@@ -1,0 +1,214 @@
+/* SideMenu Component Styles */
+.side-menu {
+  position: fixed;
+  top: 0;
+  left: 0;
+  height: 100vh;
+  background: linear-gradient(180deg, #2c3e50 0%, #34495e 100%);
+  color: white;
+  transition: width 0.3s ease;
+  width: 280px;
+  z-index: 1000;
+  box-shadow: 2px 0 10px rgba(0, 0, 0, 0.1);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.side-menu.collapsed {
+  width: 70px;
+}
+
+/* Header Section */
+.side-menu-header {
+  padding: 20px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 80px;
+}
+
+.logo-section {
+  flex: 1;
+  display: flex;
+  align-items: center;
+}
+
+.logo-text h2 {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 600;
+  color: #ecf0f1;
+}
+
+.logo-subtitle {
+  font-size: 12px;
+  color: #bdc3c7;
+  display: block;
+  margin-top: 2px;
+}
+
+.logo-collapsed {
+  display: flex;
+  justify-content: center;
+  width: 100%;
+}
+
+.logo-icon {
+  font-size: 24px;
+}
+
+.toggle-button {
+  background: rgba(255, 255, 255, 0.1);
+  border: none;
+  color: white;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  transition: background-color 0.2s ease;
+  flex-shrink: 0;
+}
+
+.toggle-button:hover {
+  background: rgba(255, 255, 255, 0.2);
+}
+
+/* Navigation Section */
+.side-menu-nav {
+  flex: 1;
+  padding: 20px 0;
+  overflow-y: auto;
+}
+
+.menu-items {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.menu-item {
+  margin-bottom: 8px;
+}
+
+.menu-link {
+  display: flex;
+  align-items: center;
+  padding: 12px 20px;
+  text-decoration: none;
+  color: #bdc3c7;
+  transition: all 0.2s ease;
+  border-radius: 0 25px 25px 0;
+  margin-right: 20px;
+  position: relative;
+}
+
+.menu-link:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: #ecf0f1;
+  transform: translateX(5px);
+}
+
+.menu-link.active {
+  background: rgba(52, 152, 219, 0.2);
+  color: #3498db;
+  border-left: 3px solid #3498db;
+}
+
+.menu-link.active::before {
+  content: '';
+  position: absolute;
+  right: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 6px;
+  height: 6px;
+  background: #3498db;
+  border-radius: 50%;
+}
+
+.menu-icon {
+  font-size: 18px;
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-right: 15px;
+  flex-shrink: 0;
+}
+
+.collapsed .menu-icon {
+  margin-right: 0;
+}
+
+.menu-text {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+}
+
+.menu-label {
+  font-size: 14px;
+  font-weight: 500;
+  margin-bottom: 2px;
+}
+
+.menu-description {
+  font-size: 11px;
+  color: #95a5a6;
+  opacity: 0.8;
+}
+
+/* Footer Section */
+.side-menu-footer {
+  padding: 20px;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  text-align: center;
+}
+
+.footer-text small {
+  color: #95a5a6;
+  font-size: 11px;
+}
+
+/* Responsive Design */
+@media (max-width: 768px) {
+  .side-menu {
+    width: 100vw;
+    transform: translateX(-100%);
+    transition: transform 0.3s ease;
+  }
+  
+  .side-menu.mobile-open {
+    transform: translateX(0);
+  }
+  
+  .side-menu.collapsed {
+    width: 100vw;
+    transform: translateX(-100%);
+  }
+}
+
+/* Scrollbar Styling for Navigation */
+.side-menu-nav::-webkit-scrollbar {
+  width: 4px;
+}
+
+.side-menu-nav::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.side-menu-nav::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.3);
+  border-radius: 2px;
+}
+
+.side-menu-nav::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.5);
+}

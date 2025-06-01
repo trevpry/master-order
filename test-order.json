@@ -1,0 +1,5 @@
+{
+  "name": "Test Comic Integration",
+  "description": "Testing ComicVine integration",
+  "items": ["The Amazing Spider-Man (2022) #1", "Batman (2016) #125", "The High Republic Adventures (2022) #7"]
+}

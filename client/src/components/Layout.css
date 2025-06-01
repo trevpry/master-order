@@ -1,0 +1,116 @@
+/* Layout Component Styles */
+.layout {
+  display: flex;
+  min-height: 100vh;
+  background-color: #f8f9fa;
+}
+
+.side-menu-container {
+  position: relative;
+  z-index: 1000;
+}
+
+.main-content {
+  flex: 1;
+  margin-left: 280px;
+  padding: 40px;
+  min-height: 100vh;
+  transition: margin-left 0.3s ease;
+  overflow-x: hidden;
+}
+
+/* When sidebar is collapsed */
+.side-menu.collapsed ~ .main-content {
+  margin-left: 70px;
+}
+
+/* Mobile Header */
+.mobile-header {
+  display: none;
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 60px;
+  background: #2c3e50;
+  color: white;
+  padding: 0 20px;
+  align-items: center;
+  z-index: 999;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+}
+
+.mobile-menu-button {
+  background: none;
+  border: none;
+  color: white;
+  padding: 8px;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin-right: 15px;
+}
+
+.hamburger-line {
+  width: 20px;
+  height: 2px;
+  background: white;
+  transition: all 0.3s ease;
+}
+
+.mobile-title {
+  font-size: 18px;
+  font-weight: 600;
+  margin: 0;
+}
+
+.mobile-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.5);
+  z-index: 999;
+}
+
+/* Mobile Responsive */
+@media (max-width: 768px) {
+  .main-content {
+    margin-left: 0;
+    padding: 20px;
+    padding-top: 80px; /* Account for mobile header */
+  }
+  
+  .mobile-header {
+    display: flex;
+  }
+  
+  .side-menu-container.mobile-open .side-menu {
+    transform: translateX(0);
+  }
+}
+
+/* Content spacing adjustments */
+.main-content > * {
+  max-width: 1200px;
+}
+
+/* Smooth transitions for sidebar state changes */
+@media (min-width: 769px) {
+  .layout:has(.side-menu.collapsed) .main-content {
+    margin-left: 70px;
+  }
+}
+
+/* Focus states for accessibility */
+.mobile-menu-button:focus {
+  outline: 2px solid #3498db;
+  outline-offset: 2px;
+}
+
+/* Animation for hamburger menu */
+.mobile-menu-button:hover .hamburger-line {
+  background: #3498db;
+}

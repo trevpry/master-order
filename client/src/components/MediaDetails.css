@@ -1,0 +1,368 @@
+/* MediaDetails Component Styles */
+
+/* Hamburger Menu Button */
+.hamburger-details-button {
+  position: absolute;
+  top: 15px;
+  right: 15px;
+  background: rgba(0, 0, 0, 0.7);
+  border: none;
+  border-radius: 6px;
+  padding: 12px;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  z-index: 10;
+  transition: background-color 0.2s ease;
+  backdrop-filter: blur(4px);
+}
+
+.hamburger-details-button:hover {
+  background: rgba(0, 0, 0, 0.9);
+}
+
+.hamburger-details-button span {
+  width: 24px;
+  height: 3px;
+  background: white;
+  border-radius: 2px;
+  transition: all 0.3s ease;
+}
+
+.hamburger-details-button:hover span {
+  background: #3498db;
+}
+
+/* Overlay */
+.details-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.5);
+  z-index: 1000;
+  animation: fadeIn 0.3s ease;
+}
+
+/* Details Panel */
+.details-panel {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  background: white;
+  border-radius: 12px;
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.2);
+  z-index: 1001;
+  max-width: 600px;
+  width: 90vw;
+  max-height: 80vh;
+  overflow: hidden;
+  animation: slideIn 0.3s ease;
+}
+
+/* Details Header */
+.details-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 20px 24px;
+  background: linear-gradient(135deg, #2c3e50 0%, #34495e 100%);
+  color: white;
+  border-radius: 12px 12px 0 0;
+}
+
+.details-header h3 {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.close-details-button {
+  background: none;
+  border: none;
+  color: white;
+  font-size: 24px;
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: 4px;
+  transition: background-color 0.2s ease;
+}
+
+.close-details-button:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+/* Details Content */
+.details-content {
+  padding: 24px;
+  max-height: calc(80vh - 80px);
+  overflow-y: auto;
+}
+
+.media-basic-info {
+  margin-bottom: 24px;
+}
+
+.details-title {
+  font-size: 24px;
+  font-weight: bold;
+  color: #333;
+  margin: 0 0 12px 0;
+}
+
+.details-stats {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.details-stats .episodes-watched {
+  font-weight: 500;
+  color: #2c3e50;
+  font-size: 14px;
+}
+
+.details-stats .current-position {
+  font-weight: 600;
+  color: #3498db;
+  font-size: 14px;
+  background: #e3f2fd;
+  padding: 6px 12px;
+  border-radius: 6px;
+  border-left: 3px solid #3498db;
+}
+
+.details-stats .media-year {
+  color: #666;
+  font-size: 14px;
+}
+
+.details-summary {
+  margin-top: 16px;
+}
+
+.details-summary h5 {
+  margin: 0 0 8px 0;
+  color: #2c3e50;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.details-summary p {
+  color: #555;
+  line-height: 1.6;
+  margin: 0;
+  font-size: 14px;
+}
+
+/* Collections Section */
+.details-collections {
+  border-top: 1px solid #eee;
+  padding-top: 20px;
+}
+
+.details-collections h5 {
+  margin: 0 0 16px 0;
+  color: #2c3e50;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.details-collections .collections-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.details-collections .collection-section {
+  width: 100%;
+}
+
+.details-collections .collection-dropdown {
+  border: 1px solid #dee2e6;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.details-collections .collection-dropdown summary {
+  cursor: pointer;
+  background-color: #e3f2fd;
+  color: #1565c0;
+  padding: 12px 16px;
+  font-size: 14px;
+  font-weight: 500;
+  list-style: none;
+  user-select: none;
+  border-radius: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.details-collections .collection-dropdown summary::-webkit-details-marker {
+  display: none;
+}
+
+.details-collections .collection-dropdown summary::after {
+  content: '▼';
+  font-size: 12px;
+  transition: transform 0.2s ease;
+}
+
+.details-collections .collection-dropdown[open] summary::after {
+  transform: rotate(180deg);
+}
+
+.details-collections .collection-dropdown summary:hover {
+  background-color: #bbdefb;
+}
+
+.details-collections .collection-items {
+  background-color: #f8f9fa;
+  border-top: 1px solid #dee2e6;
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.details-collections .collection-item {
+  padding: 10px 16px;
+  border-bottom: 1px solid #e9ecef;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  transition: background-color 0.2s ease;
+}
+
+.details-collections .collection-item:last-child {
+  border-bottom: none;
+}
+
+.details-collections .collection-item:hover {
+  background-color: #e9ecef;
+}
+
+.details-collections .item-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+}
+
+.details-collections .item-title {
+  font-size: 13px;
+  font-weight: 500;
+  color: #333;
+}
+
+.details-collections .item-year {
+  font-size: 12px;
+  color: #666;
+}
+
+.details-collections .item-stats {
+  font-size: 11px;
+  color: #666;
+  white-space: nowrap;
+}
+
+.details-collections .item-progress {
+  background-color: #fff3cd;
+  color: #856404;
+  padding: 2px 6px;
+  border-radius: 12px;
+  font-weight: 500;
+}
+
+.details-collections .item-type {
+  background-color: #d1ecf1;
+  color: #0c5460;
+  padding: 2px 6px;
+  border-radius: 12px;
+  font-weight: 500;
+}
+
+.details-collections .no-items {
+  padding: 16px;
+  text-align: center;
+  color: #666;
+  font-size: 13px;
+  font-style: italic;
+}
+
+/* Animations */
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes slideIn {
+  from { 
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(0.9);
+  }
+  to { 
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1);
+  }
+}
+
+/* Mobile Responsive */
+@media (max-width: 600px) {
+  .details-panel {
+    width: 95vw;
+    max-height: 85vh;
+  }
+  
+  .details-header {
+    padding: 16px 20px;
+  }
+  
+  .details-content {
+    padding: 20px;
+  }
+  
+  .details-title {
+    font-size: 20px;
+  }
+  
+  .hamburger-details-button {
+    top: 12px;
+    right: 12px;
+    padding: 10px;
+  }
+  
+  .hamburger-details-button span {
+    width: 20px;
+    height: 2.5px;
+  }
+}
+
+/* Accessibility */
+.hamburger-details-button:focus,
+.close-details-button:focus {
+  outline: 2px solid #3498db;
+  outline-offset: 2px;
+}
+
+/* Scrollbar styling for details content */
+.details-content::-webkit-scrollbar {
+  width: 6px;
+}
+
+.details-content::-webkit-scrollbar-track {
+  background: #f1f1f1;
+  border-radius: 3px;
+}
+
+.details-content::-webkit-scrollbar-thumb {
+  background: #c1c1c1;
+  border-radius: 3px;
+}
+
+.details-content::-webkit-scrollbar-thumb:hover {
+  background: #a8a8a8;
+}
