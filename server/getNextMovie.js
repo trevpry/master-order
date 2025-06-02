@@ -55,24 +55,154 @@ async function getAllMovies() {
 
 async function selectInitialMovie(movies) {
   // Check if movies is an array and has items
-  if (Array.isArray(movies) && movies.length > 0) {
-    // Pick an initial movie (will be replaced by earliest-date selection if collections found)
-    const initialMovie = movies[Math.floor(Math.random() * movies.length)];
-    console.log('Selected initial movie for collection check:', initialMovie.title);
-
-    const watched = await determineIfWatched(initialMovie);
-    if (watched) {
-      const newInitialMovie = await selectInitialMovie(movies);
-      return newInitialMovie;
-    } else {
-      return initialMovie;
-    }
-  } else {
+  if (!Array.isArray(movies) || movies.length === 0) {
     // If movies is not an array or is empty, return error message
     if (typeof movies === 'object' && movies.message) {
       return movies; // Return the error object from getMoviesFromCollection
     } else {
       return { message: "No movies found" };
+    }
+  }  // Get settings for partially watched collection prioritization and ignored collections
+  let settings = await prisma.settings.findUnique({
+    where: { id: 1 }
+  });
+  
+  if (!settings) {
+    settings = {
+      partiallyWatchedCollectionPercent: 75,
+      ignoredMovieCollections: null
+    };
+  }
+
+  const partiallyWatchedPercent = settings.partiallyWatchedCollectionPercent || 75;
+  
+  // Parse ignored collections from JSON string
+  let ignoredMovieCollections = [];
+  if (settings.ignoredMovieCollections && typeof settings.ignoredMovieCollections === 'string') {
+    try {
+      ignoredMovieCollections = JSON.parse(settings.ignoredMovieCollections);
+    } catch (e) {
+      console.warn('Failed to parse ignoredMovieCollections JSON:', e);
+      ignoredMovieCollections = [];
+    }
+  }
+  
+  console.log(`🎯 Using ${partiallyWatchedPercent}% priority for partially watched collections`);
+  if (ignoredMovieCollections.length > 0) {
+    console.log(`🚫 Ignoring movie collections: ${ignoredMovieCollections.join(', ')}`);
+  }
+  
+  // Filter out movies from ignored collections
+  const filteredMovies = movies.filter(movie => {
+    const movieCollections = plexDb.parseCollections(movie.collections || '');
+    const hasIgnoredCollection = movieCollections.some(collection => 
+      ignoredMovieCollections.includes(collection)
+    );
+    if (hasIgnoredCollection) {
+      console.log(`🚫 Excluding movie "${movie.title}" - found in ignored collection(s): ${movieCollections.filter(c => ignoredMovieCollections.includes(c)).join(', ')}`);
+      return false;
+    }
+    return true;
+  });
+  
+  console.log(`📊 Collection filtering: ${movies.length} total movies → ${filteredMovies.length} after removing ignored collections`);
+  
+  // Use filtered movies for further processing
+  const moviesToProcess = filteredMovies.length > 0 ? filteredMovies : movies;
+  if (filteredMovies.length === 0) {
+    console.log('⚠️  All movies were in ignored collections, proceeding with original list');
+  }
+  
+  // Analyze collection watch status
+  const watchAnalysis = await analyzeCollectionWatchStatus(moviesToProcess);    // Filter out watched movies first
+  const unwatchedMovies = moviesToProcess.filter(movie => !movie.viewCount || movie.viewCount === 0);
+  
+  if (unwatchedMovies.length === 0) {
+    console.log('⚠️  All movies are watched, returning random selection from all movies');
+    return moviesToProcess[Math.floor(Math.random() * moviesToProcess.length)];
+  }
+  
+  console.log(`📋 Found ${unwatchedMovies.length} unwatched movies for selection`);
+  
+  // Filter out movies that have TV series in their collections
+  const moviesWithoutTVCollections = [];
+  const moviesWithTVCollections = [];
+  
+  for (const movie of unwatchedMovies) {
+    const hasTVSeries = await movieHasTVSeriesInCollections(movie);
+    if (hasTVSeries) {
+      moviesWithTVCollections.push(movie);
+    } else {
+      moviesWithoutTVCollections.push(movie);
+    }
+  }
+  
+  console.log(`🔍 Collection filtering results:`);
+  console.log(`   - Movies without TV series in collections: ${moviesWithoutTVCollections.length}`);
+  console.log(`   - Movies with TV series in collections (excluded): ${moviesWithTVCollections.length}`);
+  
+  // Prefer movies that don't have TV series in their collections
+  const moviesToConsider = moviesWithoutTVCollections.length > 0 ? moviesWithoutTVCollections : unwatchedMovies;
+  
+  if (moviesWithoutTVCollections.length === 0) {
+    console.log('⚠️  All unwatched movies have TV series in their collections, proceeding with all unwatched movies');
+  }
+    // Categorize unwatched movies by collection watch status
+  const partiallyWatchedCollectionMovies = [];
+  const fullyUnwatchedCollectionMovies = [];
+  const noCollectionMovies = [];
+  
+  for (const movie of moviesToConsider) {
+    const collections = plexDb.parseCollections(movie.collections || '');
+    
+    if (collections.length === 0) {
+      // Movie doesn't belong to any collection
+      noCollectionMovies.push(movie);
+    } else {
+      // Check if any of the movie's collections are partially watched
+      const hasPartiallyWatchedCollection = collections.some(collection => 
+        watchAnalysis.partiallyWatchedCollections.has(collection)
+      );
+      
+      if (hasPartiallyWatchedCollection) {
+        partiallyWatchedCollectionMovies.push(movie);
+      } else {
+        fullyUnwatchedCollectionMovies.push(movie);
+      }
+    }
+  }
+  
+  console.log(`🔢 Categorized movies:`);
+  console.log(`   - Partially watched collections: ${partiallyWatchedCollectionMovies.length}`);
+  console.log(`   - Fully unwatched collections: ${fullyUnwatchedCollectionMovies.length}`);
+  console.log(`   - No collections: ${noCollectionMovies.length}`);
+  
+  // Apply prioritization logic
+  const randomValue = Math.random() * 100;
+  
+  if (randomValue < partiallyWatchedPercent && partiallyWatchedCollectionMovies.length > 0) {
+    // Select from partially watched collections
+    const selectedMovie = partiallyWatchedCollectionMovies[Math.floor(Math.random() * partiallyWatchedCollectionMovies.length)];
+    console.log(`🎯 Selected from partially watched collection: "${selectedMovie.title}"`);
+    return selectedMovie;
+  } else {
+    // Select from the remaining pool (fully unwatched collections + no collections)
+    const remainingMovies = [...fullyUnwatchedCollectionMovies, ...noCollectionMovies];
+    
+    if (remainingMovies.length > 0) {
+      const selectedMovie = remainingMovies[Math.floor(Math.random() * remainingMovies.length)];
+      console.log(`🎲 Selected from remaining pool: "${selectedMovie.title}"`);
+      return selectedMovie;
+    } else if (partiallyWatchedCollectionMovies.length > 0) {
+      // Fallback to partially watched collections if no other options
+      const selectedMovie = partiallyWatchedCollectionMovies[Math.floor(Math.random() * partiallyWatchedCollectionMovies.length)];
+      console.log(`🔄 Fallback to partially watched collection: "${selectedMovie.title}"`);
+      return selectedMovie;    } else {
+      // This shouldn't happen, but fallback to random selection from filtered movies or all unwatched
+      const fallbackMovies = moviesToConsider.length > 0 ? moviesToConsider : unwatchedMovies;
+      const selectedMovie = fallbackMovies[Math.floor(Math.random() * fallbackMovies.length)];
+      console.log(`⚠️  Unexpected fallback to random selection: "${selectedMovie.title}"`);
+      return selectedMovie;
     }
   }
 }
@@ -80,6 +210,89 @@ async function selectInitialMovie(movies) {
 async function determineIfWatched(movie) {
   // For movies, check if it's watched (viewCount > 0)
   return movie.viewCount && movie.viewCount > 0;
+}
+
+async function movieHasTVSeriesInCollections(movie) {
+  // Check if the movie's collections contain any TV series
+  try {
+    const movieCollections = plexDb.parseCollections(movie.collections || '');
+    
+    if (movieCollections.length === 0) {
+      return false; // No collections, so no TV series
+    }
+    
+    // Check each collection for TV series
+    for (const collectionName of movieCollections) {
+      const searchVariants = [
+        collectionName,
+        `${collectionName} Collection`
+      ];
+      
+      for (const searchTerm of searchVariants) {
+        try {
+          const tvSeries = await plexDb.getTVShowsByCollection(searchTerm);
+          if (tvSeries.length > 0) {
+            console.log(`⚠️  Movie "${movie.title}" has TV series in collection "${collectionName}": ${tvSeries.length} series found`);
+            return true; // Found TV series in this collection
+          }
+        } catch (error) {
+          // Continue checking other variants/collections
+        }
+      }
+    }
+    
+    return false; // No TV series found in any collection
+  } catch (error) {
+    console.warn(`Error checking TV series in collections for movie "${movie.title}":`, error.message);
+    return false; // Assume no TV series if error
+  }
+}
+
+async function analyzeCollectionWatchStatus(movies) {
+  console.log('🔍 Analyzing collection watch status for movie prioritization...');
+  
+  const partiallyWatchedCollections = new Set();
+  const fullyUnwatchedCollections = new Set();
+  
+  // Group movies by their collections
+  const moviesByCollection = new Map();
+  
+  for (const movie of movies) {
+    // Get all collections this movie belongs to
+    const collections = plexDb.parseCollections(movie.collections || '');
+    
+    for (const collectionName of collections) {
+      if (!moviesByCollection.has(collectionName)) {
+        moviesByCollection.set(collectionName, []);
+      }
+      moviesByCollection.get(collectionName).push(movie);
+    }
+  }
+  
+  // Analyze each collection's watch status
+  for (const [collectionName, collectionMovies] of moviesByCollection) {
+    const watchedMovies = collectionMovies.filter(movie => movie.viewCount && movie.viewCount > 0);
+    const unwatchedMovies = collectionMovies.filter(movie => !movie.viewCount || movie.viewCount === 0);
+    
+    if (watchedMovies.length > 0 && unwatchedMovies.length > 0) {
+      // Collection has both watched and unwatched movies
+      partiallyWatchedCollections.add(collectionName);
+      console.log(`📊 "${collectionName}": ${watchedMovies.length} watched, ${unwatchedMovies.length} unwatched (PARTIALLY WATCHED)`);
+    } else if (watchedMovies.length === 0) {
+      // Collection has no watched movies
+      fullyUnwatchedCollections.add(collectionName);
+      console.log(`📊 "${collectionName}": 0 watched, ${unwatchedMovies.length} unwatched (FULLY UNWATCHED)`);
+    } else {
+      // Collection is fully watched
+      console.log(`📊 "${collectionName}": ${watchedMovies.length} watched, 0 unwatched (FULLY WATCHED)`);
+    }
+  }
+  
+  return {
+    partiallyWatchedCollections,
+    fullyUnwatchedCollections,
+    moviesByCollection
+  };
 }
 
 async function selectEarliestUnplayedFromCollections(selectedMovie) {
@@ -170,9 +383,8 @@ async function selectEarliestUnplayedFromCollections(selectedMovie) {
     const dateA = new Date(a.sortDate);
     const dateB = new Date(b.sortDate);
     return dateA - dateB;
-  });
-    const earliestItem = sortedItems[0];
-  console.log(`✓ Selected earliest unplayed: "${earliestItem.title}" (${earliestItem.originallyAvailableAt || earliestItem.year}) from collection: ${earliestItem.fromCollection}`);
+  });  const earliestItem = sortedItems[0];
+  console.log(`✓ Selected earliest unplayed: "${earliestItem.title}" (${earliestItem.sortDate}) from collection: ${earliestItem.fromCollection}`);
   // If the earliest item is a TV series, we need to find the specific episode to play
   if (earliestItem.libraryType === 'tv') {
     console.log('Earliest item is a TV series, finding next unwatched episode...');

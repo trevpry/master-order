@@ -82,7 +82,17 @@ async function getTVGeneralContent() {
     
     if (allSeries.length > 0) {
       console.log(`Total TV series found: ${allSeries.length}`);
-      return allSeries;
+      
+      // Filter by ignored collections
+      const filteredSeries = await filterTVShowsByIgnoredCollections(allSeries);
+      
+      if (filteredSeries.length > 0) {
+        console.log(`TV series after ignored collections filtering: ${filteredSeries.length}`);
+        return filteredSeries;
+      } else {
+        console.log('All TV series are in ignored collections');
+        return { message: "No TV series found after filtering ignored collections" };
+      }
     } else {
       return { message: "No TV series found" };
     }
@@ -136,6 +146,66 @@ async function selectRandomTVSeries(allSeries) {
   return randomSeries;
 }
 
+// Function to filter TV shows by ignored collections
+async function filterTVShowsByIgnoredCollections(tvShows) {
+  try {
+    let settings = await prisma.settings.findUnique({
+      where: { id: 1 }
+    });
+    
+    if (!settings) {
+      settings = { ignoredTVCollections: null };
+    }
+
+    // Parse ignored collections from JSON string
+    let ignoredTVCollections = [];
+    if (settings.ignoredTVCollections && typeof settings.ignoredTVCollections === 'string') {
+      try {
+        ignoredTVCollections = JSON.parse(settings.ignoredTVCollections);
+      } catch (e) {
+        console.warn('Failed to parse ignoredTVCollections JSON:', e);
+        ignoredTVCollections = [];
+      }
+    }
+
+    if (ignoredTVCollections.length === 0) {
+      console.log('📺 No ignored TV collections configured, returning all TV shows');
+      return tvShows;
+    }
+
+    console.log(`📺 Filtering TV shows with ignored collections: ${ignoredTVCollections.join(', ')}`);
+
+    const filteredTVShows = tvShows.filter(tvShow => {
+      const showCollections = plexDb.parseCollections(tvShow.collections || '');
+      
+      // Check if this TV show belongs to any ignored collections
+      const isInIgnoredCollection = showCollections.some(collection => 
+        ignoredTVCollections.some(ignored => 
+          collection.toLowerCase() === ignored.toLowerCase()
+        )
+      );
+
+      if (isInIgnoredCollection) {
+        console.log(`📺 ⚠️  Filtering out TV show "${tvShow.title}" - found in ignored collection(s): ${showCollections.filter(col => 
+          ignoredTVCollections.some(ignored => col.toLowerCase() === ignored.toLowerCase())
+        ).join(', ')}`);
+        return false;
+      }
+
+      return true;
+    });
+
+    console.log(`📺 Collection filtering results:`);
+    console.log(`   - TV shows after filtering: ${filteredTVShows.length}`);
+    console.log(`   - TV shows excluded: ${tvShows.length - filteredTVShows.length}`);
+
+    return filteredTVShows;
+  } catch (error) {
+    console.error('Error filtering TV shows by ignored collections:', error);
+    return tvShows; // Return original list if error
+  }
+}
+
 async function selectRandomMovie(allMovies) {
   if (allMovies.length === 0) {
     return { message: "No movies found" };
@@ -168,7 +238,17 @@ async function getSeriesFromCollection(collection) {
     
     if (series.length > 0) {
       console.log(`Total TV shows found in collection "${collection}": ${series.length}`);
-      return series;
+      
+      // Filter by ignored collections
+      const filteredSeries = await filterTVShowsByIgnoredCollections(series);
+      
+      if (filteredSeries.length > 0) {
+        console.log(`TV shows after ignored collections filtering: ${filteredSeries.length}`);
+        return filteredSeries;
+      } else {
+        console.log(`All TV shows in collection "${collection}" are in ignored collections, falling back to all TV shows`);
+        return await getAllTVShows();
+      }
     } else {
       console.log(`No TV shows found in collection "${collection}", falling back to all TV shows`);
       return await getAllTVShows();
@@ -185,7 +265,12 @@ async function getAllTVShows() {
     console.log('Getting all TV shows from all TV libraries...');
     const allTVShows = await plexDb.getAllTVShows();
     console.log(`Total TV shows found across all libraries: ${allTVShows.length}`);
-    return allTVShows;
+    
+    // Filter by ignored collections
+    const filteredTVShows = await filterTVShowsByIgnoredCollections(allTVShows);
+    console.log(`TV shows after ignored collections filtering: ${filteredTVShows.length}`);
+    
+    return filteredTVShows;
   } catch (error) {
     console.error('Error getting all TV shows:', error.message);
     return { message: error.message };
@@ -271,15 +356,89 @@ async function selectEarliestUnplayedFromCollections(selectedSeries) {
     console.log('No unplayed items found, returning original selection');
     return selectedSeries;
   }
-
-  // Sort by release/air date (earliest first)
-  const sortedItems = unplayedItems.sort((a, b) => {
-    const dateA = new Date(a.originallyAvailableAt || a.year || '9999');
-    const dateB = new Date(b.originallyAvailableAt || b.year || '9999');
+  // Sort by release/air date (earliest first) - Enhanced to consider episode air dates
+  console.log('🔍 Performing enhanced date comparison including episode air dates...');
+  
+  // First, enhance TV series items with their next episode air dates for accurate sorting
+  const enhancedItems = await Promise.all(unplayedItems.map(async (item) => {
+    if (item.libraryType === 'tv') {
+      try {
+        const nextEpisode = await plexDb.getNextUnwatchedEpisode(item.ratingKey);
+        if (nextEpisode && nextEpisode.originallyAvailableAt) {
+          console.log(`📺 "${item.title}" next episode airs: ${nextEpisode.originallyAvailableAt}`);
+          return {
+            ...item,
+            episodeAirDate: nextEpisode.originallyAvailableAt,
+            nextEpisodeInfo: nextEpisode,
+            sortDate: nextEpisode.originallyAvailableAt
+          };
+        } else {
+          console.log(`📺 "${item.title}" next episode has no air date, using series date`);
+          return {
+            ...item,
+            sortDate: item.originallyAvailableAt || item.year || '9999'
+          };
+        }
+      } catch (error) {
+        console.warn(`⚠️  Could not get episode info for "${item.title}":`, error.message);
+        return {
+          ...item,
+          sortDate: item.originallyAvailableAt || item.year || '9999'
+        };
+      }
+    } else {
+      // For movies, use the movie's release date
+      console.log(`🎬 "${item.title}" releases: ${item.originallyAvailableAt || item.year}`);
+      return {
+        ...item,
+        sortDate: item.originallyAvailableAt || item.year || '9999'
+      };
+    }
+  }));
+  
+  const sortedItems = enhancedItems.sort((a, b) => {
+    const dateA = new Date(a.sortDate);
+    const dateB = new Date(b.sortDate);
     return dateA - dateB;
   });
+  
   const earliestItem = sortedItems[0];
-  console.log(`✓ Selected earliest unplayed: "${earliestItem.title}" (${earliestItem.originallyAvailableAt || earliestItem.year}) from collection: ${earliestItem.fromCollection}`);
+  console.log(`✓ Selected earliest unplayed: "${earliestItem.title}" (${earliestItem.sortDate}) from collection: ${earliestItem.fromCollection}`);  // If the earliest item is a TV series, ensure we're using the correct episode air date
+  if (earliestItem.libraryType === 'tv' && earliestItem.nextEpisodeInfo) {
+    console.log('Earliest item is a TV series with episode info, validating chronological order...');
+    
+    // **ENHANCED LOGIC**: Compare episode air date with movie release dates
+    console.log('🔍 Checking if episode air date is truly the earliest among all items...');
+    
+    // Get all movies from the sorted items for date comparison
+    const movies = sortedItems.filter(item => item.libraryType === 'movie');
+    
+    if (movies.length > 0 && earliestItem.episodeAirDate) {
+      const episodeDate = new Date(earliestItem.episodeAirDate);
+      console.log(`📅 Episode air date: ${earliestItem.episodeAirDate}`);
+      
+      // Find movies that aired before or after this episode
+      const moviesBeforeEpisode = movies.filter(movie => {
+        const movieDate = new Date(movie.originallyAvailableAt || movie.year || '9999');
+        return movieDate < episodeDate;
+      });
+      
+      if (moviesBeforeEpisode.length > 0) {
+        // There are movies that should come before this episode
+        const earliestMovie = moviesBeforeEpisode[0]; // Already sorted
+        console.log(`📅 Found movie that airs before episode: "${earliestMovie.title}" (${earliestMovie.originallyAvailableAt || earliestMovie.year})`);
+        console.log(`🎯 Movie (${earliestMovie.originallyAvailableAt || earliestMovie.year}) comes before episode (${earliestItem.episodeAirDate})`);
+        console.log(`🎬 Selecting movie as it released earlier chronologically`);
+        
+        // Return the movie instead
+        return earliestMovie;
+      } else {
+        console.log(`📅 No movies found before episode air date, episode is chronologically earliest`);
+      }
+    } else if (!earliestItem.episodeAirDate) {
+      console.log(`⚠️  Episode has no air date, falling back to series comparison logic`);
+    }
+  }
 
   // If the earliest item is from another collection, we need to re-fetch its collections
   if (earliestItem.fromCollection !== 'original') {
@@ -566,10 +725,12 @@ async function getNextEpisode() {
     enhancedSelection.orderType = 'TV_GENERAL';
 
     return enhancedSelection;
-    
-  } catch (error) {
+      } catch (error) {
     console.error('Error making API call:', error.message);
-    return error.message
+    return {
+      message: `Error in TV selection: ${error.message}`,
+      orderType: 'TV_GENERAL'
+    };
   }
 }
 

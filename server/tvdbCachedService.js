@@ -1,16 +1,27 @@
 require('dotenv').config();
 const axios = require('axios');
 const TvdbDatabaseService = require('./tvdbDatabaseService');
+const prisma = require('./prismaClient'); // Use direct prisma access
 
 class TvdbCachedService {
   constructor() {
-    this.bearerToken = process.env.TVDB_BEARER_TOKEN;
+    this.bearerToken = null;
     this.baseURL = 'https://api4.thetvdb.com/v4';
     this.dbService = new TvdbDatabaseService();
     this.cacheMaxAgeHours = 24; // Cache for 24 hours by default
   }
 
-  isTokenAvailable() {
+  async ensureTokenLoaded() {
+    if (!this.bearerToken) {
+      const settings = await prisma.settings.findUnique({
+        where: { id: 1 }
+      });
+      this.bearerToken = settings?.tvdbBearerToken;
+    }
+  }
+
+  async isTokenAvailable() {
+    await this.ensureTokenLoaded();
     return !!this.bearerToken && this.bearerToken !== 'your_tvdb_bearer_token_here';
   }
 

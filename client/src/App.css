@@ -542,3 +542,227 @@
     max-height: 200px;
   }
 }
+
+/* Responsive Home Page Styles */
+.home-responsive {
+  padding: 0;
+  min-height: 100vh;
+}
+
+.home-card {
+  max-width: 1200px;
+  width: 100%;
+  margin: 0 auto;
+  min-height: 100vh;
+  padding: 20px;
+  border-radius: 0;
+  box-shadow: none;
+  background-color: #f8f9fa;
+  display: flex;
+  flex-direction: column;
+}
+
+.home-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  height: 100vh;
+  overflow: hidden;
+}
+
+.home-button {
+  flex-shrink: 0;
+  display: flex;
+  justify-content: center;
+  padding: 20px 0;
+}
+
+.home-button button {
+  min-width: 200px;
+  padding: 12px 24px;
+  font-size: 16px;
+  font-weight: 600;
+  border-radius: 8px;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  border: none;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+}
+
+.home-button button:hover:not(:disabled) {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 12px rgba(0, 0, 0, 0.15);
+}
+
+.home-button button:disabled {
+  opacity: 0.7;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.home-result {
+  flex: 1;
+  background-color: white;
+  border-radius: 12px;
+  padding: 20px;
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+  display: flex;
+  flex-direction: column;
+  min-height: 0; /* Allow flex shrinking */
+  overflow: hidden;
+}
+
+.media-display-container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 20px;
+  height: 100%;
+  overflow: hidden;
+}
+
+.media-artwork-responsive {
+  position: relative;
+  width: 100%;
+  max-width: 400px;
+  aspect-ratio: 2/3; /* Standard poster aspect ratio */
+  border-radius: 12px;
+  overflow: hidden;
+  background-color: #000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.15);
+  flex-shrink: 0;
+}
+
+.media-artwork-responsive img {
+  max-width: 100%;
+  max-height: 100%;
+  width: auto;
+  height: auto;
+  object-fit: contain;
+  object-position: center;
+}
+
+/* Additional responsive utilities for artwork sizing */
+.media-artwork-responsive .no-artwork-large {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  font-size: 80px;
+  color: #6c757d;
+}
+
+/* Ensure MediaDetails component is responsive within the new layout */
+.home-result .media-details {
+  width: 100%;
+  max-width: 600px;
+  margin: 0 auto;
+}
+
+/* Responsive text sizing */
+@media (max-width: 480px) {
+  .media-artwork-responsive .no-artwork-large {
+    font-size: 60px;
+  }
+  
+  .home-button button {
+    min-width: 180px;
+    padding: 10px 20px;
+    font-size: 14px;
+  }
+}
+
+/* Very small screens */
+@media (max-width: 360px) {
+  .media-artwork-responsive {
+    max-width: 200px;
+  }
+  
+  .media-artwork-responsive .no-artwork-large {
+    font-size: 50px;
+  }
+  
+  .home-button button {
+    min-width: 160px;
+    font-size: 13px;
+  }
+}
+
+/* Mobile responsive adjustments */
+@media (max-width: 768px) {
+  .home-card {
+    padding: 15px;
+  }
+  
+  .home-content {
+    gap: 15px;
+  }
+  
+  .home-button {
+    padding: 15px 0;
+  }
+  
+  .home-result {
+    padding: 15px;
+  }
+  
+  .media-artwork-responsive {
+    max-width: 280px;
+  }
+}
+
+@media (max-width: 480px) {
+  .home-card {
+    padding: 10px;
+  }
+  
+  .home-content {
+    gap: 10px;
+  }
+  
+  .home-button {
+    padding: 10px 0;
+  }
+  
+  .home-result {
+    padding: 12px;
+  }
+  
+  .media-artwork-responsive {
+    max-width: 240px;
+  }
+  
+  .media-display-container {
+    gap: 15px;
+  }
+}
+
+/* Landscape mobile orientation */
+@media (max-width: 768px) and (max-height: 500px) {
+  .home-content {
+    flex-direction: row;
+    align-items: flex-start;
+  }
+  
+  .home-button {
+    min-width: 200px;
+    padding: 10px;
+  }
+  
+  .home-result {
+    flex: 1;
+    padding: 10px;
+  }
+  
+  .media-artwork-responsive {
+    max-width: 200px;
+    max-height: 300px;
+  }
+}

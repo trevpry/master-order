@@ -4,11 +4,31 @@ const prisma = require('./prismaClient'); // Use shared Prisma client
 
 class PlexSyncService {
   constructor() {
-    this.plexUrl = process.env.PLEX_URL || 'http://localhost:32400';
-    this.plexToken = process.env.PLEX_TOKEN;
+    // Initialize with null, will be loaded from database when needed
+    this.plexUrl = null;
+    this.plexToken = null;
+  }
+
+  async ensureConfigLoaded() {
+    if (!this.plexUrl || !this.plexToken) {
+      const settings = await prisma.settings.findUnique({
+        where: { id: 1 }
+      });
+      this.plexUrl = settings?.plexUrl;
+      this.plexToken = settings?.plexToken;
+      
+      if (!this.plexToken) {
+        throw new Error('Plex token not configured. Please set it in the Settings page.');
+      }
+      if (!this.plexUrl) {
+        throw new Error('Plex URL not configured. Please set it in the Settings page.');
+      }
+    }
   }
 
   async makeRequest(endpoint) {
+    await this.ensureConfigLoaded();
+    
     const separator = endpoint.includes('?') ? '&' : '?';
     const url = `${this.plexUrl}${endpoint}${separator}X-Plex-Token=${this.plexToken}`;
     console.log(`Making Plex request to: ${url}`);

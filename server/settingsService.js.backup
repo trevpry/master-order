@@ -1,0 +1,114 @@
+const prisma = require('./prismaClient');
+
+class SettingsService {
+  constructor() {
+    this.cache = null;
+    this.cacheExpiry = null;
+    this.CACHE_DURATION = 5 * 60 * 1000; // 5 minutes cache
+  }
+
+  async getSettings() {
+    // Return cached settings if still valid
+    if (this.cache && this.cacheExpiry && Date.now() < this.cacheExpiry) {
+      return this.cache;
+    }
+
+    try {
+      const settings = await prisma.settings.findFirst();
+      
+      // If no settings found, return default values with fallback to env vars for backward compatibility
+      if (!settings) {        this.cache = {
+          plexToken: process.env.PLEX_TOKEN || null,
+          plexUrl: process.env.PLEX_URL || 'http://localhost:32400',
+          tvdbApiKey: process.env.TVDB_API_KEY || null,
+          tvdbBearerToken: process.env.TVDB_BEARER_TOKEN || null,
+          collectionName: null,
+          comicVineApiKey: null,
+          tvGeneralPercent: 50,
+          moviesGeneralPercent: 50,
+          customOrderPercent: 0,
+          plexSyncInterval: 12,
+          ignoredMovieCollections: null,
+          ignoredTVCollections: null        };
+      } else {
+        // Use database values with fallback to env vars if database values are null
+        this.cache = {
+          plexToken: settings.plexToken || process.env.PLEX_TOKEN || null,
+          plexUrl: settings.plexUrl || process.env.PLEX_URL || 'http://localhost:32400',
+          tvdbApiKey: settings.tvdbApiKey || process.env.TVDB_API_KEY || null,
+          tvdbBearerToken: settings.tvdbBearerToken || process.env.TVDB_BEARER_TOKEN || null,
+          collectionName: settings.collectionName,
+          comicVineApiKey: settings.comicVineApiKey,
+          tvGeneralPercent: settings.tvGeneralPercent,
+          moviesGeneralPercent: settings.moviesGeneralPercent,
+          customOrderPercent: settings.customOrderPercent,
+          partiallyWatchedCollectionPercent: settings.partiallyWatchedCollectionPercent,
+          plexSyncInterval: settings.plexSyncInterval,
+          ignoredMovieCollections: settings.ignoredMovieCollections,
+          ignoredTVCollections: settings.ignoredTVCollections
+        };
+      }
+
+      this.cacheExpiry = Date.now() + this.CACHE_DURATION;
+      return this.cache;
+    } catch (error) {
+      console.error('Error fetching settings from database:', error);
+        // Fallback to environment variables on error      return {
+        plexToken: process.env.PLEX_TOKEN || null,
+        plexUrl: process.env.PLEX_URL || 'http://localhost:32400',
+        tvdbApiKey: process.env.TVDB_API_KEY || null,
+        tvdbBearerToken: process.env.TVDB_BEARER_TOKEN || null,
+        collectionName: null,
+        comicVineApiKey: null,
+        tvGeneralPercent: 50,
+        moviesGeneralPercent: 50,
+        customOrderPercent: 0,
+        partiallyWatchedCollectionPercent: 75,
+        plexSyncInterval: 12,
+        ignoredMovieCollections: null,
+        ignoredTVCollections: null
+      };
+    }
+  }
+
+  // Convenience methods for specific settings
+  async getPlexToken() {
+    const settings = await this.getSettings();
+    return settings.plexToken;
+  }
+
+  async getPlexUrl() {
+    const settings = await this.getSettings();
+    return settings.plexUrl;
+  }
+
+  async getTvdbApiKey() {
+    const settings = await this.getSettings();
+    return settings.tvdbApiKey;
+  }
+
+  async getTvdbBearerToken() {
+    const settings = await this.getSettings();
+    return settings.tvdbBearerToken;
+  }
+
+  async getPlexSyncInterval() {
+    const settings = await this.getSettings();
+    return settings.plexSyncInterval;
+  }
+
+  // Clear cache to force refresh
+  clearCache() {
+    this.cache = null;
+    this.cacheExpiry = null;
+  }
+
+  // Method to refresh settings after update
+  async refreshSettings() {
+    this.clearCache();
+    return await this.getSettings();
+  }
+}
+
+// Export singleton instance
+module.exports = new SettingsService();

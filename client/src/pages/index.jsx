@@ -54,11 +54,10 @@ function Home() {
     console.log('Using Plex artwork:', thumb);
     return `http://localhost:3001/api/artwork${thumb}`;
   };return (
-    <div className="app-container">
-      <div className="app-card">
-        
-        <div className="app-content">
-          <div className="button-container">
+    <div className="app-container home-responsive">
+      <div className="app-card home-card">
+        <div className="app-content home-content">
+          <div className="button-container home-button">
             <Button
               onClick={callExpressRoute}
               disabled={loading}
@@ -68,71 +67,78 @@ function Home() {
           </div>
           
           {error && (
-            <div className="message-box error">
+            <div className="message-box error compact">
               <p>{error}</p>
             </div>
-          )}          {selectedMedia && (            <div className="media-result">
-              <div className="media-artwork-large">
-                {(selectedMedia.type === 'comic' && selectedMedia.comicDetails?.coverUrl) || 
-                 selectedMedia.tvdbArtwork?.url || selectedMedia.thumb || selectedMedia.art ? (
-                  <img 
-                    src={getArtworkUrl(selectedMedia)} 
-                    alt={selectedMedia.title}
-                    onLoad={(e) => {
-                      console.log('Image loaded successfully');
-                    }}
-                    onError={(e) => {
-                      console.error('Image failed to load:', e.target.src);
-                      // Handle different fallback scenarios
-                      if (selectedMedia.type === 'comic') {
-                        // For comics, if ComicVine artwork fails, hide the image
-                        e.target.style.display = 'none';
-                      } else if (selectedMedia.tvdbArtwork?.url && !e.target.src.includes('/api/artwork')) {
-                        // If TVDB artwork fails, try Plex artwork as fallback
-                        console.log('TVDB artwork failed, trying Plex artwork fallback');
-                        const plexUrl = `http://localhost:3001/api/artwork${selectedMedia.thumb || selectedMedia.art}`;
-                        e.target.src = plexUrl;
-                      } else {
-                        e.target.style.display = 'none';
-                      }
-                    }}
-                  />
-                ) : (
-                  <div className="no-artwork-large">
-                    <span>
-                      {selectedMedia.type === 'comic' ? '📚' : 
-                       selectedMedia.orderType === 'MOVIES_GENERAL' ? '🎬' : '📺'}
-                    </span>
-                  </div>
-                )}                {/* Episode overlay for TV shows only, comic info overlay for comics */}
-                {selectedMedia.type === 'comic' ? (
-                  <div className="episode-overlay">
-                    <span className="episode-info">
-                      {selectedMedia.comicSeries} ({selectedMedia.comicYear}) #{selectedMedia.comicIssue}
-                    </span>
-                  </div>
-                ) : (selectedMedia.orderType === 'TV_GENERAL' || (selectedMedia.orderType === 'CUSTOM_ORDER' && selectedMedia.customOrderMediaType === 'tv')) && selectedMedia.currentEpisode && selectedMedia.totalEpisodesInSeason ? (
-                  <div className="episode-overlay">
-                    <span className="episode-info">
-                      Episode {selectedMedia.currentEpisode} of {selectedMedia.totalEpisodesInSeason}
-                    </span>
-                    {/* Show Final Season badge if current season is final season of ended series */}
-                    {selectedMedia.isCurrentSeasonFinal && selectedMedia.seriesStatus === 'Ended' && (
-                      <div className="finale-badge final-season">
-                        Final Season
-                      </div>
-                    )}
-                    {/* Show finale type badge if not final season */}
-                    {selectedMedia.finaleType && !(selectedMedia.isCurrentSeasonFinal && selectedMedia.seriesStatus === 'Ended') && (
-                      <div className="finale-badge">
-                        {selectedMedia.finaleType.toLowerCase().includes('series') ? 'Series Finale' : 
-                         selectedMedia.finaleType.toLowerCase().includes('season') ? 'Season Finale' :
-                         selectedMedia.finaleType.toLowerCase().includes('mid') ? 'Mid-Season Finale' :
-                         'Finale'}
-                      </div>
-                    )}
-                  </div>
-                ) : null}
+          )}
+
+          {selectedMedia && (
+            <div className="media-result home-result">
+              <div className="media-display-container">
+                <div className="media-artwork-responsive">
+                  {(selectedMedia.type === 'comic' && selectedMedia.comicDetails?.coverUrl) || 
+                   selectedMedia.tvdbArtwork?.url || selectedMedia.thumb || selectedMedia.art ? (
+                    <img 
+                      src={getArtworkUrl(selectedMedia)} 
+                      alt={selectedMedia.title}
+                      onLoad={(e) => {
+                        console.log('Image loaded successfully');
+                      }}
+                      onError={(e) => {
+                        console.error('Image failed to load:', e.target.src);
+                        // Handle different fallback scenarios
+                        if (selectedMedia.type === 'comic') {
+                          // For comics, if ComicVine artwork fails, hide the image
+                          e.target.style.display = 'none';
+                        } else if (selectedMedia.tvdbArtwork?.url && !e.target.src.includes('/api/artwork')) {
+                          // If TVDB artwork fails, try Plex artwork as fallback
+                          console.log('TVDB artwork failed, trying Plex artwork fallback');
+                          const plexUrl = `http://localhost:3001/api/artwork${selectedMedia.thumb || selectedMedia.art}`;
+                          e.target.src = plexUrl;
+                        } else {
+                          e.target.style.display = 'none';
+                        }
+                      }}
+                    />
+                  ) : (
+                    <div className="no-artwork-large">
+                      <span>
+                        {selectedMedia.type === 'comic' ? '📚' : 
+                         selectedMedia.orderType === 'MOVIES_GENERAL' ? '🎬' : '📺'}
+                      </span>
+                    </div>
+                  )}
+                  
+                  {/* Episode overlay for TV shows only, comic info overlay for comics */}
+                  {selectedMedia.type === 'comic' ? (
+                    <div className="episode-overlay">
+                      <span className="episode-info">
+                        {selectedMedia.comicSeries} ({selectedMedia.comicYear}) #{selectedMedia.comicIssue}
+                      </span>
+                    </div>
+                  ) : (selectedMedia.orderType === 'TV_GENERAL' || (selectedMedia.orderType === 'CUSTOM_ORDER' && selectedMedia.customOrderMediaType === 'tv')) && selectedMedia.currentEpisode && selectedMedia.totalEpisodesInSeason ? (
+                    <div className="episode-overlay">
+                      <span className="episode-info">
+                        Episode {selectedMedia.currentEpisode} of {selectedMedia.totalEpisodesInSeason}
+                      </span>
+                      {/* Show Final Season badge if current season is final season of ended series */}
+                      {selectedMedia.isCurrentSeasonFinal && selectedMedia.seriesStatus === 'Ended' && (
+                        <div className="finale-badge final-season">
+                          Final Season
+                        </div>
+                      )}
+                      {/* Show finale type badge if not final season */}
+                      {selectedMedia.finaleType && !(selectedMedia.isCurrentSeasonFinal && selectedMedia.seriesStatus === 'Ended') && (
+                        <div className="finale-badge">
+                          {selectedMedia.finaleType.toLowerCase().includes('series') ? 'Series Finale' : 
+                           selectedMedia.finaleType.toLowerCase().includes('season') ? 'Season Finale' :
+                           selectedMedia.finaleType.toLowerCase().includes('mid') ? 'Mid-Season Finale' :
+                           'Finale'}
+                        </div>
+                      )}
+                    </div>
+                  ) : null}
+                </div>
                 
                 <MediaDetails selectedMedia={selectedMedia} />
               </div>

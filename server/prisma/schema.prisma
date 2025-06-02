@@ -16,9 +16,17 @@ model Settings {
   tvdbToken        String?
   tvdbTokenExpiry  DateTime?
   comicVineApiKey  String?  // ComicVine API key for fetching comic details
+  plexToken        String?  // Plex authentication token
+  plexUrl          String?  // Plex server URL
+  tvdbApiKey       String?  // TVDB API key
+  tvdbBearerToken  String?  // TVDB Bearer token for API authentication
   tvGeneralPercent Int      @default(50)  // Percentage for TV General order type
   moviesGeneralPercent Int  @default(50)  // Percentage for Movies General order type
   customOrderPercent Int    @default(0)   // Percentage for Custom Order type
+  partiallyWatchedCollectionPercent Int @default(75) // Percentage likelihood to prioritize movies from partially watched collections
+  ignoredMovieCollections String?   // JSON array of collection names to ignore for movie selection
+  ignoredTVCollections String?     // JSON array of collection names to ignore for TV show selection
+  plexSyncInterval Int      @default(12)  // Hours between automatic Plex sync (default 12 hours)
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
 }

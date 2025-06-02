@@ -1,17 +1,30 @@
 require('dotenv').config();
 const axios = require('axios');
+const prisma = require('./prismaClient'); // Use direct prisma access
 
 class TVDBService {
   constructor() {
-    this.bearerToken = process.env.TVDB_BEARER_TOKEN;
+    this.bearerToken = null;
     this.baseURL = 'https://api4.thetvdb.com/v4';
   }
 
-  isTokenAvailable() {
+  async ensureTokenLoaded() {
+    if (!this.bearerToken) {
+      const settings = await prisma.settings.findUnique({
+        where: { id: 1 }
+      });
+      this.bearerToken = settings?.tvdbBearerToken;
+    }
+  }
+
+  async isTokenAvailable() {
+    await this.ensureTokenLoaded();
     return !!this.bearerToken && this.bearerToken !== 'your_tvdb_bearer_token_here';
-  }  async searchSeries(seriesName) {
+  }
+
+  async searchSeries(seriesName) {
     try {
-      if (!this.isTokenAvailable()) {
+      if (!(await this.isTokenAvailable())) {
         console.log('TVDB bearer token not available');
         return [];
       }

@@ -7,11 +7,13 @@ const prisma = require('./prismaClient'); // Import the shared client
 const PlexDatabaseService = require('./plexDatabaseService');
 const TvdbDatabaseService = require('./tvdbDatabaseService'); // Added import
 const PlexSyncService = require('./plexSyncService'); // Added import
+const BackgroundSyncService = require('./backgroundSyncService'); // Added import
 
 // Initialize services
 const plexDb = new PlexDatabaseService();
 const tvdbDb = new TvdbDatabaseService();
 const plexSync = new PlexSyncService(); // Initialize the sync service
+const backgroundSync = new BackgroundSyncService(); // Initialize background sync service
 
 // Initialize the app
 const app = express();
@@ -35,14 +37,17 @@ app.get('/api/up_next', async (req, res) => {
     } else if (data.orderType === 'CUSTOM_ORDER') {
       console.log('Custom order type selected, using getNextCustomOrder function');
       const customOrderData = await getNextCustomOrder();
-      res.json(customOrderData);
-    } else {
+      res.json(customOrderData);    } else {
       // TV General selection
       res.json(data);
     }
   } catch (error) {
     console.error('Failed to fetch data:', error.message);
-    res.status(500).json({ error: 'Something went wrong' });
+    console.error('Error stack:', error.stack);
+    res.status(500).json({ 
+      error: 'Failed to get next item',
+      details: error.message 
+    });
   }
 });
 
@@ -50,8 +55,17 @@ app.get('/api/up_next', async (req, res) => {
 app.get('/api/artwork/*', async (req, res) => {
   try {
     const artworkPath = req.params[0]; // Get everything after /api/artwork/
-    const plexUrl = process.env.PLEX_URL || 'http://localhost:32400';
-    const artworkUrl = `${plexUrl}/${artworkPath}?X-Plex-Token=${process.env.PLEX_TOKEN}`;
+    
+    // Get settings directly from database to avoid circular dependency issues
+    const settings = await prisma.settings.findUnique({
+      where: { id: 1 }
+    });
+    
+    if (!settings || !settings.plexUrl || !settings.plexToken) {
+      return res.status(500).send('Plex settings not configured');
+    }
+    
+    const artworkUrl = `${settings.plexUrl}/${artworkPath}?X-Plex-Token=${settings.plexToken}`;
     
     const axios = require('axios');
     const response = await axios.get(artworkUrl, {
@@ -150,11 +164,42 @@ app.get('/api/comicvine/search', async (req, res) => {
 
 app.get('/api/settings', async (req, res) => {
   try {
-    const settings = await prisma.settings.findUnique({
+    let settings = await prisma.settings.findUnique({
       where: { id: 1 }
     });
-    
-    res.json(settings || {});
+
+    if (!settings) {
+      settings = {};
+    } else {
+      // Parse JSON strings for ignored collections if they exist
+      if (settings.ignoredMovieCollections && typeof settings.ignoredMovieCollections === 'string') {
+        try {
+          settings.ignoredMovieCollections = JSON.parse(settings.ignoredMovieCollections);
+        } catch (e) {
+          console.warn('Failed to parse ignoredMovieCollections JSON:', e);
+          settings.ignoredMovieCollections = [];
+        }
+      }
+
+      if (settings.ignoredTVCollections && typeof settings.ignoredTVCollections === 'string') {
+        try {
+          settings.ignoredTVCollections = JSON.parse(settings.ignoredTVCollections);
+        } catch (e) {
+          console.warn('Failed to parse ignoredTVCollections JSON:', e);
+          settings.ignoredTVCollections = [];
+        }
+      }
+
+      // Set default arrays if null
+      if (!settings.ignoredMovieCollections) {
+        settings.ignoredMovieCollections = [];
+      }
+      if (!settings.ignoredTVCollections) {
+        settings.ignoredTVCollections = [];
+      }
+    }
+
+    res.json(settings);
   } catch (error) {
     console.error('Failed to fetch settings:', error);
     res.status(500).json({ error: 'Something went wrong' });
@@ -163,7 +208,21 @@ app.get('/api/settings', async (req, res) => {
 
 app.post('/api/settings', async (req, res) => {
   try {
-    const { collectionName, tvGeneralPercent, moviesGeneralPercent, customOrderPercent, comicVineApiKey } = req.body;
+    const { 
+      collectionName, 
+      tvGeneralPercent, 
+      moviesGeneralPercent, 
+      customOrderPercent,
+      partiallyWatchedCollectionPercent,
+      comicVineApiKey, 
+      plexSyncInterval,
+      plexToken,
+      plexUrl,
+      tvdbApiKey,
+      tvdbBearerToken,
+      ignoredMovieCollections,
+      ignoredTVCollections
+    } = req.body;
 
     // Validate percentages if provided
     if (tvGeneralPercent !== undefined && (tvGeneralPercent < 0 || tvGeneralPercent > 100)) {
@@ -174,6 +233,14 @@ app.post('/api/settings', async (req, res) => {
     }
     if (customOrderPercent !== undefined && (customOrderPercent < 0 || customOrderPercent > 100)) {
       return res.status(400).json({ error: 'Custom Order percentage must be between 0 and 100' });
+    }
+    if (partiallyWatchedCollectionPercent !== undefined && (partiallyWatchedCollectionPercent < 0 || partiallyWatchedCollectionPercent > 100)) {
+      return res.status(400).json({ error: 'Partially Watched Collection percentage must be between 0 and 100' });
+    }
+
+    // Validate sync interval if provided
+    if (plexSyncInterval !== undefined && (plexSyncInterval < 1 || plexSyncInterval > 168)) {
+      return res.status(400).json({ error: 'Plex sync interval must be between 1 and 168 hours (1 week)' });
     }
 
     // Validate that percentages add up to 100% if all three are provided
@@ -192,7 +259,15 @@ app.post('/api/settings', async (req, res) => {
     if (tvGeneralPercent !== undefined) updateData.tvGeneralPercent = tvGeneralPercent;
     if (moviesGeneralPercent !== undefined) updateData.moviesGeneralPercent = moviesGeneralPercent;
     if (customOrderPercent !== undefined) updateData.customOrderPercent = customOrderPercent;
+    if (partiallyWatchedCollectionPercent !== undefined) updateData.partiallyWatchedCollectionPercent = partiallyWatchedCollectionPercent;
     if (comicVineApiKey !== undefined) updateData.comicVineApiKey = comicVineApiKey.trim() || null;
+    if (plexSyncInterval !== undefined) updateData.plexSyncInterval = plexSyncInterval;
+    if (plexToken !== undefined) updateData.plexToken = plexToken.trim() || null;
+    if (plexUrl !== undefined) updateData.plexUrl = plexUrl.trim() || null;
+    if (tvdbApiKey !== undefined) updateData.tvdbApiKey = tvdbApiKey.trim() || null;
+    if (tvdbBearerToken !== undefined) updateData.tvdbBearerToken = tvdbBearerToken.trim() || null;
+    if (ignoredMovieCollections !== undefined) updateData.ignoredMovieCollections = Array.isArray(ignoredMovieCollections) ? JSON.stringify(ignoredMovieCollections) : ignoredMovieCollections;
+    if (ignoredTVCollections !== undefined) updateData.ignoredTVCollections = Array.isArray(ignoredTVCollections) ? JSON.stringify(ignoredTVCollections) : ignoredTVCollections;
 
     // Upsert settings (create if doesn't exist, update if it does)
     const settings = await prisma.settings.upsert({
@@ -204,12 +279,28 @@ app.post('/api/settings', async (req, res) => {
         tvGeneralPercent: tvGeneralPercent ?? 50, 
         moviesGeneralPercent: moviesGeneralPercent ?? 50,
         customOrderPercent: customOrderPercent ?? 0,
-        comicVineApiKey: comicVineApiKey?.trim() || null
+        partiallyWatchedCollectionPercent: partiallyWatchedCollectionPercent ?? 75,
+        comicVineApiKey: comicVineApiKey?.trim() || null,
+        plexSyncInterval: plexSyncInterval ?? 12,
+        plexToken: plexToken?.trim() || null,
+        plexUrl: plexUrl?.trim() || null,
+        tvdbApiKey: tvdbApiKey?.trim() || null,
+        tvdbBearerToken: tvdbBearerToken?.trim() || null,
+        ignoredMovieCollections: Array.isArray(ignoredMovieCollections) ? JSON.stringify(ignoredMovieCollections) : ignoredMovieCollections || null,
+        ignoredTVCollections: Array.isArray(ignoredTVCollections) ? JSON.stringify(ignoredTVCollections) : ignoredTVCollections || null
       }
     });
 
-    console.log('Saved settings:', settings);
-    res.json({ message: 'Settings saved successfully', settings }); 
+    // Update background sync interval if it was changed
+    if (plexSyncInterval !== undefined) {
+      try {
+        await backgroundSync.updateSyncInterval();
+        console.log('Background sync interval updated');
+      } catch (error) {
+        console.error('Failed to update background sync interval:', error);
+      }
+    }    console.log('Saved settings:', settings);
+    res.json({ message: 'Settings saved successfully', settings });
   } catch (error) {
     console.error('Failed to save settings:', error.message);
     res.status(500).json({ error: 'Something went wrong' });  }
@@ -237,6 +328,87 @@ app.get('/api/plex/sync-status', async (req, res) => {
     console.error('Failed to get sync status:', error);
     res.status(500).json({ 
       error: 'Failed to get sync status',
+      details: error.message 
+    });
+  }
+});
+
+// Background sync management endpoints
+app.get('/api/plex/background-sync-status', async (req, res) => {
+  try {
+    const status = backgroundSync.getSyncStatus();
+    res.json(status);
+  } catch (error) {
+    console.error('Failed to get background sync status:', error);
+    res.status(500).json({ 
+      error: 'Failed to get background sync status',
+      details: error.message 
+    });
+  }
+});
+
+app.post('/api/plex/background-sync/start', async (req, res) => {
+  try {
+    await backgroundSync.start();
+    res.json({ message: 'Background sync service started successfully' });
+  } catch (error) {
+    console.error('Failed to start background sync:', error);
+    res.status(500).json({ 
+      error: 'Failed to start background sync',
+      details: error.message 
+    });
+  }
+});
+
+app.post('/api/plex/background-sync/stop', async (req, res) => {
+  try {
+    await backgroundSync.stop();
+    res.json({ message: 'Background sync service stopped successfully' });
+  } catch (error) {
+    console.error('Failed to stop background sync:', error);
+    res.status(500).json({ 
+      error: 'Failed to stop background sync',
+      details: error.message 
+    });
+  }
+});
+
+app.post('/api/plex/background-sync/force-now', async (req, res) => {
+  try {
+    const result = await backgroundSync.forceSyncNow();
+    res.json({ message: 'Background sync completed', result });
+  } catch (error) {
+    console.error('Failed to force background sync:', error);
+    res.status(500).json({ 
+      error: 'Failed to force background sync',
+      details: error.message 
+    });
+  }
+});
+
+// Get available collections endpoint
+app.get('/api/plex/collections', async (req, res) => {
+  try {
+    // Get all collections from both TV shows and movies
+    const tvCollections = await plexDb.getAllTVCollections();
+    const movieCollections = await plexDb.getAllMovieCollections();
+    
+    // Combine and deduplicate collections
+    const allCollections = [...new Set([...tvCollections, ...movieCollections])];
+    
+    // Sort alphabetically and format for dropdown
+    const formattedCollections = allCollections
+      .sort()
+      .map(collection => ({
+        value: collection,
+        label: collection
+      }));
+    
+    res.json(formattedCollections);
+  } catch (error) {
+    console.error('Failed to fetch collections:', error);
+    res.status(500).json({ 
+      error: 'Failed to fetch collections',
       details: error.message 
     });
   }
@@ -362,11 +534,9 @@ app.get('/api/custom-orders', async (req, res) => {
       },
       orderBy: { createdAt: 'desc' }
     });
-    res.json(customOrders);
-  } catch (error) {
+    res.json(customOrders);  } catch (error) {
     console.error('Error fetching custom orders:', error);
-    res.status(500).json({ error: 'Failed to fetch custom orders' });
-  }
+    res.status(500).json({ error: 'Failed to fetch custom orders' });  }
 });
 
 // Create a new custom order
@@ -388,7 +558,17 @@ app.post('/api/custom-orders', async (req, res) => {
     res.status(201).json(customOrder);
   } catch (error) {
     console.error('Error creating custom order:', error);
-    res.status(500).json({ error: 'Failed to create custom order' });
+    res.status(500).json({ error: 'Failed to create custom order' });  }
+});
+
+// Get count of custom orders (must come before :id route)
+app.get('/api/custom-orders/count', async (req, res) => {
+  try {
+    const count = await prisma.customOrder.count();
+    res.json({ count });
+  } catch (error) {
+    console.error('Error counting custom orders:', error);
+    res.status(500).json({ error: 'Failed to count custom orders' });
   }
 });
 
@@ -696,6 +876,10 @@ app.get('/api/debug/sections', async (req, res) => {
 // Graceful shutdown
 async function shutdown() {
   console.log('Shutting down server...');
+  
+  // Stop background sync service
+  await backgroundSync.stop();
+  
   await prisma.$disconnect();
   console.log('Prisma client disconnected.');
   process.exit(0);
@@ -705,8 +889,15 @@ process.on('SIGTERM', shutdown);
 process.on('SIGINT', shutdown);
 
 // Start the server
-app.listen(PORT, () => {
+app.listen(PORT, async () => {
   console.log(`Server running on port ${PORT}`);
+  
+  // Start background sync service
+  try {
+    await backgroundSync.start();
+  } catch (error) {
+    console.error('Failed to start background sync service:', error);
+  }
 });
 
 
