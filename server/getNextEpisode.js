@@ -321,10 +321,10 @@ async function selectEarliestUnplayedFromCollections(selectedSeries) {
 
   // Collect all items from all collections
   const allItems = [];
-  
   // Add the original series/movie to the pool
   allItems.push({
     ...selectedSeries,
+    libraryType: 'tv', // Ensure the original series is properly typed as TV
     fromCollection: 'original'
   });
 
@@ -336,8 +336,7 @@ async function selectEarliestUnplayedFromCollections(selectedSeries) {
         fromCollection: collection.title
       });
     }
-  }
-  console.log(`Found ${allItems.length} total items across all collections`);
+  }  console.log(`Found ${allItems.length} total items across all collections`);
 
   // Filter to unplayed items only
   const unplayedItems = allItems.filter(item => {
@@ -355,17 +354,13 @@ async function selectEarliestUnplayedFromCollections(selectedSeries) {
   if (unplayedItems.length === 0) {
     console.log('No unplayed items found, returning original selection');
     return selectedSeries;
-  }
-  // Sort by release/air date (earliest first) - Enhanced to consider episode air dates
-  console.log('🔍 Performing enhanced date comparison including episode air dates...');
-  
+  }  // Sort by release/air date (earliest first) - Enhanced to consider episode air dates
   // First, enhance TV series items with their next episode air dates for accurate sorting
   const enhancedItems = await Promise.all(unplayedItems.map(async (item) => {
     if (item.libraryType === 'tv') {
       try {
         const nextEpisode = await plexDb.getNextUnwatchedEpisode(item.ratingKey);
         if (nextEpisode && nextEpisode.originallyAvailableAt) {
-          console.log(`📺 "${item.title}" next episode airs: ${nextEpisode.originallyAvailableAt}`);
           return {
             ...item,
             episodeAirDate: nextEpisode.originallyAvailableAt,
@@ -373,7 +368,6 @@ async function selectEarliestUnplayedFromCollections(selectedSeries) {
             sortDate: nextEpisode.originallyAvailableAt
           };
         } else {
-          console.log(`📺 "${item.title}" next episode has no air date, using series date`);
           return {
             ...item,
             sortDate: item.originallyAvailableAt || item.year || '9999'
@@ -388,7 +382,6 @@ async function selectEarliestUnplayedFromCollections(selectedSeries) {
       }
     } else {
       // For movies, use the movie's release date
-      console.log(`🎬 "${item.title}" releases: ${item.originallyAvailableAt || item.year}`);
       return {
         ...item,
         sortDate: item.originallyAvailableAt || item.year || '9999'
@@ -407,7 +400,7 @@ async function selectEarliestUnplayedFromCollections(selectedSeries) {
   if (earliestItem.libraryType === 'tv' && earliestItem.nextEpisodeInfo) {
     console.log('Earliest item is a TV series with episode info, validating chronological order...');
     
-    // **ENHANCED LOGIC**: Compare episode air date with movie release dates
+    // Enhanced logic: Compare episode air date with movie release dates
     console.log('🔍 Checking if episode air date is truly the earliest among all items...');
     
     // Get all movies from the sorted items for date comparison
@@ -417,7 +410,7 @@ async function selectEarliestUnplayedFromCollections(selectedSeries) {
       const episodeDate = new Date(earliestItem.episodeAirDate);
       console.log(`📅 Episode air date: ${earliestItem.episodeAirDate}`);
       
-      // Find movies that aired before or after this episode
+      // Find movies that aired before this episode
       const moviesBeforeEpisode = movies.filter(movie => {
         const movieDate = new Date(movie.originallyAvailableAt || movie.year || '9999');
         return movieDate < episodeDate;
@@ -427,8 +420,7 @@ async function selectEarliestUnplayedFromCollections(selectedSeries) {
         // There are movies that should come before this episode
         const earliestMovie = moviesBeforeEpisode[0]; // Already sorted
         console.log(`📅 Found movie that airs before episode: "${earliestMovie.title}" (${earliestMovie.originallyAvailableAt || earliestMovie.year})`);
-        console.log(`🎯 Movie (${earliestMovie.originallyAvailableAt || earliestMovie.year}) comes before episode (${earliestItem.episodeAirDate})`);
-        console.log(`🎬 Selecting movie as it released earlier chronologically`);
+        console.log(`🎯 Selecting movie as it released earlier chronologically`);
         
         // Return the movie instead
         return earliestMovie;
@@ -496,12 +488,11 @@ async function checkCollections(selectedSeries) {
             ratingKey: collectionName,
             items: []
           };
-          
-          // Create collection search variants (original name and with " Collection" appended)
+            // Create collection search variants (original name and with " Collection" removed)
           const searchVariants = [
             collectionName,
-            `${collectionName} Collection`
-          ];
+            collectionName.replace(/ Collection$/, '')
+          ].filter((v, i, arr) => arr.indexOf(v) === i); // Remove duplicates
           
           // Search for TV series in this collection
           for (const searchTerm of searchVariants) {

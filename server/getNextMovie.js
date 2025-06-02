@@ -222,11 +222,10 @@ async function movieHasTVSeriesInCollections(movie) {
     }
     
     // Check each collection for TV series
-    for (const collectionName of movieCollections) {
-      const searchVariants = [
+    for (const collectionName of movieCollections) {      const searchVariants = [
         collectionName,
-        `${collectionName} Collection`
-      ];
+        collectionName.replace(/ Collection$/, '')
+      ].filter((v, i, arr) => arr.indexOf(v) === i); // Remove duplicates
       
       for (const searchTerm of searchVariants) {
         try {
@@ -529,12 +528,11 @@ async function checkCollections(selectedMovie) {
             ratingKey: collectionName,
             items: []
           };
-          
-          // Create collection search variants (original name and with " Collection" appended)
+            // Create collection search variants (original name and with " Collection" removed)
           const searchVariants = [
             collectionName,
-            `${collectionName} Collection`
-          ];
+            collectionName.replace(/ Collection$/, '')
+          ].filter((v, i, arr) => arr.indexOf(v) === i); // Remove duplicates
           
           // Search for TV series in this collection
           for (const searchTerm of searchVariants) {
