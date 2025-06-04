@@ -489,15 +489,13 @@ class PlexDatabaseService {
   }
 
   // Search methods for the API endpoints
-
   // Search TV shows by title
   async searchTVShows(query) {
     try {
       return await this.prisma.PlexTVShow.findMany({
         where: {
           title: {
-            contains: query,
-            mode: 'insensitive'
+            contains: query
           }
         },
         include: {
@@ -509,15 +507,13 @@ class PlexDatabaseService {
       throw error;
     }
   }
-
   // Search movies by title
   async searchMovies(query) {
     try {
       return await this.prisma.PlexMovie.findMany({
         where: {
           title: {
-            contains: query,
-            mode: 'insensitive'
+            contains: query
           }
         },
         include: {
@@ -529,7 +525,6 @@ class PlexDatabaseService {
       throw error;
     }
   }
-
   // Search episodes by title
   async searchEpisodes(query) {
     try {
@@ -538,14 +533,12 @@ class PlexDatabaseService {
           OR: [
             {
               title: {
-                contains: query,
-                mode: 'insensitive'
+                contains: query
               }
             },
             {
               grandparentTitle: {
-                contains: query,
-                mode: 'insensitive'
+                contains: query
               }
             }
           ]

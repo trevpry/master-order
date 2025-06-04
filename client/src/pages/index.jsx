@@ -16,12 +16,22 @@ function Home() {
       try {        const response = await fetch('http://localhost:3001/api/up_next');
         const data = await response.json();        console.log('API Response:', data);
         console.log('Order Type:', data.orderType);
+        console.log('Media Type:', data.type);
         console.log('TVDB Artwork:', data.tvdbArtwork);
         console.log('Plex Thumb URL:', data.thumb);
         console.log('Generated artwork URL:', getArtworkUrl(data));
         console.log('Finale Type:', data.finaleType);
         console.log('Is Current Season Final:', data.isCurrentSeasonFinal);
         console.log('Series Status:', data.seriesStatus);
+        
+        // Debug short story specific data
+        if (data.type === 'shortstory') {
+          console.log('SHORT STORY DEBUG:');
+          console.log('- Story Title:', data.storyTitle);
+          console.log('- Story Author:', data.storyAuthor);
+          console.log('- Story Cover URL:', data.storyCoverUrl);
+          console.log('- Contained in Book Details:', data.containedInBookDetails);
+        }
         
         if (data.message) {
           setError(data.message);
@@ -39,6 +49,22 @@ function Home() {
     if (media?.type === 'comic' && media?.comicDetails?.coverUrl) {
       console.log('Using ComicVine artwork:', media.comicDetails.coverUrl);
       return `http://localhost:3001/api/comicvine-artwork?url=${encodeURIComponent(media.comicDetails.coverUrl)}`;
+    }
+    
+    // For books, use OpenLibrary artwork
+    if (media?.type === 'book' && media?.bookCoverUrl) {
+      console.log('Using OpenLibrary artwork:', media.bookCoverUrl);
+      return `http://localhost:3001/api/openlibrary-artwork?url=${encodeURIComponent(media.bookCoverUrl)}`;
+    }
+      // For short stories, use story cover or fallback to containing book's cover
+    if (media?.type === 'shortstory') {
+      if (media?.storyCoverUrl) {
+        console.log('Using short story cover artwork:', media.storyCoverUrl);
+        return `http://localhost:3001/api/openlibrary-artwork?url=${encodeURIComponent(media.storyCoverUrl)}`;
+      } else if (media?.containedInBookDetails?.coverUrl) {
+        console.log('Using containing book cover artwork for short story:', media.containedInBookDetails.coverUrl);
+        return `http://localhost:3001/api/openlibrary-artwork?url=${encodeURIComponent(media.containedInBookDetails.coverUrl)}`;
+      }
     }
     
     // Prioritize TVDB artwork if available for TV content
@@ -74,21 +100,47 @@ function Home() {
 
           {selectedMedia && (
             <div className="media-result home-result">
-              <div className="media-display-container">
-                <div className="media-artwork-responsive">
-                  {(selectedMedia.type === 'comic' && selectedMedia.comicDetails?.coverUrl) || 
-                   selectedMedia.tvdbArtwork?.url || selectedMedia.thumb || selectedMedia.art ? (
+              <div className="media-display-container">                <div className="media-artwork-responsive">                  {(() => {
+                    // Check if we have any artwork to display - handle empty strings as falsy
+                    const hasComicArt = selectedMedia.type === 'comic' && selectedMedia.comicDetails?.coverUrl;
+                    const hasBookArt = selectedMedia.type === 'book' && selectedMedia.bookCoverUrl;
+                    const hasStoryArt = selectedMedia.type === 'shortstory' && 
+                      (selectedMedia.storyCoverUrl && selectedMedia.storyCoverUrl.trim() !== '') || 
+                      (selectedMedia.containedInBookDetails?.coverUrl && selectedMedia.containedInBookDetails.coverUrl.trim() !== '');
+                    const hasTvdbArt = selectedMedia.tvdbArtwork?.url;
+                    const hasPlexArt = (selectedMedia.thumb && selectedMedia.thumb.trim() !== '') || (selectedMedia.art && selectedMedia.art.trim() !== '');
+                    
+                    const hasAnyArtwork = hasComicArt || hasBookArt || hasStoryArt || hasTvdbArt || hasPlexArt;
+                    
+                    // Debug logging
+                    console.log('ARTWORK DEBUG:');
+                    console.log('- Media type:', selectedMedia.type);
+                    console.log('- storyCoverUrl:', `"${selectedMedia.storyCoverUrl}"`);
+                    console.log('- containedInBookDetails:', selectedMedia.containedInBookDetails);
+                    console.log('- thumb:', `"${selectedMedia.thumb}"`);
+                    console.log('- art:', `"${selectedMedia.art}"`);
+                    console.log('- hasComicArt:', hasComicArt);
+                    console.log('- hasBookArt:', hasBookArt);
+                    console.log('- hasStoryArt:', hasStoryArt);
+                    console.log('- hasTvdbArt:', hasTvdbArt);
+                    console.log('- hasPlexArt:', hasPlexArt);
+                    console.log('- hasAnyArtwork:', hasAnyArtwork);
+                    
+                    return hasAnyArtwork;
+                  })() ? (
                     <img 
                       src={getArtworkUrl(selectedMedia)} 
                       alt={selectedMedia.title}
                       onLoad={(e) => {
                         console.log('Image loaded successfully');
-                      }}
-                      onError={(e) => {
+                      }}                      onError={(e) => {
                         console.error('Image failed to load:', e.target.src);
                         // Handle different fallback scenarios
                         if (selectedMedia.type === 'comic') {
                           // For comics, if ComicVine artwork fails, hide the image
+                          e.target.style.display = 'none';
+                        } else if (selectedMedia.type === 'book' || selectedMedia.type === 'shortstory') {
+                          // For books and short stories, if artwork fails, hide the image
                           e.target.style.display = 'none';
                         } else if (selectedMedia.tvdbArtwork?.url && !e.target.src.includes('/api/artwork')) {
                           // If TVDB artwork fails, try Plex artwork as fallback
@@ -99,21 +151,41 @@ function Home() {
                           e.target.style.display = 'none';
                         }
                       }}
-                    />
-                  ) : (
+                    />                  ) : (
                     <div className="no-artwork-large">
-                      <span>
-                        {selectedMedia.type === 'comic' ? '📚' : 
-                         selectedMedia.orderType === 'MOVIES_GENERAL' ? '🎬' : '📺'}
-                      </span>
+                      {selectedMedia.orderType === 'CUSTOM_ORDER' && selectedMedia.customOrderIcon ? (
+                        <div 
+                          className="custom-order-icon-large" 
+                          dangerouslySetInnerHTML={{__html: selectedMedia.customOrderIcon}}
+                        />
+                      ) : (
+                        <span>
+                          {selectedMedia.type === 'comic' ? '📚' : 
+                           selectedMedia.type === 'book' ? '📖' :
+                           selectedMedia.type === 'shortstory' ? '📖' :
+                           selectedMedia.orderType === 'MOVIES_GENERAL' ? '🎬' : '📺'}
+                        </span>
+                      )}
                     </div>
-                  )}
-                  
-                  {/* Episode overlay for TV shows only, comic info overlay for comics */}
+                  )}{/* Episode overlay for TV shows only, comic info overlay for comics, book info overlay for books, story info overlay for short stories */}
                   {selectedMedia.type === 'comic' ? (
                     <div className="episode-overlay">
                       <span className="episode-info">
                         {selectedMedia.comicSeries} ({selectedMedia.comicYear}) #{selectedMedia.comicIssue}
+                      </span>
+                    </div>
+                  ) : selectedMedia.type === 'book' ? (
+                    <div className="episode-overlay">
+                      <span className="episode-info">
+                        {selectedMedia.bookAuthor ? `by ${selectedMedia.bookAuthor}` : 'Unknown Author'}{selectedMedia.bookYear ? ` (${selectedMedia.bookYear})` : ''}
+                      </span>
+                    </div>                  
+                    ) : selectedMedia.type === 'shortstory' ? (
+                    <div className="episode-overlay">
+                      <span className="episode-info">
+                        {selectedMedia.storyTitle ? selectedMedia.storyTitle : 'Untitled Story'}
+                        {selectedMedia.storyAuthor ? `by ${selectedMedia.storyAuthor}` : 'Unknown Author'}{selectedMedia.storyYear ? ` (${selectedMedia.storyYear})` : ''}
+                        {selectedMedia.containedInBookDetails?.title ? ` • from "${selectedMedia.containedInBookDetails.title}"` : ''}
                       </span>
                     </div>
                   ) : (selectedMedia.orderType === 'TV_GENERAL' || (selectedMedia.orderType === 'CUSTOM_ORDER' && selectedMedia.customOrderMediaType === 'tv')) && selectedMedia.currentEpisode && selectedMedia.totalEpisodesInSeason ? (

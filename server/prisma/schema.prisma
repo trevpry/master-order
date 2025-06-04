@@ -44,6 +44,7 @@ model CustomOrder {
   id          Int      @id @default(autoincrement())
   name        String   // User-defined name for the custom order
   description String?  // Optional description
+  icon        String?  // Optional SVG icon content for the custom order
   isActive    Boolean  @default(true)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
@@ -54,8 +55,8 @@ model CustomOrderItem {
   id            Int         @id @default(autoincrement())
   customOrderId Int
   customOrder   CustomOrder @relation(fields: [customOrderId], references: [id], onDelete: Cascade)
-  mediaType     String      // 'movie', 'episode', or 'comic'
-  plexKey       String      // Plex key for the media item (for comics, this will be a generated key)
+  mediaType     String      // 'movie', 'episode', 'comic', 'book', or 'shortstory'
+  plexKey       String      // Plex key for the media item (for comics and books, this will be a generated key)
   title         String      // Title for display purposes
   seasonNumber  Int?        // For episodes only
   episodeNumber Int?        // For episodes only
@@ -65,6 +66,23 @@ model CustomOrderItem {
   comicYear     Int?        // For comics only - publication year
   comicIssue    String?     // For comics only - issue number (can be string for special issues)
   comicVolume   String?     // For comics only - volume information
+  // Book-specific fields
+  bookTitle     String?     // For books only - book title
+  bookAuthor    String?     // For books only - primary author
+  bookYear      Int?        // For books only - publication year
+  bookIsbn      String?     // For books only - ISBN
+  bookPublisher String?     // For books only - publisher
+  bookOpenLibraryId String? // For books only - OpenLibrary ID
+  bookCoverUrl  String?     // For books only - cover image URL
+  // Short story-specific fields
+  storyTitle    String?     // For short stories only - story title
+  storyAuthor   String?     // For short stories only - story author
+  storyYear     Int?        // For short stories only - publication year
+  storyUrl      String?     // For short stories only - optional URL link
+  storyContainedInBookId Int? // For short stories only - reference to book that contains this story
+  storyContainedInBook CustomOrderItem? @relation("StoryInBook", fields: [storyContainedInBookId], references: [id], onDelete: SetNull)
+  containedStories CustomOrderItem[] @relation("StoryInBook")
+  storyCoverUrl String?     // For short stories only - cover image URL (falls back to book cover if not set)
   sortOrder     Int         @default(0) // For manual ordering
   isWatched     Boolean     @default(false)
   createdAt     DateTime    @default(now())

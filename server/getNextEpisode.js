@@ -82,13 +82,22 @@ async function getTVGeneralContent() {
     
     if (allSeries.length > 0) {
       console.log(`Total TV series found: ${allSeries.length}`);
-      
-      // Filter by ignored collections
+        // Filter by ignored collections
       const filteredSeries = await filterTVShowsByIgnoredCollections(allSeries);
       
       if (filteredSeries.length > 0) {
         console.log(`TV series after ignored collections filtering: ${filteredSeries.length}`);
-        return filteredSeries;
+        
+        // Filter out TV shows that have episodes in active custom orders
+        const seriesNotInCustomOrders = await filterTVShowsNotInCustomOrders(filteredSeries);
+        
+        if (seriesNotInCustomOrders.length > 0) {
+          console.log(`TV series after custom orders filtering: ${seriesNotInCustomOrders.length}`);
+          return seriesNotInCustomOrders;
+        } else {
+          console.log('All remaining TV series have episodes in custom orders, using ignored collections filtered list');
+          return filteredSeries;
+        }
       } else {
         console.log('All TV series are in ignored collections');
         return { message: "No TV series found after filtering ignored collections" };
@@ -238,13 +247,22 @@ async function getSeriesFromCollection(collection) {
     
     if (series.length > 0) {
       console.log(`Total TV shows found in collection "${collection}": ${series.length}`);
-      
-      // Filter by ignored collections
+        // Filter by ignored collections
       const filteredSeries = await filterTVShowsByIgnoredCollections(series);
       
       if (filteredSeries.length > 0) {
         console.log(`TV shows after ignored collections filtering: ${filteredSeries.length}`);
-        return filteredSeries;
+        
+        // Filter out TV shows that have episodes in active custom orders
+        const seriesNotInCustomOrders = await filterTVShowsNotInCustomOrders(filteredSeries);
+        
+        if (seriesNotInCustomOrders.length > 0) {
+          console.log(`TV shows after custom orders filtering: ${seriesNotInCustomOrders.length}`);
+          return seriesNotInCustomOrders;
+        } else {
+          console.log('All remaining TV shows have episodes in custom orders, using ignored collections filtered list');
+          return filteredSeries;
+        }
       } else {
         console.log(`All TV shows in collection "${collection}" are in ignored collections, falling back to all TV shows`);
         return await getAllTVShows();
@@ -265,12 +283,15 @@ async function getAllTVShows() {
     console.log('Getting all TV shows from all TV libraries...');
     const allTVShows = await plexDb.getAllTVShows();
     console.log(`Total TV shows found across all libraries: ${allTVShows.length}`);
-    
-    // Filter by ignored collections
+      // Filter by ignored collections
     const filteredTVShows = await filterTVShowsByIgnoredCollections(allTVShows);
     console.log(`TV shows after ignored collections filtering: ${filteredTVShows.length}`);
     
-    return filteredTVShows;
+    // Filter out TV shows that have episodes in active custom orders
+    const tvShowsNotInCustomOrders = await filterTVShowsNotInCustomOrders(filteredTVShows);
+    console.log(`TV shows after custom orders filtering: ${tvShowsNotInCustomOrders.length}`);
+    
+    return tvShowsNotInCustomOrders.length > 0 ? tvShowsNotInCustomOrders : filteredTVShows;
   } catch (error) {
     console.error('Error getting all TV shows:', error.message);
     return { message: error.message };
@@ -722,6 +743,78 @@ async function getNextEpisode() {
       message: `Error in TV selection: ${error.message}`,
       orderType: 'TV_GENERAL'
     };
+  }
+}
+
+// Function to check if a TV show exists in any active custom order
+async function tvShowExistsInCustomOrder(plexKey) {
+  try {
+    // For TV shows, we need to check if any episodes from this series exist in custom orders
+    // We can identify this by checking if any custom order item has this series as seriesTitle
+    // or by checking the plexKey directly
+    
+    // First, get the series details to find its title
+    const seriesDetail = await plexDb.getTVShowByRatingKey(plexKey);
+    if (!seriesDetail) {
+      return false;
+    }
+    
+    // Check if any episodes from this series exist in custom orders
+    const result = await prisma.customOrderItem.findFirst({
+      where: {        OR: [
+          // Check by series title
+          {
+            seriesTitle: seriesDetail.title,
+            mediaType: 'episode',
+            customOrder: {
+              isActive: true
+            }
+          },
+          // Check by plexKey if the series itself is added
+          {
+            plexKey: plexKey,
+            mediaType: 'episode',
+            customOrder: {
+              isActive: true
+            }
+          }
+        ]
+      }
+    });
+    
+    return !!result;
+  } catch (error) {
+    console.warn(`Error checking if TV show exists in custom order:`, error.message);
+    return false; // If error, don't filter out the show
+  }
+}
+
+// Function to filter out TV shows that have episodes in active custom orders
+async function filterTVShowsNotInCustomOrders(tvShows) {
+  try {
+    console.log(`📺 Filtering ${tvShows.length} TV shows to exclude those with episodes in active custom orders...`);
+    
+    const filteredTVShows = [];
+    let excludedCount = 0;
+    
+    for (const tvShow of tvShows) {
+      const inCustomOrder = await tvShowExistsInCustomOrder(tvShow.ratingKey);
+      if (inCustomOrder) {
+        console.log(`🚫 Excluding TV show "${tvShow.title}" - has episodes in active custom order`);
+        excludedCount++;
+      } else {
+        filteredTVShows.push(tvShow);
+      }
+    }
+    
+    console.log(`📺 Custom order filtering results:`);
+    console.log(`   - TV shows after filtering: ${filteredTVShows.length}`);
+    console.log(`   - TV shows excluded (in custom orders): ${excludedCount}`);
+    
+    return filteredTVShows;
+  } catch (error) {
+    console.error('Error filtering TV shows by custom orders:', error);
+    return tvShows; // Return original list if error
   }
 }
 

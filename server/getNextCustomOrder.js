@@ -1,6 +1,7 @@
 const prisma = require('./prismaClient'); // Use the shared Prisma client
 const tvdbService = require('./tvdbCachedService');
 const comicVineService = require('./comicVineService');
+const openLibraryService = require('./openLibraryService');
 const PlexDatabaseService = require('./plexDatabaseService');
 
 const plexDb = new PlexDatabaseService();
@@ -49,7 +50,7 @@ async function getNextItemFromCustomOrder(customOrder) {
   return customOrder.items[0];
 }
 
-// Fetch full media details from Plex or generate for comics
+// Fetch full media details from Plex or generate for comics and books
 async function fetchMediaDetailsFromPlex(plexKey, mediaType, customOrderItem) {
   try {
     // Handle comics differently since they don't exist in Plex
@@ -73,6 +74,83 @@ async function fetchMediaDetailsFromPlex(plexKey, mediaType, customOrderItem) {
         comicYear: customOrderItem.comicYear,
         comicIssue: customOrderItem.comicIssue,
         comicVolume: customOrderItem.comicVolume,
+        orderType: 'CUSTOM_ORDER',
+        customOrderMediaType: mediaType
+      };
+      
+      return mockMetadata;
+    }
+    
+    // Handle books differently since they don't exist in Plex
+    if (mediaType === 'book') {
+      // For books, we generate mock Plex-like metadata
+      let bookDetails = null;
+      
+      // Try to get additional details from OpenLibrary if we have an ID
+      if (customOrderItem.bookOpenLibraryId) {
+        try {
+          bookDetails = await openLibraryService.getBookDetails(customOrderItem.bookOpenLibraryId);
+        } catch (error) {
+          console.log(`Could not fetch OpenLibrary details for ${customOrderItem.bookOpenLibraryId}:`, error.message);
+        }
+      }
+        const mockMetadata = {
+        ratingKey: plexKey,
+        title: customOrderItem.title,
+        type: 'book',
+        year: customOrderItem.bookYear,
+        summary: bookDetails?.description || '',
+        thumb: null, // Books don't have Plex thumbs
+        art: null,
+        bookDetails: bookDetails, // Store OpenLibrary details
+        bookTitle: customOrderItem.bookTitle,
+        bookAuthor: customOrderItem.bookAuthor,
+        bookYear: customOrderItem.bookYear,
+        bookIsbn: customOrderItem.bookIsbn,
+        bookPublisher: customOrderItem.bookPublisher,
+        bookOpenLibraryId: customOrderItem.bookOpenLibraryId,
+        bookCoverUrl: bookDetails?.coverUrl || customOrderItem.bookCoverUrl || null,
+        orderType: 'CUSTOM_ORDER',
+        customOrderMediaType: mediaType
+      };
+        return mockMetadata;
+    }
+    
+    // Handle short stories differently since they don't exist in Plex
+    if (mediaType === 'shortstory') {
+      // For short stories, we generate mock Plex-like metadata
+      let containedInBookDetails = null;
+      
+      // Try to get details about the containing book if specified
+      if (customOrderItem.storyContainedInBookId) {
+        try {
+          const containingBook = await prisma.customOrderItem.findUnique({
+            where: { id: customOrderItem.storyContainedInBookId }
+          });
+          
+          if (containingBook && containingBook.bookOpenLibraryId) {
+            containedInBookDetails = await openLibraryService.getBookDetails(containingBook.bookOpenLibraryId);
+          }
+        } catch (error) {
+          console.log(`Could not fetch containing book details for ${customOrderItem.storyContainedInBookId}:`, error.message);
+        }
+      }
+      
+      const mockMetadata = {
+        ratingKey: plexKey,
+        title: customOrderItem.title,
+        type: 'shortstory',
+        year: customOrderItem.storyYear,
+        summary: '', // Short stories typically don't have summaries
+        thumb: null, // Short stories don't have Plex thumbs
+        art: null,
+        storyTitle: customOrderItem.storyTitle,
+        storyAuthor: customOrderItem.storyAuthor,
+        storyYear: customOrderItem.storyYear,
+        storyUrl: customOrderItem.storyUrl,
+        storyContainedInBookId: customOrderItem.storyContainedInBookId,
+        storyCoverUrl: customOrderItem.storyCoverUrl || containedInBookDetails?.coverUrl || null,
+        containedInBookDetails: containedInBookDetails, // Store containing book details if available
         orderType: 'CUSTOM_ORDER',
         customOrderMediaType: mediaType
       };
@@ -223,11 +301,10 @@ async function getNextCustomOrder() {
         orderType: 'CUSTOM_ORDER'
       };
     }    console.log(`Next item: ${nextItem.title} (${nextItem.mediaType})`);    // Fetch full media details from Plex (or generate for comics)
-    const fullMediaDetails = await fetchMediaDetailsFromPlex(nextItem.plexKey, nextItem.mediaType, nextItem);
-
-    // Add custom order context
+    const fullMediaDetails = await fetchMediaDetailsFromPlex(nextItem.plexKey, nextItem.mediaType, nextItem);    // Add custom order context
     fullMediaDetails.customOrderName = selectedOrder.name;
     fullMediaDetails.customOrderDescription = selectedOrder.description;
+    fullMediaDetails.customOrderIcon = selectedOrder.icon;
     fullMediaDetails.customOrderItemId = nextItem.id;// If this is a TV episode, enhance with TVDB artwork and episode details
     if (nextItem.mediaType === 'episode' || fullMediaDetails.type === 'episode') {
       console.log(`Enhancing TV episode "${fullMediaDetails.title}" from series "${fullMediaDetails.grandparentTitle}" with TVDB data`);

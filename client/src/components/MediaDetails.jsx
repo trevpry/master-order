@@ -40,9 +40,21 @@ const MediaDetails = ({ selectedMedia }) => {
                 ×
               </button>
             </div>
-              <div className="details-content">
+              <div className="details-content">              
               <div className="media-basic-info">
-                <h4 className="details-title">{selectedMedia.title}</h4>                <div className="details-stats">
+                <h4 className="details-title">
+                  {selectedMedia.type === 'shortstory' && selectedMedia.storyUrl ? (
+                    <a 
+                      href={selectedMedia.storyUrl} 
+                      target="_blank" 
+                      rel="noopener noreferrer"
+                      className="story-title-link"
+                    >
+                      {selectedMedia.storyTitle || selectedMedia.title}
+                    </a>
+                  ) : selectedMedia.type === 'shortstory' && selectedMedia.storyTitle ? 
+                    selectedMedia.storyTitle : selectedMedia.title}
+                </h4><div className="details-stats">
                   {/* Show different stats based on media type */}
                   {selectedMedia.type === 'comic' ? (
                     <>
@@ -52,6 +64,57 @@ const MediaDetails = ({ selectedMedia }) => {
                       <span className="comic-issue">
                         Issue #{selectedMedia.comicIssue}
                       </span>
+                      {selectedMedia.customOrderName && (
+                        <span className="custom-order-info">
+                          From custom order: {selectedMedia.customOrderName}
+                        </span>
+                      )}
+                    </>
+                  ) : selectedMedia.type === 'book' ? (
+                    <>
+                      <span className="book-author">
+                        {selectedMedia.bookAuthor ? `Author: ${selectedMedia.bookAuthor}` : 'Unknown Author'}
+                      </span>
+                      {selectedMedia.bookYear && (
+                        <span className="book-year">
+                          Published: {selectedMedia.bookYear}
+                        </span>
+                      )}
+                      {selectedMedia.bookPublisher && (
+                        <span className="book-publisher">
+                          Publisher: {selectedMedia.bookPublisher}
+                        </span>
+                      )}
+                      {selectedMedia.customOrderName && (
+                        <span className="custom-order-info">
+                          From custom order: {selectedMedia.customOrderName}
+                        </span>
+                      )}
+                    </>
+                  ) : selectedMedia.type === 'shortstory' ? (
+                    <>
+                      <span className="story-title">
+                        {selectedMedia.storyTitle ? `${selectedMedia.storyTitle}` : 'Unknown Title'}
+                      </span>
+                      <span className="story-author">
+                        {selectedMedia.storyAuthor ? `Author: ${selectedMedia.storyAuthor}` : 'Unknown Author'}
+                      </span>
+                      {selectedMedia.storyYear && (
+                        <span className="story-year">
+                          Published: {selectedMedia.storyYear}
+                        </span>
+                      )}                      {selectedMedia.containedInBookDetails?.title && (
+                        <span className="story-contained-in">
+                          From book: "{selectedMedia.containedInBookDetails.title}"
+                        </span>
+                      )}
+                      {selectedMedia.storyUrl && (
+                        <span className="story-url">
+                          <a href={selectedMedia.storyUrl} target="_blank" rel="noopener noreferrer">
+                            Read Online
+                          </a>
+                        </span>
+                      )}
                       {selectedMedia.customOrderName && (
                         <span className="custom-order-info">
                           From custom order: {selectedMedia.customOrderName}
@@ -90,10 +153,9 @@ const MediaDetails = ({ selectedMedia }) => {
                         </span>
                       )}
                     </>
-                  ) : null}
-                  
-                  {/* Only show year/release date for non-comic media */}
-                  {selectedMedia.type !== 'comic' && (
+                  ) : null}                  
+                  {/* Only show year/release date for non-comic, non-book, non-shortstory media */}
+                  {selectedMedia.type !== 'comic' && selectedMedia.type !== 'book' && selectedMedia.type !== 'shortstory' && (
                     <>
                       <span className="media-year">
                         {selectedMedia.year && `Released: ${selectedMedia.year}`}

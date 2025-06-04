@@ -112,14 +112,21 @@ async function selectInitialMovie(movies) {
   if (filteredMovies.length === 0) {
     console.log('⚠️  All movies were in ignored collections, proceeding with original list');
   }
+    // Filter out movies that exist in active custom orders
+  const moviesNotInCustomOrders = await filterMoviesNotInCustomOrders(moviesToProcess);
+  
+  // Use movies not in custom orders for further processing
+  const finalMoviesToProcess = moviesNotInCustomOrders.length > 0 ? moviesNotInCustomOrders : moviesToProcess;
+  if (moviesNotInCustomOrders.length === 0) {
+    console.log('⚠️  All movies were in custom orders, proceeding with original list');
+  }
   
   // Analyze collection watch status
-  const watchAnalysis = await analyzeCollectionWatchStatus(moviesToProcess);    // Filter out watched movies first
-  const unwatchedMovies = moviesToProcess.filter(movie => !movie.viewCount || movie.viewCount === 0);
-  
-  if (unwatchedMovies.length === 0) {
+  const watchAnalysis = await analyzeCollectionWatchStatus(finalMoviesToProcess);    // Filter out watched movies first
+  const unwatchedMovies = finalMoviesToProcess.filter(movie => !movie.viewCount || movie.viewCount === 0);
+    if (unwatchedMovies.length === 0) {
     console.log('⚠️  All movies are watched, returning random selection from all movies');
-    return moviesToProcess[Math.floor(Math.random() * moviesToProcess.length)];
+    return finalMoviesToProcess[Math.floor(Math.random() * finalMoviesToProcess.length)];
   }
   
   console.log(`📋 Found ${unwatchedMovies.length} unwatched movies for selection`);
@@ -604,6 +611,55 @@ async function checkCollections(selectedMovie) {
     // Return the movie unchanged if there's an error
     selectedMovie.otherCollections = [];
     return selectedMovie;
+  }
+}
+
+// Function to check if a movie exists in any active custom order
+async function movieExistsInCustomOrder(plexKey) {
+  try {
+    const result = await prisma.customOrderItem.findFirst({
+      where: {
+        plexKey: plexKey,
+        mediaType: 'movie',
+        customOrder: {
+          isActive: true
+        }
+      }
+    });
+    
+    return !!result;
+  } catch (error) {
+    console.warn(`Error checking if movie exists in custom order:`, error.message);
+    return false; // If error, don't filter out the movie
+  }
+}
+
+// Function to filter out movies that exist in active custom orders
+async function filterMoviesNotInCustomOrders(movies) {
+  try {
+    console.log(`🎬 Filtering ${movies.length} movies to exclude those in active custom orders...`);
+    
+    const filteredMovies = [];
+    let excludedCount = 0;
+    
+    for (const movie of movies) {
+      const inCustomOrder = await movieExistsInCustomOrder(movie.ratingKey);
+      if (inCustomOrder) {
+        console.log(`🚫 Excluding movie "${movie.title}" - found in active custom order`);
+        excludedCount++;
+      } else {
+        filteredMovies.push(movie);
+      }
+    }
+    
+    console.log(`🎬 Custom order filtering results:`);
+    console.log(`   - Movies after filtering: ${filteredMovies.length}`);
+    console.log(`   - Movies excluded (in custom orders): ${excludedCount}`);
+    
+    return filteredMovies;
+  } catch (error) {
+    console.error('Error filtering movies by custom orders:', error);
+    return movies; // Return original list if error
   }
 }
 

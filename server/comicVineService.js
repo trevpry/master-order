@@ -111,43 +111,56 @@ class ComicVineService {
       if (!(await this.isApiKeyAvailable())) {
         console.log('ComicVine API key not available, skipping comic cover art lookup');
         return null;
-      }
-
-      console.log(`Parsing comic string: ${comicString}`);
+      }      console.log(`Parsing comic string: ${comicString}`);
       
-      // Parse the format "Series Name (Year) #Issue"
-      const match = comicString.match(/^(.+?)\s*\((\d{4})\)\s*#(.+)$/);
-      if (!match) {
-        console.log(`Invalid comic format: ${comicString}. Expected format: "Series Name (Year) #Issue"`);
-        return null;
+      // Parse the format "Series Name (Year) #Issue" or "Series Name #Issue"
+      let match = comicString.match(/^(.+?)\s*\((\d{4})\)\s*#(.+)$/);
+      let seriesName, year, issueNumber;
+      
+      if (match) {
+        // Format with year: "Series Name (Year) #Issue"
+        [, seriesName, year, issueNumber] = match;
+        console.log(`Parsed - Series: ${seriesName}, Year: ${year}, Issue: #${issueNumber}`);
+      } else {
+        // Try format without year: "Series Name #Issue"
+        match = comicString.match(/^(.+?)\s*#(.+)$/);
+        if (match) {
+          [, seriesName, issueNumber] = match;
+          year = null;
+          console.log(`Parsed - Series: ${seriesName}, Year: none, Issue: #${issueNumber}`);
+        } else {
+          console.log(`Invalid comic format: ${comicString}. Expected format: "Series Name (Year) #Issue" or "Series Name #Issue"`);
+          return null;
+        }
       }
-
-      const [, seriesName, year, issueNumber] = match;
-      console.log(`Parsed - Series: ${seriesName}, Year: ${year}, Issue: #${issueNumber}`);
 
       // Search for the series
       const seriesResults = await this.searchSeries(seriesName);
       if (seriesResults.length === 0) {
         console.log(`No series found for: ${seriesName}`);
         return null;
-      }
-
-      // Find the best matching series (preferably with matching year)
+      }      // Find the best matching series (preferably with matching year)
       let bestMatch = null;
       
-      // First try to find exact year match
-      for (const series of seriesResults) {
-        const seriesYear = series.start_year;
-        if (seriesYear && seriesYear.toString() === year) {
-          bestMatch = series;
-          break;
+      if (year) {
+        // First try to find exact year match if year is provided
+        for (const series of seriesResults) {
+          const seriesYear = series.start_year;
+          if (seriesYear && seriesYear.toString() === year) {
+            bestMatch = series;
+            break;
+          }
         }
-      }
-      
-      // If no exact year match, use the first result
-      if (!bestMatch) {
+        
+        // If no exact year match, use the first result
+        if (!bestMatch) {
+          bestMatch = seriesResults[0];
+          console.log(`No exact year match for ${year}, using: ${bestMatch.name} (${bestMatch.start_year})`);
+        }
+      } else {
+        // No year provided, just use the first result
         bestMatch = seriesResults[0];
-        console.log(`No exact year match for ${year}, using: ${bestMatch.name} (${bestMatch.start_year})`);
+        console.log(`No year specified, using first result: ${bestMatch.name} (${bestMatch.start_year})`);
       }
 
       console.log(`Selected series: ${bestMatch.name} (ID: ${bestMatch.id})`);
@@ -161,11 +174,10 @@ class ComicVineService {
 
       // Return comic details with cover art
       const coverUrl = issue.image?.original_url || issue.image?.screen_url || issue.image?.small_url;
-      
-      return {
+        return {
         seriesName: bestMatch.name,
         seriesId: bestMatch.id,
-        year: bestMatch.start_year || parseInt(year),
+        year: year ? parseInt(year) : bestMatch.start_year,
         issueNumber: issueNumber,
         issueId: issue.id,
         issueName: issue.name,

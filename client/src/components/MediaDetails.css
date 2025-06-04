@@ -113,6 +113,17 @@
   margin: 0 0 12px 0;
 }
 
+.story-title-link {
+  color: #3498db;
+  text-decoration: none;
+  transition: color 0.2s ease;
+}
+
+.story-title-link:hover {
+  color: #2980b9;
+  text-decoration: underline;
+}
+
 .details-stats {
   display: flex;
   flex-direction: column;

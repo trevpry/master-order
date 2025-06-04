@@ -2,7 +2,7 @@ const express = require('express');
 const cors = require('cors');
 const getNextEpisode = require('./getNextEpisode');
 const getNextMovie = require('./getNextMovie');
-const getNextCustomOrder = require('./getNextCustomOrder');
+const { getNextCustomOrder } = require('./getNextCustomOrder');
 const prisma = require('./prismaClient'); // Import the shared client
 const PlexDatabaseService = require('./plexDatabaseService');
 const TvdbDatabaseService = require('./tvdbDatabaseService'); // Added import
@@ -31,13 +31,13 @@ app.get('/api/up_next', async (req, res) => {
     
     // If movies were selected, use the new getNextMovie function
     if (data.orderType === 'MOVIES_GENERAL') {
-      console.log('Movie order type selected, using getNextMovie function');
-      const movieData = await getNextMovie();
+      console.log('Movie order type selected, using getNextMovie function');    const movieData = await getNextMovie();
       res.json(movieData);
     } else if (data.orderType === 'CUSTOM_ORDER') {
       console.log('Custom order type selected, using getNextCustomOrder function');
       const customOrderData = await getNextCustomOrder();
-      res.json(customOrderData);    } else {
+      res.json(customOrderData);
+    } else {
       // TV General selection
       res.json(data);
     }
@@ -159,6 +159,77 @@ app.get('/api/comicvine/search', async (req, res) => {
   } catch (error) {
     console.error('Error searching ComicVine:', error);
     res.status(500).json({ error: 'Failed to search ComicVine' });
+  }
+});
+
+// OpenLibrary search endpoint
+app.get('/api/openlibrary/search', async (req, res) => {
+  try {
+    const { query, limit } = req.query;
+    if (!query) {
+      return res.status(400).json({ error: 'Missing search query' });
+    }
+
+    const openLibraryService = require('./openLibraryService');
+    const results = await openLibraryService.searchBooks(query, parseInt(limit) || 20);
+    
+    res.json(results);
+  } catch (error) {
+    console.error('Error searching OpenLibrary:', error);
+    res.status(500).json({ error: 'Failed to search OpenLibrary' });
+  }
+});
+
+// OpenLibrary book details endpoint
+app.get('/api/openlibrary/book/*', async (req, res) => {
+  try {
+    const bookKey = req.params[0]; // Use wildcard parameter
+    if (!bookKey) {
+      return res.status(400).json({ error: 'Missing book key' });
+    }
+
+    const openLibraryService = require('./openLibraryService');
+    const bookDetails = await openLibraryService.getBookDetails(bookKey);
+    
+    if (!bookDetails) {
+      return res.status(404).json({ error: 'Book not found' });
+    }
+    
+    res.json(bookDetails);
+  } catch (error) {
+    console.error('Error getting book details:', error);
+    res.status(500).json({ error: 'Failed to get book details' });
+  }
+});
+
+// OpenLibrary cover artwork proxy
+app.get('/api/openlibrary-artwork', async (req, res) => {
+  try {
+    const artworkUrl = req.query.url;
+    if (!artworkUrl) {
+      return res.status(400).send('Missing artwork URL');
+    }
+    
+    const axios = require('axios');
+    const response = await axios.get(artworkUrl, {
+      responseType: 'stream',
+      timeout: 10000, // 10 second timeout
+      headers: {
+        'User-Agent': 'MasterOrder/1.0'
+      }
+    });
+    
+    // Set appropriate headers
+    res.set({
+      'Content-Type': response.headers['content-type'] || 'image/jpeg',
+      'Cache-Control': 'public, max-age=86400' // Cache for 24 hours
+    });
+    
+    // Pipe the image data
+    response.data.pipe(res);
+  } catch (error) {
+    console.error('Error proxying OpenLibrary artwork:', error);
+    res.status(500).send('Error loading OpenLibrary artwork');
   }
 });
 
@@ -521,6 +592,20 @@ app.delete('/api/orders/:id', async (req, res) => {
   }
 });
 
+// Custom order next item endpoint (for testing and direct access)
+app.get('/api/get-next-custom-order', async (req, res) => {
+  try {
+    const customOrderData = await getNextCustomOrder();
+    res.json(customOrderData);
+  } catch (error) {
+    console.error('Failed to get next custom order item:', error.message);
+    res.status(500).json({ 
+      error: 'Failed to get next custom order item',
+      details: error.message 
+    });
+  }
+});
+
 // Custom Order Management Endpoints
 
 // Get all custom orders
@@ -542,7 +627,7 @@ app.get('/api/custom-orders', async (req, res) => {
 // Create a new custom order
 app.post('/api/custom-orders', async (req, res) => {
   try {
-    const { name, description } = req.body;
+    const { name, description, icon } = req.body;
     
     if (!name || name.trim() === '') {
       return res.status(400).json({ error: 'Custom order name is required' });
@@ -551,14 +636,16 @@ app.post('/api/custom-orders', async (req, res) => {
     const customOrder = await prisma.customOrder.create({
       data: {
         name: name.trim(),
-        description: description?.trim() || null
+        description: description?.trim() || null,
+        icon: icon?.trim() || null
       }
     });
     
     res.status(201).json(customOrder);
   } catch (error) {
     console.error('Error creating custom order:', error);
-    res.status(500).json({ error: 'Failed to create custom order' });  }
+    res.status(500).json({ error: 'Failed to create custom order' });
+  }
 });
 
 // Get count of custom orders (must come before :id route)
@@ -600,12 +687,13 @@ app.get('/api/custom-orders/:id', async (req, res) => {
 app.put('/api/custom-orders/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    const { name, description, isActive } = req.body;
+    const { name, description, isActive, icon } = req.body;
     
     const updateData = {};
     if (name !== undefined) updateData.name = name.trim();
     if (description !== undefined) updateData.description = description?.trim() || null;
     if (isActive !== undefined) updateData.isActive = isActive;
+    if (icon !== undefined) updateData.icon = icon?.trim() || null;
     
     const customOrder = await prisma.customOrder.update({
       where: { id: parseInt(id) },
@@ -642,29 +730,56 @@ app.delete('/api/custom-orders/:id', async (req, res) => {
 app.post('/api/custom-orders/:id/items', async (req, res) => {
   try {
     const { id } = req.params;
-    
-    const { mediaType, plexKey, title, seasonNumber, episodeNumber, seriesTitle, comicSeries, comicYear, comicIssue, comicVolume } = req.body;
+      const { 
+      mediaType, 
+      plexKey, 
+      title, 
+      seasonNumber, 
+      episodeNumber, 
+      seriesTitle, 
+      comicSeries, 
+      comicYear, 
+      comicIssue, 
+      comicVolume,
+      bookTitle,
+      bookAuthor,
+      bookYear,
+      bookIsbn,
+      bookPublisher,
+      bookOpenLibraryId,
+      bookCoverUrl,
+      storyTitle,
+      storyAuthor,
+      storyYear,
+      storyUrl,
+      storyContainedInBookId,
+      storyCoverUrl
+    } = req.body;
     
     if (!mediaType || !title) {
       return res.status(400).json({ error: 'mediaType and title are required' });
-    }
-    
-    // Validate comic-specific requirements
+    }      // Validate media-specific requirements
     if (mediaType === 'comic') {
-      if (!comicSeries || !comicYear || !comicIssue) {
-        return res.status(400).json({ error: 'For comics: comicSeries, comicYear, and comicIssue are required' });
+      if (!comicSeries || !comicIssue) {
+        return res.status(400).json({ error: 'For comics: comicSeries and comicIssue are required' });
+      }
+    } else if (mediaType === 'book') {
+      if (!bookTitle || !bookAuthor) {
+        return res.status(400).json({ error: 'For books: bookTitle and bookAuthor are required' });
+      }    } else if (mediaType === 'shortstory') {
+      if (!storyTitle) {
+        return res.status(400).json({ error: 'For short stories: storyTitle is required' });
       }
     } else {
-      // For non-comic media, plexKey is required
+      // For non-comic/book/shortstory media, plexKey is required
       if (!plexKey) {
-        return res.status(400).json({ error: 'plexKey is required for non-comic media' });
+        return res.status(400).json({ error: 'plexKey is required for non-comic/book/shortstory media' });
       }
     }
       // Check for duplicate items
     let existingItem;
     if (mediaType === 'comic') {
       // For comics, check for duplicates by series, year, and issue
-      // Convert comicIssue to string since Prisma schema expects string
       existingItem = await prisma.customOrderItem.findFirst({
         where: {
           customOrderId: parseInt(id),
@@ -673,6 +788,34 @@ app.post('/api/custom-orders/:id/items', async (req, res) => {
           comicYear: comicYear,
           comicIssue: String(comicIssue)
         }
+      });
+    } else if (mediaType === 'book') {
+      // For books, check for duplicates by title and author
+      existingItem = await prisma.customOrderItem.findFirst({
+        where: {
+          customOrderId: parseInt(id),
+          mediaType: 'book',
+          bookTitle: bookTitle,
+          bookAuthor: bookAuthor,
+          bookYear: bookYear || null        }
+      });    } else if (mediaType === 'shortstory') {
+      // For short stories, check for duplicates by title, author (if provided), and year
+      const whereCondition = {
+        customOrderId: parseInt(id),
+        mediaType: 'shortstory',
+        storyTitle: storyTitle,
+        storyYear: storyYear || null
+      };
+      
+      // Only include author in the check if it's provided
+      if (storyAuthor) {
+        whereCondition.storyAuthor = storyAuthor;
+      } else {
+        whereCondition.storyAuthor = null;
+      }
+      
+      existingItem = await prisma.customOrderItem.findFirst({
+        where: whereCondition
       });
     } else {
       // For other media, check by plexKey
@@ -700,13 +843,17 @@ app.post('/api/custom-orders/:id/items', async (req, res) => {
       orderBy: { sortOrder: 'desc' }
     });
     
-    const nextSortOrder = lastItem ? lastItem.sortOrder + 1 : 0;
-    
-    // Generate a unique plexKey for comics (since it's required by schema)
-    const finalPlexKey = mediaType === 'comic' 
-      ? `comic-${comicSeries}-${comicYear}-${comicIssue}`.replace(/[^a-zA-Z0-9-]/g, '-').toLowerCase()
-      : plexKey;
-      const item = await prisma.customOrderItem.create({
+    const nextSortOrder = lastItem ? lastItem.sortOrder + 1 : 0;      // Generate a unique plexKey for comics and books (since it's required by schema)
+    let finalPlexKey;
+    if (mediaType === 'comic') {
+      finalPlexKey = `comic-${comicSeries}-${comicYear}-${comicIssue}`.replace(/[^a-zA-Z0-9-]/g, '-').toLowerCase();
+    } else if (mediaType === 'book') {
+      finalPlexKey = `book-${bookTitle}-${bookAuthor}`.replace(/[^a-zA-Z0-9-]/g, '-').toLowerCase();    } else if (mediaType === 'shortstory') {
+      const authorPart = storyAuthor ? `-${storyAuthor}` : '';
+      finalPlexKey = `shortstory-${storyTitle}${authorPart}`.replace(/[^a-zA-Z0-9-]/g, '-').toLowerCase();
+    } else {
+      finalPlexKey = plexKey;
+    }    const item = await prisma.customOrderItem.create({
       data: {
         customOrderId: parseInt(id),
         mediaType,
@@ -719,6 +866,19 @@ app.post('/api/custom-orders/:id/items', async (req, res) => {
         comicYear,
         comicIssue: mediaType === 'comic' ? String(comicIssue) : null,
         comicVolume,
+        bookTitle,
+        bookAuthor,
+        bookYear,
+        bookIsbn,
+        bookPublisher,
+        bookOpenLibraryId,
+        bookCoverUrl,
+        storyTitle,
+        storyAuthor,
+        storyYear,
+        storyUrl,
+        storyContainedInBookId,
+        storyCoverUrl,
         sortOrder: nextSortOrder
       }
     });
@@ -747,12 +907,45 @@ app.delete('/api/custom-orders/:id/items/:itemId', async (req, res) => {
 // Update item order in custom order
 app.put('/api/custom-orders/:id/items/:itemId', async (req, res) => {
   try {
-    const { itemId } = req.params;
-    const { sortOrder, isWatched } = req.body;
-    
-    const updateData = {};
+    const { itemId } = req.params;    const { 
+      sortOrder, 
+      isWatched, 
+      title,
+      bookTitle,
+      bookAuthor,
+      bookYear,
+      bookIsbn,
+      bookPublisher,
+      bookOpenLibraryId,
+      bookCoverUrl,
+      storyTitle,
+      storyAuthor,
+      storyYear,
+      storyUrl,
+      storyContainedInBookId,
+      storyCoverUrl
+    } = req.body;
+      const updateData = {};
     if (sortOrder !== undefined) updateData.sortOrder = sortOrder;
     if (isWatched !== undefined) updateData.isWatched = isWatched;
+    
+    // Handle book data updates for re-select functionality
+    if (title !== undefined) updateData.title = title;
+    if (bookTitle !== undefined) updateData.bookTitle = bookTitle;
+    if (bookAuthor !== undefined) updateData.bookAuthor = bookAuthor;
+    if (bookYear !== undefined) updateData.bookYear = bookYear;
+    if (bookIsbn !== undefined) updateData.bookIsbn = bookIsbn;
+    if (bookPublisher !== undefined) updateData.bookPublisher = bookPublisher;
+    if (bookOpenLibraryId !== undefined) updateData.bookOpenLibraryId = bookOpenLibraryId;
+    if (bookCoverUrl !== undefined) updateData.bookCoverUrl = bookCoverUrl;
+    
+    // Handle short story data updates
+    if (storyTitle !== undefined) updateData.storyTitle = storyTitle;
+    if (storyAuthor !== undefined) updateData.storyAuthor = storyAuthor;
+    if (storyYear !== undefined) updateData.storyYear = storyYear;
+    if (storyUrl !== undefined) updateData.storyUrl = storyUrl;
+    if (storyContainedInBookId !== undefined) updateData.storyContainedInBookId = storyContainedInBookId;
+    if (storyCoverUrl !== undefined) updateData.storyCoverUrl = storyCoverUrl;
     
     const item = await prisma.customOrderItem.update({
       where: { id: parseInt(itemId) },
@@ -773,17 +966,18 @@ app.get('/api/search', async (req, res) => {
     
     if (!query || query.trim() === '') {
       return res.status(400).json({ error: 'Search query is required' });
-    }
+        }
 
     if (type === 'tv' || type === 'television') {
       // Search for TV shows and their episodes in the database
       try {
         const tvShows = await plexDb.searchTVShows(query);
+        console.log(`TV Search Debug: Found ${tvShows.length} shows for query: "${query}"`);
         const allEpisodes = [];
-        
         for (const show of tvShows) {
           try {
-            const episodes = await plexDb.getEpisodesByTVShow(show.ratingKey);
+            const episodes = await plexDb.getAllEpisodesForShow(show.ratingKey);
+            console.log(`TV Search Debug: Found ${episodes.length} episodes for show: ${show.title}`);
             allEpisodes.push(...episodes);
           } catch (error) {
             console.error(`Error fetching episodes for series ${show.title}:`, error.message);
@@ -899,6 +1093,8 @@ app.listen(PORT, async () => {
     console.error('Failed to start background sync service:', error);
   }
 });
+
+
 
 
 
