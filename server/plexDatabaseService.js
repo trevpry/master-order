@@ -542,11 +542,10 @@ class PlexDatabaseService {
               }
             }
           ]
-        },
-        include: {
+        },        include: {
           season: {
             include: {
-              tvShow: true
+              show: true
             }
           }
         }

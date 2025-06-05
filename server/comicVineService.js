@@ -25,11 +25,58 @@ class ComicVineService {
     }
     return this.apiKey && this.apiKey.trim() !== '';
   }
+  /**
+   * Calculate string similarity using Levenshtein distance
+   * @param {string} str1 - First string
+   * @param {string} str2 - Second string
+   * @returns {number} Similarity score between 0 and 1 (1 being identical)
+   */
+  calculateSimilarity(str1, str2) {
+    if (!str1 || !str2) return 0;
+    
+    const a = str1.toLowerCase();
+    const b = str2.toLowerCase();
+    
+    if (a === b) return 1;
+    
+    const matrix = [];
+    const n = b.length;
+    const m = a.length;
+
+    if (n === 0) return m === 0 ? 1 : 0;
+    if (m === 0) return 0;
+
+    for (let i = 0; i <= n; i++) {
+      matrix[i] = [i];
+    }
+
+    for (let j = 0; j <= m; j++) {
+      matrix[0][j] = j;
+    }
+
+    for (let i = 1; i <= n; i++) {
+      for (let j = 1; j <= m; j++) {
+        if (b.charAt(i - 1) === a.charAt(j - 1)) {
+          matrix[i][j] = matrix[i - 1][j - 1];
+        } else {
+          matrix[i][j] = Math.min(
+            matrix[i - 1][j - 1] + 1,
+            matrix[i][j - 1] + 1,
+            matrix[i - 1][j] + 1
+          );
+        }
+      }
+    }
+
+    const distance = matrix[n][m];
+    const maxLength = Math.max(a.length, b.length);
+    return 1 - distance / maxLength;
+  }
 
   /**
-   * Search for a comic series by name
+   * Search for a comic series by name with fuzzy matching
    * @param {string} seriesName - The name of the comic series
-   * @returns {Promise<Array>} Array of search results
+   * @returns {Promise<Array>} Array of search results with similarity scores
    */  async searchSeries(seriesName) {
     try {
       if (!(await this.isApiKeyAvailable())) {
@@ -55,7 +102,68 @@ class ComicVineService {
       const results = response.data.results || [];
       console.log(`Found ${results.length} series results for: ${seriesName}`);
       
-      return results;
+      if (results.length === 0) {
+        console.log(`No exact matches found for "${seriesName}". Trying fuzzy search...`);
+        
+        // If no exact matches, try a broader search with just key words
+        const searchTerms = seriesName.toLowerCase().split(/\s+/).filter(term => term.length > 2);
+        let fuzzyResults = [];
+        
+        for (const term of searchTerms.slice(0, 3)) { // Use max 3 terms to avoid too many API calls
+          try {
+            const fuzzyResponse = await axios.get(`${this.baseURL}/search/`, {
+              params: {
+                api_key: this.apiKey,
+                format: 'json',
+                query: term,
+                resources: 'volume',
+                limit: 20
+              },
+              headers: {
+                'User-Agent': 'MasterOrder/1.0'
+              }
+            });
+            
+            const termResults = fuzzyResponse.data.results || [];
+            fuzzyResults = fuzzyResults.concat(termResults);
+          } catch (termError) {
+            console.warn(`Error searching for term "${term}":`, termError.message);
+          }
+        }
+        
+        // Remove duplicates and calculate similarity scores
+        const uniqueResults = new Map();
+        for (const result of fuzzyResults) {
+          if (!uniqueResults.has(result.id)) {
+            const similarity = this.calculateSimilarity(seriesName, result.name);
+            uniqueResults.set(result.id, {
+              ...result,
+              similarity: similarity,
+              isFuzzyMatch: true
+            });
+          }
+        }
+        
+        // Sort by similarity and return top matches above threshold
+        const sortedResults = Array.from(uniqueResults.values())
+          .filter(result => result.similarity > 0.3) // Only return reasonable matches
+          .sort((a, b) => b.similarity - a.similarity)
+          .slice(0, 10);
+        
+        if (sortedResults.length > 0) {
+          console.log(`Found ${sortedResults.length} fuzzy matches for "${seriesName}"`);
+          console.log(`Best match: "${sortedResults[0].name}" (${Math.round(sortedResults[0].similarity * 100)}% similarity)`);
+        }
+        
+        return sortedResults;
+      }
+      
+      // Add exact match indicators to normal results
+      return results.map(result => ({
+        ...result,
+        similarity: this.calculateSimilarity(seriesName, result.name),
+        isFuzzyMatch: false
+      }));
     } catch (error) {
       console.error('ComicVine series search failed:', error.response?.data || error.message);
       return [];

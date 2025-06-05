@@ -49,6 +49,53 @@ function CustomOrders() {
     description: '',
     icon: ''
   });
+  // Helper function to generate artwork URLs for custom order items
+  const getItemArtworkUrl = (item) => {
+    // Check if we have cached artwork
+    if (item.localArtworkPath) {
+      // Extract just the filename from the full path
+      const filename = item.localArtworkPath.includes('\\') || item.localArtworkPath.includes('/') 
+        ? item.localArtworkPath.split(/[\\\/]/).pop() 
+        : item.localArtworkPath;
+      return `http://localhost:3001/api/artwork/${filename}`;
+    }
+    
+    // For items without cached artwork, try to get remote artwork URLs
+    // This matches the logic from the artworkCacheService
+    switch (item.mediaType) {
+      case 'comic':
+        if (item.comicSeries && item.comicYear) {
+          const comicString = `${item.comicSeries} (${item.comicYear}) #${item.comicIssue || '1'}`;
+          return `http://localhost:3001/api/comicvine-artwork?url=${encodeURIComponent(`http://localhost:3001/api/comicvine-cover?comic=${encodeURIComponent(comicString)}`)}`;
+        }
+        break;
+      
+      case 'book':
+        if (item.bookCoverUrl) {
+          return `http://localhost:3001/api/openlibrary-artwork?url=${encodeURIComponent(item.bookCoverUrl)}`;
+        } else if (item.bookOpenLibraryId) {
+          return `http://localhost:3001/api/openlibrary-artwork?url=${encodeURIComponent(`https://covers.openlibrary.org/b/olid/${item.bookOpenLibraryId}-M.jpg`)}`;
+        }
+        break;
+      
+      case 'shortstory':
+        if (item.storyCoverUrl) {
+          return `http://localhost:3001/api/openlibrary-artwork?url=${encodeURIComponent(item.storyCoverUrl)}`;
+        } else if (item.storyContainedInBook?.bookCoverUrl) {
+          return `http://localhost:3001/api/openlibrary-artwork?url=${encodeURIComponent(item.storyContainedInBook.bookCoverUrl)}`;
+        }
+        break;
+      
+      case 'episode':
+      case 'movie':
+        // For Plex items, we would need the plexKey and settings, which requires backend call
+        // Fall back to null for now - the artwork caching service will handle this
+        break;
+    }
+    
+    // For items without cached artwork, return null to show fallback
+    return null;
+  };
 
   // Fetch custom orders when component mounts
   useEffect(() => {
@@ -280,10 +327,8 @@ function CustomOrders() {
   };
 
   const handleReselectBook = (item) => {
-    // Store the item being re-selected
     setReselectingItem(item);
     
-    // Pre-fill the book form with current item data
     setBookFormData({
       title: item.bookTitle || item.title || '',
       author: item.bookAuthor || '',
@@ -291,8 +336,19 @@ function CustomOrders() {
       isbn: item.bookIsbn || ''
     });
     
-    // Show the book form
     setShowBookForm(true);
+  };
+
+  const handleReselectComic = (item) => {
+    setReselectingItem(item);
+    
+    setComicFormData({
+      series: item.comicSeries || '',
+      year: item.comicYear ? item.comicYear.toString() : '',
+      issue: item.comicIssue || ''
+    });
+    
+    setShowComicForm(true);
   };
 
   const handleSearchMedia = async (query) => {
@@ -303,8 +359,6 @@ function CustomOrders() {
 
     setSearchLoading(true);
     try {
-      // This is a placeholder for Plex media search functionality
-      // In a real implementation, you would need to create an endpoint that searches Plex
       const response = await fetch(`http://127.0.0.1:3001/api/search?query=${encodeURIComponent(query)}`);
       if (response.ok) {
         const results = await response.json();
@@ -345,7 +399,6 @@ function CustomOrders() {
         requestBody.storyContainedInBookId = mediaItem.storyContainedInBookId;
         requestBody.storyCoverUrl = mediaItem.storyCoverUrl;
       } else {
-        // For Plex media (movies and TV episodes)
         requestBody.plexKey = mediaItem.ratingKey;
         requestBody.seasonNumber = mediaItem.parentIndex;
         requestBody.episodeNumber = mediaItem.index;
@@ -375,7 +428,6 @@ function CustomOrders() {
       } else {
         const errorData = await response.json();
         if (response.status === 409) {
-          // Handle duplicate item error
           setMessage(`Duplicate item: "${errorData.existingItem.title}" is already in this custom order`);
         } else {
           setMessage(`Error: ${errorData.error}`);
@@ -498,7 +550,7 @@ function CustomOrders() {
         let episodeNumber = null;
         
         if (mediaType === 'episode' && seasonEpisode) {
-          // Try to parse various formats: "S1E1", "S01E01", "1x1", "1,1", "1 1"
+          // Try to parse various formats: "S1E1", "S01E01", "1x1", "1,1", or "1-1"
           const seasonEpMatch = seasonEpisode.match(/(?:S?(\d+)(?:[xXeE]|,|\s)+(\d+))|(?:(\d+)\s*[\-\/]\s*(\d+))/i);
           if (seasonEpMatch) {
             seasonNumber = parseInt(seasonEpMatch[1] || seasonEpMatch[3]);
@@ -859,7 +911,6 @@ function CustomOrders() {
       setMessage('Error selecting book. Please try again.');
     }
   };
-
   const handleSearchComics = async (e) => {
     e.preventDefault();
     
@@ -867,22 +918,30 @@ function CustomOrders() {
       setMessage('Please enter a comic series name to search');
       return;
     }
+    
+    if (!comicFormData.issue.trim()) {
+      setMessage('Please enter an issue number to search');
+      return;
+    }
 
     setComicSearchLoading(true);
     setComicSearchResults([]);
     
     try {
-      // Build search query for ComicVine
+      // Build search query for ComicVine with issue filtering
       const searchQuery = comicFormData.series.trim();
+      const issueNumber = comicFormData.issue.trim();
 
-      const response = await fetch(`http://127.0.0.1:3001/api/comicvine/search?query=${encodeURIComponent(searchQuery)}&limit=10`);
+      const response = await fetch(`http://127.0.0.1:3001/api/comicvine/search-with-issues?query=${encodeURIComponent(searchQuery)}&issueNumber=${encodeURIComponent(issueNumber)}`);
       
       if (response.ok) {
         const results = await response.json();
         setComicSearchResults(results);
         
         if (results.length === 0) {
-          setMessage('No comic series found with that name. Try a different search term.');
+          setMessage(`No comic series found with issue #${issueNumber}. Try a different series name or issue number.`);
+        } else {
+          setMessage(`Found ${results.length} series that have issue #${issueNumber}`);
         }
       } else {
         setMessage('Error searching for comics. Please try again.');
@@ -895,8 +954,7 @@ function CustomOrders() {
     } finally {
       setComicSearchLoading(false);
     }
-  };
-  const handleSelectComic = async (selectedSeries) => {
+  };  const handleSelectComic = async (selectedSeries) => {
     try {
       // Validate required fields
       if (!comicFormData.issue) {
@@ -905,29 +963,71 @@ function CustomOrders() {
       }
 
       // Create the comic string in the expected format
-      // If year is provided: "Series Name (Year) #Issue"
-      // If year is not provided: "Series Name #Issue"
-      const comicString = comicFormData.year 
-        ? `${selectedSeries.name} (${comicFormData.year}) #${comicFormData.issue}`
+      // Use the series start year from ComicVine if no year is provided
+      const seriesYear = comicFormData.year || selectedSeries.start_year;
+      const comicString = seriesYear 
+        ? `${selectedSeries.name} (${seriesYear}) #${comicFormData.issue}`
         : `${selectedSeries.name} #${comicFormData.issue}`;
       
-      const comicMedia = {
-        mediaType: 'comic',
-        title: comicString,
-        comicSeries: selectedSeries.name,
-        comicYear: comicFormData.year ? parseInt(comicFormData.year) : null,
-        comicIssue: comicFormData.issue
-      };
+      if (reselectingItem) {
+        // Update existing item with new comic selection
+        const updateData = {
+          title: comicString,
+          comicSeries: selectedSeries.name,
+          comicYear: seriesYear ? parseInt(seriesYear) : null,
+          comicIssue: comicFormData.issue,
+          comicVineId: selectedSeries.api_detail_url || null
+        };
 
-      const success = await handleAddMediaToOrder(viewingOrderItems.id, comicMedia);
-      if (success !== false) {
-        setShowComicForm(false);
-        setComicFormData({ series: '', year: '', issue: '' });
-        setComicSearchResults([]);
-      }    } catch (error) {
+        const response = await fetch(`http://127.0.0.1:3001/api/custom-orders/${viewingOrderItems.id}/items/${reselectingItem.id}`, {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(updateData),
+        });
+
+        if (response.ok) {
+          setMessage(`Comic updated successfully: "${comicString}"`);
+          setShowComicForm(false);
+          setReselectingItem(null);
+          setComicFormData({ series: '', year: '', issue: '' });
+          setComicSearchResults([]);
+          
+          // Refresh the order items
+          fetchCustomOrders();
+          if (viewingOrderItems) {
+            const updatedOrder = await fetch(`http://127.0.0.1:3001/api/custom-orders/${viewingOrderItems.id}`);
+            const updatedOrderData = await updatedOrder.json();
+            setViewingOrderItems(updatedOrderData);
+          }
+        } else {
+          const errorData = await response.json();
+          setMessage(`Error updating comic: ${errorData.error}`);
+        }
+      } else {
+        // Add new comic to order (existing functionality)
+        const comicMedia = {
+          mediaType: 'comic',
+          title: comicString,
+          comicSeries: selectedSeries.name,
+          comicYear: seriesYear ? parseInt(seriesYear) : null,
+          comicIssue: comicFormData.issue,
+          comicVineId: selectedSeries.api_detail_url || null
+        };
+
+        const success = await handleAddMediaToOrder(viewingOrderItems.id, comicMedia);
+        if (success !== false) {
+          setShowComicForm(false);
+          setComicFormData({ series: '', year: '', issue: '' });
+          setComicSearchResults([]);
+        }
+      }
+    } catch (error) {
       console.error('Error selecting comic:', error);
       setMessage('Error selecting comic. Please try again.');
-    }  };
+    }
+  };
   const handleSearchShortStoryBooks = async (e) => {
     e.preventDefault();
     
@@ -1112,6 +1212,29 @@ function CustomOrders() {
           ) : (
             <div className="items-list">
               {viewingOrderItems.items.map((item, index) => (                <div key={item.id} className={`item-card ${item.isWatched ? 'watched' : ''}`}>
+                  <div className="item-thumbnail">
+                    {getItemArtworkUrl(item) ? (
+                      <img 
+                        src={getItemArtworkUrl(item)} 
+                        alt={`${item.title} artwork`}
+                        className="thumbnail-image"
+                        onError={(e) => {
+                          e.target.style.display = 'none';
+                          e.target.nextSibling.style.display = 'flex';
+                        }}
+                      />
+                    ) : null}
+                    <div 
+                      className="thumbnail-fallback" 
+                      style={{ display: getItemArtworkUrl(item) ? 'none' : 'flex' }}
+                    >
+                      {item.mediaType === 'tv' ? '📺' : 
+                       item.mediaType === 'movie' ? '🎬' :
+                       item.mediaType === 'comic' ? '📚' :
+                       item.mediaType === 'book' ? '📖' :
+                       item.mediaType === 'shortstory' ? '📖' : '📄'}
+                    </div>
+                  </div>
                   <div className="item-info">
                     <div className="item-position">#{index + 1}</div>
                     <div className="item-details">
@@ -1148,6 +1271,15 @@ function CustomOrders() {
                         size="small"
                       >
                         Re-select Book
+                      </Button>
+                    )}
+                    {item.mediaType === 'comic' && (
+                      <Button
+                        onClick={() => handleReselectComic(item)}
+                        className="secondary"
+                        size="small"
+                      >
+                        Re-select Comic
                       </Button>
                     )}
                     {!item.isWatched && (
@@ -1791,12 +1923,12 @@ Dune	Frank Herbert (1965)	Dune	book
       {/* Comic Search Modal */}
       {showComicForm && (
         <div className="modal-overlay">
-          <div className="modal-content">
-            <div className="modal-header">
-              <h3>Add Comic</h3>
+          <div className="modal-content">            <div className="modal-header">
+              <h3>{reselectingItem ? 'Re-select Comic' : 'Add Comic'}</h3>
               <Button
                 onClick={() => {
                   setShowComicForm(false);
+                  setReselectingItem(null);
                   setComicFormData({ series: '', year: '', issue: '' });
                   setComicSearchResults([]);
                 }}
@@ -1867,19 +1999,36 @@ Dune	Frank Herbert (1965)	Dune	book
                 </Button>
               </div>
             </form>
-            
-            {/* Search Results */}
+              {/* Search Results */}
             {comicSearchResults.length > 0 && (
               <div className="comic-search-results">
                 <h4>Select Comic Series</h4>                <p className="search-note">
-                  Found {comicSearchResults.length} series. Select the correct one, then the comic will be added as "{comicFormData.series}{comicFormData.year ? ` (${comicFormData.year})` : ''} #{comicFormData.issue}".
-                </p>
-                <div className="comic-results-list">
+                  Found {comicSearchResults.length} series that have issue #{comicFormData.issue}. Select the correct series:
+                </p>                <div className="comic-results-list">
                   {comicSearchResults.map((series, index) => (
                     <div key={index} className="comic-result-item">
                       <div className="comic-info">
+                        {series.coverUrl && (
+                          <div className="comic-cover-container">
+                            <img 
+                              src={series.coverUrl} 
+                              alt={`Cover of ${series.name} #${comicFormData.issue}`} 
+                              className="comic-cover-small"
+                              onError={(e) => {
+                                e.target.style.display = 'none';
+                              }}
+                            />
+                          </div>
+                        )}
                         <div className="comic-details">
-                          <h5>{series.name}</h5>
+                          <h5>
+                            {series.name}
+                            {series.isFuzzyMatch && (
+                              <span className="fuzzy-match-indicator" title={`${Math.round(series.similarity * 100)}% similarity match`}>
+                                ~{Math.round(series.similarity * 100)}%
+                              </span>
+                            )}
+                          </h5>
                           <p className="comic-publisher">
                             Publisher: {series.publisher?.name || 'Unknown'}
                           </p>
@@ -1887,7 +2036,10 @@ Dune	Frank Herbert (1965)	Dune	book
                             <p className="comic-year">Started: {series.start_year}</p>
                           )}
                           {series.issue_count && (
-                            <p className="comic-issues">Issues: {series.issue_count}</p>
+                            <p className="comic-issues">Total Issues: {series.issue_count}</p>
+                          )}
+                          {series.issueName && (
+                            <p className="comic-issue-name">Issue #{comicFormData.issue}: {series.issueName}</p>
                           )}
                         </div>
                       </div>
@@ -1896,7 +2048,7 @@ Dune	Frank Herbert (1965)	Dune	book
                         className="primary"
                         size="small"
                       >
-                        Add This Comic
+                        {reselectingItem ? 'Re-select This Comic' : 'Add This Comic'}
                       </Button>
                     </div>
                   ))}
@@ -2013,28 +2165,24 @@ Dune	Frank Herbert (1965)	Dune	book
                 <h4>Select Container Book</h4>
                 <p className="search-note">
                   Found {shortStorySearchResults.length} books by {shortStoryFormData.author}. Select which book contains the story "{shortStoryFormData.title}", or add the story without a container book.
-                </p>
-                <div className="book-results-list">
+                </p>                <div className="book-results-list">
                   {shortStorySearchResults.map((book, index) => (
                     <div key={index} className="book-result-item">
                       <div className="book-info">
-                        {book.cover_i && (
+                        {book.coverUrl && (
                           <img 
-                            src={`https://covers.openlibrary.org/b/id/${book.cover_i}-M.jpg`}
-                            alt={book.title}
-                            className="book-cover"
+                            src={book.coverUrl} 
+                            alt={`Cover of ${book.title}`} 
+                            className="book-cover-small"
                           />
                         )}
                         <div className="book-details">
                           <h5>{book.title}</h5>
                           <p className="book-author">
-                            by {book.author_name ? book.author_name.join(', ') : 'Unknown Author'}
+                            {book.authors && book.authors[0] ? book.authors[0] : 'Unknown Author'}
                           </p>
-                          {book.first_publish_year && (
-                            <p className="book-year">First published: {book.first_publish_year}</p>
-                          )}
-                          {book.isbn && book.isbn.length > 0 && (
-                            <p className="book-isbn">ISBN: {book.isbn[0]}</p>
+                          {book.firstPublishYear && (
+                            <p className="book-year">Published: {book.firstPublishYear}</p>
                           )}
                         </div>
                       </div>

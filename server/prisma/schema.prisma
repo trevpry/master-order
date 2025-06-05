@@ -83,6 +83,11 @@ model CustomOrderItem {
   storyContainedInBook CustomOrderItem? @relation("StoryInBook", fields: [storyContainedInBookId], references: [id], onDelete: SetNull)
   containedStories CustomOrderItem[] @relation("StoryInBook")
   storyCoverUrl String?     // For short stories only - cover image URL (falls back to book cover if not set)
+  // Local artwork caching fields
+  localArtworkPath String?  // Local file path to cached artwork
+  originalArtworkUrl String? // Original remote URL for artwork source
+  artworkLastCached DateTime? // Timestamp when artwork was last cached
+  artworkMimeType String?   // MIME type of the cached artwork file
   sortOrder     Int         @default(0) // For manual ordering
   isWatched     Boolean     @default(false)
   createdAt     DateTime    @default(now())

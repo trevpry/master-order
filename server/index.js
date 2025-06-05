@@ -8,12 +8,14 @@ const PlexDatabaseService = require('./plexDatabaseService');
 const TvdbDatabaseService = require('./tvdbDatabaseService'); // Added import
 const PlexSyncService = require('./plexSyncService'); // Added import
 const BackgroundSyncService = require('./backgroundSyncService'); // Added import
+const ArtworkCacheService = require('./artworkCacheService'); // Added import
 
 // Initialize services
 const plexDb = new PlexDatabaseService();
 const tvdbDb = new TvdbDatabaseService();
 const plexSync = new PlexSyncService(); // Initialize the sync service
 const backgroundSync = new BackgroundSyncService(); // Initialize background sync service
+const artworkCache = new ArtworkCacheService(); // Initialize artwork cache service
 
 // Initialize the app
 const app = express();
@@ -48,6 +50,51 @@ app.get('/api/up_next', async (req, res) => {
       error: 'Failed to get next item',
       details: error.message 
     });
+  }
+});
+
+// Serve cached artwork files (must come before wildcard Plex route)
+app.get('/api/artwork/:filename', async (req, res) => {
+  try {
+    const { filename } = req.params;
+    const filePath = artworkCache.getCachedFilePath(filename);
+    
+    // Check if file exists
+    const fs = require('fs').promises;
+    try {
+      await fs.access(filePath);
+    } catch (error) {
+      return res.status(404).send('Cached artwork not found');
+    }
+    
+    // Get file stats and MIME type
+    const path = require('path');
+    const extension = path.extname(filename).toLowerCase();
+    const mimeMap = {
+      '.jpg': 'image/jpeg',
+      '.jpeg': 'image/jpeg',
+      '.png': 'image/png',
+      '.gif': 'image/gif',
+      '.webp': 'image/webp',
+      '.bmp': 'image/bmp',
+      '.svg': 'image/svg+xml'
+    };
+    const mimeType = mimeMap[extension] || 'image/jpeg';
+    
+    // Set headers
+    res.set({
+      'Content-Type': mimeType,
+      'Cache-Control': 'public, max-age=86400' // Cache for 24 hours
+    });
+    
+    // Stream the file
+    const fs_stream = require('fs');
+    const stream = fs_stream.createReadStream(filePath);
+    stream.pipe(res);
+    
+  } catch (error) {
+    console.error('Error serving cached artwork:', error);
+    res.status(500).send('Error loading cached artwork');
   }
 });
 
@@ -162,6 +209,94 @@ app.get('/api/comicvine/search', async (req, res) => {
   }
 });
 
+// ComicVine search with issue filtering and cover art
+app.get('/api/comicvine/search-with-issues', async (req, res) => {
+  try {
+    const { query, issueNumber } = req.query;
+    if (!query) {
+      return res.status(400).json({ error: 'Missing search query' });
+    }
+    if (!issueNumber) {
+      return res.status(400).json({ error: 'Missing issue number' });
+    }
+
+    const comicVineService = require('./comicVineService');
+    
+    // First get all series matching the search
+    const allSeries = await comicVineService.searchSeries(query);
+    
+    // Filter series that actually have the requested issue number
+    const filteredSeries = [];
+    
+    for (const series of allSeries) {
+      try {
+        // Check if this series has the requested issue
+        const issue = await comicVineService.getIssueByNumber(series.id, issueNumber);
+        if (issue) {
+          // Add cover art URL from the issue
+          const coverUrl = issue.image?.original_url || issue.image?.screen_url || issue.image?.small_url;
+          filteredSeries.push({
+            ...series,
+            hasIssue: true,
+            coverUrl: coverUrl,
+            issueId: issue.id,
+            issueName: issue.name
+          });
+        }
+      } catch (error) {
+        console.warn(`Error checking issue ${issueNumber} for series ${series.name}:`, error.message);
+        // Continue checking other series
+      }
+    }
+    
+    console.log(`Filtered ${allSeries.length} series down to ${filteredSeries.length} with issue #${issueNumber}`);
+    res.json(filteredSeries);
+  } catch (error) {
+    console.error('Error searching ComicVine with issue filtering:', error);
+    res.status(500).json({ error: 'Failed to search ComicVine with issue filtering' });
+  }
+});
+
+// ComicVine cover artwork endpoint
+app.get('/api/comicvine-cover', async (req, res) => {
+  try {
+    const { comic } = req.query;
+    if (!comic) {
+      return res.status(400).send('Missing comic parameter');
+    }
+
+    const comicVineService = require('./comicVineService');
+    const comicDetails = await comicVineService.getComicCoverArt(comic);
+    
+    if (comicDetails && comicDetails.coverUrl) {
+      // Return the cover image by proxying it
+      const axios = require('axios');
+      const response = await axios.get(comicDetails.coverUrl, {
+        responseType: 'stream',
+        timeout: 10000,
+        headers: {
+          'User-Agent': 'MasterOrder/1.0'
+        }
+      });
+      
+      // Set appropriate headers
+      res.set({
+        'Content-Type': response.headers['content-type'] || 'image/jpeg',
+        'Cache-Control': 'public, max-age=86400' // Cache for 24 hours
+      });
+      
+      // Pipe the image data
+      response.data.pipe(res);
+    } else {
+      // Return a 404 if no cover found
+      res.status(404).send('Comic cover not found');
+    }
+  } catch (error) {
+    console.error('Error getting ComicVine cover:', error);
+    res.status(500).send('Error loading ComicVine cover');
+  }
+});
+
 // OpenLibrary search endpoint
 app.get('/api/openlibrary/search', async (req, res) => {
   try {
@@ -226,12 +361,12 @@ app.get('/api/openlibrary-artwork', async (req, res) => {
     });
     
     // Pipe the image data
-    response.data.pipe(res);
-  } catch (error) {
+    response.data.pipe(res);  } catch (error) {
     console.error('Error proxying OpenLibrary artwork:', error);
     res.status(500).send('Error loading OpenLibrary artwork');
   }
 });
+
 
 app.get('/api/settings', async (req, res) => {
   try {
@@ -614,14 +749,19 @@ app.get('/api/custom-orders', async (req, res) => {
     const customOrders = await prisma.customOrder.findMany({
       include: {
         items: {
+          include: {
+            storyContainedInBook: true
+          },
           orderBy: { sortOrder: 'asc' }
         }
       },
       orderBy: { createdAt: 'desc' }
     });
-    res.json(customOrders);  } catch (error) {
+    res.json(customOrders);
+  } catch (error) {
     console.error('Error fetching custom orders:', error);
-    res.status(500).json({ error: 'Failed to fetch custom orders' });  }
+    res.status(500).json({ error: 'Failed to fetch custom orders' });
+  }
 });
 
 // Create a new custom order
@@ -667,6 +807,9 @@ app.get('/api/custom-orders/:id', async (req, res) => {
       where: { id: parseInt(id) },
       include: {
         items: {
+          include: {
+            storyContainedInBook: true
+          },
           orderBy: { sortOrder: 'asc' }
         }
       }
@@ -694,12 +837,14 @@ app.put('/api/custom-orders/:id', async (req, res) => {
     if (description !== undefined) updateData.description = description?.trim() || null;
     if (isActive !== undefined) updateData.isActive = isActive;
     if (icon !== undefined) updateData.icon = icon?.trim() || null;
-    
-    const customOrder = await prisma.customOrder.update({
+      const customOrder = await prisma.customOrder.update({
       where: { id: parseInt(id) },
       data: updateData,
       include: {
         items: {
+          include: {
+            storyContainedInBook: true
+          },
           orderBy: { sortOrder: 'asc' }
         }
       }
@@ -755,6 +900,8 @@ app.post('/api/custom-orders/:id/items', async (req, res) => {
       storyContainedInBookId,
       storyCoverUrl
     } = req.body;
+
+    console.log(mediaType)
     
     if (!mediaType || !title) {
       return res.status(400).json({ error: 'mediaType and title are required' });
@@ -767,6 +914,7 @@ app.post('/api/custom-orders/:id/items', async (req, res) => {
       if (!bookTitle || !bookAuthor) {
         return res.status(400).json({ error: 'For books: bookTitle and bookAuthor are required' });
       }    } else if (mediaType === 'shortstory') {
+        console.log(req.body)
       if (!storyTitle) {
         return res.status(400).json({ error: 'For short stories: storyTitle is required' });
       }
@@ -883,6 +1031,11 @@ app.post('/api/custom-orders/:id/items', async (req, res) => {
       }
     });
     
+    // Try to cache artwork for the new item (async, don't wait for completion)
+    artworkCache.ensureArtworkCached(item).catch(error => {
+      console.warn(`Failed to cache artwork for item ${item.id}:`, error.message);
+    });
+    
     res.status(201).json(item);
   } catch (error) {
     console.error('Error adding item to custom order:', error);
@@ -894,6 +1047,10 @@ app.post('/api/custom-orders/:id/items', async (req, res) => {
 app.delete('/api/custom-orders/:id/items/:itemId', async (req, res) => {
   try {
     const { itemId } = req.params;
+    
+    // Clean up cached artwork for this item
+    await artworkCache.cleanupArtwork(parseInt(itemId));
+    
     await prisma.customOrderItem.delete({
       where: { id: parseInt(itemId) }
     });
@@ -907,50 +1064,147 @@ app.delete('/api/custom-orders/:id/items/:itemId', async (req, res) => {
 // Update item order in custom order
 app.put('/api/custom-orders/:id/items/:itemId', async (req, res) => {
   try {
-    const { itemId } = req.params;    const { 
+    const { itemId } = req.params;
+    const { 
       sortOrder, 
       isWatched, 
       title,
-      bookTitle,
-      bookAuthor,
-      bookYear,
-      bookIsbn,
-      bookPublisher,
-      bookOpenLibraryId,
-      bookCoverUrl,
-      storyTitle,
-      storyAuthor,
-      storyYear,
-      storyUrl,
-      storyContainedInBookId,
-      storyCoverUrl
+      seriesTitle, // For episodes
+      // Book fields
+      bookTitle, bookAuthor, bookYear, bookIsbn, bookPublisher, bookOpenLibraryId, bookCoverUrl,
+      // Comic fields
+      comicSeries, comicYear, comicIssue, comicVolume,
+      // Story fields
+      storyTitle, storyAuthor, storyYear, storyUrl, storyContainedInBookId, storyCoverUrl
     } = req.body;
-      const updateData = {};
+
+    // Check if this is a book re-selection (book-specific fields are being updated)
+    const isBookReselect = (
+      bookTitle !== undefined || 
+      bookAuthor !== undefined || 
+      bookYear !== undefined || 
+      bookIsbn !== undefined || 
+      bookPublisher !== undefined || 
+      bookOpenLibraryId !== undefined || 
+      bookCoverUrl !== undefined
+    );    // Check if this is a comic re-selection (comic-specific fields are being updated)
+    const isComicReselect = (
+      comicSeries !== undefined || 
+      comicYear !== undefined || 
+      comicIssue !== undefined || 
+      comicVolume !== undefined
+    );
+    
+    // Check if this is a short story re-selection (story-specific fields are being updated)
+    const isStoryReselect = (
+      storyTitle !== undefined || 
+      storyAuthor !== undefined || 
+      storyYear !== undefined || 
+      storyUrl !== undefined || 
+      storyContainedInBookId !== undefined || 
+      storyCoverUrl !== undefined
+    );const updateData = {};
     if (sortOrder !== undefined) updateData.sortOrder = sortOrder;
     if (isWatched !== undefined) updateData.isWatched = isWatched;
     
-    // Handle book data updates for re-select functionality
+    // Handle general data updates
     if (title !== undefined) updateData.title = title;
-    if (bookTitle !== undefined) updateData.bookTitle = bookTitle;
-    if (bookAuthor !== undefined) updateData.bookAuthor = bookAuthor;
-    if (bookYear !== undefined) updateData.bookYear = bookYear;
-    if (bookIsbn !== undefined) updateData.bookIsbn = bookIsbn;
-    if (bookPublisher !== undefined) updateData.bookPublisher = bookPublisher;
-    if (bookOpenLibraryId !== undefined) updateData.bookOpenLibraryId = bookOpenLibraryId;
-    if (bookCoverUrl !== undefined) updateData.bookCoverUrl = bookCoverUrl;
+    if (seriesTitle !== undefined) updateData.seriesTitle = seriesTitle;
+    
+    // Handle book data updates for re-select functionality
+    if (isBookReselect) { 
+        if (bookTitle !== undefined) updateData.bookTitle = bookTitle;
+        if (bookAuthor !== undefined) updateData.bookAuthor = bookAuthor;
+        if (bookYear !== undefined) updateData.bookYear = bookYear;
+        if (bookIsbn !== undefined) updateData.bookIsbn = bookIsbn;
+        if (bookPublisher !== undefined) updateData.bookPublisher = bookPublisher;
+        if (bookOpenLibraryId !== undefined) updateData.bookOpenLibraryId = bookOpenLibraryId;
+        // Use new bookCoverUrl if provided, otherwise nullify to allow re-caching logic to take over
+        updateData.bookCoverUrl = bookCoverUrl !== undefined ? bookCoverUrl : null;
+        
+        // Clear artwork fields for re-caching if a book is reselected
+        updateData.localArtworkPath = null;
+        updateData.originalArtworkUrl = bookCoverUrl !== undefined ? bookCoverUrl : null; 
+        updateData.artworkLastCached = null;
+        updateData.artworkMimeType = null;
+    }
+      // Handle comic data updates
+    if (isComicReselect) { 
+        if (comicSeries !== undefined) updateData.comicSeries = comicSeries;
+        if (comicYear !== undefined) updateData.comicYear = comicYear;
+        if (comicIssue !== undefined) updateData.comicIssue = String(comicIssue); // Ensure string
+        if (comicVolume !== undefined) updateData.comicVolume = comicVolume;
+
+        // Crucial for re-caching: clear old artwork details to force re-fetch by ensureArtworkCached
+        updateData.originalArtworkUrl = null; 
+        updateData.localArtworkPath = null;
+        updateData.artworkLastCached = null;
+        updateData.artworkMimeType = null;
+    }
     
     // Handle short story data updates
-    if (storyTitle !== undefined) updateData.storyTitle = storyTitle;
-    if (storyAuthor !== undefined) updateData.storyAuthor = storyAuthor;
-    if (storyYear !== undefined) updateData.storyYear = storyYear;
-    if (storyUrl !== undefined) updateData.storyUrl = storyUrl;
-    if (storyContainedInBookId !== undefined) updateData.storyContainedInBookId = storyContainedInBookId;
-    if (storyCoverUrl !== undefined) updateData.storyCoverUrl = storyCoverUrl;
+    if (isStoryReselect) { 
+        if (storyTitle !== undefined) updateData.storyTitle = storyTitle;
+        if (storyAuthor !== undefined) updateData.storyAuthor = storyAuthor;
+        if (storyYear !== undefined) updateData.storyYear = storyYear;
+        if (storyUrl !== undefined) updateData.storyUrl = storyUrl;
+        if (storyContainedInBookId !== undefined) updateData.storyContainedInBookId = storyContainedInBookId;
+        // Use new storyCoverUrl if provided, otherwise nullify
+        updateData.storyCoverUrl = storyCoverUrl !== undefined ? storyCoverUrl : null;
+
+        // Clear artwork fields for re-caching
+        updateData.localArtworkPath = null;
+        updateData.originalArtworkUrl = storyCoverUrl !== undefined ? storyCoverUrl : null; 
+        updateData.artworkLastCached = null;
+        updateData.artworkMimeType = null;
+    }
+
+    // If this is a book re-selection, clear existing cached artwork file (DB fields cleared above)
+    if (isBookReselect) {
+      console.log(`Re-selecting book for item ${itemId}, clearing cached artwork...`);
+      await artworkCache.cleanupArtwork(parseInt(itemId));
+    }
+      // If this is a comic re-selection, clear existing cached artwork
+    if (isComicReselect) {
+      console.log(`Re-selecting comic for item ${itemId}, clearing cached artwork...`);
+      await artworkCache.cleanupArtwork(parseInt(itemId));
+    }
+    
+    // If this is a short story re-selection, clear existing cached artwork
+    if (isStoryReselect) {
+      console.log(`Re-selecting short story for item ${itemId}, clearing cached artwork...`);
+      await artworkCache.cleanupArtwork(parseInt(itemId));
+    }
     
     const item = await prisma.customOrderItem.update({
       where: { id: parseInt(itemId) },
-      data: updateData
+      data: updateData,
+      include: {
+        storyContainedInBook: true
+      }
     });
+      // If this is a book re-selection, cache new artwork in background
+    if (isBookReselect) {
+      console.log(`Re-caching artwork for re-selected book: ${item.title}`);
+      artworkCache.ensureArtworkCached(item).catch(error => {
+        console.warn(`Failed to cache artwork for re-selected book ${item.id}:`, error.message);
+      });
+    }
+      // If this is a comic re-selection, cache new artwork in background
+    if (isComicReselect) {
+      console.log(`Re-caching artwork for re-selected comic: ${item.title || item.comicSeries + ' #' + item.comicIssue}`);
+      artworkCache.ensureArtworkCached(item).catch(error => {
+        console.warn(`Failed to cache artwork for re-selected comic ${item.id}:`, error.message);
+      });
+    }
+    
+    // If this is a short story re-selection, cache new artwork in background
+    if (isStoryReselect) {
+      console.log(`Re-caching artwork for re-selected short story: ${item.storyTitle || item.title}`);
+      artworkCache.ensureArtworkCached(item).catch(error => {
+        console.warn(`Failed to cache artwork for re-selected short story ${item.id}:`, error.message);
+      });
+    }
     
     res.json(item);
   } catch (error) {
