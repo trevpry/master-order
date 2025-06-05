@@ -520,7 +520,7 @@
   font-size: 0.875rem;
   font-weight: 600;
   flex-shrink: 0;
-  margin-top: 0.125rem; /* Small offset to align with text baseline */
+  align-self: flex-start; /* Align with top of the card content */
 }
 
 .item-details {

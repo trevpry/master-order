@@ -750,7 +750,8 @@ app.get('/api/custom-orders', async (req, res) => {
       include: {
         items: {
           include: {
-            storyContainedInBook: true
+            storyContainedInBook: true,
+            containedStories: true
           },
           orderBy: { sortOrder: 'asc' }
         }
@@ -808,7 +809,8 @@ app.get('/api/custom-orders/:id', async (req, res) => {
       include: {
         items: {
           include: {
-            storyContainedInBook: true
+            storyContainedInBook: true,
+            containedStories: true
           },
           orderBy: { sortOrder: 'asc' }
         }
@@ -836,14 +838,14 @@ app.put('/api/custom-orders/:id', async (req, res) => {
     if (name !== undefined) updateData.name = name.trim();
     if (description !== undefined) updateData.description = description?.trim() || null;
     if (isActive !== undefined) updateData.isActive = isActive;
-    if (icon !== undefined) updateData.icon = icon?.trim() || null;
-      const customOrder = await prisma.customOrder.update({
+    if (icon !== undefined) updateData.icon = icon?.trim() || null;      const customOrder = await prisma.customOrder.update({
       where: { id: parseInt(id) },
       data: updateData,
       include: {
         items: {
           include: {
-            storyContainedInBook: true
+            storyContainedInBook: true,
+            containedStories: true
           },
           orderBy: { sortOrder: 'asc' }
         }
@@ -1210,6 +1212,65 @@ app.put('/api/custom-orders/:id/items/:itemId', async (req, res) => {
   } catch (error) {
     console.error('Error updating custom order item:', error);
     res.status(500).json({ error: 'Failed to update custom order item' });
+  }
+});
+
+// Create a reference book (for containing short stories) without adding to collection order
+app.post('/api/books/reference', async (req, res) => {
+  try {
+    const {
+      title,
+      bookTitle,
+      bookAuthor,
+      bookYear,
+      bookIsbn,
+      bookPublisher,
+      bookOpenLibraryId,
+      bookCoverUrl,
+      customOrderId // Order context is needed due to schema constraints
+    } = req.body;
+
+    // Check if this book already exists globally by OpenLibrary ID
+    const existingBook = await prisma.customOrderItem.findFirst({
+      where: {
+        mediaType: 'book',
+        bookOpenLibraryId: bookOpenLibraryId
+      }
+    });
+
+    if (existingBook) {
+      return res.json(existingBook);
+    }
+
+    // If no customOrderId provided, we can't create the book due to schema constraints
+    if (!customOrderId) {
+      return res.status(400).json({ error: 'customOrderId is required to create a book' });
+    }
+
+    // Generate a unique plexKey for the book (since it's required by schema)
+    const bookPlexKey = `book_${bookOpenLibraryId || Date.now()}`;    // Create the book entry in the specified order
+    const book = await prisma.customOrderItem.create({
+      data: {
+        mediaType: 'book',
+        plexKey: bookPlexKey,
+        title: title,
+        bookTitle: bookTitle,
+        bookAuthor: bookAuthor,
+        bookYear: bookYear,
+        bookIsbn: bookIsbn,
+        bookPublisher: bookPublisher,
+        bookOpenLibraryId: bookOpenLibraryId,
+        bookCoverUrl: bookCoverUrl,
+        sortOrder: 0,
+        customOrderId: customOrderId,
+        isWatched: true // Reference books are automatically marked as watched
+      }
+    });
+
+    res.status(201).json(book);
+  } catch (error) {
+    console.error('Error creating reference book:', error);
+    res.status(500).json({ error: 'Failed to create reference book' });
   }
 });
 

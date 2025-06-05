@@ -5,9 +5,9 @@ import './CustomOrders.css';
 function CustomOrders() {  
   const [customOrders, setCustomOrders] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [message, setMessage] = useState('');
-  const [showCreateForm, setShowCreateForm] = useState(false);
+  const [message, setMessage] = useState('');  const [showCreateForm, setShowCreateForm] = useState(false);
   const [editingOrder, setEditingOrder] = useState(null);
+  const [editingItem, setEditingItem] = useState(null);
   const [viewingOrderItems, setViewingOrderItems] = useState(null);
   const [showSearchModal, setShowSearchModal] = useState(false);  const [searchResults, setSearchResults] = useState([]);
   const [searchQuery, setSearchQuery] = useState('');
@@ -198,6 +198,148 @@ function CustomOrders() {
       setMessage('Error deleting custom order');
     }
   };
+
+  const handleEditOrder = (order) => {
+    setEditingOrder(order);
+    setFormData({
+      name: order.name,
+      description: order.description || '',
+      icon: order.icon || ''
+    });
+    setMessage('');
+  };
+
+  const handleUpdateOrder = async (e) => {
+    e.preventDefault();
+    
+    if (!formData.name.trim()) {
+      setMessage('Order name is required');
+      return;
+    }
+
+    try {
+      const response = await fetch(`http://127.0.0.1:3001/api/custom-orders/${editingOrder.id}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          name: formData.name.trim(),
+          description: formData.description.trim(),
+          icon: formData.icon.trim()
+        }),
+      });
+
+      if (response.ok) {
+        setMessage('Custom order updated successfully');
+        setFormData({ name: '', description: '', icon: '' });
+        setEditingOrder(null);
+        fetchCustomOrders(); // Refresh the list
+        
+        // Update the viewing order if it's currently being viewed
+        if (viewingOrderItems && viewingOrderItems.id === editingOrder.id) {
+          const updatedOrder = await fetch(`http://127.0.0.1:3001/api/custom-orders/${editingOrder.id}`);
+          const updatedOrderData = await updatedOrder.json();
+          setViewingOrderItems(updatedOrderData);
+        }
+      } else {
+        const errorData = await response.json();
+        setMessage(`Error: ${errorData.error}`);
+      }    } catch (error) {
+      console.error('Error updating custom order:', error);
+      setMessage('Error updating custom order');
+    }
+  };
+
+  const handleEditItem = (item) => {
+    setEditingItem(item);
+    
+    // Set appropriate form data based on item type
+    switch (item.mediaType) {
+      case 'episode':
+        setEpisodeFormData({
+          series: item.series || '',
+          season: item.season || '',
+          episode: item.episode || ''
+        });
+        setShowEpisodeForm(true);
+        break;
+      case 'book':
+        setBookFormData({
+          title: item.title || '',
+          author: item.author || '',
+          year: item.publicationYear || '',
+          isbn: item.isbn || ''
+        });
+        setShowBookForm(true);
+        break;
+      case 'comic':
+        setComicFormData({
+          series: item.comicSeries || '',
+          year: item.comicYear || '',
+          issue: item.comicIssue || ''
+        });
+        setShowComicForm(true);
+        break;      case 'shortstory':
+        setShortStoryFormData({
+          title: item.title || '',
+          author: item.author || '',
+          year: item.publicationYear || '',
+          url: item.url || '',
+          containedInBookId: item.containedInBookId || '',
+          coverUrl: item.coverUrl || ''
+        });
+        setShowShortStoryForm(true);
+        break;
+      default:
+        // For movies or other types, we might need a different approach
+        setMessage(`Editing ${item.mediaType} items is not yet supported`);
+    }
+  };
+
+  const handleUpdateItem = async (updatedItemData) => {
+    if (!editingItem || !viewingOrderItems) return;
+
+    try {
+      const response = await fetch(`http://127.0.0.1:3001/api/custom-orders/${viewingOrderItems.id}/items/${editingItem.id}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(updatedItemData),
+      });
+
+      if (response.ok) {
+        setMessage('Item updated successfully');
+        setEditingItem(null);
+        
+        // Close the appropriate form
+        setShowEpisodeForm(false);
+        setShowBookForm(false);
+        setShowComicForm(false);
+        setShowShortStoryForm(false);
+        
+        // Reset form data
+        setEpisodeFormData({ series: '', season: '', episode: '' });
+        setBookFormData({ title: '', author: '', year: '', isbn: '' });
+        setComicFormData({ series: '', year: '', issue: '' });
+        setShortStoryFormData({ title: '', author: '', year: '', url: '', containedInBookId: '', coverUrl: '' });
+        
+        // Refresh the order items
+        const updatedOrder = await fetch(`http://127.0.0.1:3001/api/custom-orders/${viewingOrderItems.id}`);
+        const updatedOrderData = await updatedOrder.json();
+        setViewingOrderItems(updatedOrderData);
+        
+      } else {
+        const errorData = await response.json();
+        setMessage(`Error updating item: ${errorData.error}`);
+      }
+    } catch (error) {
+      console.error('Error updating item:', error);
+      setMessage('Error updating item');
+    }
+  };
+
   const resetWatchedStatus = async (orderId, orderName) => {
     if (!confirm(`Are you sure you want to mark all items in "${orderName}" as unwatched?`)) {
       return;
@@ -233,19 +375,59 @@ function CustomOrders() {
     setViewingOrderItems(order);
     setMessage('');
   };
-
   const handleRemoveItem = async (orderId, itemId, itemTitle) => {
     if (!confirm(`Are you sure you want to remove "${itemTitle}" from this custom order?`)) {
       return;
     }
 
     try {
+      // Check if this is a short story before deletion
+      const itemToRemove = viewingOrderItems.items.find(item => item.id === itemId);
+      let containingBookId = null;
+      
+      if (itemToRemove && itemToRemove.mediaType === 'shortstory' && itemToRemove.storyContainedInBookId) {
+        containingBookId = itemToRemove.storyContainedInBookId;
+      }
+
       const response = await fetch(`http://127.0.0.1:3001/api/custom-orders/${orderId}/items/${itemId}`, {
         method: 'DELETE',
       });
 
       if (response.ok) {
         setMessage('Item removed successfully');
+        
+        // If this was a short story from a book, check if we need to remove the containing book
+        if (containingBookId) {
+          // Get the updated order data to check remaining short stories
+          const updatedOrder = await fetch(`http://127.0.0.1:3001/api/custom-orders/${orderId}`);
+          const updatedOrderData = await updatedOrder.json();
+          
+          // Check if there are any other short stories from the same book
+          const remainingStoriesFromBook = updatedOrderData.items.filter(item => 
+            item.mediaType === 'shortstory' && 
+            item.storyContainedInBookId === containingBookId
+          );
+          
+          // If no other short stories from this book remain, remove the book
+          if (remainingStoriesFromBook.length === 0) {
+            const containingBook = updatedOrderData.items.find(item => 
+              item.id === containingBookId && item.mediaType === 'book'
+            );
+            
+            if (containingBook) {
+              const bookRemoveResponse = await fetch(`http://127.0.0.1:3001/api/custom-orders/${orderId}/items/${containingBookId}`, {
+                method: 'DELETE',
+              });
+              
+              if (bookRemoveResponse.ok) {
+                setMessage(`Item and containing book "${containingBook.bookTitle || containingBook.title}" removed successfully`);
+              } else {
+                setMessage('Item removed successfully, but failed to remove empty containing book');
+              }
+            }
+          }
+        }
+        
         fetchCustomOrders(); // Refresh the list
         
         // Update the viewing order if it's currently being viewed
@@ -338,7 +520,6 @@ function CustomOrders() {
     
     setShowBookForm(true);
   };
-
   const handleReselectComic = (item) => {
     setReselectingItem(item);
     
@@ -349,6 +530,20 @@ function CustomOrders() {
     });
     
     setShowComicForm(true);
+  };
+
+  const handleCollectedIn = (item) => {
+    setReselectingItem(item);
+    
+    // Pre-populate search with story author if available
+    setBookFormData({
+      title: '',
+      author: item.storyAuthor || '',
+      year: item.storyYear ? item.storyYear.toString() : '',
+      isbn: ''
+    });
+    
+    setShowBookForm(true);
   };
 
   const handleSearchMedia = async (query) => {
@@ -439,16 +634,28 @@ function CustomOrders() {
       setMessage('Error adding media to custom order');
       return false;
     }
-  };
-  const handleSearchTVEpisode = async (e) => {
+  };  const handleSearchTVEpisode = async (e) => {
     e.preventDefault();
     
     // Validate all required fields are filled
     if (!episodeFormData.series.trim() || !episodeFormData.season || !episodeFormData.episode) {
       setMessage('Please fill in all episode fields');
       return;
-    }    setEpisodeSearchLoading(true);
+    }
+
+    setEpisodeSearchLoading(true);
     try {
+      // If we're editing an item, update it directly without searching
+      if (editingItem) {
+        const updatedItemData = {
+          series: episodeFormData.series.trim(),
+          season: parseInt(episodeFormData.season),
+          episode: parseInt(episodeFormData.episode)
+        };
+        await handleUpdateItem(updatedItemData);
+        return;
+      }
+
       // Search Plex TV library for episodes matching the series name
       const searchQuery = `${episodeFormData.series.trim()}`;
       const response = await fetch(`http://127.0.0.1:3001/api/search?query=${encodeURIComponent(searchQuery)}&type=tv`);
@@ -466,7 +673,9 @@ function CustomOrders() {
           const seriesTitle = item.grandparentTitle.toLowerCase();
           
           return seriesTitle.includes(seriesInput) || seriesInput.includes(seriesTitle);
-        });        if (targetEpisode) {
+        });
+
+        if (targetEpisode) {
           // Add the episode directly
           const success = await handleAddMediaToOrder(viewingOrderItems.id, targetEpisode);
           // Only close the form and show success message if the add was successful
@@ -528,13 +737,18 @@ function CustomOrders() {
         }
         
         const [seriesOrMovie, seasonEpisode, title, rawMediaType] = columns.map(col => col.trim());
-        
-        if (!seriesOrMovie || !title || !rawMediaType) {
+          if (!seriesOrMovie || !title || !rawMediaType) {
           errors.push(`Line ${i + 1}: Missing required data (Series/Movie, Title, or Type)`);
           continue;
+        }          // Normalize media types
+        let mediaType = rawMediaType.toLowerCase();
+        if (mediaType === 'tv series') {
+          mediaType = 'episode';
+        } else if (mediaType === 'short story') {
+          mediaType = 'shortstory';
+        } else if (mediaType === 'film') {
+          mediaType = 'movie';
         }
-          // Normalize media types
-        const mediaType = rawMediaType.toLowerCase() === 'tv series' ? 'episode' : rawMediaType.toLowerCase();
         
         // Initialize comic-specific fields
         let comicSeries = null;
@@ -577,9 +791,22 @@ function CustomOrders() {
               errors.push(`Line ${i + 1}: Invalid comic format. Use "Series Name (Year) #Issue" or "Series Name #Issue" format (e.g., "The Amazing Spider-Man (2018) #1" or "The Amazing Spider-Man #1")`);
               continue;
             }
-          }
-        } else if (mediaType === 'book') {
+          }        } else if (mediaType === 'book') {
           // Parse book format: "Author Name (Year)" in the season/episode field, or just "Author Name"
+          if (seasonEpisode) {
+            const bookMatch = seasonEpisode.match(/^(.+?)\s*(?:\((\d{4})\))?$/);
+            if (bookMatch) {
+              bookAuthor = bookMatch[1].trim();
+              if (bookMatch[2]) {
+                bookYear = parseInt(bookMatch[2]);
+              }
+            } else {
+              bookAuthor = seasonEpisode.trim();
+            }
+          }
+          // If no season/episode field, we'll try to extract author from the title later
+        } else if (mediaType === 'shortstory') {
+          // Parse short story format: "Author Name (Year)" in the season/episode field, or just "Author Name"
           if (seasonEpisode) {
             const bookMatch = seasonEpisode.match(/^(.+?)\s*(?:\((\d{4})\))?$/);
             if (bookMatch) {
@@ -700,8 +927,7 @@ function CustomOrders() {
               targetMedia = {
                 title: item.title,
                 type: 'book',
-                bookTitle: item.title,
-                bookAuthor: item.bookAuthor || 'Unknown Author',
+                bookTitle: item.title,                bookAuthor: item.bookAuthor || 'Unknown Author',
                 bookYear: item.bookYear || null,
                 bookIsbn: null,
                 bookPublisher: null,
@@ -709,6 +935,18 @@ function CustomOrders() {
                 bookCoverUrl: null
               };
             }
+          } else if (item.mediaType === 'shortstory') {
+            // For short stories, create the media object directly since we have all the info
+            targetMedia = {
+              title: item.title,
+              type: 'shortstory',
+              storyTitle: item.title,
+              storyAuthor: item.bookAuthor,
+              storyYear: item.bookYear,
+              storyUrl: null,
+              storyContainedInBookId: null,
+              storyCoverUrl: null
+            };
           } else {
             // For movies and TV episodes, search Plex
             let searchQuery = item.seriesOrMovie;
@@ -801,12 +1039,23 @@ function CustomOrders() {
       setBulkImportLoading(false);
     }
   };
-
   const handleSearchBooks = async (e) => {
     e.preventDefault();
     
     if (!bookFormData.title.trim()) {
       setMessage('Please enter a book title to search');
+      return;
+    }
+
+    // If we're editing an item, update it directly without searching
+    if (editingItem) {
+      const updatedItemData = {
+        title: bookFormData.title.trim(),
+        author: bookFormData.author.trim(),
+        publicationYear: bookFormData.year ? parseInt(bookFormData.year) : null,
+        isbn: bookFormData.isbn.trim()
+      };
+      await handleUpdateItem(updatedItemData);
       return;
     }
 
@@ -843,49 +1092,130 @@ function CustomOrders() {
     } finally {
       setBookSearchLoading(false);
     }
-  };
-
-  const handleSelectBook = async (selectedBook) => {
+  };  const handleSelectBook = async (selectedBook) => {
     try {
-      if (reselectingItem) {
-        // Update existing item with new book selection
-        const updateData = {
-          title: selectedBook.title,
-          bookTitle: selectedBook.title,
-          bookAuthor: selectedBook.authors && selectedBook.authors[0] ? selectedBook.authors[0] : 'Unknown Author',
-          bookYear: selectedBook.firstPublishYear || null,
-          bookIsbn: selectedBook.isbn || null,
-          bookPublisher: selectedBook.publishers && selectedBook.publishers[0] ? selectedBook.publishers[0] : null,
-          bookOpenLibraryId: selectedBook.id || null,
-          bookCoverUrl: selectedBook.coverUrl || null
-        };
+      // Handle both editing and reselecting cases
+      const targetItem = editingItem || reselectingItem;
+      
+      if (targetItem) {
+        // Check if this is a short story being linked to a book
+        if (targetItem.mediaType === 'shortstory') {
+          // Check if this book already exists in the order
+          const existingBook = viewingOrderItems.items.find(item => 
+            item.mediaType === 'book' && 
+            item.bookOpenLibraryId === selectedBook.id
+          );
 
-        const response = await fetch(`http://127.0.0.1:3001/api/custom-orders/${viewingOrderItems.id}/items/${reselectingItem.id}`, {
-          method: 'PUT',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify(updateData),
-        });
+          let bookId;
+            if (existingBook) {
+            // Use the existing book
+            bookId = existingBook.id;
+          } else {            // Create a new reference book (not added to collection order)
+            const bookData = {
+              title: selectedBook.title,
+              bookTitle: selectedBook.title,
+              bookAuthor: selectedBook.authors && selectedBook.authors[0] ? selectedBook.authors[0] : 'Unknown Author',
+              bookYear: selectedBook.firstPublishYear || null,
+              bookIsbn: selectedBook.isbn || null,
+              bookPublisher: selectedBook.publishers && selectedBook.publishers[0] ? selectedBook.publishers[0] : null,
+              bookOpenLibraryId: selectedBook.id || null,
+              bookCoverUrl: selectedBook.coverUrl || null,
+              customOrderId: viewingOrderItems.id // Provide order context for schema compliance
+            };
 
-        if (response.ok) {
-          setMessage(`Book updated successfully: "${selectedBook.title}"`);
-          setShowBookForm(false);
-          setReselectingItem(null);
-          setBookFormData({ title: '', author: '', year: '', isbn: '' });
-          setBookSearchResults([]);
+            const bookResponse = await fetch(`http://127.0.0.1:3001/api/books/reference`, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify(bookData),
+            });
+
+            if (bookResponse.ok) {
+              const createdBook = await bookResponse.json();
+              bookId = createdBook.id;
+            } else {
+              const errorData = await bookResponse.json();
+              setMessage(`Error creating reference book: ${errorData.error}`);
+              return;
+            }
+          }
           
-          // Refresh the order items
-          fetchCustomOrders();
-          if (viewingOrderItems) {
-            const updatedOrder = await fetch(`http://127.0.0.1:3001/api/custom-orders/${viewingOrderItems.id}`);
-            const updatedOrderData = await updatedOrder.json();
-            setViewingOrderItems(updatedOrderData);
+          // Now update the short story to reference this book (either existing or newly created)
+          const storyUpdateData = {
+            storyContainedInBookId: bookId,
+            storyCoverUrl: selectedBook.coverUrl || null
+          };
+
+          const storyResponse = await fetch(`http://127.0.0.1:3001/api/custom-orders/${viewingOrderItems.id}/items/${targetItem.id}`, {
+            method: 'PUT',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(storyUpdateData),
+          });
+
+          if (storyResponse.ok) {
+            setMessage(`Short story "${targetItem.storyTitle || targetItem.title}" is now linked to the book "${selectedBook.title}"`);
+            setShowBookForm(false);
+            setReselectingItem(null);
+            setEditingItem(null);
+            setBookFormData({ title: '', author: '', year: '', isbn: '' });
+            setBookSearchResults([]);
+            
+            // Refresh the order items
+            fetchCustomOrders();
+            if (viewingOrderItems) {
+              const updatedOrder = await fetch(`http://127.0.0.1:3001/api/custom-orders/${viewingOrderItems.id}`);
+              const updatedOrderData = await updatedOrder.json();
+              setViewingOrderItems(updatedOrderData);
+            }
+          } else {
+            const errorData = await storyResponse.json();
+            setMessage(`Error linking story to book: ${errorData.error}`);
           }
         } else {
-          const errorData = await response.json();
-          setMessage(`Error updating book: ${errorData.error}`);
-        }      } else {
+          // Regular book re-selection/editing for book items
+          const updateData = {
+            title: selectedBook.title,
+            bookTitle: selectedBook.title,
+            bookAuthor: selectedBook.authors && selectedBook.authors[0] ? selectedBook.authors[0] : 'Unknown Author',
+            bookYear: selectedBook.firstPublishYear || null,
+            bookIsbn: selectedBook.isbn || null,
+            bookPublisher: selectedBook.publishers && selectedBook.publishers[0] ? selectedBook.publishers[0] : null,
+            bookOpenLibraryId: selectedBook.id || null,
+            bookCoverUrl: selectedBook.coverUrl || null
+          };
+
+          const response = await fetch(`http://127.0.0.1:3001/api/custom-orders/${viewingOrderItems.id}/items/${targetItem.id}`, {
+            method: 'PUT',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(updateData),
+          });
+
+          if (response.ok) {
+            setMessage(`Book updated successfully: "${selectedBook.title}"`);
+            setShowBookForm(false);
+            setReselectingItem(null);
+            setEditingItem(null);
+            setBookFormData({ title: '', author: '', year: '', isbn: '' });
+            setBookSearchResults([]);
+            
+            // Refresh the order items
+            fetchCustomOrders();
+            if (viewingOrderItems) {
+              const updatedOrder = await fetch(`http://127.0.0.1:3001/api/custom-orders/${viewingOrderItems.id}`);
+              const updatedOrderData = await updatedOrder.json();
+              setViewingOrderItems(updatedOrderData);
+            }
+          } else {
+            const errorData = await response.json();
+            setMessage(`Error updating book: ${errorData.error}`);
+          }
+        }
+      } else {
         // Add new book to order (existing functionality)
         const bookMedia = {
           type: 'book',
@@ -910,8 +1240,7 @@ function CustomOrders() {
       console.error('Error selecting book:', error);
       setMessage('Error selecting book. Please try again.');
     }
-  };
-  const handleSearchComics = async (e) => {
+  };const handleSearchComics = async (e) => {
     e.preventDefault();
     
     if (!comicFormData.series.trim()) {
@@ -921,6 +1250,17 @@ function CustomOrders() {
     
     if (!comicFormData.issue.trim()) {
       setMessage('Please enter an issue number to search');
+      return;
+    }
+
+    // If we're editing an item, update it directly without searching
+    if (editingItem) {
+      const updatedItemData = {
+        comicSeries: comicFormData.series.trim(),
+        comicYear: comicFormData.year ? parseInt(comicFormData.year) : null,
+        comicIssue: comicFormData.issue.trim()
+      };
+      await handleUpdateItem(updatedItemData);
       return;
     }
 
@@ -954,7 +1294,7 @@ function CustomOrders() {
     } finally {
       setComicSearchLoading(false);
     }
-  };  const handleSelectComic = async (selectedSeries) => {
+  };const handleSelectComic = async (selectedSeries) => {
     try {
       // Validate required fields
       if (!comicFormData.issue) {
@@ -1027,12 +1367,18 @@ function CustomOrders() {
       console.error('Error selecting comic:', error);
       setMessage('Error selecting comic. Please try again.');
     }
-  };
-  const handleSearchShortStoryBooks = async (e) => {
+  };  const handleSearchShortStoryBooks = async (e) => {
     e.preventDefault();
     
     if (!shortStoryFormData.title.trim()) {
       setMessage('Please enter a short story title');
+      return;
+    }
+
+    // If we're editing an item, handle it differently
+    if (editingItem) {
+      // For short stories being edited, just update the item directly
+      await handleAddShortStory();
       return;
     }
 
@@ -1065,11 +1411,27 @@ function CustomOrders() {
       setShortStorySearchResults([]);
     }
   };
+
   const handleAddShortStory = async (containedInBook = null) => {
     try {
       // Validate required fields
       if (!shortStoryFormData.title.trim()) {
         setMessage('Please enter a short story title');
+        return;
+      }
+
+      // If we're editing an item, update it
+      if (editingItem) {
+        const updatedItemData = {
+          title: shortStoryFormData.title.trim(),
+          storyTitle: shortStoryFormData.title.trim(),
+          storyAuthor: shortStoryFormData.author.trim() || null,
+          storyYear: shortStoryFormData.year ? parseInt(shortStoryFormData.year) : null,
+          storyUrl: shortStoryFormData.url.trim() || null,
+          storyContainedInBookId: containedInBook ? containedInBook.id : null,
+          storyCoverUrl: shortStoryFormData.coverUrl.trim() || null
+        };
+        await handleUpdateItem(updatedItemData);
         return;
       }
 
@@ -1137,18 +1499,31 @@ function CustomOrders() {
                   dangerouslySetInnerHTML={{ __html: viewingOrderItems.icon }}
                 />
               )}
-            </div>
-            <div className="order-stats">
+            </div>            <div className="order-stats">
               <div className="stat">
                 <span className="stat-label">Total Items:</span>
-                <span className="stat-value">{viewingOrderItems.items.length}</span>
+                <span className="stat-value">
+                  {viewingOrderItems.items.filter(item => {
+                    // Exclude reference books (books that contain short stories)
+                    if (item.mediaType === 'book' && item.containedStories && item.containedStories.length > 0) {
+                      return false;
+                    }
+                    return true;
+                  }).length}
+                </span>
               </div>
               <div className="stat">
                 <span className="stat-label">Unwatched:</span>
                 <span className="stat-value">
-                  {viewingOrderItems.items.filter(item => !item.isWatched).length}
+                  {viewingOrderItems.items.filter(item => {
+                    // Exclude reference books (books that contain short stories)
+                    if (item.mediaType === 'book' && item.containedStories && item.containedStories.length > 0) {
+                      return false;
+                    }
+                    return !item.isWatched;
+                  }).length}
                 </span>
-              </div>            </div>            <div className="manage-items-actions">
+              </div>            </div><div className="manage-items-actions">
               <Button
                 onClick={() => {
                   setShowSearchModal(true);
@@ -1209,9 +1584,16 @@ function CustomOrders() {
               <p>No items in this custom order yet.</p>
               <p>Add some movies, TV episodes, or comics to get started!</p>
             </div>
-          ) : (
-            <div className="items-list">
-              {viewingOrderItems.items.map((item, index) => (                <div key={item.id} className={`item-card ${item.isWatched ? 'watched' : ''}`}>
+          ) : (            <div className="items-list">
+              {viewingOrderItems.items
+                .filter(item => {
+                  // Filter out reference books (books that contain short stories)
+                  if (item.mediaType === 'book' && item.containedStories && item.containedStories.length > 0) {
+                    return false;
+                  }
+                  return true;
+                })                .map((item, index) => (<div key={item.id} className={`item-card ${item.isWatched ? 'watched' : ''}`}>
+                  <div className="item-position">#{index + 1}</div>
                   <div className="item-thumbnail">
                     {getItemArtworkUrl(item) ? (
                       <img 
@@ -1236,7 +1618,6 @@ function CustomOrders() {
                     </div>
                   </div>
                   <div className="item-info">
-                    <div className="item-position">#{index + 1}</div>
                     <div className="item-details">
                       <h4>{item.title}</h4>
                       {item.seriesTitle && (
@@ -1249,6 +1630,12 @@ function CustomOrders() {
                           {item.comicSeries} ({item.comicYear}) #{item.comicIssue}
                         </p>
                       )}
+                      {(item.mediaType === 'book' || item.mediaType === 'shortstory') && (
+                        <p className="item-series">
+                          {item.bookAuthor && `${item.bookAuthor}`}
+                          {item.bookYear && ` (${item.bookYear})`}
+                        </p>
+                      )}
                       <div className="item-meta">
                         <span className="item-type">{item.mediaType}</span>
                         <span className={`item-status ${item.isWatched ? 'watched' : 'unwatched'}`}>
@@ -1256,7 +1643,14 @@ function CustomOrders() {
                         </span>
                       </div>
                     </div>
-                  </div>                  <div className="item-actions">
+                  </div><div className="item-actions">
+                    <Button
+                      onClick={() => handleEditItem(item)}
+                      className="secondary"
+                      size="small"
+                    >
+                      Edit Item
+                    </Button>
                     <Button
                       onClick={() => handleRemoveItem(viewingOrderItems.id, item.id, item.title)}
                       className="danger"
@@ -1272,14 +1666,22 @@ function CustomOrders() {
                       >
                         Re-select Book
                       </Button>
-                    )}
-                    {item.mediaType === 'comic' && (
+                    )}                    {item.mediaType === 'comic' && (
                       <Button
                         onClick={() => handleReselectComic(item)}
                         className="secondary"
                         size="small"
                       >
                         Re-select Comic
+                      </Button>
+                    )}
+                    {item.mediaType === 'shortstory' && (
+                      <Button
+                        onClick={() => handleCollectedIn(item)}
+                        className="secondary"
+                        size="small"
+                      >
+                        Collected In...
                       </Button>
                     )}
                     {!item.isWatched && (
@@ -1309,11 +1711,11 @@ function CustomOrders() {
       ) : (
         <>
           {/* Create New Order Button */}
-          <div className="custom-orders-header">
-            <Button
+          <div className="custom-orders-header">            <Button
               onClick={() => {
                 setShowCreateForm(!showCreateForm);
-                setFormData({ name: '', description: '' });
+                setFormData({ name: '', description: '', icon: '' });
+                setEditingOrder(null);
                 setMessage('');
               }}
             >
@@ -1364,12 +1766,73 @@ function CustomOrders() {
                   />
                 </div>
               )}
-            </div>
-            <div className="form-actions">
+            </div>            <div className="form-actions">
               <Button type="submit">Create Order</Button>
               <Button 
                 type="button" 
                 onClick={() => setShowCreateForm(false)}
+                className="secondary"
+              >
+                Cancel
+              </Button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {/* Edit Form */}
+      {editingOrder && (
+        <div className="create-form">
+          <h3>Edit Custom Order</h3>
+          <form onSubmit={handleUpdateOrder}>
+            <div className="form-group">
+              <label htmlFor="editOrderName">Order Name *</label>
+              <input
+                type="text"
+                id="editOrderName"
+                value={formData.name}
+                onChange={(e) => setFormData({...formData, name: e.target.value})}
+                placeholder="e.g., Marvel Movies & Shows"
+                required
+              />
+            </div>
+            <div className="form-group">
+              <label htmlFor="editOrderDescription">Description</label>
+              <textarea
+                id="editOrderDescription"
+                value={formData.description}
+                onChange={(e) => setFormData({...formData, description: e.target.value})}
+                placeholder="Optional description of this custom order..."
+                rows="3"
+              />
+            </div>
+            <div className="form-group">
+              <label htmlFor="editOrderIcon">Icon (SVG)</label>
+              <textarea
+                id="editOrderIcon"
+                value={formData.icon}
+                onChange={(e) => setFormData({...formData, icon: e.target.value})}
+                placeholder="Paste SVG icon code here (optional)..."
+                rows="3"
+              />
+              {formData.icon && (
+                <div className="icon-preview">
+                  <span>Preview: </span>
+                  <div 
+                    className="custom-order-icon" 
+                    dangerouslySetInnerHTML={{__html: formData.icon}}
+                  />
+                </div>
+              )}
+            </div>
+            <div className="form-actions">
+              <Button type="submit">Update Order</Button>
+              <Button 
+                type="button" 
+                onClick={() => {
+                  setEditingOrder(null);
+                  setFormData({ name: '', description: '', icon: '' });
+                }}
                 className="secondary"
               >
                 Cancel
@@ -1415,16 +1878,29 @@ function CustomOrders() {
                   {order.description && (
                     <p className="order-description">{order.description}</p>
                   )}
-                  
-                  <div className="order-stats">
+                    <div className="order-stats">
                     <div className="stat">
                       <span className="stat-label">Total Items:</span>
-                      <span className="stat-value">{order.items.length}</span>
+                      <span className="stat-value">
+                        {order.items.filter(item => {
+                          // Exclude reference books (books that contain short stories)
+                          if (item.mediaType === 'book' && item.containedStories && item.containedStories.length > 0) {
+                            return false;
+                          }
+                          return true;
+                        }).length}
+                      </span>
                     </div>
                     <div className="stat">
                       <span className="stat-label">Unwatched:</span>
                       <span className="stat-value">
-                        {order.items.filter(item => !item.isWatched).length}
+                        {order.items.filter(item => {
+                          // Exclude reference books (books that contain short stories)
+                          if (item.mediaType === 'book' && item.containedStories && item.containedStories.length > 0) {
+                            return false;
+                          }
+                          return !item.isWatched;
+                        }).length}
                       </span>
                     </div>
                   </div>
@@ -1436,6 +1912,13 @@ function CustomOrders() {
                       size="small"
                     >
                       {order.isActive ? 'Deactivate' : 'Activate'}
+                    </Button>
+                      <Button
+                      onClick={() => handleEditOrder(order)}
+                      className="secondary"
+                      size="small"
+                    >
+                      Edit
                     </Button>
                     
                     <Button
@@ -1552,13 +2035,13 @@ function CustomOrders() {
       {/* Episode Form Modal */}
       {showEpisodeForm && (
         <div className="modal-overlay">
-          <div className="modal-content">
-            <div className="modal-header">
-              <h3>Add TV Episode</h3>
+          <div className="modal-content">            <div className="modal-header">
+              <h3>{editingItem ? 'Edit TV Episode' : 'Add TV Episode'}</h3>
               <Button
                 onClick={() => {
                   setShowEpisodeForm(false);
                   setEpisodeFormData({ series: '', season: '', episode: '' });
+                  setEditingItem(null);
                 }}
                 className="secondary"
                 size="small"
@@ -1617,18 +2100,20 @@ function CustomOrders() {
                 </div>
               </div>
               
-              <div className="form-actions">
-                <Button 
+              <div className="form-actions">                <Button 
                   type="submit" 
                   disabled={episodeSearchLoading}
                   className="primary"
                 >
-                  {episodeSearchLoading ? 'Searching...' : 'Add Episode'}
-                </Button>
-                <Button
+                  {episodeSearchLoading 
+                    ? (editingItem ? 'Updating...' : 'Searching...') 
+                    : (editingItem ? 'Update Episode' : 'Add Episode')
+                  }
+                </Button>                <Button
                   type="button"
                   onClick={() => {
                     setShowEpisodeForm(false);
+                    setEditingItem(null);
                     setEpisodeFormData({ series: '', season: '', episode: '' });
                   }}
                   className="secondary"
@@ -1788,13 +2273,22 @@ Dune	Frank Herbert (1965)	Dune	book
       {/* Book Search Modal */}
       {showBookForm && (
         <div className="modal-overlay">
-          <div className="modal-content">
-            <div className="modal-header">
-              <h3>{reselectingItem ? 'Re-select Book' : 'Add Book'}</h3>
+          <div className="modal-content">            <div className="modal-header">
+              <h3>
+                {editingItem 
+                  ? 'Edit Book'
+                  : reselectingItem && reselectingItem.mediaType === 'shortstory' 
+                    ? 'Select Book for Story Collection'
+                    : reselectingItem 
+                      ? 'Re-select Book' 
+                      : 'Add Book'
+                }
+              </h3>
               <Button
                 onClick={() => {
                   setShowBookForm(false);
                   setReselectingItem(null);
+                  setEditingItem(null);
                   setBookFormData({ title: '', author: '', year: '', isbn: '' });
                   setBookSearchResults([]);
                 }}
@@ -1853,19 +2347,21 @@ Dune	Frank Herbert (1965)	Dune	book
                 />
               </div>
               
-              <div className="form-actions">
-                <Button 
+              <div className="form-actions">                <Button 
                   type="submit" 
                   disabled={bookSearchLoading}
                   className="primary"
                 >
-                  {bookSearchLoading ? 'Searching...' : 'Search Books'}
-                </Button>
-                <Button
+                  {bookSearchLoading 
+                    ? (editingItem ? 'Updating...' : 'Searching...') 
+                    : (editingItem ? 'Update Book' : 'Search Books')
+                  }
+                </Button>                <Button
                   type="button"
                   onClick={() => {
                     setShowBookForm(false);
                     setReselectingItem(null);
+                    setEditingItem(null);
                     setBookFormData({ title: '', author: '', year: '', isbn: '' });
                     setBookSearchResults([]);
                   }}
@@ -1903,13 +2399,17 @@ Dune	Frank Herbert (1965)	Dune	book
                             <p className="book-publisher">Publisher: {book.publishers[0]}</p>
                           )}
                         </div>
-                      </div>
-                      <Button
+                      </div>                      <Button
                         onClick={() => handleSelectBook(book)}
                         className="primary"
                         size="small"
                       >
-                        {reselectingItem ? 'Re-select This Book' : 'Add This Book'}
+                        {reselectingItem && reselectingItem.mediaType === 'shortstory' 
+                          ? 'Story is in This Book'
+                          : reselectingItem 
+                            ? 'Re-select This Book' 
+                            : 'Add This Book'
+                        }
                       </Button>
                     </div>
                   ))}
@@ -1924,11 +2424,12 @@ Dune	Frank Herbert (1965)	Dune	book
       {showComicForm && (
         <div className="modal-overlay">
           <div className="modal-content">            <div className="modal-header">
-              <h3>{reselectingItem ? 'Re-select Comic' : 'Add Comic'}</h3>
+              <h3>{editingItem ? 'Edit Comic' : reselectingItem ? 'Re-select Comic' : 'Add Comic'}</h3>
               <Button
                 onClick={() => {
                   setShowComicForm(false);
                   setReselectingItem(null);
+                  setEditingItem(null);
                   setComicFormData({ series: '', year: '', issue: '' });
                   setComicSearchResults([]);
                 }}
@@ -1978,18 +2479,20 @@ Dune	Frank Herbert (1965)	Dune	book
                 </div>
               </div>
               
-              <div className="form-actions">
-                <Button 
+              <div className="form-actions">                <Button 
                   type="submit" 
                   disabled={comicSearchLoading}
                   className="primary"
                 >
-                  {comicSearchLoading ? 'Searching...' : 'Search Comic Series'}
-                </Button>
-                <Button
+                  {comicSearchLoading 
+                    ? (editingItem ? 'Updating...' : 'Searching...') 
+                    : (editingItem ? 'Update Comic' : 'Search Comic Series')
+                  }
+                </Button>                <Button
                   type="button"
                   onClick={() => {
                     setShowComicForm(false);
+                    setEditingItem(null);
                     setComicFormData({ series: '', year: '', issue: '' });
                     setComicSearchResults([]);
                   }}
@@ -2051,22 +2554,22 @@ Dune	Frank Herbert (1965)	Dune	book
                         {reselectingItem ? 'Re-select This Comic' : 'Add This Comic'}
                       </Button>
                     </div>
-                  ))}
-                </div>
+                  ))}                </div>
               </div>
             )}
-          </div>        </div>
+          </div>
+        </div>
       )}
 
       {/* Short Story Search Modal */}
       {showShortStoryForm && (
         <div className="modal-overlay">
-          <div className="modal-content">
-            <div className="modal-header">
-              <h3>Add Short Story</h3>
+          <div className="modal-content">            <div className="modal-header">
+              <h3>{editingItem ? 'Edit Short Story' : 'Add Short Story'}</h3>
               <Button
                 onClick={() => {
                   setShowShortStoryForm(false);
+                  setEditingItem(null);
                   setShortStoryFormData({ title: '', author: '', year: '', url: '', containedInBookId: '', coverUrl: '' });
                   setShortStorySearchResults([]);
                 }}
@@ -2133,22 +2636,24 @@ Dune	Frank Herbert (1965)	Dune	book
                   placeholder="https://example.com/cover.jpg"
                 />
               </div>
-              
-              <div className="form-actions">
+                <div className="form-actions">
                 <Button type="submit" className="primary">
-                  Search for Books to Contain This Story
+                  {editingItem ? 'Update Story' : 'Search for Books to Contain This Story'}
                 </Button>
-                <Button
-                  type="button"
-                  onClick={() => handleAddShortStory()}
-                  className="secondary"
-                >
-                  Add Story Without Container Book
-                </Button>
+                {!editingItem && (
+                  <Button
+                    type="button"
+                    onClick={() => handleAddShortStory()}
+                    className="secondary"
+                  >
+                    Add Story Without Container Book
+                  </Button>
+                )}
                 <Button
                   type="button"
                   onClick={() => {
                     setShowShortStoryForm(false);
+                    setEditingItem(null);
                     setShortStoryFormData({ title: '', author: '', year: '', url: '', containedInBookId: '', coverUrl: '' });
                     setShortStorySearchResults([]);
                   }}
