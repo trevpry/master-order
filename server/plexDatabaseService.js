@@ -195,17 +195,23 @@ class PlexDatabaseService {
       throw error;
     }
   }
-
   // Search for TV shows by title
-  async searchTVShows(query) {
+  async searchTVShows(query, year = null) {
     try {
+      const whereCondition = {
+        title: {
+          contains: query,
+          mode: 'insensitive'
+        }
+      };
+      
+      // Add year filter if provided
+      if (year !== null) {
+        whereCondition.year = year;
+      }
+      
       return await this.prisma.PlexTVShow.findMany({
-        where: {
-          title: {
-            contains: query,
-            mode: 'insensitive'
-          }
-        },
+        where: whereCondition,
         include: {
           section: true,
           seasons: {
@@ -488,16 +494,22 @@ class PlexDatabaseService {
     }
   }
 
-  // Search methods for the API endpoints
-  // Search TV shows by title
-  async searchTVShows(query) {
+  // Search methods for the API endpoints  // Search TV shows by title
+  async searchTVShows(query, year = null) {
     try {
+      const whereCondition = {
+        title: {
+          contains: query
+        }
+      };
+      
+      // Add year filter if provided
+      if (year !== null) {
+        whereCondition.year = year;
+      }
+      
       return await this.prisma.PlexTVShow.findMany({
-        where: {
-          title: {
-            contains: query
-          }
-        },
+        where: whereCondition,
         include: {
           section: true
         }
@@ -506,16 +518,22 @@ class PlexDatabaseService {
       console.error('Error searching TV shows:', error);
       throw error;
     }
-  }
-  // Search movies by title
-  async searchMovies(query) {
+  }// Search movies by title
+  async searchMovies(query, year = null) {
     try {
+      const whereCondition = {
+        title: {
+          contains: query
+        }
+      };
+      
+      // Add year filter if provided
+      if (year !== null) {
+        whereCondition.year = year;
+      }
+      
       return await this.prisma.PlexMovie.findMany({
-        where: {
-          title: {
-            contains: query
-          }
-        },
+        where: whereCondition,
         include: {
           section: true
         }
@@ -524,25 +542,36 @@ class PlexDatabaseService {
       console.error('Error searching movies:', error);
       throw error;
     }
-  }
-  // Search episodes by title
-  async searchEpisodes(query) {
+  }  // Search episodes by title
+  async searchEpisodes(query, year = null) {
     try {
-      return await this.prisma.PlexEpisode.findMany({
-        where: {
-          OR: [
-            {
-              title: {
-                contains: query
-              }
-            },
-            {
-              grandparentTitle: {
-                contains: query
-              }
+      const whereCondition = {
+        OR: [
+          {
+            title: {
+              contains: query
             }
-          ]
-        },        include: {
+          },
+          {
+            grandparentTitle: {
+              contains: query
+            }
+          }
+        ]
+      };
+      
+      // Add year filter if provided (filter by show year through season relationship)
+      if (year !== null) {
+        whereCondition.season = {
+          show: {
+            year: year
+          }
+        };
+      }
+      
+      return await this.prisma.PlexEpisode.findMany({
+        where: whereCondition,
+        include: {
           season: {
             include: {
               show: true

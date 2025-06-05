@@ -22,6 +22,9 @@ function Settings() {
   const [partiallyWatchedCollectionPercent, setPartiallyWatchedCollectionPercent] = useState(75);
   const [plexSyncInterval, setPlexSyncInterval] = useState(12);
   
+  // Christmas filter state
+  const [christmasFilterEnabled, setChristmasFilterEnabled] = useState(false);
+  
   // Sync and operation states
   const [plexSyncLoading, setPlexSyncLoading] = useState(false);
   const [plexSyncStatus, setPlexSyncStatus] = useState(null);
@@ -95,6 +98,7 @@ function Settings() {
           setPlexSyncInterval(settings.plexSyncInterval ?? 12);
           setIgnoredMovieCollections(settings.ignoredMovieCollections || []);
           setIgnoredTVCollections(settings.ignoredTVCollections || []);
+          setChristmasFilterEnabled(settings.christmasFilterEnabled ?? false);
         }
 
         // Update status and data
@@ -248,7 +252,8 @@ function Settings() {
           partiallyWatchedCollectionPercent,
           plexSyncInterval,
           ignoredMovieCollections,
-          ignoredTVCollections
+          ignoredTVCollections,
+          christmasFilterEnabled
         }),
       });
 
@@ -564,8 +569,7 @@ function Settings() {
               <h3>🎬 Movie Selection</h3>
               <p>Configure movie prioritization settings</p>
             </div>
-            
-            <div className="movie-settings-container compact">
+              <div className="movie-settings-container compact">
               <div className="movie-setting-control compact">
                 <label htmlFor="partially_watched_collection_percent">
                   📊 Partially Watched Collections Priority: {partiallyWatchedCollectionPercent}%
@@ -583,6 +587,28 @@ function Settings() {
                   onChange={handlePartiallyWatchedCollectionPercentChange}
                   className="percentage-slider collection-priority-slider"
                 />
+              </div>
+                <div className="movie-setting-control compact">
+                <label htmlFor="christmas_filter_enabled" className="checkbox-label">
+                  🎄 Christmas Movie Filter
+                </label>                <p className="setting-description">
+                  Filter out movies with "Christmas" labels during non-December months. During December, all movies are included.
+                  <br />
+                  <small>Note: Uses actual Plex label field (not collections or genres). Requires a Plex sync to populate label data.</small>
+                </p>
+                <div className="checkbox-container">
+                  <input 
+                    type="checkbox" 
+                    id="christmas_filter_enabled"
+                    name="christmas_filter_enabled"
+                    checked={christmasFilterEnabled}
+                    onChange={(e) => setChristmasFilterEnabled(e.target.checked)}
+                    className="setting-checkbox"
+                  />
+                  <label htmlFor="christmas_filter_enabled" className="checkbox-text">
+                    {christmasFilterEnabled ? 'Enabled' : 'Disabled'}
+                  </label>
+                </div>
               </div>
             </div>
           </div>

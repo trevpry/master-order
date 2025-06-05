@@ -581,6 +581,27 @@ class PlexSyncService {
           
           await prisma.plexImage.create({
             data: imageData
+          });        }
+      }
+      
+      // Sync Labels
+      if (item.Label && Array.isArray(item.Label)) {
+        for (const label of item.Label) {
+          const labelData = {
+            tag: label.tag || label.title,
+            filter: label.filter || null,
+            tagKey: label.tagKey || null,
+            thumb: label.thumb || null
+          };
+          
+          if (itemType === 'movie') {
+            labelData.movieRatingKey = ratingKey;
+          } else if (itemType === 'show') {
+            labelData.showRatingKey = ratingKey;
+          }
+          
+          await prisma.plexLabel.create({
+            data: labelData
           });
         }
       }
@@ -616,7 +637,6 @@ class PlexSyncService {
       // Don't throw here - we want the main sync to continue even if complex fields fail
     }
   }
-
   async clearComplexFields(ratingKey, itemType) {
     try {
       // Clear existing complex field data before re-syncing
@@ -632,14 +652,16 @@ class PlexSyncService {
           prisma.plexGuid.deleteMany({ where: { movieRatingKey: ratingKey } }),
           prisma.plexMedia.deleteMany({ where: { movieRatingKey: ratingKey } }),
           prisma.plexImage.deleteMany({ where: { movieRatingKey: ratingKey } }),
-          prisma.plexUltraBlurColor.deleteMany({ where: { movieRatingKey: ratingKey } })
+          prisma.plexUltraBlurColor.deleteMany({ where: { movieRatingKey: ratingKey } }),
+          prisma.plexLabel.deleteMany({ where: { movieRatingKey: ratingKey } })
         ]);
       } else if (itemType === 'show') {
         await Promise.all([
           prisma.plexGenre.deleteMany({ where: { showRatingKey: ratingKey } }),
           prisma.plexGuid.deleteMany({ where: { showRatingKey: ratingKey } }),
           prisma.plexImage.deleteMany({ where: { showRatingKey: ratingKey } }),
-          prisma.plexUltraBlurColor.deleteMany({ where: { showRatingKey: ratingKey } })
+          prisma.plexUltraBlurColor.deleteMany({ where: { showRatingKey: ratingKey } }),
+          prisma.plexLabel.deleteMany({ where: { showRatingKey: ratingKey } })
         ]);
       } else if (itemType === 'season') {
         await Promise.all([

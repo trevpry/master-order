@@ -26,6 +26,7 @@ model Settings {
   partiallyWatchedCollectionPercent Int @default(75) // Percentage likelihood to prioritize movies from partially watched collections
   ignoredMovieCollections String?   // JSON array of collection names to ignore for movie selection
   ignoredTVCollections String?     // JSON array of collection names to ignore for TV show selection
+  christmasFilterEnabled Boolean   @default(false) // Enable Christmas movie filter during December
   plexSyncInterval Int      @default(12)  // Hours between automatic Plex sync (default 12 hours)
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
@@ -154,6 +155,7 @@ model PlexTVShow {
   guids             PlexGuid[]
   images            PlexImage[]
   ultraBlurColors   PlexUltraBlurColor[]
+  labels            PlexLabel[]
   lastSyncedAt      DateTime @default(now())
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
@@ -298,6 +300,7 @@ model PlexMovie {
   media                 PlexMedia[]
   images                PlexImage[]
   ultraBlurColors       PlexUltraBlurColor[]
+  labels                PlexLabel[]
   lastSyncedAt          DateTime @default(now())
   createdAt             DateTime @default(now())
   updatedAt             DateTime @updatedAt
@@ -558,6 +561,20 @@ model PlexUltraBlurColor {
   topRight  String?  // Top right color
   bottomLeft String? // Bottom left color
   bottomRight String? // Bottom right color
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model PlexLabel {
+  id        Int      @id @default(autoincrement())
+  movieRatingKey String?
+  movie     PlexMovie? @relation(fields: [movieRatingKey], references: [ratingKey])
+  showRatingKey String?
+  show      PlexTVShow? @relation(fields: [showRatingKey], references: [ratingKey])
+  tag       String   // Label name (e.g., "Christmas")
+  filter    String?  // Filter value
+  tagKey    String?  // Tag key
+  thumb     String?  // Label thumbnail
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 }

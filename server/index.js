@@ -427,7 +427,8 @@ app.post('/api/settings', async (req, res) => {
       tvdbApiKey,
       tvdbBearerToken,
       ignoredMovieCollections,
-      ignoredTVCollections
+      ignoredTVCollections,
+      christmasFilterEnabled
     } = req.body;
 
     // Validate percentages if provided
@@ -457,9 +458,7 @@ app.post('/api/settings', async (req, res) => {
           error: `Order type percentages must add up to exactly 100%. Current total: ${total}%` 
         });
       }
-    }
-
-    // Prepare update data - only include defined fields
+    }    // Prepare update data - only include defined fields
     const updateData = {};
     if (collectionName !== undefined) updateData.collectionName = collectionName;
     if (tvGeneralPercent !== undefined) updateData.tvGeneralPercent = tvGeneralPercent;
@@ -474,12 +473,12 @@ app.post('/api/settings', async (req, res) => {
     if (tvdbBearerToken !== undefined) updateData.tvdbBearerToken = tvdbBearerToken.trim() || null;
     if (ignoredMovieCollections !== undefined) updateData.ignoredMovieCollections = Array.isArray(ignoredMovieCollections) ? JSON.stringify(ignoredMovieCollections) : ignoredMovieCollections;
     if (ignoredTVCollections !== undefined) updateData.ignoredTVCollections = Array.isArray(ignoredTVCollections) ? JSON.stringify(ignoredTVCollections) : ignoredTVCollections;
+    if (christmasFilterEnabled !== undefined) updateData.christmasFilterEnabled = christmasFilterEnabled;
 
     // Upsert settings (create if doesn't exist, update if it does)
     const settings = await prisma.settings.upsert({
       where: { id: 1 },
-      update: updateData,
-      create: { 
+      update: updateData,      create: { 
         id: 1, 
         collectionName, 
         tvGeneralPercent: tvGeneralPercent ?? 50, 
@@ -493,7 +492,8 @@ app.post('/api/settings', async (req, res) => {
         tvdbApiKey: tvdbApiKey?.trim() || null,
         tvdbBearerToken: tvdbBearerToken?.trim() || null,
         ignoredMovieCollections: Array.isArray(ignoredMovieCollections) ? JSON.stringify(ignoredMovieCollections) : ignoredMovieCollections || null,
-        ignoredTVCollections: Array.isArray(ignoredTVCollections) ? JSON.stringify(ignoredTVCollections) : ignoredTVCollections || null
+        ignoredTVCollections: Array.isArray(ignoredTVCollections) ? JSON.stringify(ignoredTVCollections) : ignoredTVCollections || null,
+        christmasFilterEnabled: christmasFilterEnabled ?? false
       }
     });
 
@@ -1277,17 +1277,24 @@ app.post('/api/books/reference', async (req, res) => {
 // Search Plex media endpoint
 app.get('/api/search', async (req, res) => {
   try {
-    const { query, type } = req.query;
+    const { query, type, year } = req.query;
     
     if (!query || query.trim() === '') {
       return res.status(400).json({ error: 'Search query is required' });
         }
 
-    if (type === 'tv' || type === 'television') {
+    // Parse year filter if provided
+    let yearFilter = null;
+    if (year) {
+      const parsedYear = parseInt(year);
+      if (!isNaN(parsedYear) && parsedYear > 1800 && parsedYear <= new Date().getFullYear() + 10) {
+        yearFilter = parsedYear;
+      }
+    }    if (type === 'tv' || type === 'television') {
       // Search for TV shows and their episodes in the database
       try {
-        const tvShows = await plexDb.searchTVShows(query);
-        console.log(`TV Search Debug: Found ${tvShows.length} shows for query: "${query}"`);
+        const tvShows = await plexDb.searchTVShows(query, yearFilter);
+        console.log(`TV Search Debug: Found ${tvShows.length} shows for query: "${query}"${yearFilter ? ` (year: ${yearFilter})` : ''}`);
         const allEpisodes = [];
         for (const show of tvShows) {
           try {
@@ -1317,13 +1324,12 @@ app.get('/api/search', async (req, res) => {
       } catch (error) {
         console.error('Error searching TV series:', error.message);
         res.json([]);
-      }
-    } else {
+      }    } else {
       // Search across all media types in the database
       try {
         const [movies, episodes] = await Promise.all([
-          plexDb.searchMovies(query),
-          plexDb.searchEpisodes(query)
+          plexDb.searchMovies(query, yearFilter),
+          plexDb.searchEpisodes(query, yearFilter)
         ]);
 
         // Format and combine results
@@ -1342,8 +1348,7 @@ app.get('/api/search', async (req, res) => {
           type: 'episode',
           year: episode.year,
           parentIndex: episode.parentIndex,
-          index: episode.index,
-          grandparentTitle: episode.grandparentTitle,
+          index: episode.index,          grandparentTitle: episode.grandparentTitle,
           parentTitle: episode.parentTitle,
           thumb: episode.thumb,
           art: episode.art

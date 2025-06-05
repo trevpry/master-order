@@ -62,7 +62,9 @@ async function selectInitialMovie(movies) {
     } else {
       return { message: "No movies found" };
     }
-  }  // Get settings for partially watched collection prioritization and ignored collections
+  }
+
+  // Get settings for partially watched collection prioritization and ignored collections
   let settings = await prisma.settings.findUnique({
     where: { id: 1 }
   });
@@ -70,11 +72,13 @@ async function selectInitialMovie(movies) {
   if (!settings) {
     settings = {
       partiallyWatchedCollectionPercent: 75,
-      ignoredMovieCollections: null
+      ignoredMovieCollections: null,
+      christmasFilterEnabled: false
     };
   }
 
   const partiallyWatchedPercent = settings.partiallyWatchedCollectionPercent || 75;
+  const christmasFilterEnabled = settings.christmasFilterEnabled || false;
   
   // Parse ignored collections from JSON string
   let ignoredMovieCollections = [];
@@ -92,8 +96,48 @@ async function selectInitialMovie(movies) {
     console.log(`🚫 Ignoring movie collections: ${ignoredMovieCollections.join(', ')}`);
   }
   
+  // Apply Christmas filter if enabled
+  let moviesToFilter = movies;
+  if (christmasFilterEnabled) {
+    const currentDate = new Date();
+    const currentMonth = currentDate.getMonth() + 1; // getMonth() returns 0-11, we want 1-12
+    const isDecember = currentMonth === 12;
+    
+    console.log(`🎄 Christmas filter enabled. Current month: ${currentMonth} (${isDecember ? 'December' : 'Not December'})`);
+      if (!isDecember) {
+      // Filter out Christmas movies during non-December months based on Plex labels
+      const nonChristmasMovies = [];
+      
+      for (const movie of movies) {
+        // Check if movie has Christmas labels
+        const movieLabels = await prisma.plexLabel.findMany({
+          where: { movieRatingKey: movie.ratingKey }
+        });
+        
+        const hasChristmasLabel = movieLabels.some(label => 
+          label.tag && label.tag.toLowerCase().includes('christmas')
+        );
+        
+        if (hasChristmasLabel) {
+          console.log(`🎄 Filtering out Christmas movie "${movie.title}" (found Christmas label, not December)`);
+        } else {
+          nonChristmasMovies.push(movie);
+        }
+      }
+      
+      console.log(`🎄 Christmas filtering: ${movies.length} total movies → ${nonChristmasMovies.length} after removing Christmas movies`);
+      moviesToFilter = nonChristmasMovies.length > 0 ? nonChristmasMovies : movies;
+      
+      if (nonChristmasMovies.length === 0) {
+        console.log('⚠️  All movies were Christmas movies, proceeding with original list');
+      }
+    } else {
+      console.log('🎄 December detected: Christmas movies are allowed in selection');
+    }
+  }
+  
   // Filter out movies from ignored collections
-  const filteredMovies = movies.filter(movie => {
+  const filteredMovies = moviesToFilter.filter(movie => {
     const movieCollections = plexDb.parseCollections(movie.collections || '');
     const hasIgnoredCollection = movieCollections.some(collection => 
       ignoredMovieCollections.includes(collection)

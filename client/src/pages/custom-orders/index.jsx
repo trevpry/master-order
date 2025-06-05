@@ -6,18 +6,20 @@ function CustomOrders() {
   const [customOrders, setCustomOrders] = useState([]);
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState('');  const [showCreateForm, setShowCreateForm] = useState(false);
-  const [editingOrder, setEditingOrder] = useState(null);
-  const [editingItem, setEditingItem] = useState(null);
+  const [editingOrder, setEditingOrder] = useState(null);  const [editingItem, setEditingItem] = useState(null);
   const [viewingOrderItems, setViewingOrderItems] = useState(null);
-  const [showSearchModal, setShowSearchModal] = useState(false);  const [searchResults, setSearchResults] = useState([]);
-  const [searchQuery, setSearchQuery] = useState('');
-  const [searchLoading, setSearchLoading] = useState(false);
   const [showEpisodeForm, setShowEpisodeForm] = useState(false);
   const [episodeFormData, setEpisodeFormData] = useState({
     series: '',
     season: '',
     episode: ''
-  });  const [episodeSearchLoading, setEpisodeSearchLoading] = useState(false);  const [showBulkImportModal, setShowBulkImportModal] = useState(false);
+  });  const [episodeSearchLoading, setEpisodeSearchLoading] = useState(false);  const [showMovieForm, setShowMovieForm] = useState(false);
+  const [movieFormData, setMovieFormData] = useState({
+    title: '',
+    year: ''
+  });
+  const [movieSearchResults, setMovieSearchResults] = useState([]);
+  const [movieSearchLoading, setMovieSearchLoading] = useState(false);  const [showBulkImportModal, setShowBulkImportModal] = useState(false);
   const [bulkImportData, setBulkImportData] = useState('');
   const [bulkImportLoading, setBulkImportLoading] = useState(false);  const [reselectingItem, setReselectingItem] = useState(null); // For tracking which item is being re-selected
   const [showBookForm, setShowBookForm] = useState(false);
@@ -604,13 +606,8 @@ function CustomOrders() {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify(requestBody),
-      });
-
-      if (response.ok) {
+      });      if (response.ok) {
         setMessage('Media added to custom order successfully');
-        setShowSearchModal(false);
-        setSearchQuery('');
-        setSearchResults([]);
         fetchCustomOrders(); // Refresh the list
         
         // Update the viewing order if it's currently being viewed
@@ -708,6 +705,93 @@ function CustomOrders() {
     }
   };
 
+  const handleSearchMovies = async (e) => {
+    e.preventDefault();
+    
+    // Validate required fields are filled
+    if (!movieFormData.title.trim()) {
+      setMessage('Please enter a movie title');
+      return;
+    }
+
+    setMovieSearchLoading(true);
+    try {
+      // If we're editing an item, update it directly without searching
+      if (editingItem) {
+        const updatedItemData = {
+          title: movieFormData.title.trim(),
+          year: movieFormData.year ? parseInt(movieFormData.year) : null
+        };
+        await handleUpdateItem(updatedItemData);
+        return;
+      }
+
+      // Search Plex movie library
+      let searchUrl = `http://127.0.0.1:3001/api/search?query=${encodeURIComponent(movieFormData.title.trim())}`;
+      
+      // Add year parameter if provided
+      if (movieFormData.year && movieFormData.year.trim()) {
+        searchUrl += `&year=${movieFormData.year.trim()}`;
+      }
+      
+      const response = await fetch(searchUrl);
+      
+      if (response.ok) {
+        const results = await response.json();
+        
+        // Filter for movies and find the best match
+        const movieCandidates = results.filter(item => 
+          item.type === 'movie' &&
+          (item.title.toLowerCase().includes(movieFormData.title.toLowerCase()) ||
+           movieFormData.title.toLowerCase().includes(item.title.toLowerCase()))
+        );
+        
+        if (movieCandidates.length > 0) {
+          setMovieSearchResults(movieCandidates);
+          
+          // If only one result or exact year match, can auto-select
+          if (movieCandidates.length === 1) {
+            const success = await handleAddMediaToOrder(viewingOrderItems.id, movieCandidates[0]);
+            if (success !== false) {
+              setShowMovieForm(false);
+              setMovieFormData({ title: '', year: '' });
+              setMovieSearchResults([]);
+            }
+          } else {
+            // Multiple results found, let user choose
+            setMessage(`Found ${movieCandidates.length} movies matching "${movieFormData.title}". Please select one below.`);
+          }
+        } else {
+          setMessage(`Movie not found: "${movieFormData.title}". Please check the title and try again.`);
+          setMovieSearchResults([]);
+        }
+      } else {
+        setMessage('Error searching for movie');
+        setMovieSearchResults([]);
+      }
+    } catch (error) {
+      console.error('Error searching for movie:', error);
+      setMessage('Error searching for movie');
+      setMovieSearchResults([]);
+    } finally {
+      setMovieSearchLoading(false);
+    }
+  };
+
+  const handleSelectMovie = async (selectedMovie) => {
+    try {
+      const success = await handleAddMediaToOrder(viewingOrderItems.id, selectedMovie);
+      if (success !== false) {
+        setShowMovieForm(false);
+        setMovieFormData({ title: '', year: '' });
+        setMovieSearchResults([]);
+      }
+    } catch (error) {
+      console.error('Error selecting movie:', error);
+      setMessage('Error adding movie to order');
+    }
+  };
+
   const handleBulkImport = async (e) => {
     e.preventDefault();
     
@@ -729,14 +813,13 @@ function CustomOrders() {
         if (!line) continue; // Skip empty lines
         
         const columns = line.split('\t');
-        
-        // Validate required columns
+          // Validate required columns (support both 4 and 5 column formats)
         if (columns.length < 4) {
-          errors.push(`Line ${i + 1}: Not enough columns (need 4: Series/Movie, Season/Episode, Title, Type)`);
+          errors.push(`Line ${i + 1}: Not enough columns (need 4-5: Series/Movie, Season/Episode, Title, Type, [Year])`);
           continue;
         }
         
-        const [seriesOrMovie, seasonEpisode, title, rawMediaType] = columns.map(col => col.trim());
+        const [seriesOrMovie, seasonEpisode, title, rawMediaType, yearColumn] = columns.map(col => col.trim());
           if (!seriesOrMovie || !title || !rawMediaType) {
           errors.push(`Line ${i + 1}: Missing required data (Series/Movie, Title, or Type)`);
           continue;
@@ -754,10 +837,18 @@ function CustomOrders() {
         let comicSeries = null;
         let comicYear = null;
         let comicIssue = null;
-        
-        // Initialize book-specific fields
+          // Initialize book-specific fields
         let bookAuthor = null;
         let bookYear = null;
+        
+        // Parse year from the optional 5th column
+        let mediaYear = null;
+        if (yearColumn && yearColumn.trim()) {
+          const parsedYear = parseInt(yearColumn.trim());
+          if (!isNaN(parsedYear) && parsedYear > 1800 && parsedYear <= new Date().getFullYear() + 10) {
+            mediaYear = parsedYear;
+          }
+        }
         
         // Parse season and episode for TV episodes, comic details for comics, or book details for books
         let seasonNumber = null;
@@ -819,8 +910,7 @@ function CustomOrders() {
             }
           }
           // If no season/episode field, we'll try to extract author from the title later
-        }
-          items.push({
+        }          items.push({
           seriesOrMovie,
           seasonNumber,
           episodeNumber,
@@ -831,7 +921,8 @@ function CustomOrders() {
           bookYear,
           title,
           mediaType: mediaType,
-          lineNumber: i + 1
+          lineNumber: i + 1,
+          year: mediaYear // Add the optional year from the 5th column
         });
       }
       
@@ -946,11 +1037,15 @@ function CustomOrders() {
               storyUrl: null,
               storyContainedInBookId: null,
               storyCoverUrl: null
-            };
-          } else {
+            };          } else {
             // For movies and TV episodes, search Plex
             let searchQuery = item.seriesOrMovie;
             let searchUrl = `http://127.0.0.1:3001/api/search?query=${encodeURIComponent(searchQuery)}`;
+            
+            // Add year parameter if available
+            if (item.year) {
+              searchUrl += `&year=${item.year}`;
+            }
             
             // For TV episodes, use the TV-specific search to get all episodes
             if (item.mediaType === 'episode') {
@@ -961,23 +1056,36 @@ function CustomOrders() {
             
             if (response.ok) {
               const results = await response.json();
-              
-              if (item.mediaType === 'episode') {
+                if (item.mediaType === 'episode') {
                 // Find specific episode
                 targetMedia = results.find(result => 
                   result.type === 'episode' &&
                   result.parentIndex === item.seasonNumber &&
                   result.index === item.episodeNumber &&
                   (result.grandparentTitle.toLowerCase().includes(item.seriesOrMovie.toLowerCase()) ||
-                   item.seriesOrMovie.toLowerCase().includes(result.grandparentTitle.toLowerCase()))
+                   item.seriesOrMovie.toLowerCase().includes(result.grandparentTitle.toLowerCase())) &&
+                  (!item.year || !result.year || result.year === item.year) // Match year if both are available
                 );
               } else if (item.mediaType === 'movie') {
-                // Find movie by title
-                targetMedia = results.find(result => 
+                // Find movie by title and optionally by year
+                let movieCandidates = results.filter(result => 
                   result.type === 'movie' &&
                   (result.title.toLowerCase().includes(item.title.toLowerCase()) ||
                    item.title.toLowerCase().includes(result.title.toLowerCase()))
                 );
+                
+                // If year is specified, prefer movies with matching year
+                if (item.year && movieCandidates.length > 1) {
+                  const exactYearMatch = movieCandidates.find(movie => movie.year === item.year);
+                  if (exactYearMatch) {
+                    targetMedia = exactYearMatch;
+                  } else {
+                    // If no exact year match, use the first candidate
+                    targetMedia = movieCandidates[0];
+                  }
+                } else {
+                  targetMedia = movieCandidates[0];
+                }
               }
             }
           }          if (targetMedia) {
@@ -1523,16 +1631,15 @@ function CustomOrders() {
                     return !item.isWatched;
                   }).length}
                 </span>
-              </div>            </div><div className="manage-items-actions">
+              </div>            </div>            <div className="manage-items-actions">
               <Button
                 onClick={() => {
-                  setShowSearchModal(true);
-                  setSearchQuery('');
-                  setSearchResults([]);
+                  setShowMovieForm(true);
+                  setMovieFormData({ title: '', year: '' });
                 }}
                 className="primary"
               >
-                Add Media
+                Add Movie
               </Button>
               <Button
                 onClick={() => {
@@ -1813,8 +1920,7 @@ function CustomOrders() {
                 value={formData.icon}
                 onChange={(e) => setFormData({...formData, icon: e.target.value})}
                 placeholder="Paste SVG icon code here (optional)..."
-                rows="3"
-              />
+                rows="3"              />
               {formData.icon && (
                 <div className="icon-preview">
                   <span>Preview: </span>
@@ -1826,12 +1932,13 @@ function CustomOrders() {
               )}
             </div>
             <div className="form-actions">
-              <Button type="submit">Update Order</Button>
+              <Button type="submit" className="primary">Update Order</Button>
               <Button 
                 type="button" 
                 onClick={() => {
                   setEditingOrder(null);
                   setFormData({ name: '', description: '', icon: '' });
+                  setMessage('');
                 }}
                 className="secondary"
               >
@@ -1843,134 +1950,105 @@ function CustomOrders() {
       )}
 
       {/* Custom Orders List */}
-      <div className="custom-orders-list">
+      <div className="orders-list">
         {customOrders.length === 0 ? (
           <div className="empty-state">
-            <p>No custom orders created yet.</p>
-            <p>Create your first custom order to get started!</p>
+            <p>No custom orders yet. Create your first custom order to get started!</p>
           </div>
         ) : (
-          <div className="orders-grid">            {customOrders.map(order => (
-              <div key={order.id} className={`order-card ${!order.isActive ? 'inactive' : ''}`}>
-                {/* SVG Icon Background */}
-                {order.icon && (
-                  <div 
-                    className="order-card-background" 
-                    dangerouslySetInnerHTML={{ __html: order.icon }}
-                  />
-                )}
-                
-                <div className="order-content">
-                  <div className="order-header">
-                    <h3 
-                      className="clickable-title" 
-                      onClick={() => handleViewItems(order)}
-                      title="Click to manage items"
-                    >
-                      {order.name}
-                    </h3>
-                    <div className="order-status">
-                      <span className={`status-badge ${order.isActive ? 'active' : 'inactive'}`}>
-                        {order.isActive ? 'Active' : 'Inactive'}
-                      </span>
-                    </div>
-                  </div>                  
-                  {order.description && (
-                    <p className="order-description">{order.description}</p>
-                  )}
-                    <div className="order-stats">
-                    <div className="stat">
-                      <span className="stat-label">Total Items:</span>
-                      <span className="stat-value">
-                        {order.items.filter(item => {
-                          // Exclude reference books (books that contain short stories)
-                          if (item.mediaType === 'book' && item.containedStories && item.containedStories.length > 0) {
-                            return false;
-                          }
-                          return true;
-                        }).length}
-                      </span>
-                    </div>
-                    <div className="stat">
-                      <span className="stat-label">Unwatched:</span>
-                      <span className="stat-value">
-                        {order.items.filter(item => {
-                          // Exclude reference books (books that contain short stories)
-                          if (item.mediaType === 'book' && item.containedStories && item.containedStories.length > 0) {
-                            return false;
-                          }
-                          return !item.isWatched;
-                        }).length}
-                      </span>
-                    </div>
-                  </div>
-
-                  <div className="order-actions">
-                    <Button
-                      onClick={() => handleToggleActive(order.id, order.isActive)}
-                      className={order.isActive ? 'secondary' : 'primary'}
-                      size="small"
-                    >
-                      {order.isActive ? 'Deactivate' : 'Activate'}
-                    </Button>
-                      <Button
-                      onClick={() => handleEditOrder(order)}
-                      className="secondary"
-                      size="small"
-                    >
-                      Edit
-                    </Button>
-                    
-                    <Button
-                      onClick={() => handleViewItems(order)}
-                      className="primary"
-                      size="small"
-                    >
-                      Manage Items
-                    </Button>
-                    
-                    {order.items.length > 0 && (
-                      <Button
-                        onClick={() => resetWatchedStatus(order.id, order.name)}
-                        className="secondary"
-                        size="small"
+          <div className="orders-grid">
+            {customOrders.map(order => (
+              <div key={order.id} className={`order-card ${order.isActive ? 'active' : 'inactive'}`}>                <div className="order-header">
+                  <div className="order-title-section">
+                    <div className="title-with-icon">
+                      <h3 
+                        className="clickable-title"
+                        onClick={() => setViewingOrderItems(order)}
                       >
-                        Reset Watched
-                      </Button>
-                    )}
-                    
-                    <Button
-                      onClick={() => handleDeleteOrder(order.id, order.name)}
-                      className="danger"
-                      size="small"
-                    >
-                      Delete
-                    </Button>
+                        {order.icon && (
+                          <span 
+                            className="custom-order-icon inline-icon" 
+                            dangerouslySetInnerHTML={{__html: order.icon}}
+                          />
+                        )}
+                        {order.name}
+                      </h3>
+                    </div>
+                    {order.description && <p className="order-description">{order.description}</p>}
                   </div>
+                  <div className="order-status">
+                    <span className={`status-indicator ${order.isActive ? 'active' : 'inactive'}`}>
+                      {order.isActive ? 'Active' : 'Inactive'}
+                    </span>
+                  </div>
+                </div>
 
+                <div className="order-stats">
+                  <div className="stat">
+                    <span className="stat-label">Total Items:</span>
+                    <span className="stat-value">{order.items.length}</span>
+                  </div>
+                  <div className="stat">
+                    <span className="stat-label">Completed:</span>
+                    <span className="stat-value">{order.items.filter(item => item.isWatched).length}</span>
+                  </div>
+                </div>                <div className="order-meta">
                   <div className="order-created">
                     Created: {new Date(order.createdAt).toLocaleDateString()}
                   </div>
+                </div>
+
+                <div className="order-actions">
+                  <Button
+                    onClick={() => handleToggleActive(order.id, order.isActive)}
+                    className="secondary"
+                    size="small"
+                  >
+                    {order.isActive ? 'Deactivate' : 'Activate'}
+                  </Button>
+                  <Button
+                    onClick={() => setViewingOrderItems(order)}
+                    className="primary"
+                    size="small"
+                  >
+                    View Items
+                  </Button>
+                  <Button
+                    onClick={() => handleEditOrder(order)}
+                    className="secondary"
+                    size="small"
+                  >
+                    Edit
+                  </Button>
+                  <Button
+                    onClick={() => handleDeleteOrder(order.id)}
+                    className="danger"
+                    size="small"
+                  >
+                    Delete
+                  </Button>
                 </div>
               </div>
             ))}
           </div>
         )}
       </div>
+
         </>
       )}
 
-      {/* Search Modal */}
-      {showSearchModal && (
+      {/* Movie Form Modal */}
+      {showMovieForm && (
         <div className="modal-overlay">
           <div className="modal-content">
             <div className="modal-header">
-              <h3>Add Media to Custom Order</h3>
+              <h3>{editingItem ? 'Edit Movie' : 'Add Movie'}</h3>
               <Button
                 onClick={() => {
-                  setShowSearchModal(false);
-                  setSearchQuery('');
-                  setSearchResults([]);
+                  setShowMovieForm(false);
+                  setMovieFormData({ title: '', year: '' });
+                  setMovieSearchResults([]);
+                  setEditingItem(null);
                 }}
                 className="secondary"
                 size="small"
@@ -1979,55 +2057,86 @@ function CustomOrders() {
               </Button>
             </div>
             
-            <div className="search-section">
-              <div className="search-input-group">
+            <form onSubmit={handleSearchMovies} className="movie-form">
+              <div className="form-group">
+                <label htmlFor="movieTitle">Movie Title *</label>
                 <input
                   type="text"
-                  placeholder="Search for movies or TV episodes..."
-                  value={searchQuery}
-                  onChange={(e) => {
-                    setSearchQuery(e.target.value);
-                    handleSearchMedia(e.target.value);
-                  }}
-                  className="search-input"
+                  id="movieTitle"
+                  value={movieFormData.title}
+                  onChange={(e) => setMovieFormData({
+                    ...movieFormData,
+                    title: e.target.value
+                  })}
+                  placeholder="e.g., The Avengers"
+                  required
                 />
-                {searchLoading && <div className="search-loading">Searching...</div>}
               </div>
               
-              <div className="search-results">
-                {searchResults.length === 0 && searchQuery && !searchLoading && (
-                  <div className="no-results">
-                    <p>Media search functionality coming soon!</p>
-                    <p>For now, you can manually add media using Plex keys through the API.</p>
-                  </div>
-                )}
-                
-                {searchResults.map(result => (
-                  <div key={result.ratingKey} className="search-result-item">
-                    <div className="result-info">
-                      <h4>{result.title}</h4>
-                      {result.grandparentTitle && (
-                        <p>{result.grandparentTitle} - S{result.parentIndex}E{result.index}</p>
-                      )}
-                      <span className="result-type">{result.type}</span>
+              <div className="form-group">
+                <label htmlFor="movieYear">Year (optional)</label>
+                <input
+                  type="number"
+                  id="movieYear"
+                  min="1800"
+                  max="2030"
+                  value={movieFormData.year}
+                  onChange={(e) => setMovieFormData({
+                    ...movieFormData,
+                    year: e.target.value
+                  })}
+                  placeholder="e.g., 2012"
+                />
+                <small>Adding a year helps find the correct movie when multiple versions exist</small>
+              </div>
+              
+              <div className="form-actions">
+                <Button 
+                  type="submit" 
+                  disabled={movieSearchLoading}
+                  className="primary"
+                >
+                  {movieSearchLoading ? 'Searching...' : (editingItem ? 'Update Movie' : 'Search & Add Movie')}
+                </Button>
+                <Button
+                  type="button"
+                  onClick={() => {
+                    setShowMovieForm(false);
+                    setMovieFormData({ title: '', year: '' });
+                    setMovieSearchResults([]);
+                    setEditingItem(null);
+                  }}
+                  className="secondary"
+                >
+                  Cancel
+                </Button>
+              </div>
+            </form>
+            
+            {/* Movie Search Results */}
+            {movieSearchResults.length > 1 && (
+              <div className="search-results-section">
+                <h4>Multiple movies found - Please select one:</h4>
+                <div className="search-results">
+                  {movieSearchResults.map(movie => (
+                    <div key={movie.ratingKey} className="search-result-item">
+                      <div className="result-info">
+                        <h4>{movie.title}</h4>
+                        {movie.year && <p>({movie.year})</p>}
+                        <span className="result-type">Movie</span>
+                      </div>
+                      <Button
+                        onClick={() => handleSelectMovie(movie)}
+                        className="primary"
+                        size="small"
+                      >
+                        Select
+                      </Button>
                     </div>
-                    <Button
-                      onClick={() => handleAddMediaToOrder(viewingOrderItems.id, result)}
-                      className="primary"
-                      size="small"
-                    >
-                      Add
-                    </Button>
-                  </div>
-                ))}
+                  ))}
+                </div>
               </div>
-                <div className="manual-add-section">
-                <p className="manual-add-note">
-                  <strong>Note:</strong> Advanced users can manually add media by creating a Plex search endpoint. 
-                  For now, items can be added programmatically through the API endpoints.
-                </p>
-              </div>
-            </div>
+            )}
           </div>
         </div>
       )}
@@ -2124,74 +2233,7 @@ function CustomOrders() {
             </form>
           </div>
         </div>
-      )}
-
-      {/* Bulk Import Modal */}
-      {showBulkImportModal && (
-        <div className="modal-overlay">
-          <div className="modal-content">
-            <div className="modal-header">
-              <h3>Bulk Import Media</h3>
-              <Button
-                onClick={() => {
-                  setShowBulkImportModal(false);
-                  setBulkImportData('');
-                  setMessage('');
-                }}
-                className="secondary"
-                size="small"
-              >
-                ✕
-              </Button>
-            </div>
-            
-            <form onSubmit={handleBulkImport} className="bulk-import-form">
-              <div className="form-group">
-                <label htmlFor="bulkData">Paste your tab-delimited data here *</label>
-                <textarea
-                  id="bulkData"
-                  value={bulkImportData}
-                  onChange={(e) => setBulkImportData(e.target.value)}
-                  placeholder="Series/Movie&#9;Season/Episode&#9;Title&#9;Type"
-                  rows="10"
-                  required
-                />
-              </div>
-              
-              <div className="form-actions">
-                <Button 
-                  type="submit" 
-                  disabled={bulkImportLoading}
-                  className="primary"
-                >
-                  {bulkImportLoading ? 'Importing...' : 'Import Media'}
-                </Button>
-                <Button
-                  type="button"
-                  onClick={() => {
-                    setShowBulkImportModal(false);
-                    setBulkImportData('');
-                    setMessage('');
-                  }}
-                  className="secondary"
-                >
-                  Cancel
-                </Button>
-              </div>
-            </form>
-            
-            <div className="bulk-import-note">
-              <p><strong>Note:</strong> This feature is for advanced users. Please ensure your data is correctly formatted.</p>
-              <p>Example format:</p>
-              <pre>
-                {`Breaking Bad\tS1E1\tPilot\tEpisode
-The Godfather\t\tThe Godfather\tMovie`}
-              </pre>
-            </div>
-          </div>
-        </div>      )}
-
-      {/* Bulk Import Modal */}
+      )}      {/* Bulk Import Modal */}
       {showBulkImportModal && (
         <div className="modal-overlay">
           <div className="modal-content">
@@ -2211,21 +2253,23 @@ The Godfather\t\tThe Godfather\tMovie`}
             
             <form onSubmit={handleBulkImport} className="bulk-import-form">              <div className="bulk-import-instructions">
                 <h4>Tab-Delimited Import Format</h4>
-                <p>Paste tab-separated data with these 4 columns in order:</p>
+                <p>Paste tab-separated data with 4-5 columns in order:</p>
                 <ol>
                   <li><strong>Series/Movie/Comic/Book Name:</strong> The name of the TV series, movie, comic, or book (for comics use "Series Name (Year) #Issue" format)</li>
                   <li><strong>Season/Episode/Author:</strong> For episodes: S1E1, S01E01, 1x1, 1,1, or 1-1 format; For books: Author name (optionally with year: "Author Name (Year)"); Leave blank for movies and comics</li>
                   <li><strong>Title:</strong> The specific episode title, movie title, comic issue title, or book title</li>
                   <li><strong>Type:</strong> "episode" (or "TV Series") for TV episodes, "movie" for movies, "comic" for comics, "book" for books</li>
+                  <li><strong>Year (Optional):</strong> Release year for more accurate matching (especially useful for movies and TV shows)</li>
                 </ol>
                 
                 <div className="example-data">
                   <strong>Example:</strong>
                   <pre>
-Breaking Bad	S1E1	Pilot	episode
-Breaking Bad	S01E02	Cat's in the Bag...	episode
-The Avengers		The Avengers	movie
-Game of Thrones	1x1	Winter Is Coming	episode
+Breaking Bad	S1E1	Pilot	episode	2008
+Breaking Bad	S01E02	Cat's in the Bag...	episode	2008
+The Avengers		The Avengers	movie	2012
+Superman		Superman	movie	1978
+Game of Thrones	1x1	Winter Is Coming	episode	2011
 The Amazing Spider-Man (2018) #1		Amazing Spider-Man	comic
 The High Republic Adventures (2022) #7		The Monster of Temple Peak Part 1	comic
 The High Republic: Convergence	Zoraida Córdova (2022)	The High Republic: Convergence	book
