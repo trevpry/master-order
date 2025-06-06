@@ -643,16 +643,17 @@ async function getNextUnwatchedEpisode(selectedSeries) {
 async function enhanceWithTVDBArtwork(selectedSeries) {
   try {
     console.log(`Enhancing ${selectedSeries.title} with TVDB artwork`);
-    
-    // Get the actual next unwatched episode from Plex
+      // Get the actual next unwatched episode from Plex
     const nextEpisode = await getNextUnwatchedEpisode(selectedSeries);
       if (nextEpisode) {
       console.log(`Found next unwatched episode: Season ${nextEpisode.seasonNumber}, Episode ${nextEpisode.episodeNumber} - "${nextEpisode.episodeTitle}"`);
+      selectedSeries.type = 'episode'; // Explicitly set type for episode data
       selectedSeries.currentSeason = nextEpisode.seasonNumber;
       selectedSeries.currentEpisode = nextEpisode.episodeNumber;
       selectedSeries.nextEpisodeTitle = nextEpisode.episodeTitle;
       selectedSeries.seasonTitle = nextEpisode.seasonTitle;
       selectedSeries.totalEpisodesInSeason = nextEpisode.totalEpisodesInSeason;
+      selectedSeries.episodeRatingKey = nextEpisode.ratingKey; // Add episodeRatingKey for the specific episode
         // Get TVDB artwork for the current season and episode details
       const tvdbArtwork = await tvdbService.getCurrentSeasonArtwork(selectedSeries.title, nextEpisode.seasonNumber, nextEpisode.episodeNumber);
         if (tvdbArtwork) {

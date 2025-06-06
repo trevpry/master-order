@@ -33,10 +33,15 @@ function Settings() {
   const [backgroundSyncMessage, setBackgroundSyncMessage] = useState('');
   const [tvdbClearLoading, setTvdbClearLoading] = useState(false);
   const [tvdbClearMessage, setTvdbClearMessage] = useState('');
-    // Collection states
+  // Collection states
   const [customOrdersCount, setCustomOrdersCount] = useState(0);
   const [availableCollections, setAvailableCollections] = useState([]);
   const [collectionsLoading, setCollectionsLoading] = useState(false);
+  
+  // Plex players states
+  const [availablePlayers, setAvailablePlayers] = useState([]);
+  const [playersLoading, setPlayersLoading] = useState(false);
+  const [selectedPlayer, setSelectedPlayer] = useState('');
   
   // Ignored collections states
   const [ignoredMovieCollections, setIgnoredMovieCollections] = useState([]);
@@ -75,15 +80,18 @@ function Settings() {
     const initializeSettings = async () => {
       setLoading(true);
       
-      try {
-        // Fetch all data in parallel for better performance
-        const [settings, syncStatus, backgroundStatus, customCount, collections] = await Promise.all([
+      try {        // Fetch all data in parallel for better performance
+        const [settings, syncStatus, backgroundStatus, customCount, collections, players] = await Promise.all([
           fetchWithErrorHandling('http://localhost:3001/api/settings'),
           fetchWithErrorHandling('http://localhost:3001/api/plex/sync-status'),
           fetchWithErrorHandling('http://localhost:3001/api/plex/background-sync-status'),
           fetchWithErrorHandling('http://localhost:3001/api/custom-orders/count'),
-          fetchWithErrorHandling('http://localhost:3001/api/plex/collections')
-        ]);        // Update settings
+          fetchWithErrorHandling('http://localhost:3001/api/plex/collections'),
+          fetchWithErrorHandling('http://localhost:3001/api/plex/players').catch(error => {
+            console.warn('Failed to load Plex players:', error);
+            return [];
+          })
+        ]);// Update settings
         if (settings) {
           setCollectionName(settings.collectionName || '');
           setComicVineApiKey(settings.comicVineApiKey || '');
@@ -99,13 +107,12 @@ function Settings() {
           setIgnoredMovieCollections(settings.ignoredMovieCollections || []);
           setIgnoredTVCollections(settings.ignoredTVCollections || []);
           setChristmasFilterEnabled(settings.christmasFilterEnabled ?? false);
-        }
-
-        // Update status and data
+        }        // Update status and data
         setPlexSyncStatus(syncStatus);
         setBackgroundSyncStatus(backgroundStatus);
         setCustomOrdersCount(customCount.count || 0);
         setAvailableCollections(collections);
+        setAvailablePlayers(players || []);
         
       } catch (error) {
         showMessage('Failed to load settings data. Please refresh the page.', true);
@@ -121,7 +128,6 @@ function Settings() {
   const handleCollectionNameChange = (e) => {
     setCollectionName(e.target.value);
   };
-
   const refreshCollections = async () => {
     try {
       setCollectionsLoading(true);
@@ -132,6 +138,19 @@ function Settings() {
       showMessage('Failed to refresh collections', true);
     } finally {
       setCollectionsLoading(false);
+    }
+  };
+
+  const refreshPlayers = async () => {
+    try {
+      setPlayersLoading(true);
+      const players = await fetchWithErrorHandling('http://localhost:3001/api/plex/players');
+      setAvailablePlayers(players || []);
+      showMessage('Plex players refreshed successfully');
+    } catch (error) {
+      showMessage('Failed to refresh Plex players', true);
+    } finally {
+      setPlayersLoading(false);
     }
   };
   
@@ -224,7 +243,6 @@ function Settings() {
       setPlexSyncInterval(value);
     }
   };
-
   const handleSubmit = async () => {
     if (!validatePercentages()) {
       const effectiveCustomOrderPercent = customOrdersCount > 0 ? customOrderPercent : 0;
@@ -235,6 +253,14 @@ function Settings() {
 
     try {
       setSaving(true);
+      
+      // Track if Plex settings changed to refresh players
+      const currentSettings = await fetchWithErrorHandling('http://localhost:3001/api/settings');
+      const plexSettingsChanged = currentSettings && (
+        currentSettings.plexUrl !== plexUrl || 
+        currentSettings.plexToken !== plexToken
+      );
+      
       await fetchWithErrorHandling('http://localhost:3001/api/settings', {
         method: 'POST',
         headers: {
@@ -262,6 +288,18 @@ function Settings() {
       // Refresh background sync status after settings update
       const backgroundStatus = await fetchWithErrorHandling('http://localhost:3001/api/plex/background-sync-status');
       setBackgroundSyncStatus(backgroundStatus);
+      
+      // Refresh Plex players if Plex settings changed
+      if (plexSettingsChanged) {
+        console.log('Plex settings changed, refreshing players...');
+        try {
+          const players = await fetchWithErrorHandling('http://localhost:3001/api/plex/players');
+          setAvailablePlayers(players || []);
+          console.log('Plex players refreshed successfully');
+        } catch (playerError) {
+          console.warn('Failed to refresh Plex players after settings update:', playerError);
+        }
+      }
       
     } catch (error) {
       showMessage(`Error saving settings: ${error.message}`, true);
@@ -453,9 +491,7 @@ function Settings() {
                     placeholder="http://192.168.1.100:32400"
                     className="url-input compact"
                   />
-                </div>
-
-                <div className="config-field compact">
+                </div>                <div className="config-field compact">
                   <label htmlFor="plex_token">Plex Token:</label>
                   <input 
                     type="password" 
@@ -466,6 +502,36 @@ function Settings() {
                     placeholder="Enter Plex token"
                     className="token-input compact"
                   />
+                </div>
+
+                <div className="config-field compact">
+                  <label htmlFor="plex_players">Available Plex Players:</label>
+                  <div className="collection-controls">
+                    <select 
+                      id="plex_players"
+                      name="plex_players"
+                      value={selectedPlayer}
+                      onChange={(e) => setSelectedPlayer(e.target.value)}
+                      className="collection-select compact"
+                    >
+                      <option value="">Select a Plex player...</option>
+                      {availablePlayers.map((player) => (
+                        <option key={player.value} value={player.value}>
+                          {player.label}
+                        </option>
+                      ))}
+                    </select>
+                    <Button
+                      onClick={refreshPlayers}
+                      disabled={playersLoading}
+                      className="refresh-button compact"
+                    >
+                      {playersLoading ? '🔄' : '🔄'}
+                    </Button>
+                  </div>
+                  {availablePlayers.length === 0 && !playersLoading && (
+                    <p className="collection-hint">No Plex players found. Make sure your Plex server is running and accessible.</p>
+                  )}
                 </div>
 
                 <div className="config-field compact">
@@ -765,9 +831,7 @@ function Settings() {
                 >
                   {tvdbClearLoading ? '🧹 Clearing...' : '🧹 Clear Cache'}
                 </Button>
-              </div>
-
-              {plexSyncStatus && (
+              </div>              {plexSyncStatus && (
                 <div className="sync-status-card compact">
                   <div className="status-grid compact">
                     <div className="status-item compact">
@@ -786,6 +850,14 @@ function Settings() {
                       <span className="status-label">Sections:</span>
                       <span className="status-value">{plexSyncStatus.sections || 0}</span>
                     </div>
+                    {plexSyncStatus.lastSync && (
+                      <div className="status-item compact last-sync-item">
+                        <span className="status-label">Last Sync:</span>
+                        <span className="status-value last-sync-time" title={new Date(plexSyncStatus.lastSync).toLocaleString()}>
+                          {new Date(plexSyncStatus.lastSync).toLocaleDateString()} {new Date(plexSyncStatus.lastSync).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
+                        </span>
+                      </div>
+                    )}
                   </div>
                 </div>
               )}

@@ -1,14 +1,71 @@
 import React from 'react';
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import Button from '../components/Button'
 import MediaDetails from '../components/MediaDetails'
+import io from 'socket.io-client'
+import toast, { Toaster } from 'react-hot-toast'
 
 
-function Home() {
-  const [selectedMedia, setSelectedMedia] = useState(null);
+function Home() {  const [selectedMedia, setSelectedMedia] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [markingWatched, setMarkingWatched] = useState(false);
+
+  // WebSocket connection for Plex webhook notifications
+  useEffect(() => {
+    const socket = io('http://localhost:3001');
+
+    socket.on('connect', () => {
+      console.log('Connected to WebSocket server');
+    });
+
+    socket.on('plexPlayback', (data) => {
+      console.log('Received Plex playback notification:', data);
+      
+      // Create a detailed toast message
+      const formatMediaInfo = (media) => {
+        switch (media.type) {
+          case 'episode':
+            return `${media.grandparentTitle} - S${media.parentIndex}E${media.index}: ${media.title}`;
+          case 'movie':
+            return `${media.title}${media.year ? ` (${media.year})` : ''}`;
+          case 'track':
+            return `${media.artistTitle} - ${media.title}`;
+          case 'album':
+            return `${media.artistTitle} - ${media.title}`;
+          default:
+            return media.title || 'Unknown Media';
+        }
+      };
+
+      const mediaInfo = formatMediaInfo(data.media);
+      const message = `🎬 ${data.user} is watching ${mediaInfo} on ${data.player}`;
+      
+      // Show toast notification
+      toast(message, {
+        duration: 6000,
+        position: 'top-right',
+        style: {
+          background: '#1a1a1a',
+          color: '#fff',
+          border: '1px solid #333',
+          borderRadius: '8px',
+          maxWidth: '400px',
+        },
+        icon: '▶️'
+      });
+    });
+
+    socket.on('disconnect', () => {
+      console.log('Disconnected from WebSocket server');
+    });
+
+    // Cleanup on unmount
+    return () => {
+      socket.disconnect();
+    };
+  }, []);
+
   const callExpressRoute = async () => {
       setLoading(true);
       setError('');
@@ -45,22 +102,49 @@ function Home() {
         setLoading(false);
       }
   };
-
   const markAsWatched = async () => {
-    if (!selectedMedia || !selectedMedia.customOrderItemId) {
+    if (!selectedMedia) {
       return;
     }
 
     setMarkingWatched(true);
     try {
-      // Extract the custom order ID from the selectedMedia
-      // We need to get the custom order ID first, then mark the item as watched
-      const response = await fetch(`http://localhost:3001/api/mark-custom-order-item-watched/${selectedMedia.customOrderItemId}`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-      });
+      let response;
+      
+      // Check if this is a custom order item
+      if (selectedMedia.customOrderItemId) {
+        // Use the custom order endpoint
+        response = await fetch(`http://localhost:3001/api/mark-custom-order-item-watched/${selectedMedia.customOrderItemId}`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+        });
+      } else if (selectedMedia.orderType === 'TV_GENERAL' || selectedMedia.orderType === 'MOVIES_GENERAL') {
+        // Use the general media endpoint for TV and Movie orders
+        const mediaType = selectedMedia.type === 'episode' ? 'episode' : 'movie';
+        const ratingKey = selectedMedia.episodeRatingKey || selectedMedia.ratingKey;
+        
+        if (!ratingKey) {
+          setError('Unable to mark as watched: missing media identifier');
+          return;
+        }
+        
+        response = await fetch('http://localhost:3001/api/mark-media-watched', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            mediaType: mediaType,
+            ratingKey: ratingKey,
+            episodeRatingKey: selectedMedia.episodeRatingKey
+          }),
+        });
+      } else {
+        setError('Unable to mark as watched: unsupported order type');
+        return;
+      }
 
       if (response.ok) {
         setSelectedMedia(null);
@@ -128,8 +212,7 @@ function Home() {
               disabled={loading}
             >
               {loading ? 'Finding Up Next...' : 'Get Up Next'}
-            </Button>
-            {selectedMedia && selectedMedia.customOrderItemId && (
+            </Button>            {selectedMedia && (selectedMedia.customOrderItemId || selectedMedia.orderType === 'TV_GENERAL' || selectedMedia.orderType === 'MOVIES_GENERAL') && (
               <Button
                 onClick={markAsWatched}
                 disabled={markingWatched}
@@ -328,9 +411,9 @@ function Home() {
                 <MediaDetails selectedMedia={selectedMedia} />
               </div>
             </div>
-          )}
-        </div>
+          )}        </div>
       </div>
+      <Toaster />
     </div>
   )
 }

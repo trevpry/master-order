@@ -1,5 +1,8 @@
 const express = require('express');
 const cors = require('cors');
+const multer = require('multer');
+const http = require('http');
+const socketIo = require('socket.io');
 const getNextEpisode = require('./getNextEpisode');
 const getNextMovie = require('./getNextMovie');
 const { getNextCustomOrder, markCustomOrderItemAsWatched } = require('./getNextCustomOrder');
@@ -9,6 +12,7 @@ const TvdbDatabaseService = require('./tvdbDatabaseService'); // Added import
 const PlexSyncService = require('./plexSyncService'); // Added import
 const BackgroundSyncService = require('./backgroundSyncService'); // Added import
 const ArtworkCacheService = require('./artworkCacheService'); // Added import
+const PlexPlayerService = require('./plexPlayerService'); // Added import
 
 // Initialize services
 const plexDb = new PlexDatabaseService();
@@ -16,10 +20,21 @@ const tvdbDb = new TvdbDatabaseService();
 const plexSync = new PlexSyncService(); // Initialize the sync service
 const backgroundSync = new BackgroundSyncService(); // Initialize background sync service
 const artworkCache = new ArtworkCacheService(); // Initialize artwork cache service
+const plexPlayer = new PlexPlayerService(); // Initialize Plex player service
 
-// Initialize the app
+// Initialize the app and server
 const app = express();
+const server = http.createServer(app);
+const io = socketIo(server, {
+  cors: {
+    origin: "http://localhost:3000",
+    methods: ["GET", "POST"]
+  }
+});
 const PORT = process.env.PORT || 3001;
+
+// Set up multer for handling multipart form data (Plex webhooks)
+const upload = multer();
 
 // Middleware
 app.use(cors());
@@ -514,7 +529,66 @@ app.get('/api/settings', async (req, res) => {
     res.json(settings);
   } catch (error) {
     console.error('Failed to fetch settings:', error);
-    res.status(500).json({ error: 'Something went wrong' });
+    res.status(500).json({ error: 'Something went wrong' });  }
+});
+
+// Plex webhook endpoint
+app.post('/webhook', upload.single('thumb'), (req, res) => {
+  try {
+    console.log('Plex webhook received');
+    
+    // Parse the JSON payload
+    let payload;
+    if (req.body.payload) {
+      payload = JSON.parse(req.body.payload);
+    } else {
+      payload = req.body;
+    }
+
+    console.log('Webhook event:', payload.event);
+    console.log('Webhook payload:', JSON.stringify(payload, null, 2));
+
+    // Only process media.play events
+    if (payload.event === 'media.play') {
+      const notification = {
+        event: payload.event,
+        user: payload.Account?.title || 'Unknown User',
+        player: payload.Player?.title || 'Unknown Player',
+        server: payload.Server?.title || 'Unknown Server',
+        media: {
+          type: payload.Metadata?.type || 'unknown',
+          title: payload.Metadata?.title || 'Unknown Title',
+          year: payload.Metadata?.year,
+          summary: payload.Metadata?.summary,
+          duration: payload.Metadata?.duration,
+          // For TV shows
+          grandparentTitle: payload.Metadata?.grandparentTitle, // Series name
+          parentTitle: payload.Metadata?.parentTitle, // Season name
+          index: payload.Metadata?.index, // Episode number
+          parentIndex: payload.Metadata?.parentIndex, // Season number
+          // For music
+          artistTitle: payload.Metadata?.grandparentTitle,
+          albumTitle: payload.Metadata?.parentTitle,
+          trackNumber: payload.Metadata?.index,
+          // Generic
+          thumb: payload.Metadata?.thumb,
+          art: payload.Metadata?.art,
+          ratingKey: payload.Metadata?.ratingKey,
+          guid: payload.Metadata?.guid,
+          librarySectionType: payload.Metadata?.librarySectionType
+        },
+        timestamp: new Date().toISOString()
+      };
+
+      // Emit to all connected clients
+      io.emit('plexPlayback', notification);
+      console.log('Emitted Plex playback notification:', notification);
+    }
+
+    res.status(200).send('OK');
+  } catch (error) {
+    console.error('Error processing webhook:', error);
+    res.status(500).send('Error processing webhook');
   }
 });
 
@@ -601,15 +675,24 @@ app.post('/api/settings', async (req, res) => {
         ignoredTVCollections: Array.isArray(ignoredTVCollections) ? JSON.stringify(ignoredTVCollections) : ignoredTVCollections || null,
         christmasFilterEnabled: christmasFilterEnabled ?? false
       }
-    });
-
-    // Update background sync interval if it was changed
+    });    // Update background sync interval if it was changed
     if (plexSyncInterval !== undefined) {
       try {
         await backgroundSync.updateSyncInterval();
         console.log('Background sync interval updated');
       } catch (error) {
         console.error('Failed to update background sync interval:', error);
+      }
+    }
+
+    // Refresh Plex player client if Plex settings were changed
+    if (plexToken !== undefined || plexUrl !== undefined) {
+      try {
+        await plexPlayer.refreshClient();
+        console.log('Plex player client refreshed due to settings update');
+      } catch (error) {
+        console.error('Failed to refresh Plex player client:', error);
+        // Don't fail the whole request if this fails
       }
     }    console.log('Saved settings:', settings);
     res.json({ message: 'Settings saved successfully', settings });
@@ -721,6 +804,41 @@ app.get('/api/plex/collections', async (req, res) => {
     console.error('Failed to fetch collections:', error);
     res.status(500).json({ 
       error: 'Failed to fetch collections',
+      details: error.message 
+    });  }
+});
+
+// Get available Plex players endpoint
+app.get('/api/plex/players', async (req, res) => {
+  try {
+    const players = await plexPlayer.getPlayers();
+    
+    // Format players for dropdown
+    const formattedPlayers = players.map(player => ({
+      value: player.machineIdentifier,
+      label: `${player.name} (${player.product}) - ${player.platform}`,
+      ...player
+    }));
+    
+    res.json(formattedPlayers);
+  } catch (error) {
+    console.error('Failed to fetch Plex players:', error);
+    res.status(500).json({ 
+      error: 'Failed to fetch Plex players',
+      details: error.message 
+    });
+  }
+});
+
+// Test Plex connection endpoint
+app.get('/api/plex/test-connection', async (req, res) => {
+  try {
+    const result = await plexPlayer.testConnection();
+    res.json(result);
+  } catch (error) {
+    console.error('Failed to test Plex connection:', error);
+    res.status(500).json({ 
+      error: 'Failed to test Plex connection',
       details: error.message 
     });
   }
@@ -1420,14 +1538,71 @@ app.post('/api/mark-custom-order-item-watched/:itemId', async (req, res) => {
     if (!itemId) {
       return res.status(400).json({ error: 'Item ID is required' });
     }
-    
-    // Use the existing function to mark item as watched
+
+    // Get the custom order item details first to check what type of media it is
+    const customOrderItem = await prisma.customOrderItem.findUnique({
+      where: { id: parseInt(itemId) }
+    });
+
+    if (!customOrderItem) {
+      return res.status(404).json({ error: 'Custom order item not found' });
+    }
+
+    // Mark the custom order item as watched
     await markCustomOrderItemAsWatched(itemId);
+
+    // If this is an episode or movie with a plexKey, also mark it as watched in the Plex database
+    if (customOrderItem.plexKey && (customOrderItem.mediaType === 'episode' || customOrderItem.mediaType === 'movie')) {
+      try {
+        if (customOrderItem.mediaType === 'episode') {
+          await plexDb.markEpisodeAsWatched(customOrderItem.plexKey);
+          console.log(`Marked episode ${customOrderItem.plexKey} as watched in Plex database`);
+        } else if (customOrderItem.mediaType === 'movie') {
+          await plexDb.markMovieAsWatched(customOrderItem.plexKey);
+          console.log(`Marked movie ${customOrderItem.plexKey} as watched in Plex database`);
+        }
+      } catch (error) {
+        console.error(`Error marking ${customOrderItem.mediaType} as watched in Plex database:`, error);
+        // Continue anyway since the custom order item was marked as watched
+      }
+    }
     
     res.json({ success: true, message: 'Item marked as watched' });
   } catch (error) {
     console.error('Error marking custom order item as watched:', error);
-    res.status(500).json({ error: 'Failed to mark item as watched' });
+    res.status(500).json({ error: 'Failed to mark item as watched' });  }
+});
+
+// Mark a general TV episode or movie as watched (for TV_GENERAL and MOVIES_GENERAL orders)
+app.post('/api/mark-media-watched', async (req, res) => {
+  try {
+    const { mediaType, ratingKey, episodeRatingKey } = req.body;
+    
+    if (!mediaType || (!ratingKey && !episodeRatingKey)) {
+      return res.status(400).json({ error: 'Media type and ratingKey (or episodeRatingKey for episodes) are required' });
+    }
+
+    try {
+      if (mediaType === 'episode') {
+        // For episodes, use episodeRatingKey if available, otherwise ratingKey
+        const episodeKey = episodeRatingKey || ratingKey;
+        await plexDb.markEpisodeAsWatched(episodeKey);
+        console.log(`Marked episode ${episodeKey} as watched in Plex database`);
+      } else if (mediaType === 'movie') {
+        await plexDb.markMovieAsWatched(ratingKey);
+        console.log(`Marked movie ${ratingKey} as watched in Plex database`);
+      } else {
+        return res.status(400).json({ error: 'Unsupported media type. Only episode and movie are supported.' });
+      }
+      
+      res.json({ success: true, message: `${mediaType} marked as watched` });
+    } catch (error) {
+      console.error(`Error marking ${mediaType} as watched in Plex database:`, error);
+      res.status(500).json({ error: `Failed to mark ${mediaType} as watched in database` });
+    }
+  } catch (error) {
+    console.error('Error in mark-media-watched endpoint:', error);
+    res.status(500).json({ error: 'Failed to mark media as watched' });
   }
 });
 
@@ -1441,6 +1616,8 @@ app.get('/api/search', async (req, res) => {
         }
 
     // Parse year filter if provided
+
+    // Parse year filter if provided
     let yearFilter = null;
     if (year) {
       const parsedYear = parseInt(year);
@@ -1450,8 +1627,6 @@ app.get('/api/search', async (req, res) => {
     }    if (type === 'tv' || type === 'television') {
       // Search for TV shows and their episodes in the database
       try {
-        const tvShows = await plexDb.searchTVShows(query, yearFilter);
-        console.log(`TV Search Debug: Found ${tvShows.length} shows for query: "${query}"${yearFilter ? ` (year: ${yearFilter})` : ''}`);
         const allEpisodes = [];
         for (const show of tvShows) {
           try {
@@ -1559,9 +1734,19 @@ async function shutdown() {
 process.on('SIGTERM', shutdown);
 process.on('SIGINT', shutdown);
 
+// Socket.IO connection handling
+io.on('connection', (socket) => {
+  console.log('Client connected to WebSocket');
+  
+  socket.on('disconnect', () => {
+    console.log('Client disconnected from WebSocket');
+  });
+});
+
 // Start the server
-app.listen(PORT, async () => {
+server.listen(PORT, async () => {
   console.log(`Server running on port ${PORT}`);
+  console.log(`WebSocket server ready for real-time notifications`);
   
   // Start background sync service
   try {

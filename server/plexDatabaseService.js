@@ -579,8 +579,43 @@ class PlexDatabaseService {
           }
         }
       });
+    } catch (error) {      console.error('Error searching episodes:', error);
+      throw error;
+    }
+  }
+
+  // Mark an episode as watched by updating its viewCount
+  async markEpisodeAsWatched(ratingKey) {
+    try {
+      console.log(`Marking episode with ratingKey ${ratingKey} as watched`);
+      
+      const result = await this.prisma.PlexEpisode.update({
+        where: { ratingKey: ratingKey },
+        data: { viewCount: 1 } // Set viewCount to 1 to mark as watched
+      });
+      
+      console.log(`Successfully marked episode ${ratingKey} as watched`);
+      return result;
     } catch (error) {
-      console.error('Error searching episodes:', error);
+      console.error(`Error marking episode ${ratingKey} as watched:`, error);
+      throw error;
+    }
+  }
+
+  // Mark a movie as watched by updating its viewCount
+  async markMovieAsWatched(ratingKey) {
+    try {
+      console.log(`Marking movie with ratingKey ${ratingKey} as watched`);
+      
+      const result = await this.prisma.PlexMovie.update({
+        where: { ratingKey: ratingKey },
+        data: { viewCount: 1 } // Set viewCount to 1 to mark as watched
+      });
+      
+      console.log(`Successfully marked movie ${ratingKey} as watched`);
+      return result;
+    } catch (error) {
+      console.error(`Error marking movie ${ratingKey} as watched:`, error);
       throw error;
     }
   }

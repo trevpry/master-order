@@ -46,7 +46,16 @@ function CustomOrders() {
     containedInBookId: '',
     coverUrl: ''
   });  const [shortStorySearchResults, setShortStorySearchResults] = useState([]);
-    // Drag and Drop state
+  
+  // Web Video Form state
+  const [showWebVideoForm, setShowWebVideoForm] = useState(false);
+  const [webVideoFormData, setWebVideoFormData] = useState({
+    title: '',
+    url: '',
+    description: ''
+  });
+  
+  // Drag and Drop state
   const [draggedItem, setDraggedItem] = useState(null);
   const [dragOverItem, setDragOverItem] = useState(null);
   const [isDragging, setIsDragging] = useState(false);
@@ -327,7 +336,7 @@ function CustomOrders() {
           title: item.customTitle || ''
         });
         setShowComicForm(true);
-        break;case 'shortstory':
+        break;      case 'shortstory':
         setShortStoryFormData({
           title: item.title || '',
           author: item.author || '',
@@ -337,6 +346,14 @@ function CustomOrders() {
           coverUrl: item.coverUrl || ''
         });
         setShowShortStoryForm(true);
+        break;
+      case 'webvideo':
+        setWebVideoFormData({
+          title: item.title || '',
+          url: item.url || '',
+          description: item.description || ''
+        });
+        setShowWebVideoForm(true);
         break;
       default:
         // For movies or other types, we might need a different approach
@@ -359,17 +376,18 @@ function CustomOrders() {
       if (response.ok) {
         setMessage('Item updated successfully');
         setEditingItem(null);
-        
-        // Close the appropriate form
+          // Close the appropriate form
         setShowEpisodeForm(false);
         setShowBookForm(false);
         setShowComicForm(false);
         setShowShortStoryForm(false);
+        setShowWebVideoForm(false);
           // Reset form data
         setEpisodeFormData({ series: '', season: '', episode: '' });
         setBookFormData({ title: '', author: '', year: '', isbn: '' });
         setComicFormData({ series: '', year: '', issue: '', title: '' });
         setShortStoryFormData({ title: '', author: '', year: '', url: '', containedInBookId: '', coverUrl: '' });
+        setWebVideoFormData({ title: '', url: '', description: '' });
         
         // Refresh the order items
         const updatedOrder = await fetch(`http://127.0.0.1:3001/api/custom-orders/${viewingOrderItems.id}`);
@@ -1811,10 +1829,53 @@ function CustomOrders() {
         setShowShortStoryForm(false);
         setShortStoryFormData({ title: '', author: '', year: '', url: '', containedInBookId: '', coverUrl: '' });
         setShortStorySearchResults([]);
-      }
-    } catch (error) {
+      }    } catch (error) {
       console.error('Error adding short story:', error);
       setMessage('Error adding short story. Please try again.');
+    }
+  };
+
+  const handleAddWebVideo = async () => {
+    try {
+      // Validate required fields
+      if (!webVideoFormData.title.trim()) {
+        setMessage('Please enter a web video title');
+        return;
+      }
+      
+      if (!webVideoFormData.url.trim()) {
+        setMessage('Please enter a web video URL');
+        return;
+      }
+
+      // If we're editing an item, update it
+      if (editingItem) {
+        const updatedItemData = {
+          title: webVideoFormData.title.trim(),
+          webTitle: webVideoFormData.title.trim(),
+          webUrl: webVideoFormData.url.trim(),
+          webDescription: webVideoFormData.description.trim() || null
+        };
+        await handleUpdateItem(updatedItemData);
+        return;
+      }
+
+      const webVideoMedia = {
+        mediaType: 'webvideo',
+        title: webVideoFormData.title.trim(),
+        webTitle: webVideoFormData.title.trim(),
+        webUrl: webVideoFormData.url.trim(),
+        webDescription: webVideoFormData.description.trim() || null
+      };
+
+      const success = await handleAddMediaToOrder(viewingOrderItems.id, webVideoMedia);
+      if (success !== false) {
+        setShowWebVideoForm(false);
+        setWebVideoFormData({ title: '', url: '', description: '' });
+      }
+    } catch (error) {
+      console.error('Error adding web video:', error);
+      setMessage('Error adding web video. Please try again.');
     }
   };
 
@@ -1923,8 +1984,7 @@ function CustomOrders() {
                 className="secondary"
               >
                 Add Comic
-              </Button>
-              <Button
+              </Button>              <Button
                 onClick={() => {
                   setShowShortStoryForm(true);
                   setShortStoryFormData({ title: '', author: '', year: '', url: '', containedInBookId: '', coverUrl: '' });
@@ -1932,7 +1992,17 @@ function CustomOrders() {
                 className="secondary"
               >
                 Add Short Story
-              </Button>              <Button
+              </Button>
+              <Button
+                onClick={() => {
+                  setShowWebVideoForm(true);
+                  setWebVideoFormData({ title: '', url: '', description: '' });
+                }}
+                className="secondary"
+              >
+                Add Web Video
+              </Button>
+              <Button
                 onClick={() => {
                   setShowBulkImportModal(true);
                   setBulkImportData('');
@@ -3093,6 +3163,80 @@ Dune	Frank Herbert (1965)	Dune	book
                 </div>
               </div>
             )}
+          </div>        </div>
+      )}
+
+      {/* Web Video Form Modal */}
+      {showWebVideoForm && (
+        <div className="modal-overlay">
+          <div className="modal-content">
+            <div className="modal-header">
+              <h3>{editingItem ? 'Edit Web Video' : 'Add Web Video'}</h3>
+              <Button
+                onClick={() => {
+                  setShowWebVideoForm(false);
+                  setEditingItem(null);
+                  setWebVideoFormData({ title: '', url: '', description: '' });
+                }}
+                className="close-modal"
+              >
+                ×
+              </Button>
+            </div>
+            
+            <form onSubmit={(e) => { e.preventDefault(); handleAddWebVideo(); }} className="webvideo-form">
+              <div className="form-group">
+                <label htmlFor="webvideo-title">Video Title *</label>
+                <input
+                  type="text"
+                  id="webvideo-title"
+                  value={webVideoFormData.title}
+                  onChange={(e) => setWebVideoFormData(prev => ({ ...prev, title: e.target.value }))}
+                  placeholder="Enter video title"
+                  required
+                />
+              </div>
+              
+              <div className="form-group">
+                <label htmlFor="webvideo-url">Video URL *</label>
+                <input
+                  type="url"
+                  id="webvideo-url"
+                  value={webVideoFormData.url}
+                  onChange={(e) => setWebVideoFormData(prev => ({ ...prev, url: e.target.value }))}
+                  placeholder="https://youtube.com/watch?v=... or any video URL"
+                  required
+                />
+              </div>
+              
+              <div className="form-group">
+                <label htmlFor="webvideo-description">Description (optional)</label>
+                <textarea
+                  id="webvideo-description"
+                  value={webVideoFormData.description}
+                  onChange={(e) => setWebVideoFormData(prev => ({ ...prev, description: e.target.value }))}
+                  placeholder="Brief description of the video"
+                  rows="3"
+                />
+              </div>
+              
+              <div className="form-actions">
+                <Button type="submit" className="primary">
+                  {editingItem ? 'Update Web Video' : 'Add Web Video'}
+                </Button>
+                <Button
+                  type="button"
+                  onClick={() => {
+                    setShowWebVideoForm(false);
+                    setEditingItem(null);
+                    setWebVideoFormData({ title: '', url: '', description: '' });
+                  }}
+                  className="secondary"
+                >
+                  Cancel
+                </Button>
+              </div>
+            </form>
           </div>
         </div>
       )}

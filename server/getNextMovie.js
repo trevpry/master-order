@@ -772,10 +772,10 @@ async function getNextMovie() {
         } catch (error) {
           console.error('Error getting next unwatched episode:', error);
         }
-      }
-      
+      }      
       return {
         ...finalSelection,
+        type: 'movie',
         orderType: 'MOVIES_GENERAL'
       };
     } else {
