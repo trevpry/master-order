@@ -1146,3 +1146,73 @@
   background: #e9ecef;
   border-radius: 4px;
 }
+
+/* Drag and Drop Styles */
+.drag-handle {
+  position: absolute;
+  left: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: #6c757d;
+  font-weight: bold;
+  cursor: grab;
+  user-select: none;
+  padding: 4px;
+  border-radius: 4px;
+  transition: color 0.2s ease;
+  z-index: 2;
+}
+
+.drag-handle:hover {
+  color: #495057;
+  background: rgba(0, 0, 0, 0.05);
+}
+
+.drag-handle:active {
+  cursor: grabbing;
+}
+
+.item-card {
+  position: relative;
+  padding-left: 40px; /* Add space for drag handle */
+  transition: transform 0.2s ease, box-shadow 0.2s ease, opacity 0.2s ease;
+  cursor: move;
+}
+
+.item-card.dragging {
+  opacity: 0.5;
+  transform: rotate(2deg);
+  box-shadow: 0 8px 16px rgba(0, 0, 0, 0.2);
+  z-index: 1000;
+}
+
+.item-card.drag-over {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0, 123, 255, 0.3);
+  border: 2px dashed #007bff;
+  background: rgba(0, 123, 255, 0.02);
+}
+
+.item-card:hover:not(.dragging) {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+}
+
+/* Ensure drag states don't interfere with other hover effects */
+.item-card.dragging:hover,
+.item-card.drag-over:hover {
+  transform: none;
+}
+
+.item-card.dragging .drag-handle {
+  cursor: grabbing;
+}
+
+/* Add visual feedback for drag operations */
+.items-list.drag-active {
+  user-select: none;
+}
+
+.items-list.drag-active .item-card:not(.dragging):not(.drag-over) {
+  opacity: 0.8;
+}

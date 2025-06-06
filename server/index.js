@@ -212,7 +212,7 @@ app.get('/api/comicvine/search', async (req, res) => {
 // ComicVine search with issue filtering and cover art
 app.get('/api/comicvine/search-with-issues', async (req, res) => {
   try {
-    const { query, issueNumber } = req.query;
+    const { query, issueNumber, issueTitle } = req.query;
     if (!query) {
       return res.status(400).json({ error: 'Missing search query' });
     }
@@ -240,15 +240,112 @@ app.get('/api/comicvine/search-with-issues', async (req, res) => {
             hasIssue: true,
             coverUrl: coverUrl,
             issueId: issue.id,
-            issueName: issue.name
+            issueName: issue.name,
+            issue_number: issueNumber
           });
         }
       } catch (error) {
         console.warn(`Error checking issue ${issueNumber} for series ${series.name}:`, error.message);
         // Continue checking other series
       }
+    }    // Sort results with multiple criteria for better accuracy
+    if (filteredSeries.length > 1) {
+      console.log(`Sorting ${filteredSeries.length} results with multiple criteria...`);
+      
+      // Sort with comprehensive ranking:
+      // 1. DC Comics publisher gets highest priority (main US publisher for most series)
+      // 2. Earlier publication years get priority (original series vs international reprints)
+      // 3. Title matches (if issueTitle provided)
+      // 4. Higher issue count (main series typically have more issues)
+      filteredSeries.sort((a, b) => {
+        // 1. Publisher priority - DC Comics first, then Marvel, then others
+        const getPublisherPriority = (series) => {
+          const publisher = (series.publisher?.name || '').toLowerCase();
+          if (publisher.includes('dc comics') || publisher === 'dc') return 100;
+          if (publisher.includes('marvel')) return 90;
+          if (publisher.includes('image')) return 80;
+          if (publisher.includes('dark horse')) return 70;
+          return 0; // International/reprint publishers get lowest priority
+        };
+        
+        const aPublisherPriority = getPublisherPriority(a);
+        const bPublisherPriority = getPublisherPriority(b);
+        
+        if (aPublisherPriority !== bPublisherPriority) {
+          return bPublisherPriority - aPublisherPriority;
+        }
+        
+        // 2. Earlier publication year gets priority (original vs reprints)
+        const aYear = parseInt(a.start_year) || 9999;
+        const bYear = parseInt(b.start_year) || 9999;
+        
+        if (Math.abs(aYear - bYear) > 5) { // Only consider if significant difference
+          return aYear - bYear;
+        }
+          // 3. Title matching (if issueTitle provided)
+        if (issueTitle) {
+          // Normalize titles for comparison - remove punctuation and extra spaces
+          const normalizeTitle = (title) => {
+            return title.toLowerCase()
+              .replace(/[^\w\s]/g, ' ') // Replace punctuation with spaces
+              .replace(/\s+/g, ' ')     // Collapse multiple spaces
+              .trim();
+          };
+          
+          const aTitle = normalizeTitle(a.issueName || '');
+          const bTitle = normalizeTitle(b.issueName || '');
+          const targetTitle = normalizeTitle(issueTitle);
+          
+          console.log(`  Title comparison for "${a.publisher?.name || 'Unknown'}" ${a.name}:`);
+          console.log(`    Issue title: "${a.issueName}" -> normalized: "${aTitle}"`);
+          console.log(`    Target title: "${issueTitle}" -> normalized: "${targetTitle}"`);
+          
+          // Check for exact matches
+          const aExactMatch = aTitle === targetTitle;
+          const bExactMatch = bTitle === targetTitle;
+          
+          if (aExactMatch && !bExactMatch) {
+            console.log(`    ✅ Exact match for ${a.name}!`);
+            return -1;
+          }
+          if (!aExactMatch && bExactMatch) {
+            console.log(`    ✅ Exact match for ${b.name}!`);
+            return 1;
+          }
+          
+          // Check for partial matches
+          const aPartialMatch = aTitle.includes(targetTitle) || targetTitle.includes(aTitle);
+          const bPartialMatch = bTitle.includes(targetTitle) || targetTitle.includes(bTitle);
+          
+          if (aPartialMatch && !bPartialMatch) {
+            console.log(`    ✅ Partial match for ${a.name}!`);
+            return -1;
+          }
+          if (!aPartialMatch && bPartialMatch) {
+            console.log(`    ✅ Partial match for ${b.name}!`);
+            return 1;
+          }
+          
+          console.log(`    ❌ No title match for either series`);
+        }
+        
+        // 4. Higher issue count suggests main series
+        const aIssueCount = a.count_of_issues || 0;
+        const bIssueCount = b.count_of_issues || 0;
+        
+        return bIssueCount - aIssueCount;
+      });
+      
+      // Log the sorting results
+      console.log('Sorted results:');
+      filteredSeries.forEach((series, index) => {
+        const publisher = series.publisher?.name || 'Unknown';
+        const titleMatch = issueTitle && series.issueName && 
+          series.issueName.toLowerCase().includes(issueTitle.toLowerCase()) ? '✅' : '❌';
+        console.log(`  ${index + 1}. ${series.name} (${series.start_year}) - ${publisher} - "${series.issueName}" ${titleMatch}`);
+      });
     }
-    
+
     console.log(`Filtered ${allSeries.length} series down to ${filteredSeries.length} with issue #${issueNumber}`);
     res.json(filteredSeries);
   } catch (error) {
@@ -925,8 +1022,7 @@ app.post('/api/custom-orders/:id/items', async (req, res) => {
       if (!plexKey) {
         return res.status(400).json({ error: 'plexKey is required for non-comic/book/shortstory media' });
       }
-    }
-      // Check for duplicate items
+    }    // Check for duplicate items
     let existingItem;
     if (mediaType === 'comic') {
       // For comics, check for duplicates by series, year, and issue
@@ -935,11 +1031,10 @@ app.post('/api/custom-orders/:id/items', async (req, res) => {
           customOrderId: parseInt(id),
           mediaType: 'comic',
           comicSeries: comicSeries,
-          comicYear: comicYear,
+          comicYear: comicYear ? parseInt(comicYear) : null,
           comicIssue: String(comicIssue)
         }
-      });
-    } else if (mediaType === 'book') {
+      });    } else if (mediaType === 'book') {
       // For books, check for duplicates by title and author
       existingItem = await prisma.customOrderItem.findFirst({
         where: {
@@ -947,14 +1042,14 @@ app.post('/api/custom-orders/:id/items', async (req, res) => {
           mediaType: 'book',
           bookTitle: bookTitle,
           bookAuthor: bookAuthor,
-          bookYear: bookYear || null        }
-      });    } else if (mediaType === 'shortstory') {
-      // For short stories, check for duplicates by title, author (if provided), and year
+          bookYear: bookYear ? parseInt(bookYear) : null
+        }
+      });} else if (mediaType === 'shortstory') {      // For short stories, check for duplicates by title, author (if provided), and year
       const whereCondition = {
         customOrderId: parseInt(id),
         mediaType: 'shortstory',
         storyTitle: storyTitle,
-        storyYear: storyYear || null
+        storyYear: storyYear ? parseInt(storyYear) : null
       };
       
       // Only include author in the check if it's provided
@@ -1013,19 +1108,19 @@ app.post('/api/custom-orders/:id/items', async (req, res) => {
         episodeNumber,
         seriesTitle,
         comicSeries,
-        comicYear,
+        comicYear: comicYear ? parseInt(comicYear) : null,
         comicIssue: mediaType === 'comic' ? String(comicIssue) : null,
         comicVolume,
         bookTitle,
         bookAuthor,
-        bookYear,
+        bookYear: bookYear ? parseInt(bookYear) : null,
         bookIsbn,
         bookPublisher,
         bookOpenLibraryId,
         bookCoverUrl,
         storyTitle,
         storyAuthor,
-        storyYear,
+        storyYear: storyYear ? parseInt(storyYear) : null,
         storyUrl,
         storyContainedInBookId,
         storyCoverUrl,

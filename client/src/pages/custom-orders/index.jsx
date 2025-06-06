@@ -45,8 +45,14 @@ function CustomOrders() {
     url: '',
     containedInBookId: '',
     coverUrl: ''
-  });
-  const [shortStorySearchResults, setShortStorySearchResults] = useState([]);  const [formData, setFormData] = useState({
+  });  const [shortStorySearchResults, setShortStorySearchResults] = useState([]);
+  
+  // Drag and Drop state
+  const [draggedItem, setDraggedItem] = useState(null);
+  const [dragOverItem, setDragOverItem] = useState(null);
+  const [isDragging, setIsDragging] = useState(false);
+
+  const [formData, setFormData] = useState({
     name: '',
     description: '',
     icon: ''
@@ -533,7 +539,6 @@ function CustomOrders() {
     
     setShowComicForm(true);
   };
-
   const handleCollectedIn = (item) => {
     setReselectingItem(item);
     
@@ -546,6 +551,90 @@ function CustomOrders() {
     });
     
     setShowBookForm(true);
+  };
+  // Drag and Drop handlers
+  const handleDragStart = (e, item, index) => {
+    setDraggedItem({ item, index });
+    setIsDragging(true);
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/html', e.target);
+  };
+
+  const handleDragOver = (e, index) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    setDragOverItem({ index });
+  };
+
+  const handleDragLeave = (e) => {
+    e.preventDefault();
+    setDragOverItem(null);
+  };
+
+  const handleDrop = async (e, dropIndex) => {
+    e.preventDefault();
+    
+    if (!draggedItem || draggedItem.index === dropIndex) {
+      setDraggedItem(null);
+      setDragOverItem(null);
+      setIsDragging(false);
+      return;
+    }
+
+    try {
+      // Get filtered items (same filter as in render)
+      const filteredItems = viewingOrderItems.items.filter(item => {
+        if (item.mediaType === 'book' && item.containedStories && item.containedStories.length > 0) {
+          return false;
+        }
+        return true;
+      });
+
+      // Reorder the items array
+      const newItems = [...filteredItems];
+      const draggedItemData = newItems[draggedItem.index];
+      
+      // Remove dragged item and insert at new position
+      newItems.splice(draggedItem.index, 1);
+      newItems.splice(dropIndex, 0, draggedItemData);
+
+      // Update sortOrder for all affected items
+      const updatePromises = newItems.map((item, index) => {
+        const newSortOrder = index + 1;
+        return fetch(`http://127.0.0.1:3001/api/custom-orders/${viewingOrderItems.id}/items/${item.id}`, {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            sortOrder: newSortOrder
+          }),
+        });
+      });
+
+      await Promise.all(updatePromises);
+
+      // Refresh the order data
+      const updatedOrder = await fetch(`http://127.0.0.1:3001/api/custom-orders/${viewingOrderItems.id}`);
+      const updatedOrderData = await updatedOrder.json();
+      setViewingOrderItems(updatedOrderData);
+      
+      setMessage('Items reordered successfully');
+    } catch (error) {
+      console.error('Error reordering items:', error);
+      setMessage('Error reordering items');
+    }
+
+    // Reset drag state
+    setDraggedItem(null);
+    setDragOverItem(null);
+    setIsDragging(false);
+  };
+
+  const handleDragEnd = () => {
+    setDraggedItem(null);
+    setDragOverItem(null);
+    setIsDragging(false);
   };
 
   const handleSearchMedia = async (query) => {
@@ -864,25 +953,64 @@ function CustomOrders() {
             errors.push(`Line ${i + 1}: Invalid season/episode format. Use S1E1, S01E01, 1x1, 1,1, or 1-1`);
             continue;
           }        } else if (mediaType === 'comic') {
-          // Parse comic format: "Series Name (Year) #Issue" or "Series Name #Issue"
-          let comicMatch = seriesOrMovie.match(/^(.+?)\s*\((\d{4})\)\s*#(\d+)$/);
-          if (comicMatch) {
-            // Format with year
-            comicSeries = comicMatch[1].trim();
-            comicYear = parseInt(comicMatch[2]);
-            comicIssue = parseInt(comicMatch[3]);
-          } else {
-            // Try format without year: "Series Name #Issue"
-            comicMatch = seriesOrMovie.match(/^(.+?)\s*#(\d+)$/);
-            if (comicMatch) {
-              comicSeries = comicMatch[1].trim();
-              comicYear = null;
-              comicIssue = parseInt(comicMatch[2]);
+          // Check if using new format: separate columns for series, issue, and title
+          if (seasonEpisode && seasonEpisode.toLowerCase().includes('issue')) {
+            // New format: Column 1 = Series, Column 2 = Issue, Column 3 = Title
+            comicSeries = seriesOrMovie;
+            
+            // Clean the series name according to new rules:
+            // - If parentheses contain a 4-digit year, keep it
+            // - If parentheses contain anything else (like "Vol. 1"), remove the entire parentheses portion
+            const parenthesesMatch = comicSeries.match(/^(.+?)\s*\((.+?)\)(.*)$/);
+            if (parenthesesMatch) {
+              const beforeParens = parenthesesMatch[1].trim();
+              const parenthesesContent = parenthesesMatch[2].trim();
+              const afterParens = parenthesesMatch[3].trim();
+              
+              // Check if parentheses content is a 4-digit year
+              const yearMatch = parenthesesContent.match(/^\d{4}$/);
+              if (yearMatch) {
+                // Keep the year
+                comicYear = parseInt(parenthesesContent);
+                comicSeries = beforeParens + (afterParens ? ' ' + afterParens : '');
+              } else {
+                // Remove the entire parentheses portion
+                comicSeries = beforeParens + (afterParens ? ' ' + afterParens : '');
+                comicYear = null;
+              }
             } else {
-              errors.push(`Line ${i + 1}: Invalid comic format. Use "Series Name (Year) #Issue" or "Series Name #Issue" format (e.g., "The Amazing Spider-Man (2018) #1" or "The Amazing Spider-Man #1")`);
+              comicYear = null;
+            }
+            
+            // Parse issue number from seasonEpisode column (e.g., "Issue #07", "#07", "07")
+            const issueMatch = seasonEpisode.match(/(?:issue\s*)?#?(\d+)/i);
+            if (issueMatch) {
+              comicIssue = parseInt(issueMatch[1]);
+            } else {
+              errors.push(`Line ${i + 1}: Invalid issue format. Use "Issue #07", "#07", or "07" format`);
               continue;
             }
-          }        } else if (mediaType === 'book') {
+          } else {
+            // Legacy format: Parse comic format from first column: "Series Name (Year) #Issue" or "Series Name #Issue"
+            let comicMatch = seriesOrMovie.match(/^(.+?)\s*\((\d{4})\)\s*#(\d+)$/);
+            if (comicMatch) {
+              // Format with year
+              comicSeries = comicMatch[1].trim();
+              comicYear = parseInt(comicMatch[2]);
+              comicIssue = parseInt(comicMatch[3]);
+            } else {
+              // Try format without year: "Series Name #Issue"
+              comicMatch = seriesOrMovie.match(/^(.+?)\s*#(\d+)$/);
+              if (comicMatch) {
+                comicSeries = comicMatch[1].trim();
+                comicYear = null;
+                comicIssue = parseInt(comicMatch[2]);
+              } else {
+                errors.push(`Line ${i + 1}: Invalid comic format. Use new format: "Series Name\\tIssue #07\\tComic Title\\tComic" or legacy format: "Series Name (Year) #Issue\\t\\tTitle\\tComic"`);
+                continue;
+              }
+            }
+          }} else if (mediaType === 'book') {
           // Parse book format: "Author Name (Year)" in the season/episode field, or just "Author Name"
           if (seasonEpisode) {
             const bookMatch = seasonEpisode.match(/^(.+?)\s*(?:\((\d{4})\))?$/);
@@ -941,20 +1069,86 @@ function CustomOrders() {
       // Process each item
       let successCount = 0;
       let failCount = 0;
-      const failedItems = [];
-        for (const item of items) {
+      const failedItems = [];        for (const item of items) {
         try {
-          let targetMedia = null;
-          
-          if (item.mediaType === 'comic') {
-            // For comics, create the media object directly since we have all the info
-            targetMedia = {
-              title: item.title,
-              type: 'comic',
-              comicSeries: item.comicSeries,
-              comicYear: item.comicYear,
-              comicIssue: item.comicIssue
-            };
+          let targetMedia = null;          if (item.mediaType === 'comic') {
+            // For comics with new format, search ComicVine to find the correct issue
+            console.log(`Searching for comic: ${item.comicSeries} #${item.comicIssue} - ${item.title}`);
+              try {              // Normalize title characters to handle smart quotes and other encoding issues
+                const normalizeTitle = (title) => {
+                  return title
+                    .replace(/’/g, "'") // Convert right smart apostrophe (U+2019) to regular apostrophe (U+0027)
+                    .replace(/‘/g, "'") // Convert left smart apostrophe (U+2018) to regular apostrophe (U+0027)
+                    .replace(/”/g, '"') // Convert right smart quote (U+201D) to regular quote (U+0022)
+                    .replace(/“/g, '"') // Convert left smart quote (U+201C) to regular quote (U+0022)
+                    .replace(/[，﹐﹑]/g, ',') // Convert full-width, small, and ideographic commas to standard comma
+                    .replace(/–/g, '-') // Convert en-dash (U+2013) to regular dash
+                    .replace(/—/g, '-'); // Convert em-dash (U+2014) to regular dash
+                };
+              
+              const normalizedTitle = normalizeTitle(item.title);
+              console.log(`Original title: "${item.title}"`);
+              console.log(`Normalized title: "${normalizedTitle}"`);
+              
+              // Search using only the cleaned series name (don't include issue title in the series search)
+              // This is more accurate since ComicVine series search should only use the series name
+              console.log(`Series search query: "${item.comicSeries}" for issue #${item.comicIssue}`);
+                // Use the ComicVine search with issue filtering to find the correct series
+              const response = await fetch(`http://127.0.0.1:3001/api/comicvine/search-with-issues?query=${encodeURIComponent(item.comicSeries)}&issueNumber=${encodeURIComponent(item.comicIssue)}&issueTitle=${encodeURIComponent(normalizedTitle)}`);
+                if (response.ok) {
+                const searchResults = await response.json();
+                console.log(`Found ${searchResults.length} comic series with issue #${item.comicIssue}`);
+                console.log('Raw ComicVine search results:', JSON.stringify(searchResults, null, 2));
+                  // Find the best match based on issue title or just use the first result if title search fails
+                let selectedSeries = null;
+                if (searchResults.length > 0) {
+                  // Backend now handles title matching and sorting, so first result is the best match
+                  selectedSeries = searchResults[0];
+                  console.log(`✓ Using backend-sorted best match: "${selectedSeries.name}" with issue title: "${selectedSeries.issueName}"`);
+                    // Create enhanced comic data with ComicVine information
+                  targetMedia = {
+                    title: normalizedTitle,
+                    type: 'comic',
+                    comicSeries: selectedSeries.name, // Use ComicVine series name
+                    comicYear: item.comicYear || selectedSeries.start_year,
+                    comicIssue: item.comicIssue,
+                    comicVineId: selectedSeries.api_detail_url,
+                    comicVineDetailsJson: JSON.stringify(selectedSeries)
+                  };
+                  
+                  console.log(`✓ Enhanced comic data with ComicVine info: ${selectedSeries.name} (${targetMedia.comicYear}) #${item.comicIssue}`);                } else {
+                  console.log(`No ComicVine results found, using original data`);
+                  // Fallback to original data if no ComicVine results
+                  targetMedia = {
+                    title: normalizedTitle,
+                    type: 'comic',
+                    comicSeries: item.comicSeries,
+                    comicYear: item.comicYear,
+                    comicIssue: item.comicIssue
+                  };
+                }
+              } else {
+                console.log(`ComicVine search failed, using original data`);
+                // Fallback to original data if search fails
+                targetMedia = {
+                  title: normalizedTitle,
+                  type: 'comic',
+                  comicSeries: item.comicSeries,
+                  comicYear: item.comicYear,
+                  comicIssue: item.comicIssue
+                };
+              }
+            } catch (searchError) {
+              console.log(`ComicVine search error: ${searchError.message}, using original data`);
+              // Fallback to original data if search encounters an error
+              targetMedia = {
+                title: item.title,
+                type: 'comic',
+                comicSeries: item.comicSeries,
+                comicYear: item.comicYear,
+                comicIssue: item.comicIssue
+              };
+            }
           } else if (item.mediaType === 'book') {
             // For books, search OpenLibrary and use the first result
             try {
@@ -1699,7 +1893,24 @@ function CustomOrders() {
                     return false;
                   }
                   return true;
-                })                .map((item, index) => (<div key={item.id} className={`item-card ${item.isWatched ? 'watched' : ''}`}>
+                })                .map((item, index) => (
+                <div 
+                  key={item.id} 
+                  className={`item-card ${item.isWatched ? 'watched' : ''} ${
+                    isDragging && draggedItem?.id === item.id ? 'dragging' : ''
+                  } ${
+                    dragOverItem?.id === item.id ? 'drag-over' : ''
+                  }`}
+                  draggable={true}
+                  onDragStart={(e) => handleDragStart(e, item, index)}
+                  onDragOver={(e) => handleDragOver(e, index)}
+                  onDragLeave={handleDragLeave}
+                  onDrop={(e) => handleDrop(e, index)}
+                  onDragEnd={handleDragEnd}
+                >
+                  <div className="drag-handle" title="Drag to reorder">
+                    ⋮⋮
+                  </div>
                   <div className="item-position">#{index + 1}</div>
                   <div className="item-thumbnail">
                     {getItemArtworkUrl(item) ? (
@@ -2290,14 +2501,23 @@ Dune	Frank Herbert (1965)	Dune	book
                   required
                 />
               </div>
-              
-              <div className="form-actions">
+                <div className="form-actions">
                 <Button 
                   type="submit" 
                   disabled={bulkImportLoading}
                   className="primary"
                 >
                   {bulkImportLoading ? 'Importing...' : 'Import Items'}
+                </Button>
+                <Button
+                  type="button"
+                  onClick={() => {
+                    setBulkImportData('Batman Adventures (Vol. 1)\tIssue #01\tPenguin\'s Big Score\tComic');
+                  }}
+                  className="secondary"
+                  style={{ marginLeft: '10px' }}
+                >
+                  Test Batman Adventures
                 </Button>
                 <Button
                   type="button"
