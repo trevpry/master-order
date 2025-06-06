@@ -1,6 +1,3 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
-
 generator client {
   provider = "prisma-client-js"
 }
@@ -11,25 +8,25 @@ datasource db {
 }
 
 model Settings {
-  id               Int      @id @default(1)
-  collectionName   String?
-  tvdbToken        String?
-  tvdbTokenExpiry  DateTime?
-  comicVineApiKey  String?  // ComicVine API key for fetching comic details
-  plexToken        String?  // Plex authentication token
-  plexUrl          String?  // Plex server URL
-  tvdbApiKey       String?  // TVDB API key
-  tvdbBearerToken  String?  // TVDB Bearer token for API authentication
-  tvGeneralPercent Int      @default(50)  // Percentage for TV General order type
-  moviesGeneralPercent Int  @default(50)  // Percentage for Movies General order type
-  customOrderPercent Int    @default(0)   // Percentage for Custom Order type
-  partiallyWatchedCollectionPercent Int @default(75) // Percentage likelihood to prioritize movies from partially watched collections
-  ignoredMovieCollections String?   // JSON array of collection names to ignore for movie selection
-  ignoredTVCollections String?     // JSON array of collection names to ignore for TV show selection
-  christmasFilterEnabled Boolean   @default(false) // Enable Christmas movie filter during December
-  plexSyncInterval Int      @default(12)  // Hours between automatic Plex sync (default 12 hours)
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
+  id                                Int       @id @default(autoincrement())
+  collectionName                    String?
+  tvdbToken                         String?
+  tvdbTokenExpiry                   DateTime?
+  comicVineApiKey                   String?
+  plexToken                         String?
+  plexUrl                           String?
+  tvdbApiKey                        String?
+  tvdbBearerToken                   String?
+  tvGeneralPercent                  Int       @default(50)
+  moviesGeneralPercent              Int       @default(50)
+  customOrderPercent                Int       @default(0)
+  partiallyWatchedCollectionPercent Int       @default(75)
+  ignoredMovieCollections           String?
+  ignoredTVCollections              String?
+  christmasFilterEnabled            Boolean   @default(false)
+  plexSyncInterval                  Int       @default(12)
+  createdAt                         DateTime  @default(now())
+  updatedAt                         DateTime  @updatedAt
 }
 
 model Order {
@@ -42,545 +39,522 @@ model Order {
 }
 
 model CustomOrder {
-  id          Int      @id @default(autoincrement())
-  name        String   // User-defined name for the custom order
-  description String?  // Optional description
-  icon        String?  // Optional SVG icon content for the custom order
-  isActive    Boolean  @default(true)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id          Int               @id @default(autoincrement())
+  name        String
+  description String?
+  isActive    Boolean           @default(true)
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+  icon        String?
   items       CustomOrderItem[]
 }
 
 model CustomOrderItem {
-  id            Int         @id @default(autoincrement())
-  customOrderId Int
-  customOrder   CustomOrder @relation(fields: [customOrderId], references: [id], onDelete: Cascade)
-  mediaType     String      // 'movie', 'episode', 'comic', 'book', 'shortstory', or 'web'
-  plexKey       String      // Plex key for the media item (for comics and books, this will be a generated key)
-  title         String      // Title for display purposes
-  seasonNumber  Int?        // For episodes only
-  episodeNumber Int?        // For episodes only
-  seriesTitle   String?     // For episodes only
-  // Comic-specific fields
-  comicSeries   String?     // For comics only - series name
-  comicYear     Int?        // For comics only - publication year
-  comicIssue    String?     // For comics only - issue number (can be string for special issues)
-  comicVolume   String?     // For comics only - volume information
-  // Book-specific fields
-  bookTitle     String?     // For books only - book title
-  bookAuthor    String?     // For books only - primary author
-  bookYear      Int?        // For books only - publication year
-  bookIsbn      String?     // For books only - ISBN
-  bookPublisher String?     // For books only - publisher
-  bookOpenLibraryId String? // For books only - OpenLibrary ID
-  bookCoverUrl  String?     // For books only - cover image URL
-  // Short story-specific fields
-  storyTitle    String?     // For short stories only - story title
-  storyAuthor   String?     // For short stories only - story author
-  storyYear     Int?        // For short stories only - publication year
-  storyUrl      String?     // For short stories only - optional URL link
-  storyContainedInBookId Int? // For short stories only - reference to book that contains this story
-  storyContainedInBook CustomOrderItem? @relation("StoryInBook", fields: [storyContainedInBookId], references: [id], onDelete: SetNull)
-  containedStories CustomOrderItem[] @relation("StoryInBook")
-  storyCoverUrl String?     // For short stories only - cover image URL (falls back to book cover if not set)
-  // Web video-specific fields
-  webTitle      String?     // For web videos only - video title
-  webUrl        String?     // For web videos only - video URL
-  webDescription String?    // For web videos only - video description
-  // Local artwork caching fields
-  localArtworkPath String?  // Local file path to cached artwork
-  originalArtworkUrl String? // Original remote URL for artwork source
-  artworkLastCached DateTime? // Timestamp when artwork was last cached
-  artworkMimeType String?   // MIME type of the cached artwork file
-  sortOrder     Int         @default(0) // For manual ordering
-  isWatched     Boolean     @default(false)
-  createdAt     DateTime    @default(now())
-  updatedAt     DateTime    @updatedAt
+  id                     Int               @id @default(autoincrement())
+  customOrderId          Int
+  mediaType              String
+  plexKey                String
+  title                  String
+  seasonNumber           Int?
+  episodeNumber          Int?
+  seriesTitle            String?
+  comicSeries            String?
+  comicYear              Int?
+  comicIssue             String?
+  comicVolume            String?
+  customTitle            String?
+  bookTitle              String?
+  bookAuthor             String?
+  bookYear               Int?
+  bookIsbn               String?
+  bookPublisher          String?
+  bookOpenLibraryId      String?
+  bookCoverUrl           String?
+  storyTitle             String?
+  storyAuthor            String?
+  storyYear              Int?
+  storyUrl               String?
+  storyContainedInBookId Int?
+  storyCoverUrl          String?
+  sortOrder              Int               @default(0)
+  isWatched              Boolean           @default(false)
+  createdAt              DateTime          @default(now())
+  updatedAt              DateTime          @updatedAt
+  artworkLastCached      DateTime?
+  artworkMimeType        String?
+  localArtworkPath       String?
+  originalArtworkUrl     String?
+  webTitle               String?
+  webUrl                 String?
+  webDescription         String?
+  storyContainedInBook   CustomOrderItem?  @relation("StoryInBook", fields: [storyContainedInBookId], references: [id])
+  containedStories       CustomOrderItem[] @relation("StoryInBook")
+  customOrder            CustomOrder       @relation(fields: [customOrderId], references: [id], onDelete: Cascade)
 }
 
-// Plex Library Tables for caching
 model PlexLibrarySection {
-  id        Int      @id @default(autoincrement())
-  sectionKey String  @unique // Plex section key
-  title     String   // Section title (e.g. "TV Shows", "Movies")
-  type      String   // Section type ("show", "movie")
-  // Additional fields from Plex API
-  agent             String?  // Scanner agent
-  allowSync         Int?     // Allow sync flag
-  art               String?  // Art path
-  composite         String?  // Composite path
-  content           String?  // Content flag
-  contentChangedAt  Int?     // Content changed timestamp
-  createdAt_plex    Int?     // Plex creation timestamp
-  directory         String?  // Directory path
-  filters           String?  // JSON string of filters
-  hidden            Int?     // Hidden flag
-  language          String?  // Language code
-  refreshing        Int?     // Refreshing flag
-  scannedAt         Int?     // Last scanned timestamp
-  scanner           String?  // Scanner type
-  thumb             String?  // Thumbnail path
-  updatedAt_plex    Int?     // Plex updated timestamp
-  uuid              String?  // UUID
-  createdAt         DateTime @default(now())
-  updatedAt         DateTime @updatedAt
-  
-  tvShows   PlexTVShow[]
-  movies    PlexMovie[]
+  id               Int          @id @default(autoincrement())
+  sectionKey       String       @unique
+  title            String
+  type             String
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+  agent            String?
+  allowSync        Int?
+  art              String?
+  composite        String?
+  content          String?
+  contentChangedAt Int?
+  createdAt_plex   Int?
+  directory        String?
+  filters          String?
+  hidden           Int?
+  language         String?
+  refreshing       Int?
+  scannedAt        Int?
+  scanner          String?
+  thumb            String?
+  updatedAt_plex   Int?
+  uuid             String?
+  movies           PlexMovie[]
+  tvShows          PlexTVShow[]
 }
 
 model PlexTVShow {
-  id                Int      @id @default(autoincrement())
-  ratingKey         String   @unique // Plex rating key
-  title             String   // Series title
-  year              Int?     // Release year
-  summary           String?  // Description
-  thumb             String?  // Thumbnail path
-  art               String?  // Art path
-  leafCount         Int?     // Total episodes
-  viewedLeafCount   Int?     // Watched episodes
-  addedAt           Int?     // Plex added timestamp
-  updatedAt_plex    Int?     // Plex updated timestamp
-  collections       String?  // JSON array of collection names
-  // Additional fields from Plex API
-  childCount        Int?     // Child count
-  guid              String?  // GUID
-  index             Int?     // Index
-  key               String?  // Key path
-  lastViewedAt      Int?     // Last viewed timestamp
-  skipCount         Int?     // Skip count
-  type              String?  // Type
-  viewCount         Int?     // View count
-  sectionKey        String   // Foreign key to library section
-  section           PlexLibrarySection @relation(fields: [sectionKey], references: [sectionKey])
-  // Related complex fields
-  genres            PlexGenre[]
-  guids             PlexGuid[]
-  images            PlexImage[]
-  ultraBlurColors   PlexUltraBlurColor[]
-  labels            PlexLabel[]
-  lastSyncedAt      DateTime @default(now())
-  createdAt         DateTime @default(now())
-  updatedAt         DateTime @updatedAt
-  
-  seasons PlexSeason[]
+  id              Int                  @id @default(autoincrement())
+  ratingKey       String               @unique
+  title           String
+  year            Int?
+  summary         String?
+  thumb           String?
+  art             String?
+  leafCount       Int?
+  viewedLeafCount Int?
+  addedAt         Int?
+  updatedAt_plex  Int?
+  collections     String?
+  sectionKey      String
+  lastSyncedAt    DateTime             @default(now())
+  createdAt       DateTime             @default(now())
+  updatedAt       DateTime             @updatedAt
+  childCount      Int?
+  guid            String?
+  index           Int?
+  key             String?
+  lastViewedAt    Int?
+  skipCount       Int?
+  type            String?
+  viewCount       Int?
+  genres          PlexGenre[]
+  guids           PlexGuid[]
+  images          PlexImage[]
+  labels          PlexLabel[]
+  seasons         PlexSeason[]
+  section         PlexLibrarySection   @relation(fields: [sectionKey], references: [sectionKey])
+  ultraBlurColors PlexUltraBlurColor[]
 }
 
 model PlexSeason {
-  id          Int      @id @default(autoincrement())
-  ratingKey   String   @unique // Plex rating key for season
-  title       String   // Season title
-  index       Int      // Season number
-  showRatingKey String // Parent show rating key
-  show        PlexTVShow @relation(fields: [showRatingKey], references: [ratingKey])
-  leafCount   Int?     // Total episodes in season
-  viewedLeafCount Int? // Watched episodes in season
-  // Additional fields from Plex API
-  addedAt           Int?     // Plex added timestamp
-  guid              String?  // GUID
-  key               String?  // Key path
-  lastViewedAt      Int?     // Last viewed timestamp
-  librarySectionID  Int?     // Library section ID
-  librarySectionKey String?  // Library section key
-  librarySectionTitle String? // Library section title
-  parentGuid        String?  // Parent GUID
-  parentIndex       Int?     // Parent index
-  parentKey         String?  // Parent key
-  parentRatingKey   String?  // Parent rating key (should match showRatingKey)
-  parentThumb       String?  // Parent thumbnail
-  parentTitle       String?  // Parent title
-  skipCount         Int?     // Skip count
-  summary           String?  // Season description
-  thumb             String?  // Thumbnail path
-  type              String?  // Type
-  updatedAt_plex    Int?     // Plex updated timestamp
-  viewCount         Int?     // View count
-  // Related complex fields
-  guids             PlexGuid[]
-  images            PlexImage[]
-  ultraBlurColors   PlexUltraBlurColor[]
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-  
-  episodes PlexEpisode[]
+  id                  Int                  @id @default(autoincrement())
+  ratingKey           String               @unique
+  title               String
+  index               Int
+  showRatingKey       String
+  leafCount           Int?
+  viewedLeafCount     Int?
+  createdAt           DateTime             @default(now())
+  updatedAt           DateTime             @updatedAt
+  addedAt             Int?
+  guid                String?
+  key                 String?
+  lastViewedAt        Int?
+  librarySectionID    Int?
+  librarySectionKey   String?
+  librarySectionTitle String?
+  parentGuid          String?
+  parentIndex         Int?
+  parentKey           String?
+  parentRatingKey     String?
+  parentThumb         String?
+  parentTitle         String?
+  skipCount           Int?
+  summary             String?
+  thumb               String?
+  type                String?
+  updatedAt_plex      Int?
+  viewCount           Int?
+  episodes            PlexEpisode[]
+  guids               PlexGuid[]
+  images              PlexImage[]
+  show                PlexTVShow           @relation(fields: [showRatingKey], references: [ratingKey])
+  ultraBlurColors     PlexUltraBlurColor[]
 }
 
 model PlexEpisode {
-  id                  Int      @id @default(autoincrement())
-  ratingKey           String   @unique // Plex rating key
-  title               String   // Episode title
-  index               Int      // Episode number
-  seasonIndex         Int      // Season number
-  showTitle           String   // Series title (denormalized for easier queries)
-  seasonRatingKey     String   // Parent season rating key
-  season              PlexSeason @relation(fields: [seasonRatingKey], references: [ratingKey])
-  viewCount           Int?     // Watch count
-  lastViewedAt        Int?     // Last viewed timestamp
-  addedAt             Int?     // Plex added timestamp
-  originallyAvailableAt String? // Original air date from Plex (YYYY-MM-DD format)
-  summary             String?  // Episode description
-  thumb               String?  // Thumbnail path
-  // Additional fields from Plex API
-  duration            Int?     // Duration in milliseconds
-  grandparentGuid     String?  // Grandparent GUID (show)
-  grandparentKey      String?  // Grandparent key
-  grandparentRatingKey String? // Grandparent rating key (show)
-  grandparentThumb    String?  // Grandparent thumbnail
-  grandparentTitle    String?  // Grandparent title (show title)
-  guid                String?  // GUID
-  key                 String?  // Key path
-  librarySectionID    Int?     // Library section ID
-  librarySectionKey   String?  // Library section key
-  librarySectionTitle String?  // Library section title
-  parentGuid          String?  // Parent GUID (season)
-  parentIndex         Int?     // Parent index (season number)
-  parentKey           String?  // Parent key
-  parentRatingKey     String?  // Parent rating key (should match seasonRatingKey)
-  parentThumb         String?  // Parent thumbnail
-  parentTitle         String?  // Parent title (season title)
-  skipCount           Int?     // Skip count
-  titleSort           String?  // Title sort
-  type                String?  // Type
-  updatedAt_plex      Int?     // Plex updated timestamp
-  // Related complex fields
-  directors           PlexDirector[]
-  writers             PlexWriter[]
-  roles               PlexRole[]
-  ratings             PlexRating[]
-  guids               PlexGuid[]
-  media               PlexMedia[]
-  images              PlexImage[]
-  ultraBlurColors     PlexUltraBlurColor[]
-  createdAt           DateTime @default(now())
-  updatedAt           DateTime @updatedAt
+  id                    Int                  @id @default(autoincrement())
+  ratingKey             String               @unique
+  title                 String
+  index                 Int
+  seasonIndex           Int
+  showTitle             String
+  seasonRatingKey       String
+  viewCount             Int?
+  lastViewedAt          Int?
+  addedAt               Int?
+  summary               String?
+  thumb                 String?
+  createdAt             DateTime             @default(now())
+  updatedAt             DateTime             @updatedAt
+  originallyAvailableAt String?
+  duration              Int?
+  grandparentGuid       String?
+  grandparentKey        String?
+  grandparentRatingKey  String?
+  grandparentThumb      String?
+  grandparentTitle      String?
+  guid                  String?
+  key                   String?
+  librarySectionID      Int?
+  librarySectionKey     String?
+  librarySectionTitle   String?
+  parentGuid            String?
+  parentIndex           Int?
+  parentKey             String?
+  parentRatingKey       String?
+  parentThumb           String?
+  parentTitle           String?
+  skipCount             Int?
+  titleSort             String?
+  type                  String?
+  updatedAt_plex        Int?
+  directors             PlexDirector[]
+  season                PlexSeason           @relation(fields: [seasonRatingKey], references: [ratingKey])
+  guids                 PlexGuid[]
+  images                PlexImage[]
+  media                 PlexMedia[]
+  ratings               PlexRating[]
+  roles                 PlexRole[]
+  ultraBlurColors       PlexUltraBlurColor[]
+  writers               PlexWriter[]
 }
 
 model PlexMovie {
-  id                    Int      @id @default(autoincrement())
-  ratingKey             String   @unique // Plex rating key
-  title                 String   // Movie title
-  year                  Int?     // Release year
-  summary               String?  // Description
-  thumb                 String?  // Thumbnail path
-  art                   String?  // Art path
-  viewCount             Int?     // Watch count
-  lastViewedAt          Int?     // Last viewed timestamp
-  addedAt               Int?     // Plex added timestamp
-  originallyAvailableAt String?  // Original release date from Plex (YYYY-MM-DD format)
-  updatedAt_plex        Int?     // Plex updated timestamp
-  collections           String?  // JSON array of collection names
-  // Additional fields from Plex API
-  audienceRating        Float?   // Audience rating
-  audienceRatingImage   String?  // Audience rating image
-  chapterSource         String?  // Chapter source
-  contentRating         String?  // Content rating (PG, R, etc.)
-  duration              Int?     // Duration in milliseconds
-  guid                  String?  // GUID
-  key                   String?  // Key path
-  librarySectionID      Int?     // Library section ID
-  librarySectionKey     String?  // Library section key
-  librarySectionTitle   String?  // Library section title
-  primaryExtraKey       String?  // Primary extra key
-  rating                Float?   // Rating
-  ratingImage           String?  // Rating image
-  skipCount             Int?     // Skip count
-  slug                  String?  // Slug
-  studio                String?  // Studio
-  tagline               String?  // Tagline
-  titleSort             String?  // Title sort
-  type                  String?  // Type
-  sectionKey            String   // Foreign key to library section
-  section               PlexLibrarySection @relation(fields: [sectionKey], references: [sectionKey])
-  // Related complex fields
+  id                    Int                  @id @default(autoincrement())
+  ratingKey             String               @unique
+  title                 String
+  year                  Int?
+  summary               String?
+  thumb                 String?
+  art                   String?
+  viewCount             Int?
+  lastViewedAt          Int?
+  addedAt               Int?
+  updatedAt_plex        Int?
+  collections           String?
+  sectionKey            String
+  lastSyncedAt          DateTime             @default(now())
+  createdAt             DateTime             @default(now())
+  updatedAt             DateTime             @updatedAt
+  originallyAvailableAt String?
+  audienceRating        Float?
+  audienceRatingImage   String?
+  chapterSource         String?
+  contentRating         String?
+  duration              Int?
+  guid                  String?
+  key                   String?
+  librarySectionID      Int?
+  librarySectionKey     String?
+  librarySectionTitle   String?
+  primaryExtraKey       String?
+  rating                Float?
+  ratingImage           String?
+  skipCount             Int?
+  slug                  String?
+  studio                String?
+  tagline               String?
+  titleSort             String?
+  type                  String?
+  countries             PlexCountry[]
   directors             PlexDirector[]
   genres                PlexGenre[]
-  producers             PlexProducer[]
-  writers               PlexWriter[]
-  roles                 PlexRole[]
-  countries             PlexCountry[]
-  ratings               PlexRating[]
   guids                 PlexGuid[]
-  media                 PlexMedia[]
   images                PlexImage[]
-  ultraBlurColors       PlexUltraBlurColor[]
   labels                PlexLabel[]
-  lastSyncedAt          DateTime @default(now())
-  createdAt             DateTime @default(now())
-  updatedAt             DateTime @updatedAt
+  media                 PlexMedia[]
+  section               PlexLibrarySection   @relation(fields: [sectionKey], references: [sectionKey])
+  producers             PlexProducer[]
+  ratings               PlexRating[]
+  roles                 PlexRole[]
+  ultraBlurColors       PlexUltraBlurColor[]
+  writers               PlexWriter[]
 }
 
-// TVDB Caching Tables
 model TvdbSeries {
-  id               Int      @id @default(autoincrement())
-  tvdbId           String   @unique // TVDB series ID
-  name             String   // Series name
-  slug             String?  // URL slug
-  image            String?  // Series image URL
-  firstAired       String?  // First aired date
-  lastAired        String?  // Last aired date
-  nextAired        String?  // Next aired date
-  status           String?  // Series status (Continuing, Ended, etc.)
-  overview         String?  // Series description
-  year             String?  // Year
-  country          String?  // Country
-  originalCountry  String?  // Original country
-  originalLanguage String?  // Original language
-  averageRuntime   Int?     // Average runtime in minutes
-  score            Float?   // TVDB score
-  lastUpdated      String?  // Last updated timestamp from TVDB
-  lastSyncedAt     DateTime @default(now())
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
-  
-  seasons  TvdbSeason[]
-  artworks TvdbArtwork[]
+  id               Int           @id @default(autoincrement())
+  tvdbId           String        @unique
+  name             String
+  slug             String?
+  image            String?
+  firstAired       String?
+  lastAired        String?
+  nextAired        String?
+  status           String?
+  overview         String?
+  year             String?
+  country          String?
+  originalCountry  String?
+  originalLanguage String?
+  averageRuntime   Int?
+  score            Float?
+  lastUpdated      String?
+  lastSyncedAt     DateTime      @default(now())
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
+  artworks         TvdbArtwork[]
+  seasons          TvdbSeason[]
 }
 
 model TvdbSeason {
-  id               Int      @id @default(autoincrement())
-  tvdbId           String   @unique // TVDB season ID
-  seriesTvdbId     String   // Foreign key to parent series
-  series           TvdbSeries @relation(fields: [seriesTvdbId], references: [tvdbId])
-  number           Int      // Season number
-  name             String?  // Season name
-  image            String?  // Season image URL
-  overview         String?  // Season description
-  year             Int?     // Year
-  lastUpdated      String?  // Last updated timestamp from TVDB
-  lastSyncedAt     DateTime @default(now())
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
-  
-  episodes TvdbEpisode[]
-  artworks TvdbArtwork[]
+  id           Int           @id @default(autoincrement())
+  tvdbId       String        @unique
+  seriesTvdbId String
+  number       Int
+  name         String?
+  image        String?
+  overview     String?
+  year         Int?
+  lastUpdated  String?
+  lastSyncedAt DateTime      @default(now())
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+  artworks     TvdbArtwork[]
+  episodes     TvdbEpisode[]
+  series       TvdbSeries    @relation(fields: [seriesTvdbId], references: [tvdbId])
 }
 
 model TvdbEpisode {
-  id               Int      @id @default(autoincrement())
-  tvdbId           String   @unique // TVDB episode ID
-  seasonTvdbId     String   // Foreign key to parent season
-  season           TvdbSeason @relation(fields: [seasonTvdbId], references: [tvdbId])
-  seriesTvdbId     String   // Denormalized for easier queries
-  number           Int      // Episode number
-  seasonNumber     Int      // Season number (denormalized)
-  name             String?  // Episode name
-  overview         String?  // Episode description
-  image            String?  // Episode image URL
-  aired            String?  // Air date
-  runtime          Int?     // Runtime in minutes
-  finaleType       String?  // Finale type (series, season, midseason)
-  year             Int?     // Year
-  lastUpdated      String?  // Last updated timestamp from TVDB
-  lastSyncedAt     DateTime @default(now())
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
+  id           Int        @id @default(autoincrement())
+  tvdbId       String     @unique
+  seasonTvdbId String
+  seriesTvdbId String
+  number       Int
+  seasonNumber Int
+  name         String?
+  overview     String?
+  image        String?
+  aired        String?
+  runtime      Int?
+  finaleType   String?
+  year         Int?
+  lastUpdated  String?
+  lastSyncedAt DateTime   @default(now())
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+  season       TvdbSeason @relation(fields: [seasonTvdbId], references: [tvdbId])
 }
 
 model TvdbArtwork {
-  id               Int      @id @default(autoincrement())
-  tvdbId           String   // TVDB artwork ID (not globally unique)
-  seriesTvdbId     String?  // Optional foreign key to series
-  series           TvdbSeries? @relation(fields: [seriesTvdbId], references: [tvdbId])
-  seasonTvdbId     String?  // Optional foreign key to season
-  season           TvdbSeason? @relation(fields: [seasonTvdbId], references: [tvdbId])
-  image            String   // Image URL
-  thumbnail        String?  // Thumbnail URL
-  language         String?  // Language code (eng, etc.)
-  type             Int      // Artwork type (2=series poster, 7=season poster, etc.)
-  width            Int?     // Image width
-  height           Int?     // Image height
-  score            Float?   // Artwork score
-  includesText     Boolean? // Whether artwork includes text
-  lastUpdated      String?  // Last updated timestamp from TVDB
-  lastSyncedAt     DateTime @default(now())
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
+  id           Int         @id @default(autoincrement())
+  tvdbId       String
+  seriesTvdbId String?
+  seasonTvdbId String?
+  image        String
+  thumbnail    String?
+  language     String?
+  type         Int
+  width        Int?
+  height       Int?
+  score        Float?
+  includesText Boolean?
+  lastUpdated  String?
+  lastSyncedAt DateTime    @default(now())
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+  season       TvdbSeason? @relation(fields: [seasonTvdbId], references: [tvdbId])
+  series       TvdbSeries? @relation(fields: [seriesTvdbId], references: [tvdbId])
 
   @@unique([tvdbId, seriesTvdbId, seasonTvdbId], name: "artwork_unique_context")
 }
 
-// Plex Complex Field Tables
 model PlexDirector {
-  id        Int      @id @default(autoincrement())
-  movieRatingKey String?
-  movie     PlexMovie? @relation(fields: [movieRatingKey], references: [ratingKey])
+  id               Int          @id @default(autoincrement())
+  movieRatingKey   String?
   episodeRatingKey String?
-  episode   PlexEpisode? @relation(fields: [episodeRatingKey], references: [ratingKey])
-  tag       String   // Director name
-  filter    String?  // Filter value
-  tagKey    String?  // Tag key
-  thumb     String?  // Director thumbnail
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  tag              String
+  filter           String?
+  tagKey           String?
+  thumb            String?
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+  episode          PlexEpisode? @relation(fields: [episodeRatingKey], references: [ratingKey])
+  movie            PlexMovie?   @relation(fields: [movieRatingKey], references: [ratingKey])
 }
 
 model PlexGenre {
-  id        Int      @id @default(autoincrement())
+  id             Int         @id @default(autoincrement())
   movieRatingKey String?
-  movie     PlexMovie? @relation(fields: [movieRatingKey], references: [ratingKey])
-  showRatingKey String?
-  show      PlexTVShow? @relation(fields: [showRatingKey], references: [ratingKey])
-  tag       String   // Genre name
-  filter    String?  // Filter value
-  tagKey    String?  // Tag key
-  thumb     String?  // Genre thumbnail
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  showRatingKey  String?
+  tag            String
+  filter         String?
+  tagKey         String?
+  thumb          String?
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+  show           PlexTVShow? @relation(fields: [showRatingKey], references: [ratingKey])
+  movie          PlexMovie?  @relation(fields: [movieRatingKey], references: [ratingKey])
 }
 
 model PlexProducer {
-  id        Int      @id @default(autoincrement())
+  id             Int        @id @default(autoincrement())
   movieRatingKey String?
-  movie     PlexMovie? @relation(fields: [movieRatingKey], references: [ratingKey])
-  tag       String   // Producer name
-  filter    String?  // Filter value
-  tagKey    String?  // Tag key
-  thumb     String?  // Producer thumbnail
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  tag            String
+  filter         String?
+  tagKey         String?
+  thumb          String?
+  createdAt      DateTime   @default(now())
+  updatedAt      DateTime   @updatedAt
+  movie          PlexMovie? @relation(fields: [movieRatingKey], references: [ratingKey])
 }
 
 model PlexWriter {
-  id        Int      @id @default(autoincrement())
-  movieRatingKey String?
-  movie     PlexMovie? @relation(fields: [movieRatingKey], references: [ratingKey])
+  id               Int          @id @default(autoincrement())
+  movieRatingKey   String?
   episodeRatingKey String?
-  episode   PlexEpisode? @relation(fields: [episodeRatingKey], references: [ratingKey])
-  tag       String   // Writer name
-  filter    String?  // Filter value
-  tagKey    String?  // Tag key
-  thumb     String?  // Writer thumbnail
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  tag              String
+  filter           String?
+  tagKey           String?
+  thumb            String?
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+  episode          PlexEpisode? @relation(fields: [episodeRatingKey], references: [ratingKey])
+  movie            PlexMovie?   @relation(fields: [movieRatingKey], references: [ratingKey])
 }
 
 model PlexRole {
-  id        Int      @id @default(autoincrement())
-  movieRatingKey String?
-  movie     PlexMovie? @relation(fields: [movieRatingKey], references: [ratingKey])
+  id               Int          @id @default(autoincrement())
+  movieRatingKey   String?
   episodeRatingKey String?
-  episode   PlexEpisode? @relation(fields: [episodeRatingKey], references: [ratingKey])
-  tag       String   // Actor name
-  filter    String?  // Filter value
-  tagKey    String?  // Tag key
-  role      String?  // Character name
-  thumb     String?  // Actor thumbnail
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  tag              String
+  filter           String?
+  tagKey           String?
+  role             String?
+  thumb            String?
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+  episode          PlexEpisode? @relation(fields: [episodeRatingKey], references: [ratingKey])
+  movie            PlexMovie?   @relation(fields: [movieRatingKey], references: [ratingKey])
 }
 
 model PlexCountry {
-  id        Int      @id @default(autoincrement())
+  id             Int        @id @default(autoincrement())
   movieRatingKey String?
-  movie     PlexMovie? @relation(fields: [movieRatingKey], references: [ratingKey])
-  tag       String   // Country name
-  filter    String?  // Filter value
-  tagKey    String?  // Tag key
-  thumb     String?  // Country thumbnail
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  tag            String
+  filter         String?
+  tagKey         String?
+  thumb          String?
+  createdAt      DateTime   @default(now())
+  updatedAt      DateTime   @updatedAt
+  movie          PlexMovie? @relation(fields: [movieRatingKey], references: [ratingKey])
 }
 
 model PlexRating {
-  id        Int      @id @default(autoincrement())
-  movieRatingKey String?
-  movie     PlexMovie? @relation(fields: [movieRatingKey], references: [ratingKey])
+  id               Int          @id @default(autoincrement())
+  movieRatingKey   String?
   episodeRatingKey String?
-  episode   PlexEpisode? @relation(fields: [episodeRatingKey], references: [ratingKey])
-  image     String?  // Rating image
-  value     Float?   // Rating value
-  type      String?  // Rating type
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  image            String?
+  value            Float?
+  type             String?
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+  episode          PlexEpisode? @relation(fields: [episodeRatingKey], references: [ratingKey])
+  movie            PlexMovie?   @relation(fields: [movieRatingKey], references: [ratingKey])
 }
 
 model PlexGuid {
-  id        Int      @id @default(autoincrement())
-  movieRatingKey String?
-  movie     PlexMovie? @relation(fields: [movieRatingKey], references: [ratingKey])
-  showRatingKey String?
-  show      PlexTVShow? @relation(fields: [showRatingKey], references: [ratingKey])
-  seasonRatingKey String?
-  season    PlexSeason? @relation(fields: [seasonRatingKey], references: [ratingKey])
+  id               Int          @id @default(autoincrement())
+  movieRatingKey   String?
+  showRatingKey    String?
+  seasonRatingKey  String?
   episodeRatingKey String?
-  episode   PlexEpisode? @relation(fields: [episodeRatingKey], references: [ratingKey])
-  id_value  String   // GUID value
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id_value         String
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+  episode          PlexEpisode? @relation(fields: [episodeRatingKey], references: [ratingKey])
+  season           PlexSeason?  @relation(fields: [seasonRatingKey], references: [ratingKey])
+  show             PlexTVShow?  @relation(fields: [showRatingKey], references: [ratingKey])
+  movie            PlexMovie?   @relation(fields: [movieRatingKey], references: [ratingKey])
 }
 
 model PlexMedia {
-  id        Int      @id @default(autoincrement())
-  movieRatingKey String?
-  movie     PlexMovie? @relation(fields: [movieRatingKey], references: [ratingKey])
-  episodeRatingKey String?
-  episode   PlexEpisode? @relation(fields: [episodeRatingKey], references: [ratingKey])
-  id_value  String?  // Media ID
-  duration  Int?     // Duration
-  bitrate   Int?     // Bitrate
-  width     Int?     // Width
-  height    Int?     // Height
-  aspectRatio Float? // Aspect ratio
-  audioChannels Int? // Audio channels
-  audioCodec String? // Audio codec
-  videoCodec String? // Video codec
-  videoResolution String? // Video resolution
-  container String?  // Container format
-  videoFrameRate String? // Video frame rate
-  optimizedForStreaming Boolean? // Optimized for streaming
-  selected  Boolean? // Selected
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id                    Int          @id @default(autoincrement())
+  movieRatingKey        String?
+  episodeRatingKey      String?
+  id_value              String?
+  duration              Int?
+  bitrate               Int?
+  width                 Int?
+  height                Int?
+  aspectRatio           Float?
+  audioChannels         Int?
+  audioCodec            String?
+  videoCodec            String?
+  videoResolution       String?
+  container             String?
+  videoFrameRate        String?
+  optimizedForStreaming Boolean?
+  selected              Boolean?
+  createdAt             DateTime     @default(now())
+  updatedAt             DateTime     @updatedAt
+  episode               PlexEpisode? @relation(fields: [episodeRatingKey], references: [ratingKey])
+  movie                 PlexMovie?   @relation(fields: [movieRatingKey], references: [ratingKey])
 }
 
 model PlexImage {
-  id        Int      @id @default(autoincrement())
-  movieRatingKey String?
-  movie     PlexMovie? @relation(fields: [movieRatingKey], references: [ratingKey])
-  showRatingKey String?
-  show      PlexTVShow? @relation(fields: [showRatingKey], references: [ratingKey])
-  seasonRatingKey String?
-  season    PlexSeason? @relation(fields: [seasonRatingKey], references: [ratingKey])
+  id               Int          @id @default(autoincrement())
+  movieRatingKey   String?
+  showRatingKey    String?
+  seasonRatingKey  String?
   episodeRatingKey String?
-  episode   PlexEpisode? @relation(fields: [episodeRatingKey], references: [ratingKey])
-  alt       String?  // Alt text
-  type      String?  // Image type
-  url       String?  // Image URL
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  alt              String?
+  type             String?
+  url              String?
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+  episode          PlexEpisode? @relation(fields: [episodeRatingKey], references: [ratingKey])
+  season           PlexSeason?  @relation(fields: [seasonRatingKey], references: [ratingKey])
+  show             PlexTVShow?  @relation(fields: [showRatingKey], references: [ratingKey])
+  movie            PlexMovie?   @relation(fields: [movieRatingKey], references: [ratingKey])
 }
 
 model PlexUltraBlurColor {
-  id        Int      @id @default(autoincrement())
-  movieRatingKey String?
-  movie     PlexMovie? @relation(fields: [movieRatingKey], references: [ratingKey])
-  showRatingKey String?
-  show      PlexTVShow? @relation(fields: [showRatingKey], references: [ratingKey])
-  seasonRatingKey String?
-  season    PlexSeason? @relation(fields: [seasonRatingKey], references: [ratingKey])
+  id               Int          @id @default(autoincrement())
+  movieRatingKey   String?
+  showRatingKey    String?
+  seasonRatingKey  String?
   episodeRatingKey String?
-  episode   PlexEpisode? @relation(fields: [episodeRatingKey], references: [ratingKey])
-  topLeft   String?  // Top left color
-  topRight  String?  // Top right color
-  bottomLeft String? // Bottom left color
-  bottomRight String? // Bottom right color
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  topLeft          String?
+  topRight         String?
+  bottomLeft       String?
+  bottomRight      String?
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+  episode          PlexEpisode? @relation(fields: [episodeRatingKey], references: [ratingKey])
+  season           PlexSeason?  @relation(fields: [seasonRatingKey], references: [ratingKey])
+  show             PlexTVShow?  @relation(fields: [showRatingKey], references: [ratingKey])
+  movie            PlexMovie?   @relation(fields: [movieRatingKey], references: [ratingKey])
 }
 
 model PlexLabel {
-  id        Int      @id @default(autoincrement())
+  id             Int         @id @default(autoincrement())
   movieRatingKey String?
-  movie     PlexMovie? @relation(fields: [movieRatingKey], references: [ratingKey])
-  showRatingKey String?
-  show      PlexTVShow? @relation(fields: [showRatingKey], references: [ratingKey])
-  tag       String   // Label name (e.g., "Christmas")
-  filter    String?  // Filter value
-  tagKey    String?  // Tag key
-  thumb     String?  // Label thumbnail
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  showRatingKey  String?
+  tag            String
+  filter         String?
+  tagKey         String?
+  thumb          String?
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+  show           PlexTVShow? @relation(fields: [showRatingKey], references: [ratingKey])
+  movie          PlexMovie?  @relation(fields: [movieRatingKey], references: [ratingKey])
 }
-
-

@@ -30,12 +30,12 @@ function CustomOrders() {
     isbn: ''
   });  const [bookSearchResults, setBookSearchResults] = useState([]);
   const [bookSearchLoading, setBookSearchLoading] = useState(false);
-  const [showComicForm, setShowComicForm] = useState(false);
-  const [comicFormData, setComicFormData] = useState({
+  const [showComicForm, setShowComicForm] = useState(false);  const [comicFormData, setComicFormData] = useState({
     series: '',
     year: '',
-    issue: ''
-  });  const [comicSearchResults, setComicSearchResults] = useState([]);
+    issue: '',
+    title: ''
+  });const [comicSearchResults, setComicSearchResults] = useState([]);
   const [comicSearchLoading, setComicSearchLoading] = useState(false);
   const [showShortStoryForm, setShowShortStoryForm] = useState(false);
   const [shortStoryFormData, setShortStoryFormData] = useState({
@@ -46,17 +46,56 @@ function CustomOrders() {
     containedInBookId: '',
     coverUrl: ''
   });  const [shortStorySearchResults, setShortStorySearchResults] = useState([]);
-  
-  // Drag and Drop state
+    // Drag and Drop state
   const [draggedItem, setDraggedItem] = useState(null);
   const [dragOverItem, setDragOverItem] = useState(null);
   const [isDragging, setIsDragging] = useState(false);
-
+  
+  // Watched items filter state
+  const [showWatchedItems, setShowWatchedItems] = useState(true);
   const [formData, setFormData] = useState({
     name: '',
     description: '',
     icon: ''
   });
+    // Helper function to filter items based on preferences
+  const getFilteredItems = (items) => {
+    return items.filter(item => {
+      // Filter out reference books (books that contain short stories)
+      if (item.mediaType === 'book' && item.containedStories && item.containedStories.length > 0) {
+        return false;
+      }
+      
+      // Filter based on watched status toggle
+      if (!showWatchedItems && item.isWatched) {
+        return false;
+      }
+      
+      return true;
+    });
+  };
+  
+  // Helper function to get all items excluding reference books (for stats)
+  const getAllNonReferenceItems = (items) => {
+    return items.filter(item => {
+      // Filter out reference books (books that contain short stories)
+      if (item.mediaType === 'book' && item.containedStories && item.containedStories.length > 0) {
+        return false;
+      }
+      return true;
+    });
+  };
+  
+  // Helper function to get unwatched items excluding reference books (for stats)
+  const getUnwatchedNonReferenceItems = (items) => {
+    return items.filter(item => {
+      // Filter out reference books (books that contain short stories)
+      if (item.mediaType === 'book' && item.containedStories && item.containedStories.length > 0) {
+        return false;
+      }
+      return !item.isWatched;
+    });
+  };
   // Helper function to generate artwork URLs for custom order items
   const getItemArtworkUrl = (item) => {
     // Check if we have cached artwork
@@ -280,15 +319,15 @@ function CustomOrders() {
           isbn: item.isbn || ''
         });
         setShowBookForm(true);
-        break;
-      case 'comic':
+        break;      case 'comic':
         setComicFormData({
           series: item.comicSeries || '',
           year: item.comicYear || '',
-          issue: item.comicIssue || ''
+          issue: item.comicIssue || '',
+          title: item.customTitle || ''
         });
         setShowComicForm(true);
-        break;      case 'shortstory':
+        break;case 'shortstory':
         setShortStoryFormData({
           title: item.title || '',
           author: item.author || '',
@@ -326,11 +365,10 @@ function CustomOrders() {
         setShowBookForm(false);
         setShowComicForm(false);
         setShowShortStoryForm(false);
-        
-        // Reset form data
+          // Reset form data
         setEpisodeFormData({ series: '', season: '', episode: '' });
         setBookFormData({ title: '', author: '', year: '', isbn: '' });
-        setComicFormData({ series: '', year: '', issue: '' });
+        setComicFormData({ series: '', year: '', issue: '', title: '' });
         setShortStoryFormData({ title: '', author: '', year: '', url: '', containedInBookId: '', coverUrl: '' });
         
         // Refresh the order items
@@ -530,11 +568,11 @@ function CustomOrders() {
   };
   const handleReselectComic = (item) => {
     setReselectingItem(item);
-    
-    setComicFormData({
+      setComicFormData({
       series: item.comicSeries || '',
       year: item.comicYear ? item.comicYear.toString() : '',
-      issue: item.comicIssue || ''
+      issue: item.comicIssue || '',
+      title: item.customTitle || ''
     });
     
     setShowComicForm(true);
@@ -579,16 +617,9 @@ function CustomOrders() {
       setDragOverItem(null);
       setIsDragging(false);
       return;
-    }
-
-    try {
+    }    try {
       // Get filtered items (same filter as in render)
-      const filteredItems = viewingOrderItems.items.filter(item => {
-        if (item.mediaType === 'book' && item.containedStories && item.containedStories.length > 0) {
-          return false;
-        }
-        return true;
-      });
+      const filteredItems = getFilteredItems(viewingOrderItems.items);
 
       // Reorder the items array
       const newItems = [...filteredItems];
@@ -658,32 +689,36 @@ function CustomOrders() {
       setMessage('Media search functionality coming soon');    } finally {
       setSearchLoading(false);
     }
-  };
-  const handleAddMediaToOrder = async (orderId, mediaItem) => {
+  };  const handleAddMediaToOrder = async (orderId, mediaItem, skipUIUpdate = false) => {
     try {
       const requestBody = {
         mediaType: mediaItem.mediaType || mediaItem.type,
         title: mediaItem.title
       };      // Add fields based on media type
-      const mediaType = mediaItem.mediaType || mediaItem.type;
-      if (mediaType === 'comic') {
+      const mediaType = mediaItem.mediaType || mediaItem.type;      if (mediaType === 'comic') {
         requestBody.comicSeries = mediaItem.comicSeries;
         requestBody.comicYear = mediaItem.comicYear;
-        requestBody.comicIssue = mediaItem.comicIssue;      } else if (mediaType === 'book') {
+        requestBody.comicIssue = mediaItem.comicIssue;
+        requestBody.customTitle = mediaItem.customTitle;} else if (mediaType === 'book') {
         requestBody.bookTitle = mediaItem.bookTitle;
         requestBody.bookAuthor = mediaItem.bookAuthor;
         requestBody.bookYear = mediaItem.bookYear;
         requestBody.bookIsbn = mediaItem.bookIsbn;
         requestBody.bookPublisher = mediaItem.bookPublisher;
         requestBody.bookOpenLibraryId = mediaItem.bookOpenLibraryId;
-        requestBody.bookCoverUrl = mediaItem.bookCoverUrl;
-      } else if (mediaType === 'shortstory') {
+        requestBody.bookCoverUrl = mediaItem.bookCoverUrl;      } else if (mediaType === 'shortstory') {
         requestBody.storyTitle = mediaItem.storyTitle;
         requestBody.storyAuthor = mediaItem.storyAuthor;
         requestBody.storyYear = mediaItem.storyYear;
         requestBody.storyUrl = mediaItem.storyUrl;
         requestBody.storyContainedInBookId = mediaItem.storyContainedInBookId;
         requestBody.storyCoverUrl = mediaItem.storyCoverUrl;
+      } else if (mediaType === 'webvideo' || mediaType === 'web') {
+        // Normalize 'web' to 'webvideo'
+        requestBody.mediaType = 'webvideo';
+        requestBody.webTitle = mediaItem.webTitle;
+        requestBody.webUrl = mediaItem.webUrl;
+        requestBody.webDescription = mediaItem.webDescription;
       } else {
         requestBody.plexKey = mediaItem.ratingKey;
         requestBody.seasonNumber = mediaItem.parentIndex;
@@ -696,31 +731,38 @@ function CustomOrders() {
         },
         body: JSON.stringify(requestBody),
       });      if (response.ok) {
-        setMessage('Media added to custom order successfully');
-        fetchCustomOrders(); // Refresh the list
-        
-        // Update the viewing order if it's currently being viewed
-        if (viewingOrderItems && viewingOrderItems.id === orderId) {
-          const updatedOrder = await fetch(`http://127.0.0.1:3001/api/custom-orders/${orderId}`);
-          const updatedOrderData = await updatedOrder.json();
-          setViewingOrderItems(updatedOrderData);
+        // Only update UI if not skipping updates (for individual adds, not bulk imports)
+        if (!skipUIUpdate) {
+          setMessage('Media added to custom order successfully');
+          fetchCustomOrders(); // Refresh the list
+          
+          // Update the viewing order if it's currently being viewed
+          if (viewingOrderItems && viewingOrderItems.id === orderId) {
+            const updatedOrder = await fetch(`http://127.0.0.1:3001/api/custom-orders/${orderId}`);
+            const updatedOrderData = await updatedOrder.json();
+            setViewingOrderItems(updatedOrderData);
+          }
         }
         return true;
       } else {
         const errorData = await response.json();
-        if (response.status === 409) {
-          setMessage(`Duplicate item: "${errorData.existingItem.title}" is already in this custom order`);
-        } else {
-          setMessage(`Error: ${errorData.error}`);
+        if (!skipUIUpdate) {
+          if (response.status === 409) {
+            setMessage(`Duplicate item: "${errorData.existingItem.title}" is already in this custom order`);
+          } else {
+            setMessage(`Error: ${errorData.error}`);
+          }
         }
         return false;
       }
     } catch (error) {
       console.error('Error adding media to custom order:', error);
-      setMessage('Error adding media to custom order');
+      if (!skipUIUpdate) {
+        setMessage('Error adding media to custom order');
+      }
       return false;
     }
-  };  const handleSearchTVEpisode = async (e) => {
+  };const handleSearchTVEpisode = async (e) => {
     e.preventDefault();
     
     // Validate all required fields are filled
@@ -911,7 +953,7 @@ function CustomOrders() {
           if (!seriesOrMovie || !title || !rawMediaType) {
           errors.push(`Line ${i + 1}: Missing required data (Series/Movie, Title, or Type)`);
           continue;
-        }          // Normalize media types
+        }        // Normalize media types
         let mediaType = rawMediaType.toLowerCase();
         if (mediaType === 'tv series') {
           mediaType = 'episode';
@@ -919,6 +961,8 @@ function CustomOrders() {
           mediaType = 'shortstory';
         } else if (mediaType === 'film') {
           mediaType = 'movie';
+        } else if (mediaType === 'web') {
+          mediaType = 'webvideo';
         }
         
         // Initialize comic-specific fields
@@ -1237,15 +1281,14 @@ function CustomOrders() {
               storyTitle: item.title,
               storyAuthor: item.bookAuthor,
               storyYear: item.bookYear,
-              storyUrl: null,
+              storyUrl: item.url || null,
               storyContainedInBookId: null,
               storyCoverUrl: null
-            };
-          } else if (item.mediaType === 'web') {
+            };} else if (item.mediaType === 'webvideo') {
             // For web videos, create the media object directly with the provided URL
             targetMedia = {
               title: item.title,
-              type: 'web',
+              type: 'webvideo',
               webTitle: item.title,
               webUrl: item.url,
               webDescription: null
@@ -1302,8 +1345,8 @@ function CustomOrders() {
               }
             }
           }          if (targetMedia) {
-            // Add to custom order
-            const success = await handleAddMediaToOrder(viewingOrderItems.id, targetMedia);
+            // Add to custom order with UI updates skipped during bulk import
+            const success = await handleAddMediaToOrder(viewingOrderItems.id, targetMedia, true);
             if (success) {
               successCount++;
             } else {
@@ -1572,14 +1615,13 @@ function CustomOrders() {
     if (!comicFormData.issue.trim()) {
       setMessage('Please enter an issue number to search');
       return;
-    }
-
-    // If we're editing an item, update it directly without searching
+    }    // If we're editing an item, update it directly without searching
     if (editingItem) {
       const updatedItemData = {
         comicSeries: comicFormData.series.trim(),
         comicYear: comicFormData.year ? parseInt(comicFormData.year) : null,
-        comicIssue: comicFormData.issue.trim()
+        comicIssue: comicFormData.issue.trim(),
+        customTitle: comicFormData.title.trim() || null
       };
       await handleUpdateItem(updatedItemData);
       return;
@@ -1630,13 +1672,13 @@ function CustomOrders() {
         ? `${selectedSeries.name} (${seriesYear}) #${comicFormData.issue}`
         : `${selectedSeries.name} #${comicFormData.issue}`;
       
-      if (reselectingItem) {
-        // Update existing item with new comic selection
+      if (reselectingItem) {        // Update existing item with new comic selection
         const updateData = {
           title: comicString,
           comicSeries: selectedSeries.name,
           comicYear: seriesYear ? parseInt(seriesYear) : null,
           comicIssue: comicFormData.issue,
+          customTitle: comicFormData.title.trim() || null,
           comicVineId: selectedSeries.api_detail_url || null
         };
 
@@ -1649,10 +1691,9 @@ function CustomOrders() {
         });
 
         if (response.ok) {
-          setMessage(`Comic updated successfully: "${comicString}"`);
-          setShowComicForm(false);
+          setMessage(`Comic updated successfully: "${comicString}"`);          setShowComicForm(false);
           setReselectingItem(null);
-          setComicFormData({ series: '', year: '', issue: '' });
+          setComicFormData({ series: '', year: '', issue: '', title: '' });
           setComicSearchResults([]);
           
           // Refresh the order items
@@ -1666,21 +1707,19 @@ function CustomOrders() {
           const errorData = await response.json();
           setMessage(`Error updating comic: ${errorData.error}`);
         }
-      } else {
-        // Add new comic to order (existing functionality)
+      } else {        // Add new comic to order (existing functionality)
         const comicMedia = {
           mediaType: 'comic',
           title: comicString,
           comicSeries: selectedSeries.name,
           comicYear: seriesYear ? parseInt(seriesYear) : null,
           comicIssue: comicFormData.issue,
+          customTitle: comicFormData.title.trim() || null,
           comicVineId: selectedSeries.api_detail_url || null
-        };
-
-        const success = await handleAddMediaToOrder(viewingOrderItems.id, comicMedia);
+        };const success = await handleAddMediaToOrder(viewingOrderItems.id, comicMedia);
         if (success !== false) {
           setShowComicForm(false);
-          setComicFormData({ series: '', year: '', issue: '' });
+          setComicFormData({ series: '', year: '', issue: '', title: '' });
           setComicSearchResults([]);
         }
       }
@@ -1779,6 +1818,24 @@ function CustomOrders() {
     }
   };
 
+  // Scroll helper functions for items list navigation
+  const scrollToTop = () => {
+    const itemsList = document.querySelector('.items-list');
+    if (itemsList) {
+      itemsList.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+  };
+
+  const scrollToBottom = () => {
+    const itemsList = document.querySelector('.items-list');
+    if (itemsList) {
+      const lastItem = itemsList.lastElementChild;
+      if (lastItem) {
+        lastItem.scrollIntoView({ behavior: 'smooth', block: 'end' });
+      }
+    }
+  };
+
   if (loading) {
     return (
       <main>
@@ -1824,27 +1881,15 @@ function CustomOrders() {
               <div className="stat">
                 <span className="stat-label">Total Items:</span>
                 <span className="stat-value">
-                  {viewingOrderItems.items.filter(item => {
-                    // Exclude reference books (books that contain short stories)
-                    if (item.mediaType === 'book' && item.containedStories && item.containedStories.length > 0) {
-                      return false;
-                    }
-                    return true;
-                  }).length}
+                  {getAllNonReferenceItems(viewingOrderItems.items).length}
                 </span>
               </div>
               <div className="stat">
                 <span className="stat-label">Unwatched:</span>
                 <span className="stat-value">
-                  {viewingOrderItems.items.filter(item => {
-                    // Exclude reference books (books that contain short stories)
-                    if (item.mediaType === 'book' && item.containedStories && item.containedStories.length > 0) {
-                      return false;
-                    }
-                    return !item.isWatched;
-                  }).length}
+                  {getUnwatchedNonReferenceItems(viewingOrderItems.items).length}
                 </span>
-              </div>            </div>            <div className="manage-items-actions">
+              </div>            </div><div className="manage-items-actions">
               <Button
                 onClick={() => {
                   setShowMovieForm(true);
@@ -1871,10 +1916,9 @@ function CustomOrders() {
                 className="secondary"
               >
                 Add Book
-              </Button>              <Button
-                onClick={() => {
+              </Button>              <Button                onClick={() => {
                   setShowComicForm(true);
-                  setComicFormData({ series: '', year: '', issue: '' });
+                  setComicFormData({ series: '', year: '', issue: '', title: '' });
                 }}
                 className="secondary"
               >
@@ -1888,8 +1932,7 @@ function CustomOrders() {
                 className="secondary"
               >
                 Add Short Story
-              </Button>
-              <Button
+              </Button>              <Button
                 onClick={() => {
                   setShowBulkImportModal(true);
                   setBulkImportData('');
@@ -1899,20 +1942,49 @@ function CustomOrders() {
                 Bulk Import
               </Button>
             </div>
+          </div>
+          
+          {/* Filter Controls */}
+          <div className="filter-controls">
+            <div className="filter-toggle">
+              <label className="toggle-label">
+                <input
+                  type="checkbox"
+                  checked={showWatchedItems}
+                  onChange={(e) => setShowWatchedItems(e.target.checked)}
+                  className="toggle-checkbox"
+                />
+                <span className="toggle-text">
+                  {showWatchedItems ? 'Hide Watched Items' : 'Show Watched Items'}
+                </span>
+              </label>
+            </div>
           </div>          {viewingOrderItems.items.length === 0 ? (
             <div className="empty-state">
               <p>No items in this custom order yet.</p>
               <p>Add some movies, TV episodes, or comics to get started!</p>
             </div>
-          ) : (            <div className="items-list">
-              {viewingOrderItems.items
-                .filter(item => {
-                  // Filter out reference books (books that contain short stories)
-                  if (item.mediaType === 'book' && item.containedStories && item.containedStories.length > 0) {
-                    return false;
-                  }
-                  return true;
-                })                .map((item, index) => (
+          ) : getFilteredItems(viewingOrderItems.items).length === 0 ? (
+            <div className="empty-state">
+              <p>No items match the current filter.</p>
+              <p>{showWatchedItems ? 'All items are hidden.' : 'All unwatched items are hidden. Toggle "Show Watched Items" to see watched items.'}</p>
+            </div>
+          ) : (
+            <>
+              {/* Scroll Navigation Buttons - only show when there are more than 5 items */}
+              {getFilteredItems(viewingOrderItems.items).length > 5 && (
+                <div className="scroll-navigation">
+                  <Button
+                    onClick={scrollToBottom}
+                    className="secondary"
+                    size="small"
+                  >
+                    ↓ Scroll to Bottom
+                  </Button>
+                </div>
+              )}
+                <div className="items-list">
+              {getFilteredItems(viewingOrderItems.items).map((item, index) => (
                 <div 
                   key={item.id} 
                   className={`item-card ${item.isWatched ? 'watched' : ''} ${
@@ -1953,10 +2025,14 @@ function CustomOrders() {
                        item.mediaType === 'book' ? '📖' :
                        item.mediaType === 'shortstory' ? '📖' : '📄'}
                     </div>
-                  </div>
-                  <div className="item-info">
+                  </div>                  <div className="item-info">
                     <div className="item-details">
-                      <h4>{item.title}</h4>
+                      <h4>
+                        {item.mediaType === 'comic' && item.customTitle 
+                          ? item.customTitle 
+                          : item.title
+                        }
+                      </h4>
                       {item.seriesTitle && (
                         <p className="item-series">
                           {item.seriesTitle} - S{item.seasonNumber}E{item.episodeNumber}
@@ -2035,14 +2111,25 @@ function CustomOrders() {
                         onClick={() => handleMarkAsUnwatched(viewingOrderItems.id, item.id, item.title)}
                         className="secondary"
                         size="small"
-                      >
-                        Mark as Unwatched
+                      >                        Mark as Unwatched
                       </Button>
                     )}
                   </div>
-                </div>
-              ))}
+                </div>              ))}
             </div>
+              {/* Scroll to Top button at bottom - only show when there are more than 5 items */}
+            {getFilteredItems(viewingOrderItems.items).length > 5 && (
+              <div className="scroll-navigation-bottom">
+                <Button
+                  onClick={scrollToTop}
+                  className="secondary"
+                  size="small"
+                >
+                  ↑ Scroll to Top
+                </Button>
+              </div>
+            )}
+            </>
           )}
         </div>
       ) : (
@@ -2707,13 +2794,12 @@ Dune	Frank Herbert (1965)	Dune	book
       {showComicForm && (
         <div className="modal-overlay">
           <div className="modal-content">            <div className="modal-header">
-              <h3>{editingItem ? 'Edit Comic' : reselectingItem ? 'Re-select Comic' : 'Add Comic'}</h3>
-              <Button
+              <h3>{editingItem ? 'Edit Comic' : reselectingItem ? 'Re-select Comic' : 'Add Comic'}</h3>              <Button
                 onClick={() => {
                   setShowComicForm(false);
                   setReselectingItem(null);
                   setEditingItem(null);
-                  setComicFormData({ series: '', year: '', issue: '' });
+                  setComicFormData({ series: '', year: '', issue: '', title: '' });
                   setComicSearchResults([]);
                 }}
                 className="secondary"
@@ -2748,8 +2834,7 @@ Dune	Frank Herbert (1965)	Dune	book
                     max="2030"
                   />
                 </div>
-                
-                <div className="form-group">
+                  <div className="form-group">
                   <label htmlFor="comicIssue">Issue Number *</label>
                   <input
                     type="text"
@@ -2762,7 +2847,21 @@ Dune	Frank Herbert (1965)	Dune	book
                 </div>
               </div>
               
-              <div className="form-actions">                <Button 
+              <div className="form-group">
+                <label htmlFor="comicTitle">Title (optional)</label>
+                <input
+                  type="text"
+                  id="comicTitle"
+                  value={comicFormData.title}
+                  onChange={(e) => setComicFormData({...comicFormData, title: e.target.value})}
+                  placeholder="Custom title or differentiator..."
+                />
+                <small className="form-help">
+                  Add a custom title to differentiate duplicate comics or provide additional context
+                </small>
+              </div>
+              
+              <div className="form-actions"><Button 
                   type="submit" 
                   disabled={comicSearchLoading}
                   className="primary"
@@ -2776,7 +2875,7 @@ Dune	Frank Herbert (1965)	Dune	book
                   onClick={() => {
                     setShowComicForm(false);
                     setEditingItem(null);
-                    setComicFormData({ series: '', year: '', issue: '' });
+                    setComicFormData({ series: '', year: '', issue: '', title: '' });
                     setComicSearchResults([]);
                   }}
                   className="secondary"

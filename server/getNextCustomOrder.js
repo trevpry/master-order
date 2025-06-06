@@ -60,10 +60,9 @@ async function fetchMediaDetailsFromPlex(plexKey, mediaType, customOrderItem) {
       
       // Get cover art from ComicVine
       const comicDetails = await comicVineService.getComicCoverArt(comicString);
-      
-      const mockMetadata = {
+        const mockMetadata = {
         ratingKey: plexKey,
-        title: customOrderItem.title,
+        title: customOrderItem.customTitle || customOrderItem.title,
         type: 'comic',
         year: customOrderItem.comicYear,
         summary: comicDetails?.description || '',
@@ -74,6 +73,7 @@ async function fetchMediaDetailsFromPlex(plexKey, mediaType, customOrderItem) {
         comicYear: customOrderItem.comicYear,
         comicIssue: customOrderItem.comicIssue,
         comicVolume: customOrderItem.comicVolume,
+        customTitle: customOrderItem.customTitle,
         orderType: 'CUSTOM_ORDER',
         customOrderMediaType: mediaType
       };
@@ -200,7 +200,7 @@ async function fetchMediaDetailsFromPlex(plexKey, mediaType, customOrderItem) {
 async function markCustomOrderItemAsWatched(itemId) {
   try {
     await prisma.customOrderItem.update({
-      where: { id: itemId },
+      where: { id: parseInt(itemId) },
       data: { isWatched: true }
     });
     console.log(`Marked custom order item ${itemId} as watched`);

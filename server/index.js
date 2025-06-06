@@ -2,7 +2,7 @@ const express = require('express');
 const cors = require('cors');
 const getNextEpisode = require('./getNextEpisode');
 const getNextMovie = require('./getNextMovie');
-const { getNextCustomOrder } = require('./getNextCustomOrder');
+const { getNextCustomOrder, markCustomOrderItemAsWatched } = require('./getNextCustomOrder');
 const prisma = require('./prismaClient'); // Import the shared client
 const PlexDatabaseService = require('./plexDatabaseService');
 const TvdbDatabaseService = require('./tvdbDatabaseService'); // Added import
@@ -25,6 +25,15 @@ const PORT = process.env.PORT || 3001;
 app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+
+// Helper function for generating a simple hash (used for web video uniqueness)
+function simpleHash(str) {
+  let hash = 5381;
+  for (let i = 0; i < str.length; i++) {
+    hash = (hash * 33) ^ str.charCodeAt(i);
+  }
+  return hash >>> 0; // Ensure positive integer
+}
 
 // API Routes
 app.get('/api/up_next', async (req, res) => {
@@ -973,17 +982,19 @@ app.delete('/api/custom-orders/:id', async (req, res) => {
 // Add item to custom order
 app.post('/api/custom-orders/:id/items', async (req, res) => {
   try {
-    const { id } = req.params;    const { 
-      mediaType, 
-      plexKey, 
-      title, 
-      seasonNumber, 
-      episodeNumber, 
-      seriesTitle, 
-      comicSeries, 
-      comicYear, 
-      comicIssue, 
+    const { id } = req.params;    const {
+      mediaType,
+      plexKey,
+      title,
+      seasonNumber,
+      episodeNumber,
+      seriesTitle,      comicSeries,
+      comicYear,
+      comicIssue,
       comicVolume,
+      customTitle,
+      comicVineId,
+      comicVineDetailsJson,
       bookTitle,
       bookAuthor,
       bookYear,
@@ -1035,18 +1046,19 @@ app.post('/api/custom-orders/:id/items', async (req, res) => {
         return res.status(400).json({ error: 'plexKey is required for non-comic/book/shortstory/webvideo media' });
       }
     }// Check for duplicate items
-    let existingItem;
-    if (mediaType === 'comic') {
-      // For comics, check for duplicates by series, year, and issue
+    let existingItem;    if (mediaType === 'comic') {
+      // For comics, check for duplicates by series, year, issue, and custom title
+      // This allows the same comic to be added multiple times with different custom titles
       existingItem = await prisma.customOrderItem.findFirst({
         where: {
           customOrderId: parseInt(id),
           mediaType: 'comic',
           comicSeries: comicSeries,
           comicYear: comicYear ? parseInt(comicYear) : null,
-          comicIssue: String(comicIssue)
+          comicIssue: String(comicIssue),
+          customTitle: customTitle || null // Include custom title in duplicate check
         }
-      });    } else if (mediaType === 'book') {
+      });} else if (mediaType === 'book') {
       // For books, check for duplicates by title and author
       existingItem = await prisma.customOrderItem.findFirst({
         where: {
@@ -1113,14 +1125,22 @@ app.post('/api/custom-orders/:id/items', async (req, res) => {
     if (mediaType === 'comic') {
       finalPlexKey = `comic-${comicSeries}-${comicYear}-${comicIssue}`.replace(/[^a-zA-Z0-9-]/g, '-').toLowerCase();
     } else if (mediaType === 'book') {
-      finalPlexKey = `book-${bookTitle}-${bookAuthor}`.replace(/[^a-zA-Z0-9-]/g, '-').toLowerCase();    } else if (mediaType === 'shortstory') {
+      finalPlexKey = `book-${bookTitle}-${bookAuthor}`.replace(/[^a-zA-Z0-9-]/g, '-').toLowerCase();
+    } else if (mediaType === 'shortstory') {
       const authorPart = storyAuthor ? `-${storyAuthor}` : '';
       finalPlexKey = `shortstory-${storyTitle}${authorPart}`.replace(/[^a-zA-Z0-9-]/g, '-').toLowerCase();
     } else if (mediaType === 'webvideo') {
-      finalPlexKey = `webvideo-${webTitle}`.replace(/[^a-zA-Z0-9-]/g, '-').toLowerCase();
+      const urlHash = simpleHash(webUrl || ''); // Hash of the URL, ensure webUrl is not null
+      const cleanWebTitle = (webTitle || title || 'untitled').replace(/[^a-zA-Z0-9-]/g, '-').toLowerCase();
+      finalPlexKey = `webvideo-${cleanWebTitle}-${urlHash}`;
+      // Truncate if too long, ensuring it fits within typical database limits for such keys
+      if (finalPlexKey.length > 250) { 
+        finalPlexKey = finalPlexKey.substring(0, 250);
+      }
     } else {
       finalPlexKey = plexKey;
-    }const item = await prisma.customOrderItem.create({
+    }
+    const item = await prisma.customOrderItem.create({
       data: {
         customOrderId: parseInt(id),
         mediaType,
@@ -1128,11 +1148,11 @@ app.post('/api/custom-orders/:id/items', async (req, res) => {
         title,
         seasonNumber,
         episodeNumber,
-        seriesTitle,
-        comicSeries,
+        seriesTitle,        comicSeries,
         comicYear: comicYear ? parseInt(comicYear) : null,
         comicIssue: mediaType === 'comic' ? String(comicIssue) : null,
         comicVolume,
+        customTitle,
         bookTitle,
         bookAuthor,
         bookYear: bookYear ? parseInt(bookYear) : null,
@@ -1192,9 +1212,8 @@ app.put('/api/custom-orders/:id/items/:itemId', async (req, res) => {
       title,
       seriesTitle, // For episodes
       // Book fields
-      bookTitle, bookAuthor, bookYear, bookIsbn, bookPublisher, bookOpenLibraryId, bookCoverUrl,
-      // Comic fields
-      comicSeries, comicYear, comicIssue, comicVolume,
+      bookTitle, bookAuthor, bookYear, bookIsbn, bookPublisher, bookOpenLibraryId, bookCoverUrl,      // Comic fields
+      comicSeries, comicYear, comicIssue, comicVolume, customTitle,
       // Story fields
       storyTitle, storyAuthor, storyYear, storyUrl, storyContainedInBookId, storyCoverUrl
     } = req.body;
@@ -1213,7 +1232,8 @@ app.put('/api/custom-orders/:id/items/:itemId', async (req, res) => {
       comicSeries !== undefined || 
       comicYear !== undefined || 
       comicIssue !== undefined || 
-      comicVolume !== undefined
+      comicVolume !== undefined ||
+      customTitle !== undefined
     );
     
     // Check if this is a short story re-selection (story-specific fields are being updated)
@@ -1248,13 +1268,13 @@ app.put('/api/custom-orders/:id/items/:itemId', async (req, res) => {
         updateData.originalArtworkUrl = bookCoverUrl !== undefined ? bookCoverUrl : null; 
         updateData.artworkLastCached = null;
         updateData.artworkMimeType = null;
-    }
-      // Handle comic data updates
+    }    // Handle comic data updates
     if (isComicReselect) { 
         if (comicSeries !== undefined) updateData.comicSeries = comicSeries;
         if (comicYear !== undefined) updateData.comicYear = comicYear;
         if (comicIssue !== undefined) updateData.comicIssue = String(comicIssue); // Ensure string
         if (comicVolume !== undefined) updateData.comicVolume = comicVolume;
+        if (customTitle !== undefined) updateData.customTitle = customTitle;
 
         // Crucial for re-caching: clear old artwork details to force re-fetch by ensureArtworkCached
         updateData.originalArtworkUrl = null; 
@@ -1389,7 +1409,25 @@ app.post('/api/books/reference', async (req, res) => {
     res.status(201).json(book);
   } catch (error) {
     console.error('Error creating reference book:', error);
-    res.status(500).json({ error: 'Failed to create reference book' });
+    res.status(500).json({ error: 'Failed to create reference book' });  }
+});
+
+// Mark custom order item as watched from home page
+app.post('/api/mark-custom-order-item-watched/:itemId', async (req, res) => {
+  try {
+    const { itemId } = req.params;
+    
+    if (!itemId) {
+      return res.status(400).json({ error: 'Item ID is required' });
+    }
+    
+    // Use the existing function to mark item as watched
+    await markCustomOrderItemAsWatched(itemId);
+    
+    res.json({ success: true, message: 'Item marked as watched' });
+  } catch (error) {
+    console.error('Error marking custom order item as watched:', error);
+    res.status(500).json({ error: 'Failed to mark item as watched' });
   }
 });
 

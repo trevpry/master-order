@@ -8,7 +8,7 @@ function Home() {
   const [selectedMedia, setSelectedMedia] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-
+  const [markingWatched, setMarkingWatched] = useState(false);
   const callExpressRoute = async () => {
       setLoading(true);
       setError('');
@@ -44,7 +44,42 @@ function Home() {
       } finally {
         setLoading(false);
       }
-  };  const getArtworkUrl = (media) => {
+  };
+
+  const markAsWatched = async () => {
+    if (!selectedMedia || !selectedMedia.customOrderItemId) {
+      return;
+    }
+
+    setMarkingWatched(true);
+    try {
+      // Extract the custom order ID from the selectedMedia
+      // We need to get the custom order ID first, then mark the item as watched
+      const response = await fetch(`http://localhost:3001/api/mark-custom-order-item-watched/${selectedMedia.customOrderItemId}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      });
+
+      if (response.ok) {
+        setSelectedMedia(null);
+        setError('Item marked as watched! Getting next item...');
+        // Automatically get the next item
+        setTimeout(() => {
+          callExpressRoute();
+        }, 1000);
+      } else {
+        const errorData = await response.json();
+        setError(`Error marking as watched: ${errorData.error}`);
+      }
+    } catch (error) {
+      console.error('Error marking item as watched:', error);
+      setError('Error marking item as watched');
+    } finally {
+      setMarkingWatched(false);
+    }
+  };const getArtworkUrl = (media) => {
     // Web videos don't have artwork
     if (media?.type === 'webvideo') {
       return null;
@@ -87,14 +122,22 @@ function Home() {
   };return (
     <div className="app-container home-responsive">
       <div className="app-card home-card">
-        <div className="app-content home-content">
-          <div className="button-container home-button">
+        <div className="app-content home-content">          <div className="button-container home-button">
             <Button
               onClick={callExpressRoute}
               disabled={loading}
             >
               {loading ? 'Finding Up Next...' : 'Get Up Next'}
             </Button>
+            {selectedMedia && selectedMedia.customOrderItemId && (
+              <Button
+                onClick={markAsWatched}
+                disabled={markingWatched}
+                style={{ marginLeft: '10px' }}
+              >
+                {markingWatched ? 'Marking as Watched...' : 'Mark as Watched'}
+              </Button>
+            )}
           </div>
           
           {error && (
@@ -113,8 +156,9 @@ function Home() {
                       (selectedMedia.containedInBookDetails?.coverUrl && selectedMedia.containedInBookDetails.coverUrl.trim() !== '');
                     const hasTvdbArt = selectedMedia.tvdbArtwork?.url;
                     const hasPlexArt = (selectedMedia.thumb && selectedMedia.thumb.trim() !== '') || (selectedMedia.art && selectedMedia.art.trim() !== '');
-                    // Web videos don't have artwork, so always show fallback
+                    // Web videos show embedded YouTube or fallback
                     const isWebVideo = selectedMedia.type === 'webvideo';
+                    const isYouTubeVideo = isWebVideo && selectedMedia.webUrl && selectedMedia.webUrl.includes('youtube.com');
                     
                     const hasAnyArtwork = !isWebVideo && (hasComicArt || hasBookArt || hasStoryArt || hasTvdbArt || hasPlexArt);
                     
@@ -131,33 +175,61 @@ function Home() {
                     console.log('- hasTvdbArt:', hasTvdbArt);
                     console.log('- hasPlexArt:', hasPlexArt);
                     console.log('- hasAnyArtwork:', hasAnyArtwork);
-                    
-                    return hasAnyArtwork;
-                  })() ? (
-                    <img 
-                      src={getArtworkUrl(selectedMedia)} 
-                      alt={selectedMedia.title}
-                      onLoad={(e) => {
-                        console.log('Image loaded successfully');
-                      }}                      onError={(e) => {
-                        console.error('Image failed to load:', e.target.src);
-                        // Handle different fallback scenarios
-                        if (selectedMedia.type === 'comic') {
-                          // For comics, if ComicVine artwork fails, hide the image
-                          e.target.style.display = 'none';
-                        } else if (selectedMedia.type === 'book' || selectedMedia.type === 'shortstory') {
-                          // For books and short stories, if artwork fails, hide the image
-                          e.target.style.display = 'none';
-                        } else if (selectedMedia.tvdbArtwork?.url && !e.target.src.includes('/api/artwork')) {
-                          // If TVDB artwork fails, try Plex artwork as fallback
-                          console.log('TVDB artwork failed, trying Plex artwork fallback');
-                          const plexUrl = `http://localhost:3001/api/artwork${selectedMedia.thumb || selectedMedia.art}`;
-                          e.target.src = plexUrl;
-                        } else {
-                          e.target.style.display = 'none';
-                        }
-                      }}
-                    />                  ) : (
+                    console.log('- isYouTubeVideo:', isYouTubeVideo);
+                      // Show image artwork OR YouTube embedded video
+                    return hasAnyArtwork || isYouTubeVideo;
+                  })() ? (                    selectedMedia.type === 'webvideo' && selectedMedia.webUrl && selectedMedia.webUrl.includes('youtube.com') ? (
+                      // Render YouTube iframe with casting support
+                      <iframe
+                        width="100%"
+                        height="100%"
+                        src={(() => {
+                          // Convert YouTube URL to embed URL
+                          const url = selectedMedia.webUrl;
+                          let videoId = '';
+                          
+                          // Handle different YouTube URL formats
+                          if (url.includes('watch?v=')) {
+                            videoId = url.split('watch?v=')[1].split('&')[0];
+                          } else if (url.includes('youtu.be/')) {
+                            videoId = url.split('youtu.be/')[1].split('?')[0];
+                          } else if (url.includes('embed/')) {
+                            videoId = url.split('embed/')[1].split('?')[0];
+                          }
+                            // Add parameters for casting and fullscreen
+                          return `https://www.youtube.com/embed/${videoId}?autoplay=1&fs=1&enablejsapi=1&enablecastapi=1&rel=0&modestbranding=1`;
+                        })()}                        title={selectedMedia.webTitle || selectedMedia.title || 'YouTube Video'}
+                        frameBorder="0"
+                        allowFullScreen
+                        style={{borderRadius: '12px'}}
+                      />
+                    ) : (
+                      // Render regular image
+                      <img 
+                        src={getArtworkUrl(selectedMedia)} 
+                        alt={selectedMedia.title}
+                        onLoad={(e) => {
+                          console.log('Image loaded successfully');
+                        }}                        onError={(e) => {
+                          console.error('Image failed to load:', e.target.src);
+                          // Handle different fallback scenarios
+                          if (selectedMedia.type === 'comic') {
+                            // For comics, if ComicVine artwork fails, hide the image
+                            e.target.style.display = 'none';
+                          } else if (selectedMedia.type === 'book' || selectedMedia.type === 'shortstory') {
+                            // For books and short stories, if artwork fails, hide the image
+                            e.target.style.display = 'none';
+                          } else if (selectedMedia.tvdbArtwork?.url && !e.target.src.includes('/api/artwork')) {
+                            // If TVDB artwork fails, try Plex artwork as fallback
+                            console.log('TVDB artwork failed, trying Plex artwork fallback');
+                            const plexUrl = `http://localhost:3001/api/artwork${selectedMedia.thumb || selectedMedia.art}`;
+                            e.target.src = plexUrl;
+                          } else {
+                            e.target.style.display = 'none';
+                          }
+                        }}
+                      />
+                    )) : (
                     <div className="no-artwork-large">
                       {selectedMedia.orderType === 'CUSTOM_ORDER' && selectedMedia.customOrderIcon ? (
                         <div 
@@ -173,11 +245,13 @@ function Home() {
                         </span>
                       )}
                     </div>
-                  )}{/* Episode overlay for TV shows only, comic info overlay for comics, book info overlay for books, story info overlay for short stories */}
-                  {selectedMedia.type === 'comic' ? (
+                  )}{/* Episode overlay for TV shows only, comic info overlay for comics, book info overlay for books, story info overlay for short stories */}                  {selectedMedia.type === 'comic' ? (
                     <div className="episode-overlay">
                       <span className="episode-info">
-                        {selectedMedia.comicSeries} ({selectedMedia.comicYear}) #{selectedMedia.comicIssue}
+                        {selectedMedia.customTitle 
+                          ? selectedMedia.customTitle
+                          : `${selectedMedia.comicSeries} (${selectedMedia.comicYear}) #${selectedMedia.comicIssue}`
+                        }
                       </span>
                     </div>
                   ) : selectedMedia.type === 'book' ? (
@@ -185,28 +259,48 @@ function Home() {
                       <span className="episode-info">
                         {selectedMedia.bookAuthor ? `by ${selectedMedia.bookAuthor}` : 'Unknown Author'}{selectedMedia.bookYear ? ` (${selectedMedia.bookYear})` : ''}
                       </span>
-                    </div>                  
-                    ) : selectedMedia.type === 'shortstory' ? (
-                    <div className="episode-overlay">
-                      <span className="episode-info">
-                        {selectedMedia.storyTitle ? selectedMedia.storyTitle : 'Untitled Story'}
-                        {selectedMedia.storyAuthor ? `by ${selectedMedia.storyAuthor}` : 'Unknown Author'}{selectedMedia.storyYear ? ` (${selectedMedia.storyYear})` : ''}                        {selectedMedia.containedInBookDetails?.title ? ` • from "${selectedMedia.containedInBookDetails.title}"` : ''}
-                      </span>
-                    </div>                  ) : selectedMedia.type === 'webvideo' ? (
+                    </div>                    ) : selectedMedia.type === 'shortstory' ? (
                     <div className="episode-overlay" style={{zIndex: 10, pointerEvents: 'auto'}}>
                       <span className="episode-info" style={{pointerEvents: 'auto'}}>
-                        {selectedMedia.webUrl && (
-                          <a href={selectedMedia.webUrl} target="_blank" rel="noopener noreferrer" style={{color: '#fff', textDecoration: 'underline', cursor: 'pointer', pointerEvents: 'auto', position: 'relative', zIndex: 11}}>
-                            {selectedMedia.webUrl}
+                        {/* Story title - clickable if URL is available */}
+                        {selectedMedia.storyUrl ? (
+                          <a 
+                            href={selectedMedia.storyUrl} 
+                            target="_blank" 
+                            rel="noopener noreferrer" 
+                            style={{color: '#fff', textDecoration: 'underline', cursor: 'pointer', pointerEvents: 'auto', position: 'relative', zIndex: 11}}
+                          >
+                            {selectedMedia.storyTitle ? selectedMedia.storyTitle : 'Untitled Story'}
                           </a>
+                        ) : (
+                          selectedMedia.storyTitle ? selectedMedia.storyTitle : 'Untitled Story'
                         )}
-                        {selectedMedia.webDescription && (
+                        {selectedMedia.storyYear ? ` (${selectedMedia.storyYear})` : ''}
+                        {selectedMedia.containedInBookDetails?.title ? ` • from "${selectedMedia.containedInBookDetails.title}"` : ''}
+                        
+                        {/* Author name on new line, hidden if "Unknown Author" */}
+                        {selectedMedia.storyAuthor && selectedMedia.storyAuthor !== 'Unknown Author' && (
                           <div style={{marginTop: '4px', fontSize: '12px', opacity: '0.9'}}>
-                            {selectedMedia.webDescription}
+                            by {selectedMedia.storyAuthor}
                           </div>
                         )}
                       </span>
-                    </div>
+                    </div>) : selectedMedia.type === 'webvideo' ? (
+                    // Only show overlay for non-YouTube web videos (YouTube videos are embedded above)
+                    selectedMedia.webUrl && !selectedMedia.webUrl.includes('youtube.com') ? (
+                      <div className="episode-overlay" style={{zIndex: 10, pointerEvents: 'auto'}}>
+                        <span className="episode-info" style={{pointerEvents: 'auto'}}>
+                          <a href={selectedMedia.webUrl} target="_blank" rel="noopener noreferrer" style={{color: '#fff', textDecoration: 'underline', cursor: 'pointer', pointerEvents: 'auto', position: 'relative', zIndex: 11}}>
+                            {selectedMedia.webUrl}
+                          </a>
+                          {selectedMedia.webDescription && (
+                            <div style={{marginTop: '4px', fontSize: '12px', opacity: '0.9'}}>
+                              {selectedMedia.webDescription}
+                            </div>
+                          )}
+                        </span>
+                      </div>
+                    ) : null
                   ) : (selectedMedia.orderType === 'TV_GENERAL' || (selectedMedia.orderType === 'CUSTOM_ORDER' && selectedMedia.customOrderMediaType === 'tv')) && selectedMedia.currentEpisode && selectedMedia.totalEpisodesInSeason ? (
                     <div className="episode-overlay">
                       <span className="episode-info">

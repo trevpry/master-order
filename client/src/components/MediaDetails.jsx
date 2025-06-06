@@ -41,8 +41,7 @@ const MediaDetails = ({ selectedMedia }) => {
               </button>
             </div>
               <div className="details-content">              
-              <div className="media-basic-info">
-                <h4 className="details-title">
+              <div className="media-basic-info">                <h4 className="details-title">
                   {selectedMedia.type === 'shortstory' && selectedMedia.storyUrl ? (
                     <a 
                       href={selectedMedia.storyUrl} 
@@ -53,11 +52,17 @@ const MediaDetails = ({ selectedMedia }) => {
                       {selectedMedia.storyTitle || selectedMedia.title}
                     </a>
                   ) : selectedMedia.type === 'shortstory' && selectedMedia.storyTitle ? 
-                    selectedMedia.storyTitle : selectedMedia.title}
+                    selectedMedia.storyTitle : 
+                    selectedMedia.type === 'comic' && selectedMedia.customTitle ? 
+                    selectedMedia.customTitle : selectedMedia.title}
                 </h4><div className="details-stats">
-                  {/* Show different stats based on media type */}
-                  {selectedMedia.type === 'comic' ? (
+                  {/* Show different stats based on media type */}                  {selectedMedia.type === 'comic' ? (
                     <>
+                      {selectedMedia.customTitle && (
+                        <span className="custom-title-note">
+                          Custom title for: {selectedMedia.title}
+                        </span>
+                      )}
                       <span className="comic-series">
                         Series: {selectedMedia.comicSeries} ({selectedMedia.comicYear})
                       </span>
@@ -70,7 +75,7 @@ const MediaDetails = ({ selectedMedia }) => {
                         </span>
                       )}
                     </>
-                  ) : selectedMedia.type === 'book' ? (
+                  ): selectedMedia.type === 'book' ? (
                     <>
                       <span className="book-author">
                         {selectedMedia.bookAuthor ? `Author: ${selectedMedia.bookAuthor}` : 'Unknown Author'}
