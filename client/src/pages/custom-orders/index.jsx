@@ -901,14 +901,13 @@ function CustomOrders() {
         const line = lines[i].trim();
         if (!line) continue; // Skip empty lines
         
-        const columns = line.split('\t');
-          // Validate required columns (support both 4 and 5 column formats)
+        const columns = line.split('\t');        // Validate required columns (support 4-6 column formats for web videos)
         if (columns.length < 4) {
-          errors.push(`Line ${i + 1}: Not enough columns (need 4-5: Series/Movie, Season/Episode, Title, Type, [Year])`);
+          errors.push(`Line ${i + 1}: Not enough columns (need 4-6: Series/Movie, Season/Episode, Title, Type, [Year], [URL for web videos])`);
           continue;
         }
         
-        const [seriesOrMovie, seasonEpisode, title, rawMediaType, yearColumn] = columns.map(col => col.trim());
+        const [seriesOrMovie, seasonEpisode, title, rawMediaType, yearColumn, urlColumn] = columns.map(col => col.trim());
           if (!seriesOrMovie || !title || !rawMediaType) {
           errors.push(`Line ${i + 1}: Missing required data (Series/Movie, Title, or Type)`);
           continue;
@@ -1035,9 +1034,19 @@ function CustomOrders() {
               }
             } else {
               bookAuthor = seasonEpisode.trim();
-            }
-          }
+            }          }
           // If no season/episode field, we'll try to extract author from the title later
+        } else if (mediaType === 'web') {
+          // For web videos, the URL should be in the 6th column
+          if (!urlColumn || !urlColumn.trim()) {
+            errors.push(`Line ${i + 1}: Web videos require a URL in the 6th column`);
+            continue;
+          }
+          // Validate URL format
+          if (!urlColumn.match(/^https?:\/\/.+/)) {
+            errors.push(`Line ${i + 1}: Invalid URL format for web video. URLs must start with http:// or https://`);
+            continue;
+          }
         }          items.push({
           seriesOrMovie,
           seasonNumber,
@@ -1050,7 +1059,8 @@ function CustomOrders() {
           title,
           mediaType: mediaType,
           lineNumber: i + 1,
-          year: mediaYear // Add the optional year from the 5th column
+          year: mediaYear, // Add the optional year from the 5th column
+          url: urlColumn // Add the optional URL from the 6th column for web videos
         });
       }
       
@@ -1219,8 +1229,7 @@ function CustomOrders() {
                 bookOpenLibraryId: null,
                 bookCoverUrl: null
               };
-            }
-          } else if (item.mediaType === 'shortstory') {
+            }          } else if (item.mediaType === 'shortstory') {
             // For short stories, create the media object directly since we have all the info
             targetMedia = {
               title: item.title,
@@ -1231,7 +1240,17 @@ function CustomOrders() {
               storyUrl: null,
               storyContainedInBookId: null,
               storyCoverUrl: null
-            };          } else {
+            };
+          } else if (item.mediaType === 'web') {
+            // For web videos, create the media object directly with the provided URL
+            targetMedia = {
+              title: item.title,
+              type: 'web',
+              webTitle: item.title,
+              webUrl: item.url,
+              webDescription: null
+            };
+          } else {
             // For movies and TV episodes, search Plex
             let searchQuery = item.seriesOrMovie;
             let searchUrl = `http://127.0.0.1:3001/api/search?query=${encodeURIComponent(searchQuery)}`;

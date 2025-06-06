@@ -45,6 +45,11 @@ function Home() {
         setLoading(false);
       }
   };  const getArtworkUrl = (media) => {
+    // Web videos don't have artwork
+    if (media?.type === 'webvideo') {
+      return null;
+    }
+    
     // For comics, prioritize ComicVine artwork
     if (media?.type === 'comic' && media?.comicDetails?.coverUrl) {
       console.log('Using ComicVine artwork:', media.comicDetails.coverUrl);
@@ -100,8 +105,7 @@ function Home() {
 
           {selectedMedia && (
             <div className="media-result home-result">
-              <div className="media-display-container">                <div className="media-artwork-responsive">                  {(() => {
-                    // Check if we have any artwork to display - handle empty strings as falsy
+              <div className="media-display-container">                <div className="media-artwork-responsive">                  {(() => {                    // Check if we have any artwork to display - handle empty strings as falsy
                     const hasComicArt = selectedMedia.type === 'comic' && selectedMedia.comicDetails?.coverUrl;
                     const hasBookArt = selectedMedia.type === 'book' && selectedMedia.bookCoverUrl;
                     const hasStoryArt = selectedMedia.type === 'shortstory' && 
@@ -109,8 +113,10 @@ function Home() {
                       (selectedMedia.containedInBookDetails?.coverUrl && selectedMedia.containedInBookDetails.coverUrl.trim() !== '');
                     const hasTvdbArt = selectedMedia.tvdbArtwork?.url;
                     const hasPlexArt = (selectedMedia.thumb && selectedMedia.thumb.trim() !== '') || (selectedMedia.art && selectedMedia.art.trim() !== '');
+                    // Web videos don't have artwork, so always show fallback
+                    const isWebVideo = selectedMedia.type === 'webvideo';
                     
-                    const hasAnyArtwork = hasComicArt || hasBookArt || hasStoryArt || hasTvdbArt || hasPlexArt;
+                    const hasAnyArtwork = !isWebVideo && (hasComicArt || hasBookArt || hasStoryArt || hasTvdbArt || hasPlexArt);
                     
                     // Debug logging
                     console.log('ARTWORK DEBUG:');
@@ -158,11 +164,11 @@ function Home() {
                           className="custom-order-icon-large" 
                           dangerouslySetInnerHTML={{__html: selectedMedia.customOrderIcon}}
                         />
-                      ) : (
-                        <span>
+                      ) : (                        <span>
                           {selectedMedia.type === 'comic' ? '📚' : 
                            selectedMedia.type === 'book' ? '📖' :
                            selectedMedia.type === 'shortstory' ? '📖' :
+                           selectedMedia.type === 'webvideo' ? '🌐' :
                            selectedMedia.orderType === 'MOVIES_GENERAL' ? '🎬' : '📺'}
                         </span>
                       )}
@@ -184,8 +190,21 @@ function Home() {
                     <div className="episode-overlay">
                       <span className="episode-info">
                         {selectedMedia.storyTitle ? selectedMedia.storyTitle : 'Untitled Story'}
-                        {selectedMedia.storyAuthor ? `by ${selectedMedia.storyAuthor}` : 'Unknown Author'}{selectedMedia.storyYear ? ` (${selectedMedia.storyYear})` : ''}
-                        {selectedMedia.containedInBookDetails?.title ? ` • from "${selectedMedia.containedInBookDetails.title}"` : ''}
+                        {selectedMedia.storyAuthor ? `by ${selectedMedia.storyAuthor}` : 'Unknown Author'}{selectedMedia.storyYear ? ` (${selectedMedia.storyYear})` : ''}                        {selectedMedia.containedInBookDetails?.title ? ` • from "${selectedMedia.containedInBookDetails.title}"` : ''}
+                      </span>
+                    </div>                  ) : selectedMedia.type === 'webvideo' ? (
+                    <div className="episode-overlay" style={{zIndex: 10, pointerEvents: 'auto'}}>
+                      <span className="episode-info" style={{pointerEvents: 'auto'}}>
+                        {selectedMedia.webUrl && (
+                          <a href={selectedMedia.webUrl} target="_blank" rel="noopener noreferrer" style={{color: '#fff', textDecoration: 'underline', cursor: 'pointer', pointerEvents: 'auto', position: 'relative', zIndex: 11}}>
+                            {selectedMedia.webUrl}
+                          </a>
+                        )}
+                        {selectedMedia.webDescription && (
+                          <div style={{marginTop: '4px', fontSize: '12px', opacity: '0.9'}}>
+                            {selectedMedia.webDescription}
+                          </div>
+                        )}
                       </span>
                     </div>
                   ) : (selectedMedia.orderType === 'TV_GENERAL' || (selectedMedia.orderType === 'CUSTOM_ORDER' && selectedMedia.customOrderMediaType === 'tv')) && selectedMedia.currentEpisode && selectedMedia.totalEpisodesInSeason ? (

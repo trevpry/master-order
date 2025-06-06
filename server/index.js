@@ -973,8 +973,7 @@ app.delete('/api/custom-orders/:id', async (req, res) => {
 // Add item to custom order
 app.post('/api/custom-orders/:id/items', async (req, res) => {
   try {
-    const { id } = req.params;
-      const { 
+    const { id } = req.params;    const { 
       mediaType, 
       plexKey, 
       title, 
@@ -997,7 +996,10 @@ app.post('/api/custom-orders/:id/items', async (req, res) => {
       storyYear,
       storyUrl,
       storyContainedInBookId,
-      storyCoverUrl
+      storyCoverUrl,
+      webTitle,
+      webUrl,
+      webDescription
     } = req.body;
 
     console.log(mediaType)
@@ -1017,12 +1019,22 @@ app.post('/api/custom-orders/:id/items', async (req, res) => {
       if (!storyTitle) {
         return res.status(400).json({ error: 'For short stories: storyTitle is required' });
       }
-    } else {
-      // For non-comic/book/shortstory media, plexKey is required
-      if (!plexKey) {
-        return res.status(400).json({ error: 'plexKey is required for non-comic/book/shortstory media' });
+    } else if (mediaType === 'webvideo') {
+      if (!webTitle || !webUrl) {
+        return res.status(400).json({ error: 'For web videos: webTitle and webUrl are required' });
       }
-    }    // Check for duplicate items
+      // Validate URL format
+      try {
+        new URL(webUrl);
+      } catch (err) {
+        return res.status(400).json({ error: 'Invalid webUrl format' });
+      }
+    } else {
+      // For non-comic/book/shortstory/webvideo media, plexKey is required
+      if (!plexKey) {
+        return res.status(400).json({ error: 'plexKey is required for non-comic/book/shortstory/webvideo media' });
+      }
+    }// Check for duplicate items
     let existingItem;
     if (mediaType === 'comic') {
       // For comics, check for duplicates by series, year, and issue
@@ -1058,9 +1070,17 @@ app.post('/api/custom-orders/:id/items', async (req, res) => {
       } else {
         whereCondition.storyAuthor = null;
       }
-      
-      existingItem = await prisma.customOrderItem.findFirst({
+        existingItem = await prisma.customOrderItem.findFirst({
         where: whereCondition
+      });
+    } else if (mediaType === 'webvideo') {
+      // For web videos, check for duplicates by URL (primary identifier)
+      existingItem = await prisma.customOrderItem.findFirst({
+        where: {
+          customOrderId: parseInt(id),
+          mediaType: 'webvideo',
+          webUrl: webUrl
+        }
       });
     } else {
       // For other media, check by plexKey
@@ -1096,9 +1116,11 @@ app.post('/api/custom-orders/:id/items', async (req, res) => {
       finalPlexKey = `book-${bookTitle}-${bookAuthor}`.replace(/[^a-zA-Z0-9-]/g, '-').toLowerCase();    } else if (mediaType === 'shortstory') {
       const authorPart = storyAuthor ? `-${storyAuthor}` : '';
       finalPlexKey = `shortstory-${storyTitle}${authorPart}`.replace(/[^a-zA-Z0-9-]/g, '-').toLowerCase();
+    } else if (mediaType === 'webvideo') {
+      finalPlexKey = `webvideo-${webTitle}`.replace(/[^a-zA-Z0-9-]/g, '-').toLowerCase();
     } else {
       finalPlexKey = plexKey;
-    }    const item = await prisma.customOrderItem.create({
+    }const item = await prisma.customOrderItem.create({
       data: {
         customOrderId: parseInt(id),
         mediaType,
@@ -1117,13 +1139,15 @@ app.post('/api/custom-orders/:id/items', async (req, res) => {
         bookIsbn,
         bookPublisher,
         bookOpenLibraryId,
-        bookCoverUrl,
-        storyTitle,
+        bookCoverUrl,        storyTitle,
         storyAuthor,
         storyYear: storyYear ? parseInt(storyYear) : null,
         storyUrl,
         storyContainedInBookId,
         storyCoverUrl,
+        webTitle,
+        webUrl,
+        webDescription,
         sortOrder: nextSortOrder
       }
     });

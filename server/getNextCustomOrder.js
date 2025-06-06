@@ -115,8 +115,7 @@ async function fetchMediaDetailsFromPlex(plexKey, mediaType, customOrderItem) {
       };
         return mockMetadata;
     }
-    
-    // Handle short stories differently since they don't exist in Plex
+      // Handle short stories differently since they don't exist in Plex
     if (mediaType === 'shortstory') {
       // For short stories, we generate mock Plex-like metadata
       let containedInBookDetails = null;
@@ -151,6 +150,27 @@ async function fetchMediaDetailsFromPlex(plexKey, mediaType, customOrderItem) {
         storyContainedInBookId: customOrderItem.storyContainedInBookId,
         storyCoverUrl: customOrderItem.storyCoverUrl || containedInBookDetails?.coverUrl || null,
         containedInBookDetails: containedInBookDetails, // Store containing book details if available
+        orderType: 'CUSTOM_ORDER',
+        customOrderMediaType: mediaType
+      };
+      
+      return mockMetadata;
+    }
+    
+    // Handle web videos differently since they don't exist in Plex
+    if (mediaType === 'webvideo') {
+      // For web videos, we generate mock Plex-like metadata
+      const mockMetadata = {
+        ratingKey: plexKey,
+        title: customOrderItem.title,
+        type: 'webvideo',
+        year: null, // Web videos don't typically have years
+        summary: customOrderItem.webDescription || '',
+        thumb: null, // Web videos don't have Plex thumbs
+        art: null,
+        webTitle: customOrderItem.webTitle,
+        webUrl: customOrderItem.webUrl,
+        webDescription: customOrderItem.webDescription,
         orderType: 'CUSTOM_ORDER',
         customOrderMediaType: mediaType
       };

@@ -56,7 +56,7 @@ model CustomOrderItem {
   id            Int         @id @default(autoincrement())
   customOrderId Int
   customOrder   CustomOrder @relation(fields: [customOrderId], references: [id], onDelete: Cascade)
-  mediaType     String      // 'movie', 'episode', 'comic', 'book', or 'shortstory'
+  mediaType     String      // 'movie', 'episode', 'comic', 'book', 'shortstory', or 'web'
   plexKey       String      // Plex key for the media item (for comics and books, this will be a generated key)
   title         String      // Title for display purposes
   seasonNumber  Int?        // For episodes only
@@ -84,6 +84,10 @@ model CustomOrderItem {
   storyContainedInBook CustomOrderItem? @relation("StoryInBook", fields: [storyContainedInBookId], references: [id], onDelete: SetNull)
   containedStories CustomOrderItem[] @relation("StoryInBook")
   storyCoverUrl String?     // For short stories only - cover image URL (falls back to book cover if not set)
+  // Web video-specific fields
+  webTitle      String?     // For web videos only - video title
+  webUrl        String?     // For web videos only - video URL
+  webDescription String?    // For web videos only - video description
   // Local artwork caching fields
   localArtworkPath String?  // Local file path to cached artwork
   originalArtworkUrl String? // Original remote URL for artwork source
