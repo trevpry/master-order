@@ -15,6 +15,7 @@ function App() {
         <Routes>
           <Route path="/" element={<Home />} />
           <Route path="/custom-orders" element={<CustomOrders />} />
+          <Route path="/custom-orders/:orderId" element={<CustomOrders />} />
           <Route path="/settings" element={<Settings />} />
         </Routes>
       </Layout>

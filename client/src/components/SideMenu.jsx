@@ -1,13 +1,27 @@
 import React, { useState } from 'react';
-import { Link, useLocation } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import './SideMenu.css';
 
 const SideMenu = () => {
   const [isCollapsed, setIsCollapsed] = useState(false);
   const location = useLocation();
+  const navigate = useNavigate();
 
   const toggleSidebar = () => {
     setIsCollapsed(!isCollapsed);
+  };
+
+  // Check if we're on a specific custom order page
+  const isOnCustomOrderDetail = location.pathname.match(/^\/custom-orders\/\d+$/);
+
+  // Handle Custom Orders menu item click
+  const handleCustomOrdersClick = (e) => {
+    if (isOnCustomOrderDetail) {
+      // If we're on a specific order page, navigate back to main list
+      e.preventDefault();
+      navigate('/custom-orders');
+    }
+    // Otherwise, let the normal Link behavior handle it
   };
   const menuItems = [
     {
@@ -55,14 +69,14 @@ const SideMenu = () => {
         </button>
       </div>
 
-      <nav className="side-menu-nav">
-        <ul className="menu-items">
+      <nav className="side-menu-nav">        <ul className="menu-items">
           {menuItems.map((item) => (
             <li key={item.path} className="menu-item">
               <Link 
                 to={item.path} 
-                className={`menu-link ${location.pathname === item.path ? 'active' : ''}`}
+                className={`menu-link ${location.pathname === item.path || (item.path === '/custom-orders' && location.pathname.startsWith('/custom-orders')) ? 'active' : ''}`}
                 title={isCollapsed ? item.label : ''}
+                onClick={item.path === '/custom-orders' ? handleCustomOrdersClick : undefined}
               >
                 <span className="menu-icon">{item.icon}</span>
                 {!isCollapsed && (

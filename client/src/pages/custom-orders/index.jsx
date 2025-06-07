@@ -1,8 +1,11 @@
 import React, { useState, useEffect } from 'react';
+import { useParams, useNavigate } from 'react-router-dom';
 import Button from '../../components/Button';
 import './CustomOrders.css';
 
 function CustomOrders() {  
+  const { orderId } = useParams();
+  const navigate = useNavigate();
   const [customOrders, setCustomOrders] = useState([]);
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState('');  const [showCreateForm, setShowCreateForm] = useState(false);
@@ -118,8 +121,20 @@ function CustomOrders() {
     
     // For items without cached artwork, try to get remote artwork URLs
     // This matches the logic from the artworkCacheService
-    switch (item.mediaType) {
-      case 'comic':
+    switch (item.mediaType) {      case 'comic':
+        // Prioritize ComicVine data if available (from comic reselection)
+        if (item.comicVineDetailsJson) {
+          try {
+            const comicVineData = JSON.parse(item.comicVineDetailsJson);
+            if (comicVineData.image?.original_url) {
+              return `http://localhost:3001/api/comicvine-artwork?url=${encodeURIComponent(comicVineData.image.original_url)}`;
+            }
+          } catch (error) {
+            console.warn(`Failed to parse ComicVine details JSON for item ${item.id}:`, error.message);
+          }
+        }
+        
+        // Fallback to traditional comic series lookup
         if (item.comicSeries && item.comicYear) {
           const comicString = `${item.comicSeries} (${item.comicYear}) #${item.comicIssue || '1'}`;
           return `http://localhost:3001/api/comicvine-artwork?url=${encodeURIComponent(`http://localhost:3001/api/comicvine-cover?comic=${encodeURIComponent(comicString)}`)}`;
@@ -152,11 +167,36 @@ function CustomOrders() {
     // For items without cached artwork, return null to show fallback
     return null;
   };
-
   // Fetch custom orders when component mounts
   useEffect(() => {
     fetchCustomOrders();
   }, []);
+  // Helper function to navigate to order items view
+  const navigateToOrderItems = (order) => {
+    navigate(`/custom-orders/${order.id}`);
+  };
+
+  // Helper function to navigate back to main orders list
+  const navigateToOrdersList = () => {
+    navigate('/custom-orders');
+  };
+
+  // Handle URL parameter for specific order viewing
+  useEffect(() => {
+    if (orderId && customOrders.length > 0) {
+      const orderIdNum = parseInt(orderId);
+      const order = customOrders.find(o => o.id === orderIdNum);
+      if (order) {
+        setViewingOrderItems(order);
+      } else {
+        // Order not found, redirect to main list
+        navigate('/custom-orders');
+      }
+    } else if (!orderId && viewingOrderItems) {
+      // If no orderId in URL but we're viewing an order, clear the view
+      setViewingOrderItems(null);
+    }
+  }, [orderId, customOrders, navigate]);
 
   const fetchCustomOrders = async () => {
     try {
@@ -284,20 +324,13 @@ function CustomOrders() {
           description: formData.description.trim(),
           icon: formData.icon.trim()
         }),
-      });
-
-      if (response.ok) {
+      });      if (response.ok) {
         setMessage('Custom order updated successfully');
         setFormData({ name: '', description: '', icon: '' });
         setEditingOrder(null);
         fetchCustomOrders(); // Refresh the list
         
-        // Update the viewing order if it's currently being viewed
-        if (viewingOrderItems && viewingOrderItems.id === editingOrder.id) {
-          const updatedOrder = await fetch(`http://127.0.0.1:3001/api/custom-orders/${editingOrder.id}`);
-          const updatedOrderData = await updatedOrder.json();
-          setViewingOrderItems(updatedOrderData);
-        }
+        // The viewing order will be automatically updated via useEffect
       } else {
         const errorData = await response.json();
         setMessage(`Error: ${errorData.error}`);
@@ -388,8 +421,7 @@ function CustomOrders() {
         setComicFormData({ series: '', year: '', issue: '', title: '' });
         setShortStoryFormData({ title: '', author: '', year: '', url: '', containedInBookId: '', coverUrl: '' });
         setWebVideoFormData({ title: '', url: '', description: '' });
-        
-        // Refresh the order items
+          // Refresh the order items
         const updatedOrder = await fetch(`http://127.0.0.1:3001/api/custom-orders/${viewingOrderItems.id}`);
         const updatedOrderData = await updatedOrder.json();
         setViewingOrderItems(updatedOrderData);
@@ -434,9 +466,8 @@ function CustomOrders() {
       setMessage('Error resetting watched status');
     }
   };
-
   const handleViewItems = (order) => {
-    setViewingOrderItems(order);
+    navigateToOrderItems(order);
     setMessage('');
   };
   const handleRemoveItem = async (orderId, itemId, itemTitle) => {
@@ -488,18 +519,12 @@ function CustomOrders() {
               } else {
                 setMessage('Item removed successfully, but failed to remove empty containing book');
               }
-            }
-          }
+            }          }
         }
         
         fetchCustomOrders(); // Refresh the list
         
-        // Update the viewing order if it's currently being viewed
-        if (viewingOrderItems && viewingOrderItems.id === orderId) {
-          const updatedOrder = await fetch(`http://127.0.0.1:3001/api/custom-orders/${orderId}`);
-          const updatedOrderData = await updatedOrder.json();
-          setViewingOrderItems(updatedOrderData);
-        }
+        // The viewing order will be automatically updated via useEffect
       } else {
         const errorData = await response.json();
         setMessage(`Error: ${errorData.error}`);
@@ -519,18 +544,11 @@ function CustomOrders() {
         body: JSON.stringify({
           isWatched: true
         }),
-      });
-
-      if (response.ok) {
+      });      if (response.ok) {
         setMessage(`"${itemTitle}" marked as watched`);
         fetchCustomOrders(); // Refresh the list
         
-        // Update the viewing order if it's currently being viewed
-        if (viewingOrderItems && viewingOrderItems.id === orderId) {
-          const updatedOrder = await fetch(`http://127.0.0.1:3001/api/custom-orders/${orderId}`);
-          const updatedOrderData = await updatedOrder.json();
-          setViewingOrderItems(updatedOrderData);
-        }
+        // The viewing order will be automatically updated via useEffect
       } else {
         const errorData = await response.json();
         setMessage(`Error: ${errorData.error}`);
@@ -553,16 +571,10 @@ function CustomOrders() {
         }),
       });
 
-      if (response.ok) {
-        setMessage(`"${itemTitle}" marked as unwatched`);
+      if (response.ok) {        setMessage(`"${itemTitle}" marked as unwatched`);
         fetchCustomOrders(); // Refresh the list
         
-        // Update the viewing order if it's currently being viewed
-        if (viewingOrderItems && viewingOrderItems.id === orderId) {
-          const updatedOrder = await fetch(`http://127.0.0.1:3001/api/custom-orders/${orderId}`);
-          const updatedOrderData = await updatedOrder.json();
-          setViewingOrderItems(updatedOrderData);
-        }
+        // The viewing order will be automatically updated via useEffect
       } else {
         const errorData = await response.json();
         setMessage(`Error: ${errorData.error}`);
@@ -747,19 +759,15 @@ function CustomOrders() {
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify(requestBody),
-      });      if (response.ok) {
+        body: JSON.stringify(requestBody),      });
+
+      if (response.ok) {
         // Only update UI if not skipping updates (for individual adds, not bulk imports)
         if (!skipUIUpdate) {
           setMessage('Media added to custom order successfully');
           fetchCustomOrders(); // Refresh the list
           
-          // Update the viewing order if it's currently being viewed
-          if (viewingOrderItems && viewingOrderItems.id === orderId) {
-            const updatedOrder = await fetch(`http://127.0.0.1:3001/api/custom-orders/${orderId}`);
-            const updatedOrderData = await updatedOrder.json();
-            setViewingOrderItems(updatedOrderData);
-          }
+          // The viewing order will be automatically updated via useEffect
         }
         return true;
       } else {
@@ -1404,14 +1412,9 @@ function CustomOrders() {
         // Clear the form and close modal
         setBulkImportData('');
         setShowBulkImportModal(false);
-        
-        // Refresh the order items
+          // Refresh the order items
         fetchCustomOrders();
-        if (viewingOrderItems) {
-          const updatedOrder = await fetch(`http://127.0.0.1:3001/api/custom-orders/${viewingOrderItems.id}`);
-          const updatedOrderData = await updatedOrder.json();
-          setViewingOrderItems(updatedOrderData);
-        }
+        // The viewing order will be automatically updated via useEffect
       }
       
     } catch (error) {
@@ -1544,14 +1547,9 @@ function CustomOrders() {
             setEditingItem(null);
             setBookFormData({ title: '', author: '', year: '', isbn: '' });
             setBookSearchResults([]);
-            
-            // Refresh the order items
+              // Refresh the order items
             fetchCustomOrders();
-            if (viewingOrderItems) {
-              const updatedOrder = await fetch(`http://127.0.0.1:3001/api/custom-orders/${viewingOrderItems.id}`);
-              const updatedOrderData = await updatedOrder.json();
-              setViewingOrderItems(updatedOrderData);
-            }
+            // The viewing order will be automatically updated via useEffect
           } else {
             const errorData = await storyResponse.json();
             setMessage(`Error linking story to book: ${errorData.error}`);
@@ -1584,14 +1582,9 @@ function CustomOrders() {
             setEditingItem(null);
             setBookFormData({ title: '', author: '', year: '', isbn: '' });
             setBookSearchResults([]);
-            
-            // Refresh the order items
+              // Refresh the order items
             fetchCustomOrders();
-            if (viewingOrderItems) {
-              const updatedOrder = await fetch(`http://127.0.0.1:3001/api/custom-orders/${viewingOrderItems.id}`);
-              const updatedOrderData = await updatedOrder.json();
-              setViewingOrderItems(updatedOrderData);
-            }
+            // The viewing order will be automatically updated via useEffect
           } else {
             const errorData = await response.json();
             setMessage(`Error updating book: ${errorData.error}`);
@@ -1689,15 +1682,15 @@ function CustomOrders() {
       const comicString = seriesYear 
         ? `${selectedSeries.name} (${seriesYear}) #${comicFormData.issue}`
         : `${selectedSeries.name} #${comicFormData.issue}`;
-      
-      if (reselectingItem) {        // Update existing item with new comic selection
+        if (reselectingItem) {        // Update existing item with new comic selection
         const updateData = {
           title: comicString,
           comicSeries: selectedSeries.name,
           comicYear: seriesYear ? parseInt(seriesYear) : null,
           comicIssue: comicFormData.issue,
           customTitle: comicFormData.title.trim() || null,
-          comicVineId: selectedSeries.api_detail_url || null
+          comicVineId: selectedSeries.api_detail_url || null,
+          comicVineDetailsJson: JSON.stringify(selectedSeries)
         };
 
         const response = await fetch(`http://127.0.0.1:3001/api/custom-orders/${viewingOrderItems.id}/items/${reselectingItem.id}`, {
@@ -1714,18 +1707,12 @@ function CustomOrders() {
           setComicFormData({ series: '', year: '', issue: '', title: '' });
           setComicSearchResults([]);
           
-          // Refresh the order items
-          fetchCustomOrders();
-          if (viewingOrderItems) {
-            const updatedOrder = await fetch(`http://127.0.0.1:3001/api/custom-orders/${viewingOrderItems.id}`);
-            const updatedOrderData = await updatedOrder.json();
-            setViewingOrderItems(updatedOrderData);
-          }
+          // Refresh the order items          fetchCustomOrders();
+          // The viewing order will be automatically updated via useEffect
         } else {
           const errorData = await response.json();
           setMessage(`Error updating comic: ${errorData.error}`);
-        }
-      } else {        // Add new comic to order (existing functionality)
+        }      } else {        // Add new comic to order (existing functionality)
         const comicMedia = {
           mediaType: 'comic',
           title: comicString,
@@ -1733,7 +1720,8 @@ function CustomOrders() {
           comicYear: seriesYear ? parseInt(seriesYear) : null,
           comicIssue: comicFormData.issue,
           customTitle: comicFormData.title.trim() || null,
-          comicVineId: selectedSeries.api_detail_url || null
+          comicVineId: selectedSeries.api_detail_url || null,
+          comicVineDetailsJson: JSON.stringify(selectedSeries)
         };const success = await handleAddMediaToOrder(viewingOrderItems.id, comicMedia);
         if (success !== false) {
           setShowComicForm(false);
@@ -1908,13 +1896,11 @@ function CustomOrders() {
   return (
     <main>
       <h2>Custom Orders</h2>
-      <p>Create and manage custom playlists of mixed media (movies, TV episodes, comics, etc.)</p>
-
-      {/* Back button when viewing items */}
+      <p>Create and manage custom playlists of mixed media (movies, TV episodes, comics, etc.)</p>      {/* Back button when viewing items */}
       {viewingOrderItems && (
         <div className="back-navigation">
           <Button
-            onClick={() => setViewingOrderItems(null)}
+            onClick={navigateToOrdersList}
             className="secondary"
           >
             ← Back to Custom Orders
@@ -2346,11 +2332,10 @@ function CustomOrders() {
           <div className="orders-grid">
             {customOrders.map(order => (
               <div key={order.id} className={`order-card ${order.isActive ? 'active' : 'inactive'}`}>                <div className="order-header">
-                  <div className="order-title-section">
-                    <div className="title-with-icon">
+                  <div className="order-title-section">                    <div className="title-with-icon">
                       <h3 
                         className="clickable-title"
-                        onClick={() => setViewingOrderItems(order)}
+                        onClick={() => navigateToOrderItems(order)}
                       >
                         {order.icon && (
                           <span 
@@ -2392,9 +2377,8 @@ function CustomOrders() {
                     size="small"
                   >
                     {order.isActive ? 'Deactivate' : 'Activate'}
-                  </Button>
-                  <Button
-                    onClick={() => setViewingOrderItems(order)}
+                  </Button>                  <Button
+                    onClick={() => navigateToOrderItems(order)}
                     className="primary"
                     size="small"
                   >

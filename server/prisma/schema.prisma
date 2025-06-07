@@ -62,6 +62,8 @@ model CustomOrderItem {
   comicYear              Int?
   comicIssue             String?
   comicVolume            String?
+  comicVineId            String?
+  comicVineDetailsJson   String?
   customTitle            String?
   bookTitle              String?
   bookAuthor             String?

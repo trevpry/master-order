@@ -1087,10 +1087,45 @@ app.put('/api/custom-orders/:id', async (req, res) => {
 app.delete('/api/custom-orders/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    await prisma.customOrder.delete({
-      where: { id: parseInt(id) }
+    const customOrderId = parseInt(id);
+    
+    // First, get all items in this custom order to clean up their cached artwork
+    const customOrder = await prisma.customOrder.findUnique({
+      where: { id: customOrderId },
+      include: {
+        items: {
+          select: { id: true, title: true }
+        }
+      }
     });
-    res.json({ message: 'Custom order deleted successfully' });
+
+    if (!customOrder) {
+      return res.status(404).json({ error: 'Custom order not found' });
+    }
+
+    // Clean up cached artwork for all items in the custom order
+    console.log(`Cleaning up cached artwork for ${customOrder.items.length} items in custom order "${customOrder.name}"`);
+    
+    for (const item of customOrder.items) {
+      try {
+        await artworkCache.cleanupArtwork(item.id);
+        console.log(`Cleaned up artwork for item: ${item.title}`);
+      } catch (error) {
+        console.warn(`Failed to cleanup artwork for item ${item.id} (${item.title}):`, error.message);
+        // Continue with deletion even if artwork cleanup fails
+      }
+    }
+
+    // Delete the custom order (this will cascade delete all items due to Prisma schema)
+    await prisma.customOrder.delete({
+      where: { id: customOrderId }
+    });
+
+    console.log(`Successfully deleted custom order "${customOrder.name}" and cleaned up ${customOrder.items.length} items`);
+    res.json({ 
+      message: 'Custom order deleted successfully',
+      itemsDeleted: customOrder.items.length
+    });
   } catch (error) {
     console.error('Error deleting custom order:', error);
     res.status(500).json({ error: 'Failed to delete custom order' });
@@ -1323,15 +1358,14 @@ app.delete('/api/custom-orders/:id/items/:itemId', async (req, res) => {
 // Update item order in custom order
 app.put('/api/custom-orders/:id/items/:itemId', async (req, res) => {
   try {
-    const { itemId } = req.params;
-    const { 
+    const { itemId } = req.params;    const { 
       sortOrder, 
       isWatched, 
       title,
       seriesTitle, // For episodes
       // Book fields
       bookTitle, bookAuthor, bookYear, bookIsbn, bookPublisher, bookOpenLibraryId, bookCoverUrl,      // Comic fields
-      comicSeries, comicYear, comicIssue, comicVolume, customTitle,
+      comicSeries, comicYear, comicIssue, comicVolume, customTitle, comicVineId, comicVineDetailsJson,
       // Story fields
       storyTitle, storyAuthor, storyYear, storyUrl, storyContainedInBookId, storyCoverUrl
     } = req.body;
@@ -1351,7 +1385,9 @@ app.put('/api/custom-orders/:id/items/:itemId', async (req, res) => {
       comicYear !== undefined || 
       comicIssue !== undefined || 
       comicVolume !== undefined ||
-      customTitle !== undefined
+      customTitle !== undefined ||
+      comicVineId !== undefined ||
+      comicVineDetailsJson !== undefined
     );
     
     // Check if this is a short story re-selection (story-specific fields are being updated)
@@ -1393,6 +1429,8 @@ app.put('/api/custom-orders/:id/items/:itemId', async (req, res) => {
         if (comicIssue !== undefined) updateData.comicIssue = String(comicIssue); // Ensure string
         if (comicVolume !== undefined) updateData.comicVolume = comicVolume;
         if (customTitle !== undefined) updateData.customTitle = customTitle;
+        if (comicVineId !== undefined) updateData.comicVineId = comicVineId;
+        if (comicVineDetailsJson !== undefined) updateData.comicVineDetailsJson = comicVineDetailsJson;
 
         // Crucial for re-caching: clear old artwork details to force re-fetch by ensureArtworkCached
         updateData.originalArtworkUrl = null; 
@@ -1627,6 +1665,10 @@ app.get('/api/search', async (req, res) => {
     }    if (type === 'tv' || type === 'television') {
       // Search for TV shows and their episodes in the database
       try {
+        // First search for TV shows that match the query
+        const tvShows = await plexDb.searchTVShows(query, yearFilter);
+        console.log(`TV Search Debug: Found ${tvShows.length} TV shows matching "${query}"`);
+        
         const allEpisodes = [];
         for (const show of tvShows) {
           try {

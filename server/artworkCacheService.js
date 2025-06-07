@@ -198,6 +198,20 @@ class ArtworkCacheService {
    */
   async getRemoteArtworkUrl(item) {
     switch (item.mediaType) {      case 'comic':
+        // Prioritize ComicVine data if available (from comic reselection)
+        if (item.comicVineDetailsJson) {
+          try {
+            const comicVineData = JSON.parse(item.comicVineDetailsJson);
+            if (comicVineData.image?.original_url) {
+              console.log(`Using ComicVine cover URL from reselection data: ${comicVineData.image.original_url}`);
+              return comicVineData.image.original_url;
+            }
+          } catch (error) {
+            console.warn(`Failed to parse ComicVine details JSON for item ${item.id}:`, error.message);
+          }
+        }
+        
+        // Fallback to traditional comic series lookup
         if (item.comicSeries && item.comicYear) {
           const comicString = `${item.comicSeries} (${item.comicYear}) #${item.comicIssue || '1'}`;
           return `http://localhost:3001/api/comicvine-cover?comic=${encodeURIComponent(comicString)}`;

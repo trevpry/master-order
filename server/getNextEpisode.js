@@ -759,10 +759,10 @@ async function tvShowExistsInCustomOrder(plexKey) {
     if (!seriesDetail) {
       return false;
     }
-    
-    // Check if any episodes from this series exist in custom orders
+      // Check if any episodes from this series exist in custom orders
     const result = await prisma.customOrderItem.findFirst({
-      where: {        OR: [
+      where: {
+        OR: [
           // Check by series title
           {
             seriesTitle: seriesDetail.title,
