@@ -27,7 +27,7 @@ const app = express();
 const server = http.createServer(app);
 const io = socketIo(server, {
   cors: {
-    origin: "http://localhost:3000",
+    origin: ["http://localhost:3000", "http://localhost:5173"],
     methods: ["GET", "POST"]
   }
 });
@@ -1087,45 +1087,10 @@ app.put('/api/custom-orders/:id', async (req, res) => {
 app.delete('/api/custom-orders/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    const customOrderId = parseInt(id);
-    
-    // First, get all items in this custom order to clean up their cached artwork
-    const customOrder = await prisma.customOrder.findUnique({
-      where: { id: customOrderId },
-      include: {
-        items: {
-          select: { id: true, title: true }
-        }
-      }
-    });
-
-    if (!customOrder) {
-      return res.status(404).json({ error: 'Custom order not found' });
-    }
-
-    // Clean up cached artwork for all items in the custom order
-    console.log(`Cleaning up cached artwork for ${customOrder.items.length} items in custom order "${customOrder.name}"`);
-    
-    for (const item of customOrder.items) {
-      try {
-        await artworkCache.cleanupArtwork(item.id);
-        console.log(`Cleaned up artwork for item: ${item.title}`);
-      } catch (error) {
-        console.warn(`Failed to cleanup artwork for item ${item.id} (${item.title}):`, error.message);
-        // Continue with deletion even if artwork cleanup fails
-      }
-    }
-
-    // Delete the custom order (this will cascade delete all items due to Prisma schema)
     await prisma.customOrder.delete({
-      where: { id: customOrderId }
+      where: { id: parseInt(id) }
     });
-
-    console.log(`Successfully deleted custom order "${customOrder.name}" and cleaned up ${customOrder.items.length} items`);
-    res.json({ 
-      message: 'Custom order deleted successfully',
-      itemsDeleted: customOrder.items.length
-    });
+    res.json({ message: 'Custom order deleted successfully' });
   } catch (error) {
     console.error('Error deleting custom order:', error);
     res.status(500).json({ error: 'Failed to delete custom order' });
