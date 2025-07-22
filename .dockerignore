@@ -1,0 +1,59 @@
+# Docker ignore file for Master Order
+node_modules
+npm-debug.log
+.git
+.gitignore
+README.md
+.env
+.env.local
+.env.development
+.env.test
+.env.production
+coverage
+.DS_Store
+*.log
+
+# Test files
+test-*.js
+*test*.js
+*debug*.js
+check-*.js
+simple-*.js
+comprehensive-*.js
+diagnostic-*.js
+
+# Database file (will be in mounted volume)
+master_order.db
+*.db
+*.db-journal
+
+# Build artifacts
+client/dist
+client/node_modules
+server/node_modules
+
+# Cache directories
+server/artwork-cache
+.cache
+
+# IDE files
+.vscode
+.idea
+*.swp
+*.swo
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*

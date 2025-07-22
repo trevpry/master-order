@@ -3,6 +3,7 @@ const cors = require('cors');
 const multer = require('multer');
 const http = require('http');
 const socketIo = require('socket.io');
+const path = require('path');
 const getNextEpisode = require('./getNextEpisode');
 const getNextMovie = require('./getNextMovie');
 const { getNextCustomOrder, markCustomOrderItemAsWatched } = require('./getNextCustomOrder');
@@ -41,6 +42,13 @@ app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
+// Serve static files from client build in production
+if (process.env.NODE_ENV === 'production') {
+  const clientBuildPath = path.join(__dirname, '..', 'client', 'dist');
+  app.use(express.static(clientBuildPath));
+  console.log('Serving static files from:', clientBuildPath);
+}
+
 // Helper function for generating a simple hash (used for web video uniqueness)
 function simpleHash(str) {
   let hash = 5381;
@@ -51,6 +59,28 @@ function simpleHash(str) {
 }
 
 // API Routes
+// Health check endpoint for Docker
+app.get('/api/health', async (req, res) => {
+  try {
+    // Check database connection
+    await prisma.$queryRaw`SELECT 1`;
+    
+    res.status(200).json({
+      status: 'healthy',
+      timestamp: new Date().toISOString(),
+      uptime: process.uptime(),
+      version: process.env.npm_package_version || '1.0.0'
+    });
+  } catch (error) {
+    console.error('Health check failed:', error);
+    res.status(503).json({
+      status: 'unhealthy',
+      error: error.message,
+      timestamp: new Date().toISOString()
+    });
+  }
+});
+
 app.get('/api/up_next', async (req, res) => {
   try {
     const data = await getNextEpisode(); // This handles order type selection internally
@@ -1725,6 +1755,14 @@ app.get('/api/debug/sections', async (req, res) => {
     res.status(500).json({ error: 'Failed to get Plex sections' });
   }
 });
+
+// Serve React app for all other routes in production
+if (process.env.NODE_ENV === 'production') {
+  app.get('*', (req, res) => {
+    const clientBuildPath = path.join(__dirname, '..', 'client', 'dist');
+    res.sendFile(path.join(clientBuildPath, 'index.html'));
+  });
+}
 
 // Graceful shutdown
 async function shutdown() {

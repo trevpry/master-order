@@ -43,6 +43,38 @@ A comprehensive media management application that intelligently curates your nex
 
 ## Setup and Installation
 
+### Docker Installation (Recommended)
+
+#### For Unraid Users
+See [UNRAID_SETUP.md](UNRAID_SETUP.md) for detailed Unraid-specific instructions.
+
+#### Quick Docker Setup
+```bash
+# Clone the repository
+git clone https://github.com/your-username/master-order.git
+cd master-order
+
+# Build the Docker image
+chmod +x build-docker.sh
+./build-docker.sh
+
+# Run with Docker Compose (recommended)
+docker-compose up -d
+
+# Or run manually
+docker run -d \
+  --name master-order \
+  --restart unless-stopped \
+  -p 3001:3001 \
+  -v $(pwd)/data:/app/data \
+  -v $(pwd)/artwork-cache:/app/server/artwork-cache \
+  -e PLEX_URL=http://your-plex-server:32400 \
+  -e PLEX_TOKEN=your-plex-token \
+  master-order:latest
+```
+
+### Manual Installation
+
 ### Prerequisites
 - Node.js (v18 or higher)
 - npm or yarn

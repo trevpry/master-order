@@ -1,0 +1,42 @@
+version: '3.8'
+
+services:
+  master-order:
+    build: .
+    container_name: master-order
+    restart: unless-stopped
+    ports:
+      - "3001:3001"
+    volumes:
+      # Persistent data storage
+      - ./data:/app/data
+      - ./artwork-cache:/app/server/artwork-cache
+      - ./logs:/app/logs
+      # Optional: Mount Plex media paths if running on same server
+      # - /mnt/user/Media:/media:ro
+    environment:
+      - NODE_ENV=production
+      - DATABASE_URL=file:/app/data/master_order.db
+      - PORT=3001
+      # Add your API keys and settings here or use a .env file
+      # - PLEX_URL=http://your-plex-server:32400
+      # - PLEX_TOKEN=your-plex-token
+      # - TVDB_API_KEY=your-tvdb-api-key
+      # - COMICVINE_API_KEY=your-comicvine-api-key
+    networks:
+      - master-order-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3001/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+networks:
+  master-order-network:
+    driver: bridge
+
+volumes:
+  master-order-data:
+  master-order-artwork:
+  master-order-logs:

@@ -1,0 +1,63 @@
+# Master Order - Unraid Docker Template
+# Save this as master-order.xml in /boot/config/plugins/dockerMan/templates-user/
+
+<?xml version="1.0"?>
+<Container version="2">
+  <Name>master-order</Name>
+  <Repository>master-order:latest</Repository>
+  <Registry></Registry>
+  <Network>bridge</Network>
+  <MyIP/>
+  <Shell>sh</Shell>
+  <Privileged>false</Privileged>
+  <Support>https://github.com/your-username/master-order</Support>
+  <Project>https://github.com/your-username/master-order</Project>
+  <Overview>
+    Master Order - A comprehensive media management application that intelligently curates your next entertainment experience by integrating Plex libraries with external metadata sources like TVDB and ComicVine.
+    
+    Features:
+    - Smart Episode Selection with collection-aware ordering
+    - Multi-Source Integration (Plex, TVDB, ComicVine)
+    - Custom Order Management for complex franchises
+    - Real-time Artwork caching
+    - Background Plex synchronization
+  </Overview>
+  <Category>MediaApp:Other</Category>
+  <WebUI>http://[IP]:[PORT:3001]/</WebUI>
+  <TemplateURL></TemplateURL>
+  <Icon>https://raw.githubusercontent.com/your-username/master-order/main/client/public/favicon.ico</Icon>
+  <ExtraParams>--restart=unless-stopped</ExtraParams>
+  <PostArgs/>
+  <CPUset/>
+  <DateInstalled></DateInstalled>
+  <DonateText/>
+  <DonateLink/>
+  <Requires/>
+  <Config Name="WebUI Port" Target="3001" Default="3001" Mode="tcp" Description="Port for the web interface" Type="Port" Display="always" Required="true" Mask="false">3001</Config>
+  
+  <!-- Data Persistence -->
+  <Config Name="App Data" Target="/app/data" Default="/mnt/user/appdata/master-order/data" Mode="rw" Description="Application data directory (database, settings)" Type="Path" Display="always" Required="true" Mask="false">/mnt/user/appdata/master-order/data</Config>
+  <Config Name="Artwork Cache" Target="/app/server/artwork-cache" Default="/mnt/user/appdata/master-order/artwork-cache" Mode="rw" Description="Cached artwork directory" Type="Path" Display="always" Required="true" Mask="false">/mnt/user/appdata/master-order/artwork-cache</Config>
+  <Config Name="Logs" Target="/app/logs" Default="/mnt/user/appdata/master-order/logs" Mode="rw" Description="Application logs directory" Type="Path" Display="always" Required="true" Mask="false">/mnt/user/appdata/master-order/logs</Config>
+  
+  <!-- Optional: Plex Media Access (if running on same server) -->
+  <Config Name="Media (Optional)" Target="/media" Default="/mnt/user/Media" Mode="ro" Description="Optional: Direct access to Plex media files (read-only)" Type="Path" Display="advanced" Required="false" Mask="false">/mnt/user/Media</Config>
+  
+  <!-- Environment Variables -->
+  <Config Name="Node Environment" Target="NODE_ENV" Default="production" Mode="" Description="Node.js environment" Type="Variable" Display="advanced" Required="true" Mask="false">production</Config>
+  <Config Name="Database URL" Target="DATABASE_URL" Default="file:/app/data/master_order.db" Mode="" Description="Database connection URL" Type="Variable" Display="advanced" Required="true" Mask="false">file:/app/data/master_order.db</Config>
+  <Config Name="Server Port" Target="PORT" Default="3001" Mode="" Description="Internal server port" Type="Variable" Display="advanced" Required="true" Mask="false">3001</Config>
+  
+  <!-- Plex Configuration -->
+  <Config Name="Plex URL" Target="PLEX_URL" Default="" Mode="" Description="Your Plex server URL (e.g., http://192.168.1.100:32400)" Type="Variable" Display="always" Required="false" Mask="false"></Config>
+  <Config Name="Plex Token" Target="PLEX_TOKEN" Default="" Mode="" Description="Your Plex authentication token" Type="Variable" Display="always" Required="false" Mask="true"></Config>
+  
+  <!-- API Keys -->
+  <Config Name="TVDB API Key" Target="TVDB_API_KEY" Default="" Mode="" Description="TVDB API Key for TV show metadata" Type="Variable" Display="always" Required="false" Mask="true"></Config>
+  <Config Name="ComicVine API Key" Target="COMICVINE_API_KEY" Default="" Mode="" Description="ComicVine API Key for comic metadata" Type="Variable" Display="always" Required="false" Mask="true"></Config>
+  
+  <!-- Advanced Settings -->
+  <Config Name="Timezone" Target="TZ" Default="America/New_York" Mode="" Description="Container timezone" Type="Variable" Display="advanced" Required="false" Mask="false">America/New_York</Config>
+  <Config Name="User ID" Target="PUID" Default="99" Mode="" Description="User ID for file permissions" Type="Variable" Display="advanced" Required="false" Mask="false">99</Config>
+  <Config Name="Group ID" Target="PGID" Default="100" Mode="" Description="Group ID for file permissions" Type="Variable" Display="advanced" Required="false" Mask="false">100</Config>
+</Container>
