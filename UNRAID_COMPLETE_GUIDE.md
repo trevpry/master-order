@@ -96,24 +96,44 @@ chmod +x build-docker.sh
 
 ### Step 6: Build the Docker Image
 ```bash
-# Build the image (this will take several minutes)
+# First, ensure you're in the correct directory with the Dockerfile
+pwd  # Should show something like /mnt/user/appdata/master-order-build/master-order
+ls -la Dockerfile  # Should show the Dockerfile exists
+
+# Build the image using standard Docker build (works on all Docker versions)
 docker build -t master-order:latest .
 
-# Monitor the build progress - you should see:
-# - Dependencies being installed
-# - Client being built
-# - Server being prepared
-# - Final image being created
+# If you get legacy builder warnings, you can suppress them with:
+# DOCKER_BUILDKIT=0 docker build -t master-order:latest .
+
+# The build process will take several minutes and show progress like:
+# Step 1/XX : FROM node:18-alpine AS build
+# Step 2/XX : RUN apk add --no-cache python3 make g++
+# ... (many more steps)
 ```
 
-**Expected output:**
+**Expected successful output (end of build):**
 ```
-Step 1/XX : FROM node:18-alpine AS build
- ---> [hash]
-Step 2/XX : RUN apk add --no-cache python3 make g++
-...
-Successfully built [hash]
+Step XX/XX : CMD ["./docker-entrypoint.sh"]
+ ---> Running in abc123def456
+Removing intermediate container abc123def456
+ ---> xyz789abc123
+Successfully built xyz789abc123
 Successfully tagged master-order:latest
+```
+
+**If you get any errors during build:**
+```bash
+# Check Docker version and available space
+docker --version
+df -h
+
+# For permission issues
+chown -R root:root .
+chmod +x docker-entrypoint.sh
+
+# For space issues, clean up unused images
+docker system prune -f
 ```
 
 ### Step 7: Verify Image Was Built
@@ -372,6 +392,55 @@ find "$BACKUP_DIR" -name "master-order-backup-*.tar.gz" -mtime +7 -delete
 ---
 
 ## Troubleshooting
+
+### Docker Build Issues
+
+**"docker build requires exactly 1 argument" Error:**
+```bash
+# This usually means you're not in the right directory
+# Ensure you're in the directory containing the Dockerfile
+ls -la Dockerfile  # Should show the file exists
+
+# If Dockerfile is missing, check if you're in a subdirectory
+find . -name "Dockerfile" -type f  # Find the Dockerfile location
+cd /path/to/directory/with/dockerfile  # Navigate to correct location
+```
+
+**Legacy Builder Deprecation Warnings:**
+```bash
+# Your Unraid Docker doesn't have buildx, so use standard build:
+docker build -t master-order:latest .
+
+# If you see deprecation warnings, suppress them:
+DOCKER_BUILDKIT=0 docker build -t master-order:latest .
+
+# Note: buildx is not available on your system, ignore buildx instructions
+```
+
+**Build Fails with "No Space Left on Device":**
+```bash
+# Check available space
+df -h
+
+# Clean up Docker if needed
+docker system prune -a  # WARNING: This removes unused images
+```
+
+**Permission Denied Errors During Build:**
+```bash
+# Ensure proper ownership of build files
+chown -R root:root /mnt/user/appdata/master-order-build/
+chmod -R 755 /mnt/user/appdata/master-order-build/
+```
+
+**Missing Dependencies Error (like "Cannot find module 'dotenv'"):**
+```bash
+# If you get missing module errors, rebuild with updated dependencies
+docker build --no-cache -t master-order:latest .
+
+# Check container logs for specific missing modules
+docker logs master-order
+```
 
 ### Common Issues and Solutions
 

@@ -12,10 +12,10 @@ COPY package*.json ./
 COPY server/package*.json ./server/
 COPY client/package*.json ./client/
 
-# Install dependencies
-RUN npm ci --only=production
+# Install dependencies (install all deps, not just production)
+RUN npm ci
 WORKDIR /app/server
-RUN npm ci --only=production
+RUN npm ci
 WORKDIR /app/client
 RUN npm ci
 

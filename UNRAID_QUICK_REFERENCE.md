@@ -7,7 +7,9 @@
 # SSH to Unraid, then:
 cd /mnt/user/appdata && mkdir master-order-build && cd master-order-build
 # Transfer your project files here
+ls -la Dockerfile  # Verify Dockerfile exists
 docker build -t master-order:latest .
+# If you get warnings: DOCKER_BUILDKIT=0 docker build -t master-order:latest .
 ```
 
 ### 2. Create Data Directories
