@@ -21,7 +21,11 @@ function CustomOrders() {
   const [movieSearchResults, setMovieSearchResults] = useState([]);
   const [movieSearchLoading, setMovieSearchLoading] = useState(false);  const [showBulkImportModal, setShowBulkImportModal] = useState(false);
   const [bulkImportData, setBulkImportData] = useState('');
-  const [bulkImportLoading, setBulkImportLoading] = useState(false);  const [reselectingItem, setReselectingItem] = useState(null); // For tracking which item is being re-selected
+  const [bulkImportLoading, setBulkImportLoading] = useState(false);
+
+  const [showCmroBulkImportModal, setShowCmroBulkImportModal] = useState(false);
+  const [cmroBulkImportData, setCmroBulkImportData] = useState('');
+  const [cmroBulkImportLoading, setCmroBulkImportLoading] = useState(false);  const [reselectingItem, setReselectingItem] = useState(null); // For tracking which item is being re-selected
   const [showBookForm, setShowBookForm] = useState(false);
   const [bookFormData, setBookFormData] = useState({
     title: '',
@@ -1449,6 +1453,238 @@ function CustomOrders() {
       setBulkImportLoading(false);
     }
   };
+
+  const handleCmroBulkImport = async (e) => {
+    e.preventDefault();
+    
+    if (!cmroBulkImportData.trim()) {
+      setMessage('Please enter CMRO data to import');
+      return;
+    }
+
+    setCmroBulkImportLoading(true);
+    
+    try {
+      // Parse CMRO format data
+      const entries = [];
+      const lines = cmroBulkImportData.trim().split('\n');
+      
+      let currentEntry = null;
+      let isProcessing = false;
+      
+      for (let i = 0; i < lines.length; i++) {
+        const line = lines[i].trim();
+        
+        // Skip empty lines
+        if (!line) continue;
+        
+        // Look for entry number pattern (e.g., "41: Shield of the Jedi")
+        const entryMatch = line.match(/^(\d+):\s*(.+)$/);
+        if (entryMatch) {
+          // Save previous entry if exists
+          if (currentEntry) {
+            entries.push(currentEntry);
+          }
+          
+          // Start new entry
+          currentEntry = {
+            number: parseInt(entryMatch[1]),
+            title: entryMatch[2].trim(),
+            source: null,
+            year: null,
+            writer: null,
+            pages: null,
+            publisher: null,
+            publishedDate: null,
+            synopsis: null
+          };
+          isProcessing = true;
+          continue;
+        }
+        
+        if (isProcessing && currentEntry) {
+          // Look for "from" line (e.g., "from The High Republic: Tales of Light and Life")
+          if (line.startsWith('from ')) {
+            currentEntry.source = line.substring(5).trim();
+            continue;
+          }
+          
+          // Look for year pattern (e.g., "349y BBY", "232y BBY")
+          const yearMatch = line.match(/^(\d+)y\s+(BBY|ABY)$/);
+          if (yearMatch) {
+            currentEntry.year = `${yearMatch[1]}y ${yearMatch[2]}`;
+            continue;
+          }
+          
+          // Look for published date (e.g., "Published: September 5, 2023")
+          if (line.startsWith('Published: ')) {
+            currentEntry.publishedDate = line.substring(11).trim();
+            continue;
+          }
+          
+          // Look for publisher (e.g., "Published by: Disney-Lucasfilm Press")
+          if (line.startsWith('Published by: ')) {
+            currentEntry.publisher = line.substring(14).trim();
+            continue;
+          }
+          
+          // Look for writer (e.g., "Writer: George Mann")
+          if (line.startsWith('Writer: ')) {
+            currentEntry.writer = line.substring(8).trim();
+            continue;
+          }
+          
+          // Look for pages (e.g., "Pages: 5")
+          if (line.startsWith('Pages: ')) {
+            currentEntry.pages = parseInt(line.substring(7).trim());
+            continue;
+          }
+          
+          // Skip certain lines
+          if (line === 'Synopsis Unavailable.' || 
+              line === 'View Listing Details' ||
+              line === 'Flashback Issue' ||
+              line.includes('Artist:') ||
+              line.trim() === '') {
+            continue;
+          }
+          
+          // Everything else is likely synopsis
+          if (!currentEntry.synopsis && 
+              !line.match(/^\d+:/) && 
+              line !== currentEntry.title) {
+            currentEntry.synopsis = line;
+          }
+        }
+      }
+      
+      // Add the last entry
+      if (currentEntry) {
+        entries.push(currentEntry);
+      }
+      
+      console.log('Parsed CMRO entries:', entries);
+      
+      if (entries.length === 0) {
+        setMessage('No valid CMRO entries found to import');
+        setCmroBulkImportLoading(false);
+        return;
+      }
+      
+      // Process each entry and add to custom order
+      let successCount = 0;
+      let failCount = 0;
+      const failedItems = [];
+      
+      for (const entry of entries) {
+        try {
+          // Determine if it's a comic, book, or short story based on the source
+          let mediaType = 'shortstory'; // Default to short story
+          let requestData = {};
+          
+          if (entry.source) {
+            // If from a magazine or anthology, treat as short story
+            if (entry.source.includes('Star Wars Insider') || 
+                entry.source.includes('Tales of') ||
+                entry.source.includes('Stories of')) {
+              mediaType = 'shortstory';
+              requestData = {
+                mediaType: 'shortstory',
+                title: entry.title,
+                storyTitle: entry.title,
+                storyAuthor: entry.writer || 'Unknown',
+                storyYear: entry.publishedDate ? new Date(entry.publishedDate).getFullYear() : null,
+                storyUrl: null,
+                storyContainedInBookId: null,
+                storyCoverUrl: null
+              };
+            } else {
+              // Standalone book or comic
+              mediaType = 'book';
+              requestData = {
+                mediaType: 'book',
+                title: entry.title,
+                bookTitle: entry.title,
+                bookAuthor: entry.writer || 'Unknown',
+                bookYear: entry.publishedDate ? new Date(entry.publishedDate).getFullYear() : null,
+                bookIsbn: null,
+                bookPublisher: entry.publisher || 'Unknown',
+                bookOpenLibraryId: null,
+                bookCoverUrl: null
+              };
+            }
+          } else {
+            // No source, likely a standalone book
+            mediaType = 'book';
+            requestData = {
+              mediaType: 'book',
+              title: entry.title,
+              bookTitle: entry.title,
+              bookAuthor: entry.writer || 'Unknown',
+              bookYear: entry.publishedDate ? new Date(entry.publishedDate).getFullYear() : null,
+              bookIsbn: null,
+              bookPublisher: entry.publisher || 'Unknown',
+              bookOpenLibraryId: null,
+              bookCoverUrl: null
+            };
+          }
+          
+          console.log(`Adding ${mediaType}: ${entry.title}`);
+          
+          const response = await fetch(`http://127.0.0.1:3001/api/custom-orders/${viewingOrderItems.id}/items`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(requestData),
+          });
+          
+          if (response.ok) {
+            successCount++;
+            console.log(`✅ Successfully added: ${entry.title}`);
+          } else {
+            const errorData = await response.json();
+            failCount++;
+            failedItems.push(`${entry.title}: ${errorData.error}`);
+            console.log(`❌ Failed to add: ${entry.title} - ${errorData.error}`);
+          }
+          
+        } catch (error) {
+          failCount++;
+          failedItems.push(`${entry.title}: ${error.message}`);
+          console.error(`Error adding ${entry.title}:`, error);
+        }
+      }
+      
+      // Show results
+      let resultMessage = `CMRO import completed: ${successCount} items added successfully`;
+      if (failCount > 0) {
+        resultMessage += `, ${failCount} failed`;
+        if (failedItems.length > 0) {
+          resultMessage += `\nFailed items:\n${failedItems.join('\n')}`;
+        }
+      }
+      
+      setMessage(resultMessage);
+      setShowCmroBulkImportModal(false);
+      setCmroBulkImportData('');
+      
+      // Refresh the order items
+      fetchCustomOrders();
+      if (viewingOrderItems) {
+        const updatedOrder = await fetch(`http://127.0.0.1:3001/api/custom-orders/${viewingOrderItems.id}`);
+        const updatedOrderData = await updatedOrder.json();
+        setViewingOrderItems(updatedOrderData);
+      }
+      
+    } catch (error) {
+      console.error('Error during CMRO import:', error);
+      setMessage('Error during CMRO import process');
+    } finally {
+      setCmroBulkImportLoading(false);
+    }
+  };
+
   const handleSearchBooks = async (e) => {
     e.preventDefault();
     
@@ -2038,6 +2274,15 @@ function CustomOrders() {
                 className="secondary"
               >
                 Bulk Import
+              </Button>
+              <Button
+                onClick={() => {
+                  setShowCmroBulkImportModal(true);
+                  setCmroBulkImportData('');
+                }}
+                className="secondary"
+              >
+                CMRO Bulk Import
               </Button>
             </div>
           </div>
@@ -2737,6 +2982,136 @@ Dune	Frank Herbert (1965)	Dune	book
             </form>
           </div>
         </div>      )}
+
+      {/* CMRO Bulk Import Modal */}
+      {showCmroBulkImportModal && (
+        <div className="modal-overlay">
+          <div className="modal-content">
+            <div className="modal-header">
+              <h3>CMRO Bulk Import</h3>
+              <Button
+                onClick={() => {
+                  setShowCmroBulkImportModal(false);
+                  setCmroBulkImportData('');
+                }}
+                className="secondary"
+                size="small"
+              >
+                ✕
+              </Button>
+            </div>
+            
+            <form onSubmit={handleCmroBulkImport} className="bulk-import-form">
+              <div className="bulk-import-instructions">
+                <h4>Complete Marvel Reading Order (CMRO) Format</h4>
+                <p>Paste CMRO-style data with the following format:</p>
+                <ul>
+                  <li><strong>Entry Number:</strong> "41: Title of Story"</li>
+                  <li><strong>Source:</strong> "from Source Publication" (optional)</li>
+                  <li><strong>Synopsis:</strong> Brief description (optional)</li>
+                  <li><strong>Timeline:</strong> "349y BBY" or similar (optional)</li>
+                  <li><strong>Published Date:</strong> "Published: Date"</li>
+                  <li><strong>Publisher:</strong> "Published by: Publisher Name"</li>
+                  <li><strong>Writer:</strong> "Writer: Author Name"</li>
+                  <li><strong>Pages:</strong> "Pages: Number" (optional)</li>
+                </ul>
+                
+                <div className="example-data">
+                  <strong>Example:</strong>
+                  <pre>
+41: Shield of the Jedi
+from The High Republic: Tales of Light and Life
+
+Synopsis Unavailable.
+349y BBY
+View Listing Details
+
+Published: September 5, 2023
+Published by: Disney-Lucasfilm Press
+Writer: George Mann
+Pages: 5
+
+42: What a Jedi Makes
+from Stories of Jedi and Sith
+
+An orphan from Coruscant's lower levels seeks out the Jedi Temple in the hopes of joining the Order.
+260y BBY
+View Listing Details
+
+Published: June 7, 2022
+Published by: Disney-Lucasfilm Press
+Writer: Michael Kogge
+                  </pre>
+                </div>
+              </div>
+              
+              <div className="form-group">
+                <label htmlFor="cmroData">CMRO Data *</label>
+                <textarea
+                  id="cmroData"
+                  value={cmroBulkImportData}
+                  onChange={(e) => setCmroBulkImportData(e.target.value)}
+                  placeholder="Paste your CMRO data here..."
+                  rows="15"
+                  className="bulk-import-textarea"
+                  required
+                />
+              </div>
+              
+              <div className="form-actions">
+                <Button 
+                  type="submit" 
+                  disabled={cmroBulkImportLoading}
+                  className="primary"
+                >
+                  {cmroBulkImportLoading ? 'Importing...' : 'Import CMRO Items'}
+                </Button>
+                <Button
+                  type="button"
+                  onClick={() => {
+                    setCmroBulkImportData(`41: Shield of the Jedi
+from The High Republic: Tales of Light and Life
+
+Synopsis Unavailable.
+349y BBY
+View Listing Details
+
+Published: September 5, 2023
+Published by: Disney-Lucasfilm Press
+Writer: George Mann
+Pages: 5
+
+42: What a Jedi Makes
+from Stories of Jedi and Sith
+
+An orphan from Coruscant's lower levels seeks out the Jedi Temple in the hopes of joining the Order.
+260y BBY
+View Listing Details
+
+Published: June 7, 2022
+Published by: Disney-Lucasfilm Press
+Writer: Michael Kogge`);
+                  }}
+                  className="secondary"
+                  style={{ marginLeft: '10px' }}
+                >
+                  Test Example
+                </Button>
+                <Button
+                  type="button"
+                  onClick={() => {
+                    setShowCmroBulkImportModal(false);
+                    setCmroBulkImportData('');
+                  }}
+                  className="secondary"
+                >
+                  Cancel
+                </Button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
 
       {/* Book Search Modal */}
       {showBookForm && (
