@@ -2,6 +2,7 @@ const express = require('express');
 const cors = require('cors');
 const multer = require('multer');
 const http = require('http');
+const https = require('https');
 const socketIo = require('socket.io');
 const path = require('path');
 const getNextEpisode = require('./getNextEpisode');
@@ -10,10 +11,10 @@ const { getNextCustomOrder, markCustomOrderItemAsWatched } = require('./getNextC
 const prisma = require('./prismaClient'); // Import the shared client
 const PlexDatabaseService = require('./plexDatabaseService');
 const TvdbDatabaseService = require('./tvdbDatabaseService'); // Added import
+const TVDBService = require('./tvdbService'); // Added import
 const PlexSyncService = require('./plexSyncService'); // Added import
 const BackgroundSyncService = require('./backgroundSyncService'); // Added import
 const ArtworkCacheService = require('./artworkCacheService'); // Added import
-const PlexPlayerService = require('./plexPlayerService'); // Added import
 
 // Initialize services
 const plexDb = new PlexDatabaseService();
@@ -21,7 +22,7 @@ const tvdbDb = new TvdbDatabaseService();
 const plexSync = new PlexSyncService(); // Initialize the sync service
 const backgroundSync = new BackgroundSyncService(); // Initialize background sync service
 const artworkCache = new ArtworkCacheService(); // Initialize artwork cache service
-const plexPlayer = new PlexPlayerService(); // Initialize Plex player service
+const plexPlayer = require('./plexPlayerService'); // Initialize Plex player service
 
 // Initialize the app and server
 const app = express();
@@ -102,6 +103,24 @@ app.get('/api/up_next', async (req, res) => {
     console.error('Error stack:', error.stack);
     res.status(500).json({ 
       error: 'Failed to get next item',
+      details: error.message 
+    });
+  }
+});
+
+// Find the earliest episode from a completed series in the selected collection
+app.get('/api/start-new-series', async (req, res) => {
+  try {
+    const startNewSeriesService = require('./startNewSeriesService');
+    const result = await startNewSeriesService.findNewSeries();
+    
+    console.log(`🎬 Successfully found new series to start: ${result.seriesTitle}`);
+    res.json(result);
+    
+  } catch (error) {
+    console.error('Error finding new series:', error);
+    res.status(500).json({ 
+      error: 'Failed to find new series',
       details: error.message 
     });
   }
@@ -636,6 +655,7 @@ app.post('/api/settings', async (req, res) => {
       plexUrl,
       tvdbApiKey,
       tvdbBearerToken,
+      selectedPlayer,
       ignoredMovieCollections,
       ignoredTVCollections,
       christmasFilterEnabled
@@ -681,6 +701,7 @@ app.post('/api/settings', async (req, res) => {
     if (plexUrl !== undefined) updateData.plexUrl = plexUrl.trim() || null;
     if (tvdbApiKey !== undefined) updateData.tvdbApiKey = tvdbApiKey.trim() || null;
     if (tvdbBearerToken !== undefined) updateData.tvdbBearerToken = tvdbBearerToken.trim() || null;
+    if (selectedPlayer !== undefined) updateData.selectedPlayer = selectedPlayer.trim() || null;
     if (ignoredMovieCollections !== undefined) updateData.ignoredMovieCollections = Array.isArray(ignoredMovieCollections) ? JSON.stringify(ignoredMovieCollections) : ignoredMovieCollections;
     if (ignoredTVCollections !== undefined) updateData.ignoredTVCollections = Array.isArray(ignoredTVCollections) ? JSON.stringify(ignoredTVCollections) : ignoredTVCollections;
     if (christmasFilterEnabled !== undefined) updateData.christmasFilterEnabled = christmasFilterEnabled;
@@ -701,6 +722,7 @@ app.post('/api/settings', async (req, res) => {
         plexUrl: plexUrl?.trim() || null,
         tvdbApiKey: tvdbApiKey?.trim() || null,
         tvdbBearerToken: tvdbBearerToken?.trim() || null,
+        selectedPlayer: selectedPlayer?.trim() || null,
         ignoredMovieCollections: Array.isArray(ignoredMovieCollections) ? JSON.stringify(ignoredMovieCollections) : ignoredMovieCollections || null,
         ignoredTVCollections: Array.isArray(ignoredTVCollections) ? JSON.stringify(ignoredTVCollections) : ignoredTVCollections || null,
         christmasFilterEnabled: christmasFilterEnabled ?? false
@@ -846,7 +868,9 @@ app.get('/api/plex/players', async (req, res) => {
     // Format players for dropdown
     const formattedPlayers = players.map(player => ({
       value: player.machineIdentifier,
-      label: `${player.name} (${player.product}) - ${player.platform}`,
+      label: player.isFallback 
+        ? `${player.name} [Fallback]`
+        : `${player.name} (${player.product}) - ${player.platform}`,
       ...player
     }));
     
@@ -855,6 +879,352 @@ app.get('/api/plex/players', async (req, res) => {
     console.error('Failed to fetch Plex players:', error);
     res.status(500).json({ 
       error: 'Failed to fetch Plex players',
+      details: error.message 
+    });
+  }
+});
+
+// Get selected player details endpoint
+app.get('/api/plex/selected-player', async (req, res) => {
+  try {
+    const settings = await prisma.settings.findUnique({
+      where: { id: 1 }
+    });
+    
+    if (!settings || !settings.selectedPlayer) {
+      return res.json({ selectedPlayer: null, message: 'No player selected' });
+    }
+    
+    const players = await plexPlayer.getPlayers();
+    const selectedPlayerDetails = players.find(player => player.machineIdentifier === settings.selectedPlayer);
+    
+    if (!selectedPlayerDetails) {
+      return res.json({ 
+        selectedPlayer: settings.selectedPlayer, 
+        message: 'Selected player not currently available',
+        available: false
+      });
+    }
+    
+    res.json({ 
+      selectedPlayer: settings.selectedPlayer,
+      playerDetails: selectedPlayerDetails,
+      available: true
+    });
+  } catch (error) {
+    console.error('Failed to get selected player:', error);
+    res.status(500).json({ 
+      error: 'Failed to get selected player',
+      details: error.message 
+    });
+  }
+});
+
+// Start playback on selected player endpoint
+app.post('/api/plex/play', async (req, res) => {
+  try {
+    const { ratingKey, offset = 0, playerId } = req.body;
+    
+    if (!ratingKey) {
+      return res.status(400).json({ error: 'ratingKey is required' });
+    }
+    
+    let targetPlayerId = playerId;
+    
+    // If no specific player provided, use the selected player from settings
+    if (!targetPlayerId) {
+      const settings = await prisma.settings.findUnique({
+        where: { id: 1 }
+      });
+      
+      if (!settings || !settings.selectedPlayer) {
+        return res.status(400).json({ 
+          error: 'No player specified and no default player selected in settings' 
+        });
+      }
+      
+      targetPlayerId = settings.selectedPlayer;
+    }
+
+    const result = await plexPlayer.playMedia(targetPlayerId, ratingKey, offset);
+    res.json(result);
+  } catch (error) {
+    console.error('Failed to start playback:', error);
+    res.status(500).json({ 
+      error: 'Failed to start playback',
+      details: error.message 
+    });
+  }
+});
+
+// Start playback with mobile retry endpoint
+app.post('/api/plex/play-with-retry', async (req, res) => {
+  try {
+    const { ratingKey, offset = 0, playerId } = req.body;
+    
+    if (!ratingKey) {
+      return res.status(400).json({ error: 'ratingKey is required' });
+    }
+    
+    let targetPlayerId = playerId;
+    
+    // If no specific player provided, use the selected player from settings
+    if (!targetPlayerId) {
+      const settings = await prisma.settings.findUnique({
+        where: { id: 1 }
+      });
+      
+      if (!settings || !settings.selectedPlayer) {
+        return res.status(400).json({ 
+          error: 'No player specified and no default player selected in settings' 
+        });
+      }
+      
+      targetPlayerId = settings.selectedPlayer;
+    }
+
+    const result = await plexPlayer.playMediaWithMobileRetry(targetPlayerId, ratingKey, offset);
+    res.json(result);
+  } catch (error) {
+    console.error('Failed to start playback with retry:', error);
+    res.status(500).json({ 
+      error: 'Failed to start playback',
+      details: error.message 
+    });
+  }
+});
+
+// Start playback via Plex.tv discovery endpoint
+app.post('/api/plex/play-via-plex-tv', async (req, res) => {
+  try {
+    const { ratingKey, offset = 0, playerId } = req.body;
+    
+    if (!ratingKey) {
+      return res.status(400).json({ error: 'ratingKey is required' });
+    }
+    
+    let targetPlayerId = playerId;
+    
+    // If no specific player provided, use the selected player from settings
+    if (!targetPlayerId) {
+      const settings = await prisma.settings.findUnique({
+        where: { id: 1 }
+      });
+      
+      if (!settings || !settings.selectedPlayer) {
+        return res.status(400).json({ 
+          error: 'No player specified and no default player selected in settings' 
+        });
+      }
+      
+      targetPlayerId = settings.selectedPlayer;
+    }
+
+    const result = await plexPlayer.playMediaViaPlex(targetPlayerId, ratingKey, offset);
+    res.json(result);
+  } catch (error) {
+    console.error('Failed to start playback via Plex.tv:', error);
+    res.status(500).json({ 
+      error: 'Failed to start playback via Plex.tv',
+      details: error.message 
+    });
+  }
+});
+
+// Test TVDB token endpoint
+app.get('/api/tvdb/test-token', async (req, res) => {
+  try {
+    const settings = await prisma.settings.findUnique({
+      where: { id: 1 }
+    });
+    
+    if (!settings || !settings.tvdbBearerToken) {
+      return res.json({
+        success: false,
+        error: 'No TVDB Bearer Token configured',
+        hasToken: false
+      });
+    }
+    
+    // Test the token with a simple API call
+    const testResponse = await fetch('https://api4.thetvdb.com/v4/search?query=test&type=series', {
+      headers: {
+        'Authorization': `Bearer ${settings.tvdbBearerToken}`
+      }
+    });
+    
+    if (testResponse.ok) {
+      const data = await testResponse.json();
+      res.json({
+        success: true,
+        message: 'TVDB Bearer Token is valid',
+        hasToken: true,
+        tokenLength: settings.tvdbBearerToken.length,
+        testResultCount: data.data?.length || 0
+      });
+    } else {
+      const errorData = await testResponse.text();
+      res.json({
+        success: false,
+        error: `TVDB API returned ${testResponse.status}: ${errorData}`,
+        hasToken: true,
+        tokenLength: settings.tvdbBearerToken.length,
+        status: testResponse.status
+      });
+    }
+  } catch (error) {
+    console.error('TVDB token test failed:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to test TVDB token',
+      details: error.message
+    });
+  }
+});
+
+// Test AndroidTV notification endpoint
+app.post('/api/plex/test-androidtv-notification', async (req, res) => {
+  try {
+    const { ratingKey, offset = 0, playerId } = req.body;
+    
+    if (!ratingKey) {
+      return res.status(400).json({ error: 'ratingKey is required' });
+    }
+    
+    let targetPlayerId = playerId;
+    
+    // If no specific player provided, use the selected player from settings
+    if (!targetPlayerId) {
+      const settings = await prisma.settings.findUnique({
+        where: { id: 1 }
+      });
+      
+      if (!settings || !settings.selectedPlayer) {
+        return res.status(400).json({ 
+          error: 'No player specified and no default player selected in settings' 
+        });
+      }
+      
+      targetPlayerId = settings.selectedPlayer;
+    }
+
+    console.log('Testing AndroidTV notification approach for device:', targetPlayerId);
+    
+    // Initialize the Plex client
+    await plexPlayer.initializeClient();
+    
+    // Get media details
+    const mediaResponse = await plexPlayer.client.query(`/library/metadata/${ratingKey}`);
+    if (!mediaResponse?.MediaContainer?.Metadata?.[0]) {
+      throw new Error('Media not found');
+    }
+    
+    const media = mediaResponse.MediaContainer.Metadata[0];
+    console.log('Media details:', media.title);
+    
+    // Try multiple notification approaches
+    const results = {};
+    
+    // Method 1: Timeline notification
+    try {
+      console.log('Trying timeline notification...');
+      const timelineParams = {
+        ratingKey: ratingKey,
+        key: media.key,
+        state: 'playing',
+        time: offset * 1000,
+        duration: media.duration || 0,
+        machineIdentifier: targetPlayerId
+      };
+      
+      const timelineResponse = await plexPlayer.client.query('/:/timeline', 'POST', timelineParams);
+      results.timeline = { success: true, response: timelineResponse };
+      console.log('Timeline notification success');
+    } catch (error) {
+      results.timeline = { success: false, error: error.message };
+      console.log('Timeline notification failed:', error.message);
+    }
+    
+    // Method 2: Direct notification
+    try {
+      console.log('Trying direct notification...');
+      const notifyParams = {
+        type: 'playing',
+        machineIdentifier: targetPlayerId,
+        key: media.key,
+        offset: offset * 1000
+      };
+      
+      const notifyResponse = await plexPlayer.client.query('/:/notify', 'POST', notifyParams);
+      results.notify = { success: true, response: notifyResponse };
+      console.log('Direct notification success');
+    } catch (error) {
+      results.notify = { success: false, error: error.message };
+      console.log('Direct notification failed:', error.message);
+    }
+    
+    // Method 3: Play queue creation
+    try {
+      console.log('Trying play queue creation...');
+      const queueParams = {
+        type: 'video',
+        uri: `library:///directory/${media.key}`,
+        machineIdentifier: targetPlayerId,
+        offset: offset * 1000
+      };
+      
+      const queueResponse = await plexPlayer.client.query('/playQueues', 'POST', queueParams);
+      results.playQueue = { success: true, response: queueResponse };
+      console.log('Play queue creation success');
+    } catch (error) {
+      results.playQueue = { success: false, error: error.message };
+      console.log('Play queue creation failed:', error.message);
+    }
+    
+    res.json({
+      success: true,
+      message: 'AndroidTV notification test completed',
+      media: media.title,
+      targetDevice: targetPlayerId,
+      results: results
+    });
+    
+  } catch (error) {
+    console.error('Failed to test AndroidTV notification:', error);
+    res.status(500).json({ 
+      error: 'Failed to test AndroidTV notification',
+      details: error.message 
+    });
+  }
+});// Control playback endpoint
+app.post('/api/plex/control/:action', async (req, res) => {
+  try {
+    const { action } = req.params;
+    const { playerId } = req.body;
+    
+    let targetPlayerId = playerId;
+    
+    // If no specific player provided, use the selected player from settings
+    if (!targetPlayerId) {
+      const settings = await prisma.settings.findUnique({
+        where: { id: 1 }
+      });
+      
+      if (!settings || !settings.selectedPlayer) {
+        return res.status(400).json({ 
+          error: 'No player specified and no default player selected in settings' 
+        });
+      }
+      
+      targetPlayerId = settings.selectedPlayer;
+    }
+    
+    const result = await plexPlayer.controlPlayback(targetPlayerId, action);
+    res.json(result);
+  } catch (error) {
+    console.error(`Failed to ${action} playback:`, error);
+    res.status(500).json({ 
+      error: `Failed to ${action} playback`,
       details: error.message 
     });
   }
@@ -870,6 +1240,327 @@ app.get('/api/plex/test-connection', async (req, res) => {
     res.status(500).json({ 
       error: 'Failed to test Plex connection',
       details: error.message 
+    });
+  }
+});
+
+// Check specific device status endpoint
+app.get('/api/plex/device-status/:machineIdentifier', async (req, res) => {
+  try {
+    const { machineIdentifier } = req.params;
+    
+    if (!machineIdentifier) {
+      return res.status(400).json({ error: 'Machine identifier is required' });
+    }
+    
+    console.log(`Checking device status for: ${machineIdentifier}`);
+    
+    // Get all available players first
+    const allPlayers = await plexPlayer.getPlayers();
+    const altPlayers = await plexPlayer.getPlayersAlternative();
+    const combinedPlayers = [...allPlayers, ...altPlayers];
+    
+    // Find the specific device
+    const device = combinedPlayers.find(p => p.machineIdentifier === machineIdentifier);
+    
+    if (!device) {
+      return res.json({
+        success: false,
+        found: false,
+        message: 'Device not found in current player list',
+        machineIdentifier: machineIdentifier,
+        availableDevices: combinedPlayers.length,
+        timestamp: new Date().toISOString()
+      });
+    }
+    
+    const status = {
+      success: true,
+      found: true,
+      device: {
+        name: device.name,
+        product: device.product,
+        platform: device.platform,
+        platformVersion: device.platformVersion,
+        device: device.device,
+        version: device.version,
+        address: device.address,
+        port: device.port,
+        local: device.local,
+        owned: device.owned,
+        isRegistered: device.isRegistered,
+        isFallback: device.isFallback
+      },
+      timestamp: new Date().toISOString()
+    };
+    
+    // Try to check if device is responsive (for AndroidTV devices)
+    if (device.isRegistered || device.platform === 'Android') {
+      console.log('Attempting to check device responsiveness...');
+      
+      try {
+        // Try the wake-up/status check method
+        const wakeupResult = await plexPlayer.checkAndWakeUpDevice(machineIdentifier);
+        status.responsiveness = {
+          checked: true,
+          result: wakeupResult,
+          responsive: wakeupResult.success
+        };
+      } catch (responsiveError) {
+        console.log('Responsiveness check failed:', responsiveError.message);
+        status.responsiveness = {
+          checked: true,
+          result: { success: false, message: responsiveError.message },
+          responsive: false
+        };
+      }
+    } else {
+      status.responsiveness = {
+        checked: false,
+        reason: 'Not an AndroidTV/registered device - responsiveness check skipped'
+      };
+    }
+    
+    // Try to get active sessions to see if device is currently playing
+    try {
+      const sessionsResponse = await plexPlayer.client.query('/status/sessions');
+      const sessions = sessionsResponse?.MediaContainer?.Metadata || [];
+      const deviceSession = sessions.find(session => 
+        session.Player?.machineIdentifier === machineIdentifier
+      );
+      
+      status.activeSession = {
+        hasSession: !!deviceSession,
+        sessionInfo: deviceSession ? {
+          state: deviceSession.Player?.state,
+          title: deviceSession.title,
+          type: deviceSession.type,
+          user: deviceSession.User?.title
+        } : null
+      };
+    } catch (sessionError) {
+      console.log('Session check failed:', sessionError.message);
+      status.activeSession = {
+        hasSession: false,
+        error: sessionError.message
+      };
+    }
+    
+    console.log('Device status check completed:', status);
+    res.json(status);
+    
+  } catch (error) {
+    console.error('Failed to check device status:', error);
+    res.status(500).json({ 
+      error: 'Failed to check device status',
+      details: error.message,
+      timestamp: new Date().toISOString()
+    });
+  }
+});
+
+// Debug endpoint to test different Plex API endpoints
+app.get('/api/plex/debug', async (req, res) => {
+  try {
+    const debugInfo = {
+      timestamp: new Date().toISOString(),
+      endpoints: {}
+    };
+
+    // Test basic connection
+    try {
+      const connectionTest = await plexPlayer.testConnection();
+      debugInfo.connection = connectionTest;
+    } catch (error) {
+      debugInfo.connection = { success: false, error: error.message };
+    }
+
+    // Test /clients endpoint
+    try {
+      const players = await plexPlayer.getPlayers();
+      debugInfo.endpoints.clients = {
+        success: true,
+        playerCount: players.length,
+        players: players
+      };
+    } catch (error) {
+      debugInfo.endpoints.clients = {
+        success: false,
+        error: error.message
+      };
+    }
+
+    // Test alternative methods
+    try {
+      const altPlayers = await plexPlayer.getPlayersAlternative();
+      debugInfo.endpoints.alternative = {
+        success: true,
+        playerCount: altPlayers.length,
+        players: altPlayers
+      };
+    } catch (error) {
+      debugInfo.endpoints.alternative = {
+        success: false,
+        error: error.message
+      };
+    }
+
+    res.json(debugInfo);
+  } catch (error) {
+    console.error('Debug endpoint failed:', error);
+    res.status(500).json({ 
+      error: 'Debug endpoint failed',
+      details: error.message 
+    });
+  }
+});
+
+// Webhook notification endpoint
+app.post('/api/webhook/notify', async (req, res) => {
+  try {
+    const { ratingKey, action, title, type, timestamp } = req.body;
+    
+    console.log('Sending webhook notification to Node-RED:', {
+      ratingKey,
+      action,
+      title,
+      type,
+      timestamp
+    });
+    
+    // Prepare the data to send
+    const postData = JSON.stringify({
+      ratingKey,
+      action,
+      title,
+      type,
+      timestamp
+    });
+    
+    // HTTP request options
+    const options = {
+      hostname: '192.168.1.117',
+      port: 1880,
+      path: '/webhook',
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Content-Length': Buffer.byteLength(postData),
+        'User-Agent': 'Master-Order-App/1.0',
+        'Accept': 'application/json',
+        'Authorization': `Bearer ${process.env.NODE_RED_TOKEN}`
+      }
+    };
+    
+    // Make the HTTP request to Node-RED
+    const request = http.request(options, (response) => {
+      let data = '';
+      
+      response.on('data', (chunk) => {
+        data += chunk;
+      });
+      
+      response.on('end', () => {
+        console.log(`Node-RED response status: ${response.statusCode}`);
+        console.log(`Node-RED response headers:`, response.headers);
+        console.log(`Node-RED response body:`, data);
+        
+        if (response.statusCode >= 200 && response.statusCode < 300) {
+          console.log('Webhook notification sent successfully to Node-RED');
+          res.json({ success: true, message: 'Webhook notification sent' });
+        } else {
+          console.error('Node-RED webhook failed with status:', response.statusCode);
+          res.status(500).json({ 
+            success: false, 
+            error: `Node-RED webhook failed with status ${response.statusCode}`,
+            responseBody: data,
+            responseHeaders: response.headers
+          });
+        }
+      });
+    });
+    
+    request.on('error', (error) => {
+      console.error('Failed to send webhook notification:', error);
+      res.status(500).json({ 
+        success: false, 
+        error: 'Failed to send webhook notification',
+        details: error.message 
+      });
+    });
+    
+    // Send the data
+    request.write(postData);
+    request.end();
+    
+  } catch (error) {
+    console.error('Webhook endpoint error:', error);
+    res.status(500).json({ 
+      success: false, 
+      error: 'Webhook endpoint error',
+      details: error.message 
+    });
+  }
+});
+
+// Raw Plex API debug endpoint
+app.get('/api/plex/debug-raw', async (req, res) => {
+  try {
+    const timestamp = new Date().toISOString();
+    
+    // Test connection first
+    const connectionTest = await plexPlayer.testConnection();
+    
+    // Get raw responses from multiple endpoints
+    const rawResponses = {};
+    
+    try {
+      console.log('Fetching raw /clients response...');
+      rawResponses.clients = await plexPlayer.client.query('/clients');
+    } catch (error) {
+      rawResponses.clients = { error: error.message };
+    }
+    
+    try {
+      console.log('Fetching raw /status/sessions response...');
+      rawResponses.sessions = await plexPlayer.client.query('/status/sessions');
+    } catch (error) {
+      rawResponses.sessions = { error: error.message };
+    }
+    
+    try {
+      console.log('Fetching raw /devices response...');
+      rawResponses.devices = await plexPlayer.client.query('/devices');
+    } catch (error) {
+      rawResponses.devices = { error: error.message };
+    }
+    
+    try {
+      console.log('Fetching raw /myplex/resources response...');
+      rawResponses.resources = await plexPlayer.client.query('/myplex/resources');
+    } catch (error) {
+      rawResponses.resources = { error: error.message };
+    }
+    
+    // Get processed players for comparison
+    const processedPlayers = await plexPlayer.getPlayers().catch(error => ({ error: error.message }));
+    const alternativePlayers = await plexPlayer.getPlayersAlternative().catch(error => ({ error: error.message }));
+    
+    res.json({
+      timestamp,
+      connection: connectionTest,
+      rawResponses,
+      processedResults: {
+        main: Array.isArray(processedPlayers) ? { success: true, count: processedPlayers.length, players: processedPlayers } : processedPlayers,
+        alternative: Array.isArray(alternativePlayers) ? { success: true, count: alternativePlayers.length, players: alternativePlayers } : alternativePlayers
+      }
+    });
+  } catch (error) {
+    console.error('Raw debug endpoint error:', error);
+    res.status(500).json({ 
+      error: 'Raw debug failed',
+      details: error.message,
+      timestamp: new Date().toISOString()
     });
   }
 });
@@ -1188,15 +1879,29 @@ app.post('/api/custom-orders/:id/items', async (req, res) => {
       } catch (err) {
         return res.status(400).json({ error: 'Invalid webUrl format' });
       }
+    } else if (mediaType === 'episode') {
+      // For TV episodes, either plexKey OR (seriesTitle + seasonNumber + episodeNumber) required
+      if (!plexKey && (!seriesTitle || seasonNumber === undefined || episodeNumber === undefined)) {
+        return res.status(400).json({ 
+          error: 'For episodes: either plexKey (for existing Plex episodes) OR seriesTitle, seasonNumber, and episodeNumber (for episodes not yet in Plex) are required' 
+        });
+      }
+    } else if (mediaType === 'movie') {
+      // For movies, either plexKey OR title is required (title alone allows for movies not yet in Plex)
+      if (!plexKey && !title) {
+        return res.status(400).json({ 
+          error: 'For movies: either plexKey (for existing Plex movies) OR title (for movies not yet in Plex) is required' 
+        });
+      }
     } else {
-      // For non-comic/book/shortstory/webvideo media, plexKey is required
+      // For other media types, plexKey is still required
       if (!plexKey) {
-        return res.status(400).json({ error: 'plexKey is required for non-comic/book/shortstory/webvideo media' });
+        return res.status(400).json({ error: 'plexKey is required for this media type' });
       }
     }// Check for duplicate items
     let existingItem;    if (mediaType === 'comic') {
-      // For comics, check for duplicates by series, year, issue, and custom title
-      // This allows the same comic to be added multiple times with different custom titles
+      // For comics, check for duplicates by series, year, issue, and main title
+      // This allows the same comic to be added multiple times with different titles
       existingItem = await prisma.customOrderItem.findFirst({
         where: {
           customOrderId: parseInt(id),
@@ -1204,7 +1909,7 @@ app.post('/api/custom-orders/:id/items', async (req, res) => {
           comicSeries: comicSeries,
           comicYear: comicYear ? parseInt(comicYear) : null,
           comicIssue: String(comicIssue),
-          customTitle: customTitle || null // Include custom title in duplicate check
+          title: title // Use main title instead of customTitle for duplicate checking
         }
       });} else if (mediaType === 'book') {
       // For books, check for duplicates by title and author
@@ -1242,8 +1947,34 @@ app.post('/api/custom-orders/:id/items', async (req, res) => {
           webUrl: webUrl
         }
       });
+    } else if (mediaType === 'episode' && !plexKey) {
+      // For episodes not yet in Plex, check by series, season, and episode
+      existingItem = await prisma.customOrderItem.findFirst({
+        where: {
+          customOrderId: parseInt(id),
+          mediaType: 'episode',
+          seriesTitle: seriesTitle,
+          seasonNumber: seasonNumber,
+          episodeNumber: episodeNumber
+        }
+      });
+    } else if (mediaType === 'movie' && !plexKey) {
+      // For movies not yet in Plex, check by title and year
+      const whereCondition = {
+        customOrderId: parseInt(id),
+        mediaType: 'movie',
+        title: title
+      };
+      
+      if (bookYear) {
+        whereCondition.bookYear = parseInt(bookYear);
+      }
+      
+      existingItem = await prisma.customOrderItem.findFirst({
+        where: whereCondition
+      });
     } else {
-      // For other media, check by plexKey
+      // For other media with plexKey, check by plexKey
       existingItem = await prisma.customOrderItem.findFirst({
         where: {
           customOrderId: parseInt(id),
@@ -1268,7 +1999,7 @@ app.post('/api/custom-orders/:id/items', async (req, res) => {
       orderBy: { sortOrder: 'desc' }
     });
     
-    const nextSortOrder = lastItem ? lastItem.sortOrder + 1 : 0;      // Generate a unique plexKey for comics and books (since it's required by schema)
+    const nextSortOrder = lastItem ? lastItem.sortOrder + 1 : 0;    // Generate a unique plexKey for items without existing Plex keys
     let finalPlexKey;
     if (mediaType === 'comic') {
       finalPlexKey = `comic-${comicSeries}-${comicYear}-${comicIssue}`.replace(/[^a-zA-Z0-9-]/g, '-').toLowerCase();
@@ -1285,6 +2016,13 @@ app.post('/api/custom-orders/:id/items', async (req, res) => {
       if (finalPlexKey.length > 250) { 
         finalPlexKey = finalPlexKey.substring(0, 250);
       }
+    } else if (mediaType === 'episode' && !plexKey) {
+      // Generate key for episodes not yet in Plex
+      finalPlexKey = `tvdb-episode-${seriesTitle}-s${seasonNumber}e${episodeNumber}`.replace(/[^a-zA-Z0-9-]/g, '-').toLowerCase();
+    } else if (mediaType === 'movie' && !plexKey) {
+      // Generate key for movies not yet in Plex  
+      const yearPart = bookYear ? `-${bookYear}` : ''; // Using bookYear as it's the year field available
+      finalPlexKey = `tvdb-movie-${title}${yearPart}`.replace(/[^a-zA-Z0-9-]/g, '-').toLowerCase();
     } else {
       finalPlexKey = plexKey;
     }
@@ -1296,7 +2034,8 @@ app.post('/api/custom-orders/:id/items', async (req, res) => {
         title,
         seasonNumber,
         episodeNumber,
-        seriesTitle,        comicSeries,
+        seriesTitle,
+        comicSeries,
         comicYear: comicYear ? parseInt(comicYear) : null,
         comicIssue: mediaType === 'comic' ? String(comicIssue) : null,
         comicVolume,
@@ -1307,7 +2046,8 @@ app.post('/api/custom-orders/:id/items', async (req, res) => {
         bookIsbn,
         bookPublisher,
         bookOpenLibraryId,
-        bookCoverUrl,        storyTitle,
+        bookCoverUrl,
+        storyTitle,
         storyAuthor,
         storyYear: storyYear ? parseInt(storyYear) : null,
         storyUrl,
@@ -1316,9 +2056,70 @@ app.post('/api/custom-orders/:id/items', async (req, res) => {
         webTitle,
         webUrl,
         webDescription,
-        sortOrder: nextSortOrder
+        sortOrder: nextSortOrder,
+        // Mark as TVDB-only if no plexKey was provided for episodes/movies
+        isFromTvdbOnly: (mediaType === 'episode' || mediaType === 'movie') && !plexKey
       }
     });
+
+    // Fetch TVDB metadata for non-Plex items
+    if ((mediaType === 'episode' || mediaType === 'movie') && !plexKey) {
+      try {
+        console.log(`Fetching TVDB metadata for ${mediaType}: ${title || seriesTitle}`);
+        
+        if (mediaType === 'episode' && seriesTitle) {
+          // Search for the series and get episode details
+          const seriesResults = await TVDBService.searchSeries(seriesTitle);
+          if (seriesResults && seriesResults.length > 0) {
+            const bestMatch = seriesResults[0]; // Take the first/best match
+            console.log(`Found TVDB series: ${bestMatch.name} (ID: ${bestMatch.tvdb_id})`);
+            
+            // Get series details and find the episode
+            const episode = await TVDBService.findEpisodeBySeasonAndNumber(
+              bestMatch.tvdb_id, 
+              seasonNumber, 
+              episodeNumber
+            );
+            
+            if (episode) {
+              console.log(`Found TVDB episode: ${episode.name}`);
+              // Update the item with TVDB metadata
+              await prisma.customOrderItem.update({
+                where: { id: item.id },
+                data: {
+                  title: episode.name || title,
+                  // You can add more fields here like overview, air date, etc.
+                }
+              });
+            }
+          }
+        } else if (mediaType === 'movie' && title) {
+          // Search for the movie
+          const movieResults = await TVDBService.searchMovies(title);
+          if (movieResults && movieResults.length > 0) {
+            const bestMatch = movieResults[0]; // Take the first/best match
+            console.log(`Found TVDB movie: ${bestMatch.name} (ID: ${bestMatch.tvdb_id})`);
+            
+            // Get movie details
+            const movieDetails = await TVDBService.getMovieDetails(bestMatch.tvdb_id);
+            if (movieDetails) {
+              console.log(`Got TVDB movie details: ${movieDetails.name}`);
+              // Update the item with TVDB metadata
+              await prisma.customOrderItem.update({
+                where: { id: item.id },
+                data: {
+                  title: movieDetails.name || title,
+                  // You can add more fields here like overview, release date, etc.
+                }
+              });
+            }
+          }
+        }
+      } catch (error) {
+        console.warn(`Failed to fetch TVDB metadata for ${mediaType} "${title || seriesTitle}":`, error.message);
+        // Don't fail the whole request if TVDB lookup fails
+      }
+    }
     
     // Try to cache artwork for the new item (async, don't wait for completion)
     artworkCache.ensureArtworkCached(item).catch(error => {
@@ -1329,6 +2130,111 @@ app.post('/api/custom-orders/:id/items', async (req, res) => {
   } catch (error) {
     console.error('Error adding item to custom order:', error);
     res.status(500).json({ error: 'Failed to add item to custom order' });
+  }
+});
+
+// Add TVDB-only item to custom order (doesn't exist in Plex yet)
+app.post('/api/custom-orders/:id/items/tvdb-only', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { 
+      mediaType, 
+      title, 
+      seasonNumber, 
+      episodeNumber, 
+      seriesTitle,
+      tvdbSeriesId,
+      tvdbSeasonId,
+      tvdbEpisodeId,
+      description,
+      airDate,
+      // Movie fields
+      year,
+      movieTvdbId
+    } = req.body;
+
+    console.log(`Adding TVDB-only ${mediaType} to custom order ${id}:`, { title, seriesTitle, seasonNumber, episodeNumber });
+
+    // Validate required fields
+    if (!mediaType || !title) {
+      return res.status(400).json({ error: 'mediaType and title are required' });
+    }
+
+    if (mediaType === 'episode' && (!seriesTitle || !seasonNumber || !episodeNumber)) {
+      return res.status(400).json({ error: 'seriesTitle, seasonNumber, and episodeNumber are required for episodes' });
+    }
+
+    if (mediaType === 'movie' && !year) {
+      return res.status(400).json({ error: 'year is required for movies' });
+    }
+
+    // Generate a unique plexKey for the TVDB item
+    let finalPlexKey;
+    if (mediaType === 'episode') {
+      finalPlexKey = `tvdb-episode-${seriesTitle}-s${seasonNumber}e${episodeNumber}`.replace(/[^a-zA-Z0-9-]/g, '-').toLowerCase();
+    } else if (mediaType === 'movie') {
+      finalPlexKey = `tvdb-movie-${title}-${year}`.replace(/[^a-zA-Z0-9-]/g, '-').toLowerCase();
+    }
+
+    // Check if this TVDB item already exists in the custom order
+    const existingItem = await prisma.customOrderItem.findFirst({
+      where: {
+        customOrderId: parseInt(id),
+        plexKey: finalPlexKey
+      }
+    });
+
+    if (existingItem) {
+      return res.status(409).json({ 
+        error: 'This TVDB item is already in the custom order',
+        existingItem: {
+          title: existingItem.title,
+          mediaType: existingItem.mediaType
+        }
+      });
+    }
+
+    // Get the highest sort order for this custom order
+    const lastItem = await prisma.customOrderItem.findFirst({
+      where: { customOrderId: parseInt(id) },
+      orderBy: { sortOrder: 'desc' }
+    });
+
+    const nextSortOrder = lastItem ? lastItem.sortOrder + 1 : 0;
+
+    // Create the TVDB-only item
+    const item = await prisma.customOrderItem.create({
+      data: {
+        customOrderId: parseInt(id),
+        mediaType,
+        plexKey: finalPlexKey,
+        title,
+        seasonNumber,
+        episodeNumber,
+        seriesTitle,
+        sortOrder: nextSortOrder,
+        isFromTvdbOnly: true, // Mark as TVDB-only
+        // Store TVDB IDs and metadata in custom fields for now
+        customTitle: description || title,
+        // For episodes, we'll store TVDB data in unused fields temporarily
+        comicSeries: tvdbSeriesId ? `tvdb-series-${tvdbSeriesId}` : null,
+        comicVolume: tvdbSeasonId ? `tvdb-season-${tvdbSeasonId}` : null,
+        comicIssue: tvdbEpisodeId ? `tvdb-episode-${tvdbEpisodeId}` : null,
+        // For movies
+        bookTitle: mediaType === 'movie' ? title : null,
+        bookYear: mediaType === 'movie' ? parseInt(year) : null,
+        bookIsbn: movieTvdbId ? `tvdb-movie-${movieTvdbId}` : null,
+        // Store air date if provided
+        storyYear: airDate ? new Date(airDate).getFullYear() : null
+      }
+    });
+
+    console.log(`Successfully added TVDB-only ${mediaType}: ${title}`);
+    res.status(201).json(item);
+
+  } catch (error) {
+    console.error('Error adding TVDB-only item to custom order:', error.message);
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
@@ -1661,8 +2567,9 @@ app.get('/api/search', async (req, res) => {
       // Search for TV shows and their episodes in the database
       try {
         // First search for TV shows that match the query
+        console.log(`TV Search Debug: Searching for TV shows with query: "${query}" and yearFilter: ${yearFilter}`);
         const tvShows = await plexDb.searchTVShows(query, yearFilter);
-        console.log(`TV Search Debug: Found ${tvShows.length} TV shows matching "${query}"`);
+        console.log(`TV Search Debug: Found ${tvShows.length} TV shows`);
         
         const allEpisodes = [];
         for (const show of tvShows) {

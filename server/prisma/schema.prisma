@@ -17,6 +17,7 @@ model Settings {
   plexUrl                           String?
   tvdbApiKey                        String?
   tvdbBearerToken                   String?
+  selectedPlayer                    String?
   tvGeneralPercent                  Int       @default(50)
   moviesGeneralPercent              Int       @default(50)
   customOrderPercent                Int       @default(0)
@@ -80,6 +81,7 @@ model CustomOrderItem {
   storyCoverUrl          String?
   sortOrder              Int               @default(0)
   isWatched              Boolean           @default(false)
+  isFromTvdbOnly         Boolean           @default(false)
   createdAt              DateTime          @default(now())
   updatedAt              DateTime          @updatedAt
   artworkLastCached      DateTime?
@@ -89,6 +91,13 @@ model CustomOrderItem {
   webTitle               String?
   webUrl                 String?
   webDescription         String?
+  tvdbId                 String?
+  tvdbYear               Int?
+  tvdbOverview           String?
+  tvdbGenres             String?
+  tvdbDirector           String?
+  tvdbStudio             String?
+  tvdbArtworkUrl         String?
   storyContainedInBook   CustomOrderItem?  @relation("StoryInBook", fields: [storyContainedInBookId], references: [id])
   containedStories       CustomOrderItem[] @relation("StoryInBook")
   customOrder            CustomOrder       @relation(fields: [customOrderId], references: [id], onDelete: Cascade)

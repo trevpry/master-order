@@ -42,6 +42,14 @@ function Settings() {
   const [availablePlayers, setAvailablePlayers] = useState([]);
   const [playersLoading, setPlayersLoading] = useState(false);
   const [selectedPlayer, setSelectedPlayer] = useState('');
+  const [deviceStatus, setDeviceStatus] = useState({
+    isOnline: false,
+    lastChecked: null,
+    checking: false,
+    isMobile: false
+  });
+  const [deviceStatusLoading, setDeviceStatusLoading] = useState(false);
+  const [deviceStatusDetails, setDeviceStatusDetails] = useState(null);
   
   // Ignored collections states
   const [ignoredMovieCollections, setIgnoredMovieCollections] = useState([]);
@@ -99,6 +107,7 @@ function Settings() {
           setPlexUrl(settings.plexUrl || '');
           setTvdbApiKey(settings.tvdbApiKey || '');
           setTvdbBearerToken(settings.tvdbBearerToken || '');
+          setSelectedPlayer(settings.selectedPlayer || '');
           setTvGeneralPercent(settings.tvGeneralPercent ?? 50);
           setMoviesGeneralPercent(settings.moviesGeneralPercent ?? 50);
           setCustomOrderPercent(settings.customOrderPercent ?? 0);
@@ -146,6 +155,12 @@ function Settings() {
       setPlayersLoading(true);
       const players = await fetchWithErrorHandling('http://localhost:3001/api/plex/players');
       setAvailablePlayers(players || []);
+      
+      // Check if selected player is currently online
+      if (selectedPlayer) {
+        checkDeviceStatus(selectedPlayer, players || []);
+      }
+      
       showMessage('Plex players refreshed successfully');
     } catch (error) {
       showMessage('Failed to refresh Plex players', true);
@@ -153,6 +168,100 @@ function Settings() {
       setPlayersLoading(false);
     }
   };
+
+  const checkDeviceStatus = async (playerId, currentPlayers = null) => {
+    if (!playerId) return;
+    
+    try {
+      setDeviceStatus(prev => ({ ...prev, checking: true }));
+      
+      // Use current players if provided, otherwise fetch fresh
+      const players = currentPlayers || await fetchWithErrorHandling('http://localhost:3001/api/plex/players');
+      const device = players.find(p => p.machineIdentifier === playerId || p.value === playerId);
+      
+      const isMobile = playerId.includes('android') || playerId.includes('ios') || playerId.includes('mobile');
+      const isRegistered = device?.isRegistered || false;
+      const isOnline = !!device && !device.value && !isRegistered; // Active connections are online, registered devices are offline unless actively connected
+      
+      setDeviceStatus({
+        isOnline,
+        lastChecked: new Date(),
+        checking: false,
+        isMobile,
+        isRegistered,
+        deviceName: device?.name || playerId
+      });
+      
+    } catch (error) {
+      console.error('Error checking device status:', error);
+      setDeviceStatus(prev => ({ 
+        ...prev, 
+        checking: false,
+        lastChecked: new Date() 
+      }));
+    }
+  };
+
+  const checkDetailedDeviceStatus = async () => {
+    if (!selectedPlayer) {
+      showMessage('No device selected', true);
+      return;
+    }
+    
+    try {
+      setDeviceStatusLoading(true);
+      setDeviceStatusDetails(null);
+      
+      console.log(`Checking detailed status for device: ${selectedPlayer}`);
+      
+      const response = await fetchWithErrorHandling(
+        `http://localhost:3001/api/plex/device-status/${encodeURIComponent(selectedPlayer)}`
+      );
+      
+      setDeviceStatusDetails(response);
+      
+      if (response.success && response.found) {
+        showMessage(`Device status check completed for ${response.device.name}`);
+        
+        // Update the basic device status as well
+        setDeviceStatus(prev => ({
+          ...prev,
+          isOnline: response.responsiveness?.responsive || false,
+          lastChecked: new Date(),
+          checking: false,
+          deviceName: response.device.name,
+          isRegistered: response.device.isRegistered,
+          isMobile: response.device.platform === 'Android' || response.device.platform === 'iOS'
+        }));
+      } else {
+        showMessage(`Device not found: ${selectedPlayer}`, true);
+      }
+      
+    } catch (error) {
+      console.error('Error checking detailed device status:', error);
+      showMessage('Failed to check device status: ' + error.message, true);
+      setDeviceStatusDetails({ error: error.message });
+    } finally {
+      setDeviceStatusLoading(false);
+    }
+  };
+
+  // Effect to check device status when selected player changes
+  useEffect(() => {
+    if (selectedPlayer) {
+      checkDeviceStatus(selectedPlayer);
+      
+      // Set up interval to check mobile device status every 10 seconds
+      const isMobile = selectedPlayer.includes('android') || selectedPlayer.includes('ios') || selectedPlayer.includes('mobile');
+      if (isMobile) {
+        const interval = setInterval(() => {
+          checkDeviceStatus(selectedPlayer);
+        }, 10000);
+        
+        return () => clearInterval(interval);
+      }
+    }
+  }, [selectedPlayer]);
   
   const handleTvGeneralPercentChange = (e) => {
     const value = parseInt(e.target.value);
@@ -272,6 +381,7 @@ function Settings() {
           plexUrl,
           tvdbApiKey,
           tvdbBearerToken,
+          selectedPlayer,
           tvGeneralPercent, 
           moviesGeneralPercent,
           customOrderPercent,
@@ -505,7 +615,7 @@ function Settings() {
                 </div>
 
                 <div className="config-field compact">
-                  <label htmlFor="plex_players">Available Plex Players:</label>
+                  <label htmlFor="plex_players">🎬 Plex Player for Remote Playback:</label>
                   <div className="collection-controls">
                     <select 
                       id="plex_players"
@@ -514,7 +624,7 @@ function Settings() {
                       onChange={(e) => setSelectedPlayer(e.target.value)}
                       className="collection-select compact"
                     >
-                      <option value="">Select a Plex player...</option>
+                      <option value="">Select a Plex player/device...</option>
                       {availablePlayers.map((player) => (
                         <option key={player.value} value={player.value}>
                           {player.label}
@@ -525,12 +635,254 @@ function Settings() {
                       onClick={refreshPlayers}
                       disabled={playersLoading}
                       className="refresh-button compact"
+                      title="Refresh available Plex players"
                     >
                       {playersLoading ? '🔄' : '🔄'}
                     </Button>
+                    {selectedPlayer && (
+                      <Button
+                        onClick={checkDetailedDeviceStatus}
+                        disabled={deviceStatusLoading}
+                        className="refresh-button compact"
+                        title="Check detailed device status and responsiveness"
+                        style={{ marginLeft: '8px' }}
+                      >
+                        {deviceStatusLoading ? '🔄' : '🔍'}
+                      </Button>
+                    )}
                   </div>
+                  
+                  {/* Device Status Indicator */}
+                  {selectedPlayer && (
+                    <div className="device-status" style={{ 
+                      marginTop: '8px', 
+                      padding: '8px 12px', 
+                      borderRadius: '4px',
+                      backgroundColor: deviceStatus.isOnline ? '#d4edda' : 
+                                       deviceStatus.isRegistered ? '#fff3cd' : '#f8d7da',
+                      border: `1px solid ${deviceStatus.isOnline ? '#c3e6cb' : 
+                                            deviceStatus.isRegistered ? '#ffeaa7' : '#f5c6cb'}`,
+                      fontSize: '14px'
+                    }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <span style={{ fontSize: '16px' }}>
+                          {deviceStatus.checking ? '🔄' : 
+                           deviceStatus.isOnline ? '🟢' : 
+                           deviceStatus.isRegistered ? '🟡' : '🔴'}
+                        </span>
+                        <span style={{ color: deviceStatus.isOnline ? '#155724' : 
+                                               deviceStatus.isRegistered ? '#856404' : '#721c24' }}>
+                          <strong>{deviceStatus.deviceName || selectedPlayer}</strong>
+                          {deviceStatus.isMobile && ' (Mobile Device)'}
+                          {deviceStatus.isRegistered && ' (AndroidTV/Media Player)'}
+                          {' - '}
+                          {deviceStatus.checking ? 'Checking...' : 
+                           deviceStatus.isOnline ? 'Online & Ready' : 
+                           deviceStatus.isRegistered ? 'Registered & Available' : 'Offline'}
+                        </span>
+                      </div>
+                      
+                      {deviceStatus.isRegistered && (
+                        <div style={{ 
+                          marginTop: '8px', 
+                          fontSize: '12px', 
+                          color: '#856404',
+                          borderTop: '1px solid #ffeaa7',
+                          paddingTop: '8px'
+                        }}>
+                          <p style={{ margin: '0 0 4px 0' }}>
+                            <strong>📺 AndroidTV/Media Device:</strong>
+                          </p>
+                          <p style={{ margin: '0' }}>
+                            This device is registered with your Plex server and ready for remote playback. 
+                            It doesn't need to be actively playing to receive playback commands.
+                          </p>
+                        </div>
+                      )}
+                      
+                      {deviceStatus.isMobile && !deviceStatus.isRegistered && !deviceStatus.isOnline && (
+                        <div style={{ 
+                          marginTop: '8px', 
+                          fontSize: '12px', 
+                          color: '#721c24',
+                          borderTop: '1px solid #f5c6cb',
+                          paddingTop: '8px'
+                        }}>
+                          <p style={{ margin: '0 0 4px 0' }}>
+                            <strong>📱 Mobile Device Help:</strong>
+                          </p>
+                          <p style={{ margin: '0 0 4px 0' }}>
+                            Mobile devices only appear when actively using Plex. To make this device available:
+                          </p>
+                          <ol style={{ margin: '4px 0 0 16px', padding: 0 }}>
+                            <li>Open Plex app on your device</li>
+                            <li>Start playing any video (briefly)</li>
+                            <li>The status above will turn green when ready</li>
+                          </ol>
+                        </div>
+                      )}
+                      
+                      {deviceStatus.lastChecked && (
+                        <div style={{ 
+                          marginTop: '6px', 
+                          fontSize: '11px', 
+                          color: '#666',
+                          fontStyle: 'italic'
+                        }}>
+                          Last checked: {deviceStatus.lastChecked.toLocaleTimeString()}
+                          {deviceStatus.isMobile && ' (Auto-checking every 10s)'}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                  
+                  {/* Detailed Device Status Results */}
+                  {deviceStatusDetails && (
+                    <div className="detailed-device-status" style={{ 
+                      marginTop: '12px', 
+                      padding: '12px', 
+                      borderRadius: '6px',
+                      backgroundColor: '#f8f9fa',
+                      border: '1px solid #dee2e6',
+                      fontSize: '13px'
+                    }}>
+                      <h4 style={{ margin: '0 0 8px 0', color: '#333' }}>
+                        🔍 Detailed Device Status
+                      </h4>
+                      
+                      {deviceStatusDetails.error ? (
+                        <div style={{ color: '#721c24', backgroundColor: '#f8d7da', padding: '8px', borderRadius: '4px' }}>
+                          <strong>Error:</strong> {deviceStatusDetails.error}
+                        </div>
+                      ) : !deviceStatusDetails.found ? (
+                        <div style={{ color: '#856404', backgroundColor: '#fff3cd', padding: '8px', borderRadius: '4px' }}>
+                          <strong>Device Not Found:</strong> {deviceStatusDetails.message}
+                          <br />
+                          <small>Available devices: {deviceStatusDetails.availableDevices}</small>
+                        </div>
+                      ) : (
+                        <div style={{ display: 'grid', gap: '8px' }}>
+                          {/* Basic Device Info */}
+                          <div style={{ 
+                            backgroundColor: 'white', 
+                            padding: '8px', 
+                            borderRadius: '4px', 
+                            border: '1px solid #e9ecef' 
+                          }}>
+                            <strong>📱 Device Information:</strong>
+                            <div style={{ marginLeft: '16px', marginTop: '4px' }}>
+                              <div><strong>Name:</strong> {deviceStatusDetails.device.name}</div>
+                              <div><strong>Product:</strong> {deviceStatusDetails.device.product}</div>
+                              <div><strong>Platform:</strong> {deviceStatusDetails.device.platform} {deviceStatusDetails.device.platformVersion}</div>
+                              <div><strong>Address:</strong> {deviceStatusDetails.device.address}:{deviceStatusDetails.device.port}</div>
+                              <div><strong>Type:</strong> {deviceStatusDetails.device.isRegistered ? 'Registered Device' : 'Active Client'}</div>
+                            </div>
+                          </div>
+                          
+                          {/* Responsiveness Status */}
+                          {deviceStatusDetails.responsiveness?.checked && (
+                            <div style={{ 
+                              backgroundColor: deviceStatusDetails.responsiveness.responsive ? '#d4edda' : '#f8d7da',
+                              border: `1px solid ${deviceStatusDetails.responsiveness.responsive ? '#c3e6cb' : '#f5c6cb'}`,
+                              padding: '8px', 
+                              borderRadius: '4px'
+                            }}>
+                              <strong>🔗 Device Responsiveness:</strong>
+                              <div style={{ marginLeft: '16px', marginTop: '4px' }}>
+                                <div style={{ 
+                                  color: deviceStatusDetails.responsiveness.responsive ? '#155724' : '#721c24' 
+                                }}>
+                                  <strong>Status:</strong> {deviceStatusDetails.responsiveness.responsive ? '✅ Responsive' : '❌ Not Responsive'}
+                                </div>
+                                <div><strong>Result:</strong> {deviceStatusDetails.responsiveness.result.message}</div>
+                              </div>
+                            </div>
+                          )}
+                          
+                          {/* Active Session Info */}
+                          <div style={{ 
+                            backgroundColor: deviceStatusDetails.activeSession?.hasSession ? '#d1ecf1' : 'white',
+                            border: `1px solid ${deviceStatusDetails.activeSession?.hasSession ? '#bee5eb' : '#e9ecef'}`,
+                            padding: '8px', 
+                            borderRadius: '4px'
+                          }}>
+                            <strong>🎬 Current Playback:</strong>
+                            <div style={{ marginLeft: '16px', marginTop: '4px' }}>
+                              {deviceStatusDetails.activeSession?.hasSession ? (
+                                <div>
+                                  <div style={{ color: '#0c5460' }}>
+                                    <strong>Status:</strong> ▶️ Currently Playing
+                                  </div>
+                                  <div><strong>Title:</strong> {deviceStatusDetails.activeSession.sessionInfo.title}</div>
+                                  <div><strong>Type:</strong> {deviceStatusDetails.activeSession.sessionInfo.type}</div>
+                                  <div><strong>State:</strong> {deviceStatusDetails.activeSession.sessionInfo.state}</div>
+                                  <div><strong>User:</strong> {deviceStatusDetails.activeSession.sessionInfo.user}</div>
+                                </div>
+                              ) : (
+                                <div>
+                                  <strong>Status:</strong> ⏹️ Not Currently Playing
+                                </div>
+                              )}
+                              {deviceStatusDetails.activeSession?.error && (
+                                <div style={{ color: '#856404', marginTop: '4px' }}>
+                                  <small>Note: {deviceStatusDetails.activeSession.error}</small>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                          
+                          {/* Timestamp */}
+                          <div style={{ 
+                            fontSize: '11px', 
+                            color: '#666', 
+                            textAlign: 'right',
+                            fontStyle: 'italic'
+                          }}>
+                            Checked: {new Date(deviceStatusDetails.timestamp).toLocaleString()}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                  {availablePlayers.length > 0 && availablePlayers.every(player => player.isFallback) && (
+                    <p className="collection-hint" style={{ color: '#f39c12' }}>
+                      ℹ️ Showing fallback players because no active Plex clients were detected. 
+                      These will work but actual devices (open a Plex app first) are preferred.
+                    </p>
+                  )}
                   {availablePlayers.length === 0 && !playersLoading && (
-                    <p className="collection-hint">No Plex players found. Make sure your Plex server is running and accessible.</p>
+                    <div className="collection-hint">
+                      <p>⚠️ No Plex players found. This can happen if:</p>
+                      <ul style={{ marginLeft: '20px', marginTop: '8px' }}>
+                        <li>• No Plex clients are currently active/connected</li>
+                        <li>• Your Plex server URL or token is incorrect</li>
+                        <li>• Plex clients are on a different network</li>
+                      </ul>
+                      <p style={{ marginTop: '12px' }}>
+                        <strong>To fix this:</strong> Open Plex in a web browser, mobile app, or TV app, then click refresh.
+                        <br />
+                        <button 
+                          onClick={() => window.open('http://localhost:3001/api/plex/debug', '_blank')}
+                          style={{ 
+                            marginTop: '8px', 
+                            padding: '4px 8px', 
+                            fontSize: '12px',
+                            backgroundColor: '#666',
+                            color: 'white',
+                            border: 'none',
+                            borderRadius: '4px',
+                            cursor: 'pointer'
+                          }}
+                        >
+                          🔍 Debug Connection
+                        </button>
+                      </p>
+                    </div>
+                  )}
+                  {selectedPlayer && (
+                    <p className="collection-hint">
+                      ✅ Selected player will be used for remote playback when you select "Play Next Episode" from the home page.
+                    </p>
                   )}
                 </div>
 

@@ -1371,10 +1371,38 @@ function CustomOrders() {
               failedItems.push(`Line ${item.lineNumber}: ${item.seriesOrMovie} - ${item.title} (duplicate or error)`);
               failCount++;
             }
+          } else if (item.mediaType === 'movie' || item.mediaType === 'episode') {
+            // For movies and episodes not found in Plex, create a minimal media object
+            // and let the server handle adding items that don't exist in Plex yet
+            const notInPlexMedia = {
+              title: item.title,
+              type: item.mediaType,
+              mediaType: item.mediaType
+            };
+            
+            // Add episode-specific fields
+            if (item.mediaType === 'episode') {
+              notInPlexMedia.seriesTitle = item.seriesOrMovie;
+              notInPlexMedia.seasonNumber = item.seasonNumber;
+              notInPlexMedia.episodeNumber = item.episodeNumber;
+            }
+            
+            // Add year if available (for movies)
+            if (item.year) {
+              notInPlexMedia.bookYear = item.year; // Using bookYear as the year field
+            }
+            
+            const success = await handleAddMediaToOrder(viewingOrderItems.id, notInPlexMedia, true);
+            if (success) {
+              successCount++;
+            } else {
+              failedItems.push(`Line ${item.lineNumber}: ${item.seriesOrMovie} - ${item.title} (duplicate or error)`);
+              failCount++;
+            }
           } else {
             const notFoundMessage = item.mediaType === 'book' 
               ? `Line ${item.lineNumber}: ${item.seriesOrMovie} - ${item.title} (could not process book)`
-              : `Line ${item.lineNumber}: ${item.seriesOrMovie} - ${item.title} (not found in Plex)`;
+              : `Line ${item.lineNumber}: ${item.seriesOrMovie} - ${item.title} (unknown media type)`;
             failedItems.push(notFoundMessage);
             failCount++;
           }

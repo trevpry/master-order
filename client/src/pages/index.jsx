@@ -10,6 +10,8 @@ function Home() {  const [selectedMedia, setSelectedMedia] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [markingWatched, setMarkingWatched] = useState(false);
+  const [playingOnPlex, setPlayingOnPlex] = useState(false);
+  const [findingNewSeries, setFindingNewSeries] = useState(false);
 
   // WebSocket connection for Plex webhook notifications
   useEffect(() => {
@@ -163,7 +165,202 @@ function Home() {  const [selectedMedia, setSelectedMedia] = useState(null);
     } finally {
       setMarkingWatched(false);
     }
-  };const getArtworkUrl = (media) => {
+  };
+
+  const testAndroidTVNotification = async () => {
+    if (!selectedMedia) {
+      return;
+    }
+
+    // Only support TV shows and movies for now
+    if (!['episode', 'movie'].includes(selectedMedia.type)) {
+      setError('AndroidTV testing is only supported for TV shows and movies');
+      return;
+    }
+
+    setPlayingOnPlex(true);
+    setError('');
+
+    try {
+      // Get the rating key for playback
+      const ratingKey = selectedMedia.episodeRatingKey || selectedMedia.ratingKey;
+      
+      if (!ratingKey) {
+        setError('Unable to test: missing media identifier');
+        return;
+      }
+
+      console.log('Testing AndroidTV notification approaches for ratingKey:', ratingKey);
+      
+      const response = await fetch('http://localhost:3001/api/plex/test-androidtv-notification', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          ratingKey: ratingKey,
+          offset: 0
+        }),
+      });
+
+      const result = await response.json();
+      
+      if (response.ok) {
+        console.log('AndroidTV test result:', result);
+        
+        // Show detailed results
+        const successMethods = Object.entries(result.results || {})
+          .filter(([method, data]) => data.success)
+          .map(([method]) => method);
+        
+        const failedMethods = Object.entries(result.results || {})
+          .filter(([method, data]) => !data.success)
+          .map(([method, data]) => `${method}: ${data.error}`);
+        
+        let message = `AndroidTV Test for "${result.media}" completed.\n`;
+        
+        if (successMethods.length > 0) {
+          message += `✅ Successful methods: ${successMethods.join(', ')}\n`;
+        }
+        
+        if (failedMethods.length > 0) {
+          message += `❌ Failed methods: ${failedMethods.join('; ')}\n`;
+        }
+        
+        setError(message);
+      } else {
+        console.error('AndroidTV test failed:', result);
+        setError(`AndroidTV test failed: ${result.error || 'Unknown error'}`);
+      }
+    } catch (error) {
+      console.error('Error testing AndroidTV notification:', error);
+      setError('Error testing AndroidTV notification');
+    } finally {
+      setPlayingOnPlex(false);
+    }
+  };
+
+  const playOnPlex = async () => {
+    if (!selectedMedia) {
+      return;
+    }
+
+    // Only support TV shows and movies for now
+    if (!['episode', 'movie'].includes(selectedMedia.type)) {
+      setError('Plex playback is only supported for TV shows and movies');
+      return;
+    }
+
+    setPlayingOnPlex(true);
+    setError('');
+
+    try {
+      // Get the rating key for playback
+      const ratingKey = selectedMedia.episodeRatingKey || selectedMedia.ratingKey;
+      
+      if (!ratingKey) {
+        setError('Unable to play: missing media identifier');
+        return;
+      }
+
+      // Send immediate webhook notification to Node-RED via backend
+      try {
+        console.log('Sending webhook notification with ratingKey:', ratingKey);
+        const webhookResponse = await fetch('http://localhost:3001/api/webhook/notify', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            ratingKey: ratingKey,
+            action: 'play_on_plex',
+            title: selectedMedia.type === 'episode' 
+              ? `${selectedMedia.seriesTitle} - ${selectedMedia.episodeTitle}` 
+              : selectedMedia.title,
+            type: selectedMedia.type,
+            timestamp: new Date().toISOString()
+          }),
+        });
+        
+        if (webhookResponse.ok) {
+          console.log('Webhook notification sent successfully');
+        } else {
+          console.warn('Webhook notification failed:', await webhookResponse.text());
+        }
+      } catch (webhookError) {
+        console.warn('Failed to send webhook notification:', webhookError);
+        // Don't stop the Plex playback if webhook fails
+      }
+
+      const response = await fetch('http://localhost:3001/api/plex/play', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          ratingKey: ratingKey
+        }),
+      });
+
+      const data = await response.json();
+
+      if (response.ok) {
+        // Show success message
+        const mediaTitle = selectedMedia.type === 'episode' 
+          ? `${selectedMedia.seriesTitle} - ${selectedMedia.episodeTitle}` 
+          : selectedMedia.title;
+        
+        toast.success(`🎬 Playing "${mediaTitle}" on ${data.player}`, {
+          duration: 4000,
+          position: 'top-right'
+        });
+      } else {
+        let errorMessage = data.error || 'Failed to start playback';
+        
+        // Provide helpful error messages for common issues
+        if (errorMessage.includes('No player specified') || errorMessage.includes('not found')) {
+          errorMessage = 'No Plex player selected. Please go to Settings and select a player first.';
+        } else if (errorMessage.includes('not currently available')) {
+          errorMessage = 'Selected Plex player is not currently available. Try refreshing players in Settings.';
+        }
+        
+        setError(errorMessage);
+      }
+    } catch (error) {
+      console.error('Error starting playback:', error);
+      setError('Error starting playback on Plex');
+    } finally {
+      setPlayingOnPlex(false);
+    }
+  };
+
+  const startNewSeries = async () => {
+    setFindingNewSeries(true);
+    setError('');
+    setSelectedMedia(null);
+
+    try {
+      const response = await fetch('http://localhost:3001/api/start-new-series');
+      const data = await response.json();
+
+      if (response.ok) {
+        setSelectedMedia(data);
+        toast.success(`🎬 Found new series: ${data.seriesTitle}`, {
+          duration: 4000,
+          position: 'top-right'
+        });
+      } else {
+        setError(data.error || 'Failed to find a new series');
+      }
+    } catch (error) {
+      console.error('Error finding new series:', error);
+      setError('Error finding new series');
+    } finally {
+      setFindingNewSeries(false);
+    }
+  };
+
+  const getArtworkUrl = (media) => {
     // Web videos don't have artwork
     if (media?.type === 'webvideo') {
       return null;
@@ -212,6 +409,15 @@ function Home() {  const [selectedMedia, setSelectedMedia] = useState(null);
               disabled={loading}
             >
               {loading ? 'Finding Up Next...' : 'Get Up Next'}
+            </Button>
+            
+            <Button
+              onClick={startNewSeries}
+              disabled={findingNewSeries}
+              style={{ marginLeft: '10px', backgroundColor: '#28a745', color: '#fff' }}
+              title="Find the earliest episode from a completed series in your collection that you haven't started watching yet"
+            >
+              {findingNewSeries ? 'Finding New Series...' : 'Start New Series'}
             </Button>            {selectedMedia && (selectedMedia.customOrderItemId || selectedMedia.orderType === 'TV_GENERAL' || selectedMedia.orderType === 'MOVIES_GENERAL') && (
               <Button
                 onClick={markAsWatched}
@@ -219,6 +425,28 @@ function Home() {  const [selectedMedia, setSelectedMedia] = useState(null);
                 style={{ marginLeft: '10px' }}
               >
                 {markingWatched ? 'Marking as Watched...' : 'Mark as Watched'}
+              </Button>
+            )}
+
+            {selectedMedia && ['episode', 'movie'].includes(selectedMedia.type) && (
+              <Button
+                onClick={playOnPlex}
+                disabled={playingOnPlex}
+                style={{ marginLeft: '10px', backgroundColor: '#e5a00d', color: '#000' }}
+                title="Play this episode/movie on your selected Plex device"
+              >
+                {playingOnPlex ? '🎬 Starting...' : '🎬 Play on Plex'}
+              </Button>
+            )}
+
+            {selectedMedia && ['episode', 'movie'].includes(selectedMedia.type) && (
+              <Button
+                onClick={testAndroidTVNotification}
+                disabled={playingOnPlex}
+                style={{ marginLeft: '10px', backgroundColor: '#ff6b35', color: '#fff' }}
+                title="Test AndroidTV notification approaches for this media"
+              >
+                📱 Test AndroidTV
               </Button>
             )}
           </div>
@@ -384,7 +612,7 @@ function Home() {  const [selectedMedia, setSelectedMedia] = useState(null);
                         </span>
                       </div>
                     ) : null
-                  ) : (selectedMedia.orderType === 'TV_GENERAL' || (selectedMedia.orderType === 'CUSTOM_ORDER' && selectedMedia.customOrderMediaType === 'tv')) && selectedMedia.currentEpisode && selectedMedia.totalEpisodesInSeason ? (
+                  ) : (selectedMedia.orderType === 'TV_GENERAL' || selectedMedia.orderType === 'NEW_SERIES' || (selectedMedia.orderType === 'CUSTOM_ORDER' && selectedMedia.customOrderMediaType === 'tv')) && selectedMedia.currentEpisode && selectedMedia.totalEpisodesInSeason ? (
                     <div className="episode-overlay">
                       <span className="episode-info">
                         Episode {selectedMedia.currentEpisode} of {selectedMedia.totalEpisodesInSeason}

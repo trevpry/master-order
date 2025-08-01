@@ -6,6 +6,41 @@ const PlexDatabaseService = require('./plexDatabaseService');
 
 const plexDb = new PlexDatabaseService();
 
+// Check if a TVDB-only item now exists in Plex
+async function checkIfTvdbItemExistsInPlex(customOrderItem) {
+  try {
+    if (customOrderItem.mediaType === 'episode') {
+      // For TV episodes, search by series title, season, and episode number
+      const episodes = await plexDb.searchTVEpisodes(
+        customOrderItem.seriesTitle,
+        customOrderItem.seasonNumber,
+        customOrderItem.episodeNumber
+      );
+      
+      if (episodes && episodes.length > 0) {
+        console.log(`Found episode "${customOrderItem.title}" in Plex database`);
+        return episodes[0];
+      }
+    } else if (customOrderItem.mediaType === 'movie') {
+      // For movies, search by title and year
+      const movies = await plexDb.searchMovies(
+        customOrderItem.title,
+        customOrderItem.bookYear
+      );
+      
+      if (movies && movies.length > 0) {
+        console.log(`Found movie "${customOrderItem.title}" in Plex database`);
+        return movies[0];
+      }
+    }
+    
+    return null;
+  } catch (error) {
+    console.warn(`Error checking if TVDB item exists in Plex:`, error.message);
+    return null;
+  }
+}
+
 // Get all active custom orders
 async function getActiveCustomOrders() {
   try {
@@ -53,6 +88,62 @@ async function getNextItemFromCustomOrder(customOrder) {
 // Fetch full media details from Plex or generate for comics and books
 async function fetchMediaDetailsFromPlex(plexKey, mediaType, customOrderItem) {
   try {
+    // Handle TVDB-only items - check if they now exist in Plex
+    if (customOrderItem.isFromTvdbOnly) {
+      console.log(`🔍 Checking if TVDB-only item "${customOrderItem.title}" now exists in Plex...`);
+      
+      const plexItem = await checkIfTvdbItemExistsInPlex(customOrderItem);
+      if (plexItem) {
+        console.log(`✅ TVDB item "${customOrderItem.title}" now exists in Plex! Updating custom order item...`);
+        
+        // Update the custom order item with Plex data
+        await prisma.customOrderItem.update({
+          where: { id: customOrderItem.id },
+          data: {
+            plexKey: plexItem.ratingKey,
+            isFromTvdbOnly: false,
+            // Update with Plex metadata
+            title: plexItem.title,
+            seasonNumber: plexItem.parentIndex || customOrderItem.seasonNumber,
+            episodeNumber: plexItem.index || customOrderItem.episodeNumber,
+            seriesTitle: plexItem.grandparentTitle || customOrderItem.seriesTitle
+          }
+        });
+        
+        // Return the Plex metadata
+        plexItem.orderType = 'CUSTOM_ORDER';
+        plexItem.customOrderMediaType = mediaType;
+        return plexItem;
+      } else {
+        console.log(`❌ TVDB item "${customOrderItem.title}" still doesn't exist in Plex`);
+        
+        // Return mock metadata based on TVDB data stored in the custom order item
+        const mockMetadata = {
+          ratingKey: plexKey,
+          title: customOrderItem.title,
+          type: mediaType,
+          year: customOrderItem.storyYear || customOrderItem.bookYear,
+          summary: customOrderItem.customTitle || '',
+          thumb: null,
+          art: null,
+          // Episode-specific fields
+          parentIndex: customOrderItem.seasonNumber,
+          index: customOrderItem.episodeNumber,
+          grandparentTitle: customOrderItem.seriesTitle,
+          // Custom order context
+          orderType: 'CUSTOM_ORDER',
+          customOrderMediaType: mediaType,
+          isFromTvdbOnly: true,
+          tvdbSeriesId: customOrderItem.comicSeries?.replace('tvdb-series-', ''),
+          tvdbSeasonId: customOrderItem.comicVolume?.replace('tvdb-season-', ''),
+          tvdbEpisodeId: customOrderItem.comicIssue?.replace('tvdb-episode-', ''),
+          tvdbMovieId: customOrderItem.bookIsbn?.replace('tvdb-movie-', '')
+        };
+        
+        return mockMetadata;
+      }
+    }
+
     // Handle comics differently since they don't exist in Plex
     if (mediaType === 'comic') {
       // For comics, we generate mock Plex-like metadata
@@ -311,20 +402,78 @@ async function getNextCustomOrder() {
     const selectedOrder = await selectRandomCustomOrder(customOrders);
     console.log(`Selected custom order: "${selectedOrder.name}"`);
 
-    // Get the next item from the selected custom order
-    const nextItem = await getNextItemFromCustomOrder(selectedOrder);
+    // Try to find a playable item from the custom orders
+    let nextItem = null;
+    let selectedOrderToUse = selectedOrder;
+    let attempts = 0;
+    const maxAttempts = Math.min(customOrders.length, 5); // Limit attempts to avoid infinite loops
+
+    while (!nextItem && attempts < maxAttempts) {
+      attempts++;
+      
+      // Get the next item from the current custom order
+      const candidateItem = await getNextItemFromCustomOrder(selectedOrderToUse);
+      
+      if (!candidateItem) {
+        console.log(`No unwatched items in custom order: "${selectedOrderToUse.name}"`);
+        
+        // Try a different custom order
+        if (attempts < maxAttempts) {
+          const remainingOrders = customOrders.filter(o => o.id !== selectedOrderToUse.id);
+          if (remainingOrders.length > 0) {
+            selectedOrderToUse = await selectRandomCustomOrder(remainingOrders);
+            console.log(`🔄 Trying different custom order: "${selectedOrderToUse.name}"`);
+            continue;
+          }
+        }
+        break;
+      }
+
+      // Check if this is a TVDB-only item that still doesn't exist in Plex
+      if (candidateItem.isFromTvdbOnly) {
+        console.log(`🔍 Checking TVDB-only item "${candidateItem.title}" availability...`);
+        const plexItem = await checkIfTvdbItemExistsInPlex(candidateItem);
+        
+        if (!plexItem) {
+          console.log(`❌ TVDB-only item "${candidateItem.title}" still not available in Plex`);
+          
+          // Try a different custom order
+          if (attempts < maxAttempts) {
+            const remainingOrders = customOrders.filter(o => o.id !== selectedOrderToUse.id);
+            if (remainingOrders.length > 0) {
+              selectedOrderToUse = await selectRandomCustomOrder(remainingOrders);
+              console.log(`🔄 Trying different custom order: "${selectedOrderToUse.name}"`);
+              continue;
+            }
+          }
+          break;
+        } else {
+          console.log(`✅ TVDB-only item "${candidateItem.title}" now available in Plex!`);
+          nextItem = candidateItem;
+        }
+      } else {
+        // Regular item, use it
+        nextItem = candidateItem;
+      }
+    }
     
     if (!nextItem) {
-      console.log(`No unwatched items in custom order: "${selectedOrder.name}"`);
+      console.log('No playable items found in any active custom orders');
       return {
-        message: `No unwatched items in custom order: "${selectedOrder.name}"`,
+        message: "No playable items found in any active custom orders",
         orderType: 'CUSTOM_ORDER'
       };
-    }    console.log(`Next item: ${nextItem.title} (${nextItem.mediaType})`);    // Fetch full media details from Plex (or generate for comics)
-    const fullMediaDetails = await fetchMediaDetailsFromPlex(nextItem.plexKey, nextItem.mediaType, nextItem);    // Add custom order context
-    fullMediaDetails.customOrderName = selectedOrder.name;
-    fullMediaDetails.customOrderDescription = selectedOrder.description;
-    fullMediaDetails.customOrderIcon = selectedOrder.icon;
+    }
+
+    console.log(`Next item: ${nextItem.title} (${nextItem.mediaType}) from order: ${selectedOrderToUse.name}`);
+
+    // Fetch full media details from Plex (or generate for comics)
+    const fullMediaDetails = await fetchMediaDetailsFromPlex(nextItem.plexKey, nextItem.mediaType, nextItem);
+
+    // Add custom order context
+    fullMediaDetails.customOrderName = selectedOrderToUse.name;
+    fullMediaDetails.customOrderDescription = selectedOrderToUse.description;
+    fullMediaDetails.customOrderIcon = selectedOrderToUse.icon;
     fullMediaDetails.customOrderItemId = nextItem.id;// If this is a TV episode, enhance with TVDB artwork and episode details
     if (nextItem.mediaType === 'episode' || fullMediaDetails.type === 'episode') {
       console.log(`Enhancing TV episode "${fullMediaDetails.title}" from series "${fullMediaDetails.grandparentTitle}" with TVDB data`);

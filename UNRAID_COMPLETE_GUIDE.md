@@ -47,28 +47,37 @@ cd master-order-build
 
 ### Step 3: Download/Transfer Source Code
 
-**Option A: Using Git (if available)**
+**Option A: Using Git (Recommended for Latest Updates)**
 ```bash
 # Install git if not available
 opkg update
 opkg install git
 
-# Clone the repository
-git clone https://github.com/your-username/master-order.git .
+# Clone the repository with the latest fixes
+git clone https://github.com/trevpry/master-order.git .
+
+# Alternative: If you need to update existing code
+# cd /mnt/user/appdata/master-order-build/master-order
+# git pull origin master
 ```
 
-**Option B: Manual Transfer**
-1. Zip your entire `master-order` project on your development machine
-2. Transfer it to Unraid using:
+**Option B: Manual Transfer (Latest Code)**
+1. **Download the latest source from GitHub:**
+   - Go to https://github.com/trevpry/master-order
+   - Click "Code" → "Download ZIP"
+   - This ensures you get the latest fixes including the dotenv dependency
+
+2. **Transfer to Unraid:**
    - Unraid shares (copy to `\\your-unraid-ip\appdata\master-order-build\`)
-   - SCP: `scp master-order.zip root@your-unraid-ip:/mnt/user/appdata/master-order-build/`
+   - SCP: `scp master-order-main.zip root@your-unraid-ip:/mnt/user/appdata/master-order-build/`
    - Unraid WebUI file manager
 
-3. If you uploaded a zip file:
+3. **Extract on Unraid:**
    ```bash
    cd /mnt/user/appdata/master-order-build
-   unzip master-order.zip
-   cd master-order  # or whatever the extracted folder is named
+   unzip master-order-main.zip
+   mv master-order-main master-order  # Rename the extracted folder
+   cd master-order
    ```
 
 ---
@@ -202,6 +211,8 @@ chmod -R 755 /mnt/user/appdata/master-order/
 ---
 
 ## Phase 6: Deploy Container via Unraid WebUI
+
+> **⚠️ CRITICAL:** Before proceeding with this phase, you MUST have completed Phase 3 (Building the Docker Image) successfully on your Unraid server. The `master-order:latest` image must exist locally before you can create the container.
 
 ### Step 12: Access Docker Management
 1. Open Unraid WebUI in your browser
@@ -394,6 +405,27 @@ find "$BACKUP_DIR" -name "master-order-backup-*.tar.gz" -mtime +7 -delete
 ## Troubleshooting
 
 ### Docker Build Issues
+
+**"Unable to find image 'master-order:latest' locally" Error:**
+```bash
+# This error means the Docker image hasn't been built yet
+# You MUST build the image on your Unraid server first
+
+# 1. Make sure you're on your Unraid server (SSH or terminal)
+# 2. Navigate to the source code directory
+cd /mnt/user/appdata/master-order-build/master-order
+
+# 3. Verify the Dockerfile exists
+ls -la Dockerfile
+
+# 4. Build the image (this is REQUIRED before running container)
+docker build -t master-order:latest .
+
+# 5. Verify the image was created
+docker images master-order
+
+# 6. THEN create the container in Unraid WebUI
+```
 
 **"docker build requires exactly 1 argument" Error:**
 ```bash

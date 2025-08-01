@@ -116,12 +116,28 @@ npm run build      # Build for production
 
 ### Settings Management
 - **GET /api/settings**: Retrieve current collection name setting
-- **POST /api/settings**: Save collection name
+- **POST /api/settings**: Save collection name and other settings
   ```json
   {
-    "collectionName": "Your Collection Name"
+    "collectionName": "Your Collection Name",
+    "selectedPlayer": "plex-player-machine-id",
+    "plexToken": "your-plex-token",
+    "plexUrl": "http://your-plex-server:32400"
   }
   ```
+
+### Plex Player Management
+- **GET /api/plex/players**: Get all available Plex players/clients
+- **GET /api/plex/selected-player**: Get details of currently selected player
+- **POST /api/plex/play**: Start playback on selected player
+  ```json
+  {
+    "ratingKey": "12345",
+    "offset": 0,
+    "playerId": "optional-specific-player-id"
+  }
+  ```
+- **POST /api/plex/control/:action**: Control playback (play, pause, stop)
 
 ### Episode Selection
 - **GET /api/up_next**: Get random episode from configured collection
@@ -173,6 +189,13 @@ npm run build      # Build for production
 6. Filter out the settings collection and return other collections the series is part of
 7. For each other collection, search across all TV and movie library sections by collection name
 8. Return series metadata with detailed collection information including all items in each collection
+
+### Plex Playback Integration
+1. **Player Discovery**: Automatically detects all available Plex clients/players on the network
+2. **Player Selection**: Users can select a default player in Settings for remote playback
+3. **Remote Playback**: Start playing episodes/movies on the selected Plex device remotely
+4. **Playback Control**: Pause, resume, and stop playback on remote devices
+5. **Smart Episode Selection**: Uses the same episode selection logic for playback as the recommendation system
 
 ### Plex API Integration Details
 - **Library Section**: Currently hardcoded to section `1` (typically TV Shows) for initial search
@@ -241,6 +264,9 @@ updatedAt    DATETIME (auto)
 - **Watch progress integration** - Sync with Plex watch status in real-time
 - **Multi-server support** - Support multiple Plex servers
 - **Smart collection support** - Enhanced support for Plex smart collections
+- **Enhanced playback controls** - Seek, chapter navigation, subtitle controls
+- **Multiple player support** - Quick switching between different Plex devices
+- **Playback queue management** - Create and manage episode/movie queues
 - **Docker containerization** - Package application for easy deployment
 - **Production deployment configuration** - Environment-specific configs
 - **Rate limiting** - Implement API rate limiting for Plex requests

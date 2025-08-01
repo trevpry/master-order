@@ -198,16 +198,27 @@ class PlexDatabaseService {
   // Search for TV shows by title
   async searchTVShows(query, year = null) {
     try {
+      // Extract year from query if it contains a year in parentheses
+      const yearMatch = query.match(/^(.+?)\s*\((\d{4})\)$/);
+      let searchTitle = query;
+      let searchYear = year; // Start with provided year
+      
+      if (yearMatch) {
+        searchTitle = yearMatch[1].trim(); // Title without year
+        searchYear = parseInt(yearMatch[2]); // Extracted year takes precedence
+        console.log(`📺 Extracted year from TV show query: "${query}" -> title: "${searchTitle}", year: ${searchYear}`);
+      }
+      
       const whereCondition = {
         title: {
-          contains: query,
+          contains: searchTitle,
           mode: 'insensitive'
         }
       };
       
-      // Add year filter if provided
-      if (year !== null) {
-        whereCondition.year = year;
+      // Add year filter if we have one (either provided or extracted)
+      if (searchYear !== null) {
+        whereCondition.year = searchYear;
       }
       
       return await this.prisma.PlexTVShow.findMany({
@@ -250,23 +261,57 @@ class PlexDatabaseService {
   // Search for episodes by title or series title
   async searchEpisodes(query) {
     try {
-      return await this.prisma.PlexEpisode.findMany({
-        where: {
-          OR: [
+      // Extract year from query if it contains a year in parentheses
+      const yearMatch = query.match(/^(.+?)\s*\((\d{4})\)$/);
+      let searchQuery = query;
+      let searchYear = null;
+      
+      if (yearMatch) {
+        searchQuery = yearMatch[1].trim(); // Query without year
+        searchYear = parseInt(yearMatch[2]); // Extracted year
+        console.log(`📺 Extracted year from episode search: "${query}" -> query: "${searchQuery}", year: ${searchYear}`);
+      }
+      
+      const whereCondition = {
+        OR: [
+          {
+            title: {
+              contains: searchQuery,
+              mode: 'insensitive'
+            }
+          },
+          {
+            showTitle: {
+              contains: searchQuery,
+              mode: 'insensitive'
+            }
+          }
+        ]
+      };
+      
+      // If we extracted a year, also search for episodes from shows with that year
+      if (searchYear) {
+        whereCondition.OR.push({
+          AND: [
             {
-              title: {
-                contains: query,
+              showTitle: {
+                contains: searchQuery,
                 mode: 'insensitive'
               }
             },
             {
-              showTitle: {
-                contains: query,
-                mode: 'insensitive'
+              season: {
+                show: {
+                  year: searchYear
+                }
               }
             }
           ]
-        },
+        });
+      }
+      
+      return await this.prisma.PlexEpisode.findMany({
+        where: whereCondition,
         include: {
           season: {
             include: {
@@ -497,28 +542,101 @@ class PlexDatabaseService {
   // Search methods for the API endpoints  // Search TV shows by title
   async searchTVShows(query, year = null) {
     try {
+      // Extract year from query if it contains a year in parentheses
+      const yearMatch = query.match(/^(.+?)\s*\((\d{4})\)$/);
+      let searchTitle = query;
+      let searchYear = year; // Start with provided year
+      
+      if (yearMatch) {
+        searchTitle = yearMatch[1].trim(); // Title without year
+        searchYear = parseInt(yearMatch[2]); // Extracted year takes precedence
+        console.log(`📺 Extracted year from TV show query: "${query}" -> title: "${searchTitle}", year: ${searchYear}`);
+      }
+      
       const whereCondition = {
         title: {
-          contains: query
+          contains: searchTitle
         }
       };
       
-      // Add year filter if provided
-      if (year !== null) {
-        whereCondition.year = year;
+      // Add year filter if we have one (either provided or extracted)
+      if (searchYear !== null) {
+        whereCondition.year = searchYear;
       }
       
-      return await this.prisma.PlexTVShow.findMany({
+      console.log(`📺 Database search condition:`, JSON.stringify(whereCondition, null, 2));
+      
+      const results = await this.prisma.PlexTVShow.findMany({
         where: whereCondition,
         include: {
           section: true
         }
       });
+      
+      console.log(`📺 Found ${results.length} shows in database`);
+      if (results.length > 0) {
+        console.log(`📺 First result:`, { title: results[0].title, year: results[0].year });
+      }
+      
+      return results;
     } catch (error) {
       console.error('Error searching TV shows:', error);
       throw error;
     }
-  }// Search movies by title
+  }
+
+  // Search TV episodes by series title, season, and episode number
+  async searchTVEpisodes(seriesTitle, seasonNumber, episodeNumber) {
+    try {
+      // Extract year from series title if it contains a year in parentheses
+      const yearMatch = seriesTitle.match(/^(.+?)\s*\((\d{4})\)$/);
+      let searchTitle = seriesTitle;
+      let searchYear = null;
+      
+      if (yearMatch) {
+        searchTitle = yearMatch[1].trim(); // Title without year
+        searchYear = parseInt(yearMatch[2]); // Extracted year
+        console.log(`📺 Extracted year from series title: "${seriesTitle}" -> title: "${searchTitle}", year: ${searchYear}`);
+      }
+      
+      const whereCondition = {
+        seasonIndex: seasonNumber,
+        index: episodeNumber,
+        season: {
+          show: {
+            title: {
+              contains: searchTitle
+            }
+          }
+        }
+      };
+      
+      // If we extracted a year, also filter by the show's year
+      if (searchYear) {
+        whereCondition.season.show.year = searchYear;
+      }
+      
+      return await this.prisma.PlexEpisode.findMany({
+        where: whereCondition,
+        include: {
+          season: {
+            include: {
+              show: {
+                include: {
+                  section: true
+                }
+              }
+            }
+          }
+        }
+      });
+    } catch (error) {
+      console.error('Error searching TV episodes:', error);
+      return [];
+    }
+  }
+
+  // Search movies by title
   async searchMovies(query, year = null) {
     try {
       const whereCondition = {

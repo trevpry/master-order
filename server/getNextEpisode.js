@@ -372,12 +372,30 @@ async function selectEarliestUnplayedFromCollections(selectedSeries) {
 
   console.log(`Found ${unplayedItems.length} unplayed items for selection`);
 
-  if (unplayedItems.length === 0) {
-    console.log('No unplayed items found, returning original selection');
+  // Filter out items that are in active custom orders
+  const filteredUnplayedItems = [];
+  for (const item of unplayedItems) {
+    if (item.libraryType === 'tv') {
+      const inCustomOrder = await tvShowExistsInCustomOrder(item.ratingKey);
+      if (inCustomOrder) {
+        console.log(`🚫 Collection selection: Excluding TV show "${item.title}" - has episodes in active custom order`);
+      } else {
+        filteredUnplayedItems.push(item);
+      }
+    } else {
+      // For movies, we could add similar logic here if needed
+      filteredUnplayedItems.push(item);
+    }
+  }
+
+  console.log(`Found ${filteredUnplayedItems.length} unplayed items after custom order filtering`);
+
+  if (filteredUnplayedItems.length === 0) {
+    console.log('No unplayed items found after custom order filtering, returning original selection');
     return selectedSeries;
   }  // Sort by release/air date (earliest first) - Enhanced to consider episode air dates
   // First, enhance TV series items with their next episode air dates for accurate sorting
-  const enhancedItems = await Promise.all(unplayedItems.map(async (item) => {
+  const enhancedItems = await Promise.all(filteredUnplayedItems.map(async (item) => {
     if (item.libraryType === 'tv') {
       try {
         const nextEpisode = await plexDb.getNextUnwatchedEpisode(item.ratingKey);
@@ -413,7 +431,15 @@ async function selectEarliestUnplayedFromCollections(selectedSeries) {
   const sortedItems = enhancedItems.sort((a, b) => {
     const dateA = new Date(a.sortDate);
     const dateB = new Date(b.sortDate);
-    return dateA - dateB;
+    
+    // Primary sort: by air date
+    const dateDiff = dateA - dateB;
+    if (dateDiff !== 0) {
+      return dateDiff;
+    }
+    
+    // Secondary sort (tiebreaker): by series title for consistent selection when dates are identical
+    return a.title.localeCompare(b.title);
   });
   
   const earliestItem = sortedItems[0];

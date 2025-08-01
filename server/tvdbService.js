@@ -8,13 +8,18 @@ class TVDBService {
     this.baseURL = 'https://api4.thetvdb.com/v4';
   }
 
-  async ensureTokenLoaded() {
-    if (!this.bearerToken) {
+  async ensureTokenLoaded(forceRefresh = false) {
+    if (!this.bearerToken || forceRefresh) {
       const settings = await prisma.settings.findUnique({
         where: { id: 1 }
       });
       this.bearerToken = settings?.tvdbBearerToken;
+      console.log('TVDB token loaded from settings:', this.bearerToken ? `${this.bearerToken.substring(0, 20)}...` : 'null');
     }
+  }
+
+  async refreshToken() {
+    await this.ensureTokenLoaded(true);
   }
 
   async isTokenAvailable() {
@@ -22,7 +27,7 @@ class TVDBService {
     return !!this.bearerToken && this.bearerToken !== 'your_tvdb_bearer_token_here';
   }
 
-  async searchSeries(seriesName) {
+  async search(query, type = 'series') {
     try {
       if (!(await this.isTokenAvailable())) {
         console.log('TVDB bearer token not available');
@@ -34,18 +39,54 @@ class TVDBService {
           'Authorization': `Bearer ${this.bearerToken}`
         },
         params: {
-          query: seriesName,
-          type: 'series'
+          query: query,
+          type: type
         }
       });
 
-      console.log(`TVDB search results for "${seriesName}":`, response.data.data?.slice(0, 2));
+      console.log(`TVDB search results for "${query}" (type: ${type}):`, response.data.data?.slice(0, 2));
       return response.data.data || [];
     } catch (error) {
-      console.error('TVDB series search failed:', error.response?.data || error.message);
+      console.error(`TVDB ${type} search failed:`, error.response?.data || error.message);
+      
+      // If unauthorized, try refreshing the token once
+      if (error.response?.status === 401) {
+        console.log('TVDB token might be expired, trying to refresh...');
+        await this.refreshToken();
+        
+        // Retry once with refreshed token
+        try {
+          if (await this.isTokenAvailable()) {
+            const retryResponse = await axios.get(`${this.baseURL}/search`, {
+              headers: {
+                'Authorization': `Bearer ${this.bearerToken}`
+              },
+              params: {
+                query: query,
+                type: type
+              }
+            });
+            console.log(`TVDB ${type} search retry succeeded for "${query}"`);
+            return retryResponse.data.data || [];
+          }
+        } catch (retryError) {
+          console.error(`TVDB ${type} search retry also failed:`, retryError.response?.data || retryError.message);
+        }
+      }
+      
       return [];
     }
-  }async getSeriesDetails(seriesId) {
+  }
+
+  async searchSeries(seriesName) {
+    return this.search(seriesName, 'series');
+  }
+
+  async searchMovies(movieName) {
+    return this.search(movieName, 'movie');
+  }
+
+  async getSeriesDetails(seriesId) {
     try {
       if (!this.isTokenAvailable()) {
         console.log('TVDB bearer token not available');
@@ -66,7 +107,29 @@ class TVDBService {
       console.error('TVDB series details fetch failed:', error.response?.data || error.message);
       return null;
     }
-  }  async getSeriesSeasons(seriesId) {
+  }
+
+  async getMovieDetails(movieId) {
+    try {
+      if (!this.isTokenAvailable()) {
+        console.log('TVDB bearer token not available');
+        return null;
+      }
+      
+      const response = await axios.get(`${this.baseURL}/movies/${movieId}/extended`, {
+        headers: {
+          'Authorization': `Bearer ${this.bearerToken}`
+        }
+      });
+
+      return response.data.data;
+    } catch (error) {
+      console.error('TVDB movie details fetch failed:', error.response?.data || error.message);
+      return null;
+    }
+  }
+
+  async getSeriesSeasons(seriesId) {
     try {
       if (!this.isTokenAvailable()) {
         console.log('TVDB bearer token not available');
@@ -259,7 +322,7 @@ class TVDBService {
       console.log(`Searching TVDB for series: ${seriesName}, season: ${currentSeason}, episode: ${currentEpisode}`);
       
       // Check if bearer token is available
-      if (!this.isTokenAvailable()) {
+      if (!(await this.isTokenAvailable())) {
         console.log('TVDB bearer token not available, skipping TVDB integration');
         return null;
       }
@@ -316,15 +379,29 @@ class TVDBService {
         const seasons = await this.getSeriesSeasons(series.id);
         if (seasons && seasons.length > 0) {
           console.log(`Found ${seasons.length} seasons for ${series.name}`);
-            // Find the specific season          const targetSeason = seasons.find(season => season.number === currentSeason);
+          console.log('Season structure:', JSON.stringify(seasons[0], null, 2));
+          
+          // Find the specific season - try different possible field names
+          const targetSeason = seasons.find(season => 
+            season.number === currentSeason || 
+            season.seasonNumber === currentSeason ||
+            season.id === currentSeason
+          );
+          
           if (targetSeason) {
-            console.log(`Found season ${currentSeason} with TVDB ID: ${targetSeason.tvdbId} (local ID: ${targetSeason.id})`);
+            console.log(`Found season ${currentSeason}:`, JSON.stringify(targetSeason, null, 2));
+            
+            // Use the correct ID field for the season
+            const seasonId = targetSeason.id || targetSeason.tvdbId || targetSeason.seasonId;
+            console.log(`Using season ID: ${seasonId}`);
+            
+            if (seasonId) {
               // Get extended season details to access artwork with language info
-            const seasonExtended = await this.getSeasonExtended(targetSeason.tvdbId);
-            if (seasonExtended) {
-              const englishSeasonArtwork = this.selectEnglishArtwork(seasonExtended, 'season');
-              if (englishSeasonArtwork) {
-                console.log(`Found English season ${currentSeason} artwork: ${englishSeasonArtwork}`);                return {
+              const seasonExtended = await this.getSeasonExtended(seasonId);
+              if (seasonExtended) {
+                const englishSeasonArtwork = this.selectEnglishArtwork(seasonExtended, 'season');
+                if (englishSeasonArtwork) {
+                  console.log(`Found English season ${currentSeason} artwork: ${englishSeasonArtwork}`);                  return {
                   url: englishSeasonArtwork,
                   seasonNumber: currentSeason,
                   seriesName: series.name,
@@ -334,7 +411,10 @@ class TVDBService {
                   isCurrentSeasonFinal: isCurrentSeasonFinal,
                   seriesStatus: seriesDetailsForStatus?.status?.name
                 };
+                }
               }
+            } else {
+              console.log(`No season ID found for season ${currentSeason}`);
             }
             
             // Check if season has artwork directly in the response (fallback)
