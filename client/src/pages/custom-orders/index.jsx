@@ -25,7 +25,13 @@ function CustomOrders() {
 
   const [showCmroBulkImportModal, setShowCmroBulkImportModal] = useState(false);
   const [cmroBulkImportData, setCmroBulkImportData] = useState('');
-  const [cmroBulkImportLoading, setCmroBulkImportLoading] = useState(false);  const [reselectingItem, setReselectingItem] = useState(null); // For tracking which item is being re-selected
+  const [cmroBulkImportLoading, setCmroBulkImportLoading] = useState(false);
+
+  // Error modal state
+  const [showErrorModal, setShowErrorModal] = useState(false);
+  const [errorDetails, setErrorDetails] = useState({ title: '', message: '', error: null });
+
+  const [reselectingItem, setReselectingItem] = useState(null); // For tracking which item is being re-selected
   const [showBookForm, setShowBookForm] = useState(false);
   const [bookFormData, setBookFormData] = useState({
     title: '',
@@ -741,6 +747,20 @@ function CustomOrders() {
         requestBody.webTitle = mediaItem.webTitle;
         requestBody.webUrl = mediaItem.webUrl;
         requestBody.webDescription = mediaItem.webDescription;
+      } else if (mediaType === 'episode') {
+        // Handle episodes (both Plex and non-Plex)
+        if (mediaItem.ratingKey) {
+          // Plex episode
+          requestBody.plexKey = mediaItem.ratingKey;
+          requestBody.seasonNumber = mediaItem.parentIndex;
+          requestBody.episodeNumber = mediaItem.index;
+          requestBody.seriesTitle = mediaItem.grandparentTitle;
+        } else {
+          // Non-Plex episode (like from CMRO import)
+          requestBody.seriesTitle = mediaItem.seriesTitle;
+          requestBody.seasonNumber = mediaItem.seasonNumber;
+          requestBody.episodeNumber = mediaItem.episodeNumber;
+        }
       } else {
         requestBody.plexKey = mediaItem.ratingKey;
         requestBody.seasonNumber = mediaItem.parentIndex;
@@ -1226,50 +1246,77 @@ function CustomOrders() {
               };
             }
           } else if (item.mediaType === 'book') {
-            // For books, search OpenLibrary and use the first result
+            // For books, search OpenLibrary with custom order name prepended, then fallback without it
             try {
-              let searchQuery = item.title;
-              if (item.bookAuthor) {
-                searchQuery += ` author:"${item.bookAuthor}"`;
-              }
-              if (item.bookYear) {
-                searchQuery += ` first_publish_year:${item.bookYear}`;
-              }
+              let searchQuery, results = null;
               
-              const response = await fetch(`http://127.0.0.1:3001/api/openlibrary/search?query=${encodeURIComponent(searchQuery)}&limit=1`);
-              
-              if (response.ok) {
-                const results = await response.json();
-                
-                if (results && results.length > 0) {
-                  const book = results[0];
-                  targetMedia = {
-                    title: book.title,
-                    type: 'book',
-                    bookTitle: book.title,
-                    bookAuthor: book.authors && book.authors[0] ? book.authors[0] : (item.bookAuthor || 'Unknown Author'),
-                    bookYear: book.firstPublishYear || item.bookYear || null,
-                    bookIsbn: book.isbn || null,
-                    bookPublisher: book.publishers && book.publishers[0] ? book.publishers[0] : null,
-                    bookOpenLibraryId: book.id || null,
-                    bookCoverUrl: book.coverUrl || null
-                  };
-                } else {
-                  // If no results from OpenLibrary, create a basic book entry
-                  targetMedia = {
-                    title: item.title,
-                    type: 'book',
-                    bookTitle: item.title,
-                    bookAuthor: item.bookAuthor || 'Unknown Author',
-                    bookYear: item.bookYear || null,
-                    bookIsbn: null,
-                    bookPublisher: null,
-                    bookOpenLibraryId: null,
-                    bookCoverUrl: null
-                  };
+              // First try with custom order name prepended if we have an order name
+              if (viewingOrderItems && viewingOrderItems.name) {
+                searchQuery = `${viewingOrderItems.name} ${item.title}`;
+                if (item.bookAuthor) {
+                  searchQuery += ` author:"${item.bookAuthor}"`;
                 }
+                if (item.bookYear) {
+                  searchQuery += ` first_publish_year:${item.bookYear}`;
+                }
+                
+                console.log(`Searching OpenLibrary with order name: "${searchQuery}"`);
+                let response = await fetch(`http://127.0.0.1:3001/api/openlibrary/search?query=${encodeURIComponent(searchQuery)}&limit=10`);
+                
+                if (response.ok) {
+                  results = await response.json();
+                }
+              }
+              
+              // If no results found with custom order name, try without it
+              if (!results || results.length === 0) {
+                if (viewingOrderItems && viewingOrderItems.name) {
+                  console.log('No results with order name, trying without order name...');
+                }
+                
+                searchQuery = item.title;
+                if (item.bookAuthor) {
+                  searchQuery += ` author:"${item.bookAuthor}"`;
+                }
+                if (item.bookYear) {
+                  searchQuery += ` first_publish_year:${item.bookYear}`;
+                }
+                
+                console.log(`Fallback search: "${searchQuery}"`);
+                const response = await fetch(`http://127.0.0.1:3001/api/openlibrary/search?query=${encodeURIComponent(searchQuery)}&limit=10`);
+                
+                if (response.ok) {
+                  results = await response.json();
+                }
+              }
+              
+              if (results && results.length > 0) {
+                // Prioritize books with cover images
+                let book = results.find(result => result.coverUrl && result.coverUrl.trim() !== '');
+                
+                // If no book with cover found, use the first result
+                if (!book) {
+                  book = results[0];
+                  console.log(`No books with covers found, using first result: "${book.title}"`);
+                } else {
+                  console.log(`Selected book with cover: "${book.title}" by ${book.authors?.[0] || 'Unknown'}`);
+                }
+                
+                console.log(`Found book: "${book.title}" by ${book.authors?.[0] || 'Unknown'}${book.coverUrl ? ' (with cover)' : ' (no cover)'}`);
+                targetMedia = {
+                  title: book.title,
+                  type: 'book',
+                  bookTitle: book.title,
+                  bookAuthor: book.authors && book.authors[0] ? book.authors[0] : (item.bookAuthor || 'Unknown Author'),
+                  bookYear: book.firstPublishYear || item.bookYear || null,
+                  bookIsbn: book.isbn || null,
+                  bookPublisher: book.publishers && book.publishers[0] ? book.publishers[0] : null,
+                  bookOpenLibraryId: book.id || null,
+                  bookCoverUrl: book.coverUrl || null
+                };
               } else {
-                // If OpenLibrary search fails, create a basic book entry
+                // If no results from OpenLibrary, create a basic book entry
+                console.log('No OpenLibrary results found, creating basic book entry');
                 targetMedia = {
                   title: item.title,
                   type: 'book',
@@ -1288,14 +1335,17 @@ function CustomOrders() {
               targetMedia = {
                 title: item.title,
                 type: 'book',
-                bookTitle: item.title,                bookAuthor: item.bookAuthor || 'Unknown Author',
+                bookTitle: item.title,
+                bookAuthor: item.bookAuthor || 'Unknown Author',
                 bookYear: item.bookYear || null,
                 bookIsbn: null,
                 bookPublisher: null,
                 bookOpenLibraryId: null,
                 bookCoverUrl: null
               };
-            }          } else if (item.mediaType === 'shortstory') {
+            }
+
+          } else if (item.mediaType === 'shortstory') {
             // For short stories, create the media object directly since we have all the info
             targetMedia = {
               title: item.title,
@@ -1416,8 +1466,16 @@ function CustomOrders() {
           
         } catch (error) {
           console.error(`Error processing item on line ${item.lineNumber}:`, error);
-          failedItems.push(`Line ${item.lineNumber}: ${item.seriesOrMovie} - ${item.title} (processing error)`);
-          failCount++;
+          
+          // Stop import on error and show error modal
+          setErrorDetails({
+            title: 'Bulk Import Error',
+            message: `Error processing item on line ${item.lineNumber}: ${item.seriesOrMovie} - ${item.title}`,
+            error: error.message || 'Unknown error occurred'
+          });
+          setShowErrorModal(true);
+          setBulkImportLoading(false);
+          return;
         }
       }
       
@@ -1448,7 +1506,14 @@ function CustomOrders() {
       
     } catch (error) {
       console.error('Error during bulk import:', error);
-      setMessage('Error during bulk import process');
+      
+      // Show error modal for unexpected errors
+      setErrorDetails({
+        title: 'Bulk Import System Error',
+        message: 'An unexpected error occurred during the bulk import process.',
+        error: error.message || 'Unknown system error'
+      });
+      setShowErrorModal(true);
     } finally {
       setBulkImportLoading(false);
     }
@@ -1493,6 +1558,9 @@ function CustomOrders() {
             source: null,
             year: null,
             writer: null,
+            director: null,
+            productionNumber: null,
+            releasedDate: null,
             pages: null,
             publisher: null,
             publishedDate: null,
@@ -1503,6 +1571,13 @@ function CustomOrders() {
         }
         
         if (isProcessing && currentEntry) {
+          // Look for TV series with episode info (e.g., "Buffy the Vampire Slayer (S4E01)")
+          const episodeMatch = line.match(/^(.+?)\s*\(S(\d+)E(\d+)\)$/);
+          if (episodeMatch && !currentEntry.source) {
+            currentEntry.source = line; // Store the full series line with episode info
+            continue;
+          }
+          
           // Look for "from" line (e.g., "from The High Republic: Tales of Light and Life")
           if (line.startsWith('from ')) {
             currentEntry.source = line.substring(5).trim();
@@ -1531,6 +1606,24 @@ function CustomOrders() {
           // Look for writer (e.g., "Writer: George Mann")
           if (line.startsWith('Writer: ')) {
             currentEntry.writer = line.substring(8).trim();
+            continue;
+          }
+          
+          // Look for director (e.g., "Director: Joss Whedon")
+          if (line.startsWith('Director: ')) {
+            currentEntry.director = line.substring(10).trim();
+            continue;
+          }
+          
+          // Look for production number (e.g., "Production Number: 401")
+          if (line.startsWith('Production Number: ')) {
+            currentEntry.productionNumber = line.substring(19).trim();
+            continue;
+          }
+          
+          // Look for released date (e.g., "Released: October 5, 1999")
+          if (line.startsWith('Released: ')) {
+            currentEntry.releasedDate = line.substring(10).trim();
             continue;
           }
           
@@ -1578,11 +1671,32 @@ function CustomOrders() {
       
       for (const entry of entries) {
         try {
-          // Determine if it's a comic, book, or short story based on the source
+          // First check if it's a TV episode based on source pattern (e.g., "Buffy the Vampire Slayer (S4E01)")
+          let episodeMatch = null;
+          if (entry.source) {
+            episodeMatch = entry.source.match(/^(.+?)\s*\(S(\d+)E(\d+)\)$/);
+          }
+          
           let mediaType = 'shortstory'; // Default to short story
           let requestData = {};
           
-          if (entry.source) {
+          if (episodeMatch) {
+            // TV Episode detected
+            const seriesName = episodeMatch[1].trim();
+            const seasonNumber = parseInt(episodeMatch[2]);
+            const episodeNumber = parseInt(episodeMatch[3]);
+            
+            mediaType = 'episode';
+            requestData = {
+              mediaType: 'episode',
+              title: entry.title,
+              seriesTitle: seriesName,
+              seasonNumber: seasonNumber,
+              episodeNumber: episodeNumber,
+              year: entry.releasedDate ? new Date(entry.releasedDate).getFullYear() : 
+                    (entry.publishedDate ? new Date(entry.publishedDate).getFullYear() : null)
+            };
+          } else if (entry.source) {
             // If from a magazine or anthology, treat as short story
             if (entry.source.includes('Star Wars Insider') || 
                 entry.source.includes('Tales of') ||
@@ -1631,28 +1745,29 @@ function CustomOrders() {
           
           console.log(`Adding ${mediaType}: ${entry.title}`);
           
-          const response = await fetch(`http://127.0.0.1:3001/api/custom-orders/${viewingOrderItems.id}/items`, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify(requestData),
-          });
-          
-          if (response.ok) {
+          // Use the same method as regular bulk import
+          const success = await handleAddMediaToOrder(viewingOrderItems.id, requestData, true);
+          if (success) {
             successCount++;
             console.log(`✅ Successfully added: ${entry.title}`);
           } else {
-            const errorData = await response.json();
             failCount++;
-            failedItems.push(`${entry.title}: ${errorData.error}`);
-            console.log(`❌ Failed to add: ${entry.title} - ${errorData.error}`);
+            failedItems.push(`${entry.title}: Failed to add item`);
+            console.log(`❌ Failed to add: ${entry.title}`);
           }
           
         } catch (error) {
-          failCount++;
-          failedItems.push(`${entry.title}: ${error.message}`);
           console.error(`Error adding ${entry.title}:`, error);
+          
+          // Stop import on error and show error modal
+          setErrorDetails({
+            title: 'CMRO Import Error',
+            message: `Error processing entry: ${entry.title}`,
+            error: error.message || 'Unknown error occurred'
+          });
+          setShowErrorModal(true);
+          setCmroBulkImportLoading(false);
+          return;
         }
       }
       
@@ -1679,7 +1794,14 @@ function CustomOrders() {
       
     } catch (error) {
       console.error('Error during CMRO import:', error);
-      setMessage('Error during CMRO import process');
+      
+      // Show error modal for unexpected errors
+      setErrorDetails({
+        title: 'CMRO Import System Error',
+        message: 'An unexpected error occurred during the CMRO import process.',
+        error: error.message || 'Unknown system error'
+      });
+      setShowErrorModal(true);
     } finally {
       setCmroBulkImportLoading(false);
     }
@@ -3640,6 +3762,30 @@ Writer: Michael Kogge`);
                 </Button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Error Modal */}
+      {showErrorModal && (
+        <div className="modal-overlay" onClick={() => setShowErrorModal(false)}>
+          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+            <h3>{errorDetails.title}</h3>
+            <div className="error-details">
+              <p><strong>Message:</strong> {errorDetails.message}</p>
+              {errorDetails.error && (
+                <p><strong>Error:</strong> {errorDetails.error}</p>
+              )}
+            </div>
+            <div className="form-actions">
+              <Button
+                type="button"
+                onClick={() => setShowErrorModal(false)}
+                className="primary"
+              >
+                OK
+              </Button>
+            </div>
           </div>
         </div>
       )}

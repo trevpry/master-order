@@ -1,0 +1,639 @@
+const PlexAPI = require('plex-api');
+const prisma = require('./prismaClient');
+
+class PlexPlayerService {
+  constructor() {
+    this.client = null;
+    this.lastSettingsCheck = null;
+    this.commandCounter = 1; // For tracking command IDs as required by Plex API
+  }
+
+  async initializeClient(forceRefresh = false) {
+    try {
+      // Get Plex settings from database
+      const settings = await prisma.settings.findUnique({
+        where: { id: 1 }
+      });
+
+      if (!settings || !settings.plexToken || !settings.plexUrl) {
+        throw new Error('Plex settings not configured. Please set Plex URL and token in settings.');
+      }
+
+      // Check if we need to refresh the client due to settings changes
+      const settingsHash = `${settings.plexUrl}:${settings.plexToken}`;
+      if (forceRefresh || !this.client || this.lastSettingsCheck !== settingsHash) {
+        console.log('Initializing Plex client with current settings...');
+        
+        // Parse the Plex URL to get hostname and port
+        const url = new URL(settings.plexUrl);
+        
+        this.client = new PlexAPI({
+          hostname: url.hostname,
+          port: url.port || 32400,
+          token: settings.plexToken,
+          https: url.protocol === 'https:',
+          timeout: 5000
+        });
+
+        this.lastSettingsCheck = settingsHash;
+        console.log(`Plex client initialized for ${url.hostname}:${url.port || 32400}`);
+      }
+
+      return this.client;
+    } catch (error) {
+      console.error('Failed to initialize Plex client:', error);
+      throw error;
+    }
+  }
+
+  async initializePlexTvClient() {
+    try {
+      const settings = await prisma.settings.findUnique({
+        where: { id: 1 }
+      });
+
+      if (!settings || !settings.plexToken) {
+        throw new Error('Plex token not configured. Please set Plex token in settings.');
+      }
+
+      // Create a client connected to plex.tv for device discovery
+      const plexTvClient = new PlexAPI({
+        hostname: 'plex.tv',
+        token: settings.plexToken,
+        https: true,
+        timeout: 30000
+      });
+
+      return plexTvClient;
+    } catch (error) {
+      console.error('Failed to initialize Plex.tv client:', error);
+      throw error;
+    }
+  }
+
+  async getPlayers() {
+    try {
+      if (!this.client) {
+        await this.initializeClient();
+      }
+
+      console.log('Fetching Plex clients...');
+      
+      // Add timeout handling for the query
+      const queryPromise = this.client.query('/clients');
+      const timeoutPromise = new Promise((_, reject) => {
+        setTimeout(() => reject(new Error('Players query timeout after 10 seconds')), 10000);
+      });
+      
+      const response = await Promise.race([queryPromise, timeoutPromise]);
+      
+      console.log('Raw Plex clients response:', JSON.stringify(response, null, 2));
+      
+      if (!response || !response.MediaContainer) {
+        console.log('No MediaContainer in response');
+        return [];
+      }
+
+      console.log('MediaContainer keys:', Object.keys(response.MediaContainer));
+
+      let players = [];
+      
+      // Check for Server array first (most common)
+      if (response.MediaContainer.Server) {
+        console.log('Found Server array, processing...');
+        const servers = Array.isArray(response.MediaContainer.Server) 
+          ? response.MediaContainer.Server 
+          : [response.MediaContainer.Server];
+          
+        players = servers.map(server => ({
+          name: server.name || server.title || 'Unknown Player',
+          machineIdentifier: server.machineIdentifier,
+          product: server.product || 'Unknown',
+          productVersion: server.productVersion || 'Unknown',
+          platform: server.platform || 'Unknown',
+          platformVersion: server.platformVersion || 'Unknown',
+          device: server.device || 'Unknown',
+          model: server.model || 'Unknown',
+          vendor: server.vendor || 'Unknown',
+          provides: server.provides || 'Unknown',
+          address: server.address || 'Unknown',
+          port: server.port || 'Unknown',
+          version: server.version || 'Unknown',
+          protocol: server.protocol || 'Unknown',
+          host: server.host || 'Unknown',
+          localAddresses: server.localAddresses || 'Unknown',
+          owned: server.owned || false
+        }));
+      }
+      // Check for Device array as alternative
+      else if (response.MediaContainer.Device) {
+        console.log('Found Device array instead of Server array');
+        const devices = Array.isArray(response.MediaContainer.Device) 
+          ? response.MediaContainer.Device 
+          : [response.MediaContainer.Device];
+          
+        players = devices.map(device => ({
+          name: device.name || device.title || 'Unknown Player',
+          machineIdentifier: device.machineIdentifier,
+          product: device.product || 'Unknown',
+          productVersion: device.productVersion || 'Unknown',
+          platform: device.platform || 'Unknown',
+          platformVersion: device.platformVersion || 'Unknown',
+          device: device.device || 'Unknown',
+          model: device.model || 'Unknown',
+          vendor: device.vendor || 'Unknown',
+          provides: device.provides || 'Unknown',
+          address: device.address || 'Unknown',
+          port: device.port || 'Unknown',
+          version: device.version || 'Unknown',
+          protocol: device.protocol || 'Unknown',
+          host: device.host || 'Unknown',
+          localAddresses: device.localAddresses || 'Unknown',
+          owned: device.owned || false
+        }));
+      }
+      else {
+        console.log('No Server or Device arrays found in MediaContainer');
+        console.log('Available properties:', Object.keys(response.MediaContainer));
+        
+        // Check if it's just an empty response (no clients connected)
+        if (response.MediaContainer.size === 0) {
+          console.log('Plex server reports 0 connected clients. Make sure Plex apps are open and connected.');
+        }
+      }
+
+      console.log(`Found ${players.length} players`);
+      
+      // If no players found, provide helpful information
+      if (players.length === 0) {
+        console.log('No Plex players found. To see players:');
+        console.log('1. Open a Plex app (AndroidTV, mobile, web, etc.)');
+        console.log('2. Make sure the app is connected to your Plex server');
+        console.log('3. Try refreshing the players list in Settings');
+      }
+      
+      return players;
+    } catch (error) {
+      console.error('Error fetching players:', error);
+      throw error;
+    }
+  }
+
+  getApiHeaders(targetClientId = null) {
+    // Headers required by official Plex Remote Control API
+    const headers = {
+      'X-Plex-Product': 'Master Order',
+      'X-Plex-Version': '1.0.0',
+      'X-Plex-Client-Identifier': 'master-order-controller',
+      'X-Plex-Device-Name': 'Master Order Controller',
+      'X-Plex-Device': 'Master Order Backend',
+      'X-Plex-Platform': 'Node.js',
+      'X-Plex-Provides': 'controller'
+    };
+
+    // Add target client identifier if specified (for proxied players)
+    if (targetClientId) {
+      headers['X-Plex-Target-Client-Identifier'] = targetClientId;
+    }
+
+    return headers;
+  }
+
+  getNextCommandId() {
+    return this.commandCounter++;
+  }
+
+  async playMedia(machineIdentifier, ratingKey, offset = 0) {
+    try {
+      console.log(`Playing media ${ratingKey} on ${machineIdentifier} at offset ${offset}`);
+      
+      await this.initializeClient();
+      
+      const players = await this.getPlayers();
+      const targetPlayer = players.find(p => p.machineIdentifier === machineIdentifier);
+      
+      if (!targetPlayer) {
+        throw new Error(`Player ${machineIdentifier} not found`);
+      }
+
+      console.log('Target player details:', targetPlayer);
+
+      // Get server details for proper URI construction
+      const serverInfo = await this.client.query('/');
+      const serverMachineId = serverInfo?.MediaContainer?.machineIdentifier;
+      if (!serverMachineId) {
+        throw new Error('Could not get server machine identifier');
+      }
+
+      // Get media details
+      const mediaResponse = await this.client.query(`/library/metadata/${ratingKey}`);
+      const media = mediaResponse?.MediaContainer?.Metadata?.[0];
+      if (!media) {
+        throw new Error('Media not found');
+      }
+
+      console.log('Media details:', {
+        title: media.title,
+        key: media.key,
+        type: media.type
+      });
+
+      // Use simple HTTP API format based on official documentation
+      const settings = await prisma.settings.findUnique({ where: { id: 1 } });
+      const serverUrl = new URL(settings.plexUrl);
+      
+      const playParams = {
+        key: `/library/metadata/${ratingKey}`,
+        machineIdentifier: serverMachineId,
+        address: serverUrl.hostname,
+        port: parseInt(serverUrl.port) || 32400
+      };
+
+      if (offset > 0) {
+        playParams.offset = offset * 1000; // Convert to milliseconds
+      }
+
+      console.log('Sending playback command with params:', playParams);
+
+      const success = await this.sendSimplePlayerCommand(targetPlayer, '/player/playback/playMedia', playParams);
+      
+      if (success) {
+        return {
+          success: true,
+          message: 'Playback started successfully',
+          player: targetPlayer?.name || 'Plex Device',
+          media: {
+            title: media?.title || 'Unknown',
+            ratingKey: media?.ratingKey || ratingKey
+          }
+        };
+      } else {
+        throw new Error('Player command failed');
+      }
+
+    } catch (error) {
+      console.error('playMedia error:', error);
+      return {
+        success: false,
+        error: error.message
+      };
+    } catch (error) {
+      console.error('playMedia error:', error);
+      return {
+        success: false,
+        error: error.message
+      };
+    }
+  }
+
+  // Simple HTTP command to player based on official Plex documentation
+  async sendSimplePlayerCommand(player, endpoint, params = {}) {
+    try {
+      if (player.address === 'Unknown' || player.port === 'Unknown') {
+        throw new Error('Player address/port not available');
+      }
+
+      const commandID = Date.now();
+      const queryParams = new URLSearchParams({
+        commandID: commandID,
+        ...params
+      });
+
+      const url = `http://${player.address}:${player.port}${endpoint}?${queryParams}`;
+      console.log('Simple HTTP request to:', url);
+
+      const response = await fetch(url, {
+        method: 'GET',
+        headers: {
+          'X-Plex-Client-Identifier': 'master-order-app',
+          'X-Plex-Target-Client-Identifier': player.machineIdentifier,
+          'X-Plex-Device-Name': 'Master Order'
+        }
+      });
+
+      console.log('Response status:', response.status);
+      const responseText = await response.text();
+      console.log('Response body:', responseText);
+
+      return response.status === 200;
+    } catch (error) {
+      console.error('Simple player command failed:', error);
+      return false;
+    }
+  }
+
+  async sendDirectPlayerCommand(player, endpoint, params = {}, headers = {}) {
+    try {
+      // For direct player communication, we need to connect to the player's address
+      if (player.address === 'Unknown' || player.port === 'Unknown') {
+        throw new Error('Player address/port not available for direct connection');
+      }
+
+      console.log(`Attempting direct connection to ${player.address}:${player.port}`);
+      console.log(`Endpoint: ${endpoint}`);
+      console.log(`Parameters:`, JSON.stringify(params, null, 2));
+      console.log(`Headers:`, JSON.stringify(headers, null, 2));
+
+      // Create a temporary client to connect directly to the player
+      const directClient = new PlexAPI({
+        hostname: player.address,
+        port: parseInt(player.port),
+        token: this.client.authToken,
+        https: false,
+        timeout: 5000  // Reduced timeout to fail faster
+      });
+
+      console.log(`Sending direct command to ${player.address}:${player.port}${endpoint}`);
+      console.log(`Using token: ${this.client.authToken ? this.client.authToken.substring(0, 10) + '...' : 'No token'}`);
+      
+      // Ensure token is in both the client AND the query parameters for AndroidTV
+      if (this.client.authToken && !params.token) {
+        params.token = this.client.authToken;
+      }
+      
+      console.log(`Updated parameters with token:`, JSON.stringify({...params, token: params.token ? params.token.substring(0, 10) + '...' : 'No token'}, null, 2));
+      
+      // Use POST for playback commands as per Plex API documentation
+      const method = endpoint.includes('/playback/') ? 'POST' : 'GET';
+      console.log(`Using HTTP method: ${method}`);
+      const queryPromise = directClient.query(endpoint, method, params, headers);
+      
+      const timeoutPromise = new Promise((_, reject) => {
+        setTimeout(() => reject(new Error('Direct connection timeout after 5 seconds')), 5000);
+      });
+      
+      const result = await Promise.race([queryPromise, timeoutPromise]);
+      
+      console.log('Direct command completed successfully');
+      console.log('Raw result:', result);
+      
+      // Handle Buffer responses from some Plex clients
+      let processedResult = result;
+      let bufferContent = '';
+      
+      if (Buffer.isBuffer(result)) {
+        bufferContent = result.toString('utf8');
+        console.log('Buffer content:', bufferContent);
+        processedResult = { raw: result, decoded: bufferContent };
+      } else if (result && result.type === 'Buffer' && result.data) {
+        bufferContent = Buffer.from(result.data).toString('utf8');
+        console.log('Buffer content:', bufferContent);
+        processedResult = { raw: result, decoded: bufferContent };
+      }
+      
+      // Check if the response indicates an error despite HTTP success
+      if (bufferContent && bufferContent.toLowerCase().includes('failure')) {
+        console.error('Device returned failure response:', bufferContent);
+        return {
+          success: false,
+          error: `Device failure: ${bufferContent.trim()}`,
+          details: processedResult
+        };
+      }
+      
+      console.log('Processed result:', processedResult);
+      
+      return {
+        success: true,
+        details: processedResult
+      };
+    } catch (error) {
+      console.error('Direct player command failed:', error.message);
+      console.error('Error details:', error);
+      
+      // Return error info instead of throwing to allow fallbacks
+      return {
+        success: false,
+        error: error.message,
+        details: error
+      };
+    }
+  }
+
+  async castMediaToPlayer(targetPlayer, media, offset = 0) {
+    try {
+      console.log(`Casting media via server to ${targetPlayer.name}`);
+      
+      // Method 1: Try using the server's session management to start playback
+      console.log('Attempting session-based casting...');
+      
+      // Create a play session for the target device
+      const sessionParams = {
+        'X-Plex-Client-Identifier': targetPlayer.machineIdentifier,
+        'X-Plex-Device': targetPlayer.product || 'Unknown Device',
+        'X-Plex-Device-Name': targetPlayer.name,
+        'X-Plex-Platform': 'Android',
+        'X-Plex-Product': targetPlayer.product || 'Plex for Android (TV)',
+        'X-Plex-Version': targetPlayer.version || '1.0'
+      };
+
+      // Create a viewing session
+      const sessionResult = await this.client.query('/:/sessions', 'POST', {
+        key: media.key,
+        ratingKey: media.ratingKey,
+        duration: media.duration || 0,
+        'viewOffset': offset * 1000,
+        ...sessionParams
+      });
+
+      console.log('Session creation result:', sessionResult ? 'Success' : 'Failed');
+
+      // Method 2: Try using Plex's companion API approach
+      console.log('Attempting companion API casting...');
+      
+      const companionParams = {
+        commandID: this.getNextCommandId(),
+        path: media.key,
+        machineIdentifier: targetPlayer.machineIdentifier,
+        address: targetPlayer.address,
+        port: targetPlayer.port,
+        protocol: 'plex',
+        offset: offset * 1000
+      };
+
+      // Send via the server's companion endpoint
+      const companionResult = await this.client.query('/companion/start', 'GET', companionParams);
+      console.log('Companion API result:', companionResult ? 'Success' : 'Failed');
+
+      // Method 3: Try using server's client management
+      console.log('Attempting server client management...');
+      
+      const clientParams = {
+        'client-identifier': targetPlayer.machineIdentifier,
+        'X-Plex-Target-Client-Identifier': targetPlayer.machineIdentifier
+      };
+
+      // Use the server to manage client playback
+      const managementResult = await this.client.query(`/clients/${targetPlayer.machineIdentifier}`, 'POST', {
+        commandID: this.getNextCommandId(),
+        key: media.key,
+        offset: offset * 1000,
+        viewOffset: offset * 1000,
+        ...clientParams
+      });
+
+      console.log('Client management result:', managementResult ? 'Success' : 'Failed');
+
+      // Method 4: Try notification-based approach
+      console.log('Attempting notification-based casting...');
+      
+      const notificationParams = {
+        type: 'playing',
+        key: media.key,
+        'player-identifier': targetPlayer.machineIdentifier,
+        'session-identifier': `master-order-${Date.now()}`,
+        offset: offset * 1000
+      };
+
+      const notificationResult = await this.client.query('/:/notify', 'POST', notificationParams);
+      console.log('Notification result:', notificationResult ? 'Success' : 'Failed');
+
+      // If any method succeeded, return success
+      if (sessionResult || companionResult || managementResult || notificationResult) {
+        return {
+          success: true,
+          details: {
+            session: sessionResult,
+            companion: companionResult,
+            management: managementResult,
+            notification: notificationResult
+          }
+        };
+      } else {
+        return {
+          success: false,
+          error: 'All server-side casting methods failed'
+        };
+      }
+
+    } catch (error) {
+      console.error('Server-side casting error:', error);
+      return {
+        success: false,
+        error: error.message,
+        details: error
+      };
+    }
+  }
+
+  async playMediaOnAndroidTV(machineIdentifier, ratingKey, offset = 0) {
+    // This function is deprecated, but kept for reference.
+    // All logic is now handled in playMedia.
+    return this.playMedia(machineIdentifier, ratingKey, offset);
+  }
+
+  async playMediaViaPlex(machineIdentifier, ratingKey, offset = 0) {
+    try {
+      console.log(`Plex.tv discovery playback for ${machineIdentifier}, media ${ratingKey}`);
+      
+      // Initialize Plex.tv client for device discovery
+      const plexTvClient = await this.initializePlexTvClient();
+      
+      // Discover devices through Plex.tv
+      console.log('Discovering devices via Plex.tv...');
+      const devicesResponse = await plexTvClient.query('/devices.xml');
+      console.log('Plex.tv devices response:', JSON.stringify(devicesResponse, null, 2));
+      
+      // Get server information
+      const serversResponse = await plexTvClient.query('/pms/servers.xml');
+      console.log('Plex.tv servers response:', JSON.stringify(serversResponse, null, 2));
+      
+      // Try to find and use the target device
+      if (devicesResponse?.MediaContainer?.Device) {
+        const devices = Array.isArray(devicesResponse.MediaContainer.Device) 
+          ? devicesResponse.MediaContainer.Device 
+          : [devicesResponse.MediaContainer.Device];
+          
+        const targetDevice = devices.find(d => d.clientIdentifier === machineIdentifier);
+        
+        if (targetDevice) {
+          console.log('Found target device via Plex.tv:', targetDevice.name);
+          
+          // Use the local client to send playback commands
+          await this.initializeClient();
+          
+          const playParams = {
+            key: `/library/metadata/${ratingKey}`,
+            offset: offset * 1000,
+            machineIdentifier: machineIdentifier,
+            address: targetDevice.publicAddress || targetDevice.localAddress,
+            port: targetDevice.port || 32400
+          };
+          
+          const result = await this.client.query('/player/playback/playMedia', 'POST', playParams);
+          
+          return {
+            success: true,
+            message: 'Plex.tv discovery playback started',
+            device: targetDevice.name,
+            details: result
+          };
+        }
+      }
+      
+      // Fallback to AndroidTV approach
+      console.log('Device not found via Plex.tv, falling back to AndroidTV approach');
+      return await this.playMediaOnAndroidTV(machineIdentifier, ratingKey, offset);
+      
+    } catch (error) {
+      console.error('Plex.tv discovery playback failed:', error);
+      
+      // Final fallback to AndroidTV approach
+      console.log('Plex.tv approach failed, trying AndroidTV approach as final fallback');
+      return await this.playMediaOnAndroidTV(machineIdentifier, ratingKey, offset);
+    }
+  }
+
+  async controlPlayback(machineIdentifier, action) {
+    try {
+      await this.initializeClient();
+
+      const validActions = ['play', 'pause', 'stop', 'skipNext', 'skipPrevious', 'seekTo'];
+      if (!validActions.includes(action)) {
+        throw new Error(`Invalid action: ${action}`);
+      }
+
+      // Get proper headers as per official documentation
+      const headers = this.getApiHeaders(machineIdentifier);
+      const commandId = this.getNextCommandId();
+      
+      const result = await this.client.query(`/player/playback/${action}`, 'POST', {
+        commandID: commandId,
+        'X-Plex-Target-Client-Identifier': machineIdentifier
+      }, headers);
+
+      return {
+        success: true,
+        message: `${action} command sent successfully`,
+        details: result
+      };
+    } catch (error) {
+      console.error(`Failed to ${action} playback:`, error);
+      throw error;
+    }
+  }
+
+  async testConnection() {
+    try {
+      await this.initializeClient();
+      const response = await this.client.query('/');
+      
+      return {
+        success: true,
+        message: 'Connection successful',
+        serverVersion: response?.MediaContainer?.version || 'Unknown'
+      };
+    } catch (error) {
+      console.error('Connection test failed:', error);
+      throw error;
+    }
+  }
+
+  async refreshClient() {
+    this.client = null;
+    this.lastSettingsCheck = null;
+    return await this.initializeClient(true);
+  }
+}
+
+module.exports = new PlexPlayerService();

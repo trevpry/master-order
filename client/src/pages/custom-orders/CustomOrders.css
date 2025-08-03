@@ -1283,3 +1283,22 @@
 .toggle-label:hover .toggle-text {
   color: #007bff;
 }
+
+/* Error Modal Styles */
+.error-details {
+  background: #f8f9fa;
+  border: 1px solid #e9ecef;
+  border-radius: 8px;
+  padding: 1rem;
+  margin: 1rem 0;
+}
+
+.error-details p {
+  margin: 0.5rem 0;
+  word-wrap: break-word;
+}
+
+.error-details strong {
+  color: #495057;
+  font-weight: 600;
+}

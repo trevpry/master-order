@@ -22,7 +22,8 @@ const tvdbDb = new TvdbDatabaseService();
 const plexSync = new PlexSyncService(); // Initialize the sync service
 const backgroundSync = new BackgroundSyncService(); // Initialize background sync service
 const artworkCache = new ArtworkCacheService(); // Initialize artwork cache service
-const plexPlayer = require('./plexPlayerService'); // Initialize Plex player service
+const PlexPlayerService = require('./plexPlayerService');
+const plexPlayer = new PlexPlayerService(); // Initialize Plex player service
 
 // Initialize the app and server
 const app = express();

@@ -1,14 +1,12 @@
-const PlexPlayerService = require('./server/plexPlayerService');
+const plexPlayerService = require('./server/plexPlayerService');
 
 async function testPlayback() {
   console.log('🎬 Testing Plex Playback...');
   
   try {
-    const service = new PlexPlayerService();
-    
     // First, get available players
     console.log('1. Getting available players...');
-    const players = await service.getPlayers();
+    const players = await plexPlayerService.getPlayers();
     console.log(`Found ${players.length} players:`);
     players.forEach(player => {
       console.log(`  - ${player.name} (${player.platform}) - ${player.machineIdentifier}`);
@@ -31,7 +29,7 @@ async function testPlayback() {
     // Use the currently playing media item from the session data
     const testRatingKey = '22578'; // The Simpsons episode currently active
     
-    const result = await service.playMedia(androidPlayer.machineIdentifier, testRatingKey, 0);
+    const result = await plexPlayerService.playMedia(androidPlayer.machineIdentifier, testRatingKey, 0);
     console.log('✅ Playback result:', result);
     
   } catch (error) {
