@@ -1,0 +1,506 @@
+/* Mobile-specific styles for the Home page */
+
+/* Prevent overscroll and improve mobile performance */
+body {
+  overscroll-behavior: none;
+  -webkit-overflow-scrolling: touch;
+  touch-action: manipulation;
+}
+
+/* Remove global transforms that might cause blur */
+.home-responsive * {
+  -webkit-backface-visibility: visible !important;
+  backface-visibility: visible !important;
+  -webkit-perspective: none !important;
+  perspective: none !important;
+  -webkit-transform: none !important;
+  transform: none !important;
+}
+
+/* AGGRESSIVE FIX: Ensure containers don't stretch images AT ALL */
+.home-responsive .media-artwork-responsive {
+  line-height: 0 !important;
+  font-size: 0 !important;
+  /* CRITICAL: Allow overflow to prevent width squeezing */
+  overflow: visible !important;
+  max-width: none !important;
+  width: auto !important;
+}
+
+.home-responsive .media-artwork-responsive img {
+  vertical-align: top !important;
+  line-height: 0 !important;
+  /* CRITICAL: Prevent any width constraints */
+  max-width: none !important;
+  width: auto !important;
+}
+
+/* Mobile Media Queries */
+@media (max-width: 768px) {
+  /* FORCE SOFTWARE RENDERING - NO GPU ACCELERATION */
+  .home-responsive .media-artwork-responsive img {
+    /* Basic display */
+    display: block !important;
+    margin: 0 auto !important;
+    border-radius: 12px !important;
+    
+    /* CRITICAL: Force exact pixel positioning */
+    width: auto !important;
+    height: auto !important;
+    max-width: 90vw !important;
+    max-height: 80vh !important;
+    
+    /* DISABLE ALL GPU ACCELERATION AND 3D RENDERING */
+    transform: translateZ(0) !important;
+    -webkit-transform: translateZ(0) !important;
+    will-change: auto !important;
+    backface-visibility: visible !important;
+    -webkit-backface-visibility: visible !important;
+    perspective: none !important;
+    -webkit-perspective: none !important;
+    
+    /* FORCE SOFTWARE RENDERING */
+    image-rendering: -webkit-optimize-contrast !important;
+    image-rendering: optimize-contrast !important;
+    -webkit-image-rendering: -webkit-optimize-contrast !important;
+    -ms-interpolation-mode: bicubic !important;
+    
+    /* PREVENT FRACTIONAL PIXEL RENDERING */
+    object-fit: contain !important;
+    object-position: center !important;
+    
+    /* FORCE CRISP EDGES */
+    -webkit-font-smoothing: subpixel-antialiased !important;
+    -moz-osx-font-smoothing: auto !important;
+    
+    /* Basic styling */
+    border: none !important;
+    box-sizing: border-box !important;
+    
+    /* FORCE INTEGER PIXEL BOUNDARIES */
+    position: relative !important;
+    top: 0 !important;
+    left: 0 !important;
+  }
+
+  /* SIMPLE CONTAINER - NO COMPLEX CONSTRAINTS */
+  .home-responsive .media-artwork-responsive {
+    /* Basic container */
+    position: relative !important;
+    width: auto !important;
+    height: auto !important;
+    max-width: 95vw !important;
+    margin: 20px auto !important;
+    padding: 0 !important;
+    
+    /* Simple display */
+    display: block !important;
+    text-align: center !important;
+    
+    /* NO 3D TRANSFORMS OR OPTIMIZATIONS */
+    transform: none !important;
+    -webkit-transform: none !important;
+    will-change: auto !important;
+    backface-visibility: hidden !important;
+    -webkit-backface-visibility: hidden !important;
+    
+    /* Basic styling */
+    background: transparent !important;
+    border: none !important;
+    border-radius: 0 !important;
+    overflow: visible !important;
+  }
+  }
+  /* Container adjustments for mobile */
+  .home-responsive .app-container {
+    padding: 0;
+    margin: 0;
+  }
+
+  .home-responsive .app-card {
+    margin: 0;
+    padding: max(16px, env(safe-area-inset-top)) 16px max(16px, env(safe-area-inset-bottom)) 16px;
+    border-radius: 0;
+    min-height: 100vh;
+    max-width: 100vw;
+    box-shadow: none;
+  }
+
+  .home-responsive .app-content {
+    gap: 16px;
+  }
+
+  /* Button container for mobile */
+  .home-responsive .button-container {
+    flex-direction: column;
+    gap: 12px;
+    align-items: stretch;
+    padding: 0 8px;
+  }
+
+  /* Primary button row (Get Up Next + Mark as Watched) */
+  .home-responsive .primary-button-row {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+  }
+
+  .home-responsive .get-up-next-button {
+    flex: 1;
+    margin: 0 !important;
+    padding: 16px 20px;
+    font-size: 16px;
+    font-weight: 600;
+    border-radius: 12px;
+    min-height: 52px;
+    box-sizing: border-box;
+    text-align: center;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .home-responsive .mark-watched-button {
+    margin: 0 !important;
+    padding: 16px;
+    font-size: 20px;
+    font-weight: 600;
+    border-radius: 12px;
+    min-height: 52px;
+    width: 60px;
+    box-sizing: border-box;
+    text-align: center;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background-color: #28a745 !important;
+    color: #fff !important;
+  }
+
+  .home-responsive .button-container button:not(.get-up-next-button):not(.mark-watched-button) {
+    margin: 0 !important;
+    padding: 16px 20px;
+    font-size: 16px;
+    font-weight: 600;
+    border-radius: 12px;
+    min-height: 52px;
+    width: 100%;
+    box-sizing: border-box;
+    text-align: center;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  /* Secondary button container (Start New Series) */
+  .home-responsive .secondary-button-container {
+    display: flex;
+    justify-content: center;
+    padding: 16px 8px;
+    margin-top: 16px;
+  }
+
+  .home-responsive .start-new-series-button {
+    margin: 0 !important;
+    padding: 16px 24px;
+    font-size: 16px;
+    font-weight: 600;
+    border-radius: 12px;
+    min-height: 52px;
+    max-width: 300px;
+    width: 100%;
+    box-sizing: border-box;
+    text-align: center;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  /* Media result container for mobile */
+  .home-responsive .media-result {
+    padding: 12px;
+    margin-top: 12px;
+    background-color: transparent;
+    min-height: auto;
+    flex: none;
+  }
+
+  /* Media display container */
+  .home-responsive .media-display-container {
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+    gap: 16px;
+  }
+
+  .home-responsive .media-artwork-responsive iframe {
+    width: 100% !important;
+    height: 250px !important;
+    min-height: 250px !important;
+    border: none !important;
+    border-radius: 12px !important;
+  }
+
+  /* No artwork fallback for mobile */
+  .home-responsive .no-artwork-large {
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    width: 100% !important;
+    height: 250px !important;
+    min-height: 250px !important;
+    color: #666 !important;
+    font-size: 48px !important;
+    background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%) !important;
+    border-radius: 12px !important;
+  }
+
+  .home-responsive .custom-order-icon-large {
+    font-size: 48px !important;
+    color: #666 !important;
+  }
+
+  /* Episode overlay for mobile */
+  .home-responsive .episode-overlay {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    background: linear-gradient(transparent, rgba(0, 0, 0, 0.8));
+    padding: 20px 16px 16px;
+    border-radius: 0 0 12px 12px;
+  }
+
+  .home-responsive .episode-info {
+    color: white;
+    font-size: 14px;
+    font-weight: 600;
+    text-shadow: 0 1px 3px rgba(0, 0, 0, 0.7);
+    line-height: 1.4;
+    display: block;
+  }
+
+  .home-responsive .episode-info a {
+    color: #87CEEB;
+    text-decoration: none;
+    border-bottom: 1px solid rgba(135, 206, 235, 0.5);
+  }
+
+  .home-responsive .episode-info a:hover {
+    border-bottom-color: #87CEEB;
+  }
+
+  /* Finale badges for mobile */
+  .home-responsive .finale-badge {
+    position: absolute;
+    top: 12px;
+    right: 12px;
+    background: #dc3545;
+    color: white;
+    padding: 6px 12px;
+    border-radius: 20px;
+    font-size: 12px;
+    font-weight: bold;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    box-shadow: 0 2px 8px rgba(220, 53, 69, 0.4);
+  }
+
+  .home-responsive .finale-badge.final-season {
+    background: #6f42c1;
+    box-shadow: 0 2px 8px rgba(111, 66, 193, 0.4);
+  }
+
+  /* Message box for mobile */
+  .home-responsive .message-box {
+    margin: 16px 8px;
+    padding: 16px;
+    border-radius: 12px;
+    font-size: 14px;
+    line-height: 1.5;
+  }
+
+  .home-responsive .message-box.error {
+    border-left: 4px solid #dc3545;
+  }
+
+  .home-responsive .message-box.compact {
+    margin-top: 12px;
+    padding: 12px;
+  }
+
+  /* Media details component adjustments */
+  .home-responsive .details-panel {
+    max-height: 50vh;
+    overflow-y: auto;
+  }
+
+  /* Toast positioning for mobile */
+  .home-responsive .react-hot-toast {
+    max-width: calc(100vw - 32px);
+    margin: 16px;
+  }
+
+/* Tablet adjustments */
+@media (min-width: 769px) and (max-width: 1024px) {
+  .home-responsive .button-container {
+    flex-wrap: wrap;
+    gap: 12px;
+    justify-content: center;
+  }
+
+  .home-responsive .button-container button {
+    margin: 0 !important;
+    flex: 1;
+    min-width: 200px;
+    max-width: 300px;
+  }
+
+  .home-responsive .media-artwork-responsive {
+    max-width: 600px;
+    max-height: 400px;
+    margin: 0 auto;
+  }
+}
+
+/* Touch-friendly improvements */
+@media (pointer: coarse) {
+  .home-responsive button {
+    min-height: 48px;
+    font-size: 16px;
+  }
+
+  .home-responsive .episode-overlay {
+    padding: 24px 16px 20px;
+  }
+
+  .home-responsive .episode-info {
+    font-size: 15px;
+  }
+}
+
+/* Landscape orientation on mobile */
+@media (max-width: 768px) and (orientation: landscape) {
+  .home-responsive .media-artwork-responsive {
+    max-height: 250px;
+  }
+
+  .home-responsive .primary-button-row {
+    justify-content: center;
+    max-width: 600px;
+    margin: 0 auto;
+  }
+
+  .home-responsive .get-up-next-button {
+    padding: 12px 16px;
+    font-size: 14px;
+    min-height: 44px;
+  }
+
+  .home-responsive .mark-watched-button {
+    padding: 12px;
+    font-size: 18px;
+    min-height: 44px;
+    width: 50px;
+  }
+
+  .home-responsive .secondary-button-container {
+    padding: 12px 8px;
+    margin-top: 12px;
+  }
+
+  .home-responsive .start-new-series-button {
+    padding: 12px 16px;
+    font-size: 14px;
+    min-height: 44px;
+    max-width: 250px;
+  }
+
+  .home-responsive .button-container button:not(.get-up-next-button):not(.mark-watched-button) {
+    padding: 12px 16px;
+    font-size: 14px;
+    min-height: 44px;
+  }
+}
+
+  /* Dark mode support for mobile */
+@media (max-width: 768px) and (prefers-color-scheme: dark) {
+  .home-responsive .app-card {
+    background-color: #1a1a1a;
+    color: #ffffff;
+  }
+
+  .home-responsive .no-artwork-large {
+    background: linear-gradient(135deg, #2d3748 0%, #4a5568 100%);
+    color: #a0aec0;
+  }
+
+  .home-responsive .message-box {
+    background-color: #2d3748;
+    color: #e2e8f0;
+  }
+
+  .home-responsive .message-box.error {
+    background-color: #742a2a;
+    color: #fed7d7;
+  }
+}
+
+/* SPECIAL HANDLING FOR COMIC BOOK COVERS - PIXEL PERFECT */
+@media (max-width: 768px) {
+  .home-responsive .media-artwork-responsive img[src*="comicvine"] {
+    /* Comic covers are typically good quality and well-sized for mobile */
+    width: auto !important;
+    height: auto !important;
+    max-width: 400px !important;
+    max-height: 600px !important;
+    
+    /* MOST AGGRESSIVE: Try to render at native resolution */
+    object-fit: none !important;
+    image-rendering: pixelated !important;
+    image-rendering: -webkit-crisp-edges !important;
+    -webkit-image-rendering: -webkit-crisp-edges !important;
+    
+    /* Enhance contrast to counteract any remaining softness */
+    filter: contrast(1.15) saturate(1.05) !important;
+    -webkit-filter: contrast(1.15) saturate(1.05) !important;
+  }
+
+  /* SPECIAL HANDLING FOR TVDB ARTWORK - EXTERNAL SOURCE ISSUES */
+  .home-responsive .media-artwork-responsive img[src*="tvdb-artwork"] {
+    /* TVDB images often have compression artifacts */
+    width: auto !important;
+    height: auto !important;
+    max-width: none !important;
+    max-height: none !important;
+    
+    /* AGGRESSIVE ANTI-BLUR FOR COMPRESSED EXTERNAL IMAGES */
+    object-fit: none !important;
+    image-rendering: pixelated !important;
+    image-rendering: -webkit-crisp-edges !important;
+    -webkit-image-rendering: -webkit-crisp-edges !important;
+    -ms-interpolation-mode: nearest-neighbor !important;
+    
+    /* ENHANCED SHARPENING FOR COMPRESSED SOURCES */
+    filter: contrast(1.2) saturate(1.1) sharpen(1) !important;
+    -webkit-filter: contrast(1.2) saturate(1.1) !important;
+  }
+
+  /* PLEX ARTWORK (movies/custom order) - ALREADY CRISP, MINIMAL INTERVENTION */
+  .home-responsive .media-artwork-responsive img[src*="/api/artwork/"] {
+    /* Plex images are usually high quality, don't over-process */
+    width: auto !important;
+    height: auto !important;
+    max-width: none !important;
+    max-height: none !important;
+    
+    /* MINIMAL PROCESSING - THESE ARE ALREADY GOOD */
+    object-fit: none !important;
+    image-rendering: auto !important;
+    -webkit-image-rendering: auto !important;
+    
+    /* NO FILTERS - Plex images are clean */
+    filter: none !important;
+    -webkit-filter: none !important;
+  }
+}

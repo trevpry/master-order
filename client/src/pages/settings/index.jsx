@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import Button from '../../components/Button'
+import config from '../../config';
 import './Settings.css'
 
 function Settings() {
@@ -90,12 +91,12 @@ function Settings() {
       
       try {        // Fetch all data in parallel for better performance
         const [settings, syncStatus, backgroundStatus, customCount, collections, players] = await Promise.all([
-          fetchWithErrorHandling('http://localhost:3001/api/settings'),
-          fetchWithErrorHandling('http://localhost:3001/api/plex/sync-status'),
-          fetchWithErrorHandling('http://localhost:3001/api/plex/background-sync-status'),
-          fetchWithErrorHandling('http://localhost:3001/api/custom-orders/count'),
-          fetchWithErrorHandling('http://localhost:3001/api/plex/collections'),
-          fetchWithErrorHandling('http://localhost:3001/api/plex/players').catch(error => {
+          fetchWithErrorHandling(`${config.apiBaseUrl}/api/settings`),
+          fetchWithErrorHandling(`${config.apiBaseUrl}/api/plex/sync-status`),
+          fetchWithErrorHandling(`${config.apiBaseUrl}/api/plex/background-sync-status`),
+          fetchWithErrorHandling(`${config.apiBaseUrl}/api/custom-orders/count`),
+          fetchWithErrorHandling(`${config.apiBaseUrl}/api/plex/collections`),
+          fetchWithErrorHandling(`${config.apiBaseUrl}/api/plex/players`).catch(error => {
             console.warn('Failed to load Plex players:', error);
             return [];
           })
@@ -423,7 +424,7 @@ function Settings() {
     setPlexSyncMessage('Starting Plex library sync...');
     
     try {
-      const data = await fetchWithErrorHandling('http://localhost:3001/api/plex/sync', {
+      const data = await fetchWithErrorHandling(`${config.apiBaseUrl}/api/plex/sync`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -433,7 +434,7 @@ function Settings() {
       setPlexSyncMessage(`Sync completed! Synced ${data.totalShows} TV shows and ${data.totalMovies} movies in ${data.duration}`);
       
       // Refresh sync status
-      const status = await fetchWithErrorHandling('http://localhost:3001/api/plex/sync-status');
+      const status = await fetchWithErrorHandling(`${config.apiBaseUrl}/api/plex/sync-status`);
       setPlexSyncStatus(status);
       
     } catch (error) {

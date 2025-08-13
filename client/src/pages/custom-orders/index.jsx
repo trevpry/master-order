@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import Button from '../../components/Button';
+import config from '../../config';
 import './CustomOrders.css';
 
 function CustomOrders() {  
@@ -123,32 +124,61 @@ function CustomOrders() {
       const filename = item.localArtworkPath.includes('\\') || item.localArtworkPath.includes('/') 
         ? item.localArtworkPath.split(/[\\\/]/).pop() 
         : item.localArtworkPath;
-      return `http://localhost:3001/api/artwork/${filename}`;
+      
+      // Add cache-busting parameter based on artworkLastCached timestamp
+      const cacheBuster = item.artworkLastCached ? `?v=${encodeURIComponent(item.artworkLastCached)}` : '';
+      const artworkUrl = `${config.apiBaseUrl}/api/artwork/${filename}${cacheBuster}`;
+      
+      // Debug logging for comics with same artwork issue
+      if (item.mediaType === 'comic') {
+        console.log(`Comic artwork - ${item.comicSeries} #${item.comicIssue}: ${filename} -> ${artworkUrl}`);
+      }
+      
+      return artworkUrl;
     }
     
     // For items without cached artwork, try to get remote artwork URLs
     // This matches the logic from the artworkCacheService
     switch (item.mediaType) {
       case 'comic':
-        if (item.comicSeries && item.comicYear) {
-          const comicString = `${item.comicSeries} (${item.comicYear}) #${item.comicIssue || '1'}`;
-          return `http://localhost:3001/api/comicvine-artwork?url=${encodeURIComponent(`http://localhost:3001/api/comicvine-cover?comic=${encodeURIComponent(comicString)}`)}`;
+        // First, check if we have ComicVine details with a direct cover URL
+        if (item.comicVineDetailsJson) {
+          try {
+            const comicVineDetails = JSON.parse(item.comicVineDetailsJson);
+            if (comicVineDetails.image && comicVineDetails.image.medium_url) {
+              // Use ComicVine's direct cover URL through our proxy
+              return `${config.apiBaseUrl}/api/comicvine-artwork?url=${encodeURIComponent(comicVineDetails.image.medium_url)}`;
+            }
+          } catch (error) {
+            console.warn('Failed to parse ComicVine details JSON:', error);
+          }
+        }
+        
+        // Fallback to the comic string search method
+        if (item.comicSeries && item.comicIssue) {
+          let comicString;
+          if (item.comicYear) {
+            comicString = `${item.comicSeries} (${item.comicYear}) #${item.comicIssue}`;
+          } else {
+            comicString = `${item.comicSeries} #${item.comicIssue}`;
+          }
+          return `${config.apiBaseUrl}/api/comicvine-artwork?url=${encodeURIComponent(`${config.apiBaseUrl}/api/comicvine-cover?comic=${encodeURIComponent(comicString)}`)}`;
         }
         break;
       
       case 'book':
         if (item.bookCoverUrl) {
-          return `http://localhost:3001/api/openlibrary-artwork?url=${encodeURIComponent(item.bookCoverUrl)}`;
+          return `${config.apiBaseUrl}/api/openlibrary-artwork?url=${encodeURIComponent(item.bookCoverUrl)}`;
         } else if (item.bookOpenLibraryId) {
-          return `http://localhost:3001/api/openlibrary-artwork?url=${encodeURIComponent(`https://covers.openlibrary.org/b/olid/${item.bookOpenLibraryId}-M.jpg`)}`;
+          return `${config.apiBaseUrl}/api/openlibrary-artwork?url=${encodeURIComponent(`https://covers.openlibrary.org/b/olid/${item.bookOpenLibraryId}-M.jpg`)}`;
         }
         break;
       
       case 'shortstory':
         if (item.storyCoverUrl) {
-          return `http://localhost:3001/api/openlibrary-artwork?url=${encodeURIComponent(item.storyCoverUrl)}`;
+          return `${config.apiBaseUrl}/api/openlibrary-artwork?url=${encodeURIComponent(item.storyCoverUrl)}`;
         } else if (item.storyContainedInBook?.bookCoverUrl) {
-          return `http://localhost:3001/api/openlibrary-artwork?url=${encodeURIComponent(item.storyContainedInBook.bookCoverUrl)}`;
+          return `${config.apiBaseUrl}/api/openlibrary-artwork?url=${encodeURIComponent(item.storyContainedInBook.bookCoverUrl)}`;
         }
         break;
       
@@ -166,12 +196,25 @@ function CustomOrders() {
   // Fetch custom orders when component mounts
   useEffect(() => {
     fetchCustomOrders();
+    
+    // Check URL parameters to restore viewing state
+    const urlParams = new URLSearchParams(window.location.search);
+    const orderIdParam = urlParams.get('order');
+    if (orderIdParam) {
+      const orderId = parseInt(orderIdParam);
+      if (!isNaN(orderId)) {
+        // Load the specific order after custom orders are fetched
+        setTimeout(() => {
+          handleViewOrder(orderId);
+        }, 100);
+      }
+    }
   }, []);
 
   const fetchCustomOrders = async () => {
     try {
       setLoading(true);
-      const response = await fetch('http://127.0.0.1:3001/api/custom-orders');
+      const response = await fetch(`${config.apiBaseUrl}/api/custom-orders`);
       const orders = await response.json();
       setCustomOrders(orders);
     } catch (error) {
@@ -182,6 +225,48 @@ function CustomOrders() {
     }
   };
 
+  // Helper function to handle viewing an order and updating URL
+  const handleViewOrder = async (orderIdOrOrder) => {
+    let order;
+    
+    if (typeof orderIdOrOrder === 'number') {
+      // If passed an ID, fetch the order
+      try {
+        const response = await fetch(`${config.apiBaseUrl}/api/custom-orders/${orderIdOrOrder}`);
+        if (response.ok) {
+          order = await response.json();
+        } else {
+          console.error('Failed to fetch order:', orderIdOrOrder);
+          return;
+        }
+      } catch (error) {
+        console.error('Error fetching order:', error);
+        return;
+      }
+    } else {
+      // If passed an order object, use it directly
+      order = orderIdOrOrder;
+    }
+    
+    // Set the viewing state
+    setViewingOrderItems(order);
+    
+    // Update URL with order parameter
+    const url = new URL(window.location);
+    url.searchParams.set('order', order.id);
+    window.history.pushState({}, '', url);
+  };
+
+  // Helper function to go back to order list and clear URL
+  const handleBackToOrderList = () => {
+    setViewingOrderItems(null);
+    
+    // Clear order parameter from URL
+    const url = new URL(window.location);
+    url.searchParams.delete('order');
+    window.history.pushState({}, '', url);
+  };
+
   const handleCreateOrder = async (e) => {
     e.preventDefault();
     
@@ -190,7 +275,7 @@ function CustomOrders() {
       return;
     }
 
-    try {      const response = await fetch('http://127.0.0.1:3001/api/custom-orders', {
+    try {      const response = await fetch(`${config.apiBaseUrl}/api/custom-orders`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -219,7 +304,7 @@ function CustomOrders() {
 
   const handleToggleActive = async (orderId, currentStatus) => {
     try {
-      const response = await fetch(`http://127.0.0.1:3001/api/custom-orders/${orderId}`, {
+      const response = await fetch(`${config.apiBaseUrl}/api/custom-orders/${orderId}`, {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
@@ -248,7 +333,7 @@ function CustomOrders() {
     }
 
     try {
-      const response = await fetch(`http://127.0.0.1:3001/api/custom-orders/${orderId}`, {
+      const response = await fetch(`${config.apiBaseUrl}/api/custom-orders/${orderId}`, {
         method: 'DELETE',
       });
 
@@ -284,7 +369,7 @@ function CustomOrders() {
     }
 
     try {
-      const response = await fetch(`http://127.0.0.1:3001/api/custom-orders/${editingOrder.id}`, {
+      const response = await fetch(`${config.apiBaseUrl}/api/custom-orders/${editingOrder.id}`, {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
@@ -304,7 +389,7 @@ function CustomOrders() {
         
         // Update the viewing order if it's currently being viewed
         if (viewingOrderItems && viewingOrderItems.id === editingOrder.id) {
-          const updatedOrder = await fetch(`http://127.0.0.1:3001/api/custom-orders/${editingOrder.id}`);
+          const updatedOrder = await fetch(`${config.apiBaseUrl}/api/custom-orders/${editingOrder.id}`);
           const updatedOrderData = await updatedOrder.json();
           setViewingOrderItems(updatedOrderData);
         }
@@ -348,12 +433,12 @@ function CustomOrders() {
         setShowComicForm(true);
         break;      case 'shortstory':
         setShortStoryFormData({
-          title: item.title || '',
-          author: item.author || '',
-          year: item.publicationYear || '',
-          url: item.url || '',
-          containedInBookId: item.containedInBookId || '',
-          coverUrl: item.coverUrl || ''
+          title: item.storyTitle || '',
+          author: item.storyAuthor || '',
+          year: item.storyYear || '',
+          url: item.storyUrl || '',
+          containedInBookId: item.storyContainedInBookId || '',
+          coverUrl: item.storyCoverUrl || ''
         });
         setShowShortStoryForm(true);
         break;
@@ -375,7 +460,7 @@ function CustomOrders() {
     if (!editingItem || !viewingOrderItems) return;
 
     try {
-      const response = await fetch(`http://127.0.0.1:3001/api/custom-orders/${viewingOrderItems.id}/items/${editingItem.id}`, {
+      const response = await fetch(`${config.apiBaseUrl}/api/custom-orders/${viewingOrderItems.id}/items/${editingItem.id}`, {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
@@ -400,7 +485,7 @@ function CustomOrders() {
         setWebVideoFormData({ title: '', url: '', description: '' });
         
         // Refresh the order items
-        const updatedOrder = await fetch(`http://127.0.0.1:3001/api/custom-orders/${viewingOrderItems.id}`);
+        const updatedOrder = await fetch(`${config.apiBaseUrl}/api/custom-orders/${viewingOrderItems.id}`);
         const updatedOrderData = await updatedOrder.json();
         setViewingOrderItems(updatedOrderData);
         
@@ -421,12 +506,12 @@ function CustomOrders() {
 
     try {
       // Get the order details first
-      const orderResponse = await fetch(`http://127.0.0.1:3001/api/custom-orders/${orderId}`);
+      const orderResponse = await fetch(`${config.apiBaseUrl}/api/custom-orders/${orderId}`);
       const orderData = await orderResponse.json();
 
       // Update each item to be unwatched
       for (const item of orderData.items) {
-        await fetch(`http://127.0.0.1:3001/api/custom-orders/${orderId}/items/${item.id}`, {
+        await fetch(`${config.apiBaseUrl}/api/custom-orders/${orderId}/items/${item.id}`, {
           method: 'PUT',
           headers: {
             'Content-Type': 'application/json',
@@ -463,7 +548,7 @@ function CustomOrders() {
         containingBookId = itemToRemove.storyContainedInBookId;
       }
 
-      const response = await fetch(`http://127.0.0.1:3001/api/custom-orders/${orderId}/items/${itemId}`, {
+      const response = await fetch(`${config.apiBaseUrl}/api/custom-orders/${orderId}/items/${itemId}`, {
         method: 'DELETE',
       });
 
@@ -473,7 +558,7 @@ function CustomOrders() {
         // If this was a short story from a book, check if we need to remove the containing book
         if (containingBookId) {
           // Get the updated order data to check remaining short stories
-          const updatedOrder = await fetch(`http://127.0.0.1:3001/api/custom-orders/${orderId}`);
+          const updatedOrder = await fetch(`${config.apiBaseUrl}/api/custom-orders/${orderId}`);
           const updatedOrderData = await updatedOrder.json();
           
           // Check if there are any other short stories from the same book
@@ -489,7 +574,7 @@ function CustomOrders() {
             );
             
             if (containingBook) {
-              const bookRemoveResponse = await fetch(`http://127.0.0.1:3001/api/custom-orders/${orderId}/items/${containingBookId}`, {
+              const bookRemoveResponse = await fetch(`${config.apiBaseUrl}/api/custom-orders/${orderId}/items/${containingBookId}`, {
                 method: 'DELETE',
               });
               
@@ -506,7 +591,7 @@ function CustomOrders() {
         
         // Update the viewing order if it's currently being viewed
         if (viewingOrderItems && viewingOrderItems.id === orderId) {
-          const updatedOrder = await fetch(`http://127.0.0.1:3001/api/custom-orders/${orderId}`);
+          const updatedOrder = await fetch(`${config.apiBaseUrl}/api/custom-orders/${orderId}`);
           const updatedOrderData = await updatedOrder.json();
           setViewingOrderItems(updatedOrderData);
         }
@@ -521,7 +606,7 @@ function CustomOrders() {
   };
   const handleMarkAsWatched = async (orderId, itemId, itemTitle) => {
     try {
-      const response = await fetch(`http://127.0.0.1:3001/api/custom-orders/${orderId}/items/${itemId}`, {
+      const response = await fetch(`${config.apiBaseUrl}/api/custom-orders/${orderId}/items/${itemId}`, {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
@@ -537,7 +622,7 @@ function CustomOrders() {
         
         // Update the viewing order if it's currently being viewed
         if (viewingOrderItems && viewingOrderItems.id === orderId) {
-          const updatedOrder = await fetch(`http://127.0.0.1:3001/api/custom-orders/${orderId}`);
+          const updatedOrder = await fetch(`${config.apiBaseUrl}/api/custom-orders/${orderId}`);
           const updatedOrderData = await updatedOrder.json();
           setViewingOrderItems(updatedOrderData);
         }
@@ -553,7 +638,7 @@ function CustomOrders() {
 
   const handleMarkAsUnwatched = async (orderId, itemId, itemTitle) => {
     try {
-      const response = await fetch(`http://127.0.0.1:3001/api/custom-orders/${orderId}/items/${itemId}`, {
+      const response = await fetch(`${config.apiBaseUrl}/api/custom-orders/${orderId}/items/${itemId}`, {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
@@ -569,7 +654,7 @@ function CustomOrders() {
         
         // Update the viewing order if it's currently being viewed
         if (viewingOrderItems && viewingOrderItems.id === orderId) {
-          const updatedOrder = await fetch(`http://127.0.0.1:3001/api/custom-orders/${orderId}`);
+          const updatedOrder = await fetch(`${config.apiBaseUrl}/api/custom-orders/${orderId}`);
           const updatedOrderData = await updatedOrder.json();
           setViewingOrderItems(updatedOrderData);
         }
@@ -660,7 +745,7 @@ function CustomOrders() {
       // Update sortOrder for all affected items
       const updatePromises = newItems.map((item, index) => {
         const newSortOrder = index + 1;
-        return fetch(`http://127.0.0.1:3001/api/custom-orders/${viewingOrderItems.id}/items/${item.id}`, {
+        return fetch(`${config.apiBaseUrl}/api/custom-orders/${viewingOrderItems.id}/items/${item.id}`, {
           method: 'PUT',
           headers: {
             'Content-Type': 'application/json',
@@ -674,7 +759,7 @@ function CustomOrders() {
       await Promise.all(updatePromises);
 
       // Refresh the order data
-      const updatedOrder = await fetch(`http://127.0.0.1:3001/api/custom-orders/${viewingOrderItems.id}`);
+      const updatedOrder = await fetch(`${config.apiBaseUrl}/api/custom-orders/${viewingOrderItems.id}`);
       const updatedOrderData = await updatedOrder.json();
       setViewingOrderItems(updatedOrderData);
       
@@ -704,7 +789,7 @@ function CustomOrders() {
 
     setSearchLoading(true);
     try {
-      const response = await fetch(`http://127.0.0.1:3001/api/search?query=${encodeURIComponent(query)}`);
+      const response = await fetch(`${config.apiBaseUrl}/api/search?query=${encodeURIComponent(query)}`);
       if (response.ok) {
         const results = await response.json();
         setSearchResults(results);      } else {
@@ -766,7 +851,7 @@ function CustomOrders() {
         requestBody.seasonNumber = mediaItem.parentIndex;
         requestBody.episodeNumber = mediaItem.index;
         requestBody.seriesTitle = mediaItem.grandparentTitle;
-      }const response = await fetch(`http://127.0.0.1:3001/api/custom-orders/${orderId}/items`, {
+      }const response = await fetch(`${config.apiBaseUrl}/api/custom-orders/${orderId}/items`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -780,7 +865,7 @@ function CustomOrders() {
           
           // Update the viewing order if it's currently being viewed
           if (viewingOrderItems && viewingOrderItems.id === orderId) {
-            const updatedOrder = await fetch(`http://127.0.0.1:3001/api/custom-orders/${orderId}`);
+            const updatedOrder = await fetch(`${config.apiBaseUrl}/api/custom-orders/${orderId}`);
             const updatedOrderData = await updatedOrder.json();
             setViewingOrderItems(updatedOrderData);
           }
@@ -828,7 +913,7 @@ function CustomOrders() {
 
       // Search Plex TV library for episodes matching the series name
       const searchQuery = `${episodeFormData.series.trim()}`;
-      const response = await fetch(`http://127.0.0.1:3001/api/search?query=${encodeURIComponent(searchQuery)}&type=tv`);
+      const response = await fetch(`${config.apiBaseUrl}/api/search?query=${encodeURIComponent(searchQuery)}&type=tv`);
       
       if (response.ok) {
         const results = await response.json();
@@ -900,7 +985,7 @@ function CustomOrders() {
       }
 
       // Search Plex movie library
-      let searchUrl = `http://127.0.0.1:3001/api/search?query=${encodeURIComponent(movieFormData.title.trim())}`;
+      let searchUrl = `${config.apiBaseUrl}/api/search?query=${encodeURIComponent(movieFormData.title.trim())}`;
       
       // Add year parameter if provided
       if (movieFormData.year && movieFormData.year.trim()) {
@@ -1190,7 +1275,7 @@ function CustomOrders() {
               // This is more accurate since ComicVine series search should only use the series name
               console.log(`Series search query: "${item.comicSeries}" for issue #${item.comicIssue}`);
                 // Use the ComicVine search with issue filtering to find the correct series
-              const response = await fetch(`http://127.0.0.1:3001/api/comicvine/search-with-issues?query=${encodeURIComponent(item.comicSeries)}&issueNumber=${encodeURIComponent(item.comicIssue)}&issueTitle=${encodeURIComponent(normalizedTitle)}`);
+              const response = await fetch(`${config.apiBaseUrl}/api/comicvine/search-with-issues?query=${encodeURIComponent(item.comicSeries)}&issueNumber=${encodeURIComponent(item.comicIssue)}&issueTitle=${encodeURIComponent(normalizedTitle)}`);
                 if (response.ok) {
                 const searchResults = await response.json();
                 console.log(`Found ${searchResults.length} comic series with issue #${item.comicIssue}`);
@@ -1261,7 +1346,7 @@ function CustomOrders() {
                 }
                 
                 console.log(`Searching OpenLibrary with order name: "${searchQuery}"`);
-                let response = await fetch(`http://127.0.0.1:3001/api/openlibrary/search?query=${encodeURIComponent(searchQuery)}&limit=10`);
+                let response = await fetch(`${config.apiBaseUrl}/api/openlibrary/search?query=${encodeURIComponent(searchQuery)}&limit=10`);
                 
                 if (response.ok) {
                   results = await response.json();
@@ -1283,7 +1368,7 @@ function CustomOrders() {
                 }
                 
                 console.log(`Fallback search: "${searchQuery}"`);
-                const response = await fetch(`http://127.0.0.1:3001/api/openlibrary/search?query=${encodeURIComponent(searchQuery)}&limit=10`);
+                const response = await fetch(`${config.apiBaseUrl}/api/openlibrary/search?query=${encodeURIComponent(searchQuery)}&limit=10`);
                 
                 if (response.ok) {
                   results = await response.json();
@@ -1368,7 +1453,7 @@ function CustomOrders() {
           } else {
             // For movies and TV episodes, search Plex
             let searchQuery = item.seriesOrMovie;
-            let searchUrl = `http://127.0.0.1:3001/api/search?query=${encodeURIComponent(searchQuery)}`;
+            let searchUrl = `${config.apiBaseUrl}/api/search?query=${encodeURIComponent(searchQuery)}`;
             
             // Add year parameter if available
             if (item.year) {
@@ -1498,7 +1583,7 @@ function CustomOrders() {
         // Refresh the order items
         fetchCustomOrders();
         if (viewingOrderItems) {
-          const updatedOrder = await fetch(`http://127.0.0.1:3001/api/custom-orders/${viewingOrderItems.id}`);
+          const updatedOrder = await fetch(`${config.apiBaseUrl}/api/custom-orders/${viewingOrderItems.id}`);
           const updatedOrderData = await updatedOrder.json();
           setViewingOrderItems(updatedOrderData);
         }
@@ -1696,6 +1781,99 @@ function CustomOrders() {
               year: entry.releasedDate ? new Date(entry.releasedDate).getFullYear() : 
                     (entry.publishedDate ? new Date(entry.publishedDate).getFullYear() : null)
             };
+          } else if (entry.title.match(/#\s*\d+/)) {
+            // Comic detected: title contains '#' followed by a number (e.g., "Amazing Spider-Man #1", "Star Wars #23")
+            console.log(`Comic detected based on title pattern: ${entry.title}`);
+            
+            // Extract series name and issue number from title
+            const comicMatch = entry.title.match(/^(.+?)\s*#\s*(\d+)(.*)$/);
+            if (comicMatch) {
+              const seriesName = comicMatch[1].trim();
+              const issueNumber = comicMatch[2];
+              const issueTitle = comicMatch[3].trim();
+              
+              console.log(`Extracted: Series="${seriesName}", Issue=#${issueNumber}, IssueTitle="${issueTitle}"`);
+              
+              try {
+                // Use ComicVine search to find the correct series and issue
+                console.log(`Searching ComicVine for series: "${seriesName}" issue #${issueNumber}`);
+                const response = await fetch(`${config.apiBaseUrl}/api/comicvine/search-with-issues?query=${encodeURIComponent(seriesName)}&issueNumber=${encodeURIComponent(issueNumber)}&issueTitle=${encodeURIComponent(issueTitle)}`);
+                
+                if (response.ok) {
+                  const searchResults = await response.json();
+                  console.log(`Found ${searchResults.length} comic series with issue #${issueNumber}`);
+                  
+                  let selectedSeries = null;
+                  if (searchResults.length > 0) {
+                    // Backend handles title matching and sorting, so first result is the best match
+                    selectedSeries = searchResults[0];
+                    console.log(`✓ Using ComicVine match: "${selectedSeries.name}" with issue: "${selectedSeries.issueName}"`);
+                    
+                    // Create enhanced comic data with ComicVine information
+                    mediaType = 'comic';
+                    requestData = {
+                      mediaType: 'comic',
+                      title: entry.title,
+                      comicSeries: selectedSeries.name, // Use ComicVine series name
+                      comicYear: entry.publishedDate ? new Date(entry.publishedDate).getFullYear() : selectedSeries.start_year,
+                      comicIssue: issueNumber,
+                      comicVineId: selectedSeries.api_detail_url,
+                      comicVineDetailsJson: JSON.stringify(selectedSeries)
+                    };
+                    
+                    console.log(`✓ Enhanced comic data with ComicVine info: ${selectedSeries.name} (${requestData.comicYear}) #${issueNumber}`);
+                  } else {
+                    console.log(`No ComicVine results found, using extracted data`);
+                    // Fallback to extracted data if no ComicVine results
+                    mediaType = 'comic';
+                    requestData = {
+                      mediaType: 'comic',
+                      title: entry.title,
+                      comicSeries: seriesName,
+                      comicYear: entry.publishedDate ? new Date(entry.publishedDate).getFullYear() : null,
+                      comicIssue: issueNumber
+                    };
+                  }
+                } else {
+                  console.log(`ComicVine search failed, using extracted data`);
+                  // Fallback to extracted data if search fails
+                  mediaType = 'comic';
+                  requestData = {
+                    mediaType: 'comic',
+                    title: entry.title,
+                    comicSeries: seriesName,
+                    comicYear: entry.publishedDate ? new Date(entry.publishedDate).getFullYear() : null,
+                    comicIssue: issueNumber
+                  };
+                }
+              } catch (searchError) {
+                console.log(`ComicVine search error: ${searchError.message}, using extracted data`);
+                // Fallback to extracted data if search encounters an error
+                mediaType = 'comic';
+                requestData = {
+                  mediaType: 'comic',
+                  title: entry.title,
+                  comicSeries: seriesName,
+                  comicYear: entry.publishedDate ? new Date(entry.publishedDate).getFullYear() : null,
+                  comicIssue: issueNumber
+                };
+              }
+            } else {
+              // If we can't parse the comic format, treat as book
+              console.log(`Could not parse comic format from: ${entry.title}`);
+              mediaType = 'book';
+              requestData = {
+                mediaType: 'book',
+                title: entry.title,
+                bookTitle: entry.title,
+                bookAuthor: entry.writer || 'Unknown',
+                bookYear: entry.publishedDate ? new Date(entry.publishedDate).getFullYear() : null,
+                bookIsbn: null,
+                bookPublisher: entry.publisher || 'Unknown',
+                bookOpenLibraryId: null,
+                bookCoverUrl: null
+              };
+            }
           } else if (entry.source) {
             // If from a magazine or anthology, treat as short story
             if (entry.source.includes('Star Wars Insider') || 
@@ -1787,7 +1965,7 @@ function CustomOrders() {
       // Refresh the order items
       fetchCustomOrders();
       if (viewingOrderItems) {
-        const updatedOrder = await fetch(`http://127.0.0.1:3001/api/custom-orders/${viewingOrderItems.id}`);
+        const updatedOrder = await fetch(`${config.apiBaseUrl}/api/custom-orders/${viewingOrderItems.id}`);
         const updatedOrderData = await updatedOrder.json();
         setViewingOrderItems(updatedOrderData);
       }
@@ -1840,7 +2018,7 @@ function CustomOrders() {
         searchQuery += ` first_publish_year:${bookFormData.year}`;
       }
 
-      const response = await fetch(`http://127.0.0.1:3001/api/openlibrary/search?query=${encodeURIComponent(searchQuery)}&limit=10`);
+      const response = await fetch(`${config.apiBaseUrl}/api/openlibrary/search?query=${encodeURIComponent(searchQuery)}&limit=10`);
       
       if (response.ok) {
         const results = await response.json();
@@ -1891,7 +2069,7 @@ function CustomOrders() {
               customOrderId: viewingOrderItems.id // Provide order context for schema compliance
             };
 
-            const bookResponse = await fetch(`http://127.0.0.1:3001/api/books/reference`, {
+            const bookResponse = await fetch(`${config.apiBaseUrl}/api/books/reference`, {
               method: 'POST',
               headers: {
                 'Content-Type': 'application/json',
@@ -1915,7 +2093,7 @@ function CustomOrders() {
             storyCoverUrl: selectedBook.coverUrl || null
           };
 
-          const storyResponse = await fetch(`http://127.0.0.1:3001/api/custom-orders/${viewingOrderItems.id}/items/${targetItem.id}`, {
+          const storyResponse = await fetch(`${config.apiBaseUrl}/api/custom-orders/${viewingOrderItems.id}/items/${targetItem.id}`, {
             method: 'PUT',
             headers: {
               'Content-Type': 'application/json',
@@ -1934,7 +2112,7 @@ function CustomOrders() {
             // Refresh the order items
             fetchCustomOrders();
             if (viewingOrderItems) {
-              const updatedOrder = await fetch(`http://127.0.0.1:3001/api/custom-orders/${viewingOrderItems.id}`);
+              const updatedOrder = await fetch(`${config.apiBaseUrl}/api/custom-orders/${viewingOrderItems.id}`);
               const updatedOrderData = await updatedOrder.json();
               setViewingOrderItems(updatedOrderData);
             }
@@ -1955,7 +2133,7 @@ function CustomOrders() {
             bookCoverUrl: selectedBook.coverUrl || null
           };
 
-          const response = await fetch(`http://127.0.0.1:3001/api/custom-orders/${viewingOrderItems.id}/items/${targetItem.id}`, {
+          const response = await fetch(`${config.apiBaseUrl}/api/custom-orders/${viewingOrderItems.id}/items/${targetItem.id}`, {
             method: 'PUT',
             headers: {
               'Content-Type': 'application/json',
@@ -1974,7 +2152,7 @@ function CustomOrders() {
             // Refresh the order items
             fetchCustomOrders();
             if (viewingOrderItems) {
-              const updatedOrder = await fetch(`http://127.0.0.1:3001/api/custom-orders/${viewingOrderItems.id}`);
+              const updatedOrder = await fetch(`${config.apiBaseUrl}/api/custom-orders/${viewingOrderItems.id}`);
               const updatedOrderData = await updatedOrder.json();
               setViewingOrderItems(updatedOrderData);
             }
@@ -2039,7 +2217,7 @@ function CustomOrders() {
       const searchQuery = comicFormData.series.trim();
       const issueNumber = comicFormData.issue.trim();
 
-      const response = await fetch(`http://127.0.0.1:3001/api/comicvine/search-with-issues?query=${encodeURIComponent(searchQuery)}&issueNumber=${encodeURIComponent(issueNumber)}`);
+      const response = await fetch(`${config.apiBaseUrl}/api/comicvine/search-with-issues?query=${encodeURIComponent(searchQuery)}&issueNumber=${encodeURIComponent(issueNumber)}`);
       
       if (response.ok) {
         const results = await response.json();
@@ -2063,6 +2241,9 @@ function CustomOrders() {
     }
   };const handleSelectComic = async (selectedSeries) => {
     try {
+      console.log('handleSelectComic called with:', selectedSeries);
+      console.log('selectedSeries.coverUrl:', selectedSeries.coverUrl);
+      
       // Validate required fields
       if (!comicFormData.issue) {
         setMessage('Please enter an issue number before adding the comic.');
@@ -2083,10 +2264,14 @@ function CustomOrders() {
           comicIssue: comicFormData.issue,
           customTitle: comicFormData.title.trim() || null,
           comicVineId: selectedSeries.api_detail_url || null,
-          comicVineDetailsJson: JSON.stringify(selectedSeries)
+          comicVineDetailsJson: JSON.stringify(selectedSeries),
+          comicCoverUrl: selectedSeries.coverUrl || null // Include the specific cover URL from the selected series
         };
 
-        const response = await fetch(`http://127.0.0.1:3001/api/custom-orders/${viewingOrderItems.id}/items/${reselectingItem.id}`, {
+        console.log('Sending updateData to backend:', updateData);
+        console.log('coverUrl being sent:', updateData.comicCoverUrl);
+
+        const response = await fetch(`${config.apiBaseUrl}/api/custom-orders/${viewingOrderItems.id}/items/${reselectingItem.id}`, {
           method: 'PUT',
           headers: {
             'Content-Type': 'application/json',
@@ -2100,13 +2285,16 @@ function CustomOrders() {
           setComicFormData({ series: '', year: '', issue: '', title: '' });
           setComicSearchResults([]);
           
-          // Refresh the order items
-          fetchCustomOrders();
-          if (viewingOrderItems) {
-            const updatedOrder = await fetch(`http://127.0.0.1:3001/api/custom-orders/${viewingOrderItems.id}`);
-            const updatedOrderData = await updatedOrder.json();
-            setViewingOrderItems(updatedOrderData);
-          }
+          // Give the server a moment to process artwork caching
+          setTimeout(async () => {
+            // Refresh the order items
+            fetchCustomOrders();
+            if (viewingOrderItems) {
+              const updatedOrder = await fetch(`${config.apiBaseUrl}/api/custom-orders/${viewingOrderItems.id}`);
+              const updatedOrderData = await updatedOrder.json();
+              setViewingOrderItems(updatedOrderData);
+            }
+          }, 1000); // 1 second delay to allow artwork processing
         } else {
           const errorData = await response.json();
           setMessage(`Error updating comic: ${errorData.error}`);
@@ -2156,7 +2344,7 @@ function CustomOrders() {
         searchQuery += ` first_publish_year:${shortStoryFormData.year}`;
       }
 
-      const response = await fetch(`http://127.0.0.1:3001/api/openlibrary/search?query=${encodeURIComponent(searchQuery)}&limit=20`);
+      const response = await fetch(`${config.apiBaseUrl}/api/openlibrary/search?query=${encodeURIComponent(searchQuery)}&limit=20`);
       
       if (response.ok) {
         const results = await response.json();
@@ -2300,7 +2488,7 @@ function CustomOrders() {
       {viewingOrderItems && (
         <div className="back-navigation">
           <Button
-            onClick={() => setViewingOrderItems(null)}
+            onClick={() => handleBackToOrderList()}
             className="secondary"
           >
             ← Back to Custom Orders
@@ -2745,7 +2933,7 @@ function CustomOrders() {
                     <div className="title-with-icon">
                       <h3 
                         className="clickable-title"
-                        onClick={() => setViewingOrderItems(order)}
+                        onClick={() => handleViewOrder(order)}
                       >
                         {order.icon && (
                           <span 
@@ -2789,7 +2977,7 @@ function CustomOrders() {
                     {order.isActive ? 'Deactivate' : 'Activate'}
                   </Button>
                   <Button
-                    onClick={() => setViewingOrderItems(order)}
+                    onClick={() => handleViewOrder(order)}
                     className="primary"
                     size="small"
                   >

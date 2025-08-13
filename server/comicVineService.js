@@ -242,8 +242,12 @@ class ComicVineService {
         }
       }
 
+      console.log(`Starting ComicVine search for series: "${seriesName}"`);
+      
       // Search for the series
       const seriesResults = await this.searchSeries(seriesName);
+      console.log(`Found ${seriesResults.length} series results for: "${seriesName}"`);
+      
       if (seriesResults.length === 0) {
         console.log(`No series found for: ${seriesName}`);
         return null;

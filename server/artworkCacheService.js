@@ -23,10 +23,24 @@ class ArtworkCacheService {
   /**
    * Generate a unique filename for cached artwork
    */
-  generateCacheFilename(url, mimeType) {
-    const hash = crypto.createHash('md5').update(url).digest('hex');
+  generateCacheFilename(url, mimeType, itemData = null) {
+    // Always use the full URL as the primary identifier to ensure uniqueness
+    let hashInput = url;
+    
+    // For comics, include comic-specific data and timestamp for re-selections to force new filenames
+    if (itemData && itemData.mediaType === 'comic') {
+      // Include timestamp for re-selections to ensure different URLs get different filenames
+      const timestamp = Date.now();
+      hashInput = `${url}_${itemData.comicSeries || ''}_${itemData.comicYear || ''}_${itemData.comicIssue || ''}_${timestamp}`;
+      console.log(`Comic artwork filename generation - URL: ${url}, Series: ${itemData.comicSeries}, Issue: #${itemData.comicIssue}, Hash input: ${hashInput}`);
+    }
+    
+    const hash = crypto.createHash('md5').update(hashInput).digest('hex');
     const extension = this.getExtensionFromMimeType(mimeType) || '.jpg';
-    return `${hash}${extension}`;
+    const filename = `${hash}${extension}`;
+    
+    console.log(`Generated artwork filename: ${filename} for URL: ${url}`);
+    return filename;
   }
 
   /**
@@ -81,7 +95,7 @@ class ArtworkCacheService {
   /**
    * Download and cache artwork from URL
    */
-  async cacheArtwork(url, itemId, isSeasonArtwork = false, seasonInfo = null) {
+  async cacheArtwork(url, itemId, isSeasonArtwork = false, seasonInfo = null, itemData = null) {
     try {
       console.log(`Caching artwork for item ${itemId} from URL: ${url}`);
       
@@ -136,7 +150,7 @@ class ArtworkCacheService {
           // File doesn't exist, proceed with download
         }
       } else {
-        filename = this.generateCacheFilename(url, mimeType);
+        filename = this.generateCacheFilename(url, mimeType, itemData);
         filePath = path.join(this.cacheDir, filename);
       }
 
@@ -198,7 +212,13 @@ class ArtworkCacheService {
    */
   async getRemoteArtworkUrl(item) {
     switch (item.mediaType) {      case 'comic':
-        // Prioritize ComicVine data if available (from comic reselection)
+        // First priority: explicit originalArtworkUrl (set during comic reselection)
+        if (item.originalArtworkUrl) {
+          console.log(`Using explicit originalArtworkUrl for comic: ${item.originalArtworkUrl}`);
+          return item.originalArtworkUrl;
+        }
+        
+        // Second priority: ComicVine data if available (from comic reselection)
         if (item.comicVineDetailsJson) {
           try {
             const comicVineData = JSON.parse(item.comicVineDetailsJson);
@@ -366,7 +386,7 @@ class ArtworkCacheService {
     } : null;
 
     // Cache the artwork
-    const result = await this.cacheArtwork(remoteUrl, item.id, isSeasonArtwork, seasonInfo);
+    const result = await this.cacheArtwork(remoteUrl, item.id, isSeasonArtwork, seasonInfo, item);
     return { ...result, cached: true };
   }
   /**

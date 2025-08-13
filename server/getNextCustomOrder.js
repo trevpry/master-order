@@ -3,8 +3,10 @@ const tvdbService = require('./tvdbCachedService');
 const comicVineService = require('./comicVineService');
 const openLibraryService = require('./openLibraryService');
 const PlexDatabaseService = require('./plexDatabaseService');
+const ArtworkCacheService = require('./artworkCacheService');
 
 const plexDb = new PlexDatabaseService();
+const artworkCache = new ArtworkCacheService();
 
 // Check if a TVDB-only item now exists in Plex
 async function checkIfTvdbItemExistsInPlex(customOrderItem) {
@@ -149,17 +151,24 @@ async function fetchMediaDetailsFromPlex(plexKey, mediaType, customOrderItem) {
       // For comics, we generate mock Plex-like metadata
       const comicString = `${customOrderItem.comicSeries} (${customOrderItem.comicYear}) #${customOrderItem.comicIssue}`;
       
-      // Get cover art from ComicVine
-      const comicDetails = await comicVineService.getComicCoverArt(comicString);
-        const mockMetadata = {
+      // Get the cached artwork URL for this comic
+      const artworkUrl = await artworkCache.getArtworkUrl(customOrderItem);
+      console.log(`Comic item details:`, {
+        id: customOrderItem.id,
+        localArtworkPath: customOrderItem.localArtworkPath,
+        originalArtworkUrl: customOrderItem.originalArtworkUrl,
+        hasComicVineDetailsJson: !!customOrderItem.comicVineDetailsJson
+      });
+      console.log(`Using cached artwork URL for comic "${comicString}": ${artworkUrl}`);
+      
+      const mockMetadata = {
         ratingKey: plexKey,
         title: customOrderItem.customTitle || customOrderItem.title,
         type: 'comic',
         year: customOrderItem.comicYear,
-        summary: comicDetails?.description || '',
-        thumb: null, // Comics don't have Plex thumbs
-        art: null,
-        comicDetails: comicDetails, // Store ComicVine details
+        summary: customOrderItem.customTitle || '', // Use custom title as summary if available
+        thumb: artworkUrl, // Use cached artwork URL
+        art: artworkUrl,   // Use cached artwork URL for both thumb and art
         comicSeries: customOrderItem.comicSeries,
         comicYear: customOrderItem.comicYear,
         comicIssue: customOrderItem.comicIssue,

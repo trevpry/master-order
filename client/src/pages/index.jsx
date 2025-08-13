@@ -4,6 +4,8 @@ import Button from '../components/Button'
 import MediaDetails from '../components/MediaDetails'
 import io from 'socket.io-client'
 import toast, { Toaster } from 'react-hot-toast'
+import './MobileImageFix.css'
+import config from '../config'
 
 
 function Home() {  const [selectedMedia, setSelectedMedia] = useState(null);
@@ -15,7 +17,7 @@ function Home() {  const [selectedMedia, setSelectedMedia] = useState(null);
 
   // WebSocket connection for Plex webhook notifications
   useEffect(() => {
-    const socket = io('http://localhost:3001');
+    const socket = io(config.apiBaseUrl);
 
     socket.on('connect', () => {
       console.log('Connected to WebSocket server');
@@ -72,7 +74,14 @@ function Home() {  const [selectedMedia, setSelectedMedia] = useState(null);
       setLoading(true);
       setError('');
       setSelectedMedia(null);
-      try {        const response = await fetch('http://localhost:3001/api/up_next');
+      try {
+        console.log('Mobile Debug - Making API call to:', `${config.apiBaseUrl}/api/up_next`);
+        const response = await fetch(`${config.apiBaseUrl}/api/up_next`);
+        
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        }
+        
         const data = await response.json();        console.log('API Response:', data);
         console.log('Order Type:', data.orderType);
         console.log('Media Type:', data.type);
@@ -98,8 +107,9 @@ function Home() {  const [selectedMedia, setSelectedMedia] = useState(null);
           setSelectedMedia(data);
         }
       } catch (error) {
-        console.error('Error calling Express route:', error);
-        setError('Error calling Express route');
+        console.error('Mobile Debug - API Error:', error);
+        console.error('Mobile Debug - Config:', config);
+        setError('Error calling Express route: ' + error.message);
       } finally {
         setLoading(false);
       }
@@ -116,7 +126,7 @@ function Home() {  const [selectedMedia, setSelectedMedia] = useState(null);
       // Check if this is a custom order item
       if (selectedMedia.customOrderItemId) {
         // Use the custom order endpoint
-        response = await fetch(`http://localhost:3001/api/mark-custom-order-item-watched/${selectedMedia.customOrderItemId}`, {
+        response = await fetch(`${config.apiBaseUrl}/api/mark-custom-order-item-watched/${selectedMedia.customOrderItemId}`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -132,7 +142,7 @@ function Home() {  const [selectedMedia, setSelectedMedia] = useState(null);
           return;
         }
         
-        response = await fetch('http://localhost:3001/api/mark-media-watched', {
+        response = await fetch(`${config.apiBaseUrl}/api/mark-media-watched`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -192,7 +202,7 @@ function Home() {  const [selectedMedia, setSelectedMedia] = useState(null);
 
       console.log('Testing AndroidTV notification approaches for ratingKey:', ratingKey);
       
-      const response = await fetch('http://localhost:3001/api/plex/test-androidtv-notification', {
+      const response = await fetch(`${config.apiBaseUrl}/api/plex/test-androidtv-notification`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -266,7 +276,7 @@ function Home() {  const [selectedMedia, setSelectedMedia] = useState(null);
       // Send immediate webhook notification to Node-RED via backend
       try {
         console.log('Sending webhook notification with ratingKey:', ratingKey);
-        const webhookResponse = await fetch('http://localhost:3001/api/webhook/notify', {
+        const webhookResponse = await fetch(`${config.apiBaseUrl}/api/webhook/notify`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -292,7 +302,7 @@ function Home() {  const [selectedMedia, setSelectedMedia] = useState(null);
         // Don't stop the Plex playback if webhook fails
       }
 
-      const response = await fetch('http://localhost:3001/api/plex/play', {
+      const response = await fetch(`${config.apiBaseUrl}/api/plex/play`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -340,7 +350,7 @@ function Home() {  const [selectedMedia, setSelectedMedia] = useState(null);
     setSelectedMedia(null);
 
     try {
-      const response = await fetch('http://localhost:3001/api/start-new-series');
+      const response = await fetch(`${config.apiBaseUrl}/api/start-new-series`);
       const data = await response.json();
 
       if (response.ok) {
@@ -369,37 +379,44 @@ function Home() {  const [selectedMedia, setSelectedMedia] = useState(null);
     // For comics, prioritize ComicVine artwork
     if (media?.type === 'comic' && media?.comicDetails?.coverUrl) {
       console.log('Using ComicVine artwork:', media.comicDetails.coverUrl);
-      return `http://localhost:3001/api/comicvine-artwork?url=${encodeURIComponent(media.comicDetails.coverUrl)}`;
+      return `${config.apiBaseUrl}/api/comicvine-artwork?url=${encodeURIComponent(media.comicDetails.coverUrl)}`;
     }
     
     // For books, use OpenLibrary artwork
     if (media?.type === 'book' && media?.bookCoverUrl) {
       console.log('Using OpenLibrary artwork:', media.bookCoverUrl);
-      return `http://localhost:3001/api/openlibrary-artwork?url=${encodeURIComponent(media.bookCoverUrl)}`;
+      return `${config.apiBaseUrl}/api/openlibrary-artwork?url=${encodeURIComponent(media.bookCoverUrl)}`;
     }
       // For short stories, use story cover or fallback to containing book's cover
     if (media?.type === 'shortstory') {
       if (media?.storyCoverUrl) {
         console.log('Using short story cover artwork:', media.storyCoverUrl);
-        return `http://localhost:3001/api/openlibrary-artwork?url=${encodeURIComponent(media.storyCoverUrl)}`;
+        return `${config.apiBaseUrl}/api/openlibrary-artwork?url=${encodeURIComponent(media.storyCoverUrl)}`;
       } else if (media?.containedInBookDetails?.coverUrl) {
         console.log('Using containing book cover artwork for short story:', media.containedInBookDetails.coverUrl);
-        return `http://localhost:3001/api/openlibrary-artwork?url=${encodeURIComponent(media.containedInBookDetails.coverUrl)}`;
+        return `${config.apiBaseUrl}/api/openlibrary-artwork?url=${encodeURIComponent(media.containedInBookDetails.coverUrl)}`;
       }
     }
     
     // Prioritize TVDB artwork if available for TV content
     if (media?.tvdbArtwork?.url) {
       console.log('Using TVDB artwork:', media.tvdbArtwork.url);
-      return `http://localhost:3001/api/tvdb-artwork?url=${encodeURIComponent(media.tvdbArtwork.url)}`;
+      return `${config.apiBaseUrl}/api/tvdb-artwork?url=${encodeURIComponent(media.tvdbArtwork.url)}`;
     }
     
     // Fall back to Plex artwork
     const thumb = media?.thumb || media?.art;
     if (!thumb) return null;
     
+    // Check if thumb is already a full URL (starts with http)
+    if (thumb.startsWith('http')) {
+      console.log('Using full artwork URL:', thumb);
+      return thumb;
+    }
+    
+    // Otherwise, it's a relative path, so add the base URL
     console.log('Using Plex artwork:', thumb);
-    return `http://localhost:3001/api/artwork${thumb}`;
+    return `${config.apiBaseUrl}/api/artwork${thumb}`;
   };return (
     <div className="app-container home-responsive">
       <div className="app-card home-card">
@@ -411,20 +428,19 @@ function Home() {  const [selectedMedia, setSelectedMedia] = useState(null);
               {loading ? 'Finding Up Next...' : 'Get Up Next'}
             </Button>
             
-            <Button
-              onClick={startNewSeries}
-              disabled={findingNewSeries}
-              style={{ marginLeft: '10px', backgroundColor: '#28a745', color: '#fff' }}
-              title="Find the earliest episode from a completed series in your collection that you haven't started watching yet"
-            >
-              {findingNewSeries ? 'Finding New Series...' : 'Start New Series'}
-            </Button>            {selectedMedia && (selectedMedia.customOrderItemId || selectedMedia.orderType === 'TV_GENERAL' || selectedMedia.orderType === 'MOVIES_GENERAL') && (
+            {selectedMedia && (selectedMedia.customOrderItemId || selectedMedia.orderType === 'TV_GENERAL' || selectedMedia.orderType === 'MOVIES_GENERAL') && (
               <Button
                 onClick={markAsWatched}
                 disabled={markingWatched}
-                style={{ marginLeft: '10px' }}
+                style={{ 
+                  backgroundColor: '#28a745', 
+                  color: '#fff',
+                  minWidth: '40px',
+                  padding: '8px 12px'
+                }}
+                title="Mark as Watched"
               >
-                {markingWatched ? 'Marking as Watched...' : 'Mark as Watched'}
+                {markingWatched ? '⏳' : '✓'}
               </Button>
             )}
 
@@ -432,21 +448,15 @@ function Home() {  const [selectedMedia, setSelectedMedia] = useState(null);
               <Button
                 onClick={playOnPlex}
                 disabled={playingOnPlex}
-                style={{ marginLeft: '10px', backgroundColor: '#e5a00d', color: '#000' }}
+                style={{ 
+                  backgroundColor: '#e5a00d', 
+                  color: '#000',
+                  minWidth: '40px',
+                  padding: '8px 12px'
+                }}
                 title="Play this episode/movie on your selected Plex device"
               >
-                {playingOnPlex ? '🎬 Starting...' : '🎬 Play on Plex'}
-              </Button>
-            )}
-
-            {selectedMedia && ['episode', 'movie'].includes(selectedMedia.type) && (
-              <Button
-                onClick={testAndroidTVNotification}
-                disabled={playingOnPlex}
-                style={{ marginLeft: '10px', backgroundColor: '#ff6b35', color: '#fff' }}
-                title="Test AndroidTV notification approaches for this media"
-              >
-                📱 Test AndroidTV
+                {playingOnPlex ? '⏳' : '🎬'}
               </Button>
             )}
           </div>
@@ -533,8 +543,15 @@ function Home() {  const [selectedMedia, setSelectedMedia] = useState(null);
                           } else if (selectedMedia.tvdbArtwork?.url && !e.target.src.includes('/api/artwork')) {
                             // If TVDB artwork fails, try Plex artwork as fallback
                             console.log('TVDB artwork failed, trying Plex artwork fallback');
-                            const plexUrl = `http://localhost:3001/api/artwork${selectedMedia.thumb || selectedMedia.art}`;
-                            e.target.src = plexUrl;
+                            const plexThumb = selectedMedia.thumb || selectedMedia.art;
+                            if (plexThumb) {
+                              // Check if it's already a full URL
+                              if (plexThumb.startsWith('http')) {
+                                e.target.src = plexThumb;
+                              } else {
+                                e.target.src = `${config.apiBaseUrl}/api/artwork${plexThumb}`;
+                              }
+                            }
                           } else {
                             e.target.style.display = 'none';
                           }
@@ -639,7 +656,20 @@ function Home() {  const [selectedMedia, setSelectedMedia] = useState(null);
                 <MediaDetails selectedMedia={selectedMedia} />
               </div>
             </div>
-          )}        </div>
+          )}
+
+          {/* Start New Series button - positioned below the media display */}
+          <div style={{ textAlign: 'center', marginTop: '20px' }}>
+            <Button
+              onClick={startNewSeries}
+              disabled={findingNewSeries}
+              style={{ backgroundColor: '#28a745', color: '#fff' }}
+              title="Find the earliest episode from a completed series in your collection that you haven't started watching yet"
+            >
+              {findingNewSeries ? 'Finding New Series...' : 'Start New Series'}
+            </Button>
+          </div>
+        </div>
       </div>
       <Toaster />
     </div>

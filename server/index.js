@@ -30,7 +30,7 @@ const app = express();
 const server = http.createServer(app);
 const io = socketIo(server, {
   cors: {
-    origin: ["http://localhost:3000", "http://localhost:5173"],
+    origin: "*", // Allow all origins for mobile access
     methods: ["GET", "POST"]
   }
 });
@@ -463,8 +463,9 @@ app.get('/api/comicvine-cover', async (req, res) => {
       res.status(404).send('Comic cover not found');
     }
   } catch (error) {
-    console.error('Error getting ComicVine cover:', error);
-    res.status(500).send('Error loading ComicVine cover');
+    console.error('Error getting ComicVine cover for comic:', req.query.comic);
+    console.error('ComicVine cover error details:', error);
+    res.status(500).send(`Error loading ComicVine cover: ${error.message}`);
   }
 });
 
@@ -2260,17 +2261,24 @@ app.delete('/api/custom-orders/:id/items/:itemId', async (req, res) => {
 // Update item order in custom order
 app.put('/api/custom-orders/:id/items/:itemId', async (req, res) => {
   try {
-    const { itemId } = req.params;    const { 
+    const { itemId } = req.params;
+    
+    const { 
       sortOrder, 
       isWatched, 
       title,
       seriesTitle, // For episodes
       // Book fields
-      bookTitle, bookAuthor, bookYear, bookIsbn, bookPublisher, bookOpenLibraryId, bookCoverUrl,      // Comic fields
-      comicSeries, comicYear, comicIssue, comicVolume, customTitle, comicVineId, comicVineDetailsJson,
+      bookTitle, bookAuthor, bookYear, bookIsbn, bookPublisher, bookOpenLibraryId, bookCoverUrl,
+      // Comic fields
+      comicSeries, comicYear, comicIssue, comicVolume, customTitle, comicVineId, comicVineDetailsJson, comicCoverUrl,
       // Story fields
       storyTitle, storyAuthor, storyYear, storyUrl, storyContainedInBookId, storyCoverUrl
     } = req.body;
+
+    console.log('Backend PUT received for itemId:', itemId);
+    console.log('Received comicCoverUrl:', comicCoverUrl);
+    console.log('Full request body:', req.body);
 
     // Check if this is a book re-selection (book-specific fields are being updated)
     const isBookReselect = (
@@ -2289,7 +2297,8 @@ app.put('/api/custom-orders/:id/items/:itemId', async (req, res) => {
       comicVolume !== undefined ||
       customTitle !== undefined ||
       comicVineId !== undefined ||
-      comicVineDetailsJson !== undefined
+      comicVineDetailsJson !== undefined ||
+      comicCoverUrl !== undefined
     );
     
     // Check if this is a short story re-selection (story-specific fields are being updated)
@@ -2326,6 +2335,7 @@ app.put('/api/custom-orders/:id/items/:itemId', async (req, res) => {
         updateData.artworkMimeType = null;
     }    // Handle comic data updates
     if (isComicReselect) { 
+        console.log('Processing comic re-selection...');
         if (comicSeries !== undefined) updateData.comicSeries = comicSeries;
         if (comicYear !== undefined) updateData.comicYear = comicYear;
         if (comicIssue !== undefined) updateData.comicIssue = String(comicIssue); // Ensure string
@@ -2334,8 +2344,11 @@ app.put('/api/custom-orders/:id/items/:itemId', async (req, res) => {
         if (comicVineId !== undefined) updateData.comicVineId = comicVineId;
         if (comicVineDetailsJson !== undefined) updateData.comicVineDetailsJson = comicVineDetailsJson;
 
-        // Crucial for re-caching: clear old artwork details to force re-fetch by ensureArtworkCached
-        updateData.originalArtworkUrl = null; 
+        // Use the specific cover URL from the selected comic if provided, otherwise let the system derive it
+        updateData.originalArtworkUrl = comicCoverUrl !== undefined ? comicCoverUrl : null;
+        console.log('Setting originalArtworkUrl to:', updateData.originalArtworkUrl);
+        
+        // Clear old artwork details to force re-caching with the new artwork URL
         updateData.localArtworkPath = null;
         updateData.artworkLastCached = null;
         updateData.artworkMimeType = null;
@@ -2697,8 +2710,9 @@ io.on('connection', (socket) => {
 });
 
 // Start the server
-server.listen(PORT, async () => {
+server.listen(PORT, '0.0.0.0', async () => {
   console.log(`Server running on port ${PORT}`);
+  console.log(`Server accessible at http://192.168.1.252:${PORT}`);
   console.log(`WebSocket server ready for real-time notifications`);
   
   // Start background sync service

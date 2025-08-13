@@ -1,0 +1,18 @@
+/* Targeted fix for mobile image blur on external artwork sources only */
+
+/* Only apply to mobile devices */
+@media (max-width: 768px) {
+  /* Specific fix for TVDB artwork blur */
+  img[src*="tvdb-artwork"] {
+    image-rendering: -webkit-optimize-contrast;
+    image-rendering: optimize-contrast;
+    -webkit-image-rendering: -webkit-optimize-contrast;
+  }
+  
+  /* Specific fix for ComicVine artwork blur */
+  img[src*="comicvine-artwork"] {
+    image-rendering: -webkit-optimize-contrast;
+    image-rendering: optimize-contrast;
+    -webkit-image-rendering: -webkit-optimize-contrast;
+  }
+}
