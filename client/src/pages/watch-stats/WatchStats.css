@@ -78,6 +78,102 @@
   background-color: #2ea043;
 }
 
+/* Tab Navigation */
+.tab-navigation {
+  display: flex;
+  background-color: #161b22;
+  border: 1px solid #30363d;
+  border-radius: 6px;
+  margin-bottom: 20px;
+  padding: 4px;
+}
+
+.tab-button {
+  flex: 1;
+  background: none;
+  border: none;
+  padding: 12px 20px;
+  color: #c9d1d9;
+  cursor: pointer;
+  border-radius: 4px;
+  font-size: 0.9rem;
+  font-weight: 500;
+  transition: all 0.2s;
+}
+
+.tab-button:hover {
+  background-color: #21262d;
+}
+
+.tab-button.active {
+  background-color: #238636;
+  color: white;
+}
+
+.tab-content {
+  min-height: 200px;
+}
+
+/* Custom Order Stats */
+.custom-order-stats {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.custom-order-item {
+  background-color: #0d1117;
+  border: 1px solid #21262d;
+  border-radius: 6px;
+  padding: 20px;
+}
+
+.order-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 15px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid #21262d;
+}
+
+.order-header h3 {
+  color: #f0f6fc;
+  margin: 0;
+  font-size: 1.2rem;
+}
+
+.order-total {
+  color: #8b949e;
+  font-size: 0.9rem;
+}
+
+.order-breakdown {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 12px;
+}
+
+.breakdown-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 12px;
+  background-color: #161b22;
+  border-radius: 4px;
+  border: 1px solid #21262d;
+}
+
+.breakdown-item .media-type {
+  color: #f0f6fc;
+  font-weight: 500;
+}
+
+.breakdown-item span:last-child {
+  color: #c9d1d9;
+  font-size: 0.9rem;
+}
+
 .control-group {
   margin-bottom: 15px;
 }
@@ -481,5 +577,189 @@
 
   .stats-card h2 {
     margin-bottom: 0;
+  }
+}
+
+/* TV Show Breakdown Styles */
+.collection-shows, .series-collections {
+  margin-top: 15px;
+  padding-top: 15px;
+  border-top: 1px solid #30363d;
+}
+
+.collection-shows h4, .series-collections h4, .recent-episodes h4 {
+  color: #8b949e;
+  font-size: 0.9rem;
+  margin: 0 0 10px 0;
+  font-weight: 500;
+}
+
+.shows-list, .collections-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.show-tag, .collection-tag {
+  background-color: #21262d;
+  border: 1px solid #30363d;
+  color: #c9d1d9;
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-size: 0.85rem;
+  white-space: nowrap;
+}
+
+.show-tag:hover, .collection-tag:hover {
+  background-color: #30363d;
+  border-color: #484f58;
+}
+
+.recent-episodes {
+  margin-top: 15px;
+  padding-top: 15px;
+  border-top: 1px solid #30363d;
+}
+
+.episode-item {
+  display: flex;
+  align-items: center;
+  padding: 6px 0;
+  border-bottom: 1px solid #21262d;
+  font-size: 0.9rem;
+}
+
+.episode-item:last-child {
+  border-bottom: none;
+}
+
+.episode-title {
+  color: #c9d1d9;
+  font-weight: 500;
+  flex: 1;
+}
+
+.episode-number {
+  color: #8b949e;
+  margin-left: 8px;
+}
+
+.episode-duration {
+  color: #7c3aed;
+  font-weight: 500;
+  margin-left: 8px;
+}
+
+.episode-date {
+  color: #6e7681;
+  font-size: 0.8rem;
+  margin-left: 8px;
+}
+
+@media (max-width: 768px) {
+  .episode-item {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 4px;
+  }
+  
+  .episode-number, .episode-duration, .episode-date {
+    margin-left: 0;
+  }
+  
+  .shows-list, .collections-list {
+    flex-direction: column;
+  }
+}
+
+/* Actor breakdown styles */
+.actor-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 20px;
+  flex-wrap: wrap;
+  gap: 15px;
+}
+
+.actor-header h2 {
+  margin: 0;
+}
+
+.actor-toggle-controls {
+  display: flex;
+  gap: 8px;
+}
+
+.toggle-btn {
+  background-color: #21262d;
+  border: 1px solid #30363d;
+  color: #c9d1d9;
+  padding: 8px 16px;
+  border-radius: 6px;
+  font-size: 0.9rem;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.toggle-btn:hover {
+  background-color: #30363d;
+  border-color: #484f58;
+}
+
+.toggle-btn.active {
+  background-color: #238636;
+  border-color: #238636;
+  color: #ffffff;
+}
+
+.actor-info {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.actor-rank {
+  background-color: #238636;
+  color: #ffffff;
+  font-size: 0.9rem;
+  font-weight: 600;
+  padding: 4px 8px;
+  border-radius: 12px;
+  min-width: 32px;
+  text-align: center;
+  flex-shrink: 0;
+}
+
+/* Special colors for top 3 actors */
+.time-period:nth-child(1) .actor-rank {
+  background-color: #ffd700; /* Gold for #1 */
+  color: #000000;
+}
+
+.time-period:nth-child(2) .actor-rank {
+  background-color: #c0c0c0; /* Silver for #2 */
+  color: #000000;
+}
+
+.time-period:nth-child(3) .actor-rank {
+  background-color: #cd7f32; /* Bronze for #3 */
+  color: #ffffff;
+}
+
+@media (max-width: 768px) {
+  .actor-header {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+  
+  .actor-toggle-controls {
+    width: 100%;
+  }
+  
+  .toggle-btn {
+    flex: 1;
+    text-align: center;
   }
 }

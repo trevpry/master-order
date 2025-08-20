@@ -2849,6 +2849,54 @@ app.post('/api/mark-custom-order-item-watched/:itemId', async (req, res) => {
     // Mark the custom order item as watched
     await markCustomOrderItemAsWatched(itemId);
 
+    // Create a watch log entry for statistics
+    let duration = null;
+    let mediaType = customOrderItem.mediaType;
+    
+    // Map custom order media types to watch log media types
+    if (customOrderItem.mediaType === 'episode') {
+      mediaType = 'tv';
+    } else if (customOrderItem.mediaType === 'book' || customOrderItem.mediaType === 'comic' || customOrderItem.mediaType === 'shortstory') {
+      // For reading media, we don't have duration but we'll log them anyway
+      mediaType = customOrderItem.mediaType;
+    }
+
+    // Try to get duration from Plex database if available
+    if (customOrderItem.plexKey) {
+      try {
+        if (customOrderItem.mediaType === 'episode') {
+          const episodeData = await plexDb.getItemMetadata(customOrderItem.plexKey, 'episode');
+          if (episodeData && episodeData.duration) {
+            duration = Math.round(episodeData.duration / 60000); // Convert milliseconds to minutes
+          }
+        } else if (customOrderItem.mediaType === 'movie') {
+          const movieData = await plexDb.getMovieByRatingKey(customOrderItem.plexKey);
+          if (movieData && movieData.duration) {
+            duration = Math.round(movieData.duration / 60000); // Convert milliseconds to minutes
+          }
+        }
+      } catch (error) {
+        console.warn('Could not get duration from Plex database:', error.message);
+      }
+    }
+
+    // Create watch log entry
+    const watchLogParams = {
+      mediaType: mediaType,
+      title: customOrderItem.title,
+      seriesTitle: customOrderItem.seriesTitle,
+      seasonNumber: customOrderItem.seasonNumber,
+      episodeNumber: customOrderItem.episodeNumber,
+      plexKey: customOrderItem.plexKey,
+      customOrderItemId: parseInt(itemId),
+      duration: duration,
+      activityType: (mediaType === 'book' || mediaType === 'comic' || mediaType === 'shortstory') ? 'read' : 'watch',
+      isCompleted: true
+    };
+
+    await watchLogService.logWatched(watchLogParams);
+    console.log(`Created watch log entry for custom order item ${itemId}`);
+
     // If this is an episode or movie with a plexKey, also mark it as watched in the Plex database
     if (customOrderItem.plexKey && (customOrderItem.mediaType === 'episode' || customOrderItem.mediaType === 'movie')) {
       try {
@@ -2865,7 +2913,7 @@ app.post('/api/mark-custom-order-item-watched/:itemId', async (req, res) => {
       }
     }
     
-    res.json({ success: true, message: 'Item marked as watched' });
+    res.json({ success: true, message: 'Item marked as watched and logged for statistics' });
   } catch (error) {
     console.error('Error marking custom order item as watched:', error);
     res.status(500).json({ error: 'Failed to mark item as watched' });  }
@@ -2881,19 +2929,62 @@ app.post('/api/mark-media-watched', async (req, res) => {
     }
 
     try {
+      let duration = null;
+      let mediaData = null;
+      let watchLogMediaType = mediaType;
+
       if (mediaType === 'episode') {
         // For episodes, use episodeRatingKey if available, otherwise ratingKey
         const episodeKey = episodeRatingKey || ratingKey;
         await plexDb.markEpisodeAsWatched(episodeKey);
         console.log(`Marked episode ${episodeKey} as watched in Plex database`);
+        
+        // Get episode data for watch log
+        try {
+          mediaData = await plexDb.getItemMetadata(episodeKey, 'episode');
+          if (mediaData && mediaData.duration) {
+            duration = Math.round(mediaData.duration / 60000); // Convert milliseconds to minutes
+          }
+          watchLogMediaType = 'tv';
+        } catch (error) {
+          console.warn('Could not get episode data for watch log:', error.message);
+        }
       } else if (mediaType === 'movie') {
         await plexDb.markMovieAsWatched(ratingKey);
         console.log(`Marked movie ${ratingKey} as watched in Plex database`);
+        
+        // Get movie data for watch log
+        try {
+          mediaData = await plexDb.getMovieByRatingKey(ratingKey);
+          if (mediaData && mediaData.duration) {
+            duration = Math.round(mediaData.duration / 60000); // Convert milliseconds to minutes
+          }
+        } catch (error) {
+          console.warn('Could not get movie data for watch log:', error.message);
+        }
       } else {
         return res.status(400).json({ error: 'Unsupported media type. Only episode and movie are supported.' });
       }
+
+      // Create watch log entry if we have media data
+      if (mediaData) {
+        const watchLogParams = {
+          mediaType: watchLogMediaType,
+          title: mediaData.title,
+          seriesTitle: mediaData.seriesTitle || (mediaData.grandparentTitle || null),
+          seasonNumber: mediaData.parentIndex || mediaData.seasonNumber || null,
+          episodeNumber: mediaData.index || mediaData.episodeNumber || null,
+          plexKey: mediaData.ratingKey || ratingKey || episodeRatingKey,
+          duration: duration,
+          activityType: 'watch',
+          isCompleted: true
+        };
+
+        await watchLogService.logWatched(watchLogParams);
+        console.log(`Created watch log entry for ${mediaType} ${ratingKey || episodeRatingKey}`);
+      }
       
-      res.json({ success: true, message: `${mediaType} marked as watched` });
+      res.json({ success: true, message: `${mediaType} marked as watched and logged for statistics` });
     } catch (error) {
       console.error(`Error marking ${mediaType} as watched in Plex database:`, error);
       res.status(500).json({ error: `Failed to mark ${mediaType} as watched in database` });
@@ -3286,6 +3377,39 @@ app.post('/api/watch-logs', async (req, res) => {
   } catch (error) {
     console.error('Error creating watch log:', error);
     res.status(500).json({ error: 'Failed to create watch log' });
+  }
+});
+
+// Get custom order statistics
+app.get('/api/watch-stats/custom-orders', async (req, res) => {
+  try {
+    const { period = 'all' } = req.query;
+    const customOrderStats = await watchLogService.getCustomOrderStats(period);
+    
+    res.json(customOrderStats);
+  } catch (error) {
+    console.error('Error getting custom order statistics:', error);
+    res.status(500).json({ error: 'Failed to get custom order statistics' });
+  }
+});
+
+// Get media type specific statistics
+app.get('/api/watch-stats/media-type/:mediaType', async (req, res) => {
+  try {
+    const { mediaType } = req.params;
+    const { period = 'all', groupBy = 'day', actorSortBy, movieActorSortBy } = req.query;
+    
+    const validMediaTypes = ['tv', 'movie', 'book', 'comic', 'shortstory'];
+    if (!validMediaTypes.includes(mediaType)) {
+      return res.status(400).json({ error: 'Invalid media type' });
+    }
+    
+    const mediaTypeStats = await watchLogService.getMediaTypeStats(mediaType, period, groupBy, actorSortBy, movieActorSortBy);
+    
+    res.json(mediaTypeStats);
+  } catch (error) {
+    console.error(`Error getting ${req.params.mediaType} statistics:`, error);
+    res.status(500).json({ error: `Failed to get ${req.params.mediaType} statistics` });
   }
 });
 

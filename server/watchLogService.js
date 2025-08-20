@@ -305,7 +305,7 @@ class WatchLogService {
   async getRecentActivity(limit = 20) {
     try {
       const recentLogs = await this.prisma.watchLog.findMany({
-        orderBy: { startTime: 'desc' },
+        orderBy: { createdAt: 'desc' }, // Sort by when the log was created/completed
         take: limit,
         include: {
           customOrderItem: {
@@ -564,6 +564,147 @@ class WatchLogService {
   }
 
   /**
+   * Get statistics grouped by custom order
+   * @param {string} period - Time period filter
+   * @returns {Promise<Array>} Array of custom order statistics
+   */
+  async getCustomOrderStats(period = 'all') {
+    try {
+      // Build date filter based on period
+      const whereClause = {};
+      
+      let actualStartDate = null;
+      let actualEndDate = null;
+
+      // Handle predefined periods
+      switch (period) {
+        case 'today':
+          actualStartDate = new Date();
+          actualStartDate.setHours(0, 0, 0, 0);
+          actualEndDate = new Date();
+          actualEndDate.setHours(23, 59, 59, 999);
+          break;
+        case 'week':
+          actualEndDate = new Date();
+          actualStartDate = new Date();
+          actualStartDate.setDate(actualStartDate.getDate() - 7);
+          break;
+        case 'month':
+          actualEndDate = new Date();
+          actualStartDate = new Date();
+          actualStartDate.setMonth(actualStartDate.getMonth() - 1);
+          break;
+        case 'year':
+          actualEndDate = new Date();
+          actualStartDate = new Date();
+          actualStartDate.setFullYear(actualStartDate.getFullYear() - 1);
+          break;
+        case 'all':
+        default:
+          // No date filtering
+          break;
+      }
+
+      // Apply date filter if dates are set
+      if (actualStartDate || actualEndDate) {
+        const dateFilter = {};
+        if (actualStartDate) dateFilter.gte = actualStartDate;
+        if (actualEndDate) dateFilter.lte = actualEndDate;
+        whereClause.startTime = dateFilter;
+      }
+
+      // Only include items that have a customOrderItemId
+      whereClause.customOrderItemId = { not: null };
+
+      // First get all relevant watch logs with custom order items
+      const watchLogs = await this.prisma.watchLog.findMany({
+        where: whereClause,
+        include: {
+          customOrderItem: {
+            include: {
+              customOrder: true
+            }
+          }
+        }
+      });
+
+      // Group by custom order
+      const orderStats = {};
+      
+      watchLogs.forEach(log => {
+        if (!log.customOrderItem?.customOrder) return;
+        
+        const orderId = log.customOrderItem.customOrder.id;
+        const orderName = log.customOrderItem.customOrder.name;
+        
+        if (!orderStats[orderId]) {
+          orderStats[orderId] = {
+            customOrderName: orderName,
+            totalWatchTime: 0,
+            totalReadTime: 0,
+            totalTvEpisodes: 0,
+            totalMovies: 0,
+            totalBooks: 0,
+            totalComics: 0,
+            totalShortStories: 0,
+            totalTvWatchTime: 0,
+            totalMovieWatchTime: 0,
+            totalBookReadTime: 0,
+            totalComicReadTime: 0,
+            totalShortStoryReadTime: 0,
+          };
+        }
+
+        const stats = orderStats[orderId];
+        const watchTime = log.totalWatchTime || 0;
+
+        if (log.activityType === 'watch') {
+          stats.totalWatchTime += watchTime;
+          if (log.mediaType === 'tv') {
+            stats.totalTvEpisodes += 1;
+            stats.totalTvWatchTime += watchTime;
+          } else if (log.mediaType === 'movie') {
+            stats.totalMovies += 1;
+            stats.totalMovieWatchTime += watchTime;
+          }
+        } else if (log.activityType === 'read') {
+          stats.totalReadTime += watchTime;
+          if (log.mediaType === 'book') {
+            stats.totalBooks += 1;
+            stats.totalBookReadTime += watchTime;
+          } else if (log.mediaType === 'comic') {
+            stats.totalComics += 1;
+            stats.totalComicReadTime += watchTime;
+          } else if (log.mediaType === 'shortstory') {
+            stats.totalShortStories += 1;
+            stats.totalShortStoryReadTime += watchTime;
+          }
+        }
+      });
+
+      // Format the results and convert to array
+      const results = Object.values(orderStats).map(stats => ({
+        ...stats,
+        totalWatchTimeFormatted: this.formatWatchTime(stats.totalWatchTime),
+        totalReadTimeFormatted: this.formatWatchTime(stats.totalReadTime),
+        totalTvWatchTimeFormatted: this.formatWatchTime(stats.totalTvWatchTime),
+        totalMovieWatchTimeFormatted: this.formatWatchTime(stats.totalMovieWatchTime),
+        totalBookReadTimeFormatted: this.formatWatchTime(stats.totalBookReadTime),
+        totalComicReadTimeFormatted: this.formatWatchTime(stats.totalComicReadTime),
+        totalShortStoryReadTimeFormatted: this.formatWatchTime(stats.totalShortStoryReadTime),
+      }));
+
+      // Sort by total activity time (watch + read) descending
+      results.sort((a, b) => (b.totalWatchTime + b.totalReadTime) - (a.totalWatchTime + a.totalReadTime));
+
+      return results;
+    } catch (error) {
+      console.error('Error fetching custom order stats:', error);
+      throw error;
+    }
+  }
+
+  /**
    * Format time in minutes to a readable format
    * @param {number} minutes - Time in minutes
    * @returns {string} Formatted time string
@@ -580,6 +721,588 @@ class WatchLogService {
       return `${hours} hour${hours === 1 ? '' : 's'}`;
     } else {
       return `${hours} hour${hours === 1 ? '' : 's'} ${remainingMinutes} minute${remainingMinutes === 1 ? '' : 's'}`;
+    }
+  }
+
+  /**
+   * Get statistics for a specific media type
+   * @param {string} mediaType - The media type to get stats for
+   * @param {string} period - Time period for the stats
+   * @param {string} groupBy - How to group the time-based data
+   * @param {string} actorSortBy - How to sort TV actors (for TV stats)
+   * @param {string} movieActorSortBy - How to sort movie actors (for movie stats)
+   * @returns {Promise<Object>} Media type specific statistics
+   */
+  async getMediaTypeStats(mediaType, period = 'all', groupBy = 'day', actorSortBy, movieActorSortBy) {
+    try {
+      // Get settings to check for ignored collections and main collection
+      const settings = await this.prisma.settings.findFirst();
+      const ignoredTVCollections = settings?.ignoredTVCollections ? 
+        settings.ignoredTVCollections.split(',').map(c => c.trim()) : [];
+      
+      // Add the main collection from settings to the ignored list
+      const mainCollection = settings?.collectionName?.trim();
+      if (mainCollection) {
+        ignoredTVCollections.push(mainCollection);
+      }
+      
+      console.log(`TV Stats - Main collection: "${mainCollection}", Ignored collections:`, ignoredTVCollections);
+      
+      // Build date filter based on period
+      const whereClause = { mediaType };
+      
+      let actualStartDate = null;
+      let actualEndDate = null;
+
+      // Handle predefined periods
+      switch (period) {
+        case 'today':
+          actualStartDate = new Date();
+          actualStartDate.setHours(0, 0, 0, 0);
+          actualEndDate = new Date();
+          actualEndDate.setHours(23, 59, 59, 999);
+          break;
+        case 'week':
+          actualEndDate = new Date();
+          actualStartDate = new Date();
+          actualStartDate.setDate(actualStartDate.getDate() - 7);
+          break;
+        case 'month':
+          actualEndDate = new Date();
+          actualStartDate = new Date();
+          actualStartDate.setMonth(actualStartDate.getMonth() - 1);
+          break;
+        case 'year':
+          actualEndDate = new Date();
+          actualStartDate = new Date();
+          actualStartDate.setFullYear(actualStartDate.getFullYear() - 1);
+          break;
+        case 'all':
+        default:
+          // No date filtering
+          break;
+      }
+
+      // Apply date filter if dates are set
+      if (actualStartDate || actualEndDate) {
+        const dateFilter = {};
+        if (actualStartDate) dateFilter.gte = actualStartDate;
+        if (actualEndDate) dateFilter.lte = actualEndDate;
+        whereClause.startTime = dateFilter;
+      }
+
+      // Get all logs for this media type in the date range
+      const watchLogs = await this.prisma.watchLog.findMany({
+        where: whereClause,
+        orderBy: { startTime: 'asc' },
+        include: {
+          customOrderItem: {
+            include: {
+              customOrder: true
+            }
+          }
+        }
+      });
+
+      // For TV shows, we need to get collection information
+      let tvShowsWithCollections = [];
+      if (mediaType === 'tv') {
+        // Get unique series titles from the watch logs
+        const uniqueSeriesTitles = [...new Set(watchLogs.map(log => log.seriesTitle).filter(Boolean))];
+        
+        if (uniqueSeriesTitles.length > 0) {
+          // Query TV shows to get collection information
+          tvShowsWithCollections = await this.prisma.plexTVShow.findMany({
+            where: {
+              title: {
+                in: uniqueSeriesTitles
+              }
+            },
+            select: {
+              title: true,
+              collections: true
+            }
+          });
+        }
+      }
+
+      // Group the data based on the groupBy parameter
+      const groupedStats = this.groupWatchStats(watchLogs, groupBy);
+      
+      // Calculate specific stats for this media type
+      const totalStats = {
+        totalItems: watchLogs.length,
+        totalActivityTime: 0,
+        totalWatchTime: 0,
+        totalReadTime: 0,
+        titles: [],
+        series: new Set(),
+        customOrders: new Set()
+      };
+
+      // Media type specific stats
+      if (mediaType === 'tv') {
+        totalStats.totalTvEpisodes = watchLogs.length;
+        totalStats.totalTvWatchTime = 0;
+        totalStats.shows = new Set();
+        totalStats.seasons = new Set();
+        totalStats.collections = new Set();
+      } else if (mediaType === 'movie') {
+        totalStats.totalMovies = watchLogs.length;
+        totalStats.totalMovieWatchTime = 0;
+      } else if (mediaType === 'book') {
+        totalStats.totalBooks = watchLogs.length;
+        totalStats.totalBookReadTime = 0;
+      } else if (mediaType === 'comic') {
+        totalStats.totalComics = watchLogs.length;
+        totalStats.totalComicReadTime = 0;
+      } else if (mediaType === 'shortstory') {
+        totalStats.totalShortStories = watchLogs.length;
+        totalStats.totalShortStoryReadTime = 0;
+      }
+
+      watchLogs.forEach(log => {
+        const watchTime = log.totalWatchTime || 0;
+        totalStats.totalActivityTime += watchTime;
+        
+        if (log.activityType === 'watch') {
+          totalStats.totalWatchTime += watchTime;
+          if (mediaType === 'tv') {
+            totalStats.totalTvWatchTime += watchTime;
+            if (log.seriesTitle) {
+              totalStats.shows.add(log.seriesTitle);
+              
+              // Find the corresponding TV show for collections
+              const tvShow = tvShowsWithCollections.find(show => show.title === log.seriesTitle);
+              if (tvShow && tvShow.collections) {
+                // Parse collections (they might be comma-separated or JSON)
+                try {
+                  let collections = [];
+                  if (tvShow.collections.startsWith('[')) {
+                    // Handle JSON array format
+                    collections = JSON.parse(tvShow.collections);
+                  } else if (tvShow.collections.includes(',')) {
+                    collections = tvShow.collections.split(',').map(c => c.trim());
+                  } else {
+                    collections = [tvShow.collections.trim()];
+                  }
+                  
+                  console.log(`Parsed collections for ${log.seriesTitle}:`, collections);
+                  console.log(`Ignored collections:`, ignoredTVCollections);
+                  
+                  // Add collections that aren't ignored (case-insensitive comparison)
+                  collections.forEach(collection => {
+                    const normalizedCollection = collection.trim();
+                    const isIgnored = ignoredTVCollections.some(ignored => 
+                      ignored.toLowerCase() === normalizedCollection.toLowerCase()
+                    );
+                    
+                    console.log(`Checking collection "${normalizedCollection}": ignored = ${isIgnored}`);
+                    
+                    if (!isIgnored) {
+                      totalStats.collections.add(normalizedCollection);
+                      console.log(`Added collection: "${normalizedCollection}"`);
+                    } else {
+                      console.log(`Filtering out collection: "${normalizedCollection}" (matches ignored: "${ignoredTVCollections.find(ignored => ignored.toLowerCase() === normalizedCollection.toLowerCase())}")`);
+                    }
+                  });
+                } catch (error) {
+                  console.warn(`Error parsing collections for ${tvShow.title}:`, error);
+                  // Treat as single collection if parsing fails
+                  const normalizedCollection = tvShow.collections.trim();
+                  const isIgnored = ignoredTVCollections.some(ignored => 
+                    ignored.toLowerCase() === normalizedCollection.toLowerCase()
+                  );
+                  
+                  if (!isIgnored) {
+                    totalStats.collections.add(normalizedCollection);
+                  } else {
+                    console.log(`Filtering out collection: "${normalizedCollection}" (matches ignored: "${ignoredTVCollections.find(ignored => ignored.toLowerCase() === normalizedCollection.toLowerCase())}")`);
+                  }
+                }
+              }
+            }
+            if (log.seasonNumber) totalStats.seasons.add(`${log.seriesTitle} S${log.seasonNumber}`);
+          } else if (mediaType === 'movie') {
+            totalStats.totalMovieWatchTime += watchTime;
+          }
+        } else if (log.activityType === 'read') {
+          totalStats.totalReadTime += watchTime;
+          if (mediaType === 'book') {
+            totalStats.totalBookReadTime += watchTime;
+          } else if (mediaType === 'comic') {
+            totalStats.totalComicReadTime += watchTime;
+          } else if (mediaType === 'shortstory') {
+            totalStats.totalShortStoryReadTime += watchTime;
+          }
+        }
+
+        // Track titles
+        totalStats.titles.push(log.title);
+        
+        // Track custom orders
+        if (log.customOrderItem?.customOrder) {
+          totalStats.customOrders.add(log.customOrderItem.customOrder.name);
+        }
+      });
+
+      // For TV shows, create detailed breakdowns
+      if (mediaType === 'tv') {
+        // Create collection breakdown
+        totalStats.collectionBreakdown = [];
+        totalStats.collections.forEach(collectionName => {
+          const collectionShows = tvShowsWithCollections
+            .filter(show => {
+              if (!show.collections) return false;
+              try {
+                let collections = [];
+                if (show.collections.startsWith('[')) {
+                  // Handle JSON array format first
+                  collections = JSON.parse(show.collections);
+                } else if (show.collections.includes(',')) {
+                  collections = show.collections.split(',').map(c => c.trim());
+                } else {
+                  collections = [show.collections.trim()];
+                }
+                return collections.includes(collectionName);
+              } catch (error) {
+                return show.collections === collectionName;
+              }
+            })
+            .map(show => show.title);
+
+          const collectionLogs = watchLogs.filter(log => 
+            log.seriesTitle && collectionShows.includes(log.seriesTitle)
+          );
+
+          const collectionStats = {
+            name: collectionName,
+            totalEpisodes: collectionLogs.length,
+            totalWatchTime: collectionLogs.reduce((sum, log) => sum + (log.totalWatchTime || 0), 0),
+            uniqueShows: new Set(collectionLogs.map(log => log.seriesTitle)).size,
+            uniqueSeasons: new Set(collectionLogs.filter(log => log.seasonNumber).map(log => `${log.seriesTitle} S${log.seasonNumber}`)).size,
+            shows: collectionShows
+          };
+          
+          collectionStats.totalWatchTimeFormatted = this.formatWatchTime(collectionStats.totalWatchTime);
+          totalStats.collectionBreakdown.push(collectionStats);
+        });
+
+        // Create series breakdown
+        totalStats.seriesBreakdown = [];
+        totalStats.shows.forEach(showName => {
+          const showLogs = watchLogs.filter(log => log.seriesTitle === showName);
+          const showSeasons = new Set(showLogs.filter(log => log.seasonNumber).map(log => log.seasonNumber));
+          
+          const seriesStats = {
+            name: showName,
+            totalEpisodes: showLogs.length,
+            totalWatchTime: showLogs.reduce((sum, log) => sum + (log.totalWatchTime || 0), 0),
+            uniqueSeasons: showSeasons.size,
+            seasons: Array.from(showSeasons).sort((a, b) => a - b),
+            recentEpisodes: showLogs.slice(-5).reverse(), // Last 5 episodes watched
+            averageEpisodeLength: showLogs.length > 0 ? 
+              Math.round(showLogs.reduce((sum, log) => sum + (log.totalWatchTime || 0), 0) / showLogs.length) : 0
+          };
+          
+          seriesStats.totalWatchTimeFormatted = this.formatWatchTime(seriesStats.totalWatchTime);
+          
+          // Find collection for this show
+          const tvShow = tvShowsWithCollections.find(show => show.title === showName);
+          if (tvShow && tvShow.collections) {
+            try {
+              let collections = [];
+              if (tvShow.collections.startsWith('[')) {
+                // Handle JSON array format first
+                collections = JSON.parse(tvShow.collections);
+              } else if (tvShow.collections.includes(',')) {
+                collections = tvShow.collections.split(',').map(c => c.trim());
+              } else {
+                collections = [tvShow.collections.trim()];
+              }
+              seriesStats.collections = collections.filter(c => {
+                const normalizedCollection = c.trim();
+                return !ignoredTVCollections.some(ignored => 
+                  ignored.toLowerCase() === normalizedCollection.toLowerCase()
+                );
+              });
+            } catch (error) {
+              const normalizedCollection = tvShow.collections.trim();
+              const isIgnored = ignoredTVCollections.some(ignored => 
+                ignored.toLowerCase() === normalizedCollection.toLowerCase()
+              );
+              if (!isIgnored) {
+                seriesStats.collections = [normalizedCollection];
+              }
+            }
+          }
+          
+          totalStats.seriesBreakdown.push(seriesStats);
+        });
+
+        // Sort breakdowns by watch time (descending)
+        totalStats.collectionBreakdown.sort((a, b) => b.totalWatchTime - a.totalWatchTime);
+        totalStats.seriesBreakdown.sort((a, b) => b.totalWatchTime - a.totalWatchTime);
+
+        // Create actor breakdown for TV shows
+        try {
+          console.log('Creating actor breakdown for TV shows...');
+          const actorStats = new Map(); // Will store { totalWatchTime, episodeCount, seriesSet }
+
+          // Get all TV watch logs with plexKey for completed episodes
+          const watchedTVLogs = watchLogs.filter(log => 
+            log.plexKey && 
+            log.totalWatchTime > 0 && 
+            log.mediaType === 'tv'
+          );
+
+          console.log(`Found ${watchedTVLogs.length} watched TV episodes with plexKey`);
+
+          if (watchedTVLogs.length > 0) {
+            const plexKeys = watchedTVLogs.map(log => log.plexKey);
+
+            // Get episodes with roles using plexKey (ratingKey in PlexEpisode)
+            const episodesWithRoles = await this.prisma.plexEpisode.findMany({
+              where: {
+                ratingKey: {
+                  in: plexKeys
+                }
+              },
+              include: {
+                roles: true,
+                season: {
+                  include: {
+                    show: true
+                  }
+                }
+              }
+            });
+
+            console.log(`Found ${episodesWithRoles.length} episodes with roles data`);
+
+            for (const episode of episodesWithRoles) {
+              // Find the corresponding watch logs for this episode
+              const episodeLogs = watchedTVLogs.filter(log => log.plexKey === episode.ratingKey);
+              const totalEpisodeWatchTime = episodeLogs.reduce((sum, log) => sum + (log.totalWatchTime || 0), 0);
+              const seriesTitle = episode.season?.show?.title || 'Unknown Series';
+
+              if (totalEpisodeWatchTime > 0 && episode.roles.length > 0) {
+                console.log(`Episode "${episode.title}" has ${episode.roles.length} roles with total watch time ${totalEpisodeWatchTime}`);
+                
+                for (const role of episode.roles) {
+                  if (role.tag && role.tag.trim()) {
+                    const actorName = role.tag.trim();
+                    
+                    if (!actorStats.has(actorName)) {
+                      actorStats.set(actorName, {
+                        totalWatchTime: 0,
+                        episodeCount: 0,
+                        seriesSet: new Set()
+                      });
+                    }
+                    
+                    const stats = actorStats.get(actorName);
+                    stats.totalWatchTime += totalEpisodeWatchTime;
+                    stats.episodeCount += 1;
+                    stats.seriesSet.add(seriesTitle);
+                  }
+                }
+              }
+            }
+          }
+
+          // Create actor breakdown with all metrics
+          const actorBreakdownData = Array.from(actorStats.entries())
+            .map(([actor, stats]) => ({
+              name: actor,
+              totalWatchTime: stats.totalWatchTime,
+              totalWatchTimeFormatted: this.formatWatchTime(stats.totalWatchTime),
+              episodeCount: stats.episodeCount,
+              seriesCount: stats.seriesSet.size,
+              series: Array.from(stats.seriesSet)
+            }));
+
+          // Store the full data for different sorting methods
+          totalStats.actorBreakdown = {
+            byPlaytime: [...actorBreakdownData].sort((a, b) => b.totalWatchTime - a.totalWatchTime).slice(0, 10),
+            byEpisodeCount: [...actorBreakdownData].sort((a, b) => b.episodeCount - a.episodeCount).slice(0, 10),
+            bySeriesCount: [...actorBreakdownData].sort((a, b) => b.seriesCount - a.seriesCount).slice(0, 10)
+          };
+
+          console.log(`Created actor breakdown with ${actorBreakdownData.length} actors`);
+          if (actorBreakdownData.length > 0) {
+            console.log('Top 3 by playtime:', totalStats.actorBreakdown.byPlaytime.slice(0, 3).map(a => `${a.name} (${a.totalWatchTimeFormatted})`));
+            console.log('Top 3 by episodes:', totalStats.actorBreakdown.byEpisodeCount.slice(0, 3).map(a => `${a.name} (${a.episodeCount} episodes)`));
+            console.log('Top 3 by series:', totalStats.actorBreakdown.bySeriesCount.slice(0, 3).map(a => `${a.name} (${a.seriesCount} series)`));
+          }
+          
+        } catch (error) {
+          console.error('Error creating actor breakdown:', error);
+          totalStats.actorBreakdown = {
+            byPlaytime: [],
+            byEpisodeCount: [],
+            bySeriesCount: []
+          };
+        }
+      }
+
+      // For Movies, create detailed actor breakdowns
+      if (mediaType === 'movie') {
+        console.log(`Movie actor breakdown requested with movieActorSortBy: ${movieActorSortBy}`);
+        try {
+          console.log('Creating actor breakdown for movies...');
+          const actorStats = new Map(); // Will store { totalWatchTime, movieCount, collections }
+
+          // Get all movie watch logs with plexKey for completed movies
+          const watchedMovieLogs = watchLogs.filter(log => 
+            log.plexKey && 
+            log.totalWatchTime > 0 && 
+            log.mediaType === 'movie'
+          );
+
+          console.log(`Found ${watchedMovieLogs.length} watched movies with plexKey`);
+
+          if (watchedMovieLogs.length > 0) {
+            const plexKeys = watchedMovieLogs.map(log => log.plexKey);
+
+            // Get movies with roles using plexKey (ratingKey in PlexMovie)
+            const moviesWithRoles = await this.prisma.plexMovie.findMany({
+              where: {
+                ratingKey: {
+                  in: plexKeys
+                }
+              },
+              include: {
+                roles: true
+              }
+            });
+
+            console.log(`Found ${moviesWithRoles.length} movies with roles data`);
+
+            for (const movie of moviesWithRoles) {
+              // Find the corresponding watch logs for this movie
+              const movieLogs = watchedMovieLogs.filter(log => log.plexKey === movie.ratingKey);
+              const totalMovieWatchTime = movieLogs.reduce((sum, log) => sum + (log.totalWatchTime || 0), 0);
+              
+              // Parse collections from the movie
+              let movieCollections = [];
+              if (movie.collections) {
+                try {
+                  movieCollections = JSON.parse(movie.collections);
+                } catch {
+                  movieCollections = movie.collections
+                    .split(',')
+                    .map(c => c.trim())
+                    .filter(c => c.length > 0);
+                }
+              }
+
+              if (totalMovieWatchTime > 0 && movie.roles.length > 0) {
+                console.log(`Movie "${movie.title}" has ${movie.roles.length} roles with total watch time ${totalMovieWatchTime}`);
+                
+                for (const role of movie.roles) {
+                  if (role.tag && role.tag.trim()) {
+                    const actorName = role.tag.trim();
+                    
+                    if (!actorStats.has(actorName)) {
+                      actorStats.set(actorName, {
+                        totalWatchTime: 0,
+                        movieCount: 0,
+                        collectionsSet: new Set(),
+                        movies: []
+                      });
+                    }
+                    
+                    const stats = actorStats.get(actorName);
+                    stats.totalWatchTime += totalMovieWatchTime;
+                    stats.movieCount += 1;
+                    stats.movies.push(movie.title);
+                    movieCollections.forEach(collection => stats.collectionsSet.add(collection));
+                  }
+                }
+              }
+            }
+          }
+
+          // Create actor breakdown with all metrics
+          const actorBreakdownData = Array.from(actorStats.entries())
+            .map(([actor, stats]) => ({
+              name: actor,
+              totalWatchTime: stats.totalWatchTime,
+              totalWatchTimeFormatted: this.formatWatchTime(stats.totalWatchTime),
+              movieCount: stats.movieCount,
+              collectionCount: stats.collectionsSet.size,
+              collections: Array.from(stats.collectionsSet),
+              movies: stats.movies
+            }));
+
+          // Store the full data for different sorting methods
+          totalStats.actorBreakdown = {
+            byPlaytime: [...actorBreakdownData].sort((a, b) => b.totalWatchTime - a.totalWatchTime).slice(0, 10),
+            byMovieCount: [...actorBreakdownData].sort((a, b) => b.movieCount - a.movieCount).slice(0, 10),
+            byCollectionCount: [...actorBreakdownData].sort((a, b) => b.collectionCount - a.collectionCount).slice(0, 10)
+          };
+
+          console.log(`Created actor breakdown with ${actorBreakdownData.length} actors`);
+          if (actorBreakdownData.length > 0) {
+            console.log('Top 3 by playtime:', totalStats.actorBreakdown.byPlaytime.slice(0, 3).map(a => `${a.name} (${a.totalWatchTimeFormatted})`));
+            console.log('Top 3 by movies:', totalStats.actorBreakdown.byMovieCount.slice(0, 3).map(a => `${a.name} (${a.movieCount} movies)`));
+            console.log('Top 3 by collections:', totalStats.actorBreakdown.byCollectionCount.slice(0, 3).map(a => `${a.name} (${a.collectionCount} collections)`));
+          }
+          
+        } catch (error) {
+          console.error('Error creating movie actor breakdown:', error);
+          totalStats.actorBreakdown = {
+            byPlaytime: [],
+            byMovieCount: [],
+            byCollectionCount: []
+          };
+        }
+      }
+
+      // Convert sets to arrays and get counts
+      if (totalStats.shows) {
+        totalStats.uniqueShows = totalStats.shows.size;
+        totalStats.shows = Array.from(totalStats.shows);
+      }
+      if (totalStats.seasons) {
+        totalStats.uniqueSeasons = totalStats.seasons.size;
+        totalStats.seasons = Array.from(totalStats.seasons);
+      }
+      if (totalStats.collections) {
+        totalStats.uniqueCollections = totalStats.collections.size;
+        totalStats.collections = Array.from(totalStats.collections);
+      }
+      
+      totalStats.uniqueCustomOrders = totalStats.customOrders.size;
+      totalStats.customOrders = Array.from(totalStats.customOrders);
+
+      // Add formatted time strings
+      totalStats.totalActivityTimeFormatted = this.formatWatchTime(totalStats.totalActivityTime);
+      totalStats.totalWatchTimeFormatted = this.formatWatchTime(totalStats.totalWatchTime);
+      totalStats.totalReadTimeFormatted = this.formatWatchTime(totalStats.totalReadTime);
+      
+      if (mediaType === 'tv') {
+        totalStats.totalTvWatchTimeFormatted = this.formatWatchTime(totalStats.totalTvWatchTime);
+      } else if (mediaType === 'movie') {
+        totalStats.totalMovieWatchTimeFormatted = this.formatWatchTime(totalStats.totalMovieWatchTime);
+      } else if (mediaType === 'book') {
+        totalStats.totalBookReadTimeFormatted = this.formatWatchTime(totalStats.totalBookReadTime);
+      } else if (mediaType === 'comic') {
+        totalStats.totalComicReadTimeFormatted = this.formatWatchTime(totalStats.totalComicReadTime);
+      } else if (mediaType === 'shortstory') {
+        totalStats.totalShortStoryReadTimeFormatted = this.formatWatchTime(totalStats.totalShortStoryReadTime);
+      }
+
+      return {
+        totalStats,
+        groupedStats,
+        totalEntries: watchLogs.length,
+        logs: watchLogs.slice(0, 10) // Recent 10 items for display
+      };
+    } catch (error) {
+      console.error(`Error fetching ${mediaType} stats:`, error);
+      throw error;
     }
   }
 }
