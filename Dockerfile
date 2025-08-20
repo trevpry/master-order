@@ -41,6 +41,7 @@ RUN apk add --no-cache \
     g++ \
     sqlite \
     curl \
+    su-exec \
     && rm -rf /var/cache/apk/*
 
 # Create app directory
@@ -69,9 +70,10 @@ COPY --chown=app:nodejs ./docker-entrypoint.sh ./docker-entrypoint.sh
 # Make entrypoint executable
 RUN chmod +x ./docker-entrypoint.sh
 
-# Create data directories
+# Create data directories with proper permissions
 RUN mkdir -p /app/data /app/server/artwork-cache /app/logs && \
-    chown -R app:nodejs /app/data /app/server/artwork-cache /app/logs
+    chown -R app:nodejs /app/data /app/server/artwork-cache /app/logs && \
+    chmod -R 755 /app/data /app/server/artwork-cache /app/logs
 
 # Set up environment
 ENV NODE_ENV=production
@@ -85,8 +87,8 @@ EXPOSE 3001
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
     CMD curl -f http://localhost:3001/api/health || exit 1
 
-# Switch to non-root user
-USER app
+# Don't switch to non-root user yet - let entrypoint handle permissions
+# USER app
 
-# Start the application
+# Start the application (entrypoint will handle user switching)
 CMD ["./docker-entrypoint.sh"]

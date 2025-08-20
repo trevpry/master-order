@@ -13,6 +13,10 @@ if [ "$(id -u)" = "0" ]; then
     chown -R app:nodejs /app/data /app/server/artwork-cache /app/logs
 fi
 
+# Ensure the app user owns these directories (in case mounted volumes have different permissions)
+# This will work even if we're running as app user
+chmod 755 /app/data /app/server/artwork-cache /app/logs || true
+
 # Change to server directory for Prisma commands
 cd /app/server
 
@@ -21,10 +25,15 @@ echo "📊 Checking database schema..."
 # Check if database exists and has tables
 if [ ! -f "/app/data/master_order.db" ]; then
     echo "🗄️ Creating new database..."
+    # Create an empty database file first to ensure proper permissions
+    touch /app/data/master_order.db
+    chmod 644 /app/data/master_order.db || true
     npx prisma migrate deploy
     echo "✅ Database created and migrated"
 else
     echo "🔄 Applying any pending migrations..."
+    # Ensure we can write to the existing database
+    chmod 644 /app/data/master_order.db || true
     npx prisma migrate deploy
     echo "✅ Migrations applied"
 fi
@@ -34,4 +43,11 @@ echo "🔧 Generating Prisma client..."
 npx prisma generate
 
 echo "🌟 Starting application server..."
-exec node index.js
+
+# Switch to app user for running the application
+if [ "$(id -u)" = "0" ]; then
+    echo "🔄 Switching to app user for security..."
+    exec su-exec app:nodejs node index.js
+else
+    exec node index.js
+fi
