@@ -141,7 +141,7 @@ function Settings() {
   const refreshCollections = async () => {
     try {
       setCollectionsLoading(true);
-      const collections = await fetchWithErrorHandling('http://localhost:3001/api/plex/collections');
+      const collections = await fetchWithErrorHandling(`${config.apiBaseUrl}/api/plex/collections`);
       setAvailableCollections(collections);
       showMessage('Collections refreshed successfully');
     } catch (error) {
@@ -154,7 +154,7 @@ function Settings() {
   const refreshPlayers = async () => {
     try {
       setPlayersLoading(true);
-      const players = await fetchWithErrorHandling('http://localhost:3001/api/plex/players');
+      const players = await fetchWithErrorHandling(`${config.apiBaseUrl}/api/plex/players`);
       setAvailablePlayers(players || []);
       
       // Check if selected player is currently online
@@ -177,7 +177,7 @@ function Settings() {
       setDeviceStatus(prev => ({ ...prev, checking: true }));
       
       // Use current players if provided, otherwise fetch fresh
-      const players = currentPlayers || await fetchWithErrorHandling('http://localhost:3001/api/plex/players');
+      const players = currentPlayers || await fetchWithErrorHandling(`${config.apiBaseUrl}/api/plex/players`);
       const device = players.find(p => p.machineIdentifier === playerId || p.value === playerId);
       
       const isMobile = playerId.includes('android') || playerId.includes('ios') || playerId.includes('mobile');
@@ -216,7 +216,7 @@ function Settings() {
       console.log(`Checking detailed status for device: ${selectedPlayer}`);
       
       const response = await fetchWithErrorHandling(
-        `http://localhost:3001/api/plex/device-status/${encodeURIComponent(selectedPlayer)}`
+        `${config.apiBaseUrl}/api/plex/device-status/${encodeURIComponent(selectedPlayer)}`
       );
       
       setDeviceStatusDetails(response);
@@ -365,13 +365,13 @@ function Settings() {
       setSaving(true);
       
       // Track if Plex settings changed to refresh players
-      const currentSettings = await fetchWithErrorHandling('http://localhost:3001/api/settings');
+      const currentSettings = await fetchWithErrorHandling(`${config.apiBaseUrl}/api/settings`);
       const plexSettingsChanged = currentSettings && (
         currentSettings.plexUrl !== plexUrl || 
         currentSettings.plexToken !== plexToken
       );
       
-      await fetchWithErrorHandling('http://localhost:3001/api/settings', {
+      await fetchWithErrorHandling(`${config.apiBaseUrl}/api/settings`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -397,14 +397,14 @@ function Settings() {
       showMessage('Settings saved successfully!');
       
       // Refresh background sync status after settings update
-      const backgroundStatus = await fetchWithErrorHandling('http://localhost:3001/api/plex/background-sync-status');
+      const backgroundStatus = await fetchWithErrorHandling(`${config.apiBaseUrl}/api/plex/background-sync-status`);
       setBackgroundSyncStatus(backgroundStatus);
       
       // Refresh Plex players if Plex settings changed
       if (plexSettingsChanged) {
         console.log('Plex settings changed, refreshing players...');
         try {
-          const players = await fetchWithErrorHandling('http://localhost:3001/api/plex/players');
+          const players = await fetchWithErrorHandling(`${config.apiBaseUrl}/api/plex/players`);
           setAvailablePlayers(players || []);
           console.log('Plex players refreshed successfully');
         } catch (playerError) {
@@ -449,7 +449,7 @@ function Settings() {
     setTvdbClearMessage('Clearing TVDB cache...');
     
     try {
-      await fetchWithErrorHandling('http://localhost:3001/api/tvdb/clear-cache', {
+      await fetchWithErrorHandling(`${config.apiBaseUrl}/api/tvdb/clear-cache`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -466,7 +466,7 @@ function Settings() {
 
   const fetchBackgroundSyncStatus = async () => {
     try {
-      const status = await fetchWithErrorHandling('http://localhost:3001/api/plex/background-sync-status');
+      const status = await fetchWithErrorHandling(`${config.apiBaseUrl}/api/plex/background-sync-status`);
       setBackgroundSyncStatus(status);
     } catch (error) {
       setBackgroundSyncMessage('Failed to fetch background sync status');
@@ -475,7 +475,7 @@ function Settings() {
 
   const handleStartBackgroundSync = async () => {
     try {
-      await fetchWithErrorHandling('http://localhost:3001/api/plex/background-sync/start', {
+      await fetchWithErrorHandling(`${config.apiBaseUrl}/api/plex/background-sync/start`, {
         method: 'POST'
       });
       
@@ -488,7 +488,7 @@ function Settings() {
 
   const handleStopBackgroundSync = async () => {
     try {
-      await fetchWithErrorHandling('http://localhost:3001/api/plex/background-sync/stop', {
+      await fetchWithErrorHandling(`${config.apiBaseUrl}/api/plex/background-sync/stop`, {
         method: 'POST'
       });
       
@@ -502,7 +502,7 @@ function Settings() {
   const handleForceBackgroundSync = async () => {
     try {
       setBackgroundSyncMessage('Starting forced background sync...');
-      await fetchWithErrorHandling('http://localhost:3001/api/plex/background-sync/force-now', {
+      await fetchWithErrorHandling(`${config.apiBaseUrl}/api/plex/background-sync/force-now`, {
         method: 'POST'
       });
       
@@ -577,7 +577,8 @@ function Settings() {
             {/* API Configuration Grid */}
             <div className="config-subsection">
               <h4 className="subsection-title">🔑 API Configuration</h4>
-              <div className="api-config-grid">
+              <form onSubmit={(e) => e.preventDefault()}>
+                <div className="api-config-grid">
                 <div className="config-field compact">
                   <label htmlFor="comicvine_api_key">ComicVine API Key:</label>
                   <input 
@@ -863,7 +864,7 @@ function Settings() {
                         <strong>To fix this:</strong> Open Plex in a web browser, mobile app, or TV app, then click refresh.
                         <br />
                         <button 
-                          onClick={() => window.open('http://localhost:3001/api/plex/debug', '_blank')}
+                          onClick={() => window.open(`${config.apiBaseUrl}/api/plex/debug`, '_blank')}
                           style={{ 
                             marginTop: '8px', 
                             padding: '4px 8px', 
@@ -913,6 +914,7 @@ function Settings() {
                   />
                 </div>
               </div>
+              </form>
             </div>
           </div>          {/* Order Types Configuration */}
           <div className="settings-section compact">
