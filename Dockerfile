@@ -46,7 +46,17 @@ RUN apk add --no-cache \
 # Create app directory
 WORKDIR /app
 
+# Copy package files first for better caching
+COPY --from=build /app/package*.json ./
+COPY --from=build /app/server/package*.json ./server/
+
+# Install production dependencies
+RUN npm ci --omit=dev
+WORKDIR /app/server
+RUN npm ci --omit=dev
+
 # Create non-root user
+WORKDIR /app
 RUN addgroup -g 1001 -S nodejs && \
     adduser -S app -u 1001
 
