@@ -37,6 +37,12 @@ const SideMenu = () => {
       description: 'Manage playlists'
     },
     {
+      path: '/watch-stats',
+      icon: '📊',
+      label: 'Watch Stats',
+      description: 'View your watching activity'
+    },
+    {
       path: '/settings',
       icon: '⚙️',
       label: 'Settings',

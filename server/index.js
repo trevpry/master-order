@@ -16,6 +16,7 @@ const PlexSyncService = require('./plexSyncService'); // Added import
 const BackgroundSyncService = require('./backgroundSyncService'); // Added import
 const ArtworkCacheService = require('./artworkCacheService'); // Added import
 const subOrderService = require('./subOrderService'); // Added import
+const WatchLogService = require('./watchLogService'); // Added import
 
 // Initialize services
 const plexDb = new PlexDatabaseService();
@@ -23,6 +24,7 @@ const tvdbDb = new TvdbDatabaseService();
 const plexSync = new PlexSyncService(); // Initialize the sync service
 const backgroundSync = new BackgroundSyncService(); // Initialize background sync service
 const artworkCache = new ArtworkCacheService(); // Initialize artwork cache service
+const watchLogService = new WatchLogService(prisma); // Initialize watch log service
 const PlexPlayerService = require('./plexPlayerService');
 const plexPlayer = new PlexPlayerService(); // Initialize Plex player service
 
@@ -2644,6 +2646,60 @@ app.put('/api/custom-orders/:id/items/:itemId', async (req, res) => {
         }
       }
     });
+
+    // Log watched activity for TV and movie content
+    if (isWatched !== undefined && isWatched === true && (item.mediaType === 'tv' || item.mediaType === 'movie')) {
+      try {
+        const watchLogData = {
+          mediaType: item.mediaType,
+          title: item.title,
+          customOrderItemId: item.id,
+          plexKey: item.plexKey
+        };
+
+        // Add episode-specific data for TV content
+        if (item.mediaType === 'tv') {
+          watchLogData.seriesTitle = item.seriesTitle;
+          watchLogData.seasonNumber = item.seasonNumber;
+          watchLogData.episodeNumber = item.episodeNumber;
+        }
+
+        // Try to get duration from Plex data if available
+        if (item.plexKey) {
+          try {
+            // Attempt to get duration from Plex database
+            let plexItem = null;
+            if (item.mediaType === 'tv') {
+              plexItem = await prisma.plexTVEpisode.findFirst({
+                where: { ratingKey: item.plexKey }
+              });
+            } else if (item.mediaType === 'movie') {
+              plexItem = await prisma.plexMovie.findFirst({
+                where: { ratingKey: item.plexKey }
+              });
+            }
+            
+            if (plexItem && plexItem.duration) {
+              // Convert from milliseconds to minutes
+              watchLogData.duration = Math.round(plexItem.duration / (1000 * 60));
+            }
+          } catch (plexError) {
+            console.warn('Could not retrieve duration from Plex data:', plexError.message);
+          }
+        }
+
+        // Set default duration if not found
+        if (!watchLogData.duration) {
+          watchLogData.duration = item.mediaType === 'movie' ? 120 : 45; // Default: 2h for movies, 45min for TV
+        }
+
+        await watchLogService.logWatched(watchLogData);
+        console.log(`Logged watch activity for ${item.mediaType}: ${item.title}`);
+      } catch (watchLogError) {
+        console.warn('Failed to log watch activity:', watchLogError.message);
+        // Don't fail the whole request if watch logging fails
+      }
+    }
     
     // If this is a sub-order and it's being marked as watched/unwatched, 
     // check if we need to update all items in the sub-order
@@ -2965,6 +3021,275 @@ app.get('/api/debug/sections', async (req, res) => {
     res.status(500).json({ error: 'Failed to get Plex sections' });
   }
 });
+
+// ==================== READING SESSION ENDPOINTS ====================
+
+// Start a reading session
+app.post('/api/reading/start', async (req, res) => {
+  try {
+    const { mediaType, title, seriesTitle, customOrderItemId } = req.body;
+    
+    console.log('Reading session start request:', { mediaType, title, seriesTitle, customOrderItemId });
+    
+    if (!mediaType || !title) {
+      console.log('Missing required fields - mediaType or title');
+      return res.status(400).json({ error: 'Missing required fields: mediaType and title are required' });
+    }
+
+    if (!customOrderItemId) {
+      console.log('Missing customOrderItemId - using default value');
+      // Use a default value or generate one if customOrderItemId is missing
+      const defaultId = Date.now(); // Use timestamp as fallback
+      console.log('Using fallback customOrderItemId:', defaultId);
+    }
+
+    if (!['book', 'comic', 'shortstory'].includes(mediaType)) {
+      console.log('Invalid media type:', mediaType);
+      return res.status(400).json({ error: 'Invalid media type for reading' });
+    }
+
+    const finalCustomOrderItemId = customOrderItemId || Date.now();
+    
+    const readingSession = await watchLogService.startReading({
+      mediaType,
+      title,
+      seriesTitle,
+      customOrderItemId: finalCustomOrderItemId
+    });
+
+    console.log('Reading session started successfully:', readingSession.id);
+    res.json(readingSession);
+  } catch (error) {
+    console.error('Error starting reading session:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Pause/Resume the active reading session
+app.post('/api/reading/pause', async (req, res) => {
+  try {
+    console.log('Attempting to pause/resume reading session...');
+    
+    // Find the active reading session
+    const activeSession = await watchLogService.getActiveReadingSession();
+    
+    console.log('Active session found:', activeSession);
+    
+    if (!activeSession) {
+      console.log('No active reading session found');
+      return res.status(404).json({ error: 'No active reading session found' });
+    }
+
+    console.log('Pausing/resuming session with ID:', activeSession.id);
+    const updatedSession = await watchLogService.pauseReading(activeSession.id);
+    console.log('Session paused/resumed successfully');
+    res.json(updatedSession);
+  } catch (error) {
+    console.error('Error pausing reading session:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Stop the active reading session
+app.post('/api/reading/stop', async (req, res) => {
+  try {
+    console.log('Attempting to stop reading session...');
+    
+    // Find the active reading session
+    const activeSession = await watchLogService.getActiveReadingSession();
+    
+    console.log('Active session found:', activeSession);
+    
+    if (!activeSession) {
+      console.log('No active reading session found');
+      return res.status(404).json({ error: 'No active reading session found' });
+    }
+
+    console.log('Stopping session with ID:', activeSession.id);
+    const completedSession = await watchLogService.stopReading(activeSession.id);
+    console.log('Session stopped successfully');
+    res.json(completedSession);
+  } catch (error) {
+    console.error('Error stopping reading session:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Get the current active reading session
+app.get('/api/reading/active', async (req, res) => {
+  try {
+    console.log('Getting active reading session...');
+    const activeSession = await watchLogService.getActiveReadingSession();
+    console.log('Active session:', activeSession);
+    res.json(activeSession);
+  } catch (error) {
+    console.error('Error getting active reading session:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Manual reading log endpoint (for testing)
+app.post('/api/reading/log', async (req, res) => {
+  try {
+    const watchLogData = {
+      mediaType: req.body.mediaType,
+      activityType: 'read',
+      title: req.body.title,
+      seriesTitle: req.body.seriesTitle,
+      customOrderItemId: req.body.customOrderItemId,
+      startTime: req.body.startTime,
+      endTime: req.body.endTime,
+      totalWatchTime: req.body.totalWatchTime,
+      isCompleted: true
+    };
+
+    const watchLog = await watchLogService.logWatched(watchLogData);
+    res.json({ success: true, watchLog });
+  } catch (error) {
+    console.error('Error logging reading session:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ==================== WATCH STATISTICS ENDPOINTS ====================
+
+// Get watch statistics with flexible date filtering
+app.get('/api/watch-stats', async (req, res) => {
+  try {
+    const { 
+      startDate, 
+      endDate, 
+      groupBy = 'day',
+      period = 'week' // 'today', 'week', 'month', 'year', 'all', or 'custom'
+    } = req.query;
+
+    let actualStartDate = null;
+    let actualEndDate = null;
+
+    // Handle predefined periods
+    switch (period) {
+      case 'today':
+        actualStartDate = new Date();
+        actualStartDate.setHours(0, 0, 0, 0);
+        actualEndDate = new Date();
+        actualEndDate.setHours(23, 59, 59, 999);
+        break;
+      case 'week':
+        actualEndDate = new Date();
+        actualStartDate = new Date();
+        actualStartDate.setDate(actualStartDate.getDate() - 7);
+        break;
+      case 'month':
+        actualEndDate = new Date();
+        actualStartDate = new Date();
+        actualStartDate.setMonth(actualStartDate.getMonth() - 1);
+        break;
+      case 'year':
+        actualEndDate = new Date();
+        actualStartDate = new Date();
+        actualStartDate.setFullYear(actualStartDate.getFullYear() - 1);
+        break;
+      case 'custom':
+        if (startDate) actualStartDate = new Date(startDate);
+        if (endDate) actualEndDate = new Date(endDate);
+        break;
+      case 'all':
+      default:
+        // No date filtering
+        break;
+    }
+
+    const stats = await watchLogService.getWatchStats({
+      startDate: actualStartDate,
+      endDate: actualEndDate,
+      groupBy: groupBy
+    });
+
+    // Add formatted time strings
+    stats.totalStats.totalWatchTimeFormatted = watchLogService.formatWatchTime(stats.totalStats.totalWatchTime);
+    stats.totalStats.totalTvWatchTimeFormatted = watchLogService.formatWatchTime(stats.totalStats.totalTvWatchTime);
+    stats.totalStats.totalMovieWatchTimeFormatted = watchLogService.formatWatchTime(stats.totalStats.totalMovieWatchTime);
+    stats.totalStats.totalReadTimeFormatted = watchLogService.formatWatchTime(stats.totalStats.totalReadTime);
+    stats.totalStats.totalBookReadTimeFormatted = watchLogService.formatWatchTime(stats.totalStats.totalBookReadTime);
+    stats.totalStats.totalComicReadTimeFormatted = watchLogService.formatWatchTime(stats.totalStats.totalComicReadTime);
+    stats.totalStats.totalShortStoryReadTimeFormatted = watchLogService.formatWatchTime(stats.totalStats.totalShortStoryReadTime);
+    stats.totalStats.totalActivityTimeFormatted = watchLogService.formatWatchTime(stats.totalStats.totalActivityTime);
+
+    stats.groupedStats = stats.groupedStats.map(group => ({
+      ...group,
+      totalWatchTimeFormatted: watchLogService.formatWatchTime(group.totalWatchTime),
+      tvWatchTimeFormatted: watchLogService.formatWatchTime(group.tvWatchTime),
+      movieWatchTimeFormatted: watchLogService.formatWatchTime(group.movieWatchTime),
+      totalReadTimeFormatted: watchLogService.formatWatchTime(group.totalReadTime || 0),
+      bookReadTimeFormatted: watchLogService.formatWatchTime(group.bookReadTime || 0),
+      comicReadTimeFormatted: watchLogService.formatWatchTime(group.comicReadTime || 0),
+      shortStoryReadTimeFormatted: watchLogService.formatWatchTime(group.shortStoryReadTime || 0)
+    }));
+
+    res.json(stats);
+  } catch (error) {
+    console.error('Error getting watch statistics:', error);
+    res.status(500).json({ error: 'Failed to get watch statistics' });
+  }
+});
+
+// Get recent watch activity
+app.get('/api/watch-stats/recent', async (req, res) => {
+  try {
+    const { limit = 20 } = req.query;
+    const recentActivity = await watchLogService.getRecentActivity(parseInt(limit));
+    
+    // Add formatted times
+    const formattedActivity = recentActivity.map(log => ({
+      ...log,
+      durationFormatted: watchLogService.formatWatchTime(log.duration),
+      totalWatchTimeFormatted: watchLogService.formatWatchTime(log.totalWatchTime)
+    }));
+
+    res.json(formattedActivity);
+  } catch (error) {
+    console.error('Error getting recent watch activity:', error);
+    res.status(500).json({ error: 'Failed to get recent watch activity' });
+  }
+});
+
+// Get today's watch statistics
+app.get('/api/watch-stats/today', async (req, res) => {
+  try {
+    const todayStats = await watchLogService.getTodayStats();
+    
+    // Add formatted time strings for watch activities
+    todayStats.totalStats.totalWatchTimeFormatted = watchLogService.formatWatchTime(todayStats.totalStats.totalWatchTime);
+    todayStats.totalStats.totalTvWatchTimeFormatted = watchLogService.formatWatchTime(todayStats.totalStats.totalTvWatchTime);
+    todayStats.totalStats.totalMovieWatchTimeFormatted = watchLogService.formatWatchTime(todayStats.totalStats.totalMovieWatchTime);
+    
+    // Add formatted time strings for reading activities
+    todayStats.totalStats.totalReadTimeFormatted = watchLogService.formatWatchTime(todayStats.totalStats.totalReadTime || 0);
+    todayStats.totalStats.totalBookReadTimeFormatted = watchLogService.formatWatchTime(todayStats.totalStats.totalBookReadTime || 0);
+    todayStats.totalStats.totalComicReadTimeFormatted = watchLogService.formatWatchTime(todayStats.totalStats.totalComicReadTime || 0);
+    todayStats.totalStats.totalShortStoryReadTimeFormatted = watchLogService.formatWatchTime(todayStats.totalStats.totalShortStoryReadTime || 0);
+    todayStats.totalStats.totalActivityTimeFormatted = watchLogService.formatWatchTime(todayStats.totalStats.totalActivityTime || 0);
+
+    res.json(todayStats);
+  } catch (error) {
+    console.error('Error getting today\'s watch statistics:', error);
+    res.status(500).json({ error: 'Failed to get today\'s watch statistics' });
+  }
+});
+
+// Manual watch log entry (for items not automatically tracked)
+app.post('/api/watch-logs', async (req, res) => {
+  try {
+    const watchLogData = req.body;
+    const watchLog = await watchLogService.logWatched(watchLogData);
+    res.json(watchLog);
+  } catch (error) {
+    console.error('Error creating watch log:', error);
+    res.status(500).json({ error: 'Failed to create watch log' });
+  }
+});
+
+// ==================== END WATCH STATISTICS ENDPOINTS ====================
 
 // Serve React app for all other routes in production
 if (process.env.NODE_ENV === 'production') {

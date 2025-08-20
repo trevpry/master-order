@@ -110,6 +110,9 @@ model CustomOrderItem {
   containedStories       CustomOrderItem[] @relation("StoryInBook")
   referencedCustomOrder  CustomOrder?      @relation("SubOrderReference", fields: [referencedCustomOrderId], references: [id])
   customOrder            CustomOrder       @relation(fields: [customOrderId], references: [id], onDelete: Cascade)
+  
+  // Watch logs for this item
+  watchLogs              WatchLog[]
 }
 
 model PlexLibrarySection {
@@ -577,4 +580,27 @@ model PlexLabel {
   updatedAt      DateTime    @updatedAt
   show           PlexTVShow? @relation(fields: [showRatingKey], references: [ratingKey])
   movie          PlexMovie?  @relation(fields: [movieRatingKey], references: [ratingKey])
+}
+
+model WatchLog {
+  id              Int      @id @default(autoincrement())
+  mediaType       String   // 'tv', 'movie', 'book', 'comic', 'shortstory'
+  activityType    String   @default("watch") // 'watch' or 'read'
+  title           String
+  seriesTitle     String?  // For TV episodes, the series name
+  seasonNumber    Int?     // For TV episodes
+  episodeNumber   Int?     // For TV episodes
+  plexKey         String?  // If available
+  customOrderItemId Int?   // Link to custom order item if applicable
+  startTime       DateTime
+  endTime         DateTime?
+  duration        Int?     // Duration in minutes
+  totalWatchTime  Int?     // Actual watch/read time in minutes (for pause tracking)
+  isCompleted     Boolean  @default(true) // Whether the full content was watched/read
+  isPaused        Boolean  @default(false) // Current pause state for active sessions
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  
+  // Optional relation to custom order item
+  customOrderItem CustomOrderItem? @relation(fields: [customOrderItemId], references: [id])
 }

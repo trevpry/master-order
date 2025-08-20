@@ -14,6 +14,11 @@ function Home() {  const [selectedMedia, setSelectedMedia] = useState(null);
   const [markingWatched, setMarkingWatched] = useState(false);
   const [playingOnPlex, setPlayingOnPlex] = useState(false);
   const [findingNewSeries, setFindingNewSeries] = useState(false);
+  
+  // Reading session state
+  const [readingSession, setReadingSession] = useState(null);
+  const [readingTimer, setReadingTimer] = useState(0);
+  const [readingActionLoading, setReadingActionLoading] = useState('');
 
   // WebSocket connection for Plex webhook notifications
   useEffect(() => {
@@ -69,6 +74,203 @@ function Home() {  const [selectedMedia, setSelectedMedia] = useState(null);
       socket.disconnect();
     };
   }, []);
+
+  // Timer effect for reading sessions
+  useEffect(() => {
+    let interval = null;
+    
+    if (readingSession && !readingSession.isPaused) {
+      interval = setInterval(() => {
+        setReadingTimer(prev => prev + 1);
+      }, 1000);
+    }
+    
+    return () => {
+      if (interval) {
+        clearInterval(interval);
+      }
+    };
+  }, [readingSession]);
+
+  // Check for active reading session on load
+  useEffect(() => {
+    const checkActiveSession = async () => {
+      try {
+        const response = await fetch(`${config.apiBaseUrl}/api/reading/active`);
+        if (response.ok) {
+          const activeSession = await response.json();
+          if (activeSession) {
+            setReadingSession(activeSession);
+            // Calculate elapsed time if session is active
+            if (!activeSession.isPaused) {
+              const elapsed = Math.floor((Date.now() - new Date(activeSession.startTime)) / 1000);
+              setReadingTimer(elapsed);
+            }
+          }
+        }
+      } catch (error) {
+        console.error('Error checking active reading session:', error);
+      }
+    };
+    
+    checkActiveSession();
+  }, []);
+
+  // Reading control functions
+  const startReading = async () => {
+    if (!selectedMedia || !['book', 'comic', 'shortstory'].includes(selectedMedia.type)) {
+      return;
+    }
+
+    setReadingActionLoading('start');
+    try {
+      const response = await fetch(`${config.apiBaseUrl}/api/reading/start`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          mediaType: selectedMedia.type,
+          title: selectedMedia.type === 'book' ? selectedMedia.title :
+                 selectedMedia.type === 'comic' ? `${selectedMedia.comicSeries} #${selectedMedia.comicIssue}` :
+                 selectedMedia.storyTitle || selectedMedia.title,
+          seriesTitle: selectedMedia.type === 'comic' ? selectedMedia.comicSeries :
+                      selectedMedia.type === 'book' ? selectedMedia.bookAuthor :
+                      selectedMedia.storyAuthor,
+          customOrderItemId: selectedMedia.customOrderItemId || selectedMedia.id || selectedMedia.plexRatingKey
+        })
+      });
+
+      if (response.ok) {
+        const session = await response.json();
+        setReadingSession(session);
+        setReadingTimer(0);
+        toast.success(`📚 Started reading "${session.title}"`, {
+          duration: 3000,
+          position: 'top-right'
+        });
+      } else {
+        const error = await response.json();
+        toast.error(`Failed to start reading: ${error.error}`, {
+          duration: 4000,
+          position: 'top-right'
+        });
+      }
+    } catch (error) {
+      console.error('Error starting reading session:', error);
+      toast.error('Error starting reading session', {
+        duration: 4000,
+        position: 'top-right'
+      });
+    } finally {
+      setReadingActionLoading('');
+    }
+  };
+
+  const pauseReading = async () => {
+    if (!readingSession) return;
+
+    setReadingActionLoading('pause');
+    try {
+      const response = await fetch(`${config.apiBaseUrl}/api/reading/pause`, {
+        method: 'POST'
+      });
+
+      if (response.ok) {
+        const updatedSession = await response.json();
+        setReadingSession(updatedSession);
+        toast.success(updatedSession.isPaused ? '⏸️ Reading paused' : '▶️ Reading resumed', {
+          duration: 2000,
+          position: 'top-right'
+        });
+      } else {
+        const error = await response.json();
+        toast.error(`Failed to pause/resume reading: ${error.error}`, {
+          duration: 4000,
+          position: 'top-right'
+        });
+      }
+    } catch (error) {
+      console.error('Error pausing/resuming reading session:', error);
+      toast.error('Error pausing/resuming reading session', {
+        duration: 4000,
+        position: 'top-right'
+      });
+    } finally {
+      setReadingActionLoading('');
+    }
+  };
+
+  const stopReading = async () => {
+    if (!readingSession) return;
+
+    setReadingActionLoading('stop');
+    try {
+      const response = await fetch(`${config.apiBaseUrl}/api/reading/stop`, {
+        method: 'POST'
+      });
+
+      if (response.ok) {
+        const completedSession = await response.json();
+        setReadingSession(null);
+        setReadingTimer(0);
+        
+        const formatTime = (seconds) => {
+          const hours = Math.floor(seconds / 3600);
+          const minutes = Math.floor((seconds % 3600) / 60);
+          const secs = seconds % 60;
+          
+          if (hours > 0) {
+            return `${hours}h ${minutes}m ${secs}s`;
+          } else if (minutes > 0) {
+            return `${minutes}m ${secs}s`;
+          } else {
+            return `${secs}s`;
+          }
+        };
+        
+        if (completedSession.deleted) {
+          // Session was deleted because it was less than 1 minute
+          toast.info(`🗑️ Reading session discarded (less than 1 minute)`, {
+            duration: 4000,
+            position: 'top-right'
+          });
+        } else {
+          // Session was completed and saved
+          toast.success(`🏁 Reading session completed! Total time: ${formatTime(completedSession.totalTime)}`, {
+            duration: 5000,
+            position: 'top-right'
+          });
+        }
+      } else {
+        const error = await response.json();
+        toast.error(`Failed to stop reading: ${error.error}`, {
+          duration: 4000,
+          position: 'top-right'
+        });
+      }
+    } catch (error) {
+      console.error('Error stopping reading session:', error);
+      toast.error('Error stopping reading session', {
+        duration: 4000,
+        position: 'top-right'
+      });
+    } finally {
+      setReadingActionLoading('');
+    }
+  };
+
+  const formatReadingTime = (seconds) => {
+    const hours = Math.floor(seconds / 3600);
+    const minutes = Math.floor((seconds % 3600) / 60);
+    const secs = seconds % 60;
+    
+    if (hours > 0) {
+      return `${hours}:${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+    } else {
+      return `${minutes}:${secs.toString().padStart(2, '0')}`;
+    }
+  };
 
   const callExpressRoute = async () => {
       setLoading(true);
@@ -458,6 +660,77 @@ function Home() {  const [selectedMedia, setSelectedMedia] = useState(null);
               >
                 {playingOnPlex ? '⏳' : '🎬'}
               </Button>
+            )}
+
+            {/* Reading controls for books, comics, and short stories */}
+            {selectedMedia && ['book', 'comic', 'shortstory'].includes(selectedMedia.type) && (
+              <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                {/* Reading timer display */}
+                {readingSession && (
+                  <div style={{ 
+                    color: '#fff', 
+                    fontSize: '14px', 
+                    fontWeight: 'bold',
+                    padding: '8px 12px',
+                    backgroundColor: readingSession.isPaused ? '#f39c12' : '#27ae60',
+                    borderRadius: '4px',
+                    minWidth: '80px',
+                    textAlign: 'center'
+                  }}>
+                    {formatReadingTime(readingTimer)}
+                    {readingSession.isPaused && ' (Paused)'}
+                  </div>
+                )}
+                
+                {/* Start/Stop button */}
+                {!readingSession ? (
+                  <Button
+                    onClick={startReading}
+                    disabled={readingActionLoading === 'start'}
+                    style={{ 
+                      backgroundColor: '#27ae60', 
+                      color: '#fff',
+                      minWidth: '40px',
+                      padding: '8px 12px'
+                    }}
+                    title="Start reading session"
+                  >
+                    {readingActionLoading === 'start' ? '⏳' : '▶️'}
+                  </Button>
+                ) : (
+                  <>
+                    {/* Pause/Resume button */}
+                    <Button
+                      onClick={pauseReading}
+                      disabled={readingActionLoading === 'pause'}
+                      style={{ 
+                        backgroundColor: readingSession.isPaused ? '#27ae60' : '#f39c12', 
+                        color: '#fff',
+                        minWidth: '40px',
+                        padding: '8px 12px'
+                      }}
+                      title={readingSession.isPaused ? "Resume reading session" : "Pause reading session"}
+                    >
+                      {readingActionLoading === 'pause' ? '⏳' : (readingSession.isPaused ? '▶️' : '⏸️')}
+                    </Button>
+                    
+                    {/* Stop button */}
+                    <Button
+                      onClick={stopReading}
+                      disabled={readingActionLoading === 'stop'}
+                      style={{ 
+                        backgroundColor: '#e74c3c', 
+                        color: '#fff',
+                        minWidth: '40px',
+                        padding: '8px 12px'
+                      }}
+                      title="Stop reading session"
+                    >
+                      {readingActionLoading === 'stop' ? '⏳' : '⏹️'}
+                    </Button>
+                  </>
+                )}
+              </div>
             )}
           </div>
           

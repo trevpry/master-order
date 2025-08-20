@@ -6,6 +6,7 @@ import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
 import Settings from './pages/settings/index';
 import Home from './pages/index';
 import CustomOrders from './pages/custom-orders/index';
+import WatchStats from './pages/watch-stats/index';
 import Layout from './components/Layout';
 
 function App() {
@@ -16,6 +17,7 @@ function App() {
           <Route path="/" element={<Home />} />
           <Route path="/custom-orders" element={<CustomOrders />} />
           <Route path="/custom-orders/:orderId" element={<CustomOrders />} />
+          <Route path="/watch-stats" element={<WatchStats />} />
           <Route path="/settings" element={<Settings />} />
         </Routes>
       </Layout>
