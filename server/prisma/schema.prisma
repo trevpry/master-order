@@ -47,14 +47,21 @@ model CustomOrder {
   createdAt   DateTime          @default(now())
   updatedAt   DateTime          @updatedAt
   icon        String?
+  parentOrderId Int?            // Foreign key for parent custom order
+  
   items       CustomOrderItem[]
+  referencingItems CustomOrderItem[] @relation("SubOrderReference") // Items that reference this order as a sub-order
+  
+  // Self-referencing relationships for hierarchical orders
+  parentOrder CustomOrder?      @relation("OrderHierarchy", fields: [parentOrderId], references: [id])
+  subOrders   CustomOrder[]     @relation("OrderHierarchy")
 }
 
 model CustomOrderItem {
   id                     Int               @id @default(autoincrement())
   customOrderId          Int
   mediaType              String
-  plexKey                String
+  plexKey                String?
   title                  String
   seasonNumber           Int?
   episodeNumber          Int?
@@ -98,8 +105,10 @@ model CustomOrderItem {
   tvdbDirector           String?
   tvdbStudio             String?
   tvdbArtworkUrl         String?
+  referencedCustomOrderId Int?              // For sub-order items, references the CustomOrder id
   storyContainedInBook   CustomOrderItem?  @relation("StoryInBook", fields: [storyContainedInBookId], references: [id])
   containedStories       CustomOrderItem[] @relation("StoryInBook")
+  referencedCustomOrder  CustomOrder?      @relation("SubOrderReference", fields: [referencedCustomOrderId], references: [id])
   customOrder            CustomOrder       @relation(fields: [customOrderId], references: [id], onDelete: Cascade)
 }
 

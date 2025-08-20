@@ -15,6 +15,7 @@ const TVDBService = require('./tvdbService'); // Added import
 const PlexSyncService = require('./plexSyncService'); // Added import
 const BackgroundSyncService = require('./backgroundSyncService'); // Added import
 const ArtworkCacheService = require('./artworkCacheService'); // Added import
+const subOrderService = require('./subOrderService'); // Added import
 
 // Initialize services
 const plexDb = new PlexDatabaseService();
@@ -322,17 +323,93 @@ app.get('/api/comicvine/search-with-issues', async (req, res) => {
         console.warn(`Error checking issue ${issueNumber} for series ${series.name}:`, error.message);
         // Continue checking other series
       }
-    }    // Sort results with multiple criteria for better accuracy
+    }    // Helper function to calculate word matching score with exact match priority
+    const calculateWordMatchingScore = (seriesName, searchQuery) => {
+      if (!seriesName || !searchQuery) return 0;
+      
+      const originalSearchLower = searchQuery.toLowerCase().trim();
+      const originalSeriesLower = seriesName.toLowerCase().trim();
+      
+      // Exact match without any normalization (highest priority)
+      if (originalSearchLower === originalSeriesLower) {
+        return 1.0;
+      }
+      
+      // Normalize titles by removing common variations
+      const normalize = (title) => {
+        return title.toLowerCase()
+          .replace(/\s*\((\d{4})\)\s*/g, ' ') // Remove years like (2005)
+          .replace(/\s*\(uk\)\s*/gi, ' ') // Remove (UK)
+          .replace(/\s*\(us\)\s*/gi, ' ') // Remove (US)
+          .replace(/\s*\(american\)\s*/gi, ' ') // Remove (American)
+          .replace(/\s*\(british\)\s*/gi, ' ') // Remove (British)
+          .replace(/\s*\(original\)\s*/gi, ' ') // Remove (Original)
+          .replace(/\s*\(reboot\)\s*/gi, ' ') // Remove (Reboot)
+          .replace(/\s*\(remake\)\s*/gi, ' ') // Remove (Remake)
+          .replace(/\s+/g, ' ') // Normalize spaces
+          .trim();
+      };
+      
+      const normalizedSearch = normalize(searchQuery);
+      const normalizedSeries = normalize(seriesName);
+      
+      // Exact match after normalization (second highest priority)
+      if (normalizedSearch === normalizedSeries) {
+        // Give a slight penalty based on how much normalization was needed
+        const originalLength = originalSeriesLower.length;
+        const normalizedLength = normalizedSeries.length;
+        const normalizationPenalty = (originalLength - normalizedLength) / originalLength * 0.1;
+        return 0.95 - normalizationPenalty; // Score between 0.85-0.95
+      }
+      
+      // Word matching logic (lower priority than exact matches)
+      // Clean and split search query into words (ignore common words)
+      const searchWords = normalizedSearch
+        .replace(/[^\w\s]/g, ' ') // Replace punctuation with spaces
+        .split(/\s+/)
+        .filter(word => word.length > 2 && !['the', 'and', 'vol', 'volume'].includes(word));
+      
+      // Clean series name
+      const seriesNameNormalized = normalizedSeries
+        .replace(/[^\w\s]/g, ' ') // Replace punctuation with spaces
+        .replace(/\s+/g, ' ') // Normalize spaces
+        .trim();
+      
+      // Count how many search words appear in the series name
+      const matchingWords = searchWords.filter(word => 
+        seriesNameNormalized.includes(word)
+      );
+      
+      // Calculate score: (matching words / total search words) with bonus for more matches
+      const matchRatio = matchingWords.length / Math.max(searchWords.length, 1);
+      const bonusForMoreMatches = matchingWords.length * 0.05; // Small bonus for absolute number of matches
+      
+      // Scale word matching score to be lower than exact matches (0.1-0.8)
+      return 0.1 + (matchRatio * 0.6) + bonusForMoreMatches;
+    };
+
+    // Sort results with multiple criteria for better accuracy
     if (filteredSeries.length > 1) {
       console.log(`Sorting ${filteredSeries.length} results with multiple criteria...`);
       
       // Sort with comprehensive ranking:
-      // 1. DC Comics publisher gets highest priority (main US publisher for most series)
-      // 2. Earlier publication years get priority (original series vs international reprints)
-      // 3. Title matches (if issueTitle provided)
-      // 4. Higher issue count (main series typically have more issues)
+      // 1. Word matching score (prioritize series with most words from input)
+      // 2. DC Comics publisher gets high priority (main US publisher for most series)
+      // 3. Earlier publication years get priority (original series vs international reprints)
+      // 4. Title matches (if issueTitle provided)
+      // 5. Higher issue count (main series typically have more issues)
       filteredSeries.sort((a, b) => {
-        // 1. Publisher priority - DC Comics first, then Marvel, then others
+        // 1. Word matching score - highest priority
+        const aWordScore = calculateWordMatchingScore(a.name, query);
+        const bWordScore = calculateWordMatchingScore(b.name, query);
+        
+        console.log(`  Word matching: "${a.name}" = ${aWordScore.toFixed(3)}, "${b.name}" = ${bWordScore.toFixed(3)}`);
+        
+        if (Math.abs(aWordScore - bWordScore) > 0.1) { // Only prioritize if significant difference
+          return bWordScore - aWordScore; // Higher word score wins
+        }
+        
+        // 2. Publisher priority - DC Comics first, then Marvel, then others
         const getPublisherPriority = (series) => {
           const publisher = (series.publisher?.name || '').toLowerCase();
           if (publisher.includes('dc comics') || publisher === 'dc') return 100;
@@ -416,7 +493,8 @@ app.get('/api/comicvine/search-with-issues', async (req, res) => {
         const publisher = series.publisher?.name || 'Unknown';
         const titleMatch = issueTitle && series.issueName && 
           series.issueName.toLowerCase().includes(issueTitle.toLowerCase()) ? '✅' : '❌';
-        console.log(`  ${index + 1}. ${series.name} (${series.start_year}) - ${publisher} - "${series.issueName}" ${titleMatch}`);
+        const wordScore = calculateWordMatchingScore(series.name, query);
+        console.log(`  ${index + 1}. ${series.name} (${series.start_year}) - ${publisher} - "${series.issueName}" ${titleMatch} - Word Score: ${wordScore.toFixed(3)}`);
       });
     }
 
@@ -1698,13 +1776,34 @@ app.get('/api/custom-orders', async (req, res) => {
         items: {
           include: {
             storyContainedInBook: true,
-            containedStories: true
+            containedStories: true,
+            referencedCustomOrder: true // Include referenced custom order for sub-order items
           },
           orderBy: { sortOrder: 'asc' }
+        },
+        parentOrder: true,
+        subOrders: {
+          include: {
+            items: {
+              include: {
+                storyContainedInBook: true,
+                containedStories: true
+              },
+              orderBy: { sortOrder: 'asc' }
+            }
+          }
         }
       },
       orderBy: { createdAt: 'desc' }
     });
+    
+    // Sync sub-order items for all parent orders (ensure consistency)
+    for (const order of customOrders) {
+      if (order.subOrders.length > 0) {
+        await subOrderService.syncSubOrderItems(order.id);
+      }
+    }
+    
     res.json(customOrders);
   } catch (error) {
     console.error('Error fetching custom orders:', error);
@@ -1715,19 +1814,39 @@ app.get('/api/custom-orders', async (req, res) => {
 // Create a new custom order
 app.post('/api/custom-orders', async (req, res) => {
   try {
-    const { name, description, icon } = req.body;
+    const { name, description, icon, parentOrderId } = req.body;
     
     if (!name || name.trim() === '') {
       return res.status(400).json({ error: 'Custom order name is required' });
+    }
+    
+    // Validate parent order exists if specified
+    if (parentOrderId) {
+      const parentOrder = await prisma.customOrder.findUnique({
+        where: { id: parseInt(parentOrderId) }
+      });
+      if (!parentOrder) {
+        return res.status(400).json({ error: 'Parent custom order not found' });
+      }
     }
     
     const customOrder = await prisma.customOrder.create({
       data: {
         name: name.trim(),
         description: description?.trim() || null,
-        icon: icon?.trim() || null
+        icon: icon?.trim() || null,
+        parentOrderId: parentOrderId ? parseInt(parentOrderId) : null
+      },
+      include: {
+        parentOrder: true,
+        subOrders: true
       }
     });
+    
+    // If this order has a parent, create a sub-order item in the parent
+    if (parentOrderId) {
+      await subOrderService.createSubOrderItems(customOrder.id, parseInt(parentOrderId));
+    }
     
     res.status(201).json(customOrder);
   } catch (error) {
@@ -1747,6 +1866,38 @@ app.get('/api/custom-orders/count', async (req, res) => {
   }
 });
 
+// Get available parent orders (excluding sub-orders and the specified order itself)
+app.get('/api/custom-orders/available-parents/:excludeId?', async (req, res) => {
+  try {
+    const { excludeId } = req.params;
+    
+    const whereCondition = {
+      parentOrderId: null // Only top-level orders can be parents
+    };
+    
+    // Exclude the specified order if provided (prevent self-reference)
+    if (excludeId) {
+      whereCondition.id = { not: parseInt(excludeId) };
+    }
+    
+    const availableParents = await prisma.customOrder.findMany({
+      where: whereCondition,
+      select: {
+        id: true,
+        name: true,
+        description: true,
+        icon: true
+      },
+      orderBy: { name: 'asc' }
+    });
+    
+    res.json(availableParents);
+  } catch (error) {
+    console.error('Error fetching available parent orders:', error);
+    res.status(500).json({ error: 'Failed to fetch available parent orders' });
+  }
+});
+
 // Get a specific custom order
 app.get('/api/custom-orders/:id', async (req, res) => {
   try {
@@ -1757,7 +1908,8 @@ app.get('/api/custom-orders/:id', async (req, res) => {
         items: {
           include: {
             storyContainedInBook: true,
-            containedStories: true
+            containedStories: true,
+            referencedCustomOrder: true // Include referenced custom order for sub-order items
           },
           orderBy: { sortOrder: 'asc' }
         }
@@ -1768,7 +1920,33 @@ app.get('/api/custom-orders/:id', async (req, res) => {
       return res.status(404).json({ error: 'Custom order not found' });
     }
     
-    res.json(customOrder);
+    // Sync sub-order items if this is a parent order
+    const hasSubOrders = await prisma.customOrder.count({
+      where: { parentOrderId: parseInt(id) }
+    });
+    
+    if (hasSubOrders > 0) {
+      await subOrderService.syncSubOrderItems(parseInt(id));
+      
+      // Re-fetch the order with updated sub-order items
+      const updatedOrder = await prisma.customOrder.findUnique({
+        where: { id: parseInt(id) },
+        include: {
+          items: {
+            include: {
+              storyContainedInBook: true,
+              containedStories: true,
+              referencedCustomOrder: true
+            },
+            orderBy: { sortOrder: 'asc' }
+          }
+        }
+      });
+      
+      res.json(updatedOrder);
+    } else {
+      res.json(customOrder);
+    }
   } catch (error) {
     console.error('Error fetching custom order:', error);
     res.status(500).json({ error: 'Failed to fetch custom order' });
@@ -1779,25 +1957,89 @@ app.get('/api/custom-orders/:id', async (req, res) => {
 app.put('/api/custom-orders/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    const { name, description, isActive, icon } = req.body;
+    const { name, description, isActive, icon, parentOrderId } = req.body;
+    
+    // Get current order to check for parent changes
+    const currentOrder = await prisma.customOrder.findUnique({
+      where: { id: parseInt(id) }
+    });
+    
+    if (!currentOrder) {
+      return res.status(404).json({ error: 'Custom order not found' });
+    }
+    
+    // Validate parent order exists if specified
+    if (parentOrderId !== undefined && parentOrderId !== null) {
+      // Prevent circular references
+      if (parseInt(parentOrderId) === parseInt(id)) {
+        return res.status(400).json({ error: 'A custom order cannot be its own parent' });
+      }
+      
+      const parentOrder = await prisma.customOrder.findUnique({
+        where: { id: parseInt(parentOrderId) }
+      });
+      if (!parentOrder) {
+        return res.status(400).json({ error: 'Parent custom order not found' });
+      }
+      
+      // Check for circular reference (if parent has this order as its parent)
+      if (parentOrder.parentOrderId === parseInt(id)) {
+        return res.status(400).json({ error: 'Cannot create circular parent-child relationship' });
+      }
+    }
     
     const updateData = {};
     if (name !== undefined) updateData.name = name.trim();
     if (description !== undefined) updateData.description = description?.trim() || null;
     if (isActive !== undefined) updateData.isActive = isActive;
-    if (icon !== undefined) updateData.icon = icon?.trim() || null;      const customOrder = await prisma.customOrder.update({
+    if (icon !== undefined) updateData.icon = icon?.trim() || null;
+    if (parentOrderId !== undefined) updateData.parentOrderId = parentOrderId ? parseInt(parentOrderId) : null;
+
+    const customOrder = await prisma.customOrder.update({
       where: { id: parseInt(id) },
       data: updateData,
       include: {
         items: {
           include: {
             storyContainedInBook: true,
-            containedStories: true
+            containedStories: true,
+            referencedCustomOrder: true // Include referenced custom order for sub-order items
           },
           orderBy: { sortOrder: 'asc' }
+        },
+        parentOrder: true,
+        subOrders: {
+          include: {
+            items: {
+              include: {
+                storyContainedInBook: true,
+                containedStories: true
+              },
+              orderBy: { sortOrder: 'asc' }
+            }
+          }
         }
       }
     });
+    
+    // Handle parent order changes
+    const oldParentId = currentOrder.parentOrderId;
+    const newParentId = parentOrderId !== undefined ? (parentOrderId ? parseInt(parentOrderId) : null) : oldParentId;
+    
+    if (oldParentId !== newParentId) {
+      // Remove from old parent if it had one
+      if (oldParentId) {
+        await subOrderService.removeSubOrderItems(parseInt(id));
+      }
+      
+      // Add to new parent if it has one
+      if (newParentId) {
+        await subOrderService.createSubOrderItems(parseInt(id), newParentId);
+      }
+    } else if (newParentId) {
+      // If parent didn't change but we have a parent, update the sub-order item
+      await subOrderService.updateSubOrderItems(parseInt(id));
+    }
     
     res.json(customOrder);
   } catch (error) {
@@ -1810,6 +2052,10 @@ app.put('/api/custom-orders/:id', async (req, res) => {
 app.delete('/api/custom-orders/:id', async (req, res) => {
   try {
     const { id } = req.params;
+    
+    // Remove any sub-order items that reference this order
+    await subOrderService.removeSubOrderItems(parseInt(id));
+    
     await prisma.customOrder.delete({
       where: { id: parseInt(id) }
     });
@@ -2392,9 +2638,52 @@ app.put('/api/custom-orders/:id/items/:itemId', async (req, res) => {
       where: { id: parseInt(itemId) },
       data: updateData,
       include: {
-        storyContainedInBook: true
+        storyContainedInBook: true,
+        referencedCustomOrder: {
+          include: { items: true }
+        }
       }
     });
+    
+    // If this is a sub-order and it's being marked as watched/unwatched, 
+    // check if we need to update all items in the sub-order
+    if (item.mediaType === 'suborder' && (isWatched !== undefined)) {
+      if (isWatched && item.referencedCustomOrder) {
+        // Mark all items in the sub-order as watched
+        await prisma.customOrderItem.updateMany({
+          where: {
+            customOrderId: item.referencedCustomOrder.id,
+            isWatched: false
+          },
+          data: { isWatched: true }
+        });
+        console.log(`Marked all items in sub-order "${item.referencedCustomOrder.name}" as watched`);
+      }
+    }
+    
+    // If this is a regular item in a sub-order and it's being marked as watched,
+    // check if all items in the sub-order are now watched and update the parent sub-order item
+    if (item.mediaType !== 'suborder' && isWatched !== undefined) {
+      const customOrder = await prisma.customOrder.findUnique({
+        where: { id: item.customOrderId },
+        include: { items: true, parentOrder: true }
+      });
+      
+      if (customOrder && customOrder.parentOrderId) {
+        // This is a sub-order, check if it's fully watched and update the parent's sub-order item
+        const isFullyWatched = subOrderService.isSubOrderFullyWatched(customOrder);
+        
+        await prisma.customOrderItem.updateMany({
+          where: {
+            mediaType: 'suborder',
+            referencedCustomOrderId: customOrder.id
+          },
+          data: { isWatched: isFullyWatched }
+        });
+        
+        console.log(`Updated sub-order item for "${customOrder.name}" - watched: ${isFullyWatched}`);
+      }
+    }
       // If this is a book re-selection, cache new artwork in background
     if (isBookReselect) {
       console.log(`Re-caching artwork for re-selected book: ${item.title}`);

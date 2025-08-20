@@ -31,6 +31,32 @@ class TvdbDatabaseService {
     }
   }
 
+  // Get all potentially matching series for scoring
+  async getAllCachedSeries(seriesName) {
+    try {
+      const allSeries = await this.prisma.tvdbSeries.findMany({
+        where: {
+          name: {
+            contains: seriesName
+          }
+        },
+        include: {
+          seasons: {
+            include: {
+              episodes: true,
+              artworks: true
+            }
+          },
+          artworks: true
+        }
+      });
+      return allSeries;
+    } catch (error) {
+      console.error('Error getting all cached series:', error);
+      return [];
+    }
+  }
+
   async getCachedSeriesById(tvdbId) {
     try {
       const series = await this.prisma.tvdbSeries.findUnique({

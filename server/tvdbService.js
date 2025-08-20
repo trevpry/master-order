@@ -44,8 +44,92 @@ class TVDBService {
         }
       });
 
-      console.log(`TVDB search results for "${query}" (type: ${type}):`, response.data.data?.slice(0, 2));
-      return response.data.data || [];
+      const searchResults = response.data.data || [];
+      console.log(`TVDB search results for "${query}" (type: ${type}):`, searchResults.slice(0, 2));
+      
+      // Apply matching priority logic for series searches
+      if (type === 'series' && searchResults.length > 1) {
+        console.log(`Sorting ${searchResults.length} TVDB ${type} results with matching priority...`);
+        
+        const calculateSeriesMatchScore = (searchTitle, resultTitle) => {
+          if (!searchTitle || !resultTitle) return 0;
+          
+          const originalSearchLower = searchTitle.toLowerCase().trim();
+          const originalResultLower = resultTitle.toLowerCase().trim();
+          
+          // Exact match without any normalization (highest priority)
+          if (originalSearchLower === originalResultLower) {
+            return 1.0;
+          }
+          
+          // Normalize titles by removing common variations
+          const normalize = (title) => {
+            return title.toLowerCase()
+              .replace(/\s*\((\d{4})\)\s*/g, ' ') // Remove years like (2005)
+              .replace(/\s*\(uk\)\s*/gi, ' ') // Remove (UK)
+              .replace(/\s*\(us\)\s*/gi, ' ') // Remove (US)
+              .replace(/\s*\(american\)\s*/gi, ' ') // Remove (American)
+              .replace(/\s*\(british\)\s*/gi, ' ') // Remove (British)
+              .replace(/\s*\(original\)\s*/gi, ' ') // Remove (Original)
+              .replace(/\s*\(reboot\)\s*/gi, ' ') // Remove (Reboot)
+              .replace(/\s*\(remake\)\s*/gi, ' ') // Remove (Remake)
+              .replace(/\s+/g, ' ') // Normalize spaces
+              .trim();
+          };
+          
+          const normalizedSearch = normalize(searchTitle);
+          const normalizedResult = normalize(resultTitle);
+          
+          // Exact match after normalization (second highest priority)
+          if (normalizedSearch === normalizedResult) {
+            // Give a slight penalty based on how much normalization was needed
+            const originalLength = originalResultLower.length;
+            const normalizedLength = normalizedResult.length;
+            const normalizationPenalty = (originalLength - normalizedLength) / originalLength * 0.1;
+            return 0.95 - normalizationPenalty; // Score between 0.85-0.95
+          }
+          
+          // Partial match where normalized search is contained in normalized result
+          if (normalizedResult.includes(normalizedSearch)) {
+            // Score higher for shorter result titles
+            const lengthPenalty = (originalResultLower.length - originalSearchLower.length) / Math.max(originalResultLower.length, 1);
+            return 0.8 - (lengthPenalty * 0.2); // Score between 0.6-0.8
+          }
+          
+          // Partial match where normalized result is contained in normalized search
+          if (normalizedSearch.includes(normalizedResult)) {
+            return 0.6;
+          }
+          
+          // Bidirectional partial match (fallback)
+          if (originalResultLower.includes(originalSearchLower) || originalSearchLower.includes(originalResultLower)) {
+            const lengthPenalty = Math.abs(originalResultLower.length - originalSearchLower.length) / Math.max(originalResultLower.length, originalSearchLower.length);
+            return 0.4 - (lengthPenalty * 0.2); // Score between 0.2-0.4
+          }
+          
+          return 0;
+        };
+        
+        // Score and sort the results
+        const scoredResults = searchResults.map(result => ({
+          ...result,
+          matchScore: calculateSeriesMatchScore(query, result.name)
+        })).filter(result => result.matchScore > 0);
+        
+        scoredResults.sort((a, b) => b.matchScore - a.matchScore);
+        
+        if (scoredResults.length > 0) {
+          console.log(`TVDB ${type} matching results:`);
+          scoredResults.slice(0, 3).forEach((result, index) => {
+            console.log(`  ${index + 1}. "${result.name}" (score: ${result.matchScore.toFixed(3)})`);
+          });
+          
+          // Return the sorted results (without the matchScore property)
+          return scoredResults.map(({ matchScore, ...result }) => result);
+        }
+      }
+      
+      return searchResults;
     } catch (error) {
       console.error(`TVDB ${type} search failed:`, error.response?.data || error.message);
       

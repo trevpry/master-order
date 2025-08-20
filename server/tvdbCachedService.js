@@ -25,19 +25,120 @@ class TvdbCachedService {
     return !!this.bearerToken && this.bearerToken !== 'your_tvdb_bearer_token_here';
   }
 
+  // Helper method for series matching scoring
+  calculateSeriesMatchScore(searchTitle, resultTitle) {
+    if (!searchTitle || !resultTitle) return 0;
+    
+    const originalSearchLower = searchTitle.toLowerCase().trim();
+    const originalResultLower = resultTitle.toLowerCase().trim();
+    
+    // Exact match without any normalization (highest priority)
+    if (originalSearchLower === originalResultLower) {
+      return 1.0;
+    }
+    
+    // Normalize titles by removing common variations
+    const normalize = (title) => {
+      return title.toLowerCase()
+        .replace(/\s*\((\d{4})\)\s*/g, ' ') // Remove years like (2005)
+        .replace(/\s*\(uk\)\s*/gi, ' ') // Remove (UK)
+        .replace(/\s*\(us\)\s*/gi, ' ') // Remove (US)
+        .replace(/\s*\(american\)\s*/gi, ' ') // Remove (American)
+        .replace(/\s*\(british\)\s*/gi, ' ') // Remove (British)
+        .replace(/\s*\(original\)\s*/gi, ' ') // Remove (Original)
+        .replace(/\s*\(reboot\)\s*/gi, ' ') // Remove (Reboot)
+        .replace(/\s*\(remake\)\s*/gi, ' ') // Remove (Remake)
+        .replace(/\s+/g, ' ') // Normalize spaces
+        .trim();
+    };
+    
+    const normalizedSearch = normalize(searchTitle);
+    const normalizedResult = normalize(resultTitle);
+    
+    // Exact match after normalization (second highest priority)
+    if (normalizedSearch === normalizedResult) {
+      // Give a slight penalty based on how much normalization was needed
+      const originalLength = originalResultLower.length;
+      const normalizedLength = normalizedResult.length;
+      const normalizationPenalty = (originalLength - normalizedLength) / originalLength * 0.1;
+      return 0.95 - normalizationPenalty; // Score between 0.85-0.95
+    }
+    
+    // Partial match where normalized search is contained in normalized result
+    if (normalizedResult.includes(normalizedSearch)) {
+      // Score higher for shorter result titles
+      const lengthPenalty = (originalResultLower.length - originalSearchLower.length) / Math.max(originalResultLower.length, 1);
+      return 0.8 - (lengthPenalty * 0.2); // Score between 0.6-0.8
+    }
+    
+    // Partial match where normalized result is contained in normalized search
+    if (normalizedSearch.includes(normalizedResult)) {
+      return 0.6;
+    }
+    
+    // Bidirectional partial match (fallback)
+    if (originalResultLower.includes(originalSearchLower) || originalSearchLower.includes(originalResultLower)) {
+      const lengthPenalty = Math.abs(originalResultLower.length - originalSearchLower.length) / Math.max(originalResultLower.length, originalSearchLower.length);
+      return 0.4 - (lengthPenalty * 0.2); // Score between 0.2-0.4
+    }
+    
+    return 0;
+  }
+
   async searchSeries(seriesName) {
     try {
-      // First check cache
-      const cachedSeries = await this.dbService.getCachedSeries(seriesName);
-      if (cachedSeries && !await this.dbService.isCacheExpired(cachedSeries.tvdbId, this.cacheMaxAgeHours)) {
-        console.log(`Using cached TVDB series: ${cachedSeries.name}`);
-        return [this.formatSeriesForSearch(cachedSeries)];
+      // Get all potentially matching series from cache
+      const allCachedSeries = await this.dbService.getAllCachedSeries(seriesName);
+      let validCachedSeries = [];
+      
+      if (allCachedSeries.length > 0) {
+        // Filter out expired cached series
+        for (const series of allCachedSeries) {
+          if (!await this.dbService.isCacheExpired(series.tvdbId, this.cacheMaxAgeHours)) {
+            validCachedSeries.push(series);
+          }
+        }
       }
 
-      // If not in cache or expired, fetch from API
+      let bestCachedMatch = null;
+      let bestCachedScore = 0;
+
+      // If we have valid cached results, apply matching logic to them
+      if (validCachedSeries.length > 0) {
+        console.log(`Found ${validCachedSeries.length} cached TVDB series for "${seriesName}"`);
+        
+        // Apply matching algorithm to cached results
+        const scoredCachedResults = validCachedSeries.map(series => ({
+          series,
+          score: this.calculateSeriesMatchScore(seriesName, series.name)
+        })).sort((a, b) => b.score - a.score);
+        
+        console.log('Cached results scoring:');
+        scoredCachedResults.forEach(result => {
+          console.log(`  "${result.series.name}" - Score: ${result.score.toFixed(3)}`);
+        });
+        
+        bestCachedMatch = scoredCachedResults[0];
+        bestCachedScore = bestCachedMatch.score;
+        
+        // Only use cached result if it's an excellent match (score > 0.98 for exact or very close matches)
+        if (bestCachedScore >= 0.98) {
+          console.log(`Using cached TVDB series: ${bestCachedMatch.series.name} (score: ${bestCachedScore.toFixed(3)})`);
+          return [this.formatSeriesForSearch(bestCachedMatch.series)];
+        } else {
+          console.log(`Best cached match "${bestCachedMatch.series.name}" has score ${bestCachedScore.toFixed(3)} (< 0.98), searching API for better match`);
+        }
+      }
+
+      // If no good cached match or no cache, fetch from API
       if (!this.isTokenAvailable()) {
         console.log('TVDB bearer token not available');
-        return cachedSeries ? [this.formatSeriesForSearch(cachedSeries)] : [];
+        // Fall back to best cached match if available, even with low score
+        if (bestCachedMatch) {
+          console.log(`Using best available cached series: ${bestCachedMatch.series.name}`);
+          return [this.formatSeriesForSearch(bestCachedMatch.series)];
+        }
+        return [];
       }
       
       const response = await axios.get(`${this.baseURL}/search`, {
@@ -51,19 +152,7 @@ class TvdbCachedService {
       });
 
       const searchResults = response.data.data || [];
-      console.log(`TVDB search results for "${seriesName}":`, searchResults.slice(0, 2));      // Store the first result in cache if available
-      if (searchResults.length > 0) {
-        try {
-          const firstResult = searchResults[0];
-          // Get extended details and store in cache
-          const seriesDetails = await this.getSeriesDetailsFromAPI(firstResult.id);
-          if (seriesDetails) {
-            await this.dbService.storeSeries(seriesDetails);
-          }
-        } catch (cacheError) {
-          console.error('Error caching search result:', cacheError);
-        }
-      }
+      console.log(`TVDB search results for "${seriesName}":`, searchResults.slice(0, 2));
 
       // Transform API results to expected format
       const transformedResults = searchResults.map(result => ({
@@ -78,15 +167,110 @@ class TvdbCachedService {
         overview: result.overview
       }));
 
+      // Apply the same matching logic to API results
+      if (transformedResults.length > 0) {
+        console.log(`Sorting ${transformedResults.length} TVDB API results with matching priority...`);
+        
+        // Score and sort the API results
+        const scoredAPIResults = transformedResults.map(result => ({
+          ...result,
+          matchScore: this.calculateSeriesMatchScore(seriesName, result.name)
+        })).filter(result => result.matchScore > 0);
+        
+        scoredAPIResults.sort((a, b) => b.matchScore - a.matchScore);
+        
+        if (scoredAPIResults.length > 0) {
+          console.log(`TVDB API series matching results:`);
+          scoredAPIResults.slice(0, 3).forEach((result, index) => {
+            console.log(`  ${index + 1}. "${result.name}" (score: ${result.matchScore.toFixed(3)})`);
+          });
+          
+          const bestAPIResult = scoredAPIResults[0];
+          
+          // Compare with best cached result
+          if (bestCachedMatch && bestCachedScore >= bestAPIResult.matchScore) {
+            console.log(`Cached result "${bestCachedMatch.series.name}" (${bestCachedScore.toFixed(3)}) is better than or equal to API result "${bestAPIResult.name}" (${bestAPIResult.matchScore.toFixed(3)})`);
+            return [this.formatSeriesForSearch(bestCachedMatch.series)];
+          }
+          
+          console.log(`Using API result "${bestAPIResult.name}" (score: ${bestAPIResult.matchScore.toFixed(3)})`);
+          
+          // Remove the matchScore property before returning
+          const finalResults = scoredAPIResults.map(({ matchScore, ...result }) => result);
+          
+          // Store the best (first) result in cache
+          try {
+            const seriesDetails = await this.getSeriesDetailsFromAPI(bestAPIResult.id);
+            if (seriesDetails) {
+              await this.dbService.storeSeries(seriesDetails);
+              console.log(`Cached new series: ${seriesDetails.name}`);
+            }
+          } catch (cacheError) {
+            console.error('Error caching API result:', cacheError);
+          }
+          
+          return finalResults;
+        }
+      }
+
+      // If no good API results, fall back to best cached match if available
+      if (bestCachedMatch) {
+        console.log(`No good API matches found, using cached result: ${bestCachedMatch.series.name}`);
+        return [this.formatSeriesForSearch(bestCachedMatch.series)];
+      }
+
+      // Store the first API result in cache if available (fallback for no scoring matches)
+      if (transformedResults.length > 0) {
+        try {
+          const firstResult = transformedResults[0];
+          const seriesDetails = await this.getSeriesDetailsFromAPI(firstResult.id);
+          if (seriesDetails) {
+            await this.dbService.storeSeries(seriesDetails);
+          }
+        } catch (cacheError) {
+          console.error('Error caching fallback result:', cacheError);
+        }
+      }
+
       return transformedResults;
     } catch (error) {
       console.error('TVDB series search failed:', error.response?.data || error.message);
       
-      // Fallback to cache even if expired
+      // Fallback to cache only if we have a good match or no other option
+      let bestCachedMatch = null;
+      let bestCachedScore = 0;
+      
+      // Try to get cached results for fallback
+      try {
+        const allCachedSeries = await this.dbService.getAllCachedSeries(seriesName);
+        if (allCachedSeries.length > 0) {
+          const scoredCachedResults = allCachedSeries.map(series => ({
+            series,
+            score: this.calculateSeriesMatchScore(seriesName, series.name)
+          })).sort((a, b) => b.score - a.score);
+          
+          bestCachedMatch = scoredCachedResults[0];
+          bestCachedScore = bestCachedMatch.score;
+        }
+      } catch (cacheError) {
+        console.error('Error accessing cache for fallback:', cacheError.message);
+      }
+      
+      if (bestCachedMatch && bestCachedScore > 0.5) {
+        console.log(`Using cached fallback for TVDB series: ${bestCachedMatch.series.name} (score: ${bestCachedScore.toFixed(3)})`);
+        return [this.formatSeriesForSearch(bestCachedMatch.series)];
+      }
+      
+      // Last resort: check for any cached series with partial matching
       const cachedSeries = await this.dbService.getCachedSeries(seriesName);
       if (cachedSeries) {
-        console.log(`Using expired cache for TVDB series: ${cachedSeries.name}`);
-        return [this.formatSeriesForSearch(cachedSeries)];
+        const fallbackScore = this.calculateSeriesMatchScore(seriesName, cachedSeries.name);
+        if (fallbackScore > 0.3) {
+          console.log(`Using fallback cached series: ${cachedSeries.name} (score: ${fallbackScore.toFixed(3)})`);
+          return [this.formatSeriesForSearch(cachedSeries)];
+        } else {
+          console.log(`Cached series "${cachedSeries.name}" has poor match score (${fallbackScore.toFixed(3)}), not using`);
+        }
       }
       
       return [];

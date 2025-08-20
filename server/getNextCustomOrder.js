@@ -4,6 +4,7 @@ const comicVineService = require('./comicVineService');
 const openLibraryService = require('./openLibraryService');
 const PlexDatabaseService = require('./plexDatabaseService');
 const ArtworkCacheService = require('./artworkCacheService');
+const subOrderService = require('./subOrderService');
 
 const plexDb = new PlexDatabaseService();
 const artworkCache = new ArtworkCacheService();
@@ -47,17 +48,33 @@ async function checkIfTvdbItemExistsInPlex(customOrderItem) {
 async function getActiveCustomOrders() {
   try {
     const customOrders = await prisma.customOrder.findMany({
-      where: { isActive: true },
+      where: { 
+        isActive: true,
+        parentOrderId: null // Only get top-level orders (not sub-orders)
+      },
       include: {
         items: {
           where: { isWatched: false },
           orderBy: { sortOrder: 'asc' }
+        },
+        subOrders: {
+          where: { isActive: true },
+          include: {
+            items: {
+              where: { isWatched: false },
+              orderBy: { sortOrder: 'asc' }
+            }
+          }
         }
       }
     });
 
-    // Filter out custom orders with no unwatched items
-    const ordersWithItems = customOrders.filter(order => order.items.length > 0);
+    // Filter out custom orders with no unwatched items (including sub-orders)
+    const ordersWithItems = customOrders.filter(order => {
+      const hasDirectItems = order.items.length > 0;
+      const hasSubOrderItems = order.subOrders.some(subOrder => subOrder.items.length > 0);
+      return hasDirectItems || hasSubOrderItems;
+    });
     
     console.log(`Found ${ordersWithItems.length} active custom orders with unwatched items`);
     return ordersWithItems;
@@ -77,14 +94,76 @@ async function selectRandomCustomOrder(customOrders) {
   return customOrders[randomIndex];
 }
 
-// Get the next item from a custom order (first unwatched item)
+// Get the next item from a custom order (first unwatched item from order or sub-orders)
 async function getNextItemFromCustomOrder(customOrder) {
-  if (!customOrder.items || customOrder.items.length === 0) {
+  try {
+    // First check if the main order has items
+    if (customOrder.items && customOrder.items.length > 0) {
+      // Look for the first unwatched item
+      for (const item of customOrder.items) {
+        if (!item.isWatched) {
+          // If this is a sub-order item, get the next item from the sub-order
+          if (item.mediaType === 'suborder' && item.referencedCustomOrderId) {
+            console.log(`Found sub-order item: "${item.title}", diving into sub-order...`);
+            
+            try {
+              const subOrderResult = await subOrderService.getNextUnwatchedFromSubOrder(item.referencedCustomOrderId);
+              if (subOrderResult && subOrderResult.item && subOrderResult.sourceOrder) {
+                return {
+                  item: subOrderResult.item,
+                  sourceOrder: subOrderResult.sourceOrder,
+                  isFromSubOrder: true,
+                  parentOrder: customOrder,
+                  subOrderItem: item // Reference to the sub-order item in parent
+                };
+              } else {
+                // Sub-order has no unwatched items, mark the sub-order item as watched
+                console.log(`Sub-order "${item.title}" has no unwatched items, marking as watched...`);
+                await prisma.customOrderItem.update({
+                  where: { id: item.id },
+                  data: { isWatched: true }
+                });
+                continue; // Continue to next item in parent order
+              }
+            } catch (subOrderError) {
+              console.error(`Error getting item from sub-order ${item.referencedCustomOrderId}:`, subOrderError);
+              continue; // Continue to next item in parent order
+            }
+          } else {
+            // Regular item, return it
+            return {
+              item: item,
+              sourceOrder: customOrder,
+              isFromSubOrder: false
+            };
+          }
+        }
+      }
+    }
+
+    // If no items in main order, check sub-orders (fallback for old hierarchy system)
+    if (customOrder.subOrders && customOrder.subOrders.length > 0) {
+      for (const subOrder of customOrder.subOrders) {
+        if (subOrder.items && subOrder.items.length > 0) {
+          for (const item of subOrder.items) {
+            if (!item.isWatched) {
+              return {
+                item: item,
+                sourceOrder: subOrder,
+                isFromSubOrder: true,
+                parentOrder: customOrder
+              };
+            }
+          }
+        }
+      }
+    }
+
+    return null;
+  } catch (error) {
+    console.error(`Error in getNextItemFromCustomOrder for order ${customOrder.id}:`, error);
     return null;
   }
-
-  // Return the first unwatched item (they're already sorted by sortOrder)
-  return customOrder.items[0];
 }
 
 // Fetch full media details from Plex or generate for comics and books
@@ -414,6 +493,9 @@ async function getNextCustomOrder() {
     // Try to find a playable item from the custom orders
     let nextItem = null;
     let selectedOrderToUse = selectedOrder;
+    let sourceOrder = null;
+    let isFromSubOrder = false;
+    let parentOrder = null;
     let attempts = 0;
     const maxAttempts = Math.min(customOrders.length, 5); // Limit attempts to avoid infinite loops
 
@@ -421,9 +503,9 @@ async function getNextCustomOrder() {
       attempts++;
       
       // Get the next item from the current custom order
-      const candidateItem = await getNextItemFromCustomOrder(selectedOrderToUse);
+      const candidateResult = await getNextItemFromCustomOrder(selectedOrderToUse);
       
-      if (!candidateItem) {
+      if (!candidateResult) {
         console.log(`No unwatched items in custom order: "${selectedOrderToUse.name}"`);
         
         // Try a different custom order
@@ -437,6 +519,28 @@ async function getNextCustomOrder() {
         }
         break;
       }
+
+      // Validate candidateResult structure
+      if (!candidateResult.item || !candidateResult.sourceOrder) {
+        console.error('Invalid candidateResult structure:', candidateResult);
+        console.log(`Trying different custom order due to invalid result structure`);
+        
+        // Try a different custom order
+        if (attempts < maxAttempts) {
+          const remainingOrders = customOrders.filter(o => o.id !== selectedOrderToUse.id);
+          if (remainingOrders.length > 0) {
+            selectedOrderToUse = await selectRandomCustomOrder(remainingOrders);
+            console.log(`🔄 Trying different custom order: "${selectedOrderToUse.name}"`);
+            continue;
+          }
+        }
+        break;
+      }
+
+      const candidateItem = candidateResult.item;
+      sourceOrder = candidateResult.sourceOrder;
+      isFromSubOrder = candidateResult.isFromSubOrder;
+      parentOrder = candidateResult.parentOrder;
 
       // Check if this is a TVDB-only item that still doesn't exist in Plex
       if (candidateItem.isFromTvdbOnly) {
@@ -474,16 +578,28 @@ async function getNextCustomOrder() {
       };
     }
 
-    console.log(`Next item: ${nextItem.title} (${nextItem.mediaType}) from order: ${selectedOrderToUse.name}`);
+    // Determine the final source order and parent for context
+    const finalSourceOrder = sourceOrder || selectedOrderToUse;
+    const finalParentOrder = isFromSubOrder ? (parentOrder || selectedOrderToUse) : null;
+
+    console.log(`Next item: ${nextItem.title} (${nextItem.mediaType}) from order: ${finalSourceOrder.name}${isFromSubOrder ? ` (sub-order of "${finalParentOrder.name}")` : ''}`);
 
     // Fetch full media details from Plex (or generate for comics)
     const fullMediaDetails = await fetchMediaDetailsFromPlex(nextItem.plexKey, nextItem.mediaType, nextItem);
 
     // Add custom order context
-    fullMediaDetails.customOrderName = selectedOrderToUse.name;
-    fullMediaDetails.customOrderDescription = selectedOrderToUse.description;
-    fullMediaDetails.customOrderIcon = selectedOrderToUse.icon;
-    fullMediaDetails.customOrderItemId = nextItem.id;// If this is a TV episode, enhance with TVDB artwork and episode details
+    fullMediaDetails.customOrderName = finalSourceOrder.name;
+    fullMediaDetails.customOrderDescription = finalSourceOrder.description;
+    fullMediaDetails.customOrderIcon = finalSourceOrder.icon;
+    fullMediaDetails.customOrderItemId = nextItem.id;
+    
+    // Add parent order context if this is from a sub-order
+    if (isFromSubOrder && finalParentOrder) {
+      fullMediaDetails.parentCustomOrderName = finalParentOrder.name;
+      fullMediaDetails.parentCustomOrderDescription = finalParentOrder.description;
+      fullMediaDetails.parentCustomOrderIcon = finalParentOrder.icon;
+      fullMediaDetails.isFromSubOrder = true;
+    }// If this is a TV episode, enhance with TVDB artwork and episode details
     if (nextItem.mediaType === 'episode' || fullMediaDetails.type === 'episode') {
       console.log(`Enhancing TV episode "${fullMediaDetails.title}" from series "${fullMediaDetails.grandparentTitle}" with TVDB data`);
       
@@ -516,6 +632,7 @@ async function getNextCustomOrder() {
 
   } catch (error) {
     console.error('Error in getNextCustomOrder:', error.message);
+    console.error('Stack trace:', error.stack);
     return {
       message: "Error getting next custom order item",
       orderType: 'CUSTOM_ORDER'

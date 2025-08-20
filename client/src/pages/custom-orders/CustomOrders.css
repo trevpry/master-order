@@ -1302,3 +1302,94 @@
   color: #495057;
   font-weight: 600;
 }
+
+/* Hierarchy Indicators */
+.hierarchy-indicator {
+  color: #6c757d;
+  font-size: 0.9em;
+  margin-right: 0.5rem;
+  font-weight: normal;
+}
+
+.sub-orders-count {
+  color: #007bff;
+  font-size: 0.8em;
+  margin-left: 0.5rem;
+  font-weight: normal;
+  opacity: 0.8;
+}
+
+.form-help {
+  display: block;
+  font-size: 0.875rem;
+  color: #6c757d;
+  margin-top: 0.25rem;
+}
+
+.form-group select {
+  width: 100%;
+  padding: 0.75rem;
+  border: 1px solid #ced4da;
+  border-radius: 4px;
+  font-size: 1rem;
+  background-color: white;
+  transition: border-color 0.15s ease-in-out, box-shadow 0.15s ease-in-out;
+}
+
+.form-group select:focus {
+  outline: none;
+  border-color: #007bff;
+  box-shadow: 0 0 0 0.2rem rgba(0, 123, 255, 0.25);
+}
+
+/* Sub-order Item Styling */
+.item-card.sub-order-item {
+  border: 2px solid #007bff;
+  background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+  box-shadow: 0 2px 8px rgba(0, 123, 255, 0.15);
+}
+
+.item-card.sub-order-item .item-thumbnail {
+  position: relative;
+}
+
+.item-card.sub-order-item .item-thumbnail::before {
+  content: '📁';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  font-size: 2rem;
+  z-index: 2;
+  background: rgba(255, 255, 255, 0.9);
+  border-radius: 50%;
+  width: 60px;
+  height: 60px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.sub-order-stats {
+  color: #495057;
+  font-size: 0.85em;
+  margin-top: 0.25rem;
+  padding: 0.25rem 0.5rem;
+  background: rgba(0, 123, 255, 0.1);
+  border-radius: 4px;
+  font-weight: 500;
+}
+
+.sub-order-title {
+  color: #007bff;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.sub-order-title::before {
+  content: '🔗';
+  font-size: 0.9em;
+}

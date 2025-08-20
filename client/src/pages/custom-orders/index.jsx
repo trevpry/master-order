@@ -68,6 +68,10 @@ function CustomOrders() {
   
   // Drag and Drop state
   const [draggedItem, setDraggedItem] = useState(null);
+  
+  // Parent/hierarchy state
+  const [availableParents, setAvailableParents] = useState([]);
+  const [selectedParentId, setSelectedParentId] = useState(null);
   const [dragOverItem, setDragOverItem] = useState(null);
   const [isDragging, setIsDragging] = useState(false);
   
@@ -78,8 +82,11 @@ function CustomOrders() {
     description: '',
     icon: ''
   });
-    // Helper function to filter items based on preferences
+  // Helper function to filter items based on preferences
   const getFilteredItems = (items) => {
+    if (!items || !Array.isArray(items)) {
+      return [];
+    }
     return items.filter(item => {
       // Filter out reference books (books that contain short stories)
       if (item.mediaType === 'book' && item.containedStories && item.containedStories.length > 0) {
@@ -97,6 +104,9 @@ function CustomOrders() {
   
   // Helper function to get all items excluding reference books (for stats)
   const getAllNonReferenceItems = (items) => {
+    if (!items || !Array.isArray(items)) {
+      return [];
+    }
     return items.filter(item => {
       // Filter out reference books (books that contain short stories)
       if (item.mediaType === 'book' && item.containedStories && item.containedStories.length > 0) {
@@ -108,6 +118,9 @@ function CustomOrders() {
   
   // Helper function to get unwatched items excluding reference books (for stats)
   const getUnwatchedNonReferenceItems = (items) => {
+    if (!items || !Array.isArray(items)) {
+      return [];
+    }
     return items.filter(item => {
       // Filter out reference books (books that contain short stories)
       if (item.mediaType === 'book' && item.containedStories && item.containedStories.length > 0) {
@@ -118,6 +131,11 @@ function CustomOrders() {
   };
   // Helper function to generate artwork URLs for custom order items
   const getItemArtworkUrl = (item) => {
+    // Handle sub-order items - they don't have artwork, use icon fallback
+    if (item.mediaType === 'suborder') {
+      return null;
+    }
+    
     // Check if we have cached artwork
     if (item.localArtworkPath) {
       // Extract just the filename from the full path
@@ -225,27 +243,43 @@ function CustomOrders() {
     }
   };
 
+  const fetchAvailableParents = async (excludeId = null) => {
+    try {
+      const url = excludeId 
+        ? `${config.apiBaseUrl}/api/custom-orders/available-parents/${excludeId}`
+        : `${config.apiBaseUrl}/api/custom-orders/available-parents`;
+      const response = await fetch(url);
+      const parents = await response.json();
+      setAvailableParents(parents);
+    } catch (error) {
+      console.error('Error fetching available parent orders:', error);
+      setMessage('Failed to load available parent orders');
+    }
+  };
+
   // Helper function to handle viewing an order and updating URL
   const handleViewOrder = async (orderIdOrOrder) => {
     let order;
+    let orderId;
     
     if (typeof orderIdOrOrder === 'number') {
-      // If passed an ID, fetch the order
-      try {
-        const response = await fetch(`${config.apiBaseUrl}/api/custom-orders/${orderIdOrOrder}`);
-        if (response.ok) {
-          order = await response.json();
-        } else {
-          console.error('Failed to fetch order:', orderIdOrOrder);
-          return;
-        }
-      } catch (error) {
-        console.error('Error fetching order:', error);
+      orderId = orderIdOrOrder;
+    } else {
+      orderId = orderIdOrOrder.id;
+    }
+    
+    // Always fetch the order from the API to ensure we have the latest data with items
+    try {
+      const response = await fetch(`${config.apiBaseUrl}/api/custom-orders/${orderId}`);
+      if (response.ok) {
+        order = await response.json();
+      } else {
+        console.error('Failed to fetch order:', orderId);
         return;
       }
-    } else {
-      // If passed an order object, use it directly
-      order = orderIdOrOrder;
+    } catch (error) {
+      console.error('Error fetching order:', error);
+      return;
     }
     
     // Set the viewing state
@@ -275,7 +309,8 @@ function CustomOrders() {
       return;
     }
 
-    try {      const response = await fetch(`${config.apiBaseUrl}/api/custom-orders`, {
+    try {
+      const response = await fetch(`${config.apiBaseUrl}/api/custom-orders`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -283,13 +318,15 @@ function CustomOrders() {
         body: JSON.stringify({
           name: formData.name.trim(),
           description: formData.description.trim(),
-          icon: formData.icon.trim()
+          icon: formData.icon.trim(),
+          parentOrderId: selectedParentId
         }),
       });
 
       if (response.ok) {
         setMessage('Custom order created successfully');
         setFormData({ name: '', description: '', icon: '' });
+        setSelectedParentId(null);
         setShowCreateForm(false);
         fetchCustomOrders(); // Refresh the list
       } else {
@@ -541,7 +578,7 @@ function CustomOrders() {
 
     try {
       // Check if this is a short story before deletion
-      const itemToRemove = viewingOrderItems.items.find(item => item.id === itemId);
+      const itemToRemove = viewingOrderItems?.items?.find(item => item.id === itemId);
       let containingBookId = null;
       
       if (itemToRemove && itemToRemove.mediaType === 'shortstory' && itemToRemove.storyContainedInBookId) {
@@ -732,7 +769,7 @@ function CustomOrders() {
       return;
     }    try {
       // Get filtered items (same filter as in render)
-      const filteredItems = getFilteredItems(viewingOrderItems.items);
+      const filteredItems = getFilteredItems(viewingOrderItems?.items || []);
 
       // Reorder the items array
       const newItems = [...filteredItems];
@@ -1470,15 +1507,104 @@ function CustomOrders() {
             if (response.ok) {
               const results = await response.json();
                 if (item.mediaType === 'episode') {
-                // Find specific episode
-                targetMedia = results.find(result => 
+                // Helper function to calculate series name matching score
+                const calculateSeriesMatchScore = (searchTitle, resultTitle) => {
+                  if (!searchTitle || !resultTitle) return 0;
+                  
+                  const originalSearchLower = searchTitle.toLowerCase().trim();
+                  const originalResultLower = resultTitle.toLowerCase().trim();
+                  
+                  // Exact match without any normalization (highest priority)
+                  if (originalSearchLower === originalResultLower) {
+                    return 1.0;
+                  }
+                  
+                  // Normalize titles by removing common variations
+                  const normalize = (title) => {
+                    return title.toLowerCase()
+                      .replace(/\s*\((\d{4})\)\s*/g, ' ') // Remove years like (2005)
+                      .replace(/\s*\(uk\)\s*/gi, ' ') // Remove (UK)
+                      .replace(/\s*\(us\)\s*/gi, ' ') // Remove (US)
+                      .replace(/\s*\(american\)\s*/gi, ' ') // Remove (American)
+                      .replace(/\s*\(british\)\s*/gi, ' ') // Remove (British)
+                      .replace(/\s*\(original\)\s*/gi, ' ') // Remove (Original)
+                      .replace(/\s*\(reboot\)\s*/gi, ' ') // Remove (Reboot)
+                      .replace(/\s*\(remake\)\s*/gi, ' ') // Remove (Remake)
+                      .replace(/\s+/g, ' ') // Normalize spaces
+                      .trim();
+                  };
+                  
+                  const normalizedSearch = normalize(searchTitle);
+                  const normalizedResult = normalize(resultTitle);
+                  
+                  // Exact match after normalization (second highest priority)
+                  if (normalizedSearch === normalizedResult) {
+                    // Give a slight penalty based on how much normalization was needed
+                    const originalLength = originalResultLower.length;
+                    const normalizedLength = normalizedResult.length;
+                    const normalizationPenalty = (originalLength - normalizedLength) / originalLength * 0.1;
+                    return 0.95 - normalizationPenalty; // Score between 0.85-0.95
+                  }
+                  
+                  // Partial match where normalized search is contained in normalized result
+                  if (normalizedResult.includes(normalizedSearch)) {
+                    // Score higher for shorter result titles (prefer "Doctor Who" over "Doctor Who (2005)")
+                    const lengthPenalty = (originalResultLower.length - originalSearchLower.length) / Math.max(originalResultLower.length, 1);
+                    return 0.8 - (lengthPenalty * 0.2); // Score between 0.6-0.8
+                  }
+                  
+                  // Partial match where normalized result is contained in normalized search
+                  if (normalizedSearch.includes(normalizedResult)) {
+                    return 0.6;
+                  }
+                  
+                  // Bidirectional partial match (fallback)
+                  if (originalResultLower.includes(originalSearchLower) || originalSearchLower.includes(originalResultLower)) {
+                    const lengthPenalty = Math.abs(originalResultLower.length - originalSearchLower.length) / Math.max(originalResultLower.length, originalSearchLower.length);
+                    return 0.4 - (lengthPenalty * 0.2); // Score between 0.2-0.4
+                  }
+                  
+                  return 0;
+                };
+                
+                // Find all matching episodes for the season/episode combination
+                const episodeCandidates = results.filter(result => 
                   result.type === 'episode' &&
                   result.parentIndex === item.seasonNumber &&
                   result.index === item.episodeNumber &&
-                  (result.grandparentTitle.toLowerCase().includes(item.seriesOrMovie.toLowerCase()) ||
-                   item.seriesOrMovie.toLowerCase().includes(result.grandparentTitle.toLowerCase())) &&
-                  (!item.year || !result.year || result.year === item.year) // Match year if both are available
+                  (!item.year || !result.year || result.year === item.year)
                 );
+                
+                // Score each candidate and pick the best match
+                if (episodeCandidates.length > 0) {
+                  const scoredCandidates = episodeCandidates.map(candidate => ({
+                    ...candidate,
+                    matchScore: calculateSeriesMatchScore(item.seriesOrMovie, candidate.grandparentTitle)
+                  })).filter(candidate => candidate.matchScore > 0);
+                  
+                  // Sort by match score (descending) and pick the best
+                  scoredCandidates.sort((a, b) => b.matchScore - a.matchScore);
+                  
+                  if (scoredCandidates.length > 0) {
+                    const bestMatch = scoredCandidates[0];
+                    console.log(`TV Series matching: "${item.seriesOrMovie}" -> "${bestMatch.grandparentTitle}" (score: ${bestMatch.matchScore.toFixed(3)})`);
+                    targetMedia = bestMatch;
+                  }
+                } else {
+                  // Fallback: look for any episode that matches the series name
+                  const allEpisodes = results.filter(result => result.type === 'episode');
+                  const scoredEpisodes = allEpisodes.map(episode => ({
+                    ...episode,
+                    matchScore: calculateSeriesMatchScore(item.seriesOrMovie, episode.grandparentTitle)
+                  })).filter(episode => episode.matchScore > 0);
+                  
+                  scoredEpisodes.sort((a, b) => b.matchScore - a.matchScore);
+                  
+                  if (scoredEpisodes.length > 0) {
+                    console.log(`TV Series fallback match: "${item.seriesOrMovie}" -> "${scoredEpisodes[0].grandparentTitle}" (score: ${scoredEpisodes[0].matchScore.toFixed(3)})`);
+                    console.log(`Note: Specific S${item.seasonNumber}E${item.episodeNumber} not found, but series exists`);
+                  }
+                }
               } else if (item.mediaType === 'movie') {
                 // Find movie by title and optionally by year
                 let movieCandidates = results.filter(result => 
@@ -2047,7 +2173,7 @@ function CustomOrders() {
         // Check if this is a short story being linked to a book
         if (targetItem.mediaType === 'shortstory') {
           // Check if this book already exists in the order
-          const existingBook = viewingOrderItems.items.find(item => 
+          const existingBook = viewingOrderItems?.items?.find(item => 
             item.mediaType === 'book' && 
             item.bookOpenLibraryId === selectedBook.id
           );
@@ -2516,15 +2642,16 @@ function CustomOrders() {
               <div className="stat">
                 <span className="stat-label">Total Items:</span>
                 <span className="stat-value">
-                  {getAllNonReferenceItems(viewingOrderItems.items).length}
+                  {viewingOrderItems?.items ? getAllNonReferenceItems(viewingOrderItems.items).length : 0}
                 </span>
               </div>
               <div className="stat">
                 <span className="stat-label">Unwatched:</span>
                 <span className="stat-value">
-                  {getUnwatchedNonReferenceItems(viewingOrderItems.items).length}
+                  {viewingOrderItems?.items ? getUnwatchedNonReferenceItems(viewingOrderItems.items).length : 0}
                 </span>
-              </div>            </div><div className="manage-items-actions">
+              </div>
+            </div><div className="manage-items-actions">
               <Button
                 onClick={() => {
                   setShowMovieForm(true);
@@ -2612,12 +2739,13 @@ function CustomOrders() {
                 </span>
               </label>
             </div>
-          </div>          {viewingOrderItems.items.length === 0 ? (
+          </div>
+          {!viewingOrderItems?.items || viewingOrderItems.items.length === 0 ? (
             <div className="empty-state">
               <p>No items in this custom order yet.</p>
               <p>Add some movies, TV episodes, or comics to get started!</p>
             </div>
-          ) : getFilteredItems(viewingOrderItems.items).length === 0 ? (
+          ) : getFilteredItems(viewingOrderItems?.items || []).length === 0 ? (
             <div className="empty-state">
               <p>No items match the current filter.</p>
               <p>{showWatchedItems ? 'All items are hidden.' : 'All unwatched items are hidden. Toggle "Show Watched Items" to see watched items.'}</p>
@@ -2625,7 +2753,7 @@ function CustomOrders() {
           ) : (
             <>
               {/* Scroll Navigation Buttons - only show when there are more than 5 items */}
-              {getFilteredItems(viewingOrderItems.items).length > 5 && (
+              {getFilteredItems(viewingOrderItems?.items || []).length > 5 && (
                 <div className="scroll-navigation">
                   <Button
                     onClick={scrollToBottom}
@@ -2637,7 +2765,7 @@ function CustomOrders() {
                 </div>
               )}
                 <div className="items-list">
-              {getFilteredItems(viewingOrderItems.items).map((item, index) => (
+              {getFilteredItems(viewingOrderItems?.items || []).map((item, index) => (
                 <div 
                   key={item.id} 
                   className={`item-card ${item.isWatched ? 'watched' : ''} ${
@@ -2672,21 +2800,41 @@ function CustomOrders() {
                       className="thumbnail-fallback" 
                       style={{ display: getItemArtworkUrl(item) ? 'none' : 'flex' }}
                     >
-                      {item.mediaType === 'tv' ? '📺' : 
+                      {item.mediaType === 'suborder' ? '📁' :
+                       item.mediaType === 'tv' ? '📺' : 
                        item.mediaType === 'movie' ? '🎬' :
                        item.mediaType === 'comic' ? '📚' :
                        item.mediaType === 'book' ? '📖' :
-                       item.mediaType === 'shortstory' ? '📖' : '📄'}
+                       item.mediaType === 'shortstory' ? '📖' : 
+                       item.mediaType === 'webvideo' ? '🎬' : '📄'}
                     </div>
                   </div>                  <div className="item-info">
                     <div className="item-details">
                       <h4>
-                        {item.mediaType === 'comic' && item.customTitle 
-                          ? item.customTitle 
-                          : item.title
-                        }
+                        {item.mediaType === 'suborder' ? (
+                          <span className="sub-order-title">
+                            📁 {item.title}
+                            {item.referencedCustomOrder && (
+                              <span className="sub-order-stats">
+                                ({item.referencedCustomOrder.items?.filter(i => !i.isWatched).length || 0} unwatched)
+                              </span>
+                            )}
+                          </span>
+                        ) : item.mediaType === 'comic' && item.customTitle ? (
+                          item.customTitle
+                        ) : (
+                          item.title
+                        )}
                       </h4>
-                      {item.seriesTitle && (
+                      {item.mediaType === 'suborder' && item.referencedCustomOrder && (
+                        <p className="item-series">
+                          Sub-order • {item.referencedCustomOrder.items?.length || 0} items
+                          {item.referencedCustomOrder.description && (
+                            <span> • {item.referencedCustomOrder.description}</span>
+                          )}
+                        </p>
+                      )}
+                      {item.seriesTitle && item.mediaType !== 'suborder' && (
                         <p className="item-series">
                           {item.seriesTitle} - S{item.seasonNumber}E{item.episodeNumber}
                         </p>
@@ -2702,76 +2850,124 @@ function CustomOrders() {
                           {item.bookYear && ` (${item.bookYear})`}
                         </p>
                       )}
+                      {item.mediaType === 'webvideo' && (
+                        <p className="item-series">
+                          {item.webUrl && <a href={item.webUrl} target="_blank" rel="noopener noreferrer">🔗 Open Video</a>}
+                        </p>
+                      )}
                       <div className="item-meta">
-                        <span className="item-type">{item.mediaType}</span>
+                        <span className="item-type">
+                          {item.mediaType === 'suborder' ? 'sub-order' : item.mediaType}
+                        </span>
                         <span className={`item-status ${item.isWatched ? 'watched' : 'unwatched'}`}>
                           {item.isWatched ? 'Watched' : 'Unwatched'}
                         </span>
                       </div>
                     </div>
-                  </div><div className="item-actions">
-                    <Button
-                      onClick={() => handleEditItem(item)}
-                      className="secondary"
-                      size="small"
-                    >
-                      Edit Item
-                    </Button>
-                    <Button
-                      onClick={() => handleRemoveItem(viewingOrderItems.id, item.id, item.title)}
-                      className="danger"
-                      size="small"
-                    >
-                      Remove
-                    </Button>
-                    {item.mediaType === 'book' && (
-                      <Button
-                        onClick={() => handleReselectBook(item)}
-                        className="secondary"
-                        size="small"
-                      >
-                        Re-select Book
-                      </Button>
-                    )}                    {item.mediaType === 'comic' && (
-                      <Button
-                        onClick={() => handleReselectComic(item)}
-                        className="secondary"
-                        size="small"
-                      >
-                        Re-select Comic
-                      </Button>
-                    )}
-                    {item.mediaType === 'shortstory' && (
-                      <Button
-                        onClick={() => handleCollectedIn(item)}
-                        className="secondary"
-                        size="small"
-                      >
-                        Collected In...
-                      </Button>
-                    )}
-                    {!item.isWatched && (
-                      <Button
-                        onClick={() => handleMarkAsWatched(viewingOrderItems.id, item.id, item.title)}
-                        className="primary"
-                        size="small"
-                      >
-                        Mark as Watched
-                      </Button>
-                    )}
-                    {item.isWatched && (
-                      <Button
-                        onClick={() => handleMarkAsUnwatched(viewingOrderItems.id, item.id, item.title)}
-                        className="secondary"
-                        size="small"
-                      >                        Mark as Unwatched
-                      </Button>
+                  </div>                <div className="item-actions">
+                    {item.mediaType === 'suborder' ? (
+                      <>
+                        <Button
+                          onClick={() => handleViewOrder(item.referencedCustomOrder)}
+                          className="primary"
+                          size="small"
+                        >
+                          View Sub-order
+                        </Button>
+                        <Button
+                          onClick={() => handleRemoveItem(viewingOrderItems.id, item.id, item.title)}
+                          className="danger"
+                          size="small"
+                        >
+                          Remove from List
+                        </Button>
+                        {!item.isWatched && (
+                          <Button
+                            onClick={() => handleMarkAsWatched(viewingOrderItems.id, item.id, item.title)}
+                            className="secondary"
+                            size="small"
+                          >
+                            Mark All as Watched
+                          </Button>
+                        )}
+                        {item.isWatched && (
+                          <Button
+                            onClick={() => handleMarkAsUnwatched(viewingOrderItems.id, item.id, item.title)}
+                            className="secondary"
+                            size="small"
+                          >
+                            Mark as Unwatched
+                          </Button>
+                        )}
+                      </>
+                    ) : (
+                      <>
+                        <Button
+                          onClick={() => handleEditItem(item)}
+                          className="secondary"
+                          size="small"
+                        >
+                          Edit Item
+                        </Button>
+                        <Button
+                          onClick={() => handleRemoveItem(viewingOrderItems.id, item.id, item.title)}
+                          className="danger"
+                          size="small"
+                        >
+                          Remove
+                        </Button>
+                        {item.mediaType === 'book' && (
+                          <Button
+                            onClick={() => handleReselectBook(item)}
+                            className="secondary"
+                            size="small"
+                          >
+                            Re-select Book
+                          </Button>
+                        )}
+                        {item.mediaType === 'comic' && (
+                          <Button
+                            onClick={() => handleReselectComic(item)}
+                            className="secondary"
+                            size="small"
+                          >
+                            Re-select Comic
+                          </Button>
+                        )}
+                        {item.mediaType === 'shortstory' && (
+                          <Button
+                            onClick={() => handleCollectedIn(item)}
+                            className="secondary"
+                            size="small"
+                          >
+                            Collected In...
+                          </Button>
+                        )}
+                        {!item.isWatched && (
+                          <Button
+                            onClick={() => handleMarkAsWatched(viewingOrderItems.id, item.id, item.title)}
+                            className="primary"
+                            size="small"
+                          >
+                            Mark as Watched
+                          </Button>
+                        )}
+                        {item.isWatched && (
+                          <Button
+                            onClick={() => handleMarkAsUnwatched(viewingOrderItems.id, item.id, item.title)}
+                            className="secondary"
+                            size="small"
+                          >
+                            Mark as Unwatched
+                          </Button>
+                        )}
+                      </>
                     )}
                   </div>
                 </div>              ))}
             </div>
               {/* Scroll to Top button at bottom - only show when there are more than 5 items */}
-            {getFilteredItems(viewingOrderItems.items).length > 5 && (
+            {getFilteredItems(viewingOrderItems?.items || []).length > 5 && (
               <div className="scroll-navigation-bottom">
                 <Button
                   onClick={scrollToTop}
@@ -2794,6 +2990,10 @@ function CustomOrders() {
                 setFormData({ name: '', description: '', icon: '' });
                 setEditingOrder(null);
                 setMessage('');
+                setSelectedParentId(null);
+                if (!showCreateForm) {
+                  fetchAvailableParents(); // Load available parent orders when opening form
+                }
               }}
             >
               {showCreateForm ? 'Cancel' : 'Create New Custom Order'}
@@ -2824,6 +3024,24 @@ function CustomOrders() {
                 placeholder="Optional description of this custom order..."
                 rows="3"
               />
+            </div>
+            <div className="form-group">
+              <label htmlFor="parentOrder">Parent Order (Optional)</label>
+              <select
+                id="parentOrder"
+                value={selectedParentId || ''}
+                onChange={(e) => setSelectedParentId(e.target.value || null)}
+              >
+                <option value="">-- None (Top-level order) --</option>
+                {availableParents.map(parent => (
+                  <option key={parent.id} value={parent.id}>
+                    {parent.name}
+                  </option>
+                ))}
+              </select>
+              <small className="form-help">
+                If selected, this order will become a sub-order and won't be independently selectable by "Get Up Next"
+              </small>
             </div>
             <div className="form-group">
               <label htmlFor="orderIcon">Icon (SVG)</label>
@@ -2941,7 +3159,17 @@ function CustomOrders() {
                             dangerouslySetInnerHTML={{__html: order.icon}}
                           />
                         )}
+                        {order.parentOrder && (
+                          <span className="hierarchy-indicator" title={`Sub-order of "${order.parentOrder.name}"`}>
+                            ↳
+                          </span>
+                        )}
                         {order.name}
+                        {order.subOrders && order.subOrders.length > 0 && (
+                          <span className="sub-orders-count" title={`Contains ${order.subOrders.length} sub-order${order.subOrders.length > 1 ? 's' : ''}`}>
+                            ({order.subOrders.length} sub)
+                          </span>
+                        )}
                       </h3>
                     </div>
                     {order.description && <p className="order-description">{order.description}</p>}
