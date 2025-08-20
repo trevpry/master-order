@@ -1,5 +1,5 @@
 # Multi-stage build for Master Order application
-FROM node:18-alpine AS build
+FROM node:20-alpine AS build
 
 # Install dependencies needed for sqlite3 and other native modules
 RUN apk add --no-cache python3 make g++
@@ -32,7 +32,7 @@ WORKDIR /app/client
 RUN npm run build
 
 # Production stage
-FROM node:18-alpine AS production
+FROM node:20-alpine AS production
 
 # Install runtime dependencies
 RUN apk add --no-cache \
