@@ -81,6 +81,8 @@ model CustomOrderItem {
   bookOpenLibraryId      String?
   bookCoverUrl           String?
   bookPageCount          Int?
+  bookCurrentPage        Int?
+  bookPercentRead        Float?
   storyTitle             String?
   storyAuthor            String?
   storyYear              Int?
