@@ -80,6 +80,7 @@ model CustomOrderItem {
   bookPublisher          String?
   bookOpenLibraryId      String?
   bookCoverUrl           String?
+  bookPageCount          Int?
   storyTitle             String?
   storyAuthor            String?
   storyYear              Int?

@@ -78,6 +78,26 @@ class OpenLibraryService {
         coverUrl = `${this.coversUrl}/id/${book.covers[0]}-L.jpg`;
       }
 
+      // Try to get page count from editions
+      let pageCount = null;
+      try {
+        const editionsResponse = await axios.get(`${this.baseUrl}/${cleanKey}/editions.json`, {
+          timeout: 10000,
+          params: { limit: 20 } // Get first 20 editions to find one with page count
+        });
+
+        if (editionsResponse.data && editionsResponse.data.entries) {
+          // Look for an edition with number_of_pages
+          const editionWithPages = editionsResponse.data.entries.find(edition => edition.number_of_pages);
+          if (editionWithPages) {
+            pageCount = editionWithPages.number_of_pages;
+            console.log(`Found page count: ${pageCount} for ${bookKey}`);
+          }
+        }
+      } catch (editionError) {
+        console.warn(`Could not fetch editions for ${bookKey}:`, editionError.message);
+      }
+
       return {
         id: book.key,
         title: book.title || 'Unknown Title',
@@ -89,7 +109,8 @@ class OpenLibraryService {
         covers: book.covers || [],
         authors: book.authors || [],
         deweyDecimal: book.dewey_decimal_class || [],
-        lcClassifications: book.lc_classifications || []
+        lcClassifications: book.lc_classifications || [],
+        pageCount: pageCount
       };
     } catch (error) {
       console.error(`Error getting book details for ${bookKey}:`, error.message);

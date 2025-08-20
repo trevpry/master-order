@@ -865,7 +865,13 @@ class WatchLogService {
         const watchTime = log.totalWatchTime || 0;
         totalStats.totalActivityTime += watchTime;
         
-        if (log.activityType === 'watch') {
+        // Determine if this is a watch or read activity
+        const isReadActivity = log.activityType === 'read' || 
+                               (log.mediaType && ['book', 'comic', 'shortstory'].includes(log.mediaType));
+        const isWatchActivity = log.activityType === 'watch' || 
+                                (log.mediaType && ['tv', 'movie'].includes(log.mediaType));
+        
+        if (isWatchActivity) {
           totalStats.totalWatchTime += watchTime;
           if (mediaType === 'tv') {
             totalStats.totalTvWatchTime += watchTime;
@@ -926,7 +932,7 @@ class WatchLogService {
           } else if (mediaType === 'movie') {
             totalStats.totalMovieWatchTime += watchTime;
           }
-        } else if (log.activityType === 'read') {
+        } else if (isReadActivity) {
           totalStats.totalReadTime += watchTime;
           if (mediaType === 'book') {
             totalStats.totalBookReadTime += watchTime;

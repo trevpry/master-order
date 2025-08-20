@@ -17,6 +17,7 @@ const BackgroundSyncService = require('./backgroundSyncService'); // Added impor
 const ArtworkCacheService = require('./artworkCacheService'); // Added import
 const subOrderService = require('./subOrderService'); // Added import
 const WatchLogService = require('./watchLogService'); // Added import
+const openLibraryService = require('./openLibraryService'); // Added import
 
 // Initialize services
 const plexDb = new PlexDatabaseService();
@@ -2091,6 +2092,7 @@ app.post('/api/custom-orders/:id/items', async (req, res) => {
       bookPublisher,
       bookOpenLibraryId,
       bookCoverUrl,
+      bookPageCount,
       storyTitle,
       storyAuthor,
       storyYear,
@@ -2276,6 +2278,37 @@ app.post('/api/custom-orders/:id/items', async (req, res) => {
     } else {
       finalPlexKey = plexKey;
     }
+
+    // Handle OpenLibrary integration for books
+    let finalBookData = {
+      bookTitle,
+      bookAuthor,
+      bookYear: bookYear ? parseInt(bookYear) : null,
+      bookIsbn,
+      bookPublisher,
+      bookOpenLibraryId,
+      bookCoverUrl,
+      bookPageCount: bookPageCount ? parseInt(bookPageCount) : null
+    };
+
+    if (mediaType === 'book' && bookOpenLibraryId && !bookPageCount) {
+      try {
+        console.log(`Fetching OpenLibrary details for: ${bookOpenLibraryId}`);
+        const bookDetails = await openLibraryService.getBookDetails(bookOpenLibraryId);
+        if (bookDetails) {
+          // Update book data with OpenLibrary details
+          finalBookData.bookPageCount = bookDetails.pageCount || null;
+          if (!bookCoverUrl && bookDetails.coverUrl) {
+            finalBookData.bookCoverUrl = bookDetails.coverUrl;
+          }
+          console.log(`Enhanced book with OpenLibrary data: pages=${bookDetails.pageCount}`);
+        }
+      } catch (error) {
+        console.warn(`Failed to fetch OpenLibrary details for ${bookOpenLibraryId}:`, error.message);
+        // Continue without OpenLibrary data
+      }
+    }
+    
     const item = await prisma.customOrderItem.create({
       data: {
         customOrderId: parseInt(id),
@@ -2290,13 +2323,14 @@ app.post('/api/custom-orders/:id/items', async (req, res) => {
         comicIssue: mediaType === 'comic' ? String(comicIssue) : null,
         comicVolume,
         customTitle,
-        bookTitle,
-        bookAuthor,
-        bookYear: bookYear ? parseInt(bookYear) : null,
-        bookIsbn,
-        bookPublisher,
-        bookOpenLibraryId,
-        bookCoverUrl,
+        bookTitle: finalBookData.bookTitle,
+        bookAuthor: finalBookData.bookAuthor,
+        bookYear: finalBookData.bookYear,
+        bookIsbn: finalBookData.bookIsbn,
+        bookPublisher: finalBookData.bookPublisher,
+        bookOpenLibraryId: finalBookData.bookOpenLibraryId,
+        bookCoverUrl: finalBookData.bookCoverUrl,
+        bookPageCount: finalBookData.bookPageCount,
         storyTitle,
         storyAuthor,
         storyYear: storyYear ? parseInt(storyYear) : null,
@@ -2517,7 +2551,7 @@ app.put('/api/custom-orders/:id/items/:itemId', async (req, res) => {
       title,
       seriesTitle, // For episodes
       // Book fields
-      bookTitle, bookAuthor, bookYear, bookIsbn, bookPublisher, bookOpenLibraryId, bookCoverUrl,
+      bookTitle, bookAuthor, bookYear, bookIsbn, bookPublisher, bookOpenLibraryId, bookCoverUrl, bookPageCount,
       // Comic fields
       comicSeries, comicYear, comicIssue, comicVolume, customTitle, comicVineId, comicVineDetailsJson, comicCoverUrl,
       // Story fields
@@ -2536,6 +2570,7 @@ app.put('/api/custom-orders/:id/items/:itemId', async (req, res) => {
       bookIsbn !== undefined || 
       bookPublisher !== undefined || 
       bookOpenLibraryId !== undefined || 
+      bookPageCount !== undefined || 
       bookCoverUrl !== undefined
     );    // Check if this is a comic re-selection (comic-specific fields are being updated)
     const isComicReselect = (
@@ -2573,6 +2608,7 @@ app.put('/api/custom-orders/:id/items/:itemId', async (req, res) => {
         if (bookIsbn !== undefined) updateData.bookIsbn = bookIsbn;
         if (bookPublisher !== undefined) updateData.bookPublisher = bookPublisher;
         if (bookOpenLibraryId !== undefined) updateData.bookOpenLibraryId = bookOpenLibraryId;
+        if (bookPageCount !== undefined) updateData.bookPageCount = bookPageCount ? parseInt(bookPageCount) : null;
         // Use new bookCoverUrl if provided, otherwise nullify to allow re-caching logic to take over
         updateData.bookCoverUrl = bookCoverUrl !== undefined ? bookCoverUrl : null;
         
@@ -2782,6 +2818,7 @@ app.post('/api/books/reference', async (req, res) => {
       bookPublisher,
       bookOpenLibraryId,
       bookCoverUrl,
+      bookPageCount,
       customOrderId // Order context is needed due to schema constraints
     } = req.body;
 
@@ -2816,6 +2853,7 @@ app.post('/api/books/reference', async (req, res) => {
         bookPublisher: bookPublisher,
         bookOpenLibraryId: bookOpenLibraryId,
         bookCoverUrl: bookCoverUrl,
+        bookPageCount: bookPageCount ? parseInt(bookPageCount) : null,
         sortOrder: 0,
         customOrderId: customOrderId,
         isWatched: true // Reference books are automatically marked as watched

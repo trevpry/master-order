@@ -94,6 +94,7 @@ const WatchStats = () => {
     setGlobalPeriod(newPeriod);
     setPeriod(newPeriod); // Keep local state in sync for compatibility
     fetchStats(newPeriod, globalGroupBy);
+    fetchAllMediaTypeStats(newPeriod); // Fetch media type stats with new period
   };
 
   // Handle global group by change
@@ -195,7 +196,17 @@ const WatchStats = () => {
   // Fetch individual media type statistics
   const fetchMediaTypeStats = async (mediaType, period = 'all') => {
     try {
-      const response = await fetch(`${config.apiBaseUrl}/api/watch-stats/media-type/${mediaType}?period=${period}&groupBy=day`);
+      let url = `${config.apiBaseUrl}/api/watch-stats/media-type/${mediaType}?period=${period}&groupBy=day`;
+      
+      // Add actor sort parameters for TV and movies
+      if (mediaType === 'tv' && actorSortBy) {
+        url += `&actorSortBy=${actorSortBy}`;
+      }
+      if (mediaType === 'movie' && movieActorSortBy) {
+        url += `&movieActorSortBy=${movieActorSortBy}`;
+      }
+      
+      const response = await fetch(url);
       if (!response.ok) throw new Error(`Failed to fetch ${mediaType} stats`);
       const data = await response.json();
       
@@ -238,8 +249,22 @@ const WatchStats = () => {
     fetchRecentActivity();
     fetchTodayStats();
     fetchCustomOrderStats();
-    fetchAllMediaTypeStats();
+    fetchAllMediaTypeStats(globalPeriod);
   }, []);
+
+  // Re-fetch TV stats when actor sort changes
+  useEffect(() => {
+    if (actorSortBy) {
+      fetchMediaTypeStats('tv', globalPeriod);
+    }
+  }, [actorSortBy]);
+
+  // Re-fetch movie stats when movie actor sort changes
+  useEffect(() => {
+    if (movieActorSortBy) {
+      fetchMediaTypeStats('movie', globalPeriod);
+    }
+  }, [movieActorSortBy]);
 
   const handlePeriodChange = (newPeriod) => {
     handleGlobalPeriodChange(newPeriod);

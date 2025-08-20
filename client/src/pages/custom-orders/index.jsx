@@ -38,7 +38,8 @@ function CustomOrders() {
     title: '',
     author: '',
     year: '',
-    isbn: ''
+    isbn: '',
+    pageCount: ''
   });  const [bookSearchResults, setBookSearchResults] = useState([]);
   const [bookSearchLoading, setBookSearchLoading] = useState(false);
   const [showComicForm, setShowComicForm] = useState(false);  const [comicFormData, setComicFormData] = useState({
@@ -454,10 +455,11 @@ function CustomOrders() {
         break;
       case 'book':
         setBookFormData({
-          title: item.title || '',
-          author: item.author || '',
-          year: item.publicationYear || '',
-          isbn: item.isbn || ''
+          title: item.bookTitle || item.title || '',
+          author: item.bookAuthor || '',
+          year: item.bookYear || '',
+          isbn: item.bookIsbn || '',
+          pageCount: item.bookPageCount || ''
         });
         setShowBookForm(true);
         break;      case 'comic':
@@ -516,7 +518,7 @@ function CustomOrders() {
         setShowWebVideoForm(false);
           // Reset form data
         setEpisodeFormData({ series: '', season: '', episode: '' });
-        setBookFormData({ title: '', author: '', year: '', isbn: '' });
+        setBookFormData({ title: '', author: '', year: '', isbn: '', pageCount: '' });
         setComicFormData({ series: '', year: '', issue: '', title: '' });
         setShortStoryFormData({ title: '', author: '', year: '', url: '', containedInBookId: '', coverUrl: '' });
         setWebVideoFormData({ title: '', url: '', description: '' });
@@ -856,7 +858,8 @@ function CustomOrders() {
         requestBody.bookIsbn = mediaItem.bookIsbn;
         requestBody.bookPublisher = mediaItem.bookPublisher;
         requestBody.bookOpenLibraryId = mediaItem.bookOpenLibraryId;
-        requestBody.bookCoverUrl = mediaItem.bookCoverUrl;      } else if (mediaType === 'shortstory') {
+        requestBody.bookCoverUrl = mediaItem.bookCoverUrl;
+        requestBody.bookPageCount = mediaItem.bookPageCount;      } else if (mediaType === 'shortstory') {
         requestBody.storyTitle = mediaItem.storyTitle;
         requestBody.storyAuthor = mediaItem.storyAuthor;
         requestBody.storyYear = mediaItem.storyYear;
@@ -2122,10 +2125,12 @@ function CustomOrders() {
     // If we're editing an item, update it directly without searching
     if (editingItem) {
       const updatedItemData = {
-        title: bookFormData.title.trim(),
-        author: bookFormData.author.trim(),
-        publicationYear: bookFormData.year ? parseInt(bookFormData.year) : null,
-        isbn: bookFormData.isbn.trim()
+        ...editingItem, // Keep existing data
+        bookTitle: bookFormData.title.trim(),
+        bookAuthor: bookFormData.author.trim(),
+        bookYear: bookFormData.year ? parseInt(bookFormData.year) : null,
+        bookIsbn: bookFormData.isbn.trim(),
+        bookPageCount: bookFormData.pageCount ? parseInt(bookFormData.pageCount) : null
       };
       await handleUpdateItem(updatedItemData);
       return;
@@ -2183,6 +2188,21 @@ function CustomOrders() {
             // Use the existing book
             bookId = existingBook.id;
           } else {            // Create a new reference book (not added to collection order)
+            // First, fetch detailed book information to get page count
+            let pageCount = null;
+            if (selectedBook.id) {
+              try {
+                const bookDetailsResponse = await fetch(`${config.apiBaseUrl}/api/openlibrary/book/${encodeURIComponent(selectedBook.id)}`);
+                if (bookDetailsResponse.ok) {
+                  const bookDetails = await bookDetailsResponse.json();
+                  pageCount = bookDetails.pageCount || null;
+                  console.log(`Fetched page count for reference book ${selectedBook.title}: ${pageCount} pages`);
+                }
+              } catch (error) {
+                console.warn(`Failed to fetch page count for reference book ${selectedBook.title}:`, error.message);
+              }
+            }
+
             const bookData = {
               title: selectedBook.title,
               bookTitle: selectedBook.title,
@@ -2192,6 +2212,7 @@ function CustomOrders() {
               bookPublisher: selectedBook.publishers && selectedBook.publishers[0] ? selectedBook.publishers[0] : null,
               bookOpenLibraryId: selectedBook.id || null,
               bookCoverUrl: selectedBook.coverUrl || null,
+              bookPageCount: pageCount,
               customOrderId: viewingOrderItems.id // Provide order context for schema compliance
             };
 
@@ -2232,7 +2253,7 @@ function CustomOrders() {
             setShowBookForm(false);
             setReselectingItem(null);
             setEditingItem(null);
-            setBookFormData({ title: '', author: '', year: '', isbn: '' });
+            setBookFormData({ title: '', author: '', year: '', isbn: '', pageCount: '' });
             setBookSearchResults([]);
             
             // Refresh the order items
@@ -2248,6 +2269,21 @@ function CustomOrders() {
           }
         } else {
           // Regular book re-selection/editing for book items
+          // First, fetch detailed book information to get page count
+          let pageCount = null;
+          if (selectedBook.id) {
+            try {
+              const bookDetailsResponse = await fetch(`${config.apiBaseUrl}/api/openlibrary/book/${encodeURIComponent(selectedBook.id)}`);
+              if (bookDetailsResponse.ok) {
+                const bookDetails = await bookDetailsResponse.json();
+                pageCount = bookDetails.pageCount || null;
+                console.log(`Fetched page count for ${selectedBook.title}: ${pageCount} pages`);
+              }
+            } catch (error) {
+              console.warn(`Failed to fetch page count for ${selectedBook.title}:`, error.message);
+            }
+          }
+
           const updateData = {
             title: selectedBook.title,
             bookTitle: selectedBook.title,
@@ -2256,7 +2292,8 @@ function CustomOrders() {
             bookIsbn: selectedBook.isbn || null,
             bookPublisher: selectedBook.publishers && selectedBook.publishers[0] ? selectedBook.publishers[0] : null,
             bookOpenLibraryId: selectedBook.id || null,
-            bookCoverUrl: selectedBook.coverUrl || null
+            bookCoverUrl: selectedBook.coverUrl || null,
+            bookPageCount: pageCount
           };
 
           const response = await fetch(`${config.apiBaseUrl}/api/custom-orders/${viewingOrderItems.id}/items/${targetItem.id}`, {
@@ -2272,7 +2309,7 @@ function CustomOrders() {
             setShowBookForm(false);
             setReselectingItem(null);
             setEditingItem(null);
-            setBookFormData({ title: '', author: '', year: '', isbn: '' });
+            setBookFormData({ title: '', author: '', year: '', isbn: '', pageCount: '' });
             setBookSearchResults([]);
             
             // Refresh the order items
@@ -2289,6 +2326,21 @@ function CustomOrders() {
         }
       } else {
         // Add new book to order (existing functionality)
+        // First, fetch detailed book information to get page count
+        let pageCount = null;
+        if (selectedBook.id) {
+          try {
+            const bookDetailsResponse = await fetch(`${config.apiBaseUrl}/api/openlibrary/book/${encodeURIComponent(selectedBook.id)}`);
+            if (bookDetailsResponse.ok) {
+              const bookDetails = await bookDetailsResponse.json();
+              pageCount = bookDetails.pageCount || null;
+              console.log(`Fetched page count for new book ${selectedBook.title}: ${pageCount} pages`);
+            }
+          } catch (error) {
+            console.warn(`Failed to fetch page count for ${selectedBook.title}:`, error.message);
+          }
+        }
+
         const bookMedia = {
           type: 'book',
           title: selectedBook.title,
@@ -2298,13 +2350,14 @@ function CustomOrders() {
           bookIsbn: selectedBook.isbn || null,
           bookPublisher: selectedBook.publishers && selectedBook.publishers[0] ? selectedBook.publishers[0] : null,
           bookOpenLibraryId: selectedBook.id || null,
-          bookCoverUrl: selectedBook.coverUrl || null
+          bookCoverUrl: selectedBook.coverUrl || null,
+          bookPageCount: pageCount
         };
 
         const success = await handleAddMediaToOrder(viewingOrderItems.id, bookMedia);
         if (success !== false) {
           setShowBookForm(false);
-          setBookFormData({ title: '', author: '', year: '', isbn: '' });
+          setBookFormData({ title: '', author: '', year: '', isbn: '', pageCount: '' });
           setBookSearchResults([]);
         }
       }
@@ -2673,7 +2726,7 @@ function CustomOrders() {
               <Button
                 onClick={() => {
                   setShowBookForm(true);
-                  setBookFormData({ title: '', author: '', year: '', isbn: '' });
+                  setBookFormData({ title: '', author: '', year: '', isbn: '', pageCount: '' });
                 }}
                 className="secondary"
               >
@@ -3670,7 +3723,7 @@ Writer: Michael Kogge`);
                   setShowBookForm(false);
                   setReselectingItem(null);
                   setEditingItem(null);
-                  setBookFormData({ title: '', author: '', year: '', isbn: '' });
+                  setBookFormData({ title: '', author: '', year: '', isbn: '', pageCount: '' });
                   setBookSearchResults([]);
                 }}
                 className="secondary"
@@ -3728,6 +3781,19 @@ Writer: Michael Kogge`);
                 />
               </div>
               
+              <div className="form-group">
+                <label htmlFor="bookPageCount">Page Count</label>
+                <input
+                  type="number"
+                  id="bookPageCount"
+                  value={bookFormData.pageCount}
+                  onChange={(e) => setBookFormData({...bookFormData, pageCount: e.target.value})}
+                  placeholder="Enter page count (optional)..."
+                  min="1"
+                  max="10000"
+                />
+              </div>
+              
               <div className="form-actions">                <Button 
                   type="submit" 
                   disabled={bookSearchLoading}
@@ -3743,7 +3809,7 @@ Writer: Michael Kogge`);
                     setShowBookForm(false);
                     setReselectingItem(null);
                     setEditingItem(null);
-                    setBookFormData({ title: '', author: '', year: '', isbn: '' });
+                    setBookFormData({ title: '', author: '', year: '', isbn: '', pageCount: '' });
                     setBookSearchResults([]);
                   }}
                   className="secondary"
@@ -3795,6 +3861,44 @@ Writer: Michael Kogge`);
                     </div>
                   ))}
                 </div>
+              </div>
+            )}
+            
+            {/* Manual Book Creation Option */}
+            {!editingItem && (
+              <div className="manual-book-option">
+                <hr className="form-divider" />
+                <p className="manual-book-text">
+                  Can't find your book? Create it manually with the information above.
+                </p>
+                <Button
+                  onClick={async () => {
+                    if (!bookFormData.title.trim()) {
+                      setMessage('Please enter a book title to create manually');
+                      return;
+                    }
+                    
+                    const manualBookData = {
+                      type: 'book',
+                      title: bookFormData.title.trim(),
+                      bookTitle: bookFormData.title.trim(),
+                      bookAuthor: bookFormData.author.trim() || 'Unknown Author',
+                      bookYear: bookFormData.year ? parseInt(bookFormData.year) : null,
+                      bookIsbn: bookFormData.isbn.trim() || null,
+                      bookPageCount: bookFormData.pageCount ? parseInt(bookFormData.pageCount) : null
+                    };
+                    
+                    const success = await handleAddMediaToOrder(viewingOrderItems.id, manualBookData);
+                    if (success !== false) {
+                      setShowBookForm(false);
+                      setBookFormData({ title: '', author: '', year: '', isbn: '', pageCount: '' });
+                      setBookSearchResults([]);
+                    }
+                  }}
+                  className="secondary"
+                >
+                  Create Book Manually
+                </Button>
               </div>
             )}
           </div>
