@@ -52,7 +52,7 @@ docker run -d \
     --name $CONTAINER_NAME \
     --restart=unless-stopped \
     -p $HOST_PORT:$CONTAINER_PORT \
-    -v "$REPO_PATH/master_order.db:/app/master_order.db" \
+    -v "$REPO_PATH/master_order.db:/app/data/master_order.db" \
     -e NODE_ENV=production \
     --network=bridge \
     $IMAGE_NAME
