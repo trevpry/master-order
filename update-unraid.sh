@@ -16,25 +16,53 @@ echo "🔄 Starting Master Order update on Unraid..."
 mkdir -p "$BACKUP_DIR"
 
 # Step 1: Create automatic database backup
-if [ -f "$REPO_PATH/master_order.db" ]; then
-    BACKUP_TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
-    BACKUP_FILE="$BACKUP_DIR/master_order_backup_$BACKUP_TIMESTAMP.db"
-    echo "💾 Creating database backup: $BACKUP_FILE"
+BACKUP_TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
+BACKUP_FILE="$BACKUP_DIR/master_order_backup_$BACKUP_TIMESTAMP.db"
+
+# First try to backup from running container
+if docker ps | grep -q "$CONTAINER_NAME"; then
+    echo "💾 Backing up database from running container..."
+    docker cp "$CONTAINER_NAME:/app/data/master_order.db" "$BACKUP_FILE"
+    
+    if [ $? -eq 0 ]; then
+        echo "✅ Container database backup created successfully: $(basename "$BACKUP_FILE")"
+        BACKUP_SUCCESS=true
+    else
+        echo "⚠️  Container backup failed, trying host filesystem..."
+        BACKUP_SUCCESS=false
+    fi
+else
+    echo "⚠️  Container not running, trying host filesystem..."
+    BACKUP_SUCCESS=false
+fi
+
+# If container backup failed, try host filesystem
+if [ "$BACKUP_SUCCESS" != "true" ] && [ -f "$REPO_PATH/master_order.db" ]; then
+    echo "💾 Backing up database from host filesystem..."
     cp "$REPO_PATH/master_order.db" "$BACKUP_FILE"
     
     if [ $? -eq 0 ]; then
-        echo "✅ Database backup created successfully"
-        # Keep only the last 10 backups to save space
-        cd "$BACKUP_DIR"
-        ls -t master_order_backup_*.db | tail -n +11 | xargs -r rm
-        echo "📁 Cleaned old backups, keeping latest 10"
-    else
-        echo "❌ Database backup failed! Aborting update."
-        exit 1
+        echo "✅ Host database backup created successfully: $(basename "$BACKUP_FILE")"
+        BACKUP_SUCCESS=true
     fi
+fi
+
+# Check if backup was successful
+if [ "$BACKUP_SUCCESS" = "true" ]; then
+    # Keep only the last 10 backups to save space
+    cd "$BACKUP_DIR"
+    ls -t master_order_backup_*.db | tail -n +11 | xargs -r rm
+    echo "📁 Cleaned old backups, keeping latest 10"
+    
+    # Show backup file size for verification
+    BACKUP_SIZE=$(ls -lh "$BACKUP_FILE" | awk '{print $5}')
+    echo "📊 Backup file size: $BACKUP_SIZE"
 else
-    echo "⚠️  No existing database found at $REPO_PATH/master_order.db"
-    echo "   This might be the first run or database is in a different location"
+    echo "⚠️  No database found to backup"
+    echo "   Checked: Container at /app/data/master_order.db"
+    echo "   Checked: Host at $REPO_PATH/master_order.db"
+    echo "   Continuing with update (this might be first run)..."
+    # Don't exit - continue with update for first-time setup
 fi
 
 # Navigate to the repository directory

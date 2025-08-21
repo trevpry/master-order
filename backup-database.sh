@@ -12,44 +12,50 @@ echo "💾 Master Order Database Backup..."
 # Create backup directory if it doesn't exist
 mkdir -p "$BACKUP_DIR"
 
-# Check if database exists
-if [ -f "$REPO_PATH/master_order.db" ]; then
-    # Backup from host file system
-    BACKUP_TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
-    BACKUP_FILE="$BACKUP_DIR/master_order_manual_backup_$BACKUP_TIMESTAMP.db"
+# Create backup directory if it doesn't exist
+mkdir -p "$BACKUP_DIR"
+
+BACKUP_TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
+
+# First try to backup from running container
+if docker ps | grep -q "$CONTAINER_NAME"; then
+    echo "📁 Backing up database from running container..."
+    BACKUP_FILE="$BACKUP_DIR/master_order_container_backup_$BACKUP_TIMESTAMP.db"
     
-    echo "📁 Backing up database to: $BACKUP_FILE"
+    docker cp "$CONTAINER_NAME:/app/data/master_order.db" "$BACKUP_FILE"
+    
+    if [ $? -eq 0 ]; then
+        echo "✅ Container database backup completed successfully!"
+        echo "📊 Backup file size: $(ls -lh "$BACKUP_FILE" | awk '{print $5}')"
+        BACKUP_SUCCESS=true
+    else
+        echo "❌ Container backup failed, trying host filesystem..."
+        BACKUP_SUCCESS=false
+    fi
+else
+    echo "⚠️  Container not running, trying host filesystem..."
+    BACKUP_SUCCESS=false
+fi
+
+# If container backup failed or container not running, try host filesystem
+if [ "$BACKUP_SUCCESS" != "true" ] && [ -f "$REPO_PATH/master_order.db" ]; then
+    echo "� Backing up database from host filesystem..."
+    BACKUP_FILE="$BACKUP_DIR/master_order_host_backup_$BACKUP_TIMESTAMP.db"
+    
     cp "$REPO_PATH/master_order.db" "$BACKUP_FILE"
     
     if [ $? -eq 0 ]; then
-        echo "✅ Database backup completed successfully!"
+        echo "✅ Host database backup completed successfully!"
         echo "📊 Backup file size: $(ls -lh "$BACKUP_FILE" | awk '{print $5}')"
-    else
-        echo "❌ Database backup failed!"
-        exit 1
+        BACKUP_SUCCESS=true
     fi
-else
-    echo "❌ Database file not found at: $REPO_PATH/master_order.db"
-    
-    # Try to backup from running container
-    if docker ps | grep -q "$CONTAINER_NAME"; then
-        echo "🔄 Attempting to backup from running container..."
-        BACKUP_TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
-        BACKUP_FILE="$BACKUP_DIR/master_order_container_backup_$BACKUP_TIMESTAMP.db"
-        
-        docker cp "$CONTAINER_NAME:/app/data/master_order.db" "$BACKUP_FILE"
-        
-        if [ $? -eq 0 ]; then
-            echo "✅ Container database backup completed!"
-            echo "📊 Backup file size: $(ls -lh "$BACKUP_FILE" | awk '{print $5}')"
-        else
-            echo "❌ Container backup also failed!"
-            exit 1
-        fi
-    else
-        echo "❌ Container not running and no host database found!"
-        exit 1
-    fi
+fi
+
+if [ "$BACKUP_SUCCESS" != "true" ]; then
+    echo "❌ No database found to backup!"
+    echo "   Checked: Container at /app/data/master_order.db"
+    echo "   Checked: Host at $REPO_PATH/master_order.db"
+    exit 1
 fi
 
 # Show backup history
