@@ -3,6 +3,10 @@
 
 echo "🚀 Starting Master Order application..."
 
+# Set DATABASE_URL explicitly to ensure Prisma uses the correct database
+export DATABASE_URL="file:/app/data/master_order.db"
+echo "🔧 Database URL set to: $DATABASE_URL"
+
 # Ensure data directory exists and has correct permissions
 mkdir -p /app/data
 mkdir -p /app/server/artwork-cache

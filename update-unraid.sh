@@ -80,6 +80,7 @@ docker run -d \
     -p $HOST_PORT:$CONTAINER_PORT \
     -v "$REPO_PATH/master_order.db:/app/data/master_order.db" \
     -e NODE_ENV=production \
+    -e DATABASE_URL="file:/app/data/master_order.db" \
     --network=bridge \
     $IMAGE_NAME
 
