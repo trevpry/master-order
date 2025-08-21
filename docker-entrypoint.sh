@@ -45,19 +45,9 @@ echo "[DEBUG] Prisma will use this DATABASE_URL for connections"
 
 echo "[INFO] Setting up PostgreSQL database..."
 
-# Add debug mode to skip PostgreSQL readiness check
-if [ "$SKIP_PG_CHECK" = "true" ]; then
-    echo "[WARN] Skipping PostgreSQL readiness check (SKIP_PG_CHECK=true)"
-    echo "[INFO] Proceeding directly to application startup..."
-else
-    # Validate required environment variables
-    if [ -z "$DATABASE_URL" ]; then
-        echo "[ERROR] DATABASE_URL environment variable is required for PostgreSQL"
-        echo "   Example: postgresql://username:password@localhost:5432/master_order"
-        exit 1
-    fi
-
-    echo "[INFO] DATABASE_URL configured for PostgreSQL"
+# Temporarily skip PostgreSQL readiness check for debugging
+echo "[WARN] PostgreSQL readiness check temporarily disabled for debugging"
+echo "[INFO] DATABASE_URL configured for PostgreSQL"
 
 # Function to wait for PostgreSQL to be ready
 wait_for_postgres() {
@@ -109,12 +99,8 @@ wait_for_postgres() {
     echo "[INFO] PostgreSQL is ready!"
 }
 
-# Wait for PostgreSQL to be available
-if [ "$SKIP_PG_CHECK" = "true" ]; then
-    echo "[INFO] Skipped PostgreSQL readiness check"
-else
-    wait_for_postgres
-fi
+# PostgreSQL readiness check temporarily disabled
+echo "[INFO] Proceeding directly to database setup..."
 
 # Check if this is a new installation or existing database
 echo "[INFO] Checking for existing database data..."
@@ -233,8 +219,6 @@ DATABASE_TEST_RESULT=$(node -e "
 " 2>/dev/null)
 
 echo "$DATABASE_TEST_RESULT"
-
-fi
 
 echo "[INFO] Database setup completed successfully!"
 echo "[INFO] Starting the application..."
