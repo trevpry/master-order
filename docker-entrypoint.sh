@@ -18,7 +18,7 @@ env | grep -i database || echo "[DEBUG] No DATABASE_URL env vars found"
 # Force correct DATABASE_URL if it's been overridden (Docker safety check)
 if [ "$DATABASE_URL" = "file:/app/data/master_order.db" ] || echo "$DATABASE_URL" | grep -q "file:"; then
     echo "[WARN] DATABASE_URL appears to be SQLite format, forcing PostgreSQL for Docker"
-    export DATABASE_URL="postgresql://master_order_user:${POSTGRES_PASSWORD:-secure_password_change_me}@192.168.1.113:5432/master_order"
+    export DATABASE_URL="postgresql://master_order_user:${POSTGRES_PASSWORD:-secure_password_change_me}@postgresql16:5432/master_order"
     echo "[INFO] Forced DATABASE_URL to: $DATABASE_URL"
 fi
 
@@ -59,8 +59,8 @@ wait_for_postgres() {
     DB_PORT=$(echo "$DATABASE_URL" | sed -n 's|.*://[^@]*@[^:]*:\([0-9]*\)/.*|\1|p')
     
     if [ -z "$DB_HOST" ] || [ -z "$DB_PORT" ]; then
-        echo "[WARN] Could not parse host/port from DATABASE_URL, using default 192.168.1.113:5432"
-        DB_HOST="192.168.1.113"
+        echo "[WARN] Could not parse host/port from DATABASE_URL, using default postgresql16:5432"
+        DB_HOST="postgresql16"
         DB_PORT="5432"
     fi
     
@@ -104,20 +104,20 @@ echo "[INFO] Proceeding directly to database setup..."
 
 # Debug PostgreSQL connectivity
 echo "[INFO] === PostgreSQL Connection Debug ==="
-echo "[DEBUG] Testing if port 5432 is open on Unraid server (192.168.1.113)..."
-if timeout 3 bash -c "</dev/tcp/192.168.1.113/5432" 2>/dev/null; then
-    echo "[SUCCESS] Port 5432 is open and accepting connections on 192.168.1.113"
+echo "[DEBUG] Testing if port 5432 is open on postgresql16 container..."
+if timeout 3 bash -c "</dev/tcp/postgresql16/5432" 2>/dev/null; then
+    echo "[SUCCESS] Port 5432 is open and accepting connections on postgresql16"
 else
-    echo "[ERROR] Port 5432 is not accessible on 192.168.1.113"
+    echo "[ERROR] Port 5432 is not accessible on postgresql16"
 fi
 
 echo "[DEBUG] Testing with basic PostgreSQL tools..."
 if command -v psql >/dev/null 2>&1; then
-    echo "[DEBUG] Testing connection with psql to 192.168.1.113..."
-    PGPASSWORD=secure_password_change_me timeout 10 psql -h 192.168.1.113 -p 5432 -U master_order_user -d master_order -c "SELECT 1 as test;" 2>&1 || echo "[ERROR] psql connection failed to 192.168.1.113"
+    echo "[DEBUG] Testing connection with psql to postgresql16..."
+    PGPASSWORD=secure_password_change_me timeout 10 psql -h postgresql16 -p 5432 -U master_order_user -d master_order -c "SELECT 1 as test;" 2>&1 || echo "[ERROR] psql connection failed to postgresql16"
     
-    echo "[DEBUG] Testing connection to postgres database on 192.168.1.113..."
-    PGPASSWORD=secure_password_change_me timeout 10 psql -h 192.168.1.113 -p 5432 -U postgres -d postgres -c "SELECT datname FROM pg_database;" 2>&1 || echo "[ERROR] postgres user connection failed to 192.168.1.113"
+    echo "[DEBUG] Testing connection to postgres database on postgresql16..."
+    PGPASSWORD=secure_password_change_me timeout 10 psql -h postgresql16 -p 5432 -U postgres -d postgres -c "SELECT datname FROM pg_database;" 2>&1 || echo "[ERROR] postgres user connection failed to postgresql16"
 else
     echo "[INFO] psql not available for testing"
 fi
@@ -205,9 +205,26 @@ if [ "$PRESERVE_EXISTING_DATA" = true ]; then
 else
     echo "[INFO] NEW DATABASE - Initializing fresh database"
     echo "[INFO] Running Prisma migrate deploy to create schema..."
-    if ! npx prisma migrate deploy; then
-        echo "[ERROR] Database initialization failed"
-        exit 1
+    if ! npx prisma migrate deploy 2>&1; then
+        echo "[ERROR] Prisma migrate deploy failed, trying alternative approaches..."
+        
+        echo "[DEBUG] Checking Prisma migrate status..."
+        npx prisma migrate status 2>&1 || echo "[DEBUG] Migrate status failed"
+        
+        echo "[DEBUG] Trying to push schema directly..."
+        if npx prisma db push --force-reset --accept-data-loss 2>&1; then
+            echo "[SUCCESS] Schema pushed successfully using db push"
+        else
+            echo "[ERROR] Both migrate deploy and db push failed"
+            echo "[DEBUG] Attempting to generate Prisma client first..."
+            npx prisma generate 2>&1 || echo "[DEBUG] Generate failed"
+            
+            echo "[DEBUG] Final attempt with reset..."
+            npx prisma migrate reset --force --skip-seed 2>&1 || echo "[DEBUG] Reset failed"
+            exit 1
+        fi
+    else
+        echo "[SUCCESS] Prisma migrate deploy successful"
     fi
     echo "[INFO] Fresh database created and ready"
 fi
