@@ -181,10 +181,9 @@ app.get('/api/artwork/*', async (req, res) => {
   try {
     const artworkPath = req.params[0]; // Get everything after /api/artwork/
     
-    // Get settings directly from database to avoid circular dependency issues
-    const settings = await prisma.settings.findUnique({
-      where: { id: 1 }
-    });
+    // Get settings using cached database utility
+    const { getSettings } = require('./databaseUtils');
+    const settings = await getSettings();
     
     if (!settings || !settings.plexUrl || !settings.plexToken) {
       return res.status(500).send('Plex settings not configured');
@@ -623,9 +622,8 @@ app.get('/api/openlibrary-artwork', async (req, res) => {
 
 app.get('/api/settings', async (req, res) => {
   try {
-    let settings = await prisma.settings.findUnique({
-      where: { id: 1 }
-    });
+    const { getSettings } = require('./databaseUtils');
+    let settings = await getSettings();
 
     if (!settings) {
       settings = {};
@@ -790,27 +788,20 @@ app.post('/api/settings', async (req, res) => {
     if (christmasFilterEnabled !== undefined) updateData.christmasFilterEnabled = christmasFilterEnabled;
 
     // Upsert settings (create if doesn't exist, update if it does)
-    const settings = await prisma.settings.upsert({
-      where: { id: 1 },
-      update: updateData,      create: { 
-        id: 1, 
-        collectionName, 
-        tvGeneralPercent: tvGeneralPercent ?? 50, 
-        moviesGeneralPercent: moviesGeneralPercent ?? 50,
-        customOrderPercent: customOrderPercent ?? 0,
-        partiallyWatchedCollectionPercent: partiallyWatchedCollectionPercent ?? 75,
-        comicVineApiKey: comicVineApiKey?.trim() || null,
-        plexSyncInterval: plexSyncInterval ?? 12,
-        plexToken: plexToken?.trim() || null,
-        plexUrl: plexUrl?.trim() || null,
-        tvdbApiKey: tvdbApiKey?.trim() || null,
-        tvdbBearerToken: tvdbBearerToken?.trim() || null,
-        selectedPlayer: selectedPlayer?.trim() || null,
-        ignoredMovieCollections: Array.isArray(ignoredMovieCollections) ? JSON.stringify(ignoredMovieCollections) : ignoredMovieCollections || null,
-        ignoredTVCollections: Array.isArray(ignoredTVCollections) ? JSON.stringify(ignoredTVCollections) : ignoredTVCollections || null,
-        christmasFilterEnabled: christmasFilterEnabled ?? false
-      }
-    });    // Update background sync interval if it was changed
+    const { updateSettings } = require('./databaseUtils');
+    const settings = await updateSettings({
+      ...updateData,
+      // Provide defaults for create case
+      collectionName: collectionName || undefined,
+      tvGeneralPercent: tvGeneralPercent ?? 50, 
+      moviesGeneralPercent: moviesGeneralPercent ?? 50,
+      customOrderPercent: customOrderPercent ?? 0,
+      partiallyWatchedCollectionPercent: partiallyWatchedCollectionPercent ?? 75,
+      plexSyncInterval: plexSyncInterval ?? 12,
+      christmasFilterEnabled: christmasFilterEnabled ?? false
+    });
+
+    // Update background sync interval if it was changed
     if (plexSyncInterval !== undefined) {
       try {
         await backgroundSync.updateSyncInterval();
@@ -970,9 +961,8 @@ app.get('/api/plex/players', async (req, res) => {
 // Get selected player details endpoint
 app.get('/api/plex/selected-player', async (req, res) => {
   try {
-    const settings = await prisma.settings.findUnique({
-      where: { id: 1 }
-    });
+    const { getSettings } = require('./databaseUtils');
+    const settings = await getSettings();
     
     if (!settings || !settings.selectedPlayer) {
       return res.json({ selectedPlayer: null, message: 'No player selected' });

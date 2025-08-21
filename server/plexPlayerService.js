@@ -18,9 +18,8 @@ class PlexPlayerService {
 
   async initializeClient() {
     try {
-      const settings = await prisma.settings.findUnique({
-        where: { id: 1 }
-      });
+      const { getSettings } = require('./databaseUtils');
+      const settings = await getSettings();
 
       if (!settings || !settings.plexUrl || !settings.plexToken) {
         throw new Error('Plex settings not configured. Please set Plex URL and token in settings.');
