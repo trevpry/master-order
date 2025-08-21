@@ -103,11 +103,28 @@ wait_for_postgres() {
 echo "[INFO] Proceeding directly to database setup..."
 
 # Debug PostgreSQL connectivity
-echo "[INFO] Running PostgreSQL connection debug test..."
-./debug-postgres-connectivity.sh || echo "[WARN] Connection debug script failed"
+echo "[INFO] === PostgreSQL Connection Debug ==="
+echo "[DEBUG] Testing if port 5432 is open..."
+if timeout 3 bash -c "</dev/tcp/localhost/5432" 2>/dev/null; then
+    echo "[SUCCESS] Port 5432 is open and accepting connections"
+else
+    echo "[ERROR] Port 5432 is not accessible"
+    echo "[DEBUG] Checking what's listening on port 5432..."
+    netstat -tlnp 2>/dev/null | grep :5432 || echo "[INFO] Nothing found listening on port 5432"
+fi
 
-echo "[INFO] Running Node.js connection test..."
-node debug-postgres-connection.js || echo "[WARN] Node.js connection test failed"
+echo "[DEBUG] Testing with basic PostgreSQL tools..."
+if command -v psql >/dev/null 2>&1; then
+    echo "[DEBUG] Testing connection with psql..."
+    PGPASSWORD=secure_password_change_me timeout 10 psql -h localhost -p 5432 -U master_order_user -d master_order -c "SELECT 1 as test;" 2>&1 || echo "[ERROR] psql connection failed"
+    
+    echo "[DEBUG] Testing connection to postgres database..."
+    PGPASSWORD=secure_password_change_me timeout 10 psql -h localhost -p 5432 -U postgres -d postgres -c "SELECT datname FROM pg_database;" 2>&1 || echo "[ERROR] postgres user connection failed"
+else
+    echo "[INFO] psql not available for testing"
+fi
+
+echo "[INFO] === End PostgreSQL Debug ==="
 
 # Check if this is a new installation or existing database
 echo "[INFO] Checking for existing database data..."
