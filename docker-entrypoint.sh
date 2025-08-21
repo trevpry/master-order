@@ -299,9 +299,6 @@ if [ -f "prisma/schema.prisma" ]; then
                             npx prisma migrate resolve --rolled-back "$migration_dir" 2>/dev/null || true
                             npx prisma migrate resolve --applied "$migration_dir" 2>/dev/null && echo "     ✅ Resolved and marked as applied" || echo "     ⚠️ Could not resolve migration state"
                         fi
-                        else
-                            echo "⚠️ Could not mark $migration_dir as applied (may already be applied)"
-                        fi
                     done
                     
                     echo "🔄 Now attempting to deploy any remaining migrations..."
@@ -434,7 +431,6 @@ if [ -f "prisma/schema.prisma" ]; then
                             fi
                         fi
                     fi
-                        fi  # Close the "already exists" check
                 
                 # Check if this is the P3005 baseline issue
                 elif echo "$MIGRATION_OUTPUT" | grep -q "P3005"; then
