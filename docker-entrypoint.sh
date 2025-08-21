@@ -29,9 +29,7 @@ if [ ! -f "/app/data/master_order.db" ]; then
     chmod 644 /app/data/master_order.db || true
 fi
 
-# Set DATABASE_URL with proper SQLite format
-export DATABASE_URL="file:/app/data/master_order.db"
-echo "🔧 Database URL set to: $DATABASE_URL"
+echo "🔧 Using DATABASE_URL from environment: $DATABASE_URL"
 
 # Apply migrations without connection tests that might fail
 echo "� Applying database migrations..."
