@@ -22,32 +22,52 @@ cd /app/server
 
 echo "📊 Setting up database..."
 
-# CRITICAL: Ensure DATABASE_URL has proper SQLite format
+# CRITICAL: Ensure DATABASE_URL has proper SQLite format with timeout parameters
 # Use a subdirectory to avoid volume mount conflicts
 mkdir -p /app/data/db
-export DATABASE_URL="file:/app/data/db/master_order.db"
+export DATABASE_URL="file:/app/data/db/master_order.db?connection_limit=1&pool_timeout=20&socket_timeout=20"
 echo "🔧 DATABASE_URL set to: $DATABASE_URL"
 
 # Create database file if it doesn't exist
 if [ ! -f "/app/data/db/master_order.db" ]; then
     echo "🗄️ Creating new database file..."
     
-    # Create a proper SQLite database file
-    echo "🔧 Creating SQLite database file..."
-    sqlite3 /app/data/db/master_order.db "CREATE TABLE IF NOT EXISTS _temp (id INTEGER); DROP TABLE _temp;" 2>/dev/null || {
+    # Create a proper SQLite database file with optimized settings
+    echo "🔧 Creating SQLite database file with optimizations..."
+    sqlite3 /app/data/db/master_order.db << 'EOF'
+-- Set WAL mode for better concurrent access
+PRAGMA journal_mode=WAL;
+-- Optimize for performance
+PRAGMA synchronous=NORMAL;
+PRAGMA cache_size=1000;
+PRAGMA temp_store=memory;
+-- Set busy timeout to 30 seconds
+PRAGMA busy_timeout=30000;
+-- Create a minimal table to initialize the database
+CREATE TABLE IF NOT EXISTS _temp (id INTEGER); 
+DROP TABLE _temp;
+EOF
+
+    if [ $? -eq 0 ]; then
+        echo "✅ Database file created successfully with optimizations"
+    else
         echo "❌ SQLite creation failed, trying touch method..."
         touch /app/data/db/master_order.db
-    }
-    
-    # Verify it's a file, not a directory
-    if [ -f "/app/data/db/master_order.db" ]; then
-        echo "✅ Database file created successfully"
-    else
-        echo "❌ CRITICAL: Could not create database as file - volume mount issue!"
-        ls -la /app/data/db/
     fi
 else
     echo "🗄️ Database file already exists"
+    echo "🔧 Applying SQLite optimizations to existing database..."
+    sqlite3 /app/data/db/master_order.db << 'EOF'
+-- Ensure WAL mode for better concurrent access
+PRAGMA journal_mode=WAL;
+-- Optimize for performance
+PRAGMA synchronous=NORMAL;
+PRAGMA cache_size=1000;
+PRAGMA temp_store=memory;
+-- Set busy timeout to 30 seconds
+PRAGMA busy_timeout=30000;
+EOF
+    echo "✅ SQLite optimizations applied"
 fi
 
 # CRITICAL: Set proper ownership and permissions for the entire data directory structure

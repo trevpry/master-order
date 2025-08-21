@@ -80,7 +80,7 @@ RUN mkdir -p /app/data /app/server/artwork-cache /app/logs && \
 
 # Set up environment
 ENV NODE_ENV=production
-ENV DATABASE_URL="file:/app/data/db/master_order.db"
+ENV DATABASE_URL="file:/app/data/db/master_order.db?connection_limit=1&pool_timeout=20&socket_timeout=20"
 ENV PORT=3001
 
 # Expose port

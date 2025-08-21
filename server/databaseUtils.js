@@ -3,9 +3,9 @@ const prisma = require('./prismaClient');
 
 // Retry configuration
 const RETRY_CONFIG = {
-  maxRetries: 3,
-  baseDelay: 1000, // 1 second base delay
-  maxDelay: 10000  // 10 seconds max delay
+  maxRetries: 5,        // Increased from 3 to 5
+  baseDelay: 2000,      // Increased from 1s to 2s base delay
+  maxDelay: 15000       // Increased from 10s to 15s max delay
 };
 
 // Sleep utility
