@@ -41,19 +41,24 @@ if [ ! -f "/app/data/db/master_order.db" ]; then
     
     # Verify it's a file, not a directory
     if [ -f "/app/data/db/master_order.db" ]; then
-        chmod 644 /app/data/db/master_order.db || true
         echo "✅ Database file created successfully"
     else
         echo "❌ CRITICAL: Could not create database as file - volume mount issue!"
         ls -la /app/data/db/
     fi
-    
-    # Set ownership if running as root
-    if [ "$(id -u)" = "0" ]; then
-        chown app:nodejs /app/data/db/master_order.db || true
-    fi
 else
     echo "🗄️ Database file already exists"
+fi
+
+# CRITICAL: Set proper ownership and permissions for the entire data directory structure
+if [ "$(id -u)" = "0" ]; then
+    echo "🔧 Setting proper ownership and permissions..."
+    chown -R app:nodejs /app/data/
+    chmod -R 755 /app/data/
+    chmod 644 /app/data/db/master_order.db
+    echo "✅ Ownership set to app:nodejs for /app/data/"
+else
+    echo "⚠️ Not running as root, cannot change ownership"
 fi
 
 echo "🔍 Database file status:"
@@ -135,8 +140,22 @@ npx prisma generate 2>&1 || echo "⚠️ Prisma generate failed"
 
 echo "🌟 Starting application server..."
 
-# Switch to app user for running the application
+# Final permission check before switching users
 if [ "$(id -u)" = "0" ]; then
+    echo "🔧 Final ownership and permission check..."
+    chown -R app:nodejs /app/data/
+    chmod -R 755 /app/data/
+    chmod 644 /app/data/db/master_order.db 2>/dev/null || true
+    
+    # Test database access as app user
+    echo "🔍 Testing database access as app user..."
+    if su-exec app:nodejs sqlite3 /app/data/db/master_order.db "SELECT 'test' as test;" 2>/dev/null; then
+        echo "✅ Database accessible by app user"
+    else
+        echo "❌ Database not accessible by app user - attempting fix..."
+        chmod 666 /app/data/db/master_order.db || true
+    fi
+    
     echo "🔄 Switching to app user for security..."
     exec su-exec app:nodejs node index.js
 else
