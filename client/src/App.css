@@ -802,3 +802,138 @@
     max-height: 300px;
   }
 }
+
+/* Reading Progress Modal Styles */
+.modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.modal-content {
+  background: white;
+  border-radius: 8px;
+  max-width: 500px;
+  width: 90%;
+  max-height: 80vh;
+  overflow-y: auto;
+  position: relative;
+}
+
+.modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 1.5rem;
+  border-bottom: 1px solid #e9ecef;
+}
+
+.modal-header h3 {
+  margin: 0;
+  color: #495057;
+}
+
+.close-modal {
+  background: none;
+  border: none;
+  font-size: 1.5rem;
+  cursor: pointer;
+  color: #6c757d;
+  padding: 0;
+  width: 30px;
+  height: 30px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.close-modal:hover {
+  color: #495057;
+}
+
+.reading-progress-form {
+  padding: 1.5rem;
+}
+
+.reading-progress-form p {
+  margin-bottom: 1.5rem;
+  color: #495057;
+}
+
+.input-type-toggle {
+  display: flex;
+  border: 1px solid #ced4da;
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.input-type-toggle button {
+  flex: 1;
+  padding: 0.75rem;
+  border: none;
+  background: white;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  font-size: 0.9rem;
+}
+
+.input-type-toggle button:first-child {
+  border-right: 1px solid #ced4da;
+}
+
+.input-type-toggle button.active {
+  background: #007bff;
+  color: white;
+}
+
+.input-type-toggle button:not(.active):hover {
+  background: #f8f9fa;
+}
+
+.progress-preview {
+  margin-top: 1rem;
+  padding: 0.75rem;
+  background: #e7f3ff;
+  border: 1px solid #b3d7ff;
+  border-radius: 4px;
+  color: #0056b3;
+}
+
+.progress-preview p {
+  margin: 0;
+  font-weight: 600;
+}
+
+.form-actions {
+  display: flex;
+  gap: 1rem;
+  margin-top: 1.5rem;
+  justify-content: flex-end;
+}
+
+@media (max-width: 576px) {
+  .modal-content {
+    width: 95%;
+    margin: 1rem;
+  }
+  
+  .form-actions {
+    flex-direction: column;
+  }
+  
+  .input-type-toggle {
+    flex-direction: column;
+  }
+  
+  .input-type-toggle button:first-child {
+    border-right: none;
+    border-bottom: 1px solid #ced4da;
+  }
+}

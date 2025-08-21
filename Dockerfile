@@ -65,6 +65,7 @@ RUN addgroup -g 1001 -S nodejs && \
 COPY --from=build --chown=app:nodejs /app/server ./server
 COPY --from=build --chown=app:nodejs /app/client/dist ./client/dist
 COPY --from=build --chown=app:nodejs /app/package*.json ./
+COPY --from=build --chown=app:nodejs /app/start.js ./start.js
 COPY --chown=app:nodejs ./docker-entrypoint.sh ./docker-entrypoint.sh
 
 # Ensure Prisma files are copied (schema and migrations)

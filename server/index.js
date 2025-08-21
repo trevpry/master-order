@@ -1759,6 +1759,31 @@ app.get('/api/get-next-custom-order', async (req, res) => {
   }
 });
 
+// Get a single custom order item by ID
+app.get('/api/custom-orders/item/:itemId', async (req, res) => {
+  try {
+    const { itemId } = req.params;
+    
+    const customOrderItem = await prisma.customOrderItem.findUnique({
+      where: { id: parseInt(itemId) },
+      include: {
+        storyContainedInBook: true,
+        containedStories: true,
+        referencedCustomOrder: true
+      }
+    });
+    
+    if (!customOrderItem) {
+      return res.status(404).json({ error: 'Custom order item not found' });
+    }
+    
+    res.json(customOrderItem);
+  } catch (error) {
+    console.error('Error fetching custom order item:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // Custom Order Management Endpoints
 
 // Get all custom orders
@@ -3216,6 +3241,7 @@ app.post('/api/reading/pause', async (req, res) => {
 app.post('/api/reading/stop', async (req, res) => {
   try {
     console.log('Attempting to stop reading session...');
+    const { progress } = req.body;
     
     // Find the active reading session
     const activeSession = await watchLogService.getActiveReadingSession();
@@ -3228,7 +3254,51 @@ app.post('/api/reading/stop', async (req, res) => {
     }
 
     console.log('Stopping session with ID:', activeSession.id);
+    
+    // Stop the reading session
     const completedSession = await watchLogService.stopReading(activeSession.id);
+    
+    // Update reading progress if provided and session wasn't deleted
+    if (progress && !completedSession.deleted && activeSession.customOrderItemId) {
+      console.log('Updating reading progress for item:', activeSession.customOrderItemId, progress);
+      
+      try {
+        const updateData = {};
+        
+        if (progress.currentPage !== undefined && progress.currentPage > 0) {
+          updateData.bookCurrentPage = progress.currentPage;
+        }
+        
+        if (progress.readPercentage !== undefined && progress.readPercentage >= 0 && progress.readPercentage <= 100) {
+          updateData.bookPercentRead = progress.readPercentage;
+        }
+        
+        if (progress.totalPages !== undefined && progress.totalPages > 0) {
+          // Also update the total page count if provided and not already set
+          const existingItem = await prisma.customOrderItem.findUnique({
+            where: { id: activeSession.customOrderItemId },
+            select: { bookPageCount: true }
+          });
+          
+          if (!existingItem?.bookPageCount) {
+            updateData.bookPageCount = progress.totalPages;
+          }
+        }
+        
+        if (Object.keys(updateData).length > 0) {
+          await prisma.customOrderItem.update({
+            where: { id: activeSession.customOrderItemId },
+            data: updateData
+          });
+          
+          console.log('Reading progress updated successfully:', updateData);
+        }
+      } catch (progressError) {
+        console.error('Error updating reading progress:', progressError);
+        // Don't fail the whole request if progress update fails
+      }
+    }
+    
     console.log('Session stopped successfully');
     res.json(completedSession);
   } catch (error) {

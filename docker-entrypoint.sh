@@ -1,7 +1,8 @@
 #!/bin/sh
 # Master Order Docker Entrypoint - DATA PRESERVATION POLICY
 # This script is designed to NEVER destroy existing data during container updates:
-# - Only applies new migrations with 'prisma migrate deploy' (safe, preserves data)
+# - Only applies new migrations with 'prisma                    # Find the latest migration and mark it as applied
+                    LATEST_MIGRATION=$(ls -1 prisma/migrations/ | grep -E '^[0-9]{14}_' | tail -1)igrate deploy' (safe, preserves data)
 # - Never uses '--force-reset' on existing databases  
 # - Distinguishes between new installations and container updates
 # - Preserves all user data during container rebuilds
@@ -151,9 +152,34 @@ if [ -f "prisma/schema.prisma" ]; then
         if npx prisma migrate deploy 2>&1; then
             echo "✅ Migrations completed successfully - user data preserved"
         else
-            echo "⚠️ Migration deploy failed - this may be normal if no new migrations"
-            echo "🔍 Checking migration status..."
-            npx prisma migrate status 2>&1 || echo "Unable to check migration status"
+            echo "⚠️ Migration deploy failed - checking if we need to baseline existing schema..."
+            
+            # Check if this is the P3005 baseline issue
+            if npx prisma migrate deploy 2>&1 | grep -q "P3005"; then
+                echo "🔧 Database needs baseline - marking existing schema as migrated..."
+                # Find the latest migration and mark it as applied
+                LATEST_MIGRATION=$(ls -1 prisma/migrations/ | grep -E '^[0-9]{14}_' | tail -1)
+                if [ -n "$LATEST_MIGRATION" ]; then
+                    echo "📌 Marking migration $LATEST_MIGRATION as applied..."
+                    if npx prisma migrate resolve --applied "$LATEST_MIGRATION" 2>&1; then
+                        echo "✅ Migration baseline completed"
+                        # Now try migrate deploy again
+                        if npx prisma migrate deploy 2>&1; then
+                            echo "✅ Subsequent migrations deployed successfully"
+                        else
+                            echo "⚠️ No additional migrations to deploy after baseline"
+                        fi
+                    else
+                        echo "❌ Failed to baseline migration"
+                    fi
+                else
+                    echo "❌ No migrations found to baseline"
+                fi
+            else
+                echo "⚠️ Migration deploy failed for other reasons - this may be normal if no new migrations"
+                echo "🔍 Checking migration status..."
+                npx prisma migrate status 2>&1 || echo "Unable to check migration status"
+            fi
         fi
         
     else
@@ -165,7 +191,32 @@ if [ -f "prisma/schema.prisma" ]; then
             if npx prisma migrate deploy 2>&1; then
                 echo "✅ Migrations completed successfully"
             else
-                echo "⚠️ Migration deploy failed - this may be normal if no new migrations"
+                echo "⚠️ Migration deploy failed - checking if we need to baseline existing schema..."
+                
+                # Check if this is the P3005 baseline issue
+                if npx prisma migrate deploy 2>&1 | grep -q "P3005"; then
+                    echo "🔧 Database needs baseline - marking existing schema as migrated..."
+                    # Find the latest migration and mark it as applied
+                    LATEST_MIGRATION=$(ls -1 server/prisma/migrations/ | grep -E '^[0-9]{14}_' | tail -1)
+                    if [ -n "$LATEST_MIGRATION" ]; then
+                        echo "📌 Marking migration $LATEST_MIGRATION as applied..."
+                        if npx prisma migrate resolve --applied "$LATEST_MIGRATION" 2>&1; then
+                            echo "✅ Migration baseline completed"
+                            # Now try migrate deploy again  
+                            if npx prisma migrate deploy 2>&1; then
+                                echo "✅ Subsequent migrations deployed successfully"
+                            else
+                                echo "⚠️ No additional migrations to deploy after baseline"
+                            fi
+                        else
+                            echo "❌ Failed to baseline migration"
+                        fi
+                    else
+                        echo "❌ No migrations found to baseline"
+                    fi
+                else
+                    echo "⚠️ Migration deploy failed for other reasons - this may be normal if no new migrations"
+                fi
             fi
         else
             echo "🆕 Database appears to be completely new ($TABLE_COUNT tables) - initializing schema..."

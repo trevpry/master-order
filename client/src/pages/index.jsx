@@ -19,6 +19,15 @@ function Home() {  const [selectedMedia, setSelectedMedia] = useState(null);
   const [readingSession, setReadingSession] = useState(null);
   const [readingTimer, setReadingTimer] = useState(0);
   const [readingActionLoading, setReadingActionLoading] = useState('');
+  
+  // Reading progress modal state
+  const [showReadingProgressModal, setShowReadingProgressModal] = useState(false);
+  const [readingProgress, setReadingProgress] = useState({
+    currentPage: '',
+    totalPages: '',
+    readPercentage: '',
+    inputType: 'page' // 'page' or 'percentage'
+  });
 
   // WebSocket connection for Plex webhook notifications
   useEffect(() => {
@@ -204,10 +213,53 @@ function Home() {  const [selectedMedia, setSelectedMedia] = useState(null);
   const stopReading = async () => {
     if (!readingSession) return;
 
+    // Show reading progress modal for books, comics, and short stories
+    if (selectedMedia && ['book', 'comic', 'shortstory'].includes(selectedMedia.type)) {
+      // Try to fetch the custom order item data to get the page count
+      let totalPages = selectedMedia.bookPageCount || selectedMedia.pageCount || '';
+      
+      // If we have a custom order item ID from the reading session, fetch the latest data
+      if (readingSession.customOrderItemId) {
+        try {
+          const response = await fetch(`${config.apiBaseUrl}/api/custom-orders/item/${readingSession.customOrderItemId}`);
+          if (response.ok) {
+            const itemData = await response.json();
+            totalPages = itemData.bookPageCount || totalPages;
+          }
+        } catch (error) {
+          console.warn('Could not fetch custom order item data for page count:', error);
+        }
+      }
+      
+      setReadingProgress({
+        currentPage: '',
+        totalPages: totalPages ? totalPages.toString() : '',
+        readPercentage: '',
+        inputType: 'page'
+      });
+      setShowReadingProgressModal(true);
+      return;
+    }
+
+    // For other media types, stop reading immediately
+    await stopReadingSession();
+  };
+
+  const stopReadingSession = async (progressData = null) => {
+    if (!readingSession) return;
+
     setReadingActionLoading('stop');
     try {
+      const requestBody = progressData ? {
+        progress: progressData
+      } : {};
+
       const response = await fetch(`${config.apiBaseUrl}/api/reading/stop`, {
-        method: 'POST'
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(requestBody)
       });
 
       if (response.ok) {
@@ -237,7 +289,14 @@ function Home() {  const [selectedMedia, setSelectedMedia] = useState(null);
           });
         } else {
           // Session was completed and saved
-          toast.success(`🏁 Reading session completed! Total time: ${formatTime(completedSession.totalTime)}`, {
+          let message = `🏁 Reading session completed! Total time: ${formatTime(completedSession.totalTime)}`;
+          if (progressData && progressData.readPercentage) {
+            message += ` (${progressData.readPercentage}% complete)`;
+          } else if (progressData && progressData.currentPage && progressData.totalPages) {
+            message += ` (page ${progressData.currentPage} of ${progressData.totalPages})`;
+          }
+          
+          toast.success(message, {
             duration: 5000,
             position: 'top-right'
           });
@@ -258,6 +317,51 @@ function Home() {  const [selectedMedia, setSelectedMedia] = useState(null);
     } finally {
       setReadingActionLoading('');
     }
+  };
+
+  const handleReadingProgressSubmit = async (e) => {
+    e.preventDefault();
+    
+    let progressData = null;
+    
+    if (readingProgress.inputType === 'page') {
+      const currentPage = parseInt(readingProgress.currentPage);
+      const totalPages = parseInt(readingProgress.totalPages);
+      
+      if (currentPage && currentPage > 0) {
+        progressData = {
+          currentPage
+        };
+        
+        // Only add total pages and percentage if total pages is provided
+        if (totalPages && totalPages > 0 && currentPage <= totalPages) {
+          const percentage = Math.round((currentPage / totalPages) * 100);
+          progressData.totalPages = totalPages;
+          progressData.readPercentage = percentage;
+        }
+      }
+    } else if (readingProgress.inputType === 'percentage') {
+      const percentage = parseFloat(readingProgress.readPercentage);
+      
+      if (percentage >= 0 && percentage <= 100) {
+        progressData = {
+          readPercentage: percentage
+        };
+        
+        // If we have total pages, calculate current page
+        if (readingProgress.totalPages) {
+          const totalPages = parseInt(readingProgress.totalPages);
+          if (totalPages > 0) {
+            const currentPage = Math.round((percentage / 100) * totalPages);
+            progressData.currentPage = currentPage;
+            progressData.totalPages = totalPages;
+          }
+        }
+      }
+    }
+
+    setShowReadingProgressModal(false);
+    await stopReadingSession(progressData);
   };
 
   const formatReadingTime = (seconds) => {
@@ -944,6 +1048,139 @@ function Home() {  const [selectedMedia, setSelectedMedia] = useState(null);
           </div>
         </div>
       </div>
+
+      {/* Reading Progress Modal */}
+      {showReadingProgressModal && (
+        <div className="modal-overlay">
+          <div className="modal-content">
+            <div className="modal-header">
+              <h3>Reading Progress</h3>
+              <Button
+                onClick={() => {
+                  setShowReadingProgressModal(false);
+                  setReadingProgress({
+                    currentPage: '',
+                    totalPages: '',
+                    readPercentage: '',
+                    inputType: 'page'
+                  });
+                }}
+                className="close-modal"
+              >
+                ×
+              </Button>
+            </div>
+            
+            <form onSubmit={handleReadingProgressSubmit} className="reading-progress-form">
+              <p>Track your reading progress for: <strong>{selectedMedia?.title || readingSession?.title}</strong></p>
+              
+              {/* Input Type Toggle */}
+              <div className="form-group">
+                <label>Progress Input Type</label>
+                <div className="input-type-toggle">
+                  <button
+                    type="button"
+                    className={readingProgress.inputType === 'page' ? 'active' : ''}
+                    onClick={() => setReadingProgress(prev => ({ ...prev, inputType: 'page' }))}
+                  >
+                    Page Number
+                  </button>
+                  <button
+                    type="button"
+                    className={readingProgress.inputType === 'percentage' ? 'active' : ''}
+                    onClick={() => setReadingProgress(prev => ({ ...prev, inputType: 'percentage' }))}
+                  >
+                    Percentage
+                  </button>
+                </div>
+              </div>
+
+              {readingProgress.inputType === 'page' ? (
+                <>
+                  <div className="form-group">
+                    <label htmlFor="currentPage">Current Page</label>
+                    <input
+                      type="number"
+                      id="currentPage"
+                      value={readingProgress.currentPage}
+                      onChange={(e) => setReadingProgress(prev => ({ ...prev, currentPage: e.target.value }))}
+                      placeholder="Enter current page"
+                      min="1"
+                    />
+                  </div>
+
+                  <div className="form-group">
+                    <label htmlFor="totalPages">Total Pages {readingProgress.totalPages ? '' : '(optional)'}</label>
+                    <input
+                      type="number"
+                      id="totalPages"
+                      value={readingProgress.totalPages}
+                      onChange={(e) => setReadingProgress(prev => ({ ...prev, totalPages: e.target.value }))}
+                      placeholder="Enter total pages"
+                      min="1"
+                    />
+                    {!readingProgress.totalPages && (
+                      <small style={{ color: '#6c757d', fontSize: '0.85rem', marginTop: '0.25rem', display: 'block' }}>
+                        Adding total pages helps calculate reading percentage
+                      </small>
+                    )}
+                  </div>
+
+                  {readingProgress.currentPage && parseInt(readingProgress.currentPage) > 0 && (
+                    <div className="progress-preview">
+                      {readingProgress.totalPages && parseInt(readingProgress.totalPages) > 0 ? (
+                        <p>Progress: {Math.round((parseInt(readingProgress.currentPage) / parseInt(readingProgress.totalPages)) * 100)}%</p>
+                      ) : (
+                        <p>Current page: {readingProgress.currentPage}</p>
+                      )}
+                    </div>
+                  )}
+                </>
+              ) : (
+                <>
+                  <div className="form-group">
+                    <label htmlFor="readPercentage">Read Percentage</label>
+                    <input
+                      type="number"
+                      id="readPercentage"
+                      value={readingProgress.readPercentage}
+                      onChange={(e) => setReadingProgress(prev => ({ ...prev, readPercentage: e.target.value }))}
+                      placeholder="Enter percentage (0-100)"
+                      min="0"
+                      max="100"
+                      step="0.1"
+                    />
+                  </div>
+
+                  {readingProgress.totalPages && readingProgress.readPercentage && (
+                    <div className="progress-preview">
+                      <p>Approximate page: {Math.round((parseFloat(readingProgress.readPercentage) / 100) * parseInt(readingProgress.totalPages))}</p>
+                    </div>
+                  )}
+                </>
+              )}
+              
+              <div className="form-actions">
+                <Button type="submit" className="primary" disabled={readingActionLoading === 'stop'}>
+                  {readingActionLoading === 'stop' ? 'Saving...' : 'Save Progress & Stop Reading'}
+                </Button>
+                <Button 
+                  type="button" 
+                  onClick={() => {
+                    setShowReadingProgressModal(false);
+                    stopReadingSession(); // Stop without saving progress
+                  }}
+                  className="secondary"
+                  disabled={readingActionLoading === 'stop'}
+                >
+                  Skip & Stop Reading
+                </Button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
       <Toaster />
     </div>
   )

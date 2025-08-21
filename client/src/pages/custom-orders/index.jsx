@@ -2916,6 +2916,31 @@ function CustomOrders() {
                           {item.isWatched ? 'Watched' : 'Unwatched'}
                         </span>
                       </div>
+
+                      {/* Reading Progress Display */}
+                      {(item.mediaType === 'book' || item.mediaType === 'comic' || item.mediaType === 'shortstory') && 
+                       (item.bookCurrentPage || item.bookPercentRead) && (
+                        <div className="reading-progress">
+                          <div className="progress-bar-container">
+                            <div 
+                              className="progress-bar-fill" 
+                              style={{ 
+                                width: `${item.bookPercentRead || 0}%`,
+                                backgroundColor: item.bookPercentRead >= 100 ? '#28a745' : '#007bff'
+                              }}
+                            />
+                          </div>
+                          <div className="progress-text">
+                            {item.bookCurrentPage && item.bookPageCount ? (
+                              <span>📖 Page {item.bookCurrentPage} of {item.bookPageCount} ({Math.round(item.bookPercentRead || 0)}%)</span>
+                            ) : item.bookPercentRead ? (
+                              <span>📖 {Math.round(item.bookPercentRead)}% complete</span>
+                            ) : item.bookCurrentPage ? (
+                              <span>📖 Page {item.bookCurrentPage}</span>
+                            ) : null}
+                          </div>
+                        </div>
+                      )}
                     </div>
                   </div>                <div className="item-actions">
                     {item.mediaType === 'suborder' ? (
