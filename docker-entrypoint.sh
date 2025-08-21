@@ -23,56 +23,52 @@ cd /app/server
 echo "📊 Setting up database..."
 
 # CRITICAL: Ensure DATABASE_URL has proper SQLite format
-export DATABASE_URL="file:/app/data/master_order.db"
+# Use a subdirectory to avoid volume mount conflicts
+mkdir -p /app/data/db
+export DATABASE_URL="file:/app/data/db/master_order.db"
 echo "🔧 DATABASE_URL set to: $DATABASE_URL"
 
 # Create database file if it doesn't exist
-if [ ! -f "/app/data/master_order.db" ]; then
+if [ ! -f "/app/data/db/master_order.db" ]; then
     echo "🗄️ Creating new database file..."
-    
-    # CRITICAL: Check if it's a directory and remove it
-    if [ -d "/app/data/master_order.db" ]; then
-        echo "🚨 ERROR: master_order.db exists as directory! Removing..."
-        rm -rf /app/data/master_order.db
-    fi
     
     # Create a proper SQLite database file
     echo "🔧 Creating SQLite database file..."
-    sqlite3 /app/data/master_order.db "CREATE TABLE IF NOT EXISTS _temp (id INTEGER); DROP TABLE _temp;" 2>/dev/null || {
+    sqlite3 /app/data/db/master_order.db "CREATE TABLE IF NOT EXISTS _temp (id INTEGER); DROP TABLE _temp;" 2>/dev/null || {
         echo "❌ SQLite creation failed, trying touch method..."
-        touch /app/data/master_order.db
+        touch /app/data/db/master_order.db
     }
     
     # Verify it's a file, not a directory
-    if [ -f "/app/data/master_order.db" ]; then
-        chmod 644 /app/data/master_order.db || true
+    if [ -f "/app/data/db/master_order.db" ]; then
+        chmod 644 /app/data/db/master_order.db || true
         echo "✅ Database file created successfully"
     else
         echo "❌ CRITICAL: Could not create database as file - volume mount issue!"
-        ls -la /app/data/
+        ls -la /app/data/db/
     fi
     
     # Set ownership if running as root
     if [ "$(id -u)" = "0" ]; then
-        chown app:nodejs /app/data/master_order.db || true
+        chown app:nodejs /app/data/db/master_order.db || true
     fi
 else
     echo "🗄️ Database file already exists"
 fi
 
 echo "🔍 Database file status:"
-ls -la /app/data/ || echo "❌ Data directory not accessible"
-ls -la /app/data/master_order.db 2>/dev/null && echo "✅ Database file exists" || echo "❌ Database file missing"
+ls -la /app/data/db/ || echo "❌ Database directory not accessible"
+ls -la /app/data/db/master_order.db 2>/dev/null && echo "✅ Database file exists" || echo "❌ Database file missing"
 
 # Debug: Test if we can create a simple SQLite connection
 echo "🔍 Testing basic SQLite access..."
-if sqlite3 /app/data/master_order.db "SELECT 'Database accessible' as test;" 2>/dev/null; then
+if sqlite3 /app/data/db/master_order.db "SELECT 'Database accessible' as test;" 2>/dev/null; then
     echo "✅ SQLite access successful"
 else
     echo "❌ SQLite access failed - trying to recreate database"
-    rm -rf /app/data/master_order.db
-    sqlite3 /app/data/master_order.db "CREATE TABLE IF NOT EXISTS _temp (id INTEGER); DROP TABLE _temp;" 2>/dev/null || true
-    chmod 644 /app/data/master_order.db || true
+    rm -f /app/data/db/master_order.db
+    sqlite3 /app/data/db/master_order.db "CREATE TABLE IF NOT EXISTS _temp (id INTEGER); DROP TABLE _temp;" 2>/dev/null || true
+    chmod 644 /app/data/db/master_order.db || true
 fi
 
 # Apply migrations
@@ -84,7 +80,7 @@ if [ -f "prisma/schema.prisma" ]; then
     echo "✅ Schema file found at prisma/schema.prisma"
     
     # Verify database file is accessible before running migrations
-    if [ -f "/app/data/master_order.db" ] && sqlite3 /app/data/master_order.db "SELECT 1;" 2>/dev/null; then
+    if [ -f "/app/data/db/master_order.db" ] && sqlite3 /app/data/db/master_order.db "SELECT 1;" 2>/dev/null; then
         echo "✅ Database accessible, running migrations..."
         
         # Run migrations with proper error handling
@@ -98,14 +94,14 @@ if [ -f "prisma/schema.prisma" ]; then
         echo "❌ Database not accessible, cannot run migrations"
         # Try to recreate the database
         echo "🔄 Attempting to recreate database..."
-        rm -rf /app/data/master_order.db
+        rm -f /app/data/db/master_order.db
         
         # Create new database file
-        sqlite3 /app/data/master_order.db "CREATE TABLE IF NOT EXISTS _temp (id INTEGER); DROP TABLE _temp;"
-        chmod 644 /app/data/master_order.db
+        sqlite3 /app/data/db/master_order.db "CREATE TABLE IF NOT EXISTS _temp (id INTEGER); DROP TABLE _temp;"
+        chmod 644 /app/data/db/master_order.db
         
         # Try migrations again
-        if [ -f "/app/data/master_order.db" ]; then
+        if [ -f "/app/data/db/master_order.db" ]; then
             npx prisma db push --force-reset 2>&1 || echo "❌ Database recreation failed"
         fi
     fi
