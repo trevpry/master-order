@@ -1,5 +1,21 @@
 #!/bin/sh
-# Database initialization script for Docker
+# Database initialization script # Apply migrations and push schema to ensure database is properly initialized
+echo "🔄 Applying database migrations..."
+npx prisma migrate deploy 2>&1 | head -20
+
+# If migrations failed, try db push as fallback
+if [ $? -ne 0 ]; then
+    echo "🔄 Migration failed, trying db push..."
+    npx prisma db push --force-reset || echo "⚠️ DB push also failed, but continuing..."
+fi
+
+# Debug: Check if tables were created
+echo "🔍 Checking database tables after migration..."
+sqlite3 /app/data/master_order.db ".tables" || echo "❌ Could not list tables"
+
+# Generate Prisma client
+echo "🔧 Generating Prisma client..."
+npx prisma generateker
 
 echo "🚀 Starting Master Order application..."
 
@@ -27,9 +43,19 @@ if [ ! -f "/app/data/master_order.db" ]; then
     echo "🗄️ Creating new database file..."
     touch /app/data/master_order.db
     chmod 644 /app/data/master_order.db || true
+else
+    echo "🗄️ Database file already exists"
 fi
 
 echo "🔧 Using DATABASE_URL from environment: $DATABASE_URL"
+
+# Debug: Check database file status
+echo "🔍 Database file status:"
+ls -la /app/data/master_order.db || echo "❌ Database file not found"
+
+# Debug: Test if we can create a simple SQLite connection
+echo "🔍 Testing basic SQLite access..."
+sqlite3 /app/data/master_order.db "SELECT 'Database accessible' as test;" || echo "❌ SQLite access failed"
 
 # Apply migrations without connection tests that might fail
 echo "� Applying database migrations..."
