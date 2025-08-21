@@ -1303,7 +1303,10 @@ class WatchLogService {
               }
             });
 
-            console.log(`Found ${booksWithProgress.length} books with progress data`);
+            console.log(`Found ${booksWithProgress.length} unique books with progress data`);
+
+            // Set total books count to unique books, not reading sessions
+            totalStats.totalBooks = booksWithProgress.length;
 
             // Calculate pages read and author statistics
             for (const book of booksWithProgress) {
@@ -1350,8 +1353,8 @@ class WatchLogService {
           // Set total pages read on totalStats
           totalStats.totalPagesRead = totalPagesRead;
 
-          // Get completed books count (100% read books from custom orders)
-          const completedBooksCount = await this.prisma.customOrderItem.count({
+        // Get completed books count (100% read books from custom orders)
+        const completedBooksCount = await this.prisma.customOrderItem.count({
             where: {
               mediaType: 'book',
               OR: [
@@ -1467,7 +1470,10 @@ class WatchLogService {
             byReadTime: [...authorBreakdownData].sort((a, b) => b.totalReadTime - a.totalReadTime).slice(0, 10),
             byPagesRead: [...authorBreakdownData].sort((a, b) => b.totalPagesRead - a.totalPagesRead).slice(0, 10),
             byBookCount: [...authorBreakdownData].sort((a, b) => b.bookCount - a.bookCount).slice(0, 10),
-            byCompletedBooks: [...authorBreakdownData].sort((a, b) => b.completedBooks - a.completedBooks).slice(0, 10)
+            byCompletedBooks: [...authorBreakdownData]
+              .filter(author => author.completedBooks > 0) // Only authors with completed books
+              .sort((a, b) => b.completedBooks - a.completedBooks)
+              .slice(0, 10)
           };
 
           console.log(`Created author breakdown with ${authorBreakdownData.length} authors`);
@@ -1481,6 +1487,7 @@ class WatchLogService {
           
         } catch (error) {
           console.error('Error creating book author breakdown:', error);
+          totalStats.totalBooks = 0;
           totalStats.totalPagesRead = 0;
           totalStats.totalCompletedBooks = 0;
           totalStats.completedBooks = [];
