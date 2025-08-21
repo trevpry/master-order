@@ -18,6 +18,8 @@ services:
       # Connect to PostgreSQL on localhost since we're using host networking
       - "DATABASE_URL=postgresql://master_order_user:${POSTGRES_PASSWORD:-secure_password_change_me}@localhost:5432/master_order"
       - PORT=3001
+      # Temporarily skip PostgreSQL readiness check for debugging
+      - SKIP_PG_CHECK=true
       # Add your API keys and settings here or use a .env file
       # - PLEX_URL=http://your-plex-server:32400
       # - PLEX_TOKEN=your-plex-token

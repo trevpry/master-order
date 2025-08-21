@@ -45,9 +45,14 @@ echo "[DEBUG] Prisma will use this DATABASE_URL for connections"
 
 echo "[INFO] Setting up PostgreSQL database..."
 
-# Validate required environment variables
-if [ -z "$DATABASE_URL" ]; then
-    echo "[ERROR] DATABASE_URL environment variable is required for PostgreSQL"
+# Add debug mode to skip PostgreSQL readiness check
+if [ "$SKIP_PG_CHECK" = "true" ]; then
+    echo "[WARN] Skipping PostgreSQL readiness check (SKIP_PG_CHECK=true)"
+    echo "[INFO] Proceeding directly to application startup..."
+else
+    # Validate required environment variables
+    if [ -z "$DATABASE_URL" ]; then
+        echo "[ERROR] DATABASE_URL environment variable is required for PostgreSQL"
     echo "   Example: postgresql://username:password@localhost:5432/master_order"
     exit 1
 fi
@@ -105,7 +110,11 @@ wait_for_postgres() {
 }
 
 # Wait for PostgreSQL to be available
-wait_for_postgres
+if [ "$SKIP_PG_CHECK" = "true" ]; then
+    echo "[INFO] Skipped PostgreSQL readiness check"
+else
+    wait_for_postgres
+fi
 
 # Check if this is a new installation or existing database
 echo "[INFO] Checking for existing database data..."
