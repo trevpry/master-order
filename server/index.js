@@ -2614,6 +2614,24 @@ app.put('/api/custom-orders/:id/items/:itemId', async (req, res) => {
     if (sortOrder !== undefined) updateData.sortOrder = sortOrder;
     if (isWatched !== undefined) updateData.isWatched = isWatched;
     
+    // If marking a book, comic, or short story as watched, set completion to 100%
+    if (isWatched === true) {
+      const item = await prisma.customOrderItem.findUnique({
+        where: { id: parseInt(itemId) }
+      });
+      
+      if (item && (item.mediaType === 'book' || item.mediaType === 'comic' || item.mediaType === 'shortstory')) {
+        updateData.bookPercentRead = 100;
+        
+        // If we have page count but no current page, set current page to total pages
+        if (item.bookPageCount && !item.bookCurrentPage) {
+          updateData.bookCurrentPage = item.bookPageCount;
+        }
+        
+        console.log(`Setting ${item.mediaType} "${item.title}" to 100% completed`);
+      }
+    }
+    
     // Handle general data updates
     if (title !== undefined) updateData.title = title;
     if (seriesTitle !== undefined) updateData.seriesTitle = seriesTitle;
@@ -2934,6 +2952,25 @@ app.post('/api/mark-custom-order-item-watched/:itemId', async (req, res) => {
       } catch (error) {
         console.warn('Could not get duration from Plex database:', error.message);
       }
+    }
+
+    // For books, comics, and short stories, set completion status to 100%
+    if (customOrderItem.mediaType === 'book' || customOrderItem.mediaType === 'comic' || customOrderItem.mediaType === 'shortstory') {
+      const updateData = {
+        bookPercentRead: 100
+      };
+      
+      // If we have page count but no current page, set current page to total pages
+      if (customOrderItem.bookPageCount && !customOrderItem.bookCurrentPage) {
+        updateData.bookCurrentPage = customOrderItem.bookPageCount;
+      }
+      
+      await prisma.customOrderItem.update({
+        where: { id: parseInt(itemId) },
+        data: updateData
+      });
+      
+      console.log(`Set ${customOrderItem.mediaType} "${customOrderItem.title}" to 100% completed`);
     }
 
     // Create watch log entry

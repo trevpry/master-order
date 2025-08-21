@@ -1350,23 +1350,124 @@ class WatchLogService {
           // Set total pages read on totalStats
           totalStats.totalPagesRead = totalPagesRead;
 
+          // Get completed books count (100% read books from custom orders)
+          const completedBooksCount = await this.prisma.customOrderItem.count({
+            where: {
+              mediaType: 'book',
+              OR: [
+                { bookPercentRead: 100 },
+                { isWatched: true }
+              ]
+            }
+          });
+
+          totalStats.totalCompletedBooks = completedBooksCount;
+          console.log(`Found ${completedBooksCount} completed books`);
+
+          // Get list of completed books for display
+          const completedBooksList = await this.prisma.customOrderItem.findMany({
+            where: {
+              mediaType: 'book',
+              OR: [
+                { bookPercentRead: 100 },
+                { isWatched: true }
+              ]
+            },
+            select: {
+              id: true,
+              title: true,
+              bookTitle: true,
+              bookAuthor: true,
+              bookYear: true,
+              bookPageCount: true,
+              bookPercentRead: true,
+              isWatched: true,
+              createdAt: true,
+              updatedAt: true
+            },
+            orderBy: {
+              updatedAt: 'desc'
+            },
+            take: 20 // Limit to 20 most recently completed books
+          });
+
+          totalStats.completedBooks = completedBooksList.map(book => ({
+            title: book.bookTitle || book.title,
+            author: book.bookAuthor || 'Unknown Author',
+            year: book.bookYear,
+            pageCount: book.bookPageCount,
+            percentRead: book.bookPercentRead || (book.isWatched ? 100 : 0),
+            isWatched: book.isWatched,
+            completedDate: book.updatedAt
+          }));
+
+          console.log(`Found ${completedBooksList.length} completed books for display`);
+
+          // Create completed books author statistics
+          const completedAuthorStats = new Map();
+          for (const book of completedBooksList) {
+            if (book.bookAuthor && book.bookAuthor.trim()) {
+              const authorName = book.bookAuthor.trim();
+              
+              if (!completedAuthorStats.has(authorName)) {
+                completedAuthorStats.set(authorName, {
+                  completedBooks: 0,
+                  completedBooksList: []
+                });
+              }
+              
+              const stats = completedAuthorStats.get(authorName);
+              stats.completedBooks += 1;
+              stats.completedBooksList.push({
+                title: book.bookTitle || book.title,
+                year: book.bookYear,
+                pageCount: book.bookPageCount
+              });
+            }
+          }
+
           // Create author breakdown with all metrics
           const authorBreakdownData = Array.from(authorStats.entries())
-            .map(([author, stats]) => ({
-              name: author,
-              totalReadTime: stats.totalReadTime,
-              totalReadTimeFormatted: this.formatWatchTime(stats.totalReadTime),
-              bookCount: stats.bookCount,
-              totalPagesRead: stats.totalPagesRead,
-              books: stats.books,
-              averagePagesPerBook: stats.bookCount > 0 ? Math.round(stats.totalPagesRead / stats.bookCount) : 0
-            }));
+            .map(([author, stats]) => {
+              // Merge with completed books data if available
+              const completedStats = completedAuthorStats.get(author) || { completedBooks: 0, completedBooksList: [] };
+              
+              return {
+                name: author,
+                totalReadTime: stats.totalReadTime,
+                totalReadTimeFormatted: this.formatWatchTime(stats.totalReadTime),
+                bookCount: stats.bookCount,
+                totalPagesRead: stats.totalPagesRead,
+                books: stats.books,
+                averagePagesPerBook: stats.bookCount > 0 ? Math.round(stats.totalPagesRead / stats.bookCount) : 0,
+                completedBooks: completedStats.completedBooks,
+                completedBooksList: completedStats.completedBooksList
+              };
+            });
+
+          // Also add authors that only have completed books (not in reading logs)
+          for (const [author, completedStats] of completedAuthorStats.entries()) {
+            if (!authorStats.has(author)) {
+              authorBreakdownData.push({
+                name: author,
+                totalReadTime: 0,
+                totalReadTimeFormatted: this.formatWatchTime(0),
+                bookCount: 0,
+                totalPagesRead: 0,
+                books: [],
+                averagePagesPerBook: 0,
+                completedBooks: completedStats.completedBooks,
+                completedBooksList: completedStats.completedBooksList
+              });
+            }
+          }
 
           // Store the full data for different sorting methods
           totalStats.authorBreakdown = {
             byReadTime: [...authorBreakdownData].sort((a, b) => b.totalReadTime - a.totalReadTime).slice(0, 10),
             byPagesRead: [...authorBreakdownData].sort((a, b) => b.totalPagesRead - a.totalPagesRead).slice(0, 10),
-            byBookCount: [...authorBreakdownData].sort((a, b) => b.bookCount - a.bookCount).slice(0, 10)
+            byBookCount: [...authorBreakdownData].sort((a, b) => b.bookCount - a.bookCount).slice(0, 10),
+            byCompletedBooks: [...authorBreakdownData].sort((a, b) => b.completedBooks - a.completedBooks).slice(0, 10)
           };
 
           console.log(`Created author breakdown with ${authorBreakdownData.length} authors`);
@@ -1375,15 +1476,19 @@ class WatchLogService {
             console.log('Top 3 by read time:', totalStats.authorBreakdown.byReadTime.slice(0, 3).map(a => `${a.name} (${a.totalReadTimeFormatted})`));
             console.log('Top 3 by pages read:', totalStats.authorBreakdown.byPagesRead.slice(0, 3).map(a => `${a.name} (${a.totalPagesRead} pages)`));
             console.log('Top 3 by book count:', totalStats.authorBreakdown.byBookCount.slice(0, 3).map(a => `${a.name} (${a.bookCount} books)`));
+            console.log('Top 3 by completed books:', totalStats.authorBreakdown.byCompletedBooks.slice(0, 3).map(a => `${a.name} (${a.completedBooks} completed)`));
           }
           
         } catch (error) {
           console.error('Error creating book author breakdown:', error);
           totalStats.totalPagesRead = 0;
+          totalStats.totalCompletedBooks = 0;
+          totalStats.completedBooks = [];
           totalStats.authorBreakdown = {
             byReadTime: [],
             byPagesRead: [],
-            byBookCount: []
+            byBookCount: [],
+            byCompletedBooks: []
           };
         }
       }

@@ -153,8 +153,90 @@ if [ -f "prisma/schema.prisma" ]; then
         else
             echo "⚠️ Migration deploy failed - checking if we need to baseline existing schema..."
             
+            # Get migration output to check error type
+            MIGRATION_OUTPUT=$(npx prisma migrate deploy 2>&1)
+            
+            # Check if this is a failed migration state (P3009 or P3018)
+            if echo "$MIGRATION_OUTPUT" | grep -q "P3009\|P3018"; then
+                echo "🔧 Database has failed migrations - attempting to resolve..."
+                
+                # Get the failed migration name from the error
+                FAILED_MIGRATION=$(echo "$MIGRATION_OUTPUT" | grep -E "The \`.*\` migration" | sed 's/The `\([^`]*\)` migration.*/\1/' | head -1)
+                
+                if [ -n "$FAILED_MIGRATION" ]; then
+                    echo "📌 Found failed migration: $FAILED_MIGRATION"
+                    
+                    # Try to mark it as rolled back first
+                    echo "🔄 Attempting to mark failed migration as rolled back..."
+                    if npx prisma migrate resolve --rolled-back "$FAILED_MIGRATION" 2>/dev/null; then
+                        echo "✅ Marked failed migration as rolled back"
+                        
+                        # Now try to apply migrations again
+                        echo "🔄 Retrying migration deployment..."
+                        if npx prisma migrate deploy 2>&1; then
+                            echo "✅ Migrations deployed successfully after rollback - user data preserved"
+                        else
+                            echo "⚠️ Still having migration issues after rollback - attempting baseline approach..."
+                            # Fall back to baseline approach
+                            if [ -d "prisma/migrations" ]; then
+                                LATEST_MIGRATION=$(ls -1 prisma/migrations/ | grep -E '^[0-9]{14}_' | tail -1)
+                                if [ -n "$LATEST_MIGRATION" ]; then
+                                    echo "📌 Marking migration $LATEST_MIGRATION as applied..."
+                                    if npx prisma migrate resolve --applied "$LATEST_MIGRATION" 2>&1; then
+                                        echo "✅ Migration baseline completed"
+                                        if npx prisma migrate deploy 2>&1; then
+                                            echo "✅ Subsequent migrations deployed successfully"
+                                        else
+                                            echo "⚠️ No additional migrations to deploy after baseline"
+                                        fi
+                                    else
+                                        echo "❌ Failed to baseline migration"
+                                    fi
+                                fi
+                            fi
+                        fi
+                    else
+                        echo "⚠️ Could not mark migration as rolled back, trying baseline approach..."
+                        # Baseline approach as fallback
+                        if [ -d "prisma/migrations" ]; then
+                            LATEST_MIGRATION=$(ls -1 prisma/migrations/ | grep -E '^[0-9]{14}_' | tail -1)
+                            if [ -n "$LATEST_MIGRATION" ]; then
+                                echo "📌 Marking migration $LATEST_MIGRATION as applied..."
+                                if npx prisma migrate resolve --applied "$LATEST_MIGRATION" 2>&1; then
+                                    echo "✅ Migration baseline completed"
+                                    if npx prisma migrate deploy 2>&1; then
+                                        echo "✅ Subsequent migrations deployed successfully"
+                                    else
+                                        echo "⚠️ No additional migrations to deploy after baseline"
+                                    fi
+                                else
+                                    echo "❌ Failed to baseline migration"
+                                fi
+                            fi
+                        fi
+                    fi
+                else
+                    echo "⚠️ Could not identify failed migration name - trying generic baseline approach"
+                    if [ -d "prisma/migrations" ]; then
+                        LATEST_MIGRATION=$(ls -1 prisma/migrations/ | grep -E '^[0-9]{14}_' | tail -1)
+                        if [ -n "$LATEST_MIGRATION" ]; then
+                            echo "📌 Marking migration $LATEST_MIGRATION as applied..."
+                            if npx prisma migrate resolve --applied "$LATEST_MIGRATION" 2>&1; then
+                                echo "✅ Migration baseline completed"
+                                if npx prisma migrate deploy 2>&1; then
+                                    echo "✅ Subsequent migrations deployed successfully"
+                                else
+                                    echo "⚠️ No additional migrations to deploy after baseline"
+                                fi
+                            else
+                                echo "❌ Failed to baseline migration"
+                            fi
+                        fi
+                    fi
+                fi
+            
             # Check if this is the P3005 baseline issue
-            if npx prisma migrate deploy 2>&1 | grep -q "P3005"; then
+            elif echo "$MIGRATION_OUTPUT" | grep -q "P3005"; then
                 echo "🔧 Database needs baseline - marking existing schema as migrated..."
                 # Find the latest migration and mark it as applied
                 if [ -d "prisma/migrations" ]; then
@@ -196,8 +278,90 @@ if [ -f "prisma/schema.prisma" ]; then
             else
                 echo "⚠️ Migration deploy failed - checking if we need to baseline existing schema..."
                 
+                # Get migration output to check error type
+                MIGRATION_OUTPUT=$(npx prisma migrate deploy 2>&1)
+                
+                # Check if this is a failed migration state (P3009 or P3018)
+                if echo "$MIGRATION_OUTPUT" | grep -q "P3009\|P3018"; then
+                    echo "🔧 Database has failed migrations - attempting to resolve..."
+                    
+                    # Get the failed migration name from the error
+                    FAILED_MIGRATION=$(echo "$MIGRATION_OUTPUT" | grep -E "The \`.*\` migration" | sed 's/The `\([^`]*\)` migration.*/\1/' | head -1)
+                    
+                    if [ -n "$FAILED_MIGRATION" ]; then
+                        echo "📌 Found failed migration: $FAILED_MIGRATION"
+                        
+                        # Try to mark it as rolled back first
+                        echo "🔄 Attempting to mark failed migration as rolled back..."
+                        if npx prisma migrate resolve --rolled-back "$FAILED_MIGRATION" 2>/dev/null; then
+                            echo "✅ Marked failed migration as rolled back"
+                            
+                            # Now try to apply migrations again
+                            echo "🔄 Retrying migration deployment..."
+                            if npx prisma migrate deploy 2>&1; then
+                                echo "✅ Migrations deployed successfully after rollback"
+                            else
+                                echo "⚠️ Still having migration issues after rollback - attempting baseline approach..."
+                                # Fall back to baseline approach
+                                if [ -d "prisma/migrations" ]; then
+                                    LATEST_MIGRATION=$(ls -1 prisma/migrations/ | grep -E '^[0-9]{14}_' | tail -1)
+                                    if [ -n "$LATEST_MIGRATION" ]; then
+                                        echo "📌 Marking migration $LATEST_MIGRATION as applied..."
+                                        if npx prisma migrate resolve --applied "$LATEST_MIGRATION" 2>&1; then
+                                            echo "✅ Migration baseline completed"
+                                            if npx prisma migrate deploy 2>&1; then
+                                                echo "✅ Subsequent migrations deployed successfully"
+                                            else
+                                                echo "⚠️ No additional migrations to deploy after baseline"
+                                            fi
+                                        else
+                                            echo "❌ Failed to baseline migration"
+                                        fi
+                                    fi
+                                fi
+                            fi
+                        else
+                            echo "⚠️ Could not mark migration as rolled back, trying baseline approach..."
+                            # Baseline approach as fallback
+                            if [ -d "prisma/migrations" ]; then
+                                LATEST_MIGRATION=$(ls -1 prisma/migrations/ | grep -E '^[0-9]{14}_' | tail -1)
+                                if [ -n "$LATEST_MIGRATION" ]; then
+                                    echo "📌 Marking migration $LATEST_MIGRATION as applied..."
+                                    if npx prisma migrate resolve --applied "$LATEST_MIGRATION" 2>&1; then
+                                        echo "✅ Migration baseline completed"
+                                        if npx prisma migrate deploy 2>&1; then
+                                            echo "✅ Subsequent migrations deployed successfully"
+                                        else
+                                            echo "⚠️ No additional migrations to deploy after baseline"
+                                        fi
+                                    else
+                                        echo "❌ Failed to baseline migration"
+                                    fi
+                                fi
+                            fi
+                        fi
+                    else
+                        echo "⚠️ Could not identify failed migration name - trying generic baseline approach"
+                        if [ -d "prisma/migrations" ]; then
+                            LATEST_MIGRATION=$(ls -1 prisma/migrations/ | grep -E '^[0-9]{14}_' | tail -1)
+                            if [ -n "$LATEST_MIGRATION" ]; then
+                                echo "📌 Marking migration $LATEST_MIGRATION as applied..."
+                                if npx prisma migrate resolve --applied "$LATEST_MIGRATION" 2>&1; then
+                                    echo "✅ Migration baseline completed"
+                                    if npx prisma migrate deploy 2>&1; then
+                                        echo "✅ Subsequent migrations deployed successfully"
+                                    else
+                                        echo "⚠️ No additional migrations to deploy after baseline"
+                                    fi
+                                else
+                                    echo "❌ Failed to baseline migration"
+                                fi
+                            fi
+                        fi
+                    fi
+                
                 # Check if this is the P3005 baseline issue
-                if npx prisma migrate deploy 2>&1 | grep -q "P3005"; then
+                elif echo "$MIGRATION_OUTPUT" | grep -q "P3005"; then
                     echo "🔧 Database needs baseline - marking existing schema as migrated..."
                     # Find the latest migration and mark it as applied
                     if [ -d "prisma/migrations" ]; then

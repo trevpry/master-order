@@ -1563,6 +1563,10 @@ const WatchStats = () => {
                     <span className="stat-value">{bookStats.totalStats?.totalBooks || 0}</span>
                   </div>
                   <div className="stat-item">
+                    <span className="stat-label">Completed Books</span>
+                    <span className="stat-value">{bookStats.totalStats?.totalCompletedBooks || 0}</span>
+                  </div>
+                  <div className="stat-item">
                     <span className="stat-label">Total Read Time</span>
                     <span className="stat-value">{bookStats.totalStats?.totalBookReadTimeFormatted || '0 minutes'}</span>
                   </div>
@@ -1619,6 +1623,12 @@ const WatchStats = () => {
                       >
                         By Book Count
                       </button>
+                      <button
+                        className={`toggle-btn ${authorSortBy === 'completed' ? 'active' : ''}`}
+                        onClick={() => setAuthorSortBy('completed')}
+                      >
+                        By Completed Books
+                      </button>
                     </div>
                   </div>
                   {(() => {
@@ -1630,6 +1640,8 @@ const WatchStats = () => {
                           return bookStats.totalStats.authorBreakdown.byPagesRead || [];
                         case 'books':
                           return bookStats.totalStats.authorBreakdown.byBookCount || [];
+                        case 'completed':
+                          return bookStats.totalStats.authorBreakdown.byCompletedBooks || [];
                         default:
                           return [];
                       }
@@ -1638,6 +1650,8 @@ const WatchStats = () => {
                     const authorData = getAuthorData();
                     const sortLabel = authorSortBy === 'readtime' ? 'Total Read Time' : 
                                      authorSortBy === 'pages' ? 'Pages Read' : 
+                                     authorSortBy === 'books' ? 'Book Count' :
+                                     authorSortBy === 'completed' ? 'Completed Books' :
                                      'Book Count';
                     
                     return authorData.length > 0 ? (
@@ -1653,6 +1667,7 @@ const WatchStats = () => {
                                 {authorSortBy === 'readtime' && author.totalReadTimeFormatted}
                                 {authorSortBy === 'pages' && `${author.totalPagesRead} pages`}
                                 {authorSortBy === 'books' && `${author.bookCount} books`}
+                                {authorSortBy === 'completed' && `${author.completedBooks} completed`}
                               </span>
                             </div>
                             <div className="period-stats">
@@ -1674,6 +1689,12 @@ const WatchStats = () => {
                                   <span>{author.bookCount}</span>
                                 </div>
                               )}
+                              {authorSortBy !== 'completed' && author.completedBooks && (
+                                <div className="period-stat">
+                                  <span className="stat-type">Completed:</span>
+                                  <span>{author.completedBooks}</span>
+                                </div>
+                              )}
                               {author.averagePagesPerBook > 0 && (
                                 <div className="period-stat">
                                   <span className="stat-type">Avg Pages/Book:</span>
@@ -1691,6 +1712,16 @@ const WatchStats = () => {
                                 </div>
                               </div>
                             )}
+                            {author.completedBooks && author.completedBooksList && author.completedBooksList.length > 0 && authorSortBy === 'completed' && (
+                              <div className="collection-shows">
+                                <h4>Completed Books:</h4>
+                                <div className="shows-list">
+                                  {author.completedBooksList.map((book, bookIndex) => (
+                                    <span key={bookIndex} className="show-tag">{book.title}</span>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
                           </div>
                         ))}
                       </div>
@@ -1700,6 +1731,57 @@ const WatchStats = () => {
                       </div>
                     );
                   })()}
+                </div>
+              )}
+
+              {/* Completed Books */}
+              {bookStats.totalStats?.completedBooks && bookStats.totalStats.completedBooks.length > 0 && (
+                <div className="stats-card">
+                  <h2>📖 Completed Books ({bookStats.totalStats.totalCompletedBooks})</h2>
+                  <div className="recent-activity">
+                    {bookStats.totalStats.completedBooks.slice(0, 15).map((book, index) => (
+                      <div key={index} className="activity-item">
+                        <div className="activity-info">
+                          <div className="activity-title">
+                            <span className="title">{book.title}</span>
+                            {book.author && book.author !== 'Unknown Author' && (
+                              <span className="subtitle">by {book.author}</span>
+                            )}
+                          </div>
+                          <div className="activity-meta">
+                            <span className="media-type">BOOK</span>
+                            <span className="separator">•</span>
+                            <span className="completion-status">{book.percentRead}% Complete</span>
+                            {book.pageCount && (
+                              <>
+                                <span className="separator">•</span>
+                                <span className="page-count">{book.pageCount} pages</span>
+                              </>
+                            )}
+                            {book.year && (
+                              <>
+                                <span className="separator">•</span>
+                                <span className="year">{book.year}</span>
+                              </>
+                            )}
+                            <span className="separator">•</span>
+                            <span className="date">{new Date(book.completedDate).toLocaleDateString()}</span>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                    {bookStats.totalStats.totalCompletedBooks > 15 && (
+                      <div className="activity-item">
+                        <div className="activity-info">
+                          <div className="activity-title">
+                            <span className="subtitle">
+                              ... and {bookStats.totalStats.totalCompletedBooks - 15} more completed books
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
                 </div>
               )}
 
