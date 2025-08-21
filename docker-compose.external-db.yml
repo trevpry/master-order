@@ -1,0 +1,27 @@
+# Docker Compose for External PostgreSQL
+version: '3.8'
+
+services:
+  master-order:
+    build: .
+    container_name: master-order
+    restart: unless-stopped
+    ports:
+      - "3001:3001"
+    volumes:
+      - /mnt/user/appdata/master-order/data:/app/data
+      - /mnt/user/appdata/master-order/artwork-cache:/app/server/artwork-cache
+      - /mnt/user/appdata/master-order/logs:/app/logs
+    environment:
+      - NODE_ENV=production
+      - DATABASE_URL=postgresql://username:password@your-postgres-host:5432/master_order
+      - PORT=3001
+      - PLEX_URL=${PLEX_URL}
+      - PLEX_TOKEN=${PLEX_TOKEN}
+      - TVDB_API_KEY=${TVDB_API_KEY}
+      - COMICVINE_API_KEY=${COMICVINE_API_KEY}
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
