@@ -1,6 +1,13 @@
 // c:\Users\Trevor\Sites\master-order\server\prismaClient.js
-require('dotenv').config();
+require('dotenv').config({ path: '../.env' }); // Load from parent directory
+require('dotenv').config(); // Also try from current directory
 const { PrismaClient } = require('@prisma/client');
+const path = require('path');
+
+console.log('🔍 Environment check:');
+console.log('  NODE_ENV:', process.env.NODE_ENV);
+console.log('  DATABASE_URL:', process.env.DATABASE_URL ? 'Set' : 'NOT SET');
+console.log('  Working directory:', process.cwd());
 
 // Singleton pattern to ensure only one Prisma client instance
 let prismaInstance = null;
@@ -17,16 +24,40 @@ function createPrismaClient() {
     log: ['info', 'warn', 'error'], // Enable more detailed logging
   };
   
-  // Only override datasources if DATABASE_URL is explicitly set
-  if (process.env.DATABASE_URL) {
+  // Determine database URL
+  let databaseUrl = process.env.DATABASE_URL;
+  
+  if (!databaseUrl) {
+    // Fallback to default based on environment
+    const isProduction = process.env.NODE_ENV === 'production';
+    
+    if (isProduction) {
+      databaseUrl = 'file:/app/data/db/master_order.db?connection_limit=1&pool_timeout=20&socket_timeout=20';
+    } else {
+      // Development fallback - look for database in parent directory
+      const dbPath = path.join(__dirname, '..', 'master_order.db');
+      databaseUrl = `file:${dbPath}`;
+    }
+    
+    console.log('⚠️ DATABASE_URL not found in environment, using fallback:', databaseUrl);
+    
+    // Override the datasources with our fallback
     clientConfig.datasources = {
       db: {
-        url: process.env.DATABASE_URL
+        url: databaseUrl
       }
     };
-    console.log('🔧 Using custom DATABASE_URL:', process.env.DATABASE_URL);
   } else {
-    console.log('🔧 Using default DATABASE_URL from schema.prisma');
+    console.log('🔧 Using DATABASE_URL from environment:', databaseUrl);
+    
+    // Only override datasources if we want to customize the URL
+    if (databaseUrl !== process.env.DATABASE_URL) {
+      clientConfig.datasources = {
+        db: {
+          url: databaseUrl
+        }
+      };
+    }
   }
   
   prismaInstance = new PrismaClient(clientConfig);
