@@ -1,10 +1,32 @@
 version: '3.8'
 
 services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: master-order-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: master_order
+      POSTGRES_USER: master_order_user
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-secure_password_change_me}
+    volumes:
+      - /mnt/user/appdata/master-order/postgres-data:/var/lib/postgresql/data
+    networks:
+      - master-order-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U master_order_user -d master_order"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+
   master-order:
     build: .
     container_name: master-order
     restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
     ports:
       - "3001:3001"
     volumes:
@@ -16,7 +38,7 @@ services:
       # - /mnt/user/Media:/media:ro
     environment:
       - NODE_ENV=production
-      - DATABASE_URL=file:/app/data/master_order.db
+      - DATABASE_URL=postgresql://master_order_user:${POSTGRES_PASSWORD:-secure_password_change_me}@postgres:5432/master_order
       - PORT=3001
       # Add your API keys and settings here or use a .env file
       # - PLEX_URL=http://your-plex-server:32400
@@ -30,13 +52,14 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 40s
+      start_period: 60s
 
 networks:
   master-order-network:
     driver: bridge
 
 volumes:
+  postgres-data:
   master-order-data:
   master-order-artwork:
   master-order-logs:

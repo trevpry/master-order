@@ -55,6 +55,7 @@ const WatchStats = () => {
   const [actorSortBy, setActorSortBy] = useState('playtime'); // 'playtime', 'episodes', 'series'
   const [movieActorSortBy, setMovieActorSortBy] = useState('playtime'); // 'playtime', 'episodes', 'series' (reused names for consistency)
   const [authorSortBy, setAuthorSortBy] = useState('readtime'); // 'readtime', 'pages', 'books'
+  const [publisherSortBy, setPublisherSortBy] = useState('readtime'); // 'readtime', 'comics'
 
   // Fetch watch statistics
   const fetchStats = async (selectedPeriod = globalPeriod, selectedGroupBy = globalGroupBy) => {
@@ -1852,6 +1853,96 @@ const WatchStats = () => {
                   </div>
                 </div>
               </div>
+
+              {/* Publisher Breakdown */}
+              {comicStats.totalStats?.publisherBreakdown && (
+                <div className="stats-card">
+                  <div className="breakdown-header">
+                    <h2>📚 Publishers</h2>
+                    <div className="toggle-group">
+                      <button
+                        className={`toggle-btn ${publisherSortBy === 'readtime' ? 'active' : ''}`}
+                        onClick={() => setPublisherSortBy('readtime')}
+                      >
+                        By Read Time
+                      </button>
+                      <button
+                        className={`toggle-btn ${publisherSortBy === 'comics' ? 'active' : ''}`}
+                        onClick={() => setPublisherSortBy('comics')}
+                      >
+                        By Comic Count
+                      </button>
+                    </div>
+                  </div>
+                  {(() => {
+                    const getPublisherData = () => {
+                      switch (publisherSortBy) {
+                        case 'readtime':
+                          return comicStats.totalStats.publisherBreakdown.byReadTime || [];
+                        case 'comics':
+                          return comicStats.totalStats.publisherBreakdown.byComicCount || [];
+                        default:
+                          return [];
+                      }
+                    };
+                    
+                    const publisherData = getPublisherData();
+                    
+                    return publisherData.length > 0 ? (
+                      <div className="time-breakdown">
+                        {publisherData.map((publisher, index) => (
+                          <div key={`comic-${publisherSortBy}-${index}`} className="time-period">
+                            <div className="period-header">
+                              <div className="actor-info">
+                                <span className="actor-rank">#{index + 1}</span>
+                                <h3>{publisher.name}</h3>
+                              </div>
+                              <span className="period-total">
+                                {publisherSortBy === 'readtime' && publisher.totalReadTimeFormatted}
+                                {publisherSortBy === 'comics' && `${publisher.comicCount} comics`}
+                              </span>
+                            </div>
+                            <div className="period-stats">
+                              {publisherSortBy !== 'readtime' && (
+                                <div className="period-stat">
+                                  <span className="stat-type">Read Time:</span>
+                                  <span>{publisher.totalReadTimeFormatted}</span>
+                                </div>
+                              )}
+                              {publisherSortBy !== 'comics' && (
+                                <div className="period-stat">
+                                  <span className="stat-type">Comics:</span>
+                                  <span>{publisher.comicCount}</span>
+                                </div>
+                              )}
+                              {publisher.averageReadTime > 0 && (
+                                <div className="period-stat">
+                                  <span className="stat-type">Avg Read Time:</span>
+                                  <span>{publisher.averageReadTime} min</span>
+                                </div>
+                              )}
+                            </div>
+                            {publisher.comics && publisher.comics.length > 0 && publisherSortBy === 'comics' && (
+                              <div className="collection-shows">
+                                <h4>Comics Read:</h4>
+                                <div className="shows-list">
+                                  {publisher.comics.map((comic, comicIndex) => (
+                                    <span key={comicIndex} className="show-tag">{comic.title}</span>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div style={{ textAlign: 'center', padding: '20px', color: '#8b949e' }}>
+                        <p>No publisher data available</p>
+                      </div>
+                    );
+                  })()}
+                </div>
+              )}
 
               {/* Recent Comics */}
               {comicStats.logs && comicStats.logs.length > 0 && (

@@ -1500,6 +1500,70 @@ class WatchLogService {
         }
       }
 
+      // For Comics, create publisher breakdown statistics
+      if (mediaType === 'comic') {
+        console.log('Creating publisher breakdown statistics for comics...');
+        try {
+          // Track publisher statistics from watch logs
+          const publisherStats = new Map();
+
+          watchLogs.forEach(log => {
+            if (log.customOrderItem?.comicPublisher && log.customOrderItem.comicPublisher.trim()) {
+              const publisherName = log.customOrderItem.comicPublisher.trim();
+              const totalComicReadTime = log.totalWatchTime || 0;
+              
+              if (!publisherStats.has(publisherName)) {
+                publisherStats.set(publisherName, {
+                  totalReadTime: 0,
+                  comicCount: 0,
+                  comics: []
+                });
+              }
+              
+              const stats = publisherStats.get(publisherName);
+              stats.totalReadTime += totalComicReadTime;
+              stats.comicCount += 1;
+              stats.comics.push({
+                title: log.title,
+                series: log.customOrderItem.comicSeries,
+                issue: log.customOrderItem.comicIssue,
+                readTime: totalComicReadTime
+              });
+            }
+          });
+
+          // Create publisher breakdown with all metrics
+          const publisherBreakdownData = Array.from(publisherStats.entries())
+            .map(([publisher, stats]) => ({
+              name: publisher,
+              totalReadTime: stats.totalReadTime,
+              totalReadTimeFormatted: this.formatWatchTime(stats.totalReadTime),
+              comicCount: stats.comicCount,
+              comics: stats.comics,
+              averageReadTime: stats.comicCount > 0 ? Math.round(stats.totalReadTime / stats.comicCount) : 0
+            }));
+
+          // Store the full data for different sorting methods
+          totalStats.publisherBreakdown = {
+            byReadTime: [...publisherBreakdownData].sort((a, b) => b.totalReadTime - a.totalReadTime).slice(0, 10),
+            byComicCount: [...publisherBreakdownData].sort((a, b) => b.comicCount - a.comicCount).slice(0, 10)
+          };
+
+          console.log(`Created publisher breakdown with ${publisherBreakdownData.length} publishers`);
+          if (publisherBreakdownData.length > 0) {
+            console.log('Top 3 by read time:', totalStats.publisherBreakdown.byReadTime.slice(0, 3).map(p => `${p.name} (${p.totalReadTimeFormatted})`));
+            console.log('Top 3 by comic count:', totalStats.publisherBreakdown.byComicCount.slice(0, 3).map(p => `${p.name} (${p.comicCount} comics)`));
+          }
+          
+        } catch (error) {
+          console.error('Error creating comic publisher breakdown:', error);
+          totalStats.publisherBreakdown = {
+            byReadTime: [],
+            byComicCount: []
+          };
+        }
+      }
+
       // Convert sets to arrays and get counts
       if (totalStats.shows) {
         totalStats.uniqueShows = totalStats.shows.size;

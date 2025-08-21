@@ -2097,6 +2097,7 @@ app.post('/api/custom-orders/:id/items', async (req, res) => {
       comicYear,
       comicIssue,
       comicVolume,
+      comicPublisher,
       customTitle,
       comicVineId,
       comicVineDetailsJson,
@@ -2337,6 +2338,7 @@ app.post('/api/custom-orders/:id/items', async (req, res) => {
         comicYear: comicYear ? parseInt(comicYear) : null,
         comicIssue: mediaType === 'comic' ? String(comicIssue) : null,
         comicVolume,
+        comicPublisher,
         customTitle,
         bookTitle: finalBookData.bookTitle,
         bookAuthor: finalBookData.bookAuthor,
@@ -2571,7 +2573,7 @@ app.put('/api/custom-orders/:id/items/:itemId', async (req, res) => {
       // Book fields
       bookTitle, bookAuthor, bookYear, bookIsbn, bookPublisher, bookOpenLibraryId, bookCoverUrl, bookPageCount,
       // Comic fields
-      comicSeries, comicYear, comicIssue, comicVolume, customTitle, comicVineId, comicVineDetailsJson, comicCoverUrl,
+      comicSeries, comicYear, comicIssue, comicVolume, comicPublisher, customTitle, comicVineId, comicVineDetailsJson, comicCoverUrl,
       // Story fields
       storyTitle, storyAuthor, storyYear, storyUrl, storyContainedInBookId, storyCoverUrl
     } = req.body;
@@ -2596,6 +2598,7 @@ app.put('/api/custom-orders/:id/items/:itemId', async (req, res) => {
       comicYear !== undefined || 
       comicIssue !== undefined || 
       comicVolume !== undefined ||
+      comicPublisher !== undefined ||
       customTitle !== undefined ||
       comicVineId !== undefined ||
       comicVineDetailsJson !== undefined ||
@@ -2660,6 +2663,7 @@ app.put('/api/custom-orders/:id/items/:itemId', async (req, res) => {
         if (comicYear !== undefined) updateData.comicYear = comicYear;
         if (comicIssue !== undefined) updateData.comicIssue = String(comicIssue); // Ensure string
         if (comicVolume !== undefined) updateData.comicVolume = comicVolume;
+        if (comicPublisher !== undefined) updateData.comicPublisher = comicPublisher;
         if (customTitle !== undefined) updateData.customTitle = customTitle;
         if (comicVineId !== undefined) updateData.comicVineId = comicVineId;
         if (comicVineDetailsJson !== undefined) updateData.comicVineDetailsJson = comicVineDetailsJson;

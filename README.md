@@ -9,12 +9,14 @@ A comprehensive media management application that intelligently curates your nex
 - **Collection-Aware Ordering**: Identifies shared collections between movies and TV shows for chronological viewing
 - **Multi-Source Integration**: Combines Plex library data with TVDB and ComicVine metadata
 - **Custom Order Management**: Create and manage custom viewing orders for complex franchises
+- **Comic Publisher Integration**: Automatically extracts and displays comic publisher information from ComicVine
+- **Advanced Statistics**: Publisher breakdowns, author statistics, and comprehensive watch analytics
 - **Real-time Artwork**: Dynamic artwork fetching and caching from TVDB
 
 ### Technical Stack
 - **Frontend**: React with Vite, TailwindCSS
 - **Backend**: Express.js with comprehensive API
-- **Database**: SQLite with Prisma ORM
+- **Database**: SQLite for development, PostgreSQL 16 for production
 - **Integrations**: Plex Media Server, TVDB API, ComicVine API
 - **Authentication**: Plex token-based authentication
 
@@ -42,6 +44,16 @@ A comprehensive media management application that intelligently curates your nex
 - **Custom Models**: User-defined viewing orders and settings
 
 ## Setup and Installation
+
+### Database Configuration
+
+This application supports dual database configurations:
+- **Development**: SQLite (file-based, simple setup)
+- **Production**: PostgreSQL 16 (Docker/Unraid, better performance and reliability)
+
+The database provider is automatically determined by the `DATABASE_URL` environment variable:
+- SQLite: `file:./master_order.db` 
+- PostgreSQL: `postgresql://user:password@host:port/database`
 
 ### Docker Installation (Recommended)
 

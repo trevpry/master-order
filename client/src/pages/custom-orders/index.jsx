@@ -851,6 +851,7 @@ function CustomOrders() {
         requestBody.comicSeries = mediaItem.comicSeries;
         requestBody.comicYear = mediaItem.comicYear;
         requestBody.comicIssue = mediaItem.comicIssue;
+        requestBody.comicPublisher = mediaItem.comicPublisher;
         requestBody.customTitle = mediaItem.customTitle;} else if (mediaType === 'book') {
         requestBody.bookTitle = mediaItem.bookTitle;
         requestBody.bookAuthor = mediaItem.bookAuthor;
@@ -1333,6 +1334,7 @@ function CustomOrders() {
                     comicSeries: selectedSeries.name, // Use ComicVine series name
                     comicYear: item.comicYear || selectedSeries.start_year,
                     comicIssue: item.comicIssue,
+                    comicPublisher: selectedSeries.publisher?.name || null,
                     comicVineId: selectedSeries.api_detail_url,
                     comicVineDetailsJson: JSON.stringify(selectedSeries)
                   };
@@ -1946,6 +1948,7 @@ function CustomOrders() {
                       comicSeries: selectedSeries.name, // Use ComicVine series name
                       comicYear: entry.publishedDate ? new Date(entry.publishedDate).getFullYear() : selectedSeries.start_year,
                       comicIssue: issueNumber,
+                      comicPublisher: selectedSeries.publisher?.name || null,
                       comicVineId: selectedSeries.api_detail_url,
                       comicVineDetailsJson: JSON.stringify(selectedSeries)
                     };
@@ -2441,6 +2444,7 @@ function CustomOrders() {
           comicSeries: selectedSeries.name,
           comicYear: seriesYear ? parseInt(seriesYear) : null,
           comicIssue: comicFormData.issue,
+          comicPublisher: selectedSeries.publisher?.name || null,
           customTitle: comicFormData.title.trim() || null,
           comicVineId: selectedSeries.api_detail_url || null,
           comicVineDetailsJson: JSON.stringify(selectedSeries),
@@ -2484,6 +2488,7 @@ function CustomOrders() {
           comicSeries: selectedSeries.name,
           comicYear: seriesYear ? parseInt(seriesYear) : null,
           comicIssue: comicFormData.issue,
+          comicPublisher: selectedSeries.publisher?.name || null,
           customTitle: comicFormData.title.trim() || null,
           comicVineId: selectedSeries.api_detail_url || null,
           comicVineDetailsJson: JSON.stringify(selectedSeries)
