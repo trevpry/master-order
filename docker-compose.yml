@@ -5,8 +5,7 @@ services:
     build: .
     container_name: master-order
     restart: unless-stopped
-    ports:
-      - "3001:3001"
+    network_mode: host
     volumes:
       # Persistent data storage - Updated paths for Unraid
       - /mnt/user/appdata/master-order/data:/app/data
@@ -16,16 +15,14 @@ services:
       # - /mnt/user/Media:/media:ro
     environment:
       - NODE_ENV=production
-      # Connect to your existing PostgreSQL instance on the host
-      - "DATABASE_URL=postgresql://master_order_user:${POSTGRES_PASSWORD:-secure_password_change_me}@host.docker.internal:5432/master_order"
+      # Connect to PostgreSQL on localhost since we're using host networking
+      - "DATABASE_URL=postgresql://master_order_user:${POSTGRES_PASSWORD:-secure_password_change_me}@localhost:5432/master_order"
       - PORT=3001
       # Add your API keys and settings here or use a .env file
       # - PLEX_URL=http://your-plex-server:32400
       # - PLEX_TOKEN=your-plex-token
       # - TVDB_API_KEY=your-tvdb-api-key
       # - COMICVINE_API_KEY=your-comicvine-api-key
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:3001/api/health"]
       interval: 30s
