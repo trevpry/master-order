@@ -1,32 +1,10 @@
 version: '3.8'
 
 services:
-  postgres:
-    image: postgres:16-alpine
-    container_name: master-order-postgres
-    restart: unless-stopped
-    environment:
-      POSTGRES_DB: master_order
-      POSTGRES_USER: master_order_user
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-secure_password_change_me}
-    volumes:
-      - /mnt/user/appdata/master-order/postgres-data:/var/lib/postgresql/data
-    networks:
-      - master-order-network
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U master_order_user -d master_order"]
-      interval: 30s
-      timeout: 10s
-      retries: 5
-      start_period: 30s
-
   master-order:
     build: .
     container_name: master-order
     restart: unless-stopped
-    depends_on:
-      postgres:
-        condition: service_healthy
     ports:
       - "3001:3001"
     volumes:
@@ -38,15 +16,16 @@ services:
       # - /mnt/user/Media:/media:ro
     environment:
       - NODE_ENV=production
-      - "DATABASE_URL=postgresql://master_order_user:${POSTGRES_PASSWORD:-secure_password_change_me}@postgres:5432/master_order"
+      # Connect to your existing PostgreSQL instance on the host
+      - "DATABASE_URL=postgresql://master_order_user:${POSTGRES_PASSWORD:-secure_password_change_me}@host.docker.internal:5432/master_order"
       - PORT=3001
       # Add your API keys and settings here or use a .env file
       # - PLEX_URL=http://your-plex-server:32400
       # - PLEX_TOKEN=your-plex-token
       # - TVDB_API_KEY=your-tvdb-api-key
       # - COMICVINE_API_KEY=your-comicvine-api-key
-    networks:
-      - master-order-network
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:3001/api/health"]
       interval: 30s
@@ -54,12 +33,7 @@ services:
       retries: 3
       start_period: 60s
 
-networks:
-  master-order-network:
-    driver: bridge
-
 volumes:
-  postgres-data:
   master-order-data:
   master-order-artwork:
   master-order-logs:
