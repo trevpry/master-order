@@ -67,6 +67,9 @@ COPY --from=build --chown=app:nodejs /app/client/dist ./client/dist
 COPY --from=build --chown=app:nodejs /app/package*.json ./
 COPY --chown=app:nodejs ./docker-entrypoint.sh ./docker-entrypoint.sh
 
+# Ensure Prisma files are copied (schema and migrations)
+COPY --from=build --chown=app:nodejs /app/server/prisma ./server/prisma
+
 # Make entrypoint executable
 RUN chmod +x ./docker-entrypoint.sh
 

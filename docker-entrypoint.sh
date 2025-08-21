@@ -1,21 +1,31 @@
 #!/bin/sh
 # Database initialization script # Apply migrations and push schema to ensure database is properly initialized
 echo "🔄 Applying database migrations..."
-npx prisma migrate deploy 2>&1 | head -20
 
-# If migrations failed, try db push as fallback
-if [ $? -ne 0 ]; then
-    echo "🔄 Migration failed, trying db push..."
-    npx prisma db push --force-reset || echo "⚠️ DB push also failed, but continuing..."
+# First, check if schema exists
+echo "🔍 Checking for Prisma schema file..."
+ls -la prisma/schema.prisma || echo "❌ Schema file not found"
+
+# Run migrations with proper error handling
+if [ -f "prisma/schema.prisma" ]; then
+    npx prisma migrate deploy 2>&1 | head -20
+    
+    # If migrations failed, try db push as fallback
+    if [ $? -ne 0 ]; then
+        echo "🔄 Migration failed, trying db push..."
+        npx prisma db push --force-reset 2>&1 || echo "⚠️ DB push also failed, but continuing..."
+    fi
+else
+    echo "❌ No schema file found, cannot run migrations"
 fi
 
 # Debug: Check if tables were created
 echo "🔍 Checking database tables after migration..."
-sqlite3 /app/data/master_order.db ".tables" || echo "❌ Could not list tables"
+sqlite3 /app/data/master_order.db ".tables" 2>&1 || echo "❌ Could not list tables"
 
 # Generate Prisma client
 echo "🔧 Generating Prisma client..."
-npx prisma generateker
+npx prisma generate 2>&1 || echo "⚠️ Prisma generate failed"ker
 
 echo "🚀 Starting Master Order application..."
 
@@ -41,8 +51,18 @@ echo "📊 Setting up database..."
 # Create database file if it doesn't exist
 if [ ! -f "/app/data/master_order.db" ]; then
     echo "🗄️ Creating new database file..."
+    # Ensure parent directory exists and has proper permissions
+    mkdir -p /app/data
+    chmod 755 /app/data || true
+    
+    # Create database file
     touch /app/data/master_order.db
     chmod 644 /app/data/master_order.db || true
+    
+    # Set ownership if running as root
+    if [ "$(id -u)" = "0" ]; then
+        chown app:nodejs /app/data/master_order.db || true
+    fi
 else
     echo "🗄️ Database file already exists"
 fi
