@@ -18,7 +18,7 @@ env | grep -i database || echo "[DEBUG] No DATABASE_URL env vars found"
 # Force correct DATABASE_URL if it's been overridden (Docker safety check)
 if [ "$DATABASE_URL" = "file:/app/data/master_order.db" ] || echo "$DATABASE_URL" | grep -q "file:"; then
     echo "[WARN] DATABASE_URL appears to be SQLite format, forcing PostgreSQL for Docker"
-    export DATABASE_URL="postgresql://master_order_user:${POSTGRES_PASSWORD:-secure_password_change_me}@postgres:5432/master_order"
+    export DATABASE_URL="postgresql://master_order_user:${POSTGRES_PASSWORD:-secure_password_change_me}@host.docker.internal:5432/master_order"
     echo "[INFO] Forced DATABASE_URL to: $DATABASE_URL"
 fi
 
@@ -48,7 +48,7 @@ echo "[INFO] Setting up PostgreSQL database..."
 # Validate required environment variables
 if [ -z "$DATABASE_URL" ]; then
     echo "[ERROR] DATABASE_URL environment variable is required for PostgreSQL"
-    echo "   Example: postgresql://username:password@postgres:5432/master_order"
+    echo "   Example: postgresql://username:password@host.docker.internal:5432/master_order"
     exit 1
 fi
 
@@ -64,8 +64,8 @@ wait_for_postgres() {
     DB_PORT=$(echo "$DATABASE_URL" | sed -n 's|.*://[^@]*@[^:]*:\([0-9]*\)/.*|\1|p')
     
     if [ -z "$DB_HOST" ] || [ -z "$DB_PORT" ]; then
-        echo "[WARN] Could not parse host/port from DATABASE_URL, using default postgres:5432"
-        DB_HOST="postgres"
+        echo "[WARN] Could not parse host/port from DATABASE_URL, using default host.docker.internal:5432"
+        DB_HOST="host.docker.internal"
         DB_PORT="5432"
     fi
     
