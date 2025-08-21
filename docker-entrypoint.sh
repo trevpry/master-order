@@ -53,11 +53,11 @@ else
     # Validate required environment variables
     if [ -z "$DATABASE_URL" ]; then
         echo "[ERROR] DATABASE_URL environment variable is required for PostgreSQL"
-    echo "   Example: postgresql://username:password@localhost:5432/master_order"
-    exit 1
-fi
+        echo "   Example: postgresql://username:password@localhost:5432/master_order"
+        exit 1
+    fi
 
-echo "[INFO] DATABASE_URL configured for PostgreSQL"
+    echo "[INFO] DATABASE_URL configured for PostgreSQL"
 
 # Function to wait for PostgreSQL to be ready
 wait_for_postgres() {
@@ -233,6 +233,8 @@ DATABASE_TEST_RESULT=$(node -e "
 " 2>/dev/null)
 
 echo "$DATABASE_TEST_RESULT"
+
+fi
 
 echo "[INFO] Database setup completed successfully!"
 echo "[INFO] Starting the application..."
