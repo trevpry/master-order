@@ -1266,6 +1266,128 @@ class WatchLogService {
         }
       }
 
+      // For Books, create detailed author breakdowns and pages read statistics
+      if (mediaType === 'book') {
+        console.log('Creating author breakdown and pages read statistics for books...');
+        try {
+          const authorStats = new Map(); // Will store { totalReadTime, bookCount, totalPagesRead, books }
+          let totalPagesRead = 0;
+
+          // Get all book read logs with custom order items
+          const bookReadLogs = watchLogs.filter(log => 
+            log.customOrderItemId && 
+            log.totalWatchTime > 0 && 
+            log.mediaType === 'book'
+          );
+
+          console.log(`Found ${bookReadLogs.length} book reading sessions`);
+
+          if (bookReadLogs.length > 0) {
+            const customOrderItemIds = [...new Set(bookReadLogs.map(log => log.customOrderItemId))];
+
+            // Get custom order items (books) with reading progress data
+            const booksWithProgress = await this.prisma.customOrderItem.findMany({
+              where: {
+                id: {
+                  in: customOrderItemIds
+                },
+                mediaType: 'book'
+              },
+              select: {
+                id: true,
+                title: true,
+                bookAuthor: true,
+                bookCurrentPage: true,
+                bookPageCount: true,
+                bookPercentRead: true
+              }
+            });
+
+            console.log(`Found ${booksWithProgress.length} books with progress data`);
+
+            // Calculate pages read and author statistics
+            for (const book of booksWithProgress) {
+              const bookLogs = bookReadLogs.filter(log => log.customOrderItemId === book.id);
+              const totalBookReadTime = bookLogs.reduce((sum, log) => sum + (log.totalWatchTime || 0), 0);
+
+              // Calculate pages read for this book
+              let bookPagesRead = 0;
+              if (book.bookCurrentPage && book.bookCurrentPage > 0) {
+                bookPagesRead = book.bookCurrentPage;
+              } else if (book.bookPercentRead && book.bookPageCount) {
+                bookPagesRead = Math.round((book.bookPercentRead / 100) * book.bookPageCount);
+              }
+
+              totalPagesRead += bookPagesRead;
+
+              // Track author statistics
+              if (book.bookAuthor && book.bookAuthor.trim()) {
+                const authorName = book.bookAuthor.trim();
+                
+                if (!authorStats.has(authorName)) {
+                  authorStats.set(authorName, {
+                    totalReadTime: 0,
+                    bookCount: 0,
+                    totalPagesRead: 0,
+                    books: []
+                  });
+                }
+                
+                const stats = authorStats.get(authorName);
+                stats.totalReadTime += totalBookReadTime;
+                stats.bookCount += 1;
+                stats.totalPagesRead += bookPagesRead;
+                stats.books.push({
+                  title: book.title,
+                  pagesRead: bookPagesRead,
+                  totalPages: book.bookPageCount,
+                  readTime: totalBookReadTime
+                });
+              }
+            }
+          }
+
+          // Set total pages read on totalStats
+          totalStats.totalPagesRead = totalPagesRead;
+
+          // Create author breakdown with all metrics
+          const authorBreakdownData = Array.from(authorStats.entries())
+            .map(([author, stats]) => ({
+              name: author,
+              totalReadTime: stats.totalReadTime,
+              totalReadTimeFormatted: this.formatWatchTime(stats.totalReadTime),
+              bookCount: stats.bookCount,
+              totalPagesRead: stats.totalPagesRead,
+              books: stats.books,
+              averagePagesPerBook: stats.bookCount > 0 ? Math.round(stats.totalPagesRead / stats.bookCount) : 0
+            }));
+
+          // Store the full data for different sorting methods
+          totalStats.authorBreakdown = {
+            byReadTime: [...authorBreakdownData].sort((a, b) => b.totalReadTime - a.totalReadTime).slice(0, 10),
+            byPagesRead: [...authorBreakdownData].sort((a, b) => b.totalPagesRead - a.totalPagesRead).slice(0, 10),
+            byBookCount: [...authorBreakdownData].sort((a, b) => b.bookCount - a.bookCount).slice(0, 10)
+          };
+
+          console.log(`Created author breakdown with ${authorBreakdownData.length} authors`);
+          console.log(`Total pages read across all books: ${totalPagesRead}`);
+          if (authorBreakdownData.length > 0) {
+            console.log('Top 3 by read time:', totalStats.authorBreakdown.byReadTime.slice(0, 3).map(a => `${a.name} (${a.totalReadTimeFormatted})`));
+            console.log('Top 3 by pages read:', totalStats.authorBreakdown.byPagesRead.slice(0, 3).map(a => `${a.name} (${a.totalPagesRead} pages)`));
+            console.log('Top 3 by book count:', totalStats.authorBreakdown.byBookCount.slice(0, 3).map(a => `${a.name} (${a.bookCount} books)`));
+          }
+          
+        } catch (error) {
+          console.error('Error creating book author breakdown:', error);
+          totalStats.totalPagesRead = 0;
+          totalStats.authorBreakdown = {
+            byReadTime: [],
+            byPagesRead: [],
+            byBookCount: []
+          };
+        }
+      }
+
       // Convert sets to arrays and get counts
       if (totalStats.shows) {
         totalStats.uniqueShows = totalStats.shows.size;

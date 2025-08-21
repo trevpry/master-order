@@ -54,6 +54,7 @@ const WatchStats = () => {
   // Actor breakdown sorting state
   const [actorSortBy, setActorSortBy] = useState('playtime'); // 'playtime', 'episodes', 'series'
   const [movieActorSortBy, setMovieActorSortBy] = useState('playtime'); // 'playtime', 'episodes', 'series' (reused names for consistency)
+  const [authorSortBy, setAuthorSortBy] = useState('readtime'); // 'readtime', 'pages', 'books'
 
   // Fetch watch statistics
   const fetchStats = async (selectedPeriod = globalPeriod, selectedGroupBy = globalGroupBy) => {
@@ -1566,6 +1567,10 @@ const WatchStats = () => {
                     <span className="stat-value">{bookStats.totalStats?.totalBookReadTimeFormatted || '0 minutes'}</span>
                   </div>
                   <div className="stat-item">
+                    <span className="stat-label">Total Pages Read</span>
+                    <span className="stat-value">{bookStats.totalStats?.totalPagesRead || 0} pages</span>
+                  </div>
+                  <div className="stat-item">
                     <span className="stat-label">Custom Orders</span>
                     <span className="stat-value">{bookStats.totalStats?.uniqueCustomOrders || 0}</span>
                   </div>
@@ -1578,8 +1583,125 @@ const WatchStats = () => {
                       }
                     </span>
                   </div>
+                  <div className="stat-item">
+                    <span className="stat-label">Average Pages per Book</span>
+                    <span className="stat-value">
+                      {bookStats.totalStats?.totalBooks > 0 && bookStats.totalStats?.totalPagesRead > 0
+                        ? Math.round(bookStats.totalStats.totalPagesRead / bookStats.totalStats.totalBooks) + ' pages'
+                        : '0 pages'
+                      }
+                    </span>
+                  </div>
                 </div>
               </div>
+
+              {/* Author Breakdown */}
+              {bookStats.totalStats?.authorBreakdown && (
+                <div className="stats-card">
+                  <div className="breakdown-header">
+                    <h2>📖 Top Authors</h2>
+                    <div className="toggle-group">
+                      <button
+                        className={`toggle-btn ${authorSortBy === 'readtime' ? 'active' : ''}`}
+                        onClick={() => setAuthorSortBy('readtime')}
+                      >
+                        By Read Time
+                      </button>
+                      <button
+                        className={`toggle-btn ${authorSortBy === 'pages' ? 'active' : ''}`}
+                        onClick={() => setAuthorSortBy('pages')}
+                      >
+                        By Pages Read
+                      </button>
+                      <button
+                        className={`toggle-btn ${authorSortBy === 'books' ? 'active' : ''}`}
+                        onClick={() => setAuthorSortBy('books')}
+                      >
+                        By Book Count
+                      </button>
+                    </div>
+                  </div>
+                  {(() => {
+                    const getAuthorData = () => {
+                      switch (authorSortBy) {
+                        case 'readtime':
+                          return bookStats.totalStats.authorBreakdown.byReadTime || [];
+                        case 'pages':
+                          return bookStats.totalStats.authorBreakdown.byPagesRead || [];
+                        case 'books':
+                          return bookStats.totalStats.authorBreakdown.byBookCount || [];
+                        default:
+                          return [];
+                      }
+                    };
+                    
+                    const authorData = getAuthorData();
+                    const sortLabel = authorSortBy === 'readtime' ? 'Total Read Time' : 
+                                     authorSortBy === 'pages' ? 'Pages Read' : 
+                                     'Book Count';
+                    
+                    return authorData.length > 0 ? (
+                      <div className="time-breakdown">
+                        {authorData.map((author, index) => (
+                          <div key={`book-${authorSortBy}-${index}`} className="time-period">
+                            <div className="period-header">
+                              <div className="actor-info">
+                                <span className="actor-rank">#{index + 1}</span>
+                                <h3>{author.name}</h3>
+                              </div>
+                              <span className="period-total">
+                                {authorSortBy === 'readtime' && author.totalReadTimeFormatted}
+                                {authorSortBy === 'pages' && `${author.totalPagesRead} pages`}
+                                {authorSortBy === 'books' && `${author.bookCount} books`}
+                              </span>
+                            </div>
+                            <div className="period-stats">
+                              {authorSortBy !== 'readtime' && (
+                                <div className="period-stat">
+                                  <span className="stat-type">Read Time:</span>
+                                  <span>{author.totalReadTimeFormatted}</span>
+                                </div>
+                              )}
+                              {authorSortBy !== 'pages' && (
+                                <div className="period-stat">
+                                  <span className="stat-type">Pages Read:</span>
+                                  <span>{author.totalPagesRead}</span>
+                                </div>
+                              )}
+                              {authorSortBy !== 'books' && (
+                                <div className="period-stat">
+                                  <span className="stat-type">Books:</span>
+                                  <span>{author.bookCount}</span>
+                                </div>
+                              )}
+                              {author.averagePagesPerBook > 0 && (
+                                <div className="period-stat">
+                                  <span className="stat-type">Avg Pages/Book:</span>
+                                  <span>{author.averagePagesPerBook}</span>
+                                </div>
+                              )}
+                            </div>
+                            {author.books && author.books.length > 0 && authorSortBy === 'books' && (
+                              <div className="collection-shows">
+                                <h4>Books Read:</h4>
+                                <div className="shows-list">
+                                  {author.books.map((book, bookIndex) => (
+                                    <span key={bookIndex} className="show-tag">{book.title}</span>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div style={{ textAlign: 'center', padding: '20px', color: '#8b949e' }}>
+                        <p>No author data available</p>
+                      </div>
+                    );
+                  })()}
+                </div>
+              )}
 
               {/* Recent Books */}
               {bookStats.logs && bookStats.logs.length > 0 && (
