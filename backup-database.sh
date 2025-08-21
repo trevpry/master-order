@@ -22,14 +22,21 @@ if docker ps | grep -q "$CONTAINER_NAME"; then
     echo "📁 Backing up database from running container..."
     BACKUP_FILE="$BACKUP_DIR/master_order_container_backup_$BACKUP_TIMESTAMP.db"
     
-    docker cp "$CONTAINER_NAME:/app/data/master_order.db" "$BACKUP_FILE"
-    
-    if [ $? -eq 0 ]; then
-        echo "✅ Container database backup completed successfully!"
-        echo "📊 Backup file size: $(ls -lh "$BACKUP_FILE" | awk '{print $5}')"
-        BACKUP_SUCCESS=true
+    # First check if the database file exists in the container
+    if docker exec "$CONTAINER_NAME" test -f /app/data/master_order.db; then
+        echo "🔍 Found database file in container, copying..."
+        docker cp "$CONTAINER_NAME:/app/data/master_order.db" "$BACKUP_FILE"
+        
+        if [ $? -eq 0 ] && [ -f "$BACKUP_FILE" ]; then
+            echo "✅ Container database backup completed successfully!"
+            echo "📊 Backup file size: $(ls -lh "$BACKUP_FILE" | awk '{print $5}')"
+            BACKUP_SUCCESS=true
+        else
+            echo "❌ Container backup command succeeded but file not created, trying host filesystem..."
+            BACKUP_SUCCESS=false
+        fi
     else
-        echo "❌ Container backup failed, trying host filesystem..."
+        echo "❌ Database file not found in container at /app/data/master_order.db"
         BACKUP_SUCCESS=false
     fi
 else
