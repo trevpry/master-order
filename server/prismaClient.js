@@ -11,14 +11,25 @@ function createPrismaClient() {
   }
 
   console.log('🔗 Creating new Prisma client instance...');
-  prismaInstance = new PrismaClient({
+  
+  // Build Prisma client configuration
+  const clientConfig = {
     log: ['info', 'warn', 'error'], // Enable more detailed logging
-    datasources: {
+  };
+  
+  // Only override datasources if DATABASE_URL is explicitly set
+  if (process.env.DATABASE_URL) {
+    clientConfig.datasources = {
       db: {
         url: process.env.DATABASE_URL
       }
-    }
-  });
+    };
+    console.log('🔧 Using custom DATABASE_URL:', process.env.DATABASE_URL);
+  } else {
+    console.log('🔧 Using default DATABASE_URL from schema.prisma');
+  }
+  
+  prismaInstance = new PrismaClient(clientConfig);
 
   // Add graceful shutdown handler
   process.on('beforeExit', async () => {
