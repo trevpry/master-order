@@ -2,14 +2,28 @@
 # Database initialization script # Apply migrations and push schema to ensure database is properly initialized
 echo "🔄 Applying database migrations..."
 
-# First, check if schema exists
+# First, check if schema exists - check both locations found by debugging
 echo "🔍 Checking for Prisma schema file..."
+SCHEMA_PATH=""
 if [ -f "prisma/schema.prisma" ]; then
-    echo "✅ Schema file found"
-    ls -la prisma/schema.prisma
-    
+    SCHEMA_PATH="prisma/schema.prisma"
+    echo "✅ Schema file found at prisma/schema.prisma"
+elif [ -f "server/prisma/schema.prisma" ]; then
+    SCHEMA_PATH="server/prisma/schema.prisma"
+    echo "✅ Schema file found at server/prisma/schema.prisma"
+    # Change to server directory for Prisma commands to work
+    cd /app/server
+else
+    echo "❌ Schema file not found in expected locations"
+    echo "🔍 Current directory contents:"
+    ls -la
+    echo "🔍 Looking for schema in other locations..."
+    find . -name "schema.prisma" -type f 2>/dev/null || echo "No schema.prisma found anywhere"
+fi
+
+if [ -n "$SCHEMA_PATH" ]; then
     # Verify database file is accessible before running migrations
-    if sqlite3 /app/data/master_order.db "SELECT 1;" 2>/dev/null; then
+    if [ -f "/app/data/master_order.db" ] && sqlite3 /app/data/master_order.db "SELECT 1;" 2>/dev/null; then
         echo "✅ Database accessible, running migrations..."
         
         # Run migrations with proper error handling
@@ -23,19 +37,19 @@ if [ -f "prisma/schema.prisma" ]; then
         echo "❌ Database not accessible, cannot run migrations"
         # Try to recreate the database
         echo "🔄 Attempting to recreate database..."
-        rm -f /app/data/master_order.db
-        sqlite3 /app/data/master_order.db "SELECT 1;"
+        rm -rf /app/data/master_order.db
+        
+        # Create new database file
+        sqlite3 /app/data/master_order.db "CREATE TABLE IF NOT EXISTS _temp (id INTEGER); DROP TABLE _temp;"
         chmod 644 /app/data/master_order.db
         
         # Try migrations again
-        npx prisma db push --force-reset 2>&1 || echo "❌ Database recreation failed"
+        if [ -f "/app/data/master_order.db" ]; then
+            npx prisma db push --force-reset 2>&1 || echo "❌ Database recreation failed"
+        fi
     fi
 else
-    echo "❌ Schema file not found at prisma/schema.prisma"
-    echo "🔍 Current directory contents:"
-    ls -la
-    echo "🔍 Looking for schema in other locations..."
-    find . -name "schema.prisma" -type f 2>/dev/null || echo "No schema.prisma found anywhere"
+    echo "❌ No schema file found, cannot run migrations"
 fi
 
 # Debug: Check if tables were created and database is functional
@@ -101,16 +115,34 @@ if [ ! -f "/app/data/master_order.db" ]; then
     mkdir -p /app/data
     chmod 755 /app/data || true
     
+    # CRITICAL: Check if it's a directory and remove it
+    if [ -d "/app/data/master_order.db" ]; then
+        echo "🚨 ERROR: master_order.db exists as directory! Removing..."
+        rm -rf /app/data/master_order.db
+    fi
+    
     # Create a proper SQLite database file (not just empty file)
-    sqlite3 /app/data/master_order.db "SELECT 1;" || true
-    chmod 644 /app/data/master_order.db || true
+    echo "🔧 Creating SQLite database file..."
+    sqlite3 /app/data/master_order.db "CREATE TABLE IF NOT EXISTS _temp (id INTEGER); DROP TABLE _temp;" 2>/dev/null || {
+        echo "❌ SQLite creation failed, trying alternative method..."
+        # Alternative: create empty file first, then initialize
+        touch /app/data/master_order.db
+        sqlite3 /app/data/master_order.db "SELECT 1;" 2>/dev/null || true
+    }
+    
+    # Verify it's a file, not a directory
+    if [ -f "/app/data/master_order.db" ]; then
+        chmod 644 /app/data/master_order.db || true
+        echo "✅ Database file created successfully"
+    else
+        echo "❌ CRITICAL: Could not create database as file - volume mount issue!"
+        ls -la /app/data/
+    fi
     
     # Set ownership if running as root
     if [ "$(id -u)" = "0" ]; then
         chown app:nodejs /app/data/master_order.db || true
     fi
-    
-    echo "✅ Database file created successfully"
 else
     echo "🗄️ Database file already exists"
 fi
