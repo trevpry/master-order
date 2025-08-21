@@ -46,6 +46,42 @@ fi
 echo "🔧 Generating Prisma client..."
 npx prisma generate
 
+# Test database connection before starting application
+echo "🔍 Testing database connection..."
+CONNECTION_SUCCESS=false
+
+for attempt in 1 2 3 4 5; do
+    echo "🔄 Connection test attempt $attempt/5..."
+    
+    if npx prisma db execute --stdin <<EOF
+SELECT name FROM sqlite_master WHERE type='table' AND name='Settings';
+EOF
+    then
+        echo "✅ Database connection test successful on attempt $attempt"
+        CONNECTION_SUCCESS=true
+        break
+    else
+        echo "❌ Database connection test failed on attempt $attempt"
+        if [ $attempt -lt 5 ]; then
+            echo "⏳ Waiting 3 seconds before retry..."
+            sleep 3
+        fi
+    fi
+done
+
+if [ "$CONNECTION_SUCCESS" != "true" ]; then
+    echo "💥 Fatal: Could not establish database connection after 5 attempts"
+    echo "🔍 Database file status:"
+    ls -la /app/data/master_order.db || echo "❌ Database file not found"
+    echo "🔍 Environment:"
+    echo "DATABASE_URL: $DATABASE_URL"
+    exit 1
+fi
+
+# Give additional time for any remaining database connections to stabilize
+echo "⏳ Allowing 5 seconds for connection stabilization..."
+sleep 5
+
 echo "🌟 Starting application server..."
 
 # Switch to app user for running the application
