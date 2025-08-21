@@ -5,7 +5,8 @@ services:
     build: .
     container_name: master-order
     restart: unless-stopped
-    network_mode: host
+    ports:
+      - "3001:3001"
     volumes:
       # Persistent data storage - Updated paths for Unraid
       - /mnt/user/appdata/master-order/data:/app/data
@@ -15,8 +16,8 @@ services:
       # - /mnt/user/Media:/media:ro
     environment:
       - NODE_ENV=production
-      # Connect to PostgreSQL on localhost since we're using host networking
-      - "DATABASE_URL=postgresql://master_order_user:${POSTGRES_PASSWORD:-secure_password_change_me}@localhost:5432/master_order"
+      # Connect to PostgreSQL using Unraid server IP
+      - "DATABASE_URL=postgresql://master_order_user:${POSTGRES_PASSWORD:-secure_password_change_me}@192.168.1.113:5432/master_order"
       - PORT=3001
       # Temporarily skip PostgreSQL readiness check for debugging
       - SKIP_PG_CHECK=true

@@ -18,7 +18,7 @@ env | grep -i database || echo "[DEBUG] No DATABASE_URL env vars found"
 # Force correct DATABASE_URL if it's been overridden (Docker safety check)
 if [ "$DATABASE_URL" = "file:/app/data/master_order.db" ] || echo "$DATABASE_URL" | grep -q "file:"; then
     echo "[WARN] DATABASE_URL appears to be SQLite format, forcing PostgreSQL for Docker"
-    export DATABASE_URL="postgresql://master_order_user:${POSTGRES_PASSWORD:-secure_password_change_me}@localhost:5432/master_order"
+    export DATABASE_URL="postgresql://master_order_user:${POSTGRES_PASSWORD:-secure_password_change_me}@192.168.1.113:5432/master_order"
     echo "[INFO] Forced DATABASE_URL to: $DATABASE_URL"
 fi
 
@@ -59,8 +59,8 @@ wait_for_postgres() {
     DB_PORT=$(echo "$DATABASE_URL" | sed -n 's|.*://[^@]*@[^:]*:\([0-9]*\)/.*|\1|p')
     
     if [ -z "$DB_HOST" ] || [ -z "$DB_PORT" ]; then
-        echo "[WARN] Could not parse host/port from DATABASE_URL, using default localhost:5432"
-        DB_HOST="localhost"
+        echo "[WARN] Could not parse host/port from DATABASE_URL, using default 192.168.1.113:5432"
+        DB_HOST="192.168.1.113"
         DB_PORT="5432"
     fi
     
@@ -104,22 +104,20 @@ echo "[INFO] Proceeding directly to database setup..."
 
 # Debug PostgreSQL connectivity
 echo "[INFO] === PostgreSQL Connection Debug ==="
-echo "[DEBUG] Testing if port 5432 is open..."
-if timeout 3 bash -c "</dev/tcp/localhost/5432" 2>/dev/null; then
-    echo "[SUCCESS] Port 5432 is open and accepting connections"
+echo "[DEBUG] Testing if port 5432 is open on Unraid server (192.168.1.113)..."
+if timeout 3 bash -c "</dev/tcp/192.168.1.113/5432" 2>/dev/null; then
+    echo "[SUCCESS] Port 5432 is open and accepting connections on 192.168.1.113"
 else
-    echo "[ERROR] Port 5432 is not accessible"
-    echo "[DEBUG] Checking what's listening on port 5432..."
-    netstat -tlnp 2>/dev/null | grep :5432 || echo "[INFO] Nothing found listening on port 5432"
+    echo "[ERROR] Port 5432 is not accessible on 192.168.1.113"
 fi
 
 echo "[DEBUG] Testing with basic PostgreSQL tools..."
 if command -v psql >/dev/null 2>&1; then
-    echo "[DEBUG] Testing connection with psql..."
-    PGPASSWORD=secure_password_change_me timeout 10 psql -h localhost -p 5432 -U master_order_user -d master_order -c "SELECT 1 as test;" 2>&1 || echo "[ERROR] psql connection failed"
+    echo "[DEBUG] Testing connection with psql to 192.168.1.113..."
+    PGPASSWORD=secure_password_change_me timeout 10 psql -h 192.168.1.113 -p 5432 -U master_order_user -d master_order -c "SELECT 1 as test;" 2>&1 || echo "[ERROR] psql connection failed to 192.168.1.113"
     
-    echo "[DEBUG] Testing connection to postgres database..."
-    PGPASSWORD=secure_password_change_me timeout 10 psql -h localhost -p 5432 -U postgres -d postgres -c "SELECT datname FROM pg_database;" 2>&1 || echo "[ERROR] postgres user connection failed"
+    echo "[DEBUG] Testing connection to postgres database on 192.168.1.113..."
+    PGPASSWORD=secure_password_change_me timeout 10 psql -h 192.168.1.113 -p 5432 -U postgres -d postgres -c "SELECT datname FROM pg_database;" 2>&1 || echo "[ERROR] postgres user connection failed to 192.168.1.113"
 else
     echo "[INFO] psql not available for testing"
 fi
