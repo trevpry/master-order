@@ -4,8 +4,9 @@
   "description": "Express server for Master Order application",
   "main": "index.js",
   "scripts": {
-    "start": "node setup-schema.js && npx prisma generate && node index.js",
+    "start": "node index.js",
     "dev": "node setup-schema.js && npx prisma generate && nodemon index.js",
+    "build": "node setup-schema.js && npx prisma generate",
     "test": "echo \"Error: no test specified\" && exit 1",
     "setup-schema": "node setup-schema.js",
     "setup-schema:sqlite": "node setup-schema.js sqlite",

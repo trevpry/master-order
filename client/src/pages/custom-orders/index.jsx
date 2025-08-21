@@ -47,8 +47,12 @@ function CustomOrders() {
     year: '',
     issue: '',
     title: ''
-  });const [comicSearchResults, setComicSearchResults] = useState([]);
+  });  const [comicSearchResults, setComicSearchResults] = useState([]);
   const [comicSearchLoading, setComicSearchLoading] = useState(false);
+  
+  // State for tracking expanded comic details
+  const [expandedItems, setExpandedItems] = useState(new Set());
+  
   const [showShortStoryForm, setShowShortStoryForm] = useState(false);
   const [shortStoryFormData, setShortStoryFormData] = useState({
     title: '',
@@ -210,6 +214,19 @@ function CustomOrders() {
     
     // For items without cached artwork, return null to show fallback
     return null;
+  };
+
+  // Function to toggle expanded state for an item
+  const toggleItemExpanded = (itemId) => {
+    setExpandedItems(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(itemId)) {
+        newSet.delete(itemId);
+      } else {
+        newSet.add(itemId);
+      }
+      return newSet;
+    });
   };
 
   // Fetch custom orders when component mounts
@@ -2846,7 +2863,7 @@ function CustomOrders() {
                     ⋮⋮
                   </div>
                   <div className="item-position">#{index + 1}</div>
-                  <div className="item-thumbnail">
+                  <div className="item-thumbnail" onClick={() => toggleItemExpanded(item.id)} style={{ cursor: 'pointer' }}>
                     {getItemArtworkUrl(item) ? (
                       <img 
                         src={getItemArtworkUrl(item)} 
@@ -2869,6 +2886,10 @@ function CustomOrders() {
                        item.mediaType === 'book' ? '📖' :
                        item.mediaType === 'shortstory' ? '📖' : 
                        item.mediaType === 'webvideo' ? '🎬' : '📄'}
+                    </div>
+                    {/* Expand/Collapse indicator */}
+                    <div className="expand-indicator">
+                      {expandedItems.has(item.id) ? '▼' : '▶'}
                     </div>
                   </div>                  <div className="item-info">
                     <div className="item-details">
@@ -2907,9 +2928,9 @@ function CustomOrders() {
                             {item.comicSeries} ({item.comicYear}) #{item.comicIssue}
                           </p>
                           
-                          {/* Enhanced ComicVine Data Display */}
-                          {(item.comicIssueName || item.comicDescription || item.comicCreators || item.comicCharacters || item.comicStoryArcs) && (
-                            <div className="comic-vine-details">
+                          {/* Enhanced ComicVine Data Display - Only show when expanded */}
+                          {expandedItems.has(item.id) && (item.comicIssueName || item.comicDescription || item.comicCreators || item.comicCharacters || item.comicStoryArcs) && (
+                            <div className="comic-vine-details expanded">
                               {item.comicIssueName && (
                                 <p className="comic-issue-name">
                                   <strong>Issue:</strong> {item.comicIssueName}
@@ -2918,7 +2939,7 @@ function CustomOrders() {
                               
                               {item.comicDescription && (
                                 <p className="comic-description">
-                                  <strong>Description:</strong> {item.comicDescription.length > 150 ? item.comicDescription.substring(0, 150) + '...' : item.comicDescription}
+                                  <strong>Description:</strong> {item.comicDescription}
                                 </p>
                               )}
                               

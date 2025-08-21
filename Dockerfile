@@ -27,8 +27,10 @@ COPY . .
 RUN find . -name ".env*" -type f -delete || true
 
 # Setup schema and generate Prisma client for production (PostgreSQL)
+# Note: This only sets up the schema files, no database connection during build
 WORKDIR /app/server
-RUN node setup-schema.js postgresql && npx prisma generate
+ENV DATABASE_URL="postgresql://placeholder:placeholder@localhost:5432/placeholder"
+RUN npm run build
 
 # Build client
 WORKDIR /app/client
@@ -46,6 +48,7 @@ RUN apk add --no-cache \
     curl \
     su-exec \
     postgresql-client \
+    netcat-openbsd \
     && rm -rf /var/cache/apk/*
 
 # Create app directory
@@ -98,4 +101,5 @@ HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
 # USER app
 
 # Start the application (entrypoint will handle user switching)
-CMD ["./docker-entrypoint.sh"]
+ENTRYPOINT ["./docker-entrypoint.sh"]
+CMD ["npm", "start"]

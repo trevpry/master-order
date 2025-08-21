@@ -3,11 +3,13 @@
 # This script is designed for production use with PostgreSQL
 # SQLite is used only in development outside of Docker
 
-echo "[INFO] Starting Master Order application..."
+echo "[INFO] Master Order Docker Entrypoint Started"
+echo "[INFO] This script runs when the container STARTS, not during build"
 echo "[DEBUG] Initial DATABASE_URL: $DATABASE_URL"
 echo "[DEBUG] Environment check:"
 echo "[DEBUG] - NODE_ENV: $NODE_ENV"
 echo "[DEBUG] - Working directory: $(pwd)"
+echo "[DEBUG] - Container runtime detected"
 echo "[DEBUG] - Available .env files:"
 find /app -name ".env*" -type f 2>/dev/null || echo "[DEBUG] No .env files found"
 echo "[DEBUG] All DATABASE_URL related env vars:"
@@ -32,31 +34,14 @@ fi
 # Ensure the app user owns these directories
 chmod 755 /app/server/artwork-cache /app/logs || true
 
-# Change to server directory for Prisma commands
+# Change to server directory for consistency
 cd /app/server
 
-# Setup correct database schema for Docker/PostgreSQL environment
-echo "[INFO] Setting up PostgreSQL database schema..."
-node setup-schema.js postgresql
-if [ $? -ne 0 ]; then
-    echo "[ERROR] Failed to setup database schema"
-    exit 1
-fi
+echo "[INFO] Setting correct DATABASE_URL for runtime..."
 
 # Debug: Show final DATABASE_URL after schema setup
-echo "[DEBUG] Final DATABASE_URL after schema setup: $DATABASE_URL"
+echo "[DEBUG] Final DATABASE_URL: $DATABASE_URL"
 echo "[DEBUG] Prisma will use this DATABASE_URL for connections"
-
-# Generate Prisma client with PostgreSQL schema
-echo "[INFO] Generating Prisma client..."
-npx prisma generate
-if [ $? -ne 0 ]; then
-    echo "[ERROR] Failed to generate Prisma client"
-    exit 1
-fi
-echo "[INFO] Prisma Client generated successfully"
-
-echo "[DEBUG] DATABASE_URL after Prisma generate: $DATABASE_URL"
 
 echo "[INFO] Setting up PostgreSQL database..."
 
@@ -85,16 +70,31 @@ wait_for_postgres() {
     fi
     
     echo "[INFO] Checking PostgreSQL at $DB_HOST:$DB_PORT..."
+    echo "[DEBUG] Using pg_isready command: pg_isready -h $DB_HOST -p $DB_PORT"
     
-    # Wait for PostgreSQL to accept connections (max 60 seconds)
+    # First, check if the host is reachable at all
+    echo "[DEBUG] Testing basic connectivity to $DB_HOST:$DB_PORT..."
+    
+    # Wait for PostgreSQL to accept connections (max 90 seconds, longer timeout)
     COUNTER=0
-    until pg_isready -h "$DB_HOST" -p "$DB_PORT" > /dev/null 2>&1; do
+    MAX_ATTEMPTS=45  # 90 seconds total
+    until pg_isready -h "$DB_HOST" -p "$DB_PORT" -U master_order_user > /dev/null 2>&1; do
         COUNTER=$((COUNTER + 1))
-        if [ $COUNTER -gt 30 ]; then
-            echo "[ERROR] PostgreSQL did not become ready within 60 seconds"
+        if [ $COUNTER -gt $MAX_ATTEMPTS ]; then
+            echo "[ERROR] PostgreSQL did not become ready within 90 seconds"
             echo "   Host: $DB_HOST"
             echo "   Port: $DB_PORT"
+            echo "   User: master_order_user"
             echo "   DATABASE_URL: $DATABASE_URL"
+            echo ""
+            echo "[DEBUG] Final connection test results:"
+            pg_isready -h "$DB_HOST" -p "$DB_PORT" -U master_order_user -v
+            echo ""
+            echo "[DEBUG] Network connectivity test:"
+            nc -z "$DB_HOST" "$DB_PORT" && echo "Port is open" || echo "Port is closed/unreachable"
+            echo ""
+            echo "[ERROR] This suggests PostgreSQL container may not be starting properly"
+            echo "        Check: docker-compose logs postgres"
             exit 1
         fi
         echo "[INFO] PostgreSQL is unavailable - sleeping... (attempt $COUNTER/30)"

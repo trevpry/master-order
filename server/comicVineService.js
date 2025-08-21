@@ -184,26 +184,50 @@ class ComicVineService {
 
       console.log(`Searching for issue #${issueNumber} in volume ${volumeId}`);
       
-      const response = await axios.get(`${this.baseURL}/issues/`, {
+      // First, get the issue ID from the issues list endpoint
+      const listResponse = await axios.get(`${this.baseURL}/issues/`, {
         params: {
           api_key: this.apiKey,
           format: 'json',
           filter: `volume:${volumeId},issue_number:${issueNumber}`,
-          limit: 1
+          limit: 1,
+          field_list: 'id,name,issue_number'
         },
         headers: {
           'User-Agent': 'MasterOrder/1.0'
         }
       });
 
-      const issues = response.data.results || [];
-      if (issues.length > 0) {
-        console.log(`Found issue #${issueNumber}: ${issues[0].name || 'Untitled'}`);
-        return issues[0];
+      const issues = listResponse.data.results || [];
+      if (issues.length === 0) {
+        console.log(`No issue #${issueNumber} found in volume ${volumeId}`);
+        return null;
       }
       
-      console.log(`No issue #${issueNumber} found in volume ${volumeId}`);
-      return null;
+      const issueId = issues[0].id;
+      console.log(`Found issue #${issueNumber}: ${issues[0].name || 'Untitled'} (ID: ${issueId})`);
+      
+      // Now get the full issue details using the issue detail endpoint
+      const detailResponse = await axios.get(`${this.baseURL}/issue/4000-${issueId}/`, {
+        params: {
+          api_key: this.apiKey,
+          format: 'json',
+          field_list: 'id,name,issue_number,cover_date,store_date,date_added,date_last_updated,deck,description,has_staff_review,image,site_detail_url,character_credits,character_died_in,concept_credits,location_credits,object_credits,person_credits,story_arc_credits,team_credits,first_appearance_characters,first_appearance_concepts,first_appearance_locations,first_appearance_objects,first_appearance_storyarcs,first_appearance_teams'
+        },
+        headers: {
+          'User-Agent': 'MasterOrder/1.0'
+        }
+      });
+      
+      if (detailResponse.data.results) {
+        const fullIssue = detailResponse.data.results;
+        console.log(`Retrieved full details for issue #${issueNumber}${fullIssue.character_credits ? ` with ${fullIssue.character_credits.length} characters` : ''}`);
+        return fullIssue;
+      } else {
+        console.log(`Could not retrieve full details for issue #${issueNumber}`);
+        return issues[0]; // Fallback to basic issue data
+      }
+      
     } catch (error) {
       console.error('ComicVine issue search failed:', error.response?.data || error.message);
       return null;
