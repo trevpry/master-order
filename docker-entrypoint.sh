@@ -4,6 +4,12 @@
 # SQLite is used only in development outside of Docker
 
 echo "[INFO] Starting Master Order application..."
+echo "[DEBUG] Initial DATABASE_URL: $DATABASE_URL"
+echo "[DEBUG] Environment check:"
+echo "[DEBUG] - NODE_ENV: $NODE_ENV"
+echo "[DEBUG] - Working directory: $(pwd)"
+echo "[DEBUG] - Available .env files:"
+find /app -name ".env*" -type f 2>/dev/null || echo "[DEBUG] No .env files found"
 
 # Ensure required directories exist and have correct permissions
 mkdir -p /app/server/artwork-cache

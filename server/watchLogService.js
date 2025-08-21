@@ -1562,6 +1562,79 @@ class WatchLogService {
             byComicCount: []
           };
         }
+
+        // Create character breakdown statistics for comics
+        console.log('Creating character breakdown statistics for comics...');
+        try {
+          // Track character statistics from watch logs
+          const characterStats = new Map();
+
+          watchLogs.forEach(log => {
+            if (log.customOrderItem?.comicCharacters) {
+              try {
+                const characters = JSON.parse(log.customOrderItem.comicCharacters);
+                const totalComicReadTime = log.totalWatchTime || 0;
+                
+                characters.forEach(character => {
+                  if (character.name && character.name.trim()) {
+                    const characterName = character.name.trim();
+                    
+                    if (!characterStats.has(characterName)) {
+                      characterStats.set(characterName, {
+                        totalReadTime: 0,
+                        comicCount: 0,
+                        comics: []
+                      });
+                    }
+                    
+                    const stats = characterStats.get(characterName);
+                    stats.totalReadTime += totalComicReadTime;
+                    stats.comicCount += 1;
+                    stats.comics.push({
+                      title: log.title,
+                      series: log.customOrderItem.comicSeries,
+                      issue: log.customOrderItem.comicIssue,
+                      publisher: log.customOrderItem.comicPublisher,
+                      readTime: totalComicReadTime
+                    });
+                  }
+                });
+              } catch (error) {
+                console.warn('Error parsing comic characters JSON:', error);
+              }
+            }
+          });
+
+          // Create character breakdown with all metrics
+          const characterBreakdownData = Array.from(characterStats.entries())
+            .map(([characterName, stats]) => ({
+              name: characterName,
+              totalReadTime: stats.totalReadTime,
+              totalReadTimeFormatted: this.formatWatchTime(stats.totalReadTime),
+              comicCount: stats.comicCount,
+              comics: stats.comics,
+              averageReadTime: stats.comicCount > 0 ? Math.round(stats.totalReadTime / stats.comicCount) : 0
+            }));
+
+          // Store the top 10 for different sorting methods
+          totalStats.characterBreakdown = {
+            byReadTime: [...characterBreakdownData].sort((a, b) => b.totalReadTime - a.totalReadTime).slice(0, 10),
+            byComicCount: [...characterBreakdownData].sort((a, b) => b.comicCount - a.comicCount).slice(0, 10)
+          };
+
+          console.log(`Created character breakdown with ${characterBreakdownData.length} characters`);
+          if (characterBreakdownData.length > 0) {
+            console.log('Top 3 characters by read time:', totalStats.characterBreakdown.byReadTime.slice(0, 3).map(c => `${c.name} (${c.totalReadTimeFormatted})`));
+            console.log('Top 3 characters by comic count:', totalStats.characterBreakdown.byComicCount.slice(0, 3).map(c => `${c.name} (${c.comicCount} comics)`));
+          }
+          
+        } catch (error) {
+          console.error('Error creating comic character breakdown:', error);
+          totalStats.characterBreakdown = {
+            byReadTime: [],
+            byComicCount: []
+          };
+        }
       }
 
       // Convert sets to arrays and get counts

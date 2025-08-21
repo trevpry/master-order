@@ -23,6 +23,9 @@ RUN npm ci
 WORKDIR /app
 COPY . .
 
+# Remove any .env files that might override Docker environment variables
+RUN find . -name ".env*" -type f -delete || true
+
 # Setup schema and generate Prisma client for production (PostgreSQL)
 WORKDIR /app/server
 RUN node setup-schema.js postgresql && npx prisma generate

@@ -56,6 +56,7 @@ const WatchStats = () => {
   const [movieActorSortBy, setMovieActorSortBy] = useState('playtime'); // 'playtime', 'episodes', 'series' (reused names for consistency)
   const [authorSortBy, setAuthorSortBy] = useState('readtime'); // 'readtime', 'pages', 'books'
   const [publisherSortBy, setPublisherSortBy] = useState('readtime'); // 'readtime', 'comics'
+  const [characterSortBy, setCharacterSortBy] = useState('readtime'); // 'readtime', 'comics'
 
   // Fetch watch statistics
   const fetchStats = async (selectedPeriod = globalPeriod, selectedGroupBy = globalGroupBy) => {
@@ -1938,6 +1939,98 @@ const WatchStats = () => {
                     ) : (
                       <div style={{ textAlign: 'center', padding: '20px', color: '#8b949e' }}>
                         <p>No publisher data available</p>
+                      </div>
+                    );
+                  })()}
+                </div>
+              )}
+
+              {/* Character Breakdown */}
+              {comicStats.totalStats?.characterBreakdown && (
+                <div className="stats-card">
+                  <div className="breakdown-header">
+                    <h2>🦸 Top Characters</h2>
+                    <div className="toggle-group">
+                      <button
+                        className={`toggle-btn ${characterSortBy === 'readtime' ? 'active' : ''}`}
+                        onClick={() => setCharacterSortBy('readtime')}
+                      >
+                        By Read Time
+                      </button>
+                      <button
+                        className={`toggle-btn ${characterSortBy === 'comics' ? 'active' : ''}`}
+                        onClick={() => setCharacterSortBy('comics')}
+                      >
+                        By Comic Count
+                      </button>
+                    </div>
+                  </div>
+                  {(() => {
+                    const getCharacterData = () => {
+                      switch (characterSortBy) {
+                        case 'readtime':
+                          return comicStats.totalStats.characterBreakdown.byReadTime || [];
+                        case 'comics':
+                          return comicStats.totalStats.characterBreakdown.byComicCount || [];
+                        default:
+                          return [];
+                      }
+                    };
+                    
+                    const characterData = getCharacterData();
+                    
+                    return characterData.length > 0 ? (
+                      <div className="time-breakdown">
+                        {characterData.map((character, index) => (
+                          <div key={`comic-character-${characterSortBy}-${index}`} className="time-period">
+                            <div className="period-header">
+                              <div className="actor-info">
+                                <span className="actor-rank">#{index + 1}</span>
+                                <h3>{character.name}</h3>
+                              </div>
+                              <span className="period-total">
+                                {characterSortBy === 'readtime' && character.totalReadTimeFormatted}
+                                {characterSortBy === 'comics' && `${character.comicCount} comics`}
+                              </span>
+                            </div>
+                            <div className="period-stats">
+                              {characterSortBy !== 'readtime' && (
+                                <div className="period-stat">
+                                  <span className="stat-type">Read Time:</span>
+                                  <span>{character.totalReadTimeFormatted}</span>
+                                </div>
+                              )}
+                              {characterSortBy !== 'comics' && (
+                                <div className="period-stat">
+                                  <span className="stat-type">Comics:</span>
+                                  <span>{character.comicCount}</span>
+                                </div>
+                              )}
+                              {character.averageReadTime > 0 && (
+                                <div className="period-stat">
+                                  <span className="stat-type">Avg Read Time:</span>
+                                  <span>{character.averageReadTime} min</span>
+                                </div>
+                              )}
+                            </div>
+                            {character.comics && character.comics.length > 0 && characterSortBy === 'comics' && (
+                              <div className="collection-shows">
+                                <h4>Comics with {character.name}:</h4>
+                                <div className="shows-list">
+                                  {character.comics.map((comic, comicIndex) => (
+                                    <span key={comicIndex} className="show-tag">
+                                      {comic.series} #{comic.issue} ({comic.publisher})
+                                    </span>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div style={{ textAlign: 'center', padding: '20px', color: '#8b949e' }}>
+                        <p>No character data available</p>
                       </div>
                     );
                   })()}
