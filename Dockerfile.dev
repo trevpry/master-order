@@ -1,0 +1,50 @@
+# Development Dockerfile
+# Optimized for development with volume mounts
+
+FROM node:20-alpine
+
+# Install su-exec for proper user permissions
+RUN apk add --no-cache su-exec
+
+# Create app directory
+WORKDIR /app
+
+# Create a non-root user
+RUN addgroup -g 1001 -S nodejs && \
+    adduser -S nextjs -u 1001
+
+# Copy package files first for better layer caching
+COPY package*.json ./
+COPY server/package*.json ./server/
+COPY client/package*.json ./client/
+
+# Install dependencies
+RUN npm ci --only=production
+
+# Install server dependencies
+WORKDIR /app/server
+RUN npm ci --only=production
+
+# Install client dependencies and build
+WORKDIR /app/client
+RUN npm ci
+RUN npm run build
+
+# Back to app root
+WORKDIR /app
+
+# Copy the entrypoint script
+COPY docker-entrypoint.sh /usr/local/bin/
+RUN chmod +x /usr/local/bin/docker-entrypoint.sh
+
+# In development, source code will be mounted as volumes
+# So we don't copy it here to avoid conflicts
+
+# Expose port
+EXPOSE 3001
+
+# Use entrypoint script
+ENTRYPOINT ["docker-entrypoint.sh"]
+
+# Default command (can be overridden in docker-compose)
+CMD ["npm", "run", "dev"]

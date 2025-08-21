@@ -8,10 +8,10 @@ services:
     ports:
       - "3001:3001"
     volumes:
-      # Persistent data storage
-      - ./data:/app/data
-      - ./artwork-cache:/app/server/artwork-cache
-      - ./logs:/app/logs
+      # Persistent data storage - Updated paths for Unraid
+      - /mnt/user/appdata/master-order/data:/app/data
+      - /mnt/user/appdata/master-order/artwork-cache:/app/server/artwork-cache
+      - /mnt/user/appdata/master-order/logs:/app/logs
       # Optional: Mount Plex media paths if running on same server
       # - /mnt/user/Media:/media:ro
     environment:

@@ -1,0 +1,37 @@
+# Development Docker Compose Configuration
+# This setup mounts your source code for instant updates
+
+version: '3.8'
+
+services:
+  master-order-dev:
+    build: .
+    container_name: master-order-dev
+    ports:
+      - "3001:3001"
+    volumes:
+      # Mount source code for instant updates
+      - ./client:/app/client
+      - ./server:/app/server
+      - ./package.json:/app/package.json
+      - ./start.js:/app/start.js
+      # Mount database to persist data
+      - ./master_order.db:/app/master_order.db
+      # Mount node_modules as named volume for performance
+      - node_modules_client:/app/client/node_modules
+      - node_modules_server:/app/server/node_modules
+    environment:
+      - NODE_ENV=development
+      - CHOKIDAR_USEPOLLING=true  # For better file watching in containers
+    restart: unless-stopped
+    command: npm run dev
+    networks:
+      - master-order-network
+
+volumes:
+  node_modules_client:
+  node_modules_server:
+
+networks:
+  master-order-network:
+    driver: bridge

@@ -1,0 +1,25 @@
+# Production Docker Compose Configuration
+# For Unraid deployment with optimized settings
+
+version: '3.8'
+
+services:
+  master-order:
+    build: 
+      context: .
+      dockerfile: Dockerfile  # Use the production Dockerfile
+    container_name: master-order
+    ports:
+      - "3001:3001"
+    volumes:
+      # Only mount the database for persistence
+      - ./master_order.db:/app/master_order.db
+    environment:
+      - NODE_ENV=production
+    restart: unless-stopped
+    networks:
+      - master-order-network
+
+networks:
+  master-order-network:
+    driver: bridge
