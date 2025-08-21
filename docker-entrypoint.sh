@@ -1,5 +1,10 @@
 #!/bin/sh
-# Database initialization script for Docker
+# Master Order Docker Entrypoint - DATA PRESERVATION POLICY
+# This script is designed to NEVER destroy existing data during container updates:
+# - Only applies new migrations with 'prisma migrate deploy' (safe, preserves data)
+# - Never uses '--force-reset' on existing databases  
+# - Distinguishes between new installations and container updates
+# - Preserves all user data during container rebuilds
 
 echo "🚀 Starting Master Order application..."
 
@@ -90,46 +95,74 @@ echo "🔍 Testing basic SQLite access..."
 if sqlite3 /app/data/db/master_order.db "SELECT 'Database accessible' as test;" 2>/dev/null; then
     echo "✅ SQLite access successful"
 else
-    echo "❌ SQLite access failed - trying to recreate database"
-    rm -f /app/data/db/master_order.db
-    sqlite3 /app/data/db/master_order.db "CREATE TABLE IF NOT EXISTS _temp (id INTEGER); DROP TABLE _temp;" 2>/dev/null || true
-    chmod 644 /app/data/db/master_order.db || true
+    echo "⚠️ SQLite access failed - checking if this is a new database..."
+    
+    # Only recreate if the file is completely empty or corrupted
+    if [ ! -s "/app/data/db/master_order.db" ]; then
+        echo "🔄 Database file is empty, initializing..."
+        rm -f /app/data/db/master_order.db
+        sqlite3 /app/data/db/master_order.db << 'EOF'
+PRAGMA journal_mode=WAL;
+PRAGMA synchronous=NORMAL;
+PRAGMA cache_size=1000;
+PRAGMA temp_store=memory;
+PRAGMA busy_timeout=30000;
+CREATE TABLE IF NOT EXISTS _temp (id INTEGER); 
+DROP TABLE _temp;
+EOF
+        chmod 644 /app/data/db/master_order.db || true
+        echo "✅ New database initialized"
+    else
+        echo "⚠️ Database file exists but not accessible - permissions issue?"
+        echo "🔧 Attempting to fix permissions..."
+        chmod 644 /app/data/db/master_order.db || true
+    fi
 fi
 
-# Apply migrations
-echo "🔄 Applying database migrations..."
+# Apply migrations (SAFE - preserves existing data)
+echo "🔄 Checking database migrations..."
 
 # Check if schema exists
 echo "🔍 Checking for Prisma schema file..."
 if [ -f "prisma/schema.prisma" ]; then
     echo "✅ Schema file found at prisma/schema.prisma"
     
-    # Verify database file is accessible before running migrations
-    if [ -f "/app/data/db/master_order.db" ] && sqlite3 /app/data/db/master_order.db "SELECT 1;" 2>/dev/null; then
-        echo "✅ Database accessible, running migrations..."
+    # Check if database already has tables (existing data)
+    echo "🔍 Checking if database has existing data..."
+    TABLE_COUNT=$(sqlite3 /app/data/db/master_order.db "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name != '_prisma_migrations';" 2>/dev/null || echo "0")
+    
+    if [ "$TABLE_COUNT" -gt "0" ]; then
+        echo "✅ Database has $TABLE_COUNT existing tables - this is an existing database"
+        echo "🔄 Running safe migration deployment (preserves data)..."
         
-        # Run migrations with proper error handling
+        # Only run migrate deploy - this NEVER destroys data, only applies new migrations
         if npx prisma migrate deploy 2>&1; then
             echo "✅ Migrations completed successfully"
         else
-            echo "⚠️ Migrations failed, trying db push..."
-            npx prisma db push --force-reset 2>&1 || echo "❌ DB push also failed"
+            echo "⚠️ Migration deploy failed - this may be normal if no new migrations"
+            echo "🔍 Checking migration status..."
+            npx prisma migrate status 2>&1 || echo "Unable to check migration status"
         fi
+        
     else
-        echo "❌ Database not accessible, cannot run migrations"
-        # Try to recreate the database
-        echo "🔄 Attempting to recreate database..."
-        rm -f /app/data/db/master_order.db
+        echo "🆕 Database appears to be empty - this is a new installation"
+        echo "🔄 Initializing database with schema..."
         
-        # Create new database file
-        sqlite3 /app/data/db/master_order.db "CREATE TABLE IF NOT EXISTS _temp (id INTEGER); DROP TABLE _temp;"
-        chmod 644 /app/data/db/master_order.db
-        
-        # Try migrations again
-        if [ -f "/app/data/db/master_order.db" ]; then
-            npx prisma db push --force-reset 2>&1 || echo "❌ Database recreation failed"
+        # For brand new databases, we can safely use db push
+        if npx prisma db push 2>&1; then
+            echo "✅ Database schema initialized successfully"
+        else
+            echo "❌ Failed to initialize database schema"
         fi
     fi
+    
+    # Verify database file is accessible after operations
+    if [ -f "/app/data/db/master_order.db" ] && sqlite3 /app/data/db/master_order.db "SELECT 1;" 2>/dev/null; then
+        echo "✅ Database is accessible after migrations"
+    else
+        echo "❌ Database not accessible after migration attempts"
+    fi
+    
 else
     echo "❌ Schema file not found at prisma/schema.prisma"
     echo "🔍 Current directory contents:"
@@ -138,17 +171,21 @@ else
     find . -name "schema.prisma" -type f 2>/dev/null || echo "No schema.prisma found anywhere"
 fi
 
-# Debug: Check if tables were created
+# Debug: Check if tables exist after migration (SAFE - read-only)
 echo "🔍 Checking database tables after migration..."
-if sqlite3 /app/data/master_order.db ".tables" 2>/dev/null; then
+if sqlite3 /app/data/db/master_order.db ".tables" 2>/dev/null; then
     echo "✅ Database tables accessible:"
-    sqlite3 /app/data/master_order.db ".tables"
+    sqlite3 /app/data/db/master_order.db ".tables"
     
-    # Test if we can query the Settings table
-    if sqlite3 /app/data/master_order.db "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='Settings';" 2>/dev/null | grep -q "1"; then
+    # Test if we can query the Settings table (read-only check)
+    if sqlite3 /app/data/db/master_order.db "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='Settings';" 2>/dev/null | grep -q "1"; then
         echo "✅ Settings table exists - database is properly initialized"
+        
+        # Show existing data count (helpful for confirming data preservation)
+        SETTINGS_COUNT=$(sqlite3 /app/data/db/master_order.db "SELECT COUNT(*) FROM Settings;" 2>/dev/null || echo "0")
+        echo "📊 Settings table has $SETTINGS_COUNT records"
     else
-        echo "⚠️ Settings table missing - may need to re-run migrations"
+        echo "⚠️ Settings table missing - may need to initialize application data"
     fi
 else
     echo "❌ Database tables not accessible"
