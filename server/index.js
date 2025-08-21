@@ -2409,6 +2409,19 @@ app.post('/api/custom-orders/:id/items', async (req, res) => {
             comicCharacters: data.issue?.character_credits ? JSON.stringify(data.issue.character_credits) : null,
             comicStoryArcs: data.issue?.story_arc_credits ? JSON.stringify(data.issue.story_arc_credits) : null
           };
+        } else if (comicVineData.series && comicVineData.issue) {
+          // Current format - direct series and issue objects
+          comicVineExtractedData = {
+            comicVineSeriesId: comicVineData.series?.id || null,
+            comicVineIssueId: comicVineData.issue?.id || null,
+            comicIssueName: comicVineData.issue?.name || null,
+            comicDescription: comicVineData.issue?.description || comicVineData.series?.description || null,
+            comicCoverDate: comicVineData.issue?.cover_date || null,
+            comicStoreDate: comicVineData.issue?.store_date || null,
+            comicCreators: comicVineData.issue?.person_credits ? JSON.stringify(comicVineData.issue.person_credits) : null,
+            comicCharacters: comicVineData.issue?.character_credits ? JSON.stringify(comicVineData.issue.character_credits) : null,
+            comicStoryArcs: comicVineData.issue?.story_arc_credits ? JSON.stringify(comicVineData.issue.story_arc_credits) : null
+          };
         } else {
           // Legacy format - extract what we can from the series data
           comicVineExtractedData = {
@@ -2796,6 +2809,17 @@ app.put('/api/custom-orders/:id/items/:itemId', async (req, res) => {
               updateData.comicCreators = data.issue?.person_credits ? JSON.stringify(data.issue.person_credits) : null;
               updateData.comicCharacters = data.issue?.character_credits ? JSON.stringify(data.issue.character_credits) : null;
               updateData.comicStoryArcs = data.issue?.story_arc_credits ? JSON.stringify(data.issue.story_arc_credits) : null;
+            } else if (comicVineData.series && comicVineData.issue) {
+              // Current format - direct series and issue objects
+              updateData.comicVineSeriesId = comicVineData.series?.id || null;
+              updateData.comicVineIssueId = comicVineData.issue?.id || null;
+              updateData.comicIssueName = comicVineData.issue?.name || null;
+              updateData.comicDescription = comicVineData.issue?.description || comicVineData.series?.description || null;
+              updateData.comicCoverDate = comicVineData.issue?.cover_date || null;
+              updateData.comicStoreDate = comicVineData.issue?.store_date || null;
+              updateData.comicCreators = comicVineData.issue?.person_credits ? JSON.stringify(comicVineData.issue.person_credits) : null;
+              updateData.comicCharacters = comicVineData.issue?.character_credits ? JSON.stringify(comicVineData.issue.character_credits) : null;
+              updateData.comicStoryArcs = comicVineData.issue?.story_arc_credits ? JSON.stringify(comicVineData.issue.story_arc_credits) : null;
             } else {
               // Legacy format - extract what we can from the series data
               updateData.comicVineSeriesId = comicVineData.id || null;

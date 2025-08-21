@@ -1,4 +1,7 @@
-require('dotenv').config();
+// Only load dotenv in development
+if (process.env.NODE_ENV !== 'production') {
+  require('dotenv').config();
+}
 const axios = require('axios');
 const prisma = require('./prismaClient'); // Use direct prisma access
 

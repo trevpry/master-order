@@ -10,6 +10,15 @@ echo "[DEBUG] - NODE_ENV: $NODE_ENV"
 echo "[DEBUG] - Working directory: $(pwd)"
 echo "[DEBUG] - Available .env files:"
 find /app -name ".env*" -type f 2>/dev/null || echo "[DEBUG] No .env files found"
+echo "[DEBUG] All DATABASE_URL related env vars:"
+env | grep -i database || echo "[DEBUG] No DATABASE_URL env vars found"
+
+# Force correct DATABASE_URL if it's been overridden (Docker safety check)
+if [ "$DATABASE_URL" = "file:/app/data/master_order.db" ] || echo "$DATABASE_URL" | grep -q "file:"; then
+    echo "[WARN] DATABASE_URL appears to be SQLite format, forcing PostgreSQL for Docker"
+    export DATABASE_URL="postgresql://master_order_user:${POSTGRES_PASSWORD:-secure_password_change_me}@postgres:5432/master_order"
+    echo "[INFO] Forced DATABASE_URL to: $DATABASE_URL"
+fi
 
 # Ensure required directories exist and have correct permissions
 mkdir -p /app/server/artwork-cache
@@ -36,6 +45,7 @@ fi
 
 # Debug: Show final DATABASE_URL after schema setup
 echo "[DEBUG] Final DATABASE_URL after schema setup: $DATABASE_URL"
+echo "[DEBUG] Prisma will use this DATABASE_URL for connections"
 
 # Generate Prisma client with PostgreSQL schema
 echo "[INFO] Generating Prisma client..."
@@ -44,6 +54,9 @@ if [ $? -ne 0 ]; then
     echo "[ERROR] Failed to generate Prisma client"
     exit 1
 fi
+echo "[INFO] Prisma Client generated successfully"
+
+echo "[DEBUG] DATABASE_URL after Prisma generate: $DATABASE_URL"
 
 echo "[INFO] Setting up PostgreSQL database..."
 

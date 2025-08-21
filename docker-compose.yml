@@ -38,7 +38,7 @@ services:
       # - /mnt/user/Media:/media:ro
     environment:
       - NODE_ENV=production
-      - DATABASE_URL=postgresql://master_order_user:${POSTGRES_PASSWORD:-secure_password_change_me}@postgres:5432/master_order
+      - "DATABASE_URL=postgresql://master_order_user:${POSTGRES_PASSWORD:-secure_password_change_me}@postgres:5432/master_order"
       - PORT=3001
       # Add your API keys and settings here or use a .env file
       # - PLEX_URL=http://your-plex-server:32400

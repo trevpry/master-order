@@ -1,6 +1,9 @@
 // c:\Users\Trevor\Sites\master-order\server\prismaClient.js
-require('dotenv').config({ path: '../.env' }); // Load from parent directory
-require('dotenv').config(); // Also try from current directory
+// Only load dotenv in development (not in Docker production)
+if (process.env.NODE_ENV !== 'production') {
+  require('dotenv').config({ path: '../.env' }); // Load from parent directory
+  require('dotenv').config(); // Also try from current directory
+}
 const { PrismaClient } = require('@prisma/client');
 const path = require('path');
 
