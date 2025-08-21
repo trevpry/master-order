@@ -33,13 +33,46 @@ mkdir -p /app/data/db
 export DATABASE_URL="file:/app/data/db/master_order.db?connection_limit=1&pool_timeout=20&socket_timeout=20"
 echo "🔧 DATABASE_URL set to: $DATABASE_URL"
 
-# Create database file if it doesn't exist
-if [ ! -f "/app/data/db/master_order.db" ]; then
-    echo "🗄️ Creating new database file..."
+# CRITICAL DATA PRESERVATION CHECK - Do this FIRST before any database operations
+echo "🛡️ CRITICAL: Checking for existing user data BEFORE any database operations..."
+PRESERVE_EXISTING_DATA=false
+
+if [ -f "/app/data/db/master_order.db" ] && [ -s "/app/data/db/master_order.db" ]; then
+    # Check if the existing database has user data in key tables
+    echo "🔍 Existing database file found, checking for user data..."
     
-    # Create a proper SQLite database file with optimized settings
-    echo "🔧 Creating SQLite database file with optimizations..."
-    sqlite3 /app/data/db/master_order.db << 'EOF'
+    # Try to check for user data in the existing database
+    EXISTING_SETTINGS=$(sqlite3 /app/data/db/master_order.db "SELECT COUNT(*) FROM Settings;" 2>/dev/null || echo "0")
+    EXISTING_CUSTOM_ORDERS=$(sqlite3 /app/data/db/master_order.db "SELECT COUNT(*) FROM CustomOrder;" 2>/dev/null || echo "0")
+    EXISTING_PLEX_DATA=$(sqlite3 /app/data/db/master_order.db "SELECT COUNT(*) FROM PlexMovie;" 2>/dev/null || echo "0")
+    
+    EXISTING_USER_DATA=$((EXISTING_SETTINGS + EXISTING_CUSTOM_ORDERS + EXISTING_PLEX_DATA))
+    
+    if [ "$EXISTING_USER_DATA" -gt "0" ]; then
+        echo "🚨 FOUND EXISTING USER DATA: $EXISTING_USER_DATA records"
+        echo "   Settings: $EXISTING_SETTINGS"
+        echo "   Custom Orders: $EXISTING_CUSTOM_ORDERS" 
+        echo "   Plex Movies: $EXISTING_PLEX_DATA"
+        echo "🛡️ PRESERVING EXISTING DATABASE - Will NOT recreate or initialize"
+        PRESERVE_EXISTING_DATA=true
+    else
+        echo "📝 Existing database has no user data (empty tables)"
+        PRESERVE_EXISTING_DATA=false
+    fi
+else
+    echo "📁 No existing database file found"
+    PRESERVE_EXISTING_DATA=false
+fi
+
+# Only create/initialize database if no user data exists
+if [ "$PRESERVE_EXISTING_DATA" = "false" ]; then
+    # Create database file if it doesn't exist or is empty
+    if [ ! -f "/app/data/db/master_order.db" ] || [ ! -s "/app/data/db/master_order.db" ]; then
+        echo "🗄️ Creating new database file..."
+        
+        # Create a proper SQLite database file with optimized settings
+        echo "🔧 Creating SQLite database file with optimizations..."
+        sqlite3 /app/data/db/master_order.db << 'EOF'
 -- Set WAL mode for better concurrent access
 PRAGMA journal_mode=WAL;
 -- Optimize for performance
@@ -48,58 +81,46 @@ PRAGMA cache_size=1000;
 PRAGMA temp_store=memory;
 -- Set busy timeout to 30 seconds
 PRAGMA busy_timeout=30000;
--- Create a minimal table to initialize the database
+-- Create minimal table to initialize database structure
 CREATE TABLE IF NOT EXISTS _temp (id INTEGER); 
 DROP TABLE _temp;
 EOF
-
-    if [ $? -eq 0 ]; then
-        echo "✅ Database file created successfully with optimizations"
-    else
-        echo "❌ SQLite creation failed, trying touch method..."
-        touch /app/data/db/master_order.db
+        echo "✅ Database file created with SQLite optimizations"
     fi
-else
-    echo "🗄️ Database file already exists"
-    echo "🔧 Applying SQLite optimizations to existing database..."
-    sqlite3 /app/data/db/master_order.db << 'EOF'
--- Ensure WAL mode for better concurrent access
-PRAGMA journal_mode=WAL;
--- Optimize for performance
-PRAGMA synchronous=NORMAL;
-PRAGMA cache_size=1000;
-PRAGMA temp_store=memory;
--- Set busy timeout to 30 seconds
-PRAGMA busy_timeout=30000;
-EOF
-    echo "✅ SQLite optimizations applied"
 fi
 
-# CRITICAL: Set proper ownership and permissions for the entire data directory structure
-if [ "$(id -u)" = "0" ]; then
-    echo "🔧 Setting proper ownership and permissions..."
-    chown -R app:nodejs /app/data/
-    chmod -R 755 /app/data/
-    chmod 644 /app/data/db/master_order.db
-    echo "✅ Ownership set to app:nodejs for /app/data/"
-else
-    echo "⚠️ Not running as root, cannot change ownership"
+# Set proper permissions on database file
+if [ -f "/app/data/db/master_order.db" ]; then
+    echo "🔧 Setting database file permissions..."
+    if [ "$(id -u)" = "0" ]; then
+        echo "🔧 Setting proper ownership and permissions..."
+        chown -R app:nodejs /app/data/
+        chmod -R 755 /app/data/
+        chmod 644 /app/data/db/master_order.db
+        echo "✅ Ownership set to app:nodejs for /app/data/"
+    else
+        echo "⚠️ Not running as root, cannot change ownership"
+    fi
 fi
 
-echo "🔍 Database file status:"
-ls -la /app/data/db/ || echo "❌ Database directory not accessible"
-ls -la /app/data/db/master_order.db 2>/dev/null && echo "✅ Database file exists" || echo "❌ Database file missing"
-
-# Debug: Test if we can create a simple SQLite connection
+# Test database accessibility
 echo "🔍 Testing basic SQLite access..."
-if sqlite3 /app/data/db/master_order.db "SELECT 'Database accessible' as test;" 2>/dev/null; then
+if sqlite3 /app/data/db/master_order.db "SELECT 'Database accessible' as test;" >/dev/null 2>&1; then
     echo "✅ SQLite access successful"
 else
-    echo "⚠️ SQLite access failed - checking if this is a new database..."
-    
-    # Only recreate if the file is completely empty or corrupted
-    if [ ! -s "/app/data/db/master_order.db" ]; then
-        echo "🔄 Database file is empty, initializing..."
+    if [ "$PRESERVE_EXISTING_DATA" = "true" ]; then
+        echo "🚨 WARNING: Database has user data but is not accessible - attempting permission fix only"
+        chmod 644 /app/data/db/master_order.db || true
+        chown app:nodejs /app/data/db/master_order.db 2>/dev/null || true
+        
+        # Test again
+        if sqlite3 /app/data/db/master_order.db "SELECT 'Database accessible' as test;" >/dev/null 2>&1; then
+            echo "✅ Database access restored with permission fix"
+        else
+            echo "❌ CRITICAL: Cannot access database with user data - manual intervention required"
+        fi
+    else
+        echo "⚠️ SQLite access failed - database has no user data, attempting to reinitialize"
         rm -f /app/data/db/master_order.db
         sqlite3 /app/data/db/master_order.db << 'EOF'
 PRAGMA journal_mode=WAL;
@@ -111,33 +132,24 @@ CREATE TABLE IF NOT EXISTS _temp (id INTEGER);
 DROP TABLE _temp;
 EOF
         chmod 644 /app/data/db/master_order.db || true
-        echo "✅ New database initialized"
-    else
-        echo "⚠️ Database file exists but not accessible - permissions issue?"
-        echo "🔧 Attempting to fix permissions..."
-        chmod 644 /app/data/db/master_order.db || true
+        echo "✅ Database reinitialized"
     fi
 fi
 
-# Apply migrations (SAFE - preserves existing data)
+# Apply migrations using the preservation flag
 echo "🔄 Checking database migrations..."
 
-# Check if schema exists
-echo "🔍 Checking for Prisma schema file..."
 if [ -f "prisma/schema.prisma" ]; then
     echo "✅ Schema file found at prisma/schema.prisma"
     
-    # Check if database already has tables (existing data)
-    echo "🔍 Checking if database has existing data..."
-    TABLE_COUNT=$(sqlite3 /app/data/db/master_order.db "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name != '_prisma_migrations';" 2>/dev/null || echo "0")
-    
-    if [ "$TABLE_COUNT" -gt "0" ]; then
-        echo "✅ Database has $TABLE_COUNT existing tables - this is an existing database"
-        echo "🔄 Running safe migration deployment (preserves data)..."
+    # Use the preservation flag to determine migration strategy
+    if [ "$PRESERVE_EXISTING_DATA" = "true" ]; then
+        echo "🛡️ EXISTING USER DATA DETECTED - Using safe migration strategy"
+        echo "🔄 Running SAFE migration deployment (NEVER destroys data)..."
         
         # Only run migrate deploy - this NEVER destroys data, only applies new migrations
         if npx prisma migrate deploy 2>&1; then
-            echo "✅ Migrations completed successfully"
+            echo "✅ Migrations completed successfully - user data preserved"
         else
             echo "⚠️ Migration deploy failed - this may be normal if no new migrations"
             echo "🔍 Checking migration status..."
@@ -145,19 +157,29 @@ if [ -f "prisma/schema.prisma" ]; then
         fi
         
     else
-        echo "🆕 Database appears to be empty - this is a new installation"
-        echo "🔄 Initializing database with schema..."
+        # No existing user data detected - check if we have schema-only database
+        TABLE_COUNT=$(sqlite3 /app/data/db/master_order.db "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name != '_prisma_migrations';" 2>/dev/null || echo "0")
         
-        # For brand new databases, we can safely use db push
-        if npx prisma db push 2>&1; then
-            echo "✅ Database schema initialized successfully"
+        if [ "$TABLE_COUNT" -gt "10" ]; then
+            echo "🗄️ Database has $TABLE_COUNT tables but no user data - running safe migrations..."
+            if npx prisma migrate deploy 2>&1; then
+                echo "✅ Migrations completed successfully"
+            else
+                echo "⚠️ Migration deploy failed - this may be normal if no new migrations"
+            fi
         else
-            echo "❌ Failed to initialize database schema"
+            echo "🆕 Database appears to be completely new ($TABLE_COUNT tables) - initializing schema..."
+            # For brand new databases, we can safely use db push
+            if npx prisma db push 2>&1; then
+                echo "✅ Database schema initialized successfully"
+            else
+                echo "❌ Failed to initialize database schema"
+            fi
         fi
     fi
     
     # Verify database file is accessible after operations
-    if [ -f "/app/data/db/master_order.db" ] && sqlite3 /app/data/db/master_order.db "SELECT 1;" 2>/dev/null; then
+    if [ -f "/app/data/db/master_order.db" ] && sqlite3 /app/data/db/master_order.db "SELECT 1;" >/dev/null 2>&1; then
         echo "✅ Database is accessible after migrations"
     else
         echo "❌ Database not accessible after migration attempts"
@@ -171,11 +193,10 @@ else
     find . -name "schema.prisma" -type f 2>/dev/null || echo "No schema.prisma found anywhere"
 fi
 
-# Debug: Check if tables exist after migration (SAFE - read-only)
-echo "🔍 Checking database tables after migration..."
-if sqlite3 /app/data/db/master_order.db ".tables" 2>/dev/null; then
-    echo "✅ Database tables accessible:"
-    sqlite3 /app/data/db/master_order.db ".tables"
+# Final database health check
+echo "🔍 Final database health check..."
+if sqlite3 /app/data/db/master_order.db ".tables" >/dev/null 2>&1; then
+    echo "✅ Database tables accessible"
     
     # Test if we can query the Settings table (read-only check)
     if sqlite3 /app/data/db/master_order.db "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='Settings';" 2>/dev/null | grep -q "1"; then
@@ -184,6 +205,14 @@ if sqlite3 /app/data/db/master_order.db ".tables" 2>/dev/null; then
         # Show existing data count (helpful for confirming data preservation)
         SETTINGS_COUNT=$(sqlite3 /app/data/db/master_order.db "SELECT COUNT(*) FROM Settings;" 2>/dev/null || echo "0")
         echo "📊 Settings table has $SETTINGS_COUNT records"
+        
+        # If this was a preservation scenario, confirm data is still there
+        if [ "$PRESERVE_EXISTING_DATA" = "true" ]; then
+            echo "🛡️ DATA PRESERVATION VERIFICATION:"
+            echo "   Settings: $(sqlite3 /app/data/db/master_order.db "SELECT COUNT(*) FROM Settings;" 2>/dev/null || echo "0")"
+            echo "   Custom Orders: $(sqlite3 /app/data/db/master_order.db "SELECT COUNT(*) FROM CustomOrder;" 2>/dev/null || echo "0")"
+            echo "   Plex Movies: $(sqlite3 /app/data/db/master_order.db "SELECT COUNT(*) FROM PlexMovie;" 2>/dev/null || echo "0")"
+        fi
     else
         echo "⚠️ Settings table missing - may need to initialize application data"
     fi
@@ -196,25 +225,8 @@ echo "🔧 Generating Prisma client..."
 npx prisma generate 2>&1 || echo "⚠️ Prisma generate failed"
 
 echo "🌟 Starting application server..."
+echo "📍 Server starting from directory: $(pwd)"
+echo "🌐 Application will be available on configured port"
 
-# Final permission check before switching users
-if [ "$(id -u)" = "0" ]; then
-    echo "🔧 Final ownership and permission check..."
-    chown -R app:nodejs /app/data/
-    chmod -R 755 /app/data/
-    chmod 644 /app/data/db/master_order.db 2>/dev/null || true
-    
-    # Test database access as app user
-    echo "🔍 Testing database access as app user..."
-    if su-exec app:nodejs sqlite3 /app/data/db/master_order.db "SELECT 'test' as test;" 2>/dev/null; then
-        echo "✅ Database accessible by app user"
-    else
-        echo "❌ Database not accessible by app user - attempting fix..."
-        chmod 666 /app/data/db/master_order.db || true
-    fi
-    
-    echo "🔄 Switching to app user for security..."
-    exec su-exec app:nodejs node index.js
-else
-    exec node index.js
-fi
+# Switch to app user and start the application
+exec su-exec app node ../start.js
