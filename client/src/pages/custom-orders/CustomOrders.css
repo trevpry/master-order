@@ -1427,3 +1427,75 @@
   align-items: center;
   gap: 0.25rem;
 }
+
+/* ComicVine Enhanced Details Styles */
+.comic-info-section {
+  margin-bottom: 0.5rem;
+}
+
+.comic-vine-details {
+  background: rgba(0, 123, 255, 0.05);
+  border-left: 3px solid #007bff;
+  padding: 0.75rem;
+  margin-top: 0.5rem;
+  border-radius: 0 4px 4px 0;
+  font-size: 0.85rem;
+}
+
+.comic-vine-details p {
+  margin: 0.4rem 0;
+  line-height: 1.4;
+}
+
+.comic-vine-details p:first-child {
+  margin-top: 0;
+}
+
+.comic-vine-details p:last-child {
+  margin-bottom: 0;
+}
+
+.comic-issue-name strong,
+.comic-description strong,
+.comic-dates strong,
+.comic-creators strong,
+.comic-characters strong,
+.comic-story-arcs strong {
+  color: #007bff;
+  font-weight: 600;
+}
+
+.comic-description {
+  color: #6c757d;
+  font-style: italic;
+}
+
+.comic-creators {
+  color: #17a2b8;
+}
+
+.comic-characters {
+  color: #28a745;
+}
+
+.comic-story-arcs {
+  color: #dc3545;
+  font-weight: 500;
+}
+
+.comic-dates {
+  color: #6c757d;
+  font-size: 0.8rem;
+}
+
+/* Mobile responsiveness for ComicVine details */
+@media (max-width: 768px) {
+  .comic-vine-details {
+    padding: 0.5rem;
+    font-size: 0.8rem;
+  }
+  
+  .comic-vine-details p {
+    margin: 0.3rem 0;
+  }
+}

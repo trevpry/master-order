@@ -1336,7 +1336,8 @@ function CustomOrders() {
                     comicIssue: item.comicIssue,
                     comicPublisher: selectedSeries.publisher?.name || null,
                     comicVineId: selectedSeries.api_detail_url,
-                    comicVineDetailsJson: JSON.stringify(selectedSeries)
+                    // Store comprehensive ComicVine data if available
+                    comicVineDetailsJson: JSON.stringify(selectedSeries.comprehensiveData || selectedSeries)
                   };
                   
                   console.log(`✓ Enhanced comic data with ComicVine info: ${selectedSeries.name} (${targetMedia.comicYear}) #${item.comicIssue}`);                } else {
@@ -1950,7 +1951,8 @@ function CustomOrders() {
                       comicIssue: issueNumber,
                       comicPublisher: selectedSeries.publisher?.name || null,
                       comicVineId: selectedSeries.api_detail_url,
-                      comicVineDetailsJson: JSON.stringify(selectedSeries)
+                      // Store comprehensive ComicVine data if available
+                      comicVineDetailsJson: JSON.stringify(selectedSeries.comprehensiveData || selectedSeries)
                     };
                     
                     console.log(`✓ Enhanced comic data with ComicVine info: ${selectedSeries.name} (${requestData.comicYear}) #${issueNumber}`);
@@ -2447,7 +2449,8 @@ function CustomOrders() {
           comicPublisher: selectedSeries.publisher?.name || null,
           customTitle: comicFormData.title.trim() || null,
           comicVineId: selectedSeries.api_detail_url || null,
-          comicVineDetailsJson: JSON.stringify(selectedSeries),
+          // Store comprehensive ComicVine data if available
+          comicVineDetailsJson: JSON.stringify(selectedSeries.comprehensiveData || selectedSeries),
           comicCoverUrl: selectedSeries.coverUrl || null // Include the specific cover URL from the selected series
         };
 
@@ -2491,7 +2494,8 @@ function CustomOrders() {
           comicPublisher: selectedSeries.publisher?.name || null,
           customTitle: comicFormData.title.trim() || null,
           comicVineId: selectedSeries.api_detail_url || null,
-          comicVineDetailsJson: JSON.stringify(selectedSeries)
+          // Store comprehensive ComicVine data if available
+          comicVineDetailsJson: JSON.stringify(selectedSeries.comprehensiveData || selectedSeries)
         };const success = await handleAddMediaToOrder(viewingOrderItems.id, comicMedia);
         if (success !== false) {
           setShowComicForm(false);
@@ -2898,9 +2902,76 @@ function CustomOrders() {
                         </p>
                       )}
                       {item.comicSeries && (
-                        <p className="item-series">
-                          {item.comicSeries} ({item.comicYear}) #{item.comicIssue}
-                        </p>
+                        <div className="comic-info-section">
+                          <p className="item-series">
+                            {item.comicSeries} ({item.comicYear}) #{item.comicIssue}
+                          </p>
+                          
+                          {/* Enhanced ComicVine Data Display */}
+                          {(item.comicIssueName || item.comicDescription || item.comicCreators || item.comicCharacters || item.comicStoryArcs) && (
+                            <div className="comic-vine-details">
+                              {item.comicIssueName && (
+                                <p className="comic-issue-name">
+                                  <strong>Issue:</strong> {item.comicIssueName}
+                                </p>
+                              )}
+                              
+                              {item.comicDescription && (
+                                <p className="comic-description">
+                                  <strong>Description:</strong> {item.comicDescription.length > 150 ? item.comicDescription.substring(0, 150) + '...' : item.comicDescription}
+                                </p>
+                              )}
+                              
+                              {item.comicCoverDate && (
+                                <p className="comic-dates">
+                                  <strong>Cover Date:</strong> {new Date(item.comicCoverDate).toLocaleDateString()}
+                                  {item.comicStoreDate && item.comicStoreDate !== item.comicCoverDate && (
+                                    <span> | <strong>Store Date:</strong> {new Date(item.comicStoreDate).toLocaleDateString()}</span>
+                                  )}
+                                </p>
+                              )}
+                              
+                              {item.comicCreators && (() => {
+                                try {
+                                  const creators = JSON.parse(item.comicCreators);
+                                  return (
+                                    <p className="comic-creators">
+                                      <strong>Creative Team:</strong> {creators.map(creator => `${creator.name} (${creator.role})`).join(', ')}
+                                    </p>
+                                  );
+                                } catch (e) {
+                                  return null;
+                                }
+                              })()}
+                              
+                              {item.comicCharacters && (() => {
+                                try {
+                                  const characters = JSON.parse(item.comicCharacters);
+                                  return (
+                                    <p className="comic-characters">
+                                      <strong>Characters:</strong> {characters.map(char => char.name).join(', ')}
+                                    </p>
+                                  );
+                                } catch (e) {
+                                  return null;
+                                }
+                              })()}
+                              
+                              {item.comicStoryArcs && (() => {
+                                try {
+                                  const storyArcs = JSON.parse(item.comicStoryArcs);
+                                  return (
+                                    <p className="comic-story-arcs">
+                                      <strong>Story Arc:</strong> {storyArcs.map(arc => arc.name).join(', ')}
+                                    </p>
+                                  );
+                                } catch (e) {
+                                  return null;
+                                }
+                              })()}
+                            </div>
+                          )}
+                        </div>
                       )}
                       {(item.mediaType === 'book' || item.mediaType === 'shortstory') && (
                         <p className="item-series">

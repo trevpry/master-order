@@ -23,9 +23,9 @@ RUN npm ci
 WORKDIR /app
 COPY . .
 
-# Generate Prisma client
+# Setup schema and generate Prisma client for production (PostgreSQL)
 WORKDIR /app/server
-RUN npx prisma generate
+RUN node setup-schema.js postgresql && npx prisma generate
 
 # Build client
 WORKDIR /app/client
@@ -42,6 +42,7 @@ RUN apk add --no-cache \
     sqlite \
     curl \
     su-exec \
+    postgresql-client \
     && rm -rf /var/cache/apk/*
 
 # Create app directory
@@ -81,7 +82,6 @@ RUN mkdir -p /app/data /app/server/artwork-cache /app/logs && \
 
 # Set up environment
 ENV NODE_ENV=production
-ENV DATABASE_URL="file:/app/data/db/master_order.db?connection_limit=1&pool_timeout=20&socket_timeout=20"
 ENV PORT=3001
 
 # Expose port

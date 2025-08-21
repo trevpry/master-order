@@ -1,0 +1,385 @@
+generator client {
+  provider = "prisma-client-js"
+  output   = "../node_modules/.prisma/client"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Settings {
+  id                                Int       @id @default(autoincrement())
+  collectionName                    String?
+  tvdbToken                         String?
+  tvdbTokenExpiry                   DateTime?
+  comicVineApiKey                   String?
+  plexToken                         String?
+  plexUrl                           String?
+  tvdbApiKey                        String?
+  tvdbBearerToken                   String?
+  selectedPlayer                    String?
+  tvGeneralPercent                  Int       @default(50)
+  moviesGeneralPercent              Int       @default(50)
+  customOrderPercent                Int       @default(0)
+  partiallyWatchedCollectionPercent Int       @default(75)
+  ignoredMovieCollections           String?
+  ignoredTVCollections              String?
+  christmasFilterEnabled            Boolean   @default(false)
+  plexSyncInterval                  Int       @default(12)
+  createdAt                         DateTime  @default(now())
+  updatedAt                         DateTime  @updatedAt
+}
+
+model Order {
+  id           Int      @id @default(autoincrement())
+  customerName String
+  orderDate    DateTime @default(now())
+  status       String
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}
+
+model CustomOrder {
+  id          Int               @id @default(autoincrement())
+  name        String
+  description String?
+  isActive    Boolean           @default(true)
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+  icon        String?
+  parentOrderId Int?            // Foreign key for parent custom order
+  parentOrder CustomOrder?     @relation("CustomOrderHierarchy", fields: [parentOrderId], references: [id])
+  subOrders   CustomOrder[]    @relation("CustomOrderHierarchy")
+  
+  items       CustomOrderItem[]
+  orderType   String            @default("collection") // "collection" or "standalone" 
+}
+
+model CustomOrderItem {
+  id                    Int                @id @default(autoincrement())
+  customOrderId         Int
+  customOrder           CustomOrder        @relation(fields: [customOrderId], references: [id], onDelete: Cascade)
+  mediaType             String             // 'tv', 'movie', 'book', 'comic', 'shortstory', 'webvideo'
+  plexKey               String?
+  title                 String
+  seasonNumber          Int?
+  episodeNumber         Int?
+  seriesTitle           String?
+  sortOrder             Int                @default(0)
+  isWatched             Boolean            @default(false)
+  // Book-specific fields
+  bookTitle             String?
+  bookAuthor            String?
+  bookYear              Int?
+  bookIsbn              String?
+  bookPublisher         String?
+  bookOpenLibraryId     String?
+  bookCoverUrl          String?
+  bookPageCount         Int?
+  bookCurrentPage       Int?               @default(0)
+  bookPercentRead       Int?               @default(0)
+  // Comic-specific fields
+  comicSeries           String?
+  comicYear             Int?
+  comicIssue            String?
+  comicVolume           String?
+  comicPublisher        String?
+  customTitle           String?
+  comicVineId           String?
+  comicVineDetailsJson  String?
+  // Short story specific fields
+  storyTitle            String?
+  storyAuthor           String?
+  storyYear             Int?
+  storyUrl              String?
+  storyContainedInBookId Int?
+  storyContainedInBook  CustomOrderItem?   @relation("StoryContainedInBook", fields: [storyContainedInBookId], references: [id])
+  containedStories      CustomOrderItem[]  @relation("StoryContainedInBook")
+  storyCoverUrl         String?
+  // Web video specific fields
+  webTitle              String?
+  webUrl                String?
+  webDescription        String?
+  // Artwork caching fields
+  localArtworkPath      String?
+  originalArtworkUrl    String?
+  artworkLastCached     DateTime?
+  artworkMimeType       String?
+  // TVDB-only items
+  isFromTvdbOnly        Boolean            @default(false)
+  tvdbId                String?
+  tvdbOverview          String?
+  // Sub-order reference (for items that link to other custom orders)
+  referencedCustomOrderId Int?
+  referencedCustomOrder CustomOrder?      @relation(fields: [referencedCustomOrderId], references: [id])
+  createdAt             DateTime           @default(now())
+  updatedAt             DateTime           @updatedAt
+
+  watchLogs             WatchLog[]
+}
+
+model PlexTVShow {
+  id                    Int      @id @default(autoincrement())
+  ratingKey             String   @unique
+  title                 String
+  year                  Int?
+  summary               String?
+  studio                String?
+  contentRating         String?
+  thumb                 String?
+  art                   String?
+  theme                 String?
+  duration              Int?
+  originallyAvailableAt DateTime?
+  leafCount             Int?
+  viewedLeafCount       Int?
+  addedAt               DateTime?
+  updatedAt             DateTime?
+  createdAt             DateTime @default(now())
+  lastSyncedAt          DateTime @default(now())
+}
+
+model PlexTVSeason {
+  id                    Int      @id @default(autoincrement())
+  ratingKey             String   @unique
+  parentRatingKey       String
+  title                 String
+  index                 Int
+  summary               String?
+  thumb                 String?
+  art                   String?
+  leafCount             Int?
+  viewedLeafCount       Int?
+  addedAt               DateTime?
+  updatedAt             DateTime?
+  createdAt             DateTime @default(now())
+  lastSyncedAt          DateTime @default(now())
+}
+
+model PlexTVEpisode {
+  id                    Int      @id @default(autoincrement())
+  ratingKey             String   @unique
+  parentRatingKey       String
+  grandparentRatingKey  String
+  title                 String
+  grandparentTitle      String?
+  parentTitle           String?
+  contentRating         String?
+  summary               String?
+  index                 Int
+  parentIndex           Int
+  thumb                 String?
+  art                   String?
+  duration              Int?
+  originallyAvailableAt DateTime?
+  addedAt               DateTime?
+  updatedAt             DateTime?
+  viewCount             Int      @default(0)
+  lastViewedAt          DateTime?
+  createdAt             DateTime @default(now())
+  lastSyncedAt          DateTime @default(now())
+
+  // Actor/Role relationships
+  roles                 PlexRole[]
+}
+
+model PlexMovie {
+  id                    Int      @id @default(autoincrement())
+  ratingKey             String   @unique
+  title                 String
+  year                  Int?
+  summary               String?
+  studio                String?
+  contentRating         String?
+  thumb                 String?
+  art                   String?
+  duration              Int?
+  originallyAvailableAt DateTime?
+  addedAt               DateTime?
+  updatedAt             DateTime?
+  viewCount             Int      @default(0)
+  lastViewedAt          DateTime?
+  createdAt             DateTime @default(now())
+  lastSyncedAt          DateTime @default(now())
+
+  // Actor/Role relationships
+  roles                 PlexRole[]
+}
+
+model PlexCollection {
+  id              Int      @id @default(autoincrement())
+  ratingKey       String   @unique
+  title           String
+  subtype         String?
+  summary         String?
+  thumb           String?
+  art             String?
+  childCount      Int?
+  addedAt         DateTime?
+  updatedAt       DateTime?
+  createdAt       DateTime @default(now())
+  lastSyncedAt    DateTime @default(now())
+
+  // Collection members
+  tvShows         PlexCollectionTVShow[]
+  movies          PlexCollectionMovie[]
+}
+
+model PlexCollectionTVShow {
+  id             Int            @id @default(autoincrement())
+  collectionId   Int
+  collection     PlexCollection @relation(fields: [collectionId], references: [id], onDelete: Cascade)
+  tvShowRatingKey String
+  addedAt        DateTime?
+  createdAt      DateTime       @default(now())
+
+  @@unique([collectionId, tvShowRatingKey])
+}
+
+model PlexCollectionMovie {
+  id             Int            @id @default(autoincrement())
+  collectionId   Int
+  collection     PlexCollection @relation(fields: [collectionId], references: [id], onDelete: Cascade)
+  movieRatingKey String
+  addedAt        DateTime?
+  createdAt      DateTime       @default(now())
+
+  @@unique([collectionId, movieRatingKey])
+}
+
+model PlexActor {
+  id        Int      @id @default(autoincrement())
+  tag       String   @unique
+  createdAt DateTime @default(now())
+
+  // Role relationships
+  roles     PlexRole[]
+}
+
+model PlexRole {
+  id        Int      @id @default(autoincrement())
+  actorId   Int
+  actor     PlexActor @relation(fields: [actorId], references: [id], onDelete: Cascade)
+  role      String?
+  
+  // Media relationships
+  tvEpisodeId Int?
+  tvEpisode   PlexTVEpisode? @relation(fields: [tvEpisodeId], references: [id], onDelete: Cascade)
+  movieId     Int?
+  movie       PlexMovie?     @relation(fields: [movieId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  @@unique([actorId, tvEpisodeId])
+  @@unique([actorId, movieId])
+}
+
+model PlexLabel {
+  id        Int      @id @default(autoincrement())
+  tag       String   @unique
+  createdAt DateTime @default(now())
+
+  tvShows   PlexTVShowLabel[]
+  movies    PlexMovieLabel[]
+}
+
+model PlexTVShowLabel {
+  id         Int       @id @default(autoincrement())
+  labelId    Int
+  label      PlexLabel @relation(fields: [labelId], references: [id], onDelete: Cascade)
+  ratingKey  String
+  createdAt  DateTime  @default(now())
+
+  @@unique([labelId, ratingKey])
+}
+
+model PlexMovieLabel {
+  id         Int       @id @default(autoincrement())
+  labelId    Int
+  label      PlexLabel @relation(fields: [labelId], references: [id], onDelete: Cascade)
+  ratingKey  String
+  createdAt  DateTime  @default(now())
+
+  @@unique([labelId, ratingKey])
+}
+
+model TVDBSeries {
+  id                Int      @id @default(autoincrement())
+  tvdbId            Int      @unique
+  name              String
+  overview          String?
+  firstAired        String?
+  network           String?
+  status            String?
+  image             String?
+  createdAt         DateTime @default(now())
+  lastSyncedAt      DateTime @default(now())
+
+  seasons           TVDBSeason[]
+}
+
+model TVDBSeason {
+  id                Int      @id @default(autoincrement())
+  tvdbId            Int      @unique
+  seriesId          Int
+  series            TVDBSeries @relation(fields: [seriesId], references: [id], onDelete: Cascade)
+  seasonNumber      Int
+  name              String?
+  overview          String?
+  image             String?
+  createdAt         DateTime @default(now())
+  lastSyncedAt      DateTime @default(now())
+
+  episodes          TVDBEpisode[]
+}
+
+model TVDBEpisode {
+  id                Int      @id @default(autoincrement())
+  tvdbId            Int      @unique
+  seasonId          Int
+  season            TVDBSeason @relation(fields: [seasonId], references: [id], onDelete: Cascade)
+  episodeNumber     Int
+  name              String?
+  overview          String?
+  aired             String?
+  image             String?
+  createdAt         DateTime @default(now())
+  lastSyncedAt      DateTime @default(now())
+}
+
+model TVDBMovie {
+  id                Int      @id @default(autoincrement())
+  tvdbId            Int      @unique
+  name              String
+  overview          String?
+  releaseDate       String?
+  image             String?
+  createdAt         DateTime @default(now())
+  lastSyncedAt      DateTime @default(now())
+}
+
+model WatchLog {
+  id                    Int      @id @default(autoincrement())
+  mediaType             String   // 'tv', 'movie', 'book', 'comic', 'shortstory'
+  title                 String
+  plexKey               String?
+  customOrderItemId     Int?
+  customOrderItem       CustomOrderItem? @relation(fields: [customOrderItemId], references: [id], onDelete: SetNull)
+  
+  // Episode-specific data for TV content
+  seriesTitle           String?
+  seasonNumber          Int?
+  episodeNumber         Int?
+  
+  // Timing data
+  startTime             DateTime
+  endTime               DateTime?
+  duration              Int?     // Duration in minutes (for books/comics based on reading speed)
+  totalWatchTime        Int      // Total time spent in minutes
+  
+  // Activity type
+  activityType          String   @default("watch") // 'watch' or 'read'
+  
+  createdAt             DateTime @default(now())
+}

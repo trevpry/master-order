@@ -4,9 +4,15 @@
   "description": "Express server for Master Order application",
   "main": "index.js",
   "scripts": {
-    "start": "node index.js",
-    "dev": "nodemon index.js",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "start": "node setup-schema.js && npx prisma generate && node index.js",
+    "dev": "node setup-schema.js && npx prisma generate && nodemon index.js",
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "setup-schema": "node setup-schema.js",
+    "setup-schema:sqlite": "node setup-schema.js sqlite",
+    "setup-schema:postgresql": "node setup-schema.js postgresql",
+    "prisma:generate": "node setup-schema.js && npx prisma generate",
+    "prisma:migrate": "node setup-schema.js && npx prisma migrate dev",
+    "prisma:deploy": "node setup-schema.js && npx prisma migrate deploy"
   },
   "keywords": [
     "express",

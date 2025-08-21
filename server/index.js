@@ -312,13 +312,76 @@ app.get('/api/comicvine/search-with-issues', async (req, res) => {
         if (issue) {
           // Add cover art URL from the issue
           const coverUrl = issue.image?.original_url || issue.image?.screen_url || issue.image?.small_url;
+          
+          // Create comprehensive ComicVine data object
+          const comprehensiveData = {
+            // Series information
+            series: {
+              id: series.id,
+              name: series.name,
+              aliases: series.aliases,
+              api_detail_url: series.api_detail_url,
+              count_of_issues: series.count_of_issues,
+              description: series.description,
+              first_issue: series.first_issue,
+              last_issue: series.last_issue,
+              publisher: series.publisher,
+              start_year: series.start_year,
+              site_detail_url: series.site_detail_url,
+              image: series.image,
+              deck: series.deck
+            },
+            // Issue information  
+            issue: {
+              id: issue.id,
+              name: issue.name,
+              aliases: issue.aliases,
+              api_detail_url: issue.api_detail_url,
+              cover_date: issue.cover_date,
+              date_added: issue.date_added,
+              date_last_updated: issue.date_last_updated,
+              deck: issue.deck,
+              description: issue.description,
+              has_staff_review: issue.has_staff_review,
+              image: issue.image,
+              issue_number: issue.issue_number,
+              site_detail_url: issue.site_detail_url,
+              store_date: issue.store_date,
+              // Character and creator data if available
+              character_credits: issue.character_credits,
+              character_died_in: issue.character_died_in,
+              concept_credits: issue.concept_credits,
+              location_credits: issue.location_credits,
+              object_credits: issue.object_credits,
+              person_credits: issue.person_credits,
+              story_arc_credits: issue.story_arc_credits,
+              team_credits: issue.team_credits
+            },
+            // Enhanced metadata
+            enhanced: {
+              searchQuery: query,
+              searchTimestamp: new Date().toISOString(),
+              confidence: series.similarity || 1.0,
+              isFuzzyMatch: series.isFuzzyMatch || false
+            }
+          };
+          
           filteredSeries.push({
             ...series,
             hasIssue: true,
             coverUrl: coverUrl,
             issueId: issue.id,
             issueName: issue.name,
-            issue_number: issueNumber
+            issue_number: issueNumber,
+            // Store comprehensive data for the frontend to use
+            comprehensiveData: comprehensiveData,
+            // Keep the original flat structure for backward compatibility
+            issue_description: issue.description,
+            issue_cover_date: issue.cover_date,
+            issue_store_date: issue.store_date,
+            character_credits: issue.character_credits,
+            person_credits: issue.person_credits,
+            story_arc_credits: issue.story_arc_credits
           });
         }
       } catch (error) {
@@ -2325,6 +2388,49 @@ app.post('/api/custom-orders/:id/items', async (req, res) => {
       }
     }
     
+    // Handle ComicVine data extraction for comics
+    let comicVineExtractedData = {};
+    if (mediaType === 'comic' && comicVineDetailsJson) {
+      try {
+        const comicVineData = JSON.parse(comicVineDetailsJson);
+        
+        // Extract comprehensive data from either the new format or legacy format
+        if (comicVineData.comprehensiveData) {
+          // New comprehensive format
+          const data = comicVineData.comprehensiveData;
+          comicVineExtractedData = {
+            comicVineSeriesId: data.series?.id || null,
+            comicVineIssueId: data.issue?.id || null,
+            comicIssueName: data.issue?.name || null,
+            comicDescription: data.issue?.description || data.series?.description || null,
+            comicCoverDate: data.issue?.cover_date || null,
+            comicStoreDate: data.issue?.store_date || null,
+            comicCreators: data.issue?.person_credits ? JSON.stringify(data.issue.person_credits) : null,
+            comicCharacters: data.issue?.character_credits ? JSON.stringify(data.issue.character_credits) : null,
+            comicStoryArcs: data.issue?.story_arc_credits ? JSON.stringify(data.issue.story_arc_credits) : null
+          };
+        } else {
+          // Legacy format - extract what we can from the series data
+          comicVineExtractedData = {
+            comicVineSeriesId: comicVineData.id || null,
+            comicVineIssueId: comicVineData.issueId || null,
+            comicIssueName: comicVineData.issueName || null,
+            comicDescription: comicVineData.issue_description || comicVineData.description || null,
+            comicCoverDate: comicVineData.issue_cover_date || null,
+            comicStoreDate: comicVineData.issue_store_date || null,
+            comicCreators: comicVineData.person_credits ? JSON.stringify(comicVineData.person_credits) : null,
+            comicCharacters: comicVineData.character_credits ? JSON.stringify(comicVineData.character_credits) : null,
+            comicStoryArcs: comicVineData.story_arc_credits ? JSON.stringify(comicVineData.story_arc_credits) : null
+          };
+        }
+        
+        console.log('Extracted ComicVine data:', comicVineExtractedData);
+      } catch (error) {
+        console.warn('Failed to parse ComicVine details JSON:', error);
+        comicVineExtractedData = {};
+      }
+    }
+
     const item = await prisma.customOrderItem.create({
       data: {
         customOrderId: parseInt(id),
@@ -2340,6 +2446,10 @@ app.post('/api/custom-orders/:id/items', async (req, res) => {
         comicVolume,
         comicPublisher,
         customTitle,
+        comicVineId,
+        comicVineDetailsJson,
+        // Add the new comprehensive ComicVine fields
+        ...comicVineExtractedData,
         bookTitle: finalBookData.bookTitle,
         bookAuthor: finalBookData.bookAuthor,
         bookYear: finalBookData.bookYear,
@@ -2667,6 +2777,47 @@ app.put('/api/custom-orders/:id/items/:itemId', async (req, res) => {
         if (customTitle !== undefined) updateData.customTitle = customTitle;
         if (comicVineId !== undefined) updateData.comicVineId = comicVineId;
         if (comicVineDetailsJson !== undefined) updateData.comicVineDetailsJson = comicVineDetailsJson;
+
+        // Extract and store comprehensive ComicVine data if provided
+        if (comicVineDetailsJson !== undefined) {
+          try {
+            const comicVineData = JSON.parse(comicVineDetailsJson);
+            
+            // Extract comprehensive data from either the new format or legacy format
+            if (comicVineData.comprehensiveData) {
+              // New comprehensive format
+              const data = comicVineData.comprehensiveData;
+              updateData.comicVineSeriesId = data.series?.id || null;
+              updateData.comicVineIssueId = data.issue?.id || null;
+              updateData.comicIssueName = data.issue?.name || null;
+              updateData.comicDescription = data.issue?.description || data.series?.description || null;
+              updateData.comicCoverDate = data.issue?.cover_date || null;
+              updateData.comicStoreDate = data.issue?.store_date || null;
+              updateData.comicCreators = data.issue?.person_credits ? JSON.stringify(data.issue.person_credits) : null;
+              updateData.comicCharacters = data.issue?.character_credits ? JSON.stringify(data.issue.character_credits) : null;
+              updateData.comicStoryArcs = data.issue?.story_arc_credits ? JSON.stringify(data.issue.story_arc_credits) : null;
+            } else {
+              // Legacy format - extract what we can from the series data
+              updateData.comicVineSeriesId = comicVineData.id || null;
+              updateData.comicVineIssueId = comicVineData.issueId || null;
+              updateData.comicIssueName = comicVineData.issueName || null;
+              updateData.comicDescription = comicVineData.issue_description || comicVineData.description || null;
+              updateData.comicCoverDate = comicVineData.issue_cover_date || null;
+              updateData.comicStoreDate = comicVineData.issue_store_date || null;
+              updateData.comicCreators = comicVineData.person_credits ? JSON.stringify(comicVineData.person_credits) : null;
+              updateData.comicCharacters = comicVineData.character_credits ? JSON.stringify(comicVineData.character_credits) : null;
+              updateData.comicStoryArcs = comicVineData.story_arc_credits ? JSON.stringify(comicVineData.story_arc_credits) : null;
+            }
+            
+            console.log('Extracted ComicVine data for update:', {
+              comicVineSeriesId: updateData.comicVineSeriesId,
+              comicVineIssueId: updateData.comicVineIssueId,
+              comicIssueName: updateData.comicIssueName
+            });
+          } catch (error) {
+            console.warn('Failed to parse ComicVine details JSON during update:', error);
+          }
+        }
 
         // Use the specific cover URL from the selected comic if provided, otherwise let the system derive it
         updateData.originalArtworkUrl = comicCoverUrl !== undefined ? comicCoverUrl : null;

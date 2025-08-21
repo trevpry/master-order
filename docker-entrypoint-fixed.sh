@@ -20,25 +20,6 @@ chmod 755 /app/server/artwork-cache /app/logs || true
 # Change to server directory for Prisma commands
 cd /app/server
 
-# Setup correct database schema for Docker/PostgreSQL environment
-echo "[INFO] Setting up PostgreSQL database schema..."
-node setup-schema.js postgresql
-if [ $? -ne 0 ]; then
-    echo "[ERROR] Failed to setup database schema"
-    exit 1
-fi
-
-# Debug: Show final DATABASE_URL after schema setup
-echo "[DEBUG] Final DATABASE_URL after schema setup: $DATABASE_URL"
-
-# Generate Prisma client with PostgreSQL schema
-echo "[INFO] Generating Prisma client..."
-npx prisma generate
-if [ $? -ne 0 ]; then
-    echo "[ERROR] Failed to generate Prisma client"
-    exit 1
-fi
-
 echo "[INFO] Setting up PostgreSQL database..."
 
 # Validate required environment variables
