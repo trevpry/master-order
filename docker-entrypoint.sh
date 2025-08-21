@@ -102,6 +102,13 @@ wait_for_postgres() {
 # PostgreSQL readiness check temporarily disabled
 echo "[INFO] Proceeding directly to database setup..."
 
+# Debug PostgreSQL connectivity
+echo "[INFO] Running PostgreSQL connection debug test..."
+./debug-postgres-connectivity.sh || echo "[WARN] Connection debug script failed"
+
+echo "[INFO] Running Node.js connection test..."
+node debug-postgres-connection.js || echo "[WARN] Node.js connection test failed"
+
 # Check if this is a new installation or existing database
 echo "[INFO] Checking for existing database data..."
 PRESERVE_EXISTING_DATA=false

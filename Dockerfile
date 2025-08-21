@@ -75,6 +75,11 @@ COPY --from=build --chown=app:nodejs /app/package*.json ./
 COPY --from=build --chown=app:nodejs /app/start.js ./start.js
 COPY --chown=app:nodejs ./docker-entrypoint.sh ./docker-entrypoint.sh
 
+# Copy debug scripts for PostgreSQL troubleshooting
+COPY --chown=app:nodejs ./debug-postgres-connection.js ./debug-postgres-connection.js
+COPY --chown=app:nodejs ./debug-postgres-connectivity.sh ./debug-postgres-connectivity.sh
+RUN chmod +x ./debug-postgres-connectivity.sh
+
 # Ensure Prisma files are copied (schema and migrations)
 COPY --from=build --chown=app:nodejs /app/server/prisma ./server/prisma
 
