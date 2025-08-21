@@ -5,7 +5,7 @@
 
 CONTAINER_NAME="master-order"
 IMAGE_NAME="master-order"
-REPO_PATH="/mnt/user/appdata/master-order"  # Adjust this path as needed
+REPO_PATH="/mnt/user/appdata/master-order-build/master-order"  # Updated to match your actual path
 HOST_PORT="3001"
 CONTAINER_PORT="3001"
 
