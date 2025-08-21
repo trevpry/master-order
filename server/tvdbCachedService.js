@@ -143,12 +143,16 @@ class TvdbCachedService {
       
       const response = await axios.get(`${this.baseURL}/search`, {
         headers: {
-          'Authorization': `Bearer ${this.bearerToken}`
+          'Authorization': `Bearer ${this.bearerToken}`,
+          'User-Agent': 'Master-Order-App/1.0',
+          'Accept': 'application/json',
+          'Content-Type': 'application/json'
         },
         params: {
           query: seriesName,
           type: 'series'
-        }
+        },
+        timeout: 10000
       });
 
       const searchResults = response.data.data || [];
@@ -328,8 +332,12 @@ class TvdbCachedService {
       
       const response = await axios.get(`${this.baseURL}/series/${cleanSeriesId}/extended`, {
         headers: {
-          'Authorization': `Bearer ${this.bearerToken}`
-        }
+          'Authorization': `Bearer ${this.bearerToken}`,
+          'User-Agent': 'Master-Order-App/1.0',
+          'Accept': 'application/json',
+          'Content-Type': 'application/json'
+        },
+        timeout: 10000
       });
 
       return response.data.data;
@@ -360,8 +368,12 @@ class TvdbCachedService {
       
       const response = await axios.get(`${this.baseURL}/series/${cleanSeriesId}/extended`, {
         headers: {
-          'Authorization': `Bearer ${this.bearerToken}`
-        }
+          'Authorization': `Bearer ${this.bearerToken}`,
+          'User-Agent': 'Master-Order-App/1.0',
+          'Accept': 'application/json',
+          'Content-Type': 'application/json'
+        },
+        timeout: 10000
       });
 
       const seasons = response.data.data?.seasons || [];
@@ -406,8 +418,12 @@ class TvdbCachedService {
       
       const response = await axios.get(`${this.baseURL}/seasons/${seasonId}/extended`, {
         headers: {
-          'Authorization': `Bearer ${this.bearerToken}`
-        }
+          'Authorization': `Bearer ${this.bearerToken}`,
+          'User-Agent': 'Master-Order-App/1.0',
+          'Accept': 'application/json',
+          'Content-Type': 'application/json'
+        },
+        timeout: 10000
       });
 
       const seasonData = response.data.data;
@@ -452,8 +468,12 @@ class TvdbCachedService {
       
       const response = await axios.get(`${this.baseURL}/episodes/${episodeId}/extended`, {
         headers: {
-          'Authorization': `Bearer ${this.bearerToken}`
-        }
+          'Authorization': `Bearer ${this.bearerToken}`,
+          'User-Agent': 'Master-Order-App/1.0',
+          'Accept': 'application/json',
+          'Content-Type': 'application/json'
+        },
+        timeout: 10000
       });
 
       const episodeData = response.data.data;
