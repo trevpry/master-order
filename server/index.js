@@ -2366,13 +2366,16 @@ app.post('/api/custom-orders/:id/items', async (req, res) => {
             );
             
             if (episode) {
-              console.log(`Found TVDB episode: ${episode.name}`);
-              // Update the item with TVDB metadata
+              console.log(`Found TVDB episode: ${episode.name}, but keeping bulk import title: ${title}`);
+              // Update the item with TVDB metadata but preserve bulk import title
               await prisma.customOrderItem.update({
                 where: { id: item.id },
                 data: {
-                  title: episode.name || title,
-                  // You can add more fields here like overview, air date, etc.
+                  // Keep the title from bulk import data, don't overwrite with TVDB episode name
+                  // Store other TVDB metadata fields if needed
+                  tvdbId: episode.id?.toString(),
+                  tvdbOverview: episode.overview,
+                  // You can add more fields here like genres, air date, etc.
                 }
               });
             }
