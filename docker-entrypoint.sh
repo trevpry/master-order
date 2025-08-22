@@ -23,16 +23,45 @@ if [ "$DATABASE_URL" = "file:/app/data/master_order.db" ] || echo "$DATABASE_URL
 fi
 
 # Ensure required directories exist and have correct permissions
+echo "[INFO] Ensuring required directories exist with correct permissions..."
 mkdir -p /app/server/artwork-cache
 mkdir -p /app/logs
+mkdir -p /app/data
 
 # Set ownership if running as root (will be changed by USER directive)
 if [ "$(id -u)" = "0" ]; then
-    chown -R app:nodejs /app/server/artwork-cache /app/logs
+    echo "[INFO] Running as root, setting ownership to app:nodejs..."
+    chown -R app:nodejs /app/server/artwork-cache /app/logs /app/data
+    echo "[INFO] Ownership set successfully"
+else
+    echo "[INFO] Running as non-root user: $(id -u):$(id -g)"
 fi
 
 # Ensure the app user owns these directories
-chmod 755 /app/server/artwork-cache /app/logs || true
+echo "[INFO] Setting directory permissions..."
+chmod -R 755 /app/server/artwork-cache /app/logs /app/data || echo "[WARN] Failed to set some permissions"
+
+# Verify directories exist and are writable
+echo "[INFO] Verifying directory setup..."
+if [ -d "/app/server/artwork-cache" ]; then
+    echo "[SUCCESS] Artwork cache directory exists: /app/server/artwork-cache"
+    ls -la /app/server/artwork-cache || echo "[INFO] Artwork cache directory is empty"
+else
+    echo "[ERROR] Artwork cache directory does not exist!"
+    exit 1
+fi
+
+if [ -d "/app/logs" ]; then
+    echo "[SUCCESS] Logs directory exists: /app/logs"
+else
+    echo "[ERROR] Logs directory does not exist!"
+fi
+
+if [ -d "/app/data" ]; then
+    echo "[SUCCESS] Data directory exists: /app/data"
+else
+    echo "[ERROR] Data directory does not exist!"
+fi
 
 # Change to server directory for consistency
 cd /app/server

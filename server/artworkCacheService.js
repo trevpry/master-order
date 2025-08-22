@@ -15,8 +15,19 @@ class ArtworkCacheService {
     try {
       await fs.mkdir(this.cacheDir, { recursive: true });
       console.log('Artwork cache directory initialized:', this.cacheDir);
+      
+      // Verify the directory is writable by attempting to create a test file
+      const testFile = path.join(this.cacheDir, '.write-test');
+      try {
+        await fs.writeFile(testFile, 'test');
+        await fs.unlink(testFile);
+        console.log('Artwork cache directory is writable');
+      } catch (writeError) {
+        console.error('Artwork cache directory is not writable:', writeError.message);
+      }
     } catch (error) {
       console.error('Failed to initialize artwork cache directory:', error);
+      console.error('This may cause artwork caching to fail');
     }
   }
 
@@ -98,6 +109,13 @@ class ArtworkCacheService {
   async cacheArtwork(url, itemId, isSeasonArtwork = false, seasonInfo = null, itemData = null) {
     try {
       console.log(`Caching artwork for item ${itemId} from URL: ${url}`);
+      
+      // Ensure cache directory exists before attempting to write
+      try {
+        await fs.mkdir(this.cacheDir, { recursive: true });
+      } catch (mkdirError) {
+        console.warn('Failed to ensure cache directory exists:', mkdirError.message);
+      }
       
       // Make request with headers to appear like a browser
       const response = await fetch(url, {

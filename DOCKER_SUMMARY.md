@@ -66,12 +66,53 @@ docker run -d \
 - **Automatic migrations** - Database schema handled on startup
 - **Static file serving** - Single container serves both API and frontend
 
+### Persistent Data Volumes ⚠️ IMPORTANT
+The following directories **MUST** be mounted as persistent volumes to prevent data loss:
+
+- **`/app/data`** - Contains the SQLite database with all your custom orders, settings, and watch logs
+- **`/app/server/artwork-cache`** - Contains cached artwork files to avoid re-downloading
+- **`/app/logs`** - Contains application logs for troubleshooting
+
+**Without proper volume mounts, you will lose all your data when updating the container!**
+
+Example volume configuration:
+```bash
+# Unraid paths (recommended)
+/mnt/user/appdata/master-order/data:/app/data
+/mnt/user/appdata/master-order/artwork-cache:/app/server/artwork-cache
+/mnt/user/appdata/master-order/logs:/app/logs
+
+# Local development paths
+./data:/app/data
+./artwork-cache:/app/server/artwork-cache
+./logs:/app/logs
+```
+
 ### Unraid Integration
 - **Complete template** - Ready-to-use Community Applications template
 - **Persistent storage** - Data, artwork cache, and logs preserved
 - **Environment variables** - All configuration through Unraid UI
 - **Port mapping** - Customizable port configuration
 - **Media mounting** - Optional direct media access
+
+#### Critical Unraid Setup ⚠️
+**Before first install or any update, verify these volume mappings:**
+
+```
+Container Volume: /app/data
+Host Path: /mnt/user/appdata/master-order/data
+Access Mode: Read/Write
+
+Container Volume: /app/server/artwork-cache
+Host Path: /mnt/user/appdata/master-order/artwork-cache
+Access Mode: Read/Write
+
+Container Volume: /app/logs
+Host Path: /mnt/user/appdata/master-order/logs
+Access Mode: Read/Write
+```
+
+**Without these mappings, all your data will be lost on container updates!**
 
 ### Production Ready
 - **Database migrations** - Automatic Prisma schema updates

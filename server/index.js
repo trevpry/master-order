@@ -210,6 +210,99 @@ app.get('/api/artwork/*', async (req, res) => {
   }
 });
 
+// Get full Plex media data by plexKey (for custom order navigation)
+app.get('/api/plex-media/:plexKey', async (req, res) => {
+  try {
+    const { plexKey } = req.params;
+    
+    if (!plexKey) {
+      return res.status(400).json({ error: 'Missing plexKey parameter' });
+    }
+    
+    console.log(`📺 Fetching full Plex data for plexKey: ${plexKey}`);
+    
+    const plexDatabaseService = require('./plexDatabaseService');
+    const plexDb = new plexDatabaseService();
+    
+    // Try to get item metadata (works for episodes, movies, shows)
+    const itemData = await plexDb.getItemMetadata(plexKey);
+    if (itemData && itemData.type === 'episode') {
+      console.log(`📺 Found episode: ${itemData.grandparentTitle} - S${itemData.parentIndex}E${itemData.index} - ${itemData.title}`);
+      
+      // Get TVDB artwork for the episode
+      const tvdbService = require('./tvdbCachedService');
+      const tvdbArtwork = await tvdbService.getCurrentSeasonArtwork(
+        itemData.grandparentTitle, 
+        itemData.parentIndex, 
+        itemData.index
+      );
+      
+      const responseData = {
+        type: 'episode',
+        id: itemData.ratingKey,
+        title: itemData.title,
+        seriesTitle: itemData.grandparentTitle,
+        season: itemData.parentIndex,
+        episode: itemData.index,
+        currentSeason: itemData.parentIndex,
+        currentEpisode: itemData.index,
+        nextEpisodeTitle: itemData.title,
+        episodeRatingKey: plexKey,
+        plexKey: plexKey,
+        thumb: itemData.thumb,
+        art: itemData.art,
+        tvdbArtwork: tvdbArtwork,
+        ratingKey: plexKey,
+        // Add series-level data
+        seriesRatingKey: itemData.grandparentRatingKey,
+        seasonTitle: itemData.parentTitle,
+        // Add any other relevant episode data
+        duration: itemData.duration,
+        year: itemData.year,
+        addedAt: itemData.addedAt,
+        updatedAt: itemData.updatedAt
+      };
+      
+      return res.json(responseData);
+    }
+    
+    // Try to get movie data
+    if (itemData && itemData.type === 'movie') {
+      console.log(`🎬 Found movie: ${itemData.title} (${itemData.year})`);
+      
+      const responseData = {
+        type: 'movie',
+        id: itemData.ratingKey,
+        title: itemData.title,
+        year: itemData.year,
+        plexKey: plexKey,
+        ratingKey: plexKey,
+        thumb: itemData.thumb,
+        art: itemData.art,
+        // Add any other relevant movie data
+        duration: itemData.duration,
+        addedAt: itemData.addedAt,
+        updatedAt: itemData.updatedAt,
+        summary: itemData.summary
+      };
+      
+      return res.json(responseData);
+    }
+    
+    // If no item found or not the right type
+    if (!itemData) {
+      console.warn(`⚠️ No media found for plexKey: ${plexKey}`);
+    } else {
+      console.warn(`⚠️ Unsupported media type '${itemData.type}' for plexKey: ${plexKey}`);
+    }
+    return res.status(404).json({ error: 'Media not found or unsupported type' });
+    
+  } catch (error) {
+    console.error('Error fetching Plex media data:', error);
+    res.status(500).json({ error: 'Failed to fetch Plex media data' });
+  }
+});
+
 // Proxy endpoint for TVDB artwork
 app.get('/api/tvdb-artwork', async (req, res) => {
   try {
@@ -842,8 +935,15 @@ app.post('/webhook', upload.single('thumb'), async (req, res) => {
             await markCustomOrderItemAsWatched(customOrderItem.id);
             
             // Create watch log entry
+            let watchLogMediaType = customOrderItem.mediaType;
+            
+            // Map custom order media types to watch log media types (same as manual marking)
+            if (customOrderItem.mediaType === 'episode') {
+              watchLogMediaType = 'tv';
+            }
+            
             const watchLogData = {
-              mediaType: customOrderItem.mediaType,
+              mediaType: watchLogMediaType,
               title: customOrderItem.title,
               plexKey: ratingKey.toString(),
               customOrderItemId: customOrderItem.id,

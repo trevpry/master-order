@@ -759,6 +759,197 @@ function CustomOrders() {
     
     setShowBookForm(true);
   };
+
+  // Navigate to home page with selected item
+  const handleNavigateToHome = async (item) => {
+    console.log('🏠 Navigate to Home - Original item:', item);
+    
+    if (!item.plexKey && item.mediaType === 'episode') {
+      console.warn('🏠 No plexKey available for episode, using basic data');
+      // Fallback to basic data if no plexKey
+      const basicData = {
+        id: item.id,
+        type: 'episode',
+        title: item.title,
+        seriesTitle: item.seriesTitle,
+        season: item.seasonNumber,
+        episode: item.episodeNumber,
+        orderType: 'CUSTOM_ORDER',
+        customOrderId: viewingOrderItems?.id,
+        customOrderName: viewingOrderItems?.name,
+      };
+      localStorage.setItem('masterOrder_selectedMedia', JSON.stringify(basicData));
+      window.location.href = '/';
+      return;
+    }
+    
+    if (item.plexKey && (item.mediaType === 'episode' || item.mediaType === 'movie')) {
+      try {
+        console.log(`🏠 Fetching full Plex data for ${item.mediaType} with plexKey: ${item.plexKey}`);
+        
+        // Fetch full episode/movie data from Plex using the plexKey
+        const response = await fetch(`${config.apiBaseUrl}/api/plex-media/${item.plexKey}`);
+        
+        if (!response.ok) {
+          throw new Error(`Failed to fetch Plex data: ${response.status}`);
+        }
+        
+        const plexData = await response.json();
+        console.log('🏠 Received Plex data:', plexData);
+        
+        // Transform the Plex data to the format expected by the home page
+        const selectedMediaData = {
+          ...plexData,
+          // Override with custom order specific data
+          orderType: 'CUSTOM_ORDER',
+          customOrderId: viewingOrderItems?.id,
+          customOrderName: viewingOrderItems?.name,
+          customOrderItemId: item.id,
+          isWatched: item.isWatched,
+          dateWatched: item.dateWatched,
+          totalWatchTime: item.totalWatchTime,
+          
+          // Ensure we have the correct type
+          type: item.mediaType === 'episode' ? 'episode' : item.mediaType,
+          
+          // For episodes, ensure we have season/episode data
+          ...(item.mediaType === 'episode' && {
+            currentSeason: plexData.season || item.seasonNumber,
+            currentEpisode: plexData.episode || item.episodeNumber,
+            nextEpisodeTitle: plexData.title || item.title,
+            episodeRatingKey: item.plexKey
+          })
+        };
+        
+        console.log('🏠 Final transformed data:', selectedMediaData);
+        
+        // Store in localStorage
+        localStorage.setItem('masterOrder_selectedMedia', JSON.stringify(selectedMediaData));
+        
+        console.log('🏠 Navigate to Home - Plex data saved to localStorage');
+        
+        // Navigate to home page
+        window.location.href = '/';
+        
+      } catch (error) {
+        console.error('🏠 Error fetching Plex data:', error);
+        
+        // Fallback to basic data if Plex fetch fails
+        const fallbackData = {
+          id: item.id,
+          type: item.mediaType === 'episode' ? 'episode' : item.mediaType,
+          title: item.title,
+          ...(item.mediaType === 'episode' && {
+            seriesTitle: item.seriesTitle,
+            season: item.seasonNumber,
+            episode: item.episodeNumber,
+            currentSeason: item.seasonNumber,
+            currentEpisode: item.episodeNumber,
+            nextEpisodeTitle: item.title,
+          }),
+          ...(item.mediaType === 'movie' && {
+            year: item.movieYear,
+          }),
+          orderType: 'CUSTOM_ORDER',
+          customOrderId: viewingOrderItems?.id,
+          customOrderName: viewingOrderItems?.name,
+          plexKey: item.plexKey
+        };
+        
+        localStorage.setItem('masterOrder_selectedMedia', JSON.stringify(fallbackData));
+        window.location.href = '/';
+      }
+      return;
+    }
+    
+    // For non-Plex items (books, comics, short stories, web videos)
+    const selectedMediaData = {
+      id: item.id,
+      type: item.mediaType,
+      title: item.title,
+      
+      // Artwork and caching fields
+      localArtworkPath: item.localArtworkPath,
+      artworkLastCached: item.artworkLastCached,
+      
+      // Book fields
+      ...(item.mediaType === 'book' && {
+        author: item.bookAuthor,
+        year: item.bookYear,
+        isbn: item.isbn,
+        pageCount: item.pageCount,
+        bookCoverUrl: item.bookCoverUrl,
+        bookOpenLibraryId: item.bookOpenLibraryId,
+        bookDescription: item.bookDescription,
+        containedStories: item.containedStories
+      }),
+      
+      // Comic fields
+      ...(item.mediaType === 'comic' && {
+        comicSeries: item.comicSeries,
+        comicIssue: item.comicIssue,
+        comicYear: item.comicYear,
+        comicPublisher: item.comicPublisher,
+        customTitle: item.customTitle,
+        comicIssueName: item.comicIssueName,
+        comicDescription: item.comicDescription,
+        comicCoverDate: item.comicCoverDate,
+        comicStoreDate: item.comicStoreDate,
+        comicCreators: item.comicCreators,
+        comicCharacters: item.comicCharacters,
+        comicStoryArcs: item.comicStoryArcs,
+        comicVineDetailsJson: item.comicVineDetailsJson,
+        comicDetails: item.comicVineDetailsJson ? (() => {
+          try {
+            return JSON.parse(item.comicVineDetailsJson);
+          } catch (e) {
+            return null;
+          }
+        })() : null
+      }),
+      
+      // Short story fields
+      ...(item.mediaType === 'shortstory' && {
+        storyTitle: item.storyTitle,
+        storyAuthor: item.storyAuthor,
+        storyYear: item.storyYear,
+        storyUrl: item.storyUrl,
+        storyCoverUrl: item.storyCoverUrl,
+        containedInBookId: item.containedInBookId,
+        containedInBookDetails: item.containedInBookDetails
+      }),
+      
+      // Web video fields
+      ...(item.mediaType === 'webvideo' && {
+        webVideoUrl: item.webVideoUrl,
+        webVideoDescription: item.webVideoDescription,
+        webTitle: item.title
+      }),
+      
+      // Common fields for all media types
+      orderType: 'CUSTOM_ORDER',
+      customOrderId: viewingOrderItems?.id,
+      customOrderName: viewingOrderItems?.name,
+      isWatched: item.isWatched,
+      dateWatched: item.dateWatched,
+      totalWatchTime: item.totalWatchTime,
+      
+      // Additional metadata that might be needed
+      createdAt: item.createdAt,
+      updatedAt: item.updatedAt
+    };
+
+    console.log('🏠 Navigate to Home - Non-Plex item data:', selectedMediaData);
+    
+    // Store in localStorage so the home page can pick it up
+    localStorage.setItem('masterOrder_selectedMedia', JSON.stringify(selectedMediaData));
+    
+    console.log('🏠 Navigate to Home - Data saved to localStorage');
+    
+    // Navigate to home page
+    window.location.href = '/';
+  };
+
   // Drag and Drop handlers
   const handleDragStart = (e, item, index) => {
     setDraggedItem({ item, index });
@@ -3136,6 +3327,14 @@ function CustomOrders() {
                             Mark as Unwatched
                           </Button>
                         )}
+                        <Button
+                          onClick={() => handleNavigateToHome(item)}
+                          className="primary"
+                          size="small"
+                          title="Navigate to home page and select this item"
+                        >
+                          Go to Home
+                        </Button>
                       </>
                     )}
                   </div>
