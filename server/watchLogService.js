@@ -139,7 +139,7 @@ class WatchLogService {
       });
 
       // Group the data based on the groupBy parameter
-      const groupedStats = this.groupWatchStats(watchLogs, groupBy);
+      const groupedStats = await this.groupWatchStats(watchLogs, groupBy);
       
       // Calculate totals
       const totalStats = this.calculateTotalStats(watchLogs);
@@ -159,37 +159,54 @@ class WatchLogService {
    * Group watch statistics by time period
    * @private
    */
-  groupWatchStats(watchLogs, groupBy) {
+  async groupWatchStats(watchLogs, groupBy) {
     const grouped = {};
+    
+    // Get timezone setting
+    const { getSettings } = require('./databaseUtils');
+    const settings = await getSettings();
+    const timezone = settings?.timezone || 'UTC';
 
     watchLogs.forEach(log => {
-      const date = new Date(log.startTime);
+      // Convert the UTC timestamp to the configured timezone
+      const utcDate = new Date(log.startTime);
+      const formatter = new Intl.DateTimeFormat('en-CA', {
+        timeZone: timezone,
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit'
+      });
+      
+      const parts = formatter.formatToParts(utcDate);
+      const year = parseInt(parts.find(part => part.type === 'year').value);
+      const month = parseInt(parts.find(part => part.type === 'month').value);
+      const day = parseInt(parts.find(part => part.type === 'day').value);
+      
       let key;
 
       switch (groupBy) {
         case 'day':
-          // Use local date to avoid timezone issues
-          key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+          key = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
           break;
         case 'week':
-          const weekStart = new Date(date);
-          weekStart.setDate(date.getDate() - date.getDay());
+          const weekStart = new Date(year, month - 1, day); // month is 0-indexed in Date constructor
+          weekStart.setDate(day - weekStart.getDay());
           key = `${weekStart.getFullYear()}-${String(weekStart.getMonth() + 1).padStart(2, '0')}-${String(weekStart.getDate()).padStart(2, '0')}`;
           break;
         case 'month':
-          key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+          key = `${year}-${String(month).padStart(2, '0')}`;
           break;
         case 'year':
-          key = date.getFullYear().toString();
+          key = year.toString();
           break;
         default:
-          key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+          key = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
       }
 
       if (!grouped[key]) {
         grouped[key] = {
           period: key,
-          displayDate: new Date(date.getFullYear(), date.getMonth(), date.getDate()), // Local date object
+          displayDate: new Date(year, month - 1, day), // Local date object for display
           tvEpisodes: 0,
           movies: 0,
           webVideos: 0,

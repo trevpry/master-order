@@ -4311,22 +4311,10 @@ app.get('/api/watch-stats', async (req, res) => {
     // Handle predefined periods
     switch (period) {
       case 'today':
-        // Use timezone-aware today calculation
-        const now = new Date();
-        const formatter = new Intl.DateTimeFormat('en-CA', {
-          timeZone: timezone,
-          year: 'numeric',
-          month: '2-digit',
-          day: '2-digit'
-        });
-        
-        const parts = formatter.formatToParts(now);
-        const year = parts.find(part => part.type === 'year').value;
-        const month = parts.find(part => part.type === 'month').value;
-        const day = parts.find(part => part.type === 'day').value;
-        
-        actualStartDate = new Date(`${year}-${month}-${day}T00:00:00Z`);
-        actualEndDate = new Date(`${year}-${month}-${day}T23:59:59Z`);
+        actualStartDate = new Date();
+        actualStartDate.setHours(0, 0, 0, 0);
+        actualEndDate = new Date();
+        actualEndDate.setHours(23, 59, 59, 999);
         break;
       case 'week':
         actualEndDate = new Date();
