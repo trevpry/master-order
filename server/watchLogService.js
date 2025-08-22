@@ -372,28 +372,23 @@ class WatchLogService {
       const settings = await getSettings();
       const timezone = settings?.timezone || 'UTC';
       
-      // Use Intl.DateTimeFormat to get the current date in the specified timezone
+      // Get today's date in the configured timezone
       const now = new Date();
-      const formatter = new Intl.DateTimeFormat('en-CA', {
-        timeZone: timezone,
-        year: 'numeric',
-        month: '2-digit',
-        day: '2-digit'
-      });
+      const todayString = now.toLocaleDateString('en-CA', { timeZone: timezone }); // YYYY-MM-DD
       
-      const parts = formatter.formatToParts(now);
-      const year = parts.find(part => part.type === 'year').value;
-      const month = parts.find(part => part.type === 'month').value;
-      const day = parts.find(part => part.type === 'day').value;
+      // Parse the date components
+      const [year, month, day] = todayString.split('-').map(n => parseInt(n));
       
-      // Create a date object for "today" in the configured timezone
-      // Note: This creates a Date object that represents the start of today in the user's timezone
-      const todayInTimezone = new Date(`${year}-${month}-${day}T00:00:00`);
+      // Create a date object for the start of today in local server time
+      // This will be used for filtering and will be compared against stored UTC timestamps
+      const todayStart = new Date(year, month - 1, day, 0, 0, 0, 0);
       
-      return todayInTimezone;
+      return todayStart;
     } catch (error) {
-      console.warn('Error getting timezone setting, falling back to UTC:', error.message);
-      return new Date(); // Fallback to current UTC date
+      console.warn('Error getting timezone setting, falling back to local date:', error.message);
+      const now = new Date();
+      now.setHours(0, 0, 0, 0);
+      return now;
     }
   }
 

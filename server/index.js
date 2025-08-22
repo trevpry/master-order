@@ -4311,10 +4311,26 @@ app.get('/api/watch-stats', async (req, res) => {
     // Handle predefined periods
     switch (period) {
       case 'today':
-        actualStartDate = new Date();
-        actualStartDate.setHours(0, 0, 0, 0);
-        actualEndDate = new Date();
-        actualEndDate.setHours(23, 59, 59, 999);
+        // Get what "today" means in the configured timezone
+        const todayInConfiguredTZ = new Date().toLocaleDateString('en-CA', { timeZone: timezone }); // YYYY-MM-DD
+        
+        // Create start and end of this day in UTC
+        // We need to find the UTC times that correspond to 00:00:00 and 23:59:59 in the configured timezone
+        const startOfDayInTZ = new Date(`${todayInConfiguredTZ}T00:00:00`);
+        const endOfDayInTZ = new Date(`${todayInConfiguredTZ}T23:59:59.999`);
+        
+        // Convert to UTC by adjusting for timezone offset
+        // Get the offset for this timezone on this specific date
+        const testDate = new Date(`${todayInConfiguredTZ}T12:00:00`);
+        const utcTime = testDate.getTime();
+        const tzTime = new Date(testDate.toLocaleString('en-US', { timeZone: timezone })).getTime();
+        const offsetMs = utcTime - tzTime;
+        
+        actualStartDate = new Date(startOfDayInTZ.getTime() + offsetMs);
+        actualEndDate = new Date(endOfDayInTZ.getTime() + offsetMs);
+        
+        console.log(`Filtering for today (${todayInConfiguredTZ}) in timezone ${timezone}`);
+        console.log(`Start: ${actualStartDate.toISOString()}, End: ${actualEndDate.toISOString()}`);
         break;
       case 'week':
         actualEndDate = new Date();
