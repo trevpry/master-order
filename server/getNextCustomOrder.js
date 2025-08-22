@@ -167,7 +167,7 @@ async function getNextItemFromCustomOrder(customOrder) {
 }
 
 // Fetch full media details from Plex or generate for comics and books
-async function fetchMediaDetailsFromPlex(plexKey, mediaType, customOrderItem) {
+async function fetchMediaDetailsFromPlex(plexKey, mediaType, customOrderItem, baseUrl = 'http://localhost:3001') {
   try {
     // Handle TVDB-only items - check if they now exist in Plex
     if (customOrderItem.isFromTvdbOnly) {
@@ -593,7 +593,7 @@ async function getNextCustomOrder(req = null) {
     console.log(`Next item: ${nextItem.title} (${nextItem.mediaType}) from order: ${finalSourceOrder.name}${isFromSubOrder ? ` (sub-order of "${finalParentOrder.name}")` : ''}`);
 
     // Fetch full media details from Plex (or generate for comics)
-    const fullMediaDetails = await fetchMediaDetailsFromPlex(nextItem.plexKey, nextItem.mediaType, nextItem);
+    const fullMediaDetails = await fetchMediaDetailsFromPlex(nextItem.plexKey, nextItem.mediaType, nextItem, baseUrl);
 
     // Add custom order context
     fullMediaDetails.customOrderName = finalSourceOrder.name;
