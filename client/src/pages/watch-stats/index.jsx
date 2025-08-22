@@ -59,6 +59,9 @@ const WatchStats = () => {
   const [authorSortBy, setAuthorSortBy] = useState('readtime'); // 'readtime', 'pages', 'books'
   const [publisherSortBy, setPublisherSortBy] = useState('readtime'); // 'readtime', 'comics'
   const [characterSortBy, setCharacterSortBy] = useState('readtime'); // 'readtime', 'comics'
+  
+  // Settings state for timezone
+  const [settings, setSettings] = useState(null);
 
   // Fetch watch statistics
   const fetchStats = async (selectedPeriod = globalPeriod, selectedGroupBy = globalGroupBy) => {
@@ -186,6 +189,18 @@ const WatchStats = () => {
     }
   };
 
+  // Fetch settings (for timezone)
+  const fetchSettings = async () => {
+    try {
+      const response = await fetch(`${config.apiBaseUrl}/api/settings`);
+      if (!response.ok) throw new Error('Failed to fetch settings');
+      const data = await response.json();
+      setSettings(data);
+    } catch (err) {
+      console.error('Error fetching settings:', err);
+    }
+  };
+
   // Fetch custom order statistics
   const fetchCustomOrderStats = async (period = 'all') => {
     try {
@@ -274,6 +289,7 @@ const WatchStats = () => {
   };
 
   useEffect(() => {
+    fetchSettings();
     fetchStats();
     fetchChartStats();
     fetchRecentActivity();
@@ -311,6 +327,8 @@ const WatchStats = () => {
   };
 
   const formatDate = (dateString) => {
+    const timezone = settings?.timezone || 'UTC';
+    
     // Handle date-only strings (YYYY-MM-DD) to avoid timezone issues
     if (typeof dateString === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(dateString)) {
       // For date-only strings, create date in local timezone to avoid shifting
@@ -318,11 +336,11 @@ const WatchStats = () => {
       const date = new Date(year, month - 1, day); // month is 0-indexed
       
       if (groupBy === 'day') {
-        return date.toLocaleDateString();
+        return date.toLocaleDateString('en-US', { timeZone: timezone });
       } else if (groupBy === 'week') {
-        return `Week of ${date.toLocaleDateString()}`;
+        return `Week of ${date.toLocaleDateString('en-US', { timeZone: timezone })}`;
       } else if (groupBy === 'month') {
-        return date.toLocaleDateString('en-US', { year: 'numeric', month: 'long' });
+        return date.toLocaleDateString('en-US', { year: 'numeric', month: 'long', timeZone: timezone });
       } else if (groupBy === 'year') {
         return date.getFullYear().toString();
       }
@@ -330,16 +348,22 @@ const WatchStats = () => {
       // For other date formats, use the original logic
       const date = new Date(dateString);
       if (groupBy === 'day') {
-        return date.toLocaleDateString();
+        return date.toLocaleDateString('en-US', { timeZone: timezone });
       } else if (groupBy === 'week') {
-        return `Week of ${date.toLocaleDateString()}`;
+        return `Week of ${date.toLocaleDateString('en-US', { timeZone: timezone })}`;
       } else if (groupBy === 'month') {
-        return date.toLocaleDateString('en-US', { year: 'numeric', month: 'long' });
+        return date.toLocaleDateString('en-US', { year: 'numeric', month: 'long', timeZone: timezone });
       } else if (groupBy === 'year') {
         return date.getFullYear().toString();
       }
     }
     return dateString;
+  };
+
+  // Helper function for formatting any date with timezone
+  const formatDateWithTimezone = (dateString) => {
+    const timezone = settings?.timezone || 'UTC';
+    return new Date(dateString).toLocaleDateString('en-US', { timeZone: timezone });
   };
 
   if (loading && !stats) {
@@ -419,6 +443,7 @@ const WatchStats = () => {
 
     // Extract labels (time periods) and format them based on the appropriate groupBy
     const labels = chronologicalStats.map(group => {
+      const timezone = settings?.timezone || 'UTC';
       // Handle date-only strings (YYYY-MM-DD) to avoid timezone issues
       let date;
       if (typeof group.period === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(group.period)) {
@@ -430,11 +455,11 @@ const WatchStats = () => {
       }
       
       if (chartGroupBy === 'day') {
-        return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+        return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: timezone });
       } else if (chartGroupBy === 'week') {
-        return `Week of ${date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`;
+        return `Week of ${date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: timezone })}`;
       } else if (chartGroupBy === 'month') {
-        return date.toLocaleDateString('en-US', { year: 'numeric', month: 'short' });
+        return date.toLocaleDateString('en-US', { year: 'numeric', month: 'short', timeZone: timezone });
       } else if (chartGroupBy === 'year') {
         return date.getFullYear().toString();
       }
@@ -1075,7 +1100,7 @@ const WatchStats = () => {
                           : log.durationFormatted}
                       </span>
                       <span className="separator">•</span>
-                      <span className="date">{new Date(log.startTime).toLocaleDateString()}</span>
+                      <span className="date">{new Date(log.startTime).toLocaleDateString('en-US', { timeZone: settings?.timezone || 'UTC' })}</span>
                     </div>
                 </div>
               </div>
@@ -1211,7 +1236,7 @@ const WatchStats = () => {
                         <tbody>
                           {customOrderStats.logs.slice(0, 10).map((log, index) => (
                             <tr key={index}>
-                              <td>{new Date(log.startTime).toLocaleDateString()}</td>
+                              <td>{formatDateWithTimezone(log.startTime)}</td>
                               <td>{log.title}</td>
                               <td>{log.customOrderItem?.customOrder?.name || 'N/A'}</td>
                               <td className="text-capitalize">{log.mediaType}</td>
@@ -1302,7 +1327,7 @@ const WatchStats = () => {
                             <span className="separator">•</span>
                             <span className="duration">{Math.round(log.totalWatchTime)} min</span>
                             <span className="separator">•</span>
-                            <span className="date">{new Date(log.startTime).toLocaleDateString()}</span>
+                            <span className="date">{formatDateWithTimezone(log.startTime)}</span>
                           </div>
                         </div>
                       </div>
@@ -1551,7 +1576,7 @@ const WatchStats = () => {
                             <span className="separator">•</span>
                             <span className="duration">{Math.round(log.totalWatchTime)} min</span>
                             <span className="separator">•</span>
-                            <span className="date">{new Date(log.startTime).toLocaleDateString()}</span>
+                            <span className="date">{formatDateWithTimezone(log.startTime)}</span>
                           </div>
                         </div>
                       </div>
@@ -1895,7 +1920,7 @@ const WatchStats = () => {
                               </>
                             )}
                             <span className="separator">•</span>
-                            <span className="date">{new Date(book.completedDate).toLocaleDateString()}</span>
+                            <span className="date">{formatDateWithTimezone(book.completedDate)}</span>
                           </div>
                         </div>
                       </div>
@@ -1934,7 +1959,7 @@ const WatchStats = () => {
                             <span className="separator">•</span>
                             <span className="duration">{Math.round(log.totalWatchTime)} min</span>
                             <span className="separator">•</span>
-                            <span className="date">{new Date(log.startTime).toLocaleDateString()}</span>
+                            <span className="date">{formatDateWithTimezone(log.startTime)}</span>
                           </div>
                         </div>
                       </div>
@@ -2187,7 +2212,7 @@ const WatchStats = () => {
                             <span className="separator">•</span>
                             <span className="duration">{Math.round(log.totalWatchTime)} min</span>
                             <span className="separator">•</span>
-                            <span className="date">{new Date(log.startTime).toLocaleDateString()}</span>
+                            <span className="date">{formatDateWithTimezone(log.startTime)}</span>
                           </div>
                         </div>
                       </div>
@@ -2289,7 +2314,7 @@ const WatchStats = () => {
                             <span className="separator">•</span>
                             <span className="duration">{Math.round(log.totalWatchTime)} min</span>
                             <span className="separator">•</span>
-                            <span className="date">{new Date(log.startTime).toLocaleDateString()}</span>
+                            <span className="date">{formatDateWithTimezone(log.startTime)}</span>
                             <span className="separator">•</span>
                             <span className="time">{new Date(log.startTime).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</span>
                           </div>
@@ -2371,7 +2396,7 @@ const WatchStats = () => {
                             <span className="separator">•</span>
                             <span className="duration">{Math.round(log.totalWatchTime)} min</span>
                             <span className="separator">•</span>
-                            <span className="date">{new Date(log.startTime).toLocaleDateString()}</span>
+                            <span className="date">{formatDateWithTimezone(log.startTime)}</span>
                           </div>
                         </div>
                       </div>
@@ -2521,7 +2546,7 @@ const WatchStats = () => {
                         </div>
                         <div className="activity-meta">
                           <span className="activity-date">
-                            {new Date(log.startTime).toLocaleDateString()}
+                            {formatDateWithTimezone(log.startTime)}
                           </span>
                           <span className="activity-time">
                             {Math.round(log.totalWatchTime)} min
