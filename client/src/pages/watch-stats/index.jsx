@@ -41,8 +41,9 @@ const WatchStats = () => {
   const [globalGroupBy, setGlobalGroupBy] = useState('day');
   const [chartPeriod, setChartPeriod] = useState('week'); // Independent chart period
   const [chartStats, setChartStats] = useState(null); // Separate stats for chart
-  const [activeTab, setActiveTab] = useState('overview'); // 'overview', 'custom-orders', 'tv', 'movies', 'books', 'comics', 'shortstories'
+  const [activeTab, setActiveTab] = useState('overview'); // 'overview', 'custom-orders', 'all-activity', 'tv', 'movies', 'books', 'comics', 'shortstories'
   const [customOrderStats, setCustomOrderStats] = useState(null);
+  const [allActivityStats, setAllActivityStats] = useState(null);
   
   // Individual media type stats
   const [tvStats, setTvStats] = useState(null);
@@ -196,6 +197,27 @@ const WatchStats = () => {
     }
   };
 
+  // Fetch all activity across all media types
+  const fetchAllActivityStats = async (period = 'all') => {
+    try {
+      console.log('Fetching all activity stats for period:', period);
+      const url = `${config.apiBaseUrl}/api/watch-stats/all-activity?period=${period}&groupBy=day`;
+      console.log('Fetching from URL:', url);
+      
+      const response = await fetch(url);
+      console.log('Response status:', response.status, response.ok);
+      
+      if (!response.ok) throw new Error('Failed to fetch all activity stats');
+      
+      const data = await response.json();
+      console.log('All activity data received:', data);
+      
+      setAllActivityStats(data);
+    } catch (err) {
+      console.error('Error fetching all activity stats:', err);
+    }
+  };
+
   // Fetch individual media type statistics
   const fetchMediaTypeStats = async (mediaType, period = 'all') => {
     try {
@@ -253,6 +275,7 @@ const WatchStats = () => {
     fetchTodayStats();
     fetchCustomOrderStats();
     fetchAllMediaTypeStats(globalPeriod);
+    fetchAllActivityStats(globalPeriod);
   }, []);
 
   // Re-fetch TV stats when actor sort changes
@@ -612,6 +635,12 @@ const WatchStats = () => {
           onClick={() => setActiveTab('custom-orders')}
         >
           By Custom Order
+        </button>
+        <button 
+          className={`tab-button ${activeTab === 'all-activity' ? 'active' : ''}`}
+          onClick={() => setActiveTab('all-activity')}
+        >
+          📋 All Activity
         </button>
         <button 
           className={`tab-button ${activeTab === 'tv' ? 'active' : ''}`}
@@ -1160,7 +1189,10 @@ const WatchStats = () => {
                 <div className="stats-card">
                   <h2>Recent TV Episodes</h2>
                   <div className="recent-activity">
-                    {tvStats.logs.slice(0, 10).map((log, index) => (
+                    {tvStats.logs
+                      .sort((a, b) => new Date(b.startTime) - new Date(a.startTime))
+                      .slice(0, 10)
+                      .map((log, index) => (
                       <div key={index} className="activity-item">
                         <div className="activity-info">
                           <div className="activity-title">
@@ -1412,7 +1444,10 @@ const WatchStats = () => {
                 <div className="stats-card">
                   <h2>Recent Movies</h2>
                   <div className="recent-activity">
-                    {movieStats.logs.slice(0, 10).map((log, index) => (
+                    {movieStats.logs
+                      .sort((a, b) => new Date(b.startTime) - new Date(a.startTime))
+                      .slice(0, 10)
+                      .map((log, index) => (
                       <div key={index} className="activity-item">
                         <div className="activity-info">
                           <div className="activity-title">
@@ -1792,7 +1827,10 @@ const WatchStats = () => {
                 <div className="stats-card">
                   <h2>Recent Books</h2>
                   <div className="recent-activity">
-                    {bookStats.logs.slice(0, 10).map((log, index) => (
+                    {bookStats.logs
+                      .sort((a, b) => new Date(b.startTime) - new Date(a.startTime))
+                      .slice(0, 10)
+                      .map((log, index) => (
                       <div key={index} className="activity-item">
                         <div className="activity-info">
                           <div className="activity-title">
@@ -2042,7 +2080,10 @@ const WatchStats = () => {
                 <div className="stats-card">
                   <h2>Recent Comics</h2>
                   <div className="recent-activity">
-                    {comicStats.logs.slice(0, 10).map((log, index) => (
+                    {comicStats.logs
+                      .sort((a, b) => new Date(b.startTime) - new Date(a.startTime))
+                      .slice(0, 10)
+                      .map((log, index) => (
                       <div key={index} className="activity-item">
                         <div className="activity-info">
                           <div className="activity-title">
@@ -2066,6 +2107,119 @@ const WatchStats = () => {
             <div className="stats-card">
               <div style={{ textAlign: 'center', padding: '40px', color: '#8b949e' }}>
                 <h3>Loading Comic Statistics...</h3>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* All Activity Tab */}
+      {activeTab === 'all-activity' && (
+        <div className="tab-content">
+          {allActivityStats ? (
+            <>
+              {/* Time Period Selection for All Activity */}
+              <div className="stats-card">
+                <h2>📋 All Activity</h2>
+                <div className="period-controls">
+                  <button 
+                    className={`period-btn ${globalPeriod === 'all' ? 'active' : ''}`}
+                    onClick={() => {
+                      setGlobalPeriod('all');
+                      fetchAllActivityStats('all');
+                    }}
+                  >
+                    All Time
+                  </button>
+                  <button 
+                    className={`period-btn ${globalPeriod === 'today' ? 'active' : ''}`}
+                    onClick={() => {
+                      setGlobalPeriod('today');
+                      fetchAllActivityStats('today');
+                    }}
+                  >
+                    Today
+                  </button>
+                  <button 
+                    className={`period-btn ${globalPeriod === 'week' ? 'active' : ''}`}
+                    onClick={() => {
+                      setGlobalPeriod('week');
+                      fetchAllActivityStats('week');
+                    }}
+                  >
+                    This Week
+                  </button>
+                  <button 
+                    className={`period-btn ${globalPeriod === 'month' ? 'active' : ''}`}
+                    onClick={() => {
+                      setGlobalPeriod('month');
+                      fetchAllActivityStats('month');
+                    }}
+                  >
+                    This Month
+                  </button>
+                  <button 
+                    className={`period-btn ${globalPeriod === 'year' ? 'active' : ''}`}
+                    onClick={() => {
+                      setGlobalPeriod('year');
+                      fetchAllActivityStats('year');
+                    }}
+                  >
+                    This Year
+                  </button>
+                </div>
+              </div>
+
+              {/* All Activity List */}
+              {allActivityStats.logs && allActivityStats.logs.length > 0 && (
+                <div className="stats-card">
+                  <h2>All Activity ({globalPeriod === 'all' ? 'All Time' : globalPeriod.charAt(0).toUpperCase() + globalPeriod.slice(1)})</h2>
+                  <div className="recent-activity">
+                    {allActivityStats.logs
+                      .sort((a, b) => new Date(b.startTime) - new Date(a.startTime))
+                      .map((log, index) => (
+                      <div key={index} className="activity-item">
+                        <div className="activity-info">
+                          <div className="activity-title">
+                            {log.seriesTitle && (
+                              <span className="series-title">{log.seriesTitle} - </span>
+                            )}
+                            <span className="title">{log.title}</span>
+                            {log.seasonNumber && log.episodeNumber && (
+                              <span className="episode-info"> (S{log.seasonNumber}E{log.episodeNumber})</span>
+                            )}
+                          </div>
+                          <div className="activity-meta">
+                            <span className={`media-type media-type-${log.type?.toLowerCase() || 'unknown'}`}>
+                              {log.type?.toUpperCase() || 'UNKNOWN'}
+                            </span>
+                            <span className="separator">•</span>
+                            <span className="duration">{Math.round(log.totalWatchTime)} min</span>
+                            <span className="separator">•</span>
+                            <span className="date">{new Date(log.startTime).toLocaleDateString()}</span>
+                            <span className="separator">•</span>
+                            <span className="time">{new Date(log.startTime).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</span>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {(!allActivityStats.logs || allActivityStats.logs.length === 0) && (
+                <div className="stats-card">
+                  <div style={{ textAlign: 'center', padding: '40px', color: '#8b949e' }}>
+                    <h3>No activity found for the selected time period</h3>
+                    <p>Try selecting a different time period to see your activity.</p>
+                  </div>
+                </div>
+              )}
+            </>
+          ) : (
+            <div className="stats-card">
+              <div style={{ textAlign: 'center', padding: '40px', color: '#8b949e' }}>
+                <h3>Loading All Activity...</h3>
               </div>
             </div>
           )}
@@ -2110,7 +2264,10 @@ const WatchStats = () => {
                 <div className="stats-card">
                   <h2>Recent Short Stories</h2>
                   <div className="recent-activity">
-                    {shortStoryStats.logs.slice(0, 10).map((log, index) => (
+                    {shortStoryStats.logs
+                      .sort((a, b) => new Date(b.startTime) - new Date(a.startTime))
+                      .slice(0, 10)
+                      .map((log, index) => (
                       <div key={index} className="activity-item">
                         <div className="activity-info">
                           <div className="activity-title">

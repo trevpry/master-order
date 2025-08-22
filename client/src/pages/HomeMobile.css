@@ -44,11 +44,11 @@ body {
     margin: 0 auto !important;
     border-radius: 12px !important;
     
-    /* CRITICAL: Force exact pixel positioning */
+    /* CRITICAL: Maintain full desktop size - NO mobile constraints */
     width: auto !important;
     height: auto !important;
-    max-width: 90vw !important;
-    max-height: 80vh !important;
+    max-width: none !important;
+    max-height: none !important;
     
     /* DISABLE ALL GPU ACCELERATION AND 3D RENDERING */
     transform: translateZ(0) !important;
@@ -83,13 +83,13 @@ body {
     left: 0 !important;
   }
 
-  /* SIMPLE CONTAINER - NO COMPLEX CONSTRAINTS */
+  /* SIMPLE CONTAINER - NO size constraints, maintain desktop dimensions */
   .home-responsive .media-artwork-responsive {
     /* Basic container */
     position: relative !important;
     width: auto !important;
     height: auto !important;
-    max-width: 95vw !important;
+    max-width: none !important;
     margin: 20px auto !important;
     padding: 0 !important;
     
@@ -382,7 +382,8 @@ body {
 /* Landscape orientation on mobile */
 @media (max-width: 768px) and (orientation: landscape) {
   .home-responsive .media-artwork-responsive {
-    max-height: 250px;
+    /* No height constraint - maintain desktop dimensions */
+    max-height: none;
   }
 
   .home-responsive .primary-button-row {
@@ -446,14 +447,14 @@ body {
   }
 }
 
-/* SPECIAL HANDLING FOR COMIC BOOK COVERS - PIXEL PERFECT */
+/* SPECIAL HANDLING FOR COMIC BOOK COVERS - MAINTAIN DESKTOP SIZE */
 @media (max-width: 768px) {
   .home-responsive .media-artwork-responsive img[src*="comicvine"] {
-    /* Comic covers are typically good quality and well-sized for mobile */
+    /* Comic covers maintain their desktop dimensions on mobile */
     width: auto !important;
     height: auto !important;
-    max-width: 400px !important;
-    max-height: 600px !important;
+    max-width: none !important;
+    max-height: none !important;
     
     /* MOST AGGRESSIVE: Try to render at native resolution */
     object-fit: none !important;

@@ -728,18 +728,44 @@ app.get('/api/settings', async (req, res) => {
 // Plex webhook endpoint
 app.post('/webhook', upload.single('thumb'), (req, res) => {
   try {
-    console.log('Plex webhook received');
+    console.log('\n🎬 =================================');
+    console.log('🎬 PLEX WEBHOOK RECEIVED');
+    console.log('🎬 =================================');
+    console.log('📅 Timestamp:', new Date().toISOString());
+    console.log('🔗 Headers:', JSON.stringify(req.headers, null, 2));
     
     // Parse the JSON payload
     let payload;
     if (req.body.payload) {
       payload = JSON.parse(req.body.payload);
+      console.log('📦 Raw payload found in req.body.payload');
     } else {
       payload = req.body;
+      console.log('📦 Using req.body directly');
     }
 
-    console.log('Webhook event:', payload.event);
-    console.log('Webhook payload:', JSON.stringify(payload, null, 2));
+    console.log('🎯 Event Type:', payload.event);
+    console.log('👤 User:', payload.Account?.title || 'Unknown User');
+    console.log('📱 Player:', payload.Player?.title || 'Unknown Player');
+    console.log('🖥️  Server:', payload.Server?.title || 'Unknown Server');
+    
+    if (payload.Metadata) {
+      console.log('📺 Media Details:');
+      console.log('   Type:', payload.Metadata.type);
+      console.log('   Title:', payload.Metadata.title);
+      console.log('   Year:', payload.Metadata.year);
+      console.log('   Duration:', payload.Metadata.duration);
+      console.log('   Rating Key:', payload.Metadata.ratingKey);
+      
+      if (payload.Metadata.type === 'episode') {
+        console.log('   Series:', payload.Metadata.grandparentTitle);
+        console.log('   Season:', payload.Metadata.parentIndex);
+        console.log('   Episode:', payload.Metadata.index);
+      }
+    }
+    
+    console.log('📄 Full Payload:', JSON.stringify(payload, null, 2));
+    console.log('🎬 =================================\n');
 
     // Only process media.play events
     if (payload.event === 'media.play') {
@@ -775,12 +801,12 @@ app.post('/webhook', upload.single('thumb'), (req, res) => {
 
       // Emit to all connected clients
       io.emit('plexPlayback', notification);
-      console.log('Emitted Plex playback notification:', notification);
+      console.log('✅ Emitted Plex playback notification to WebSocket clients');
     }
 
     res.status(200).send('OK');
   } catch (error) {
-    console.error('Error processing webhook:', error);
+    console.error('❌ Error processing webhook:', error);
     res.status(500).send('Error processing webhook');
   }
 });
@@ -3727,6 +3753,28 @@ app.get('/api/watch-stats/media-type/:mediaType', async (req, res) => {
   } catch (error) {
     console.error(`Error getting ${req.params.mediaType} statistics:`, error);
     res.status(500).json({ error: `Failed to get ${req.params.mediaType} statistics` });
+  }
+});
+
+// Get all activity across all media types
+app.get('/api/watch-stats/all-activity', async (req, res) => {
+  try {
+    console.log('All activity endpoint called with query:', req.query);
+    const { period = 'all', groupBy = 'day' } = req.query;
+    
+    console.log('Calling getAllActivityStats with period:', period, 'groupBy:', groupBy);
+    const allActivityStats = await watchLogService.getAllActivityStats(period, groupBy);
+    
+    console.log('All activity stats result:', {
+      totalCount: allActivityStats?.totalCount,
+      logsLength: allActivityStats?.logs?.length,
+      period: allActivityStats?.period
+    });
+    
+    res.json(allActivityStats);
+  } catch (error) {
+    console.error('Error getting all activity statistics:', error);
+    res.status(500).json({ error: 'Failed to get all activity statistics' });
   }
 });
 

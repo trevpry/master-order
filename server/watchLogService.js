@@ -1682,6 +1682,101 @@ class WatchLogService {
       throw error;
     }
   }
+
+  /**
+   * Get all activity logs across all media types for a given period
+   * @param {string} period - Time period ('all', 'today', 'week', 'month', 'year')
+   * @param {string} groupBy - How to group the results ('day')
+   * @returns {Promise<Object>} Combined activity statistics
+   */
+  async getAllActivityStats(period = 'all', groupBy = 'day') {
+    try {
+      // Build date filter based on period
+      let whereClause = {};
+      
+      // Handle predefined periods
+      switch (period) {
+        case 'today':
+          const startOfToday = new Date();
+          startOfToday.setHours(0, 0, 0, 0);
+          const endOfToday = new Date();
+          endOfToday.setHours(23, 59, 59, 999);
+          whereClause.startTime = {
+            gte: startOfToday,
+            lte: endOfToday
+          };
+          break;
+        case 'week':
+          const startOfWeek = new Date();
+          startOfWeek.setDate(startOfWeek.getDate() - startOfWeek.getDay());
+          startOfWeek.setHours(0, 0, 0, 0);
+          whereClause.startTime = {
+            gte: startOfWeek
+          };
+          break;
+        case 'month':
+          const startOfMonth = new Date();
+          startOfMonth.setDate(1);
+          startOfMonth.setHours(0, 0, 0, 0);
+          whereClause.startTime = {
+            gte: startOfMonth
+          };
+          break;
+        case 'year':
+          const startOfYear = new Date();
+          startOfYear.setMonth(0, 1);
+          startOfYear.setHours(0, 0, 0, 0);
+          whereClause.startTime = {
+            gte: startOfYear
+          };
+          break;
+        case 'all':
+        default:
+          // No date filter for 'all'
+          break;
+      }
+
+      // Get all watch logs for the specified period, ordered by most recent first
+      const logs = await this.prisma.watchLog.findMany({
+        where: {
+          ...whereClause,
+          isCompleted: true, // Only get completed sessions
+        },
+        orderBy: {
+          startTime: 'desc'
+        },
+        select: {
+          id: true,
+          mediaType: true,
+          title: true,
+          seriesTitle: true,
+          seasonNumber: true,
+          episodeNumber: true,
+          startTime: true,
+          endTime: true,
+          totalWatchTime: true,
+          duration: true,
+          activityType: true // Use activityType instead of type
+        }
+      });
+
+      // Add 'type' field based on mediaType for consistency with frontend
+      const logsWithType = logs.map(log => ({
+        ...log,
+        type: log.activityType || log.mediaType // Use existing activityType or fallback to mediaType
+      }));
+
+      return {
+        logs: logsWithType,
+        totalCount: logsWithType.length,
+        period: period
+      };
+
+    } catch (error) {
+      console.error('Error fetching all activity stats:', error);
+      throw error;
+    }
+  }
 }
 
 module.exports = WatchLogService;
