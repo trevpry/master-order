@@ -18,7 +18,7 @@ env | grep -i database || echo "[DEBUG] No DATABASE_URL env vars found"
 # Force correct DATABASE_URL if it's been overridden (Docker safety check)
 if [ "$DATABASE_URL" = "file:/app/data/master_order.db" ] || echo "$DATABASE_URL" | grep -q "file:"; then
     echo "[WARN] DATABASE_URL appears to be SQLite format, forcing PostgreSQL for Docker"
-    export DATABASE_URL="postgresql://master_order_user:${POSTGRES_PASSWORD:-secure_password_change_me}@postgresql16:5432/master_order"
+    export DATABASE_URL="postgresql://master_order_user:${POSTGRES_PASSWORD:-secure_password_change_me}@192.168.1.113:5432/master_order"
     echo "[INFO] Forced DATABASE_URL to: $DATABASE_URL"
 fi
 
@@ -104,20 +104,35 @@ echo "[INFO] Proceeding directly to database setup..."
 
 # Debug PostgreSQL connectivity
 echo "[INFO] === PostgreSQL Connection Debug ==="
-echo "[DEBUG] Testing if port 5432 is open on postgresql16 container..."
-if timeout 3 bash -c "</dev/tcp/postgresql16/5432" 2>/dev/null; then
-    echo "[SUCCESS] Port 5432 is open and accepting connections on postgresql16"
+echo "[DEBUG] Environment variables:"
+echo "[DEBUG] - DATABASE_URL: $DATABASE_URL"
+echo "[DEBUG] - POSTGRES_PASSWORD: $POSTGRES_PASSWORD"
+
+echo "[DEBUG] Testing network connectivity to 192.168.1.113:5432..."
+if ping -c 1 192.168.1.113 >/dev/null 2>&1; then
+    echo "[SUCCESS] Can ping 192.168.1.113"
 else
-    echo "[ERROR] Port 5432 is not accessible on postgresql16"
+    echo "[ERROR] Cannot ping 192.168.1.113"
 fi
 
-echo "[DEBUG] Testing with basic PostgreSQL tools..."
+echo "[DEBUG] Testing if port 5432 is open on 192.168.1.113..."
+if timeout 5 bash -c "echo >/dev/tcp/192.168.1.113/5432" 2>/dev/null; then
+    echo "[SUCCESS] Port 5432 is open and accepting connections on 192.168.1.113"
+else
+    echo "[ERROR] Port 5432 is not accessible on 192.168.1.113"
+    echo "[DEBUG] Checking if port is listening anywhere..."
+    netstat -tulpn 2>/dev/null | grep :5432 || echo "[INFO] No port 5432 found in netstat"
+fi
+
+echo "[DEBUG] Testing with nslookup..."
+nslookup 192.168.1.113 2>/dev/null || echo "[INFO] nslookup failed"
+
+echo "[DEBUG] Testing with telnet-style connection..."
+timeout 5 bash -c "exec 3<>/dev/tcp/192.168.1.113/5432; echo 'Connected' >&3; cat <&3" 2>/dev/null && echo "[SUCCESS] Raw TCP connection works" || echo "[ERROR] Raw TCP connection failed"
+
 if command -v psql >/dev/null 2>&1; then
-    echo "[DEBUG] Testing connection with psql to postgresql16..."
-    PGPASSWORD=secure_password_change_me timeout 10 psql -h postgresql16 -p 5432 -U master_order_user -d master_order -c "SELECT 1 as test;" 2>&1 || echo "[ERROR] psql connection failed to postgresql16"
-    
-    echo "[DEBUG] Testing connection to postgres database on postgresql16..."
-    PGPASSWORD=secure_password_change_me timeout 10 psql -h postgresql16 -p 5432 -U postgres -d postgres -c "SELECT datname FROM pg_database;" 2>&1 || echo "[ERROR] postgres user connection failed to postgresql16"
+    echo "[DEBUG] Testing psql connection..."
+    PGPASSWORD=secure_password_change_me timeout 10 psql -h 192.168.1.113 -p 5432 -U master_order_user -d master_order -c "SELECT current_database(), current_user, version();" 2>&1
 else
     echo "[INFO] psql not available for testing"
 fi

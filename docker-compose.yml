@@ -16,8 +16,8 @@ services:
       # - /mnt/user/Media:/media:ro
     environment:
       - NODE_ENV=production
-      # Connect to PostgreSQL using container name
-      - "DATABASE_URL=postgresql://master_order_user:secure_password_change_me@postgresql16:5432/master_order"
+      # Connect to PostgreSQL using Unraid IP address
+      - "DATABASE_URL=postgresql://master_order_user:secure_password_change_me@192.168.1.113:5432/master_order"
       - "POSTGRES_PASSWORD=secure_password_change_me"
       - PORT=3001
       # Temporarily skip PostgreSQL readiness check for debugging
