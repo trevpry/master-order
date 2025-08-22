@@ -16,6 +16,7 @@ function Settings() {
   const [plexUrl, setPlexUrl] = useState('');
   const [tvdbApiKey, setTvdbApiKey] = useState('');
   const [tvdbBearerToken, setTvdbBearerToken] = useState('');
+  const [timezone, setTimezone] = useState('UTC');
     // Percentage states
   const [tvGeneralPercent, setTvGeneralPercent] = useState(50);
   const [moviesGeneralPercent, setMoviesGeneralPercent] = useState(50);
@@ -120,6 +121,7 @@ function Settings() {
           setTvdbBearerToken(settings.tvdbBearerToken || '');
           setSelectedPlayer(settings.selectedPlayer || '');
           setSelectedPlexUser(settings.selectedPlexUser || '');
+          setTimezone(settings.timezone || 'UTC');
           setTvGeneralPercent(settings.tvGeneralPercent ?? 50);
           setMoviesGeneralPercent(settings.moviesGeneralPercent ?? 50);
           setCustomOrderPercent(settings.customOrderPercent ?? 0);
@@ -409,6 +411,7 @@ function Settings() {
           tvdbBearerToken,
           selectedPlayer,
           selectedPlexUser,
+          timezone,
           tvGeneralPercent, 
           moviesGeneralPercent,
           customOrderPercent,
@@ -961,6 +964,47 @@ function Settings() {
                       ⚠️ Webhooks from all Plex users will be processed. Select a specific user to filter webhooks.
                     </p>
                   )}
+                </div>
+
+                <div className="config-field compact">
+                  <label htmlFor="timezone">🌍 Timezone:</label>
+                  <select 
+                    id="timezone"
+                    name="timezone"
+                    value={timezone}
+                    onChange={(e) => setTimezone(e.target.value)}
+                    className="collection-select compact"
+                  >
+                    <option value="UTC">UTC (Coordinated Universal Time)</option>
+                    <optgroup label="Americas">
+                      <option value="America/New_York">Eastern Time (New York)</option>
+                      <option value="America/Chicago">Central Time (Chicago)</option>
+                      <option value="America/Denver">Mountain Time (Denver)</option>
+                      <option value="America/Los_Angeles">Pacific Time (Los Angeles)</option>
+                      <option value="America/Phoenix">Arizona (Phoenix)</option>
+                      <option value="America/Toronto">Eastern Time (Toronto)</option>
+                      <option value="America/Vancouver">Pacific Time (Vancouver)</option>
+                    </optgroup>
+                    <optgroup label="Europe">
+                      <option value="Europe/London">GMT (London)</option>
+                      <option value="Europe/Paris">Central European Time (Paris)</option>
+                      <option value="Europe/Berlin">Central European Time (Berlin)</option>
+                      <option value="Europe/Amsterdam">Central European Time (Amsterdam)</option>
+                      <option value="Europe/Rome">Central European Time (Rome)</option>
+                      <option value="Europe/Madrid">Central European Time (Madrid)</option>
+                    </optgroup>
+                    <optgroup label="Asia Pacific">
+                      <option value="Asia/Tokyo">Japan Standard Time (Tokyo)</option>
+                      <option value="Asia/Shanghai">China Standard Time (Shanghai)</option>
+                      <option value="Asia/Kolkata">India Standard Time (Mumbai)</option>
+                      <option value="Australia/Sydney">Australian Eastern Time (Sydney)</option>
+                      <option value="Australia/Melbourne">Australian Eastern Time (Melbourne)</option>
+                      <option value="Australia/Perth">Australian Western Time (Perth)</option>
+                    </optgroup>
+                  </select>
+                  <p className="collection-hint">
+                    📅 Used for "Today's Activity" and date filtering in statistics. Current selection: {timezone}
+                  </p>
                 </div>
 
                 <div className="config-field compact">

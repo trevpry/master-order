@@ -1268,6 +1268,7 @@ app.post('/api/settings', async (req, res) => {
       tvdbBearerToken,
       selectedPlayer,
       selectedPlexUser,
+      timezone,
       ignoredMovieCollections,
       ignoredTVCollections,
       christmasFilterEnabled
@@ -1315,6 +1316,7 @@ app.post('/api/settings', async (req, res) => {
     if (tvdbBearerToken !== undefined) updateData.tvdbBearerToken = tvdbBearerToken.trim() || null;
     if (selectedPlayer !== undefined) updateData.selectedPlayer = selectedPlayer.trim() || null;
     if (selectedPlexUser !== undefined) updateData.selectedPlexUser = selectedPlexUser.trim() || null;
+    if (timezone !== undefined) updateData.timezone = timezone.trim() || 'UTC';
     if (ignoredMovieCollections !== undefined) updateData.ignoredMovieCollections = Array.isArray(ignoredMovieCollections) ? JSON.stringify(ignoredMovieCollections) : ignoredMovieCollections;
     if (ignoredTVCollections !== undefined) updateData.ignoredTVCollections = Array.isArray(ignoredTVCollections) ? JSON.stringify(ignoredTVCollections) : ignoredTVCollections;
     if (christmasFilterEnabled !== undefined) updateData.christmasFilterEnabled = christmasFilterEnabled;

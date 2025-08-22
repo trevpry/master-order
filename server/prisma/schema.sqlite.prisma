@@ -19,6 +19,7 @@ model Settings {
   tvdbBearerToken                   String?
   selectedPlayer                    String?
   selectedPlexUser                  String?
+  timezone                          String?   @default("UTC")
   tvGeneralPercent                  Int       @default(50)
   moviesGeneralPercent              Int       @default(50)
   customOrderPercent                Int       @default(0)

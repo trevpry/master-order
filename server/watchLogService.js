@@ -346,11 +346,46 @@ class WatchLogService {
   }
 
   /**
+   * Get the current date in the configured timezone
+   * @returns {Date} Date object for "today" in the configured timezone
+   */
+  async getTodayInTimezone() {
+    try {
+      const { getSettings } = require('./databaseUtils');
+      const settings = await getSettings();
+      const timezone = settings?.timezone || 'UTC';
+      
+      // Use Intl.DateTimeFormat to get the current date in the specified timezone
+      const now = new Date();
+      const formatter = new Intl.DateTimeFormat('en-CA', {
+        timeZone: timezone,
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit'
+      });
+      
+      const parts = formatter.formatToParts(now);
+      const year = parts.find(part => part.type === 'year').value;
+      const month = parts.find(part => part.type === 'month').value;
+      const day = parts.find(part => part.type === 'day').value;
+      
+      // Create a date object for "today" in the configured timezone
+      // Note: This creates a Date object that represents the start of today in the user's timezone
+      const todayInTimezone = new Date(`${year}-${month}-${day}T00:00:00`);
+      
+      return todayInTimezone;
+    } catch (error) {
+      console.warn('Error getting timezone setting, falling back to UTC:', error.message);
+      return new Date(); // Fallback to current UTC date
+    }
+  }
+
+  /**
    * Get watch statistics for today
    * @returns {Promise<Object>} Today's watch statistics
    */
   async getTodayStats() {
-    const today = new Date();
+    const today = await this.getTodayInTimezone();
     today.setHours(0, 0, 0, 0);
     const tomorrow = new Date(today);
     tomorrow.setDate(tomorrow.getDate() + 1);
@@ -1930,9 +1965,9 @@ class WatchLogService {
       // Handle predefined periods
       switch (period) {
         case 'today':
-          const startOfToday = new Date();
+          const startOfToday = await this.getTodayInTimezone();
           startOfToday.setHours(0, 0, 0, 0);
-          const endOfToday = new Date();
+          const endOfToday = await this.getTodayInTimezone();
           endOfToday.setHours(23, 59, 59, 999);
           whereClause.startTime = {
             gte: startOfToday,
