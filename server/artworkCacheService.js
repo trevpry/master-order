@@ -25,9 +25,79 @@ class ArtworkCacheService {
       } catch (writeError) {
         console.error('Artwork cache directory is not writable:', writeError.message);
       }
+      
+      // Check for and clean up orphaned cache entries (Docker rebuild recovery)
+      this.checkOrphanedEntries();
     } catch (error) {
       console.error('Failed to initialize artwork cache directory:', error);
       console.error('This may cause artwork caching to fail');
+    }
+  }
+
+  /**
+   * Check for orphaned cache entries and clean them up
+   * This is especially important after Docker rebuilds
+   */
+  async checkOrphanedEntries() {
+    try {
+      const prisma = require('./prismaClient');
+      
+      // Get all items with cached artwork
+      const items = await prisma.customOrderItem.findMany({
+        where: {
+          localArtworkPath: { not: null }
+        },
+        select: {
+          id: true,
+          title: true,
+          localArtworkPath: true
+        }
+      });
+
+      if (items.length === 0) {
+        return;
+      }
+
+      console.log(`Checking ${items.length} cached artwork entries for consistency...`);
+      
+      let orphanedCount = 0;
+      
+      for (const item of items) {
+        // Extract filename from stored path
+        const filename = item.localArtworkPath.includes('\\') || item.localArtworkPath.includes('/') 
+          ? item.localArtworkPath.split(/[\\\/]/).pop() 
+          : item.localArtworkPath;
+        
+        const filePath = path.join(this.cacheDir, filename);
+        
+        try {
+          await fs.access(filePath);
+          // File exists, no action needed
+        } catch (error) {
+          // File is missing, clean up the orphaned database entry
+          await prisma.customOrderItem.update({
+            where: { id: item.id },
+            data: {
+              localArtworkPath: null,
+              originalArtworkUrl: null,
+              artworkLastCached: null,
+              artworkMimeType: null
+            }
+          });
+          orphanedCount++;
+          console.log(`Cleaned up orphaned cache entry for: ${item.title}`);
+        }
+      }
+      
+      if (orphanedCount > 0) {
+        console.log(`🧹 Cleaned up ${orphanedCount} orphaned artwork cache entries`);
+        console.log('   These items will show fallback artwork and can be re-cached as needed');
+      } else {
+        console.log('✅ All cached artwork files are present');
+      }
+      
+    } catch (error) {
+      console.warn('Failed to check for orphaned cache entries:', error.message);
     }
   }
 

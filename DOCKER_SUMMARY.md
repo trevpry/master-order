@@ -114,6 +114,16 @@ Access Mode: Read/Write
 
 **Without these mappings, all your data will be lost on container updates!**
 
+#### Artwork Cache Recovery 🔧
+If thumbnails disappear after a Docker rebuild (common issue):
+
+1. **Automatic cleanup** - The system now automatically detects and cleans up missing artwork references on startup
+2. **Check health** - Visit `http://your-server:3001/api/artwork-cache/health` to see cache status
+3. **Manual repair** - Use `http://your-server:3001/api/artwork-cache/repair` (POST request) to attempt re-caching
+4. **Items will re-cache** - Thumbnails will automatically re-download when accessed
+
+The system is now self-healing and will recover from Docker rebuilds automatically!
+
 ### Production Ready
 - **Database migrations** - Automatic Prisma schema updates
 - **Graceful shutdown** - Proper signal handling

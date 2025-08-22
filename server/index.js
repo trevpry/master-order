@@ -29,6 +29,12 @@ const watchLogService = new WatchLogService(prisma); // Initialize watch log ser
 const PlexPlayerService = require('./plexPlayerService');
 const plexPlayer = new PlexPlayerService(); // Initialize Plex player service
 
+// Add Docker startup diagnostics for artwork cache issues
+if (process.env.NODE_ENV === 'production') {
+  console.log('🐳 Docker environment detected - artwork cache diagnostics enabled');
+  console.log('   Orphaned cache entries will be cleaned up automatically on startup');
+}
+
 // Initialize the app and server
 const app = express();
 const server = http.createServer(app);
@@ -127,6 +133,135 @@ app.get('/api/start-new-series', async (req, res) => {
     res.status(500).json({ 
       error: 'Failed to find new series',
       details: error.message 
+    });
+  }
+});
+
+// API endpoint to check artwork cache health
+app.get('/api/artwork-cache/health', async (req, res) => {
+  try {
+    const items = await prisma.customOrderItem.findMany({
+      where: {
+        localArtworkPath: { not: null }
+      },
+      select: {
+        id: true,
+        title: true,
+        localArtworkPath: true
+      }
+    });
+
+    let validFiles = 0;
+    let missingFiles = 0;
+    const orphanedEntries = [];
+
+    for (const item of items) {
+      const filename = item.localArtworkPath.includes('\\') || item.localArtworkPath.includes('/') 
+        ? item.localArtworkPath.split(/[\\\/]/).pop() 
+        : item.localArtworkPath;
+      
+      const filePath = artworkCache.getCachedFilePath(filename);
+      
+      try {
+        await require('fs').promises.access(filePath);
+        validFiles++;
+      } catch (error) {
+        missingFiles++;
+        orphanedEntries.push({
+          id: item.id,
+          title: item.title,
+          filename: filename
+        });
+      }
+    }
+
+    res.json({
+      status: 'ok',
+      totalEntries: items.length,
+      validFiles,
+      missingFiles,
+      orphanedEntries: orphanedEntries.slice(0, 10) // Limit to first 10 for response size
+    });
+    
+  } catch (error) {
+    res.status(500).json({
+      status: 'error',
+      message: error.message
+    });
+  }
+});
+
+// API endpoint to manually repair artwork cache
+app.post('/api/artwork-cache/repair', async (req, res) => {
+  try {
+    console.log('🔧 Manual artwork cache repair requested...');
+    
+    const items = await prisma.customOrderItem.findMany({
+      where: {
+        localArtworkPath: { not: null }
+      },
+      include: {
+        storyContainedInBook: true
+      }
+    });
+
+    let cleanedEntries = 0;
+    let recachedItems = 0;
+
+    for (const item of items) {
+      const filename = item.localArtworkPath.includes('\\') || item.localArtworkPath.includes('/') 
+        ? item.localArtworkPath.split(/[\\\/]/).pop() 
+        : item.localArtworkPath;
+      
+      const filePath = artworkCache.getCachedFilePath(filename);
+      
+      try {
+        await require('fs').promises.access(filePath);
+        // File exists, no action needed
+      } catch (error) {
+        console.log(`Repairing orphaned entry: ${item.title}`);
+        
+        // Try to re-cache first
+        try {
+          const result = await artworkCache.ensureArtworkCached(item);
+          if (result.success) {
+            recachedItems++;
+            console.log(`Successfully re-cached: ${item.title}`);
+          } else {
+            throw new Error(result.error || 'Re-caching failed');
+          }
+        } catch (recacheError) {
+          // Clean up orphaned entry if re-caching fails
+          await prisma.customOrderItem.update({
+            where: { id: item.id },
+            data: {
+              localArtworkPath: null,
+              originalArtworkUrl: null,
+              artworkLastCached: null,
+              artworkMimeType: null
+            }
+          });
+          cleanedEntries++;
+          console.log(`Cleaned up orphaned entry: ${item.title}`);
+        }
+      }
+    }
+
+    console.log(`🎉 Repair complete - Re-cached: ${recachedItems}, Cleaned: ${cleanedEntries}`);
+    
+    res.json({
+      status: 'success',
+      totalItems: items.length,
+      recachedItems,
+      cleanedEntries,
+      message: `Repair complete! Re-cached ${recachedItems} items and cleaned up ${cleanedEntries} orphaned entries.`
+    });
+    
+  } catch (error) {
+    console.error('Artwork cache repair failed:', error.message);
+    res.status(500).json({
+      status: 'error',
+      message: error.message
     });
   }
 });
