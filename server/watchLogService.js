@@ -189,6 +189,7 @@ class WatchLogService {
       if (!grouped[key]) {
         grouped[key] = {
           period: key,
+          displayDate: new Date(date.getFullYear(), date.getMonth(), date.getDate()), // Local date object
           tvEpisodes: 0,
           movies: 0,
           books: 0,
@@ -735,18 +736,7 @@ class WatchLogService {
    */
   async getMediaTypeStats(mediaType, period = 'all', groupBy = 'day', actorSortBy, movieActorSortBy) {
     try {
-      // Get settings to check for ignored collections and main collection
-      const settings = await this.prisma.settings.findFirst();
-      const ignoredTVCollections = settings?.ignoredTVCollections ? 
-        settings.ignoredTVCollections.split(',').map(c => c.trim()) : [];
-      
-      // Add the main collection from settings to the ignored list
-      const mainCollection = settings?.collectionName?.trim();
-      if (mainCollection) {
-        ignoredTVCollections.push(mainCollection);
-      }
-      
-      console.log(`TV Stats - Main collection: "${mainCollection}", Ignored collections:`, ignoredTVCollections);
+      console.log(`Getting stats for media type: ${mediaType}, period: ${period}`);
       
       // Build date filter based on period
       const whereClause = { mediaType };
@@ -804,11 +794,24 @@ class WatchLogService {
         }
       });
 
+      console.log(`DEBUG watchLogService: Found ${watchLogs.length} watch logs for ${mediaType}`);
+      if (watchLogs.length > 0) {
+        console.log(`DEBUG watchLogService: First few logs:`, watchLogs.slice(0, 3).map(log => ({
+          title: log.title,
+          seriesTitle: log.seriesTitle,
+          plexKey: log.plexKey,
+          mediaType: log.mediaType,
+          startTime: log.startTime
+        })));
+      }
+
       // For TV shows, we need to get collection information
       let tvShowsWithCollections = [];
       if (mediaType === 'tv') {
         // Get unique series titles from the watch logs
         const uniqueSeriesTitles = [...new Set(watchLogs.map(log => log.seriesTitle).filter(Boolean))];
+        
+        console.log(`DEBUG watchLogService: Unique TV series from logs:`, uniqueSeriesTitles);
         
         if (uniqueSeriesTitles.length > 0) {
           // Query TV shows to get collection information
@@ -823,6 +826,8 @@ class WatchLogService {
               collections: true
             }
           });
+          
+          console.log(`DEBUG watchLogService: Found ${tvShowsWithCollections.length} matching TV shows in plexTVShow table:`, tvShowsWithCollections);
         }
       }
 
@@ -894,37 +899,19 @@ class WatchLogService {
                   }
                   
                   console.log(`Parsed collections for ${log.seriesTitle}:`, collections);
-                  console.log(`Ignored collections:`, ignoredTVCollections);
                   
-                  // Add collections that aren't ignored (case-insensitive comparison)
+                  // Add all collections (no filtering for stats)
                   collections.forEach(collection => {
                     const normalizedCollection = collection.trim();
-                    const isIgnored = ignoredTVCollections.some(ignored => 
-                      ignored.toLowerCase() === normalizedCollection.toLowerCase()
-                    );
-                    
-                    console.log(`Checking collection "${normalizedCollection}": ignored = ${isIgnored}`);
-                    
-                    if (!isIgnored) {
-                      totalStats.collections.add(normalizedCollection);
-                      console.log(`Added collection: "${normalizedCollection}"`);
-                    } else {
-                      console.log(`Filtering out collection: "${normalizedCollection}" (matches ignored: "${ignoredTVCollections.find(ignored => ignored.toLowerCase() === normalizedCollection.toLowerCase())}")`);
-                    }
+                    totalStats.collections.add(normalizedCollection);
+                    console.log(`Added collection: "${normalizedCollection}"`);
                   });
                 } catch (error) {
                   console.warn(`Error parsing collections for ${tvShow.title}:`, error);
                   // Treat as single collection if parsing fails
                   const normalizedCollection = tvShow.collections.trim();
-                  const isIgnored = ignoredTVCollections.some(ignored => 
-                    ignored.toLowerCase() === normalizedCollection.toLowerCase()
-                  );
-                  
-                  if (!isIgnored) {
-                    totalStats.collections.add(normalizedCollection);
-                  } else {
-                    console.log(`Filtering out collection: "${normalizedCollection}" (matches ignored: "${ignoredTVCollections.find(ignored => ignored.toLowerCase() === normalizedCollection.toLowerCase())}")`);
-                  }
+                  totalStats.collections.add(normalizedCollection);
+                  console.log(`Added collection: "${normalizedCollection}"`);
                 }
               }
             }
@@ -1026,20 +1013,11 @@ class WatchLogService {
               } else {
                 collections = [tvShow.collections.trim()];
               }
-              seriesStats.collections = collections.filter(c => {
-                const normalizedCollection = c.trim();
-                return !ignoredTVCollections.some(ignored => 
-                  ignored.toLowerCase() === normalizedCollection.toLowerCase()
-                );
-              });
+              // Include all collections (no filtering for stats)
+              seriesStats.collections = collections.map(c => c.trim());
             } catch (error) {
               const normalizedCollection = tvShow.collections.trim();
-              const isIgnored = ignoredTVCollections.some(ignored => 
-                ignored.toLowerCase() === normalizedCollection.toLowerCase()
-              );
-              if (!isIgnored) {
-                seriesStats.collections = [normalizedCollection];
-              }
+              seriesStats.collections = [normalizedCollection];
             }
           }
           

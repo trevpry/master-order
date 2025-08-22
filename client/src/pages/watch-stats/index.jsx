@@ -306,15 +306,33 @@ const WatchStats = () => {
   };
 
   const formatDate = (dateString) => {
-    const date = new Date(dateString);
-    if (groupBy === 'day') {
-      return date.toLocaleDateString();
-    } else if (groupBy === 'week') {
-      return `Week of ${date.toLocaleDateString()}`;
-    } else if (groupBy === 'month') {
-      return date.toLocaleDateString('en-US', { year: 'numeric', month: 'long' });
-    } else if (groupBy === 'year') {
-      return date.getFullYear().toString();
+    // Handle date-only strings (YYYY-MM-DD) to avoid timezone issues
+    if (typeof dateString === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(dateString)) {
+      // For date-only strings, create date in local timezone to avoid shifting
+      const [year, month, day] = dateString.split('-').map(num => parseInt(num));
+      const date = new Date(year, month - 1, day); // month is 0-indexed
+      
+      if (groupBy === 'day') {
+        return date.toLocaleDateString();
+      } else if (groupBy === 'week') {
+        return `Week of ${date.toLocaleDateString()}`;
+      } else if (groupBy === 'month') {
+        return date.toLocaleDateString('en-US', { year: 'numeric', month: 'long' });
+      } else if (groupBy === 'year') {
+        return date.getFullYear().toString();
+      }
+    } else {
+      // For other date formats, use the original logic
+      const date = new Date(dateString);
+      if (groupBy === 'day') {
+        return date.toLocaleDateString();
+      } else if (groupBy === 'week') {
+        return `Week of ${date.toLocaleDateString()}`;
+      } else if (groupBy === 'month') {
+        return date.toLocaleDateString('en-US', { year: 'numeric', month: 'long' });
+      } else if (groupBy === 'year') {
+        return date.getFullYear().toString();
+      }
     }
     return dateString;
   };
@@ -390,7 +408,16 @@ const WatchStats = () => {
 
     // Extract labels (time periods) and format them based on the appropriate groupBy
     const labels = filteredStats.groupedStats.map(group => {
-      const date = new Date(group.period);
+      // Handle date-only strings (YYYY-MM-DD) to avoid timezone issues
+      let date;
+      if (typeof group.period === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(group.period)) {
+        // For date-only strings, create date in local timezone to avoid shifting
+        const [year, month, day] = group.period.split('-').map(num => parseInt(num));
+        date = new Date(year, month - 1, day); // month is 0-indexed
+      } else {
+        date = new Date(group.period);
+      }
+      
       if (chartGroupBy === 'day') {
         return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
       } else if (chartGroupBy === 'week') {
@@ -502,7 +529,10 @@ const WatchStats = () => {
       books: selectedMediaTypes.includes('book') ? group.books || 0 : 0,
       comics: selectedMediaTypes.includes('comic') ? group.comics || 0 : 0,
       shortStories: selectedMediaTypes.includes('shortstory') ? group.shortStories || 0 : 0,
-    }));
+    })).sort((a, b) => {
+      // Sort by date in descending order (most recent first)
+      return new Date(b.period) - new Date(a.period);
+    });
 
     return {
       ...stats,

@@ -43,6 +43,12 @@ function Settings() {
   const [availablePlayers, setAvailablePlayers] = useState([]);
   const [playersLoading, setPlayersLoading] = useState(false);
   const [selectedPlayer, setSelectedPlayer] = useState('');
+  
+  // Plex users states
+  const [availablePlexUsers, setAvailablePlexUsers] = useState([]);
+  const [plexUsersLoading, setPlexUsersLoading] = useState(false);
+  const [selectedPlexUser, setSelectedPlexUser] = useState('');
+  
   const [deviceStatus, setDeviceStatus] = useState({
     isOnline: false,
     lastChecked: null,
@@ -90,7 +96,7 @@ function Settings() {
       setLoading(true);
       
       try {        // Fetch all data in parallel for better performance
-        const [settings, syncStatus, backgroundStatus, customCount, collections, players] = await Promise.all([
+        const [settings, syncStatus, backgroundStatus, customCount, collections, players, plexUsers] = await Promise.all([
           fetchWithErrorHandling(`${config.apiBaseUrl}/api/settings`),
           fetchWithErrorHandling(`${config.apiBaseUrl}/api/plex/sync-status`),
           fetchWithErrorHandling(`${config.apiBaseUrl}/api/plex/background-sync-status`),
@@ -98,6 +104,10 @@ function Settings() {
           fetchWithErrorHandling(`${config.apiBaseUrl}/api/plex/collections`),
           fetchWithErrorHandling(`${config.apiBaseUrl}/api/plex/players`).catch(error => {
             console.warn('Failed to load Plex players:', error);
+            return [];
+          }),
+          fetchWithErrorHandling(`${config.apiBaseUrl}/api/plex/users`).catch(error => {
+            console.warn('Failed to load Plex users:', error);
             return [];
           })
         ]);// Update settings
@@ -109,6 +119,7 @@ function Settings() {
           setTvdbApiKey(settings.tvdbApiKey || '');
           setTvdbBearerToken(settings.tvdbBearerToken || '');
           setSelectedPlayer(settings.selectedPlayer || '');
+          setSelectedPlexUser(settings.selectedPlexUser || '');
           setTvGeneralPercent(settings.tvGeneralPercent ?? 50);
           setMoviesGeneralPercent(settings.moviesGeneralPercent ?? 50);
           setCustomOrderPercent(settings.customOrderPercent ?? 0);
@@ -123,6 +134,7 @@ function Settings() {
         setCustomOrdersCount(customCount.count || 0);
         setAvailableCollections(collections);
         setAvailablePlayers(players || []);
+        setAvailablePlexUsers(plexUsers || []);
         
       } catch (error) {
         showMessage('Failed to load settings data. Please refresh the page.', true);
@@ -167,6 +179,19 @@ function Settings() {
       showMessage('Failed to refresh Plex players', true);
     } finally {
       setPlayersLoading(false);
+    }
+  };
+
+  const refreshPlexUsers = async () => {
+    try {
+      setPlexUsersLoading(true);
+      const plexUsers = await fetchWithErrorHandling(`${config.apiBaseUrl}/api/plex/users`);
+      setAvailablePlexUsers(plexUsers || []);
+      showMessage('Plex users refreshed successfully');
+    } catch (error) {
+      showMessage('Failed to refresh Plex users', true);
+    } finally {
+      setPlexUsersLoading(false);
     }
   };
 
@@ -383,6 +408,7 @@ function Settings() {
           tvdbApiKey,
           tvdbBearerToken,
           selectedPlayer,
+          selectedPlexUser,
           tvGeneralPercent, 
           moviesGeneralPercent,
           customOrderPercent,
@@ -884,6 +910,55 @@ function Settings() {
                   {selectedPlayer && (
                     <p className="collection-hint">
                       ✅ Selected player will be used for remote playback when you select "Play Next Episode" from the home page.
+                    </p>
+                  )}
+                </div>
+
+                <div className="config-field compact">
+                  <label htmlFor="plex_user">👤 Plex User for Webhook Filtering:</label>
+                  <div className="collection-controls">
+                    <select 
+                      id="plex_user"
+                      name="plex_user"
+                      value={selectedPlexUser}
+                      onChange={(e) => setSelectedPlexUser(e.target.value)}
+                      className="collection-select compact"
+                    >
+                      <option value="">Process webhooks from all users</option>
+                      {availablePlexUsers.map((user) => (
+                        <option key={user.id} value={user.name}>
+                          {user.title || user.name}
+                        </option>
+                      ))}
+                    </select>
+                    <Button
+                      onClick={refreshPlexUsers}
+                      disabled={plexUsersLoading}
+                      className="refresh-button compact"
+                      title="Refresh available Plex users"
+                    >
+                      {plexUsersLoading ? '🔄' : '🔄'}
+                    </Button>
+                  </div>
+                  
+                  {availablePlexUsers.length === 0 && !plexUsersLoading && (
+                    <div className="collection-hint">
+                      <p>⚠️ No Plex users found. This can happen if:</p>
+                      <ul style={{ marginLeft: '20px', marginTop: '8px' }}>
+                        <li>• Your Plex server URL or token is incorrect</li>
+                        <li>• You don't have any shared users on your Plex server</li>
+                        <li>• Network connectivity issues</li>
+                      </ul>
+                    </div>
+                  )}
+                  
+                  {selectedPlexUser ? (
+                    <p className="collection-hint">
+                      ✅ Only webhooks from "{selectedPlexUser}" will be processed for automatic watched status updates.
+                    </p>
+                  ) : (
+                    <p className="collection-hint">
+                      ⚠️ Webhooks from all Plex users will be processed. Select a specific user to filter webhooks.
                     </p>
                   )}
                 </div>

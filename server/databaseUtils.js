@@ -87,10 +87,7 @@ const updateSettings = async (data) => {
     return await prisma.settings.upsert({
       where: { id: 1 },
       update: data,
-      create: { 
-        id: 1, 
-        ...data 
-      }
+      create: data
     });
   }, 'updateSettings');
   

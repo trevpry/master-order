@@ -726,7 +726,7 @@ app.get('/api/settings', async (req, res) => {
 });
 
 // Plex webhook endpoint
-app.post('/webhook', upload.single('thumb'), (req, res) => {
+app.post('/webhook', upload.single('thumb'), async (req, res) => {
   try {
     console.log('\n🎬 =================================');
     console.log('🎬 PLEX WEBHOOK RECEIVED');
@@ -767,7 +767,23 @@ app.post('/webhook', upload.single('thumb'), (req, res) => {
     console.log('📄 Full Payload:', JSON.stringify(payload, null, 2));
     console.log('🎬 =================================\n');
 
-    // Only process media.play events
+    // Check if we should filter by selected Plex user
+    const { getSettings } = require('./databaseUtils');
+    const settings = await getSettings();
+    const selectedPlexUser = settings?.selectedPlexUser;
+    const webhookUser = payload.Account?.title || payload.Account?.name;
+
+    if (selectedPlexUser && webhookUser && webhookUser !== selectedPlexUser) {
+      console.log(`🚫 Ignoring webhook from user "${webhookUser}" (only processing "${selectedPlexUser}")`);
+      res.status(200).send('OK - Ignored (different user)');
+      return;
+    }
+
+    if (selectedPlexUser) {
+      console.log(`✅ Processing webhook from selected user: "${webhookUser}"`);
+    }
+
+    // Only process media.play and media.scrobble events
     if (payload.event === 'media.play') {
       const notification = {
         event: payload.event,
@@ -804,6 +820,178 @@ app.post('/webhook', upload.single('thumb'), (req, res) => {
       console.log('✅ Emitted Plex playback notification to WebSocket clients');
     }
 
+    // Process media.scrobble events to mark items as watched
+    if (payload.event === 'media.scrobble') {
+      console.log('\n🎯 Processing media.scrobble event for automatic watched marking...');
+      const ratingKey = payload.Metadata?.ratingKey;
+      
+      if (ratingKey) {
+        try {
+          // Find custom order item with this ratingKey (plexKey)
+          const customOrderItem = await prisma.customOrderItem.findFirst({
+            where: { plexKey: ratingKey.toString() },
+            include: {
+              customOrder: true
+            }
+          });
+
+          if (customOrderItem && !customOrderItem.isWatched) {
+            console.log(`   📺 Found matching item in custom order: "${customOrderItem.title}"`);
+            
+            // Mark as watched in custom order
+            await markCustomOrderItemAsWatched(customOrderItem.id);
+            
+            // Create watch log entry
+            const watchLogData = {
+              mediaType: customOrderItem.mediaType,
+              title: customOrderItem.title,
+              plexKey: ratingKey.toString(),
+              customOrderItemId: customOrderItem.id,
+              isCompleted: true
+            };
+
+            // Add series-specific data for TV episodes
+            if (customOrderItem.mediaType === 'episode') {
+              watchLogData.seriesTitle = customOrderItem.seriesTitle;
+              watchLogData.seasonNumber = customOrderItem.seasonNumber;
+              watchLogData.episodeNumber = customOrderItem.episodeNumber;
+            }
+
+            // Try to get duration from Plex data
+            try {
+              if (customOrderItem.mediaType === 'episode') {
+                const plexItem = await plexDb.getItemMetadata(ratingKey, 'episode');
+                if (plexItem && plexItem.duration) {
+                  watchLogData.duration = Math.round(plexItem.duration / (1000 * 60));
+                }
+              } else if (customOrderItem.mediaType === 'movie') {
+                const plexItem = await plexDb.getMovieByRatingKey(ratingKey);
+                if (plexItem && plexItem.duration) {
+                  watchLogData.duration = Math.round(plexItem.duration / (1000 * 60));
+                }
+              }
+            } catch (plexError) {
+              console.warn(`   ⚠️  Could not get duration from Plex: ${plexError.message}`);
+            }
+
+            // Set default duration if not found
+            if (!watchLogData.duration) {
+              watchLogData.duration = customOrderItem.mediaType === 'movie' ? 120 : 45;
+            }
+            watchLogData.totalWatchTime = watchLogData.duration;
+
+            // Log the watch activity
+            await watchLogService.logWatched(watchLogData);
+
+            // Mark as watched in Plex database
+            try {
+              if (customOrderItem.mediaType === 'episode') {
+                await plexDb.markEpisodeAsWatched(ratingKey);
+                console.log(`   📺 Marked episode as watched in Plex database`);
+              } else if (customOrderItem.mediaType === 'movie') {
+                await plexDb.markMovieAsWatched(ratingKey);
+                console.log(`   🎬 Marked movie as watched in Plex database`);
+              }
+            } catch (plexMarkError) {
+              console.warn(`   ⚠️  Could not mark as watched in Plex database: ${plexMarkError.message}`);
+            }
+
+            console.log(`   ✅ Successfully marked "${customOrderItem.title}" as watched via Plex scrobble`);
+            console.log(`   📊 Custom order: "${customOrderItem.customOrder.name}"`);
+            console.log(`   ⏱️  Duration: ${watchLogData.duration} minutes`);
+          } else if (customOrderItem && customOrderItem.isWatched) {
+            console.log(`   ℹ️  Item "${customOrderItem.title}" is already marked as watched`);
+          } else {
+            console.log(`   ❓ No matching custom order item found for ratingKey: ${ratingKey}`);
+            console.log(`   📝 Creating watch log entry for non-custom order item...`);
+            
+            // Still create a watch log entry even if not in custom order
+            try {
+              const watchLogData = {
+                title: payload.Metadata?.title || 'Unknown Title',
+                plexKey: ratingKey.toString(),
+                isCompleted: true
+              };
+
+              // Determine media type and add appropriate data
+              if (payload.Metadata?.type === 'episode') {
+                watchLogData.mediaType = 'tv';  // Use 'tv' for consistency with stats queries
+                watchLogData.seriesTitle = payload.Metadata?.grandparentTitle;
+                watchLogData.seasonNumber = payload.Metadata?.parentIndex;
+                watchLogData.episodeNumber = payload.Metadata?.index;
+              } else if (payload.Metadata?.type === 'movie') {
+                watchLogData.mediaType = 'movie';
+              } else {
+                watchLogData.mediaType = payload.Metadata?.type || 'unknown';
+              }
+
+              // Get duration from payload or Plex database
+              let duration = null;
+              if (payload.Metadata?.duration) {
+                duration = Math.round(payload.Metadata.duration / (1000 * 60)); // Convert from ms to minutes
+              }
+
+              // If no duration in payload, try to get from Plex database
+              if (!duration) {
+                try {
+                  if (watchLogData.mediaType === 'episode') {
+                    const plexItem = await plexDb.getItemMetadata(ratingKey, 'episode');
+                    if (plexItem && plexItem.duration) {
+                      duration = Math.round(plexItem.duration / (1000 * 60));
+                    }
+                  } else if (watchLogData.mediaType === 'movie') {
+                    const plexItem = await plexDb.getMovieByRatingKey(ratingKey);
+                    if (plexItem && plexItem.duration) {
+                      duration = Math.round(plexItem.duration / (1000 * 60));
+                    }
+                  }
+                } catch (plexError) {
+                  console.warn(`   ⚠️  Could not get duration from Plex database: ${plexError.message}`);
+                }
+              }
+
+              // Set default duration if still not found
+              if (!duration) {
+                duration = watchLogData.mediaType === 'movie' ? 120 : 45;
+              }
+              
+              watchLogData.duration = duration;
+              watchLogData.totalWatchTime = duration;
+
+              // Log the watch activity
+              await watchLogService.logWatched(watchLogData);
+
+              // Mark as watched in Plex database
+              try {
+                if (watchLogData.mediaType === 'episode') {
+                  await plexDb.markEpisodeAsWatched(ratingKey);
+                  console.log(`   📺 Marked episode as watched in Plex database`);
+                } else if (watchLogData.mediaType === 'movie') {
+                  await plexDb.markMovieAsWatched(ratingKey);
+                  console.log(`   🎬 Marked movie as watched in Plex database`);
+                }
+              } catch (plexMarkError) {
+                console.warn(`   ⚠️  Could not mark as watched in Plex database: ${plexMarkError.message}`);
+              }
+
+              console.log(`   ✅ Successfully logged "${watchLogData.title}" as watched via Plex scrobble`);
+              console.log(`   📺 Media type: ${watchLogData.mediaType}`);
+              console.log(`   ⏱️  Duration: ${duration} minutes`);
+              if (watchLogData.seriesTitle) {
+                console.log(`   📺 Series: "${watchLogData.seriesTitle}" S${watchLogData.seasonNumber}E${watchLogData.episodeNumber}`);
+              }
+            } catch (watchLogError) {
+              console.error(`   ❌ Failed to create watch log for non-custom order item: ${watchLogError.message}`);
+            }
+          }
+        } catch (error) {
+          console.error(`   ❌ Error processing scrobble event: ${error.message}`);
+        }
+      } else {
+        console.log(`   ⚠️  No ratingKey found in scrobble payload`);
+      }
+    }
+
     res.status(200).send('OK');
   } catch (error) {
     console.error('❌ Error processing webhook:', error);
@@ -826,6 +1014,7 @@ app.post('/api/settings', async (req, res) => {
       tvdbApiKey,
       tvdbBearerToken,
       selectedPlayer,
+      selectedPlexUser,
       ignoredMovieCollections,
       ignoredTVCollections,
       christmasFilterEnabled
@@ -872,6 +1061,7 @@ app.post('/api/settings', async (req, res) => {
     if (tvdbApiKey !== undefined) updateData.tvdbApiKey = tvdbApiKey.trim() || null;
     if (tvdbBearerToken !== undefined) updateData.tvdbBearerToken = tvdbBearerToken.trim() || null;
     if (selectedPlayer !== undefined) updateData.selectedPlayer = selectedPlayer.trim() || null;
+    if (selectedPlexUser !== undefined) updateData.selectedPlexUser = selectedPlexUser.trim() || null;
     if (ignoredMovieCollections !== undefined) updateData.ignoredMovieCollections = Array.isArray(ignoredMovieCollections) ? JSON.stringify(ignoredMovieCollections) : ignoredMovieCollections;
     if (ignoredTVCollections !== undefined) updateData.ignoredTVCollections = Array.isArray(ignoredTVCollections) ? JSON.stringify(ignoredTVCollections) : ignoredTVCollections;
     if (christmasFilterEnabled !== undefined) updateData.christmasFilterEnabled = christmasFilterEnabled;
@@ -1077,6 +1267,90 @@ app.get('/api/plex/selected-player', async (req, res) => {
     console.error('Failed to get selected player:', error);
     res.status(500).json({ 
       error: 'Failed to get selected player',
+      details: error.message 
+    });
+  }
+});
+
+// Get available Plex users endpoint
+app.get('/api/plex/users', async (req, res) => {
+  try {
+    const { getSettings } = require('./databaseUtils');
+    const settings = await getSettings();
+
+    if (!settings || !settings.plexUrl || !settings.plexToken) {
+      return res.status(400).json({ error: 'Plex settings not configured' });
+    }
+
+    // Use axios to make direct API call to get users
+    const axios = require('axios');
+    const url = new URL(settings.plexUrl);
+    const baseUrl = `${url.protocol}//${url.host}`;
+    
+    const response = await axios.get(`${baseUrl}/accounts`, {
+      headers: {
+        'X-Plex-Token': settings.plexToken,
+        'Accept': 'application/json'
+      },
+      timeout: 10000
+    });
+
+    if (response.data && response.data.MediaContainer && response.data.MediaContainer.Account) {
+      const users = response.data.MediaContainer.Account.map(account => ({
+        id: account.id,
+        name: account.name || account.title,
+        title: account.title || account.name
+      }));
+
+      // Add the server owner (admin) if not already included
+      const adminResponse = await axios.get(`${baseUrl}/`, {
+        headers: {
+          'X-Plex-Token': settings.plexToken,
+          'Accept': 'application/json'
+        },
+        timeout: 10000
+      });
+
+      if (adminResponse.data && adminResponse.data.MediaContainer) {
+        const serverOwner = adminResponse.data.MediaContainer.friendlyName || 'Server Owner';
+        
+        // Check if server owner is already in the list
+        const ownerExists = users.some(user => 
+          user.name === serverOwner || user.title === serverOwner
+        );
+
+        if (!ownerExists) {
+          users.unshift({
+            id: 'admin',
+            name: serverOwner,
+            title: serverOwner
+          });
+        }
+      }
+
+      res.json(users);
+    } else {
+      // If no shared users, return just the server owner
+      const adminResponse = await axios.get(`${baseUrl}/`, {
+        headers: {
+          'X-Plex-Token': settings.plexToken,
+          'Accept': 'application/json'
+        },
+        timeout: 10000
+      });
+
+      const serverOwner = adminResponse.data?.MediaContainer?.friendlyName || 'Server Owner';
+      
+      res.json([{
+        id: 'admin',
+        name: serverOwner,
+        title: serverOwner
+      }]);
+    }
+  } catch (error) {
+    console.error('Failed to fetch Plex users:', error);
+    res.status(500).json({ 
+      error: 'Failed to fetch Plex users',
       details: error.message 
     });
   }
@@ -3638,6 +3912,18 @@ app.get('/api/watch-stats', async (req, res) => {
       endDate: actualEndDate,
       groupBy: groupBy
     });
+    
+    console.log('DEBUG: Overview stats result:', {
+      totalWatchTime: stats?.totalStats?.totalWatchTime,
+      totalLogs: stats?.totalStats?.totalLogs,
+      recentCount: stats?.recentActivity?.length,
+      firstFewRecent: stats?.recentActivity?.slice(0, 3).map(log => ({
+        title: log.title,
+        seriesTitle: log.seriesTitle,
+        mediaType: log.mediaType,
+        plexKey: log.plexKey
+      }))
+    });
 
     // Add formatted time strings
     stats.totalStats.totalWatchTimeFormatted = watchLogService.formatWatchTime(stats.totalStats.totalWatchTime);
@@ -3742,12 +4028,26 @@ app.get('/api/watch-stats/media-type/:mediaType', async (req, res) => {
     const { mediaType } = req.params;
     const { period = 'all', groupBy = 'day', actorSortBy, movieActorSortBy } = req.query;
     
+    console.log(`DEBUG: Media type stats requested for: ${mediaType}, period: ${period}`);
+    
     const validMediaTypes = ['tv', 'movie', 'book', 'comic', 'shortstory'];
     if (!validMediaTypes.includes(mediaType)) {
       return res.status(400).json({ error: 'Invalid media type' });
     }
     
     const mediaTypeStats = await watchLogService.getMediaTypeStats(mediaType, period, groupBy, actorSortBy, movieActorSortBy);
+    
+    console.log(`DEBUG: ${mediaType} stats result:`, {
+      totalCount: mediaTypeStats?.totalCount,
+      logsLength: mediaTypeStats?.logs?.length,
+      period: mediaTypeStats?.period,
+      firstFewLogs: mediaTypeStats?.logs?.slice(0, 3).map(log => ({
+        title: log.title,
+        seriesTitle: log.seriesTitle,
+        plexKey: log.plexKey,
+        mediaType: log.mediaType
+      }))
+    });
     
     res.json(mediaTypeStats);
   } catch (error) {

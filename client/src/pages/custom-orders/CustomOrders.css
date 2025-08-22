@@ -160,13 +160,18 @@
 
 .order-header h3 {
   margin: 0;
-  color: #495057;
+  color: #1e3a8a;
   font-size: 1.25rem;
 }
 
 .clickable-title {
   cursor: pointer;
   transition: color 0.2s ease-in-out;
+  color: #1e3a8a;
+}
+
+h3.clickable-title {
+  color: #1e3a8a !important;
 }
 
 .clickable-title:hover {
