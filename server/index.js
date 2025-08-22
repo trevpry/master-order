@@ -4290,6 +4290,67 @@ app.post('/api/viewing/log', async (req, res) => {
 
 // ==================== WATCH STATISTICS ENDPOINTS ====================
 
+// Helper function to get timezone-aware period boundaries
+function getTimezoneAwarePeriodBounds(period, timezone) {
+  const now = new Date();
+  
+  // Get "today" in the configured timezone
+  const todayInTZ = now.toLocaleDateString('en-CA', { timeZone: timezone }); // YYYY-MM-DD
+  const [year, month, day] = todayInTZ.split('-').map(n => parseInt(n));
+  
+  let startDateInTZ, endDateInTZ;
+  
+  switch (period) {
+    case 'today':
+      startDateInTZ = `${todayInTZ}T00:00:00`;
+      endDateInTZ = `${todayInTZ}T23:59:59.999`;
+      break;
+      
+    case 'week':
+      // Start of current week (Sunday) in timezone
+      const todayDate = new Date(year, month - 1, day);
+      const startOfWeek = new Date(todayDate);
+      startOfWeek.setDate(day - todayDate.getDay());
+      
+      const weekStartStr = startOfWeek.toLocaleDateString('en-CA');
+      startDateInTZ = `${weekStartStr}T00:00:00`;
+      endDateInTZ = `${todayInTZ}T23:59:59.999`;
+      break;
+      
+    case 'month':
+      // Start of current month in timezone
+      const monthStartStr = `${year}-${month.toString().padStart(2, '0')}-01`;
+      startDateInTZ = `${monthStartStr}T00:00:00`;
+      endDateInTZ = `${todayInTZ}T23:59:59.999`;
+      break;
+      
+    case 'year':
+      // Start of current year in timezone
+      const yearStartStr = `${year}-01-01`;
+      startDateInTZ = `${yearStartStr}T00:00:00`;
+      endDateInTZ = `${todayInTZ}T23:59:59.999`;
+      break;
+      
+    default:
+      return { startDate: null, endDate: null };
+  }
+  
+  // Convert timezone dates to UTC
+  const startTzDate = new Date(`${startDateInTZ}`);
+  const endTzDate = new Date(`${endDateInTZ}`);
+  
+  // Calculate timezone offset
+  const testDate = new Date(`${todayInTZ}T12:00:00`);
+  const utcTime = testDate.getTime();
+  const tzTime = new Date(testDate.toLocaleString('en-US', { timeZone: timezone })).getTime();
+  const offsetMs = utcTime - tzTime;
+  
+  const startDate = new Date(startTzDate.getTime() + offsetMs);
+  const endDate = new Date(endTzDate.getTime() + offsetMs);
+  
+  return { startDate, endDate };
+}
+
 // Get watch statistics with flexible date filtering
 app.get('/api/watch-stats', async (req, res) => {
   try {
@@ -4308,54 +4369,21 @@ app.get('/api/watch-stats', async (req, res) => {
     let actualStartDate = null;
     let actualEndDate = null;
 
-    // Handle predefined periods
-    switch (period) {
-      case 'today':
-        // Get what "today" means in the configured timezone
-        const todayInConfiguredTZ = new Date().toLocaleDateString('en-CA', { timeZone: timezone }); // YYYY-MM-DD
-        
-        // Create start and end of this day in UTC
-        // We need to find the UTC times that correspond to 00:00:00 and 23:59:59 in the configured timezone
-        const startOfDayInTZ = new Date(`${todayInConfiguredTZ}T00:00:00`);
-        const endOfDayInTZ = new Date(`${todayInConfiguredTZ}T23:59:59.999`);
-        
-        // Convert to UTC by adjusting for timezone offset
-        // Get the offset for this timezone on this specific date
-        const testDate = new Date(`${todayInConfiguredTZ}T12:00:00`);
-        const utcTime = testDate.getTime();
-        const tzTime = new Date(testDate.toLocaleString('en-US', { timeZone: timezone })).getTime();
-        const offsetMs = utcTime - tzTime;
-        
-        actualStartDate = new Date(startOfDayInTZ.getTime() + offsetMs);
-        actualEndDate = new Date(endOfDayInTZ.getTime() + offsetMs);
-        
-        console.log(`Filtering for today (${todayInConfiguredTZ}) in timezone ${timezone}`);
+    // Handle predefined periods with timezone awareness
+    if (period !== 'custom' && period !== 'all') {
+      const bounds = getTimezoneAwarePeriodBounds(period, timezone);
+      actualStartDate = bounds.startDate;
+      actualEndDate = bounds.endDate;
+      
+      if (actualStartDate && actualEndDate) {
+        console.log(`Filtering for ${period} in timezone ${timezone}`);
         console.log(`Start: ${actualStartDate.toISOString()}, End: ${actualEndDate.toISOString()}`);
-        break;
-      case 'week':
-        actualEndDate = new Date();
-        actualStartDate = new Date();
-        actualStartDate.setDate(actualStartDate.getDate() - 7);
-        break;
-      case 'month':
-        actualEndDate = new Date();
-        actualStartDate = new Date();
-        actualStartDate.setMonth(actualStartDate.getMonth() - 1);
-        break;
-      case 'year':
-        actualEndDate = new Date();
-        actualStartDate = new Date();
-        actualStartDate.setFullYear(actualStartDate.getFullYear() - 1);
-        break;
-      case 'custom':
-        if (startDate) actualStartDate = new Date(startDate);
-        if (endDate) actualEndDate = new Date(endDate);
-        break;
-      case 'all':
-      default:
-        // No date filtering
-        break;
+      }
+    } else if (period === 'custom') {
+      if (startDate) actualStartDate = new Date(startDate);
+      if (endDate) actualEndDate = new Date(endDate);
     }
+    // For 'all' period, no date filtering (actualStartDate and actualEndDate remain null)
 
     const stats = await watchLogService.getWatchStats({
       startDate: actualStartDate,
