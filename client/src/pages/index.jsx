@@ -1005,11 +1005,28 @@ function Home() {
               <div><strong>API Base URL:</strong> {config.apiBaseUrl}</div>
               <div><strong>Device:</strong> {navigator.userAgent.includes('Mobile') ? '📱 Mobile' : '🖥️ Desktop'}</div>
               <div><strong>Selected Media:</strong> {selectedMedia ? selectedMedia.type || 'Unknown type' : 'None'}</div>
-              {selectedMedia && selectedMedia.localArtworkPath && (
-                <div><strong>Local Artwork Path:</strong> {selectedMedia.localArtworkPath}</div>
+              {selectedMedia && (
+                <div style={{backgroundColor: '#fff3cd', padding: '5px', margin: '5px 0', borderRadius: '3px'}}>
+                  <div><strong>Media Debug:</strong></div>
+                  <div>• Type: {selectedMedia.type}</div>
+                  <div>• Title: {selectedMedia.title || 'No title'}</div>
+                  <div>• Local Artwork: {selectedMedia.localArtworkPath || 'None'}</div>
+                  <div>• Thumb: {selectedMedia.thumb || 'None'}</div>
+                  <div>• Art: {selectedMedia.art || 'None'}</div>
+                  <div>• Comic Artwork: {selectedMedia.comicArtwork || 'None'}</div>
+                </div>
               )}
               {selectedMedia && (
-                <div><strong>Artwork URL being used:</strong> {getArtworkUrl()}</div>
+                <div style={{backgroundColor: selectedMedia ? '#d4edda' : '#f8d7da', padding: '5px', margin: '5px 0', borderRadius: '3px'}}>
+                  <strong>Artwork URL Result:</strong> {(() => {
+                    try {
+                      const url = getArtworkUrl();
+                      return url || '❌ EMPTY/UNDEFINED';
+                    } catch (error) {
+                      return `❌ ERROR: ${error.message}`;
+                    }
+                  })()}
+                </div>
               )}
             </div>
           )}
