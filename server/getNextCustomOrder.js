@@ -253,6 +253,7 @@ async function fetchMediaDetailsFromPlex(plexKey, mediaType, customOrderItem) {
         comicIssue: customOrderItem.comicIssue,
         comicVolume: customOrderItem.comicVolume,
         customTitle: customOrderItem.customTitle,
+        localArtworkPath: customOrderItem.localArtworkPath, // Include for frontend cached artwork logic
         orderType: 'CUSTOM_ORDER',
         customOrderMediaType: mediaType
       };
@@ -289,6 +290,7 @@ async function fetchMediaDetailsFromPlex(plexKey, mediaType, customOrderItem) {
         bookPublisher: customOrderItem.bookPublisher,
         bookOpenLibraryId: customOrderItem.bookOpenLibraryId,
         bookCoverUrl: bookDetails?.coverUrl || customOrderItem.bookCoverUrl || null,
+        localArtworkPath: customOrderItem.localArtworkPath, // Include for frontend cached artwork logic
         orderType: 'CUSTOM_ORDER',
         customOrderMediaType: mediaType
       };
@@ -329,6 +331,7 @@ async function fetchMediaDetailsFromPlex(plexKey, mediaType, customOrderItem) {
         storyContainedInBookId: customOrderItem.storyContainedInBookId,
         storyCoverUrl: customOrderItem.storyCoverUrl || containedInBookDetails?.coverUrl || null,
         containedInBookDetails: containedInBookDetails, // Store containing book details if available
+        localArtworkPath: customOrderItem.localArtworkPath, // Include for frontend cached artwork logic
         orderType: 'CUSTOM_ORDER',
         customOrderMediaType: mediaType
       };
@@ -350,6 +353,7 @@ async function fetchMediaDetailsFromPlex(plexKey, mediaType, customOrderItem) {
         webTitle: customOrderItem.webTitle,
         webUrl: customOrderItem.webUrl,
         webDescription: customOrderItem.webDescription,
+        localArtworkPath: customOrderItem.localArtworkPath, // Include for frontend cached artwork logic
         orderType: 'CUSTOM_ORDER',
         customOrderMediaType: mediaType
       };

@@ -928,9 +928,18 @@ function Home() {
       return null;
     }
     
-    // For comics, prioritize ComicVine artwork
+    // First priority: Check for cached artwork (works for all media types)
+    if (media?.localArtworkPath) {
+      const filename = media.localArtworkPath.includes('\\') || media.localArtworkPath.includes('/')
+        ? media.localArtworkPath.split(/[\\\/]/).pop() 
+        : media.localArtworkPath;
+      console.log('Using cached artwork:', filename);
+      return `${config.apiBaseUrl}/api/artwork/${filename}`;
+    }
+    
+    // For comics, fallback to ComicVine artwork if no cached artwork
     if (media?.type === 'comic' && media?.comicDetails?.coverUrl) {
-      console.log('Using ComicVine artwork:', media.comicDetails.coverUrl);
+      console.log('Using ComicVine artwork (fallback):', media.comicDetails.coverUrl);
       return `${config.apiBaseUrl}/api/comicvine-artwork?url=${encodeURIComponent(media.comicDetails.coverUrl)}`;
     }
     
@@ -1224,13 +1233,30 @@ function Home() {
                         src={getArtworkUrl(selectedMedia)} 
                         alt={selectedMedia.title}
                         onLoad={(e) => {
-                          console.log('Image loaded successfully');
-                        }}                        onError={(e) => {
+                          console.log('Image loaded successfully:', e.target.src);
+                        }}
+                        onError={(e) => {
                           console.error('Image failed to load:', e.target.src);
+                          console.error('Error details:', e.target.naturalWidth, e.target.naturalHeight);
+                          
                           // Handle different fallback scenarios
                           if (selectedMedia.type === 'comic') {
                             // For comics, if ComicVine artwork fails, hide the image
+                            console.log('ComicVine artwork failed, hiding image');
                             e.target.style.display = 'none';
+                            
+                            // Show a loading placeholder for mobile debugging
+                            if (window.innerWidth <= 768) {
+                              const placeholder = document.createElement('div');
+                              placeholder.innerHTML = `
+                                <div style="background: #333; color: #fff; padding: 20px; text-align: center; border-radius: 8px;">
+                                  <p>Comic cover failed to load</p>
+                                  <p style="font-size: 12px; opacity: 0.7;">${e.target.src}</p>
+                                  <p style="font-size: 10px; opacity: 0.5;">Check network connection</p>
+                                </div>
+                              `;
+                              e.target.parentNode.insertBefore(placeholder, e.target);
+                            }
                           } else if (selectedMedia.type === 'book' || selectedMedia.type === 'shortstory') {
                             // For books and short stories, if artwork fails, hide the image
                             e.target.style.display = 'none';

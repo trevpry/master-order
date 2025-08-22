@@ -189,25 +189,12 @@ const WatchStats = () => {
   // Fetch custom order statistics
   const fetchCustomOrderStats = async (period = 'all') => {
     try {
-      console.log('Fetching custom order stats for period:', period);
       const response = await fetch(`${config.apiBaseUrl}/api/watch-stats/custom-orders?period=${period}`);
-      console.log('Custom order stats response status:', response.status);
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.error('Custom order stats API error:', response.status, errorText);
-        throw new Error(`Failed to fetch custom order stats: ${response.status} ${errorText}`);
-      }
+      if (!response.ok) throw new Error('Failed to fetch custom order stats');
       const data = await response.json();
-      console.log('Custom order stats data received:', {
-        isArray: Array.isArray(data),
-        length: data?.length,
-        firstItem: data?.[0]?.customOrderName,
-        sample: data?.[0]
-      });
       setCustomOrderStats(data);
     } catch (err) {
       console.error('Error fetching custom order stats:', err);
-      setCustomOrderStats(null); // Set to null to trigger error display
     }
   };
 
@@ -2465,12 +2452,7 @@ const WatchStats = () => {
               <div className="stats-card">
                 <div style={{ textAlign: 'center', padding: '40px', color: '#8b949e' }}>
                   <h3>No Custom Order Data Available</h3>
-                  <p>Debug info: {JSON.stringify({ 
-                    hasData: !!customOrderStats, 
-                    isArray: Array.isArray(customOrderStats),
-                    length: customOrderStats?.length,
-                    type: typeof customOrderStats
-                  })}</p>
+                  <p>No activity has been logged for custom orders yet.</p>
                 </div>
               </div>
             )
@@ -2478,7 +2460,6 @@ const WatchStats = () => {
             <div className="stats-card">
               <div style={{ textAlign: 'center', padding: '40px', color: '#8b949e' }}>
                 <h3>Loading Custom Order Statistics...</h3>
-                <p>Check browser console for debugging information</p>
               </div>
             </div>
           )}
