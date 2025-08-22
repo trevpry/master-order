@@ -36,12 +36,12 @@ const WatchStats = () => {
   const [chartType, setChartType] = useState('bar'); // 'bar' or 'line'
   
   // Global filter states
-  const [selectedMediaTypes, setSelectedMediaTypes] = useState(['tv', 'movie', 'book', 'comic', 'shortstory']);
+  const [selectedMediaTypes, setSelectedMediaTypes] = useState(['tv', 'movie', 'book', 'comic', 'shortstory', 'webvideo']);
   const [globalPeriod, setGlobalPeriod] = useState('week');
   const [globalGroupBy, setGlobalGroupBy] = useState('day');
   const [chartPeriod, setChartPeriod] = useState('week'); // Independent chart period
   const [chartStats, setChartStats] = useState(null); // Separate stats for chart
-  const [activeTab, setActiveTab] = useState('overview'); // 'overview', 'custom-orders', 'all-activity', 'tv', 'movies', 'books', 'comics', 'shortstories'
+  const [activeTab, setActiveTab] = useState('overview'); // 'overview', 'custom-orders', 'all-activity', 'tv', 'movies', 'books', 'comics', 'shortstories', 'webvideos'
   const [customOrderStats, setCustomOrderStats] = useState(null);
   const [allActivityStats, setAllActivityStats] = useState(null);
   
@@ -51,6 +51,7 @@ const WatchStats = () => {
   const [bookStats, setBookStats] = useState(null);
   const [comicStats, setComicStats] = useState(null);
   const [shortStoryStats, setShortStoryStats] = useState(null);
+  const [webvideoStats, setWebvideoStats] = useState(null);
   
   // Actor breakdown sorting state
   const [actorSortBy, setActorSortBy] = useState('playtime'); // 'playtime', 'episodes', 'series'
@@ -121,7 +122,7 @@ const WatchStats = () => {
 
   // Toggle all media types
   const handleSelectAllMediaTypes = () => {
-    const allTypes = ['tv', 'movie', 'book', 'comic', 'shortstory'];
+    const allTypes = ['tv', 'movie', 'book', 'comic', 'shortstory', 'webvideo'];
     if (selectedMediaTypes.length === allTypes.length) {
       setSelectedMediaTypes([]);
     } else {
@@ -251,6 +252,9 @@ const WatchStats = () => {
         case 'shortstory':
           setShortStoryStats(data);
           break;
+        case 'webvideo':
+          setWebvideoStats(data);
+          break;
       }
     } catch (err) {
       console.error(`Error fetching ${mediaType} stats:`, err);
@@ -264,7 +268,8 @@ const WatchStats = () => {
       fetchMediaTypeStats('movie', period),
       fetchMediaTypeStats('book', period),
       fetchMediaTypeStats('comic', period),
-      fetchMediaTypeStats('shortstory', period)
+      fetchMediaTypeStats('shortstory', period),
+      fetchMediaTypeStats('webvideo', period)
     ]);
   };
 
@@ -362,6 +367,7 @@ const WatchStats = () => {
     const mediaTypeMapping = [
       { type: 'tv', label: 'TV Shows', value: filteredStats.totalStats.totalTvWatchTime || 0, bgColor: '#3b82f6', borderColor: '#2563eb' },
       { type: 'movie', label: 'Movies', value: filteredStats.totalStats.totalMovieWatchTime || 0, bgColor: '#ef4444', borderColor: '#dc2626' },
+      { type: 'webvideo', label: 'Web Videos', value: filteredStats.totalStats.totalWebVideoViewTime || 0, bgColor: '#06b6d4', borderColor: '#0891b2' },
       { type: 'book', label: 'Books', value: filteredStats.totalStats.totalBookReadTime || 0, bgColor: '#10b981', borderColor: '#059669' },
       { type: 'comic', label: 'Comics', value: filteredStats.totalStats.totalComicReadTime || 0, bgColor: '#f59e0b', borderColor: '#d97706' },
       { type: 'shortstory', label: 'Short Stories', value: filteredStats.totalStats.totalShortStoryReadTime || 0, bgColor: '#8b5cf6', borderColor: '#7c3aed' }
@@ -390,6 +396,11 @@ const WatchStats = () => {
     const filteredStats = getFilteredStats();
     if (!filteredStats || !filteredStats.groupedStats || filteredStats.groupedStats.length === 0) return null;
 
+    // Sort grouped stats chronologically for the line chart (earliest first)
+    const chronologicalStats = [...filteredStats.groupedStats].sort((a, b) => {
+      return new Date(a.period) - new Date(b.period);
+    });
+
     // Determine appropriate groupBy based on the global period
     let chartGroupBy = 'day';
     switch (globalPeriod) {
@@ -407,7 +418,7 @@ const WatchStats = () => {
     }
 
     // Extract labels (time periods) and format them based on the appropriate groupBy
-    const labels = filteredStats.groupedStats.map(group => {
+    const labels = chronologicalStats.map(group => {
       // Handle date-only strings (YYYY-MM-DD) to avoid timezone issues
       let date;
       if (typeof group.period === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(group.period)) {
@@ -435,7 +446,7 @@ const WatchStats = () => {
     if (selectedMediaTypes.includes('tv')) {
       datasets.push({
         label: 'TV Shows',
-        data: filteredStats.groupedStats.map(group => group.tvWatchTime || 0),
+        data: chronologicalStats.map(group => group.tvWatchTime || 0),
         borderColor: '#3b82f6',
         backgroundColor: 'rgba(59, 130, 246, 0.1)',
         tension: 0.1
@@ -445,9 +456,19 @@ const WatchStats = () => {
     if (selectedMediaTypes.includes('movie')) {
       datasets.push({
         label: 'Movies',
-        data: filteredStats.groupedStats.map(group => group.movieWatchTime || 0),
+        data: chronologicalStats.map(group => group.movieWatchTime || 0),
         borderColor: '#ef4444',
         backgroundColor: 'rgba(239, 68, 68, 0.1)',
+        tension: 0.1
+      });
+    }
+    
+    if (selectedMediaTypes.includes('webvideo')) {
+      datasets.push({
+        label: 'Web Videos',
+        data: chronologicalStats.map(group => group.webVideoViewTime || 0),
+        borderColor: '#06b6d4',
+        backgroundColor: 'rgba(6, 182, 212, 0.1)',
         tension: 0.1
       });
     }
@@ -455,7 +476,7 @@ const WatchStats = () => {
     if (selectedMediaTypes.includes('book')) {
       datasets.push({
         label: 'Books',
-        data: filteredStats.groupedStats.map(group => group.bookReadTime || 0),
+        data: chronologicalStats.map(group => group.bookReadTime || 0),
         borderColor: '#10b981',
         backgroundColor: 'rgba(16, 185, 129, 0.1)',
         tension: 0.1
@@ -465,7 +486,7 @@ const WatchStats = () => {
     if (selectedMediaTypes.includes('comic')) {
       datasets.push({
         label: 'Comics',
-        data: filteredStats.groupedStats.map(group => group.comicReadTime || 0),
+        data: chronologicalStats.map(group => group.comicReadTime || 0),
         borderColor: '#f59e0b',
         backgroundColor: 'rgba(245, 158, 11, 0.1)',
         tension: 0.1
@@ -475,7 +496,7 @@ const WatchStats = () => {
     if (selectedMediaTypes.includes('shortstory')) {
       datasets.push({
         label: 'Short Stories',
-        data: filteredStats.groupedStats.map(group => group.shortStoryReadTime || 0),
+        data: chronologicalStats.map(group => group.shortStoryReadTime || 0),
         borderColor: '#8b5cf6',
         backgroundColor: 'rgba(139, 92, 246, 0.1)',
         tension: 0.1
@@ -501,31 +522,35 @@ const WatchStats = () => {
       ...stats.totalStats,
       totalTvWatchTime: selectedMediaTypes.includes('tv') ? stats.totalStats.totalTvWatchTime : 0,
       totalMovieWatchTime: selectedMediaTypes.includes('movie') ? stats.totalStats.totalMovieWatchTime : 0,
+      totalWebVideoViewTime: selectedMediaTypes.includes('webvideo') ? stats.totalStats.totalWebVideoViewTime || 0 : 0,
       totalBookReadTime: selectedMediaTypes.includes('book') ? stats.totalStats.totalBookReadTime || 0 : 0,
       totalComicReadTime: selectedMediaTypes.includes('comic') ? stats.totalStats.totalComicReadTime || 0 : 0,
       totalShortStoryReadTime: selectedMediaTypes.includes('shortstory') ? stats.totalStats.totalShortStoryReadTime || 0 : 0,
       totalTvEpisodes: selectedMediaTypes.includes('tv') ? stats.totalStats.totalTvEpisodes : 0,
       totalMovies: selectedMediaTypes.includes('movie') ? stats.totalStats.totalMovies : 0,
+      totalWebVideos: selectedMediaTypes.includes('webvideo') ? stats.totalStats.totalWebVideos || 0 : 0,
       totalBooks: selectedMediaTypes.includes('book') ? stats.totalStats.totalBooks || 0 : 0,
       totalComics: selectedMediaTypes.includes('comic') ? stats.totalStats.totalComics || 0 : 0,
       totalShortStories: selectedMediaTypes.includes('shortstory') ? stats.totalStats.totalShortStories || 0 : 0,
     };
 
     // Recalculate totals
-    filteredTotalStats.totalWatchTime = filteredTotalStats.totalTvWatchTime + filteredTotalStats.totalMovieWatchTime;
+    filteredTotalStats.totalWatchTime = filteredTotalStats.totalTvWatchTime + filteredTotalStats.totalMovieWatchTime + filteredTotalStats.totalWebVideoViewTime;
     filteredTotalStats.totalReadTime = filteredTotalStats.totalBookReadTime + filteredTotalStats.totalComicReadTime + filteredTotalStats.totalShortStoryReadTime;
     filteredTotalStats.totalActivityTime = filteredTotalStats.totalWatchTime + filteredTotalStats.totalReadTime;
-    filteredTotalStats.totalItems = filteredTotalStats.totalTvEpisodes + filteredTotalStats.totalMovies + filteredTotalStats.totalBooks + filteredTotalStats.totalComics + filteredTotalStats.totalShortStories;
+    filteredTotalStats.totalItems = filteredTotalStats.totalTvEpisodes + filteredTotalStats.totalMovies + filteredTotalStats.totalWebVideos + filteredTotalStats.totalBooks + filteredTotalStats.totalComics + filteredTotalStats.totalShortStories;
 
     const filteredGroupedStats = stats.groupedStats.map(group => ({
       ...group,
       tvWatchTime: selectedMediaTypes.includes('tv') ? group.tvWatchTime : 0,
       movieWatchTime: selectedMediaTypes.includes('movie') ? group.movieWatchTime : 0,
+      webVideoViewTime: selectedMediaTypes.includes('webvideo') ? group.webVideoViewTime || 0 : 0,
       bookReadTime: selectedMediaTypes.includes('book') ? group.bookReadTime || 0 : 0,
       comicReadTime: selectedMediaTypes.includes('comic') ? group.comicReadTime || 0 : 0,
       shortStoryReadTime: selectedMediaTypes.includes('shortstory') ? group.shortStoryReadTime || 0 : 0,
       tvEpisodes: selectedMediaTypes.includes('tv') ? group.tvEpisodes : 0,
       movies: selectedMediaTypes.includes('movie') ? group.movies : 0,
+      webVideos: selectedMediaTypes.includes('webvideo') ? group.webVideos || 0 : 0,
       books: selectedMediaTypes.includes('book') ? group.books || 0 : 0,
       comics: selectedMediaTypes.includes('comic') ? group.comics || 0 : 0,
       shortStories: selectedMediaTypes.includes('shortstory') ? group.shortStories || 0 : 0,
@@ -645,9 +670,17 @@ const WatchStats = () => {
               />
               Short Stories
             </label>
+            <label className="media-filter">
+              <input 
+                type="checkbox" 
+                checked={selectedMediaTypes.includes('webvideo')} 
+                onChange={() => handleMediaTypeToggle('webvideo')}
+              />
+              Web Videos
+            </label>
           </div>
           <button onClick={handleSelectAllMediaTypes} className="select-all-btn">
-            {selectedMediaTypes.length === 5 ? 'Deselect All' : 'Select All'}
+            {selectedMediaTypes.length === 6 ? 'Deselect All' : 'Select All'}
           </button>
         </div>
       </div>
@@ -702,6 +735,12 @@ const WatchStats = () => {
         >
           📝 Stories
         </button>
+        <button 
+          className={`tab-button ${activeTab === 'webvideos' ? 'active' : ''}`}
+          onClick={() => setActiveTab('webvideos')}
+        >
+          🌐 Web Videos
+        </button>
       </div>
       
       {/* Tab Content */}
@@ -715,13 +754,14 @@ const WatchStats = () => {
           if (type === 'book' && (todayStats.totalStats.totalBooks || 0) > 0) return true;
           if (type === 'comic' && (todayStats.totalStats.totalComics || 0) > 0) return true;
           if (type === 'shortstory' && (todayStats.totalStats.totalShortStories || 0) > 0) return true;
+          if (type === 'webvideo' && (todayStats.totalStats.totalWebVideos || 0) > 0) return true;
           return false;
         })
       ) && (
         <div className="stats-card today-stats">
           <h2>Today's Activity</h2>
           <div className="stats-grid">
-            {(selectedMediaTypes.includes('tv') || selectedMediaTypes.includes('movie')) && (
+            {(selectedMediaTypes.includes('tv') || selectedMediaTypes.includes('movie') || selectedMediaTypes.includes('webvideo')) && (
               <div className="stat-item">
                 <span className="stat-label">Total Watch Time</span>
                 <span className="stat-value">{todayStats.totalStats.totalWatchTimeFormatted}</span>
@@ -763,6 +803,12 @@ const WatchStats = () => {
                 <span className="stat-value">{todayStats.totalStats.totalShortStories || 0}</span>
               </div>
             )}
+            {selectedMediaTypes.includes('webvideo') && (
+              <div className="stat-item">
+                <span className="stat-label">Web Videos</span>
+                <span className="stat-value">{todayStats.totalStats.totalWebVideos || 0}</span>
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -776,7 +822,7 @@ const WatchStats = () => {
               <span className="stat-label">Total Activity Time</span>
               <span className="stat-value">{getFilteredStats()?.totalStats.totalActivityTimeFormatted}</span>
             </div>
-            {(selectedMediaTypes.includes('tv') || selectedMediaTypes.includes('movie')) && (
+            {(selectedMediaTypes.includes('tv') || selectedMediaTypes.includes('movie') || selectedMediaTypes.includes('webvideo')) && (
               <div className="stat-item">
                 <span className="stat-label">Total Watch Time</span>
                 <span className="stat-value">{getFilteredStats()?.totalStats.totalWatchTimeFormatted}</span>
@@ -845,6 +891,18 @@ const WatchStats = () => {
                 <div className="stat-item">
                   <span className="stat-label">Stories Read</span>
                   <span className="stat-value">{getFilteredStats()?.totalStats.totalShortStories || 0}</span>
+                </div>
+              </>
+            )}
+            {selectedMediaTypes.includes('webvideo') && (
+              <>
+                <div className="stat-item">
+                  <span className="stat-label">Web Video View Time</span>
+                  <span className="stat-value">{getFilteredStats()?.totalStats.totalWebVideoViewTimeFormatted || '0m'}</span>
+                </div>
+                <div className="stat-item">
+                  <span className="stat-label">Web Videos Watched</span>
+                  <span className="stat-value">{getFilteredStats()?.totalStats.totalWebVideos || 0}</span>
                 </div>
               </>
             )}
@@ -917,7 +975,7 @@ const WatchStats = () => {
             {getFilteredStats().groupedStats.map((group, index) => {
               // Calculate total activity time for filtered media types only
               let totalActivityTime = 0;
-              if (selectedMediaTypes.includes('tv') || selectedMediaTypes.includes('movie')) {
+              if (selectedMediaTypes.includes('tv') || selectedMediaTypes.includes('movie') || selectedMediaTypes.includes('webvideo')) {
                 totalActivityTime += (group.totalWatchTime || 0);
               }
               if (selectedMediaTypes.includes('book') || selectedMediaTypes.includes('comic') || selectedMediaTypes.includes('shortstory')) {
@@ -954,6 +1012,12 @@ const WatchStats = () => {
                       <div className="period-stat">
                         <span className="stat-type">Movies:</span>
                         <span>{group.movies || 0} movies ({group.movieWatchTimeFormatted || '0m'})</span>
+                      </div>
+                    )}
+                    {selectedMediaTypes.includes('webvideo') && (
+                      <div className="period-stat">
+                        <span className="stat-type">Web Videos:</span>
+                        <span>{group.webVideos || 0} videos ({group.webVideoViewTimeFormatted || '0m'})</span>
                       </div>
                     )}
                     {selectedMediaTypes.includes('book') && (
@@ -1006,7 +1070,7 @@ const WatchStats = () => {
                       <span className="media-type">{log.mediaType.toUpperCase()}</span>
                       <span className="separator">•</span>
                       <span className="duration">
-                        {log.activityType === 'read' 
+                        {(log.activityType === 'read' || log.activityType === 'view') 
                           ? log.totalWatchTimeFormatted 
                           : log.durationFormatted}
                       </span>
@@ -1025,7 +1089,7 @@ const WatchStats = () => {
         <div className="stats-card">
           <div className="no-data">
             <h2>No Watch Data</h2>
-            <p>Start watching TV shows and movies to see your statistics here!</p>
+            <p>Start watching TV shows, movies, web videos, or reading books and comics to see your statistics here!</p>
           </div>
         </div>
       )}
@@ -1109,6 +1173,28 @@ const WatchStats = () => {
                       <p><strong>Total Watch Time:</strong> {customOrderStats.totalStats?.totalWatchTimeFormatted || '0 minutes'}</p>
                       <p><strong>Total Read Time:</strong> {customOrderStats.totalStats?.totalReadTimeFormatted || '0 minutes'}</p>
                       <p><strong>Custom Orders Accessed:</strong> {customOrderStats.totalStats?.uniqueCustomOrders || 0}</p>
+                      
+                      {/* Media Type Breakdown */}
+                      <hr />
+                      <h6>Media Type Breakdown:</h6>
+                      {customOrderStats.totalStats?.totalTvEpisodes > 0 && (
+                        <p><strong>TV Episodes:</strong> {customOrderStats.totalStats.totalTvEpisodes} ({customOrderStats.totalStats?.totalTvWatchTimeFormatted || '0 minutes'})</p>
+                      )}
+                      {customOrderStats.totalStats?.totalMovies > 0 && (
+                        <p><strong>Movies:</strong> {customOrderStats.totalStats.totalMovies} ({customOrderStats.totalStats?.totalMovieWatchTimeFormatted || '0 minutes'})</p>
+                      )}
+                      {customOrderStats.totalStats?.totalWebVideos > 0 && (
+                        <p><strong>Web Videos:</strong> {customOrderStats.totalStats.totalWebVideos} ({customOrderStats.totalStats?.totalWebVideoViewTimeFormatted || '0 minutes'})</p>
+                      )}
+                      {customOrderStats.totalStats?.totalBooks > 0 && (
+                        <p><strong>Books:</strong> {customOrderStats.totalStats.totalBooks} ({customOrderStats.totalStats?.totalBookReadTimeFormatted || '0 minutes'})</p>
+                      )}
+                      {customOrderStats.totalStats?.totalComics > 0 && (
+                        <p><strong>Comics:</strong> {customOrderStats.totalStats.totalComics} ({customOrderStats.totalStats?.totalComicReadTimeFormatted || '0 minutes'})</p>
+                      )}
+                      {customOrderStats.totalStats?.totalShortStories > 0 && (
+                        <p><strong>Short Stories:</strong> {customOrderStats.totalStats.totalShortStories} ({customOrderStats.totalStats?.totalShortStoryReadTimeFormatted || '0 minutes'})</p>
+                      )}
                     </div>
                   ) : (
                     <p>Loading custom order statistics...</p>
@@ -2334,7 +2420,7 @@ const WatchStats = () => {
             <div className="stats-card">
               <h2>Statistics by Custom Order</h2>
               <div className="custom-order-stats">
-                {customOrderStats.map((orderStat, index) => (
+                {customOrderStats.customOrders?.map((orderStat, index) => (
                   <div key={index} className="custom-order-item">
                     <div className="order-header">
                       <h3>{orderStat.customOrderName || 'Unknown Order'}</h3>
@@ -2353,6 +2439,12 @@ const WatchStats = () => {
                         <div className="breakdown-item">
                           <span className="media-type">Movies:</span>
                           <span>{orderStat.totalMovies} movies ({orderStat.totalMovieWatchTimeFormatted})</span>
+                        </div>
+                      )}
+                      {orderStat.totalWebVideos > 0 && (
+                        <div className="breakdown-item">
+                          <span className="media-type">Web Videos:</span>
+                          <span>{orderStat.totalWebVideos} videos ({orderStat.totalWebVideoViewTimeFormatted})</span>
                         </div>
                       )}
                       {orderStat.totalBooks > 0 && (
@@ -2382,6 +2474,107 @@ const WatchStats = () => {
             <div className="stats-card">
               <div style={{ textAlign: 'center', padding: '40px', color: '#8b949e' }}>
                 <h3>Loading Custom Order Statistics...</h3>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Web Videos Tab */}
+      {activeTab === 'webvideos' && (
+        <div className="tab-content">
+          {webvideoStats ? (
+            <>
+              {/* Overall Web Video Statistics */}
+              <div className="stats-card">
+                <h2>🌐 Web Video Statistics</h2>
+                <div className="stats-grid">
+                  <div className="stat-item">
+                    <span className="stat-label">Total Videos</span>
+                    <span className="stat-value">{webvideoStats.totalStats?.totalWebVideos || 0}</span>
+                  </div>
+                  <div className="stat-item">
+                    <span className="stat-label">Total View Time</span>
+                    <span className="stat-value">{webvideoStats.totalStats?.totalWebVideoViewTimeFormatted || '0 minutes'}</span>
+                  </div>
+                  <div className="stat-item">
+                    <span className="stat-label">Custom Orders</span>
+                    <span className="stat-value">{webvideoStats.totalStats?.uniqueCustomOrders || 0}</span>
+                  </div>
+                  <div className="stat-item">
+                    <span className="stat-label">Average Video Length</span>
+                    <span className="stat-value">
+                      {webvideoStats.totalStats?.totalWebVideos > 0 
+                        ? Math.round((webvideoStats.totalStats?.totalWebVideoViewTime || 0) / webvideoStats.totalStats.totalWebVideos) + ' min'
+                        : '0 min'
+                      }
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Recent Web Videos */}
+              {webvideoStats.logs && webvideoStats.logs.length > 0 && (
+                <div className="stats-card">
+                  <h2>Recent Web Videos</h2>
+                  <div className="recent-activity">
+                    {webvideoStats.logs
+                      .sort((a, b) => new Date(b.startTime) - new Date(a.startTime))
+                      .slice(0, 10)
+                      .map((log, index) => (
+                      <div key={index} className="activity-item">
+                        <div className="activity-info">
+                          <div className="activity-title">
+                            <span className="video-title">{log.title}</span>
+                          </div>
+                          {log.seriesTitle && (
+                            <div className="activity-details">
+                              <span className="video-url">{log.seriesTitle}</span>
+                            </div>
+                          )}
+                        </div>
+                        <div className="activity-meta">
+                          <span className="activity-date">
+                            {new Date(log.startTime).toLocaleDateString()}
+                          </span>
+                          <span className="activity-time">
+                            {Math.round(log.totalWatchTime)} min
+                          </span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Web Video Breakdown by Custom Order */}
+              {webvideoStats.totalStats?.customOrderBreakdown && webvideoStats.totalStats.customOrderBreakdown.length > 0 && (
+                <div className="stats-card">
+                  <h2>Web Videos by Custom Order</h2>
+                  <div className="breakdown-list">
+                    {webvideoStats.totalStats.customOrderBreakdown
+                      .sort((a, b) => b.totalWebVideoViewTime - a.totalWebVideoViewTime)
+                      .slice(0, 15)
+                      .map((order, index) => (
+                      <div key={index} className="breakdown-item">
+                        <div className="breakdown-info">
+                          <span className="breakdown-name">{order.orderTitle}</span>
+                          <div className="breakdown-details">
+                            <span>{order.totalWebVideos} videos</span>
+                            <span className="separator">•</span>
+                            <span>{order.totalWebVideoViewTimeFormatted}</span>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </>
+          ) : (
+            <div className="stats-card">
+              <div style={{ textAlign: 'center', padding: '40px', color: '#8b949e' }}>
+                <h3>Loading Web Video Statistics...</h3>
               </div>
             </div>
           )}

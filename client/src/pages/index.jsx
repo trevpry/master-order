@@ -30,6 +30,11 @@ function Home() {
   const [readingTimer, setReadingTimer] = useState(0);
   const [readingActionLoading, setReadingActionLoading] = useState('');
   
+  // Viewing session state for web videos
+  const [viewingSession, setViewingSession] = useState(null);
+  const [viewingTimer, setViewingTimer] = useState(0);
+  const [viewingActionLoading, setViewingActionLoading] = useState('');
+  
   // Reading progress modal state
   const [showReadingProgressModal, setShowReadingProgressModal] = useState(false);
   const [readingProgress, setReadingProgress] = useState({
@@ -124,6 +129,23 @@ function Home() {
     };
   }, [readingSession]);
 
+  // Timer effect for viewing sessions
+  useEffect(() => {
+    let interval = null;
+    
+    if (viewingSession && !viewingSession.isPaused) {
+      interval = setInterval(() => {
+        setViewingTimer(prev => prev + 1);
+      }, 1000);
+    }
+    
+    return () => {
+      if (interval) {
+        clearInterval(interval);
+      }
+    };
+  }, [viewingSession]);
+
   // Check for active reading session on load
   useEffect(() => {
     const checkActiveSession = async () => {
@@ -144,8 +166,28 @@ function Home() {
         console.error('Error checking active reading session:', error);
       }
     };
+
+    const checkActiveViewingSession = async () => {
+      try {
+        const response = await fetch(`${config.apiBaseUrl}/api/viewing/active`);
+        if (response.ok) {
+          const activeSession = await response.json();
+          if (activeSession) {
+            setViewingSession(activeSession);
+            // Calculate elapsed time if session is active
+            if (!activeSession.isPaused) {
+              const elapsed = Math.floor((Date.now() - new Date(activeSession.startTime)) / 1000);
+              setViewingTimer(elapsed);
+            }
+          }
+        }
+      } catch (error) {
+        console.error('Error checking active viewing session:', error);
+      }
+    };
     
     checkActiveSession();
+    checkActiveViewingSession();
   }, []);
 
   // Reading control functions
@@ -388,6 +430,185 @@ function Home() {
   };
 
   const formatReadingTime = (seconds) => {
+    const hours = Math.floor(seconds / 3600);
+    const minutes = Math.floor((seconds % 3600) / 60);
+    const secs = seconds % 60;
+    
+    if (hours > 0) {
+      return `${hours}:${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+    } else {
+      return `${minutes}:${secs.toString().padStart(2, '0')}`;
+    }
+  };
+
+  // Viewing control functions
+  const startViewing = async () => {
+    if (!selectedMedia || selectedMedia.type !== 'webvideo') {
+      return;
+    }
+
+    setViewingActionLoading('start');
+    try {
+      const response = await fetch(`${config.apiBaseUrl}/api/viewing/start`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          mediaType: selectedMedia.type,
+          title: selectedMedia.webTitle || selectedMedia.title,
+          seriesTitle: selectedMedia.webUrl,
+          customOrderItemId: selectedMedia.customOrderItemId || selectedMedia.id || selectedMedia.plexRatingKey
+        })
+      });
+
+      if (response.ok) {
+        const session = await response.json();
+        setViewingSession(session);
+        setViewingTimer(0);
+        toast.success(`🌐 Started viewing "${session.title}"`, {
+          duration: 3000,
+          position: 'top-right'
+        });
+      } else {
+        const error = await response.json();
+        toast.error(`Failed to start viewing: ${error.error}`, {
+          duration: 4000,
+          position: 'top-right'
+        });
+      }
+    } catch (error) {
+      console.error('Error starting viewing session:', error);
+      toast.error('Error starting viewing session', {
+        duration: 4000,
+        position: 'top-right'
+      });
+    } finally {
+      setViewingActionLoading('');
+    }
+  };
+
+  const pauseViewing = async () => {
+    if (!viewingSession) return;
+
+    setViewingActionLoading('pause');
+    try {
+      const response = await fetch(`${config.apiBaseUrl}/api/viewing/pause`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        }
+      });
+
+      if (response.ok) {
+        const updatedSession = await response.json();
+        setViewingSession(updatedSession);
+        
+        if (updatedSession.isPaused) {
+          toast.info('⏸️ Viewing session paused', {
+            duration: 2000,
+            position: 'top-right'
+          });
+        } else {
+          toast.success('▶️ Viewing session resumed', {
+            duration: 2000,
+            position: 'top-right'
+          });
+        }
+      } else {
+        const error = await response.json();
+        toast.error(`Failed to pause/resume viewing: ${error.error}`, {
+          duration: 4000,
+          position: 'top-right'
+        });
+      }
+    } catch (error) {
+      console.error('Error pausing/resuming viewing session:', error);
+      toast.error('Error pausing/resuming viewing session', {
+        duration: 4000,
+        position: 'top-right'
+      });
+    } finally {
+      setViewingActionLoading('');
+    }
+  };
+
+  const stopViewing = async () => {
+    if (!viewingSession) return;
+
+    await stopViewingSession();
+  };
+
+  const stopViewingSession = async (progressData = null) => {
+    if (!viewingSession) return;
+
+    setViewingActionLoading('stop');
+    try {
+      const requestBody = progressData ? {
+        progress: progressData
+      } : {};
+
+      const response = await fetch(`${config.apiBaseUrl}/api/viewing/stop`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(requestBody)
+      });
+
+      if (response.ok) {
+        const completedSession = await response.json();
+        setViewingSession(null);
+        setViewingTimer(0);
+        
+        const formatTime = (seconds) => {
+          const hours = Math.floor(seconds / 3600);
+          const minutes = Math.floor((seconds % 3600) / 60);
+          const secs = seconds % 60;
+          
+          if (hours > 0) {
+            return `${hours}h ${minutes}m ${secs}s`;
+          } else if (minutes > 0) {
+            return `${minutes}m ${secs}s`;
+          } else {
+            return `${secs}s`;
+          }
+        };
+        
+        if (completedSession.deleted) {
+          // Session was deleted because it was less than 1 minute
+          toast.info(`🗑️ Viewing session discarded (less than 1 minute)`, {
+            duration: 4000,
+            position: 'top-right'
+          });
+        } else {
+          // Session was completed and saved
+          let message = `🏁 Viewing session completed! Total time: ${formatTime(completedSession.totalTime)}`;
+          
+          toast.success(message, {
+            duration: 5000,
+            position: 'top-right'
+          });
+        }
+      } else {
+        const error = await response.json();
+        toast.error(`Failed to stop viewing: ${error.error}`, {
+          duration: 4000,
+          position: 'top-right'
+        });
+      }
+    } catch (error) {
+      console.error('Error stopping viewing session:', error);
+      toast.error('Error stopping viewing session', {
+        duration: 4000,
+        position: 'top-right'
+      });
+    } finally {
+      setViewingActionLoading('');
+    }
+  };
+
+  const formatViewingTime = (seconds) => {
     const hours = Math.floor(seconds / 3600);
     const minutes = Math.floor((seconds % 3600) / 60);
     const secs = seconds % 60;
@@ -856,6 +1077,77 @@ function Home() {
                       title="Stop reading session"
                     >
                       {readingActionLoading === 'stop' ? '⏳' : '⏹️'}
+                    </Button>
+                  </>
+                )}
+              </div>
+            )}
+
+            {/* Viewing controls for web videos */}
+            {selectedMedia && selectedMedia.type === 'webvideo' && (
+              <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                {/* Viewing timer display */}
+                {viewingSession && (
+                  <div style={{ 
+                    color: '#fff', 
+                    fontSize: '14px', 
+                    fontWeight: 'bold',
+                    padding: '8px 12px',
+                    backgroundColor: viewingSession.isPaused ? '#f39c12' : '#17a2b8',
+                    borderRadius: '4px',
+                    minWidth: '80px',
+                    textAlign: 'center'
+                  }}>
+                    {formatViewingTime(viewingTimer)}
+                    {viewingSession.isPaused && ' (Paused)'}
+                  </div>
+                )}
+                
+                {/* Start/Stop button */}
+                {!viewingSession ? (
+                  <Button
+                    onClick={startViewing}
+                    disabled={viewingActionLoading === 'start'}
+                    style={{ 
+                      backgroundColor: '#17a2b8', 
+                      color: '#fff',
+                      minWidth: '40px',
+                      padding: '8px 12px'
+                    }}
+                    title="Start viewing session"
+                  >
+                    {viewingActionLoading === 'start' ? '⏳' : '▶️'}
+                  </Button>
+                ) : (
+                  <>
+                    {/* Pause/Resume button */}
+                    <Button
+                      onClick={pauseViewing}
+                      disabled={viewingActionLoading === 'pause'}
+                      style={{ 
+                        backgroundColor: viewingSession.isPaused ? '#17a2b8' : '#f39c12', 
+                        color: '#fff',
+                        minWidth: '40px',
+                        padding: '8px 12px'
+                      }}
+                      title={viewingSession.isPaused ? "Resume viewing session" : "Pause viewing session"}
+                    >
+                      {viewingActionLoading === 'pause' ? '⏳' : (viewingSession.isPaused ? '▶️' : '⏸️')}
+                    </Button>
+                    
+                    {/* Stop button */}
+                    <Button
+                      onClick={stopViewing}
+                      disabled={viewingActionLoading === 'stop'}
+                      style={{ 
+                        backgroundColor: '#e74c3c', 
+                        color: '#fff',
+                        minWidth: '40px',
+                        padding: '8px 12px'
+                      }}
+                      title="Stop viewing session"
+                    >
+                      {viewingActionLoading === 'stop' ? '⏳' : '⏹️'}
                     </Button>
                   </>
                 )}

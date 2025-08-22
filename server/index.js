@@ -4094,6 +4094,180 @@ app.post('/api/reading/log', async (req, res) => {
   }
 });
 
+// ==================== VIEWING SESSION ENDPOINTS ====================
+
+// Start a viewing session for web videos
+app.post('/api/viewing/start', async (req, res) => {
+  try {
+    const { mediaType, title, seriesTitle, customOrderItemId } = req.body;
+    
+    console.log('Viewing session start request:', { mediaType, title, seriesTitle, customOrderItemId });
+    
+    if (!mediaType || !title) {
+      console.log('Missing required fields - mediaType or title');
+      return res.status(400).json({ error: 'Missing required fields: mediaType and title are required' });
+    }
+
+    if (!customOrderItemId) {
+      console.log('Missing customOrderItemId - using default value');
+      // Use a default value or generate one if customOrderItemId is missing
+      const defaultId = Date.now(); // Use timestamp as fallback
+      console.log('Using fallback customOrderItemId:', defaultId);
+    }
+
+    if (!['webvideo'].includes(mediaType)) {
+      console.log('Invalid media type:', mediaType);
+      return res.status(400).json({ error: 'Invalid media type for viewing' });
+    }
+
+    const finalCustomOrderItemId = customOrderItemId || Date.now();
+    
+    const viewingSession = await watchLogService.startViewing({
+      mediaType,
+      title,
+      seriesTitle,
+      customOrderItemId: finalCustomOrderItemId
+    });
+
+    console.log('Viewing session started successfully:', viewingSession.id);
+    res.json(viewingSession);
+  } catch (error) {
+    console.error('Error starting viewing session:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Pause/Resume the active viewing session
+app.post('/api/viewing/pause', async (req, res) => {
+  try {
+    console.log('Attempting to pause/resume viewing session...');
+    
+    // Find the active viewing session
+    const activeSession = await watchLogService.getActiveViewingSession();
+    
+    console.log('Active session found:', activeSession);
+    
+    if (!activeSession) {
+      console.log('No active viewing session found');
+      return res.status(404).json({ error: 'No active viewing session found' });
+    }
+
+    console.log('Pausing/resuming session with ID:', activeSession.id);
+    const updatedSession = await watchLogService.pauseViewing(activeSession.id);
+    console.log('Session paused/resumed successfully');
+    res.json(updatedSession);
+  } catch (error) {
+    console.error('Error pausing viewing session:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Stop the active viewing session
+app.post('/api/viewing/stop', async (req, res) => {
+  try {
+    console.log('Attempting to stop viewing session...');
+    const { progress } = req.body;
+    
+    // Find the active viewing session
+    const activeSession = await watchLogService.getActiveViewingSession();
+    
+    console.log('Active session found:', activeSession);
+    
+    if (!activeSession) {
+      console.log('No active viewing session found');
+      return res.status(404).json({ error: 'No active viewing session found' });
+    }
+
+    console.log('Stopping session with ID:', activeSession.id);
+    
+    // Stop the viewing session
+    const completedSession = await watchLogService.stopViewing(activeSession.customOrderItemId);
+    
+    // Update viewing progress if provided and session wasn't deleted
+    if (progress && !completedSession.deleted && activeSession.customOrderItemId) {
+      console.log('Updating viewing progress for item:', activeSession.customOrderItemId, progress);
+      
+      try {
+        const updateData = {};
+        
+        if (progress.watchedPercentage !== undefined && progress.watchedPercentage >= 0 && progress.watchedPercentage <= 100) {
+          updateData.webvideoPercentWatched = progress.watchedPercentage;
+        }
+        
+        if (progress.currentTime !== undefined && progress.currentTime >= 0) {
+          updateData.webvideoCurrentTime = progress.currentTime;
+        }
+        
+        if (progress.totalDuration !== undefined && progress.totalDuration > 0) {
+          // Also update the total duration if provided and not already set
+          const existingItem = await prisma.customOrderItem.findUnique({
+            where: { id: activeSession.customOrderItemId },
+            select: { webvideoDuration: true }
+          });
+          
+          if (!existingItem?.webvideoDuration) {
+            updateData.webvideoDuration = progress.totalDuration;
+          }
+        }
+        
+        if (Object.keys(updateData).length > 0) {
+          await prisma.customOrderItem.update({
+            where: { id: activeSession.customOrderItemId },
+            data: updateData
+          });
+          
+          console.log('Viewing progress updated successfully:', updateData);
+        }
+      } catch (progressError) {
+        console.error('Error updating viewing progress:', progressError);
+        // Don't fail the whole request if progress update fails
+      }
+    }
+    
+    console.log('Session stopped successfully');
+    res.json(completedSession);
+  } catch (error) {
+    console.error('Error stopping viewing session:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Get the current active viewing session
+app.get('/api/viewing/active', async (req, res) => {
+  try {
+    console.log('Getting active viewing session...');
+    const activeSession = await watchLogService.getActiveViewingSession();
+    console.log('Active session:', activeSession);
+    res.json(activeSession);
+  } catch (error) {
+    console.error('Error getting active viewing session:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Manual viewing log endpoint (for testing)
+app.post('/api/viewing/log', async (req, res) => {
+  try {
+    const watchLogData = {
+      mediaType: req.body.mediaType,
+      activityType: 'view',
+      title: req.body.title,
+      seriesTitle: req.body.seriesTitle,
+      customOrderItemId: req.body.customOrderItemId,
+      startTime: req.body.startTime,
+      endTime: req.body.endTime,
+      totalWatchTime: req.body.totalWatchTime,
+      isCompleted: true
+    };
+
+    const watchLog = await watchLogService.logWatched(watchLogData);
+    res.json({ success: true, watchLog });
+  } catch (error) {
+    console.error('Error logging viewing session:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // ==================== WATCH STATISTICS ENDPOINTS ====================
 
 // Get watch statistics with flexible date filtering
@@ -4164,6 +4338,7 @@ app.get('/api/watch-stats', async (req, res) => {
     stats.totalStats.totalWatchTimeFormatted = watchLogService.formatWatchTime(stats.totalStats.totalWatchTime);
     stats.totalStats.totalTvWatchTimeFormatted = watchLogService.formatWatchTime(stats.totalStats.totalTvWatchTime);
     stats.totalStats.totalMovieWatchTimeFormatted = watchLogService.formatWatchTime(stats.totalStats.totalMovieWatchTime);
+    stats.totalStats.totalWebVideoViewTimeFormatted = watchLogService.formatWatchTime(stats.totalStats.totalWebVideoViewTime);
     stats.totalStats.totalReadTimeFormatted = watchLogService.formatWatchTime(stats.totalStats.totalReadTime);
     stats.totalStats.totalBookReadTimeFormatted = watchLogService.formatWatchTime(stats.totalStats.totalBookReadTime);
     stats.totalStats.totalComicReadTimeFormatted = watchLogService.formatWatchTime(stats.totalStats.totalComicReadTime);
@@ -4175,6 +4350,7 @@ app.get('/api/watch-stats', async (req, res) => {
       totalWatchTimeFormatted: watchLogService.formatWatchTime(group.totalWatchTime),
       tvWatchTimeFormatted: watchLogService.formatWatchTime(group.tvWatchTime),
       movieWatchTimeFormatted: watchLogService.formatWatchTime(group.movieWatchTime),
+      webVideoViewTimeFormatted: watchLogService.formatWatchTime(group.webVideoViewTime || 0),
       totalReadTimeFormatted: watchLogService.formatWatchTime(group.totalReadTime || 0),
       bookReadTimeFormatted: watchLogService.formatWatchTime(group.bookReadTime || 0),
       comicReadTimeFormatted: watchLogService.formatWatchTime(group.comicReadTime || 0),
@@ -4257,6 +4433,53 @@ app.get('/api/watch-stats/custom-orders', async (req, res) => {
   }
 });
 
+// Debug endpoint to fix webvideo completion status
+app.post('/api/debug/fix-webvideo-completion', async (req, res) => {
+  try {
+    // Update webvideo sessions that have endTime but aren't marked as completed
+    const result = await prisma.watchLog.updateMany({
+      where: {
+        mediaType: 'webvideo',
+        endTime: { not: null },
+        isCompleted: false
+      },
+      data: {
+        isCompleted: true
+      }
+    });
+    
+    res.json({
+      message: 'Fixed webvideo completion status',
+      updated: result.count
+    });
+  } catch (error) {
+    console.error('Error fixing webvideo completion:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Debug endpoint to check webvideo sessions
+app.get('/api/debug/webvideo-sessions', async (req, res) => {
+  try {
+    const sessions = await prisma.watchLog.findMany({
+      where: {
+        mediaType: 'webvideo'
+      },
+      orderBy: {
+        startTime: 'desc'
+      }
+    });
+    
+    res.json({
+      count: sessions.length,
+      sessions: sessions
+    });
+  } catch (error) {
+    console.error('Error getting webvideo sessions:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // Get media type specific statistics
 app.get('/api/watch-stats/media-type/:mediaType', async (req, res) => {
   try {
@@ -4265,7 +4488,7 @@ app.get('/api/watch-stats/media-type/:mediaType', async (req, res) => {
     
     console.log(`DEBUG: Media type stats requested for: ${mediaType}, period: ${period}`);
     
-    const validMediaTypes = ['tv', 'movie', 'book', 'comic', 'shortstory'];
+    const validMediaTypes = ['tv', 'movie', 'webvideo', 'book', 'comic', 'shortstory'];
     if (!validMediaTypes.includes(mediaType)) {
       return res.status(400).json({ error: 'Invalid media type' });
     }

@@ -192,11 +192,13 @@ class WatchLogService {
           displayDate: new Date(date.getFullYear(), date.getMonth(), date.getDate()), // Local date object
           tvEpisodes: 0,
           movies: 0,
+          webVideos: 0,
           books: 0,
           comics: 0,
           shortStories: 0,
           tvWatchTime: 0,
           movieWatchTime: 0,
+          webVideoViewTime: 0,
           bookReadTime: 0,
           comicReadTime: 0,
           shortStoryReadTime: 0,
@@ -211,9 +213,15 @@ class WatchLogService {
       if (log.mediaType === 'tv') {
         grouped[key].tvEpisodes++;
         grouped[key].tvWatchTime += watchTime;
+        grouped[key].totalWatchTime += watchTime;
       } else if (log.mediaType === 'movie') {
         grouped[key].movies++;
         grouped[key].movieWatchTime += watchTime;
+        grouped[key].totalWatchTime += watchTime;
+      } else if (log.mediaType === 'webvideo') {
+        grouped[key].webVideos++;
+        grouped[key].webVideoViewTime += watchTime;
+        grouped[key].totalWatchTime += watchTime;
       } else if (log.mediaType === 'book') {
         grouped[key].books++;
         grouped[key].bookReadTime += watchTime;
@@ -228,7 +236,6 @@ class WatchLogService {
         grouped[key].totalReadTime += watchTime;
       }
       
-      grouped[key].totalWatchTime += watchTime;
       grouped[key].entries.push(log);
     });
 
@@ -246,11 +253,13 @@ class WatchLogService {
     let totalBooks = 0;
     let totalComics = 0;
     let totalShortStories = 0;
+    let totalWebVideos = 0;
     let totalTvWatchTime = 0;
     let totalMovieWatchTime = 0;
     let totalBookReadTime = 0;
     let totalComicReadTime = 0;
     let totalShortStoryReadTime = 0;
+    let totalWebVideoViewTime = 0;
 
     watchLogs.forEach(log => {
       const time = log.totalWatchTime || log.duration || 0;
@@ -270,6 +279,9 @@ class WatchLogService {
       } else if (log.mediaType === 'shortstory') {
         totalShortStories++;
         totalShortStoryReadTime += time;
+      } else if (log.mediaType === 'webvideo') {
+        totalWebVideos++;
+        totalWebVideoViewTime += time;
       }
     });
 
@@ -277,10 +289,12 @@ class WatchLogService {
       // Watch stats
       totalTvEpisodes,
       totalMovies,
+      totalWebVideos,
       totalTvWatchTime,
       totalMovieWatchTime,
-      totalWatchTime: totalTvWatchTime + totalMovieWatchTime,
-      totalWatchItems: totalTvEpisodes + totalMovies,
+      totalWebVideoViewTime,
+      totalWatchTime: totalTvWatchTime + totalMovieWatchTime + totalWebVideoViewTime,
+      totalWatchItems: totalTvEpisodes + totalMovies + totalWebVideos,
       
       // Read stats
       totalBooks,
@@ -293,8 +307,8 @@ class WatchLogService {
       totalReadItems: totalBooks + totalComics + totalShortStories,
       
       // Combined stats
-      totalItems: totalTvEpisodes + totalMovies + totalBooks + totalComics + totalShortStories,
-      totalActivityTime: totalTvWatchTime + totalMovieWatchTime + totalBookReadTime + totalComicReadTime + totalShortStoryReadTime
+      totalItems: totalTvEpisodes + totalMovies + totalWebVideos + totalBooks + totalComics + totalShortStories,
+      totalActivityTime: totalTvWatchTime + totalMovieWatchTime + totalWebVideoViewTime + totalBookReadTime + totalComicReadTime + totalShortStoryReadTime
     };
   }
 
@@ -399,6 +413,56 @@ class WatchLogService {
   }
 
   /**
+   * Start a viewing session for a web video
+   * @param {Object} params - Viewing session parameters
+   * @param {string} params.mediaType - 'webvideo'
+   * @param {string} params.title - Title of the web video
+   * @param {string} params.webUrl - URL of the web video
+   * @param {number} params.customOrderItemId - Custom order item ID
+   * @returns {Promise<Object>} The created viewing log entry
+   */
+  async startViewing(params) {
+    try {
+      // Check if there's already an active viewing session for this item
+      const activeSession = await this.prisma.watchLog.findFirst({
+        where: {
+          customOrderItemId: params.customOrderItemId,
+          activityType: 'view',
+          endTime: null
+        }
+      });
+
+      if (activeSession) {
+        console.log(`Resuming existing viewing session for ${params.title}`);
+        // Resume the existing session (unpause it)
+        return await this.resumeViewing(activeSession.id);
+      }
+
+      const viewingLog = await this.prisma.watchLog.create({
+        data: {
+          mediaType: params.mediaType,
+          activityType: 'view',
+          title: params.title,
+          seriesTitle: null,
+          customOrderItemId: params.customOrderItemId,
+          startTime: new Date(),
+          endTime: null,
+          duration: null, // Web videos don't have a set duration
+          totalWatchTime: 0,
+          isCompleted: false,
+          isPaused: false
+        }
+      });
+
+      console.log(`Started viewing session for web video: ${params.title}`);
+      return viewingLog;
+    } catch (error) {
+      console.error('Error starting viewing session:', error);
+      throw error;
+    }
+  }
+
+  /**
    * Pause an active reading session
    * @param {number} readingLogId - ID of the reading log to pause
    * @returns {Promise<Object>} Updated reading log
@@ -442,6 +506,49 @@ class WatchLogService {
   }
 
   /**
+   * Pause an active viewing session (for web videos)
+   * @param {number} viewingLogId - ID of the viewing log to pause
+   * @returns {Promise<Object>} Updated viewing log
+   */
+  async pauseViewing(viewingLogId) {
+    try {
+      const viewingLog = await this.prisma.watchLog.findUnique({
+        where: { id: viewingLogId }
+      });
+
+      if (!viewingLog) {
+        throw new Error('Viewing session not found');
+      }
+
+      if (viewingLog.isPaused) {
+        // If already paused, resume it
+        console.log('Viewing session is paused, resuming...');
+        return await this.resumeViewing(viewingLogId);
+      }
+
+      // Calculate time since last resume (or start if never paused)
+      const now = new Date();
+      const sessionStartTime = viewingLog.endTime ? new Date(viewingLog.endTime) : new Date(viewingLog.startTime);
+      const timeElapsed = Math.floor((now - sessionStartTime) / 1000 / 60); // in minutes
+
+      const updatedLog = await this.prisma.watchLog.update({
+        where: { id: viewingLogId },
+        data: {
+          isPaused: true,
+          endTime: now, // Temporarily store pause time in endTime
+          totalWatchTime: (viewingLog.totalWatchTime || 0) + timeElapsed
+        }
+      });
+
+      console.log(`Paused viewing session (${timeElapsed} minutes added)`);
+      return updatedLog;
+    } catch (error) {
+      console.error('Error pausing viewing session:', error);
+      throw error;
+    }
+  }
+
+  /**
    * Resume a paused reading session
    * @param {number} readingLogId - ID of the reading log to resume
    * @returns {Promise<Object>} Updated reading log
@@ -460,6 +567,29 @@ class WatchLogService {
       return updatedLog;
     } catch (error) {
       console.error('Error resuming reading session:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Resume a paused viewing session (for web videos)
+   * @param {number} viewingLogId - ID of the viewing log to resume
+   * @returns {Promise<Object>} Updated viewing log
+   */
+  async resumeViewing(viewingLogId) {
+    try {
+      const updatedLog = await this.prisma.watchLog.update({
+        where: { id: viewingLogId },
+        data: {
+          isPaused: false,
+          endTime: null // Clear the temporary pause time
+        }
+      });
+
+      console.log('Resumed viewing session');
+      return updatedLog;
+    } catch (error) {
+      console.error('Error resuming viewing session:', error);
       throw error;
     }
   }
@@ -527,6 +657,58 @@ class WatchLogService {
   }
 
   /**
+   * Stop viewing session for web video
+   * @param {number} customOrderItemId - Custom order item ID
+   * @returns {Promise<Object>} Updated viewing session
+   */
+  async stopViewing(customOrderItemId) {
+    console.log(`Stopping viewing session for custom order item: ${customOrderItemId}`);
+    
+    try {
+      // Find the active viewing session
+      const activeSession = await this.getActiveViewingSession(customOrderItemId);
+      
+      if (!activeSession) {
+        throw new Error('No active viewing session found');
+      }
+
+      const endTime = new Date();
+      let finalTotalTime = 0;
+
+      if (activeSession.isPaused) {
+        // If paused, use the existing totalWatchTime
+        finalTotalTime = activeSession.totalWatchTime || 0;
+        console.log(`Session was paused. Using existing total time: ${finalTotalTime} minutes`);
+      } else {
+        // Calculate total time including current session
+        const sessionTime = (endTime - new Date(activeSession.startTime)) / (1000 * 60); // Convert to minutes
+        finalTotalTime = (activeSession.totalWatchTime || 0) + sessionTime;
+        console.log(`Active session time: ${sessionTime.toFixed(2)} minutes, total: ${finalTotalTime.toFixed(2)} minutes`);
+      }
+
+      // Update the session as completed
+      const updatedLog = await this.prisma.watchLog.update({
+        where: { id: activeSession.id },
+        data: {
+          endTime: endTime,
+          totalWatchTime: Math.round(finalTotalTime * 100) / 100, // Round to 2 decimal places
+          isPaused: false,
+          isCompleted: true
+        }
+      });
+
+      // Add totalTime in seconds for client compatibility
+      updatedLog.totalTime = finalTotalTime * 60; // Convert minutes to seconds
+
+      console.log(`Completed viewing session: ${finalTotalTime} minutes total`);
+      return updatedLog;
+    } catch (error) {
+      console.error('Error stopping viewing session:', error);
+      throw error;
+    }
+  }
+
+  /**
    * Get active reading session for a custom order item
    * @param {number} customOrderItemId - Custom order item ID (optional - if not provided, finds any active session)
    * @returns {Promise<Object|null>} Active reading session or null
@@ -560,6 +742,50 @@ class WatchLogService {
       return activeSession;
     } catch (error) {
       console.error('Error getting active reading session:', error);
+      return null;
+    }
+  }
+
+  /**
+   * Get active viewing session for a custom order item
+   * @param {number} customOrderItemId - Custom order item ID (optional - if not provided, finds any active session)
+   * @returns {Promise<Object|null>} Active viewing session or null
+   */
+  async getActiveViewingSession(customOrderItemId) {
+    try {
+      const whereClause = customOrderItemId 
+        ? {
+            customOrderItemId: customOrderItemId,
+            activityType: 'view',
+            OR: [
+              { endTime: null },  // Not ended
+              { 
+                endTime: { not: null }, 
+                isPaused: true 
+              }  // Paused (has endTime but is paused)
+            ]
+          }
+        : {
+            activityType: 'view',
+            OR: [
+              { endTime: null },  // Not ended
+              { 
+                endTime: { not: null }, 
+                isPaused: true 
+              }  // Paused (has endTime but is paused)
+            ]
+          };
+
+      const activeSession = await this.prisma.watchLog.findFirst({
+        where: whereClause,
+        orderBy: {
+          startTime: 'desc'
+        }
+      });
+
+      return activeSession;
+    } catch (error) {
+      console.error('Error getting active viewing session:', error);
       return null;
     }
   }
@@ -645,11 +871,13 @@ class WatchLogService {
             totalReadTime: 0,
             totalTvEpisodes: 0,
             totalMovies: 0,
+            totalWebVideos: 0,
             totalBooks: 0,
             totalComics: 0,
             totalShortStories: 0,
             totalTvWatchTime: 0,
             totalMovieWatchTime: 0,
+            totalWebVideoViewTime: 0,
             totalBookReadTime: 0,
             totalComicReadTime: 0,
             totalShortStoryReadTime: 0,
@@ -667,6 +895,12 @@ class WatchLogService {
           } else if (log.mediaType === 'movie') {
             stats.totalMovies += 1;
             stats.totalMovieWatchTime += watchTime;
+          }
+        } else if (log.activityType === 'view') {
+          stats.totalWatchTime += watchTime;
+          if (log.mediaType === 'webvideo') {
+            stats.totalWebVideos += 1;
+            stats.totalWebVideoViewTime += watchTime;
           }
         } else if (log.activityType === 'read') {
           stats.totalReadTime += watchTime;
@@ -690,6 +924,7 @@ class WatchLogService {
         totalReadTimeFormatted: this.formatWatchTime(stats.totalReadTime),
         totalTvWatchTimeFormatted: this.formatWatchTime(stats.totalTvWatchTime),
         totalMovieWatchTimeFormatted: this.formatWatchTime(stats.totalMovieWatchTime),
+        totalWebVideoViewTimeFormatted: this.formatWatchTime(stats.totalWebVideoViewTime),
         totalBookReadTimeFormatted: this.formatWatchTime(stats.totalBookReadTime),
         totalComicReadTimeFormatted: this.formatWatchTime(stats.totalComicReadTime),
         totalShortStoryReadTimeFormatted: this.formatWatchTime(stats.totalShortStoryReadTime),
@@ -698,7 +933,66 @@ class WatchLogService {
       // Sort by total activity time (watch + read) descending
       results.sort((a, b) => (b.totalWatchTime + b.totalReadTime) - (a.totalWatchTime + a.totalReadTime));
 
-      return results;
+      // Calculate overall totals for all custom orders
+      const totalStats = {
+        totalEntries: watchLogs.length,
+        totalWatchTime: 0,
+        totalReadTime: 0,
+        totalTvEpisodes: 0,
+        totalMovies: 0,
+        totalWebVideos: 0,
+        totalBooks: 0,
+        totalComics: 0,
+        totalShortStories: 0,
+        totalTvWatchTime: 0,
+        totalMovieWatchTime: 0,
+        totalWebVideoViewTime: 0,
+        totalBookReadTime: 0,
+        totalComicReadTime: 0,
+        totalShortStoryReadTime: 0,
+        uniqueCustomOrders: Object.keys(orderStats).length
+      };
+
+      // Sum up all the totals from individual custom orders
+      results.forEach(stats => {
+        totalStats.totalWatchTime += stats.totalWatchTime;
+        totalStats.totalReadTime += stats.totalReadTime;
+        totalStats.totalTvEpisodes += stats.totalTvEpisodes;
+        totalStats.totalMovies += stats.totalMovies;
+        totalStats.totalWebVideos += stats.totalWebVideos;
+        totalStats.totalBooks += stats.totalBooks;
+        totalStats.totalComics += stats.totalComics;
+        totalStats.totalShortStories += stats.totalShortStories;
+        totalStats.totalTvWatchTime += stats.totalTvWatchTime;
+        totalStats.totalMovieWatchTime += stats.totalMovieWatchTime;
+        totalStats.totalWebVideoViewTime += stats.totalWebVideoViewTime;
+        totalStats.totalBookReadTime += stats.totalBookReadTime;
+        totalStats.totalComicReadTime += stats.totalComicReadTime;
+        totalStats.totalShortStoryReadTime += stats.totalShortStoryReadTime;
+      });
+
+      // Calculate combined totals
+      totalStats.totalActivityTime = totalStats.totalWatchTime + totalStats.totalReadTime;
+      totalStats.totalWatchItems = totalStats.totalTvEpisodes + totalStats.totalMovies + totalStats.totalWebVideos;
+      totalStats.totalReadItems = totalStats.totalBooks + totalStats.totalComics + totalStats.totalShortStories;
+      totalStats.totalItems = totalStats.totalWatchItems + totalStats.totalReadItems;
+
+      // Add formatted time strings
+      totalStats.totalActivityTimeFormatted = this.formatWatchTime(totalStats.totalActivityTime);
+      totalStats.totalWatchTimeFormatted = this.formatWatchTime(totalStats.totalWatchTime);
+      totalStats.totalReadTimeFormatted = this.formatWatchTime(totalStats.totalReadTime);
+      totalStats.totalTvWatchTimeFormatted = this.formatWatchTime(totalStats.totalTvWatchTime);
+      totalStats.totalMovieWatchTimeFormatted = this.formatWatchTime(totalStats.totalMovieWatchTime);
+      totalStats.totalWebVideoViewTimeFormatted = this.formatWatchTime(totalStats.totalWebVideoViewTime);
+      totalStats.totalBookReadTimeFormatted = this.formatWatchTime(totalStats.totalBookReadTime);
+      totalStats.totalComicReadTimeFormatted = this.formatWatchTime(totalStats.totalComicReadTime);
+      totalStats.totalShortStoryReadTimeFormatted = this.formatWatchTime(totalStats.totalShortStoryReadTime);
+
+      return {
+        totalStats,
+        customOrders: results,
+        totalEntries: watchLogs.length
+      };
     } catch (error) {
       console.error('Error fetching custom order stats:', error);
       throw error;
@@ -864,17 +1158,22 @@ class WatchLogService {
       } else if (mediaType === 'shortstory') {
         totalStats.totalShortStories = watchLogs.length;
         totalStats.totalShortStoryReadTime = 0;
+      } else if (mediaType === 'webvideo') {
+        totalStats.totalWebVideos = watchLogs.length;
+        totalStats.totalWebVideoViewTime = 0;
       }
 
       watchLogs.forEach(log => {
         const watchTime = log.totalWatchTime || 0;
         totalStats.totalActivityTime += watchTime;
         
-        // Determine if this is a watch or read activity
+        // Determine if this is a watch, view, or read activity
         const isReadActivity = log.activityType === 'read' || 
                                (log.mediaType && ['book', 'comic', 'shortstory'].includes(log.mediaType));
         const isWatchActivity = log.activityType === 'watch' || 
                                 (log.mediaType && ['tv', 'movie'].includes(log.mediaType));
+        const isViewActivity = log.activityType === 'view' || 
+                               (log.mediaType && ['webvideo'].includes(log.mediaType));
         
         if (isWatchActivity) {
           totalStats.totalWatchTime += watchTime;
@@ -918,6 +1217,11 @@ class WatchLogService {
             if (log.seasonNumber) totalStats.seasons.add(`${log.seriesTitle} S${log.seasonNumber}`);
           } else if (mediaType === 'movie') {
             totalStats.totalMovieWatchTime += watchTime;
+          }
+        } else if (isViewActivity) {
+          totalStats.totalWatchTime += watchTime; // Web video viewing counts as watch time
+          if (mediaType === 'webvideo') {
+            totalStats.totalWebVideoViewTime += watchTime;
           }
         } else if (isReadActivity) {
           totalStats.totalReadTime += watchTime;
@@ -1641,11 +1945,21 @@ class WatchLogService {
         totalStats.totalTvWatchTimeFormatted = this.formatWatchTime(totalStats.totalTvWatchTime);
       } else if (mediaType === 'movie') {
         totalStats.totalMovieWatchTimeFormatted = this.formatWatchTime(totalStats.totalMovieWatchTime);
+      } else if (mediaType === 'webvideo') {
+        totalStats.totalWebVideoViewTimeFormatted = this.formatWatchTime(totalStats.totalWebVideoViewTime);
       } else if (mediaType === 'book') {
         totalStats.totalBookReadTimeFormatted = this.formatWatchTime(totalStats.totalBookReadTime);
       } else if (mediaType === 'comic') {
         totalStats.totalComicReadTimeFormatted = this.formatWatchTime(totalStats.totalComicReadTime);
       } else if (mediaType === 'shortstory') {
+        totalStats.totalShortStoryReadTimeFormatted = this.formatWatchTime(totalStats.totalShortStoryReadTime);
+      } else {
+        // Format all media type times when no specific type is requested
+        totalStats.totalTvWatchTimeFormatted = this.formatWatchTime(totalStats.totalTvWatchTime);
+        totalStats.totalMovieWatchTimeFormatted = this.formatWatchTime(totalStats.totalMovieWatchTime);
+        totalStats.totalWebVideoViewTimeFormatted = this.formatWatchTime(totalStats.totalWebVideoViewTime);
+        totalStats.totalBookReadTimeFormatted = this.formatWatchTime(totalStats.totalBookReadTime);
+        totalStats.totalComicReadTimeFormatted = this.formatWatchTime(totalStats.totalComicReadTime);
         totalStats.totalShortStoryReadTimeFormatted = this.formatWatchTime(totalStats.totalShortStoryReadTime);
       }
 
@@ -1741,7 +2055,7 @@ class WatchLogService {
       // Add 'type' field based on mediaType for consistency with frontend
       const logsWithType = logs.map(log => ({
         ...log,
-        type: log.activityType || log.mediaType // Use existing activityType or fallback to mediaType
+        type: log.mediaType || log.activityType // Use mediaType for display, fallback to activityType
       }));
 
       return {

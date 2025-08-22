@@ -865,6 +865,11 @@
   color: #ffffff;
 }
 
+.media-type.webvideo {
+  background-color: #06b6d4;
+  color: #ffffff;
+}
+
 /* Ensure media type badge has consistent styling */
 .media-type {
   padding: 2px 8px;

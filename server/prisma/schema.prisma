@@ -18,6 +18,7 @@ model Settings {
   tvdbApiKey                        String?
   tvdbBearerToken                   String?
   selectedPlayer                    String?
+  selectedPlexUser                  String?
   tvGeneralPercent                  Int       @default(50)
   moviesGeneralPercent              Int       @default(50)
   customOrderPercent                Int       @default(0)
