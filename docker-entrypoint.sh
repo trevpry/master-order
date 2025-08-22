@@ -227,17 +227,17 @@ else
         npx prisma migrate status 2>&1 || echo "[DEBUG] Migrate status failed"
         
         echo "[DEBUG] Trying to push schema directly..."
-        if npx prisma db push --force-reset --accept-data-loss 2>&1; then
-            echo "[SUCCESS] Schema pushed successfully using db push"
-        else
-            echo "[ERROR] Both migrate deploy and db push failed"
-            echo "[DEBUG] Attempting to generate Prisma client first..."
-            npx prisma generate 2>&1 || echo "[DEBUG] Generate failed"
-            
-            echo "[DEBUG] Final attempt with reset..."
-            npx prisma migrate reset --force --skip-seed 2>&1 || echo "[DEBUG] Reset failed"
-            exit 1
-        fi
+    if npx prisma db push 2>&1; then
+        echo "[SUCCESS] Schema pushed successfully using db push"
+    else
+        echo "[ERROR] Both migrate deploy and db push failed"
+        echo "[DEBUG] Attempting to generate Prisma client first..."
+        npx prisma generate 2>&1 || echo "[DEBUG] Generate failed"
+        
+        echo "[DEBUG] Final attempt with reset (THIS WILL DELETE DATA)..."
+        npx prisma migrate reset --force --skip-seed 2>&1 || echo "[DEBUG] Reset failed"
+        exit 1
+    fi
     else
         echo "[SUCCESS] Prisma migrate deploy successful"
     fi

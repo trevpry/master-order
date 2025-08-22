@@ -20,8 +20,6 @@ services:
       - "DATABASE_URL=postgresql://master_order_user:secure_password_change_me@192.168.1.113:5432/master_order"
       - "POSTGRES_PASSWORD=secure_password_change_me"
       - PORT=3001
-      # Temporarily skip PostgreSQL readiness check for debugging
-      - SKIP_PG_CHECK=true
       # Add your API keys and settings here or use a .env file
       # - PLEX_URL=http://your-plex-server:32400
       # - PLEX_TOKEN=your-plex-token
