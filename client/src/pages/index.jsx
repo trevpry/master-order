@@ -9,6 +9,9 @@ import config from '../config'
 
 
 function Home() {
+  // Debug state for configuration visibility
+  const [showDebugInfo, setShowDebugInfo] = useState(true);
+  
   // Initialize selectedMedia from localStorage
   const [selectedMedia, setSelectedMedia] = useState(() => {
     try {
@@ -981,7 +984,37 @@ function Home() {
   };return (
     <div className="app-container home-responsive">
       <div className="app-card home-card">
-        <div className="app-content home-content">          <div className="button-container home-button">
+        <div className="app-content home-content">
+          {/* Debug Panel - Remove this after troubleshooting */}
+          {showDebugInfo && (
+            <div style={{
+              backgroundColor: '#f0f8ff',
+              border: '2px solid #007acc',
+              padding: '10px',
+              margin: '10px 0',
+              borderRadius: '5px',
+              fontSize: '12px',
+              fontFamily: 'monospace'
+            }}>
+              <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px'}}>
+                <strong>🔧 Debug Info (Mobile Troubleshooting)</strong>
+                <button onClick={() => setShowDebugInfo(false)} style={{fontSize: '12px', padding: '2px 6px'}}>Hide</button>
+              </div>
+              <div><strong>Current URL:</strong> {window.location.href}</div>
+              <div><strong>Hostname:</strong> {window.location.hostname}</div>
+              <div><strong>API Base URL:</strong> {config.apiBaseUrl}</div>
+              <div><strong>Device:</strong> {navigator.userAgent.includes('Mobile') ? '📱 Mobile' : '🖥️ Desktop'}</div>
+              <div><strong>Selected Media:</strong> {selectedMedia ? selectedMedia.type || 'Unknown type' : 'None'}</div>
+              {selectedMedia && selectedMedia.localArtworkPath && (
+                <div><strong>Local Artwork Path:</strong> {selectedMedia.localArtworkPath}</div>
+              )}
+              {selectedMedia && (
+                <div><strong>Artwork URL being used:</strong> {getArtworkUrl()}</div>
+              )}
+            </div>
+          )}
+          
+          <div className="button-container home-button">
             <Button
               onClick={callExpressRoute}
               disabled={loading}
