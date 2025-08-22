@@ -933,66 +933,7 @@ class WatchLogService {
       // Sort by total activity time (watch + read) descending
       results.sort((a, b) => (b.totalWatchTime + b.totalReadTime) - (a.totalWatchTime + a.totalReadTime));
 
-      // Calculate overall totals for all custom orders
-      const totalStats = {
-        totalEntries: watchLogs.length,
-        totalWatchTime: 0,
-        totalReadTime: 0,
-        totalTvEpisodes: 0,
-        totalMovies: 0,
-        totalWebVideos: 0,
-        totalBooks: 0,
-        totalComics: 0,
-        totalShortStories: 0,
-        totalTvWatchTime: 0,
-        totalMovieWatchTime: 0,
-        totalWebVideoViewTime: 0,
-        totalBookReadTime: 0,
-        totalComicReadTime: 0,
-        totalShortStoryReadTime: 0,
-        uniqueCustomOrders: Object.keys(orderStats).length
-      };
-
-      // Sum up all the totals from individual custom orders
-      results.forEach(stats => {
-        totalStats.totalWatchTime += stats.totalWatchTime;
-        totalStats.totalReadTime += stats.totalReadTime;
-        totalStats.totalTvEpisodes += stats.totalTvEpisodes;
-        totalStats.totalMovies += stats.totalMovies;
-        totalStats.totalWebVideos += stats.totalWebVideos;
-        totalStats.totalBooks += stats.totalBooks;
-        totalStats.totalComics += stats.totalComics;
-        totalStats.totalShortStories += stats.totalShortStories;
-        totalStats.totalTvWatchTime += stats.totalTvWatchTime;
-        totalStats.totalMovieWatchTime += stats.totalMovieWatchTime;
-        totalStats.totalWebVideoViewTime += stats.totalWebVideoViewTime;
-        totalStats.totalBookReadTime += stats.totalBookReadTime;
-        totalStats.totalComicReadTime += stats.totalComicReadTime;
-        totalStats.totalShortStoryReadTime += stats.totalShortStoryReadTime;
-      });
-
-      // Calculate combined totals
-      totalStats.totalActivityTime = totalStats.totalWatchTime + totalStats.totalReadTime;
-      totalStats.totalWatchItems = totalStats.totalTvEpisodes + totalStats.totalMovies + totalStats.totalWebVideos;
-      totalStats.totalReadItems = totalStats.totalBooks + totalStats.totalComics + totalStats.totalShortStories;
-      totalStats.totalItems = totalStats.totalWatchItems + totalStats.totalReadItems;
-
-      // Add formatted time strings
-      totalStats.totalActivityTimeFormatted = this.formatWatchTime(totalStats.totalActivityTime);
-      totalStats.totalWatchTimeFormatted = this.formatWatchTime(totalStats.totalWatchTime);
-      totalStats.totalReadTimeFormatted = this.formatWatchTime(totalStats.totalReadTime);
-      totalStats.totalTvWatchTimeFormatted = this.formatWatchTime(totalStats.totalTvWatchTime);
-      totalStats.totalMovieWatchTimeFormatted = this.formatWatchTime(totalStats.totalMovieWatchTime);
-      totalStats.totalWebVideoViewTimeFormatted = this.formatWatchTime(totalStats.totalWebVideoViewTime);
-      totalStats.totalBookReadTimeFormatted = this.formatWatchTime(totalStats.totalBookReadTime);
-      totalStats.totalComicReadTimeFormatted = this.formatWatchTime(totalStats.totalComicReadTime);
-      totalStats.totalShortStoryReadTimeFormatted = this.formatWatchTime(totalStats.totalShortStoryReadTime);
-
-      return {
-        totalStats,
-        customOrders: results,
-        totalEntries: watchLogs.length
-      };
+      return results;
     } catch (error) {
       console.error('Error fetching custom order stats:', error);
       throw error;

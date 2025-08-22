@@ -189,12 +189,25 @@ const WatchStats = () => {
   // Fetch custom order statistics
   const fetchCustomOrderStats = async (period = 'all') => {
     try {
+      console.log('Fetching custom order stats for period:', period);
       const response = await fetch(`${config.apiBaseUrl}/api/watch-stats/custom-orders?period=${period}`);
-      if (!response.ok) throw new Error('Failed to fetch custom order stats');
+      console.log('Custom order stats response status:', response.status);
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('Custom order stats API error:', response.status, errorText);
+        throw new Error(`Failed to fetch custom order stats: ${response.status} ${errorText}`);
+      }
       const data = await response.json();
+      console.log('Custom order stats data received:', {
+        isArray: Array.isArray(data),
+        length: data?.length,
+        firstItem: data?.[0]?.customOrderName,
+        sample: data?.[0]
+      });
       setCustomOrderStats(data);
     } catch (err) {
       console.error('Error fetching custom order stats:', err);
+      setCustomOrderStats(null); // Set to null to trigger error display
     }
   };
 
@@ -1168,33 +1181,10 @@ const WatchStats = () => {
                   <h5 className="card-title">Custom Order Overview ({customPeriod.charAt(0).toUpperCase() + customPeriod.slice(1)})</h5>
                   {customOrderStats ? (
                     <div>
-                      <p><strong>Total Entries:</strong> {customOrderStats.totalEntries}</p>
-                      <p><strong>Total Activity Time:</strong> {customOrderStats.totalStats?.totalActivityTimeFormatted || '0 minutes'}</p>
-                      <p><strong>Total Watch Time:</strong> {customOrderStats.totalStats?.totalWatchTimeFormatted || '0 minutes'}</p>
-                      <p><strong>Total Read Time:</strong> {customOrderStats.totalStats?.totalReadTimeFormatted || '0 minutes'}</p>
-                      <p><strong>Custom Orders Accessed:</strong> {customOrderStats.totalStats?.uniqueCustomOrders || 0}</p>
-                      
-                      {/* Media Type Breakdown */}
-                      <hr />
-                      <h6>Media Type Breakdown:</h6>
-                      {customOrderStats.totalStats?.totalTvEpisodes > 0 && (
-                        <p><strong>TV Episodes:</strong> {customOrderStats.totalStats.totalTvEpisodes} ({customOrderStats.totalStats?.totalTvWatchTimeFormatted || '0 minutes'})</p>
-                      )}
-                      {customOrderStats.totalStats?.totalMovies > 0 && (
-                        <p><strong>Movies:</strong> {customOrderStats.totalStats.totalMovies} ({customOrderStats.totalStats?.totalMovieWatchTimeFormatted || '0 minutes'})</p>
-                      )}
-                      {customOrderStats.totalStats?.totalWebVideos > 0 && (
-                        <p><strong>Web Videos:</strong> {customOrderStats.totalStats.totalWebVideos} ({customOrderStats.totalStats?.totalWebVideoViewTimeFormatted || '0 minutes'})</p>
-                      )}
-                      {customOrderStats.totalStats?.totalBooks > 0 && (
-                        <p><strong>Books:</strong> {customOrderStats.totalStats.totalBooks} ({customOrderStats.totalStats?.totalBookReadTimeFormatted || '0 minutes'})</p>
-                      )}
-                      {customOrderStats.totalStats?.totalComics > 0 && (
-                        <p><strong>Comics:</strong> {customOrderStats.totalStats.totalComics} ({customOrderStats.totalStats?.totalComicReadTimeFormatted || '0 minutes'})</p>
-                      )}
-                      {customOrderStats.totalStats?.totalShortStories > 0 && (
-                        <p><strong>Short Stories:</strong> {customOrderStats.totalStats.totalShortStories} ({customOrderStats.totalStats?.totalShortStoryReadTimeFormatted || '0 minutes'})</p>
-                      )}
+                      <p><strong>Total Custom Orders:</strong> {customOrderStats.length}</p>
+                      <p><strong>Total Entries:</strong> {customOrderStats.reduce((sum, order) => sum + (order.totalTvEpisodes + order.totalMovies + order.totalWebVideos + order.totalBooks + order.totalComics + order.totalShortStories), 0)}</p>
+                      <p><strong>Total Watch Time:</strong> {customOrderStats.reduce((sum, order) => sum + order.totalWatchTime, 0) > 0 ? `${Math.floor(customOrderStats.reduce((sum, order) => sum + order.totalWatchTime, 0) / 60)}h ${customOrderStats.reduce((sum, order) => sum + order.totalWatchTime, 0) % 60}m` : '0 minutes'}</p>
+                      <p><strong>Total Read Time:</strong> {customOrderStats.reduce((sum, order) => sum + order.totalReadTime, 0) > 0 ? `${Math.floor(customOrderStats.reduce((sum, order) => sum + order.totalReadTime, 0) / 60)}h ${customOrderStats.reduce((sum, order) => sum + order.totalReadTime, 0) % 60}m` : '0 minutes'}</p>
                     </div>
                   ) : (
                     <p>Loading custom order statistics...</p>
@@ -2417,63 +2407,78 @@ const WatchStats = () => {
       {activeTab === 'custom-orders' && (
         <div className="tab-content">
           {customOrderStats ? (
-            <div className="stats-card">
-              <h2>Statistics by Custom Order</h2>
-              <div className="custom-order-stats">
-                {customOrderStats.customOrders?.map((orderStat, index) => (
-                  <div key={index} className="custom-order-item">
-                    <div className="order-header">
-                      <h3>{orderStat.customOrderName || 'Unknown Order'}</h3>
-                      <span className="order-total">
-                        {orderStat.totalWatchTimeFormatted} watch • {orderStat.totalReadTimeFormatted} read
-                      </span>
+            Array.isArray(customOrderStats) && customOrderStats.length > 0 ? (
+              <div className="stats-card">
+                <h2>Statistics by Custom Order</h2>
+                <div className="custom-order-stats">
+                  {customOrderStats.map((orderStat, index) => (
+                    <div key={index} className="custom-order-item">
+                      <div className="order-header">
+                        <h3>{orderStat.customOrderName || 'Unknown Order'}</h3>
+                        <span className="order-total">
+                          {orderStat.totalWatchTimeFormatted} watch • {orderStat.totalReadTimeFormatted} read
+                        </span>
+                      </div>
+                      <div className="order-breakdown">
+                        {orderStat.totalTvEpisodes > 0 && (
+                          <div className="breakdown-item">
+                            <span className="media-type">TV:</span>
+                            <span>{orderStat.totalTvEpisodes} episodes ({orderStat.totalTvWatchTimeFormatted})</span>
+                          </div>
+                        )}
+                        {orderStat.totalMovies > 0 && (
+                          <div className="breakdown-item">
+                            <span className="media-type">Movies:</span>
+                            <span>{orderStat.totalMovies} movies ({orderStat.totalMovieWatchTimeFormatted})</span>
+                          </div>
+                        )}
+                        {orderStat.totalWebVideos > 0 && (
+                          <div className="breakdown-item">
+                            <span className="media-type">Web Videos:</span>
+                            <span>{orderStat.totalWebVideos} videos ({orderStat.totalWebVideoViewTimeFormatted})</span>
+                          </div>
+                        )}
+                        {orderStat.totalBooks > 0 && (
+                          <div className="breakdown-item">
+                            <span className="media-type">Books:</span>
+                            <span>{orderStat.totalBooks} books ({orderStat.totalBookReadTimeFormatted})</span>
+                          </div>
+                        )}
+                        {orderStat.totalComics > 0 && (
+                          <div className="breakdown-item">
+                            <span className="media-type">Comics:</span>
+                            <span>{orderStat.totalComics} comics ({orderStat.totalComicReadTimeFormatted})</span>
+                          </div>
+                        )}
+                        {orderStat.totalShortStories > 0 && (
+                          <div className="breakdown-item">
+                            <span className="media-type">Stories:</span>
+                            <span>{orderStat.totalShortStories} stories ({orderStat.totalShortStoryReadTimeFormatted})</span>
+                          </div>
+                        )}
+                      </div>
                     </div>
-                    <div className="order-breakdown">
-                      {orderStat.totalTvEpisodes > 0 && (
-                        <div className="breakdown-item">
-                          <span className="media-type">TV:</span>
-                          <span>{orderStat.totalTvEpisodes} episodes ({orderStat.totalTvWatchTimeFormatted})</span>
-                        </div>
-                      )}
-                      {orderStat.totalMovies > 0 && (
-                        <div className="breakdown-item">
-                          <span className="media-type">Movies:</span>
-                          <span>{orderStat.totalMovies} movies ({orderStat.totalMovieWatchTimeFormatted})</span>
-                        </div>
-                      )}
-                      {orderStat.totalWebVideos > 0 && (
-                        <div className="breakdown-item">
-                          <span className="media-type">Web Videos:</span>
-                          <span>{orderStat.totalWebVideos} videos ({orderStat.totalWebVideoViewTimeFormatted})</span>
-                        </div>
-                      )}
-                      {orderStat.totalBooks > 0 && (
-                        <div className="breakdown-item">
-                          <span className="media-type">Books:</span>
-                          <span>{orderStat.totalBooks} books ({orderStat.totalBookReadTimeFormatted})</span>
-                        </div>
-                      )}
-                      {orderStat.totalComics > 0 && (
-                        <div className="breakdown-item">
-                          <span className="media-type">Comics:</span>
-                          <span>{orderStat.totalComics} comics ({orderStat.totalComicReadTimeFormatted})</span>
-                        </div>
-                      )}
-                      {orderStat.totalShortStories > 0 && (
-                        <div className="breakdown-item">
-                          <span className="media-type">Stories:</span>
-                          <span>{orderStat.totalShortStories} stories ({orderStat.totalShortStoryReadTimeFormatted})</span>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                ))}
+                  ))}
+                </div>
               </div>
-            </div>
+            ) : (
+              <div className="stats-card">
+                <div style={{ textAlign: 'center', padding: '40px', color: '#8b949e' }}>
+                  <h3>No Custom Order Data Available</h3>
+                  <p>Debug info: {JSON.stringify({ 
+                    hasData: !!customOrderStats, 
+                    isArray: Array.isArray(customOrderStats),
+                    length: customOrderStats?.length,
+                    type: typeof customOrderStats
+                  })}</p>
+                </div>
+              </div>
+            )
           ) : (
             <div className="stats-card">
               <div style={{ textAlign: 'center', padding: '40px', color: '#8b949e' }}>
                 <h3>Loading Custom Order Statistics...</h3>
+                <p>Check browser console for debugging information</p>
               </div>
             </div>
           )}

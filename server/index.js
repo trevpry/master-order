@@ -4424,12 +4424,19 @@ app.post('/api/watch-logs', async (req, res) => {
 app.get('/api/watch-stats/custom-orders', async (req, res) => {
   try {
     const { period = 'all' } = req.query;
+    console.log('Custom order stats request received - period:', period);
     const customOrderStats = await watchLogService.getCustomOrderStats(period);
+    console.log('Custom order stats result:', {
+      isArray: Array.isArray(customOrderStats),
+      length: customOrderStats?.length,
+      firstItem: customOrderStats?.[0]?.customOrderName,
+      totalEntries: customOrderStats?.reduce((sum, order) => sum + (order.totalTvEpisodes + order.totalMovies + order.totalWebVideos + order.totalBooks + order.totalComics + order.totalShortStories), 0)
+    });
     
     res.json(customOrderStats);
   } catch (error) {
     console.error('Error getting custom order statistics:', error);
-    res.status(500).json({ error: 'Failed to get custom order statistics' });
+    res.status(500).json({ error: 'Failed to get custom order statistics', details: error.message });
   }
 });
 
