@@ -1,3 +1,14 @@
+/* Mobile viewport handling */
+* {
+  box-sizing: border-box;
+}
+
+html, body {
+  overflow-x: hidden;
+  width: 100%;
+  max-width: 100%;
+}
+
 /* Main container */
 .settings-main {
   max-width: 1400px;
@@ -45,6 +56,14 @@
   grid-template-columns: 1fr 1fr;
   gap: 1.5rem;
   align-items: start;
+}
+
+/* Mobile Responsive Grid */
+@media (max-width: 768px) {
+  .settings-grid {
+    grid-template-columns: 1fr;
+    gap: 1rem;
+  }
 }
 
 .settings-column {
@@ -820,4 +839,180 @@
 .collection-checkbox input[type="checkbox"]:checked + .collection-name {
   color: #667eea;
   font-weight: 500;
+}
+
+/* Mobile Responsive Styles */
+@media (max-width: 768px) {
+  /* Main container adjustments - prevent horizontal overflow */
+  .settings-main {
+    padding: 1rem;
+    max-width: 100%;
+    width: 100%;
+    overflow-x: hidden;
+    box-sizing: border-box;
+  }
+  
+  /* Force single column grid on mobile */
+  .settings-grid {
+    display: flex !important;
+    flex-direction: column !important;
+    gap: 1rem;
+    width: 100%;
+  }
+  
+  /* Ensure columns stack properly */
+  .settings-column {
+    width: 100% !important;
+    max-width: 100% !important;
+    flex-shrink: 0;
+    box-sizing: border-box;
+  }
+  
+  .settings-column-left,
+  .settings-column-right {
+    width: 100% !important;
+    max-width: 100% !important;
+  }
+  
+  /* Header adjustments */
+  .settings-header h1 {
+    font-size: 1.8rem;
+  }
+  
+  .settings-subtitle {
+    font-size: 0.9rem;
+  }
+  
+  /* Section adjustments - ensure they fit mobile width */
+  .settings-section {
+    padding: 1.5rem;
+    margin-bottom: 1.5rem;
+    border-radius: 8px;
+    width: 100%;
+    max-width: 100%;
+    box-sizing: border-box;
+    overflow-x: hidden;
+  }
+  
+  .section-header h3 {
+    font-size: 1.2rem;
+  }
+  
+  /* Form elements - prevent horizontal overflow */
+  .form-group {
+    margin-bottom: 1rem;
+    width: 100%;
+    box-sizing: border-box;
+  }
+  
+  .form-group label {
+    font-size: 0.9rem;
+    margin-bottom: 0.5rem;
+    display: block;
+    width: 100%;
+  }
+  
+  .form-input,
+  .form-select {
+    font-size: 16px; /* Prevents zoom on iOS */
+    padding: 0.8rem;
+    border-radius: 6px;
+    width: 100%;
+    max-width: 100%;
+    box-sizing: border-box;
+  }
+  
+  .form-textarea {
+    font-size: 16px;
+    min-height: 80px;
+    width: 100%;
+    max-width: 100%;
+    box-sizing: border-box;
+    resize: vertical;
+  }
+  
+  /* Buttons */
+  .settings-button {
+    padding: 0.8rem 1.5rem;
+    font-size: 0.9rem;
+    width: 100%;
+    margin-bottom: 0.5rem;
+  }
+  
+  .button-group {
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+  
+  .button-row {
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+  
+  /* Status sections */
+  .status-grid {
+    grid-template-columns: 1fr;
+    gap: 1rem;
+  }
+  
+  .status-item {
+    padding: 1rem;
+  }
+  
+  /* Cards and containers */
+  .sync-card {
+    padding: 1.5rem;
+  }
+  
+  .device-status-card {
+    padding: 1rem;
+  }
+  
+  /* Collections list */
+  .collections-list {
+    max-height: 300px;
+  }
+  
+  .collection-checkbox {
+    padding: 0.5rem;
+    font-size: 0.9rem;
+  }
+  
+  /* Responsive text */
+  .info-text,
+  .help-text {
+    font-size: 0.85rem;
+    line-height: 1.4;
+  }
+}
+
+/* Small mobile devices */
+@media (max-width: 480px) {
+  .settings-main {
+    padding: 0.75rem;
+  }
+  
+  .settings-section {
+    padding: 1rem;
+  }
+  
+  .settings-header h1 {
+    font-size: 1.6rem;
+  }
+  
+  .section-header h3 {
+    font-size: 1.1rem;
+  }
+  
+  .form-input,
+  .form-select,
+  .form-textarea {
+    font-size: 16px;
+    padding: 0.7rem;
+  }
+  
+  .settings-button {
+    padding: 0.7rem 1rem;
+    font-size: 0.85rem;
+  }
 }

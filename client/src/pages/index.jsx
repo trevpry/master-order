@@ -8,7 +8,17 @@ import './MobileImageFix.css'
 import config from '../config'
 
 
-function Home() {  const [selectedMedia, setSelectedMedia] = useState(null);
+function Home() {
+  // Initialize selectedMedia from localStorage
+  const [selectedMedia, setSelectedMedia] = useState(() => {
+    try {
+      const saved = localStorage.getItem('masterOrder_selectedMedia');
+      return saved ? JSON.parse(saved) : null;
+    } catch (error) {
+      console.error('Error loading selectedMedia from localStorage:', error);
+      return null;
+    }
+  });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [markingWatched, setMarkingWatched] = useState(false);
@@ -83,6 +93,19 @@ function Home() {  const [selectedMedia, setSelectedMedia] = useState(null);
       socket.disconnect();
     };
   }, []);
+
+  // Save selectedMedia to localStorage whenever it changes
+  useEffect(() => {
+    try {
+      if (selectedMedia) {
+        localStorage.setItem('masterOrder_selectedMedia', JSON.stringify(selectedMedia));
+      } else {
+        localStorage.removeItem('masterOrder_selectedMedia');
+      }
+    } catch (error) {
+      console.error('Error saving selectedMedia to localStorage:', error);
+    }
+  }, [selectedMedia]);
 
   // Timer effect for reading sessions
   useEffect(() => {
@@ -379,7 +402,9 @@ function Home() {  const [selectedMedia, setSelectedMedia] = useState(null);
   const callExpressRoute = async () => {
       setLoading(true);
       setError('');
+      // Clear any existing selected media to get a fresh one
       setSelectedMedia(null);
+      
       try {
         console.log('Mobile Debug - Making API call to:', `${config.apiBaseUrl}/api/up_next`);
         const response = await fetch(`${config.apiBaseUrl}/api/up_next`);

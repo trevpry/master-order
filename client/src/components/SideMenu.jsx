@@ -2,13 +2,28 @@ import React, { useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import './SideMenu.css';
 
-const SideMenu = () => {
+const SideMenu = ({ isMobile, closeMobileMenu }) => {
   const [isCollapsed, setIsCollapsed] = useState(false);
   const location = useLocation();
   const navigate = useNavigate();
 
   const toggleSidebar = () => {
     setIsCollapsed(!isCollapsed);
+  };
+
+  // Handle menu item click - close mobile menu if on mobile
+  const handleMenuItemClick = (callback) => {
+    return (e) => {
+      // Call any specific callback first (like handleCustomOrdersClick)
+      if (callback) {
+        callback(e);
+      }
+      
+      // Close mobile menu if on mobile and navigation wasn't prevented
+      if (isMobile && !e.defaultPrevented) {
+        closeMobileMenu();
+      }
+    };
   };
 
   // Check if we're on a specific custom order page
@@ -82,7 +97,7 @@ const SideMenu = () => {
                 to={item.path} 
                 className={`menu-link ${location.pathname === item.path || (item.path === '/custom-orders' && location.pathname.startsWith('/custom-orders')) ? 'active' : ''}`}
                 title={isCollapsed ? item.label : ''}
-                onClick={item.path === '/custom-orders' ? handleCustomOrdersClick : undefined}
+                onClick={handleMenuItemClick(item.path === '/custom-orders' ? handleCustomOrdersClick : null)}
               >
                 <span className="menu-icon">{item.icon}</span>
                 {!isCollapsed && (

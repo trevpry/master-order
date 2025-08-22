@@ -185,9 +185,10 @@
     transition: transform 0.3s ease;
   }
   
-  .side-menu.mobile-open {
+  /* Remove this conflicting rule - handled by Layout.css */
+  /* .side-menu.mobile-open {
     transform: translateX(0);
-  }
+  } */
   
   .side-menu.collapsed {
     width: 100vw;

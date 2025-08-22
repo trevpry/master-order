@@ -32,7 +32,10 @@ const Layout = ({ children }) => {
       
       {/* Side Menu */}
       <div className={`side-menu-container ${isMobile && isSideMenuOpen ? 'mobile-open' : ''}`}>
-        <SideMenu />
+        <SideMenu 
+          isMobile={isMobile}
+          closeMobileMenu={() => setIsSideMenuOpen(false)}
+        />
       </div>
 
       {/* Mobile Header with Menu Button */}
