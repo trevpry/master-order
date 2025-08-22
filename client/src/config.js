@@ -17,41 +17,4 @@ const config = {
   })(),
 };
 
-// Debug logging to help troubleshoot mobile access issues
-console.log('🔍 DETAILED CONFIG DEBUG:', {
-  currentURL: window.location.href,
-  hostname: window.location.hostname,
-  port: window.location.port,
-  protocol: window.location.protocol,
-  apiBaseUrl: config.apiBaseUrl,
-  isLocalhost: window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1',
-  userAgent: navigator.userAgent.includes('Mobile') ? 'Mobile' : 'Desktop',
-  fullUserAgent: navigator.userAgent,
-  timestamp: new Date().toISOString()
-});
-
-// Mobile-specific debugging and warnings
-if (navigator.userAgent.includes('Mobile')) {
-  console.log('📱 MOBILE DEVICE DETECTED');
-  console.log('🎯 Final API URL will be:', config.apiBaseUrl);
-  
-  if (config.apiBaseUrl.includes('localhost')) {
-    console.error('❌ CRITICAL: Mobile device is STILL using localhost API URL!');
-    console.error('This indicates a configuration problem that needs investigation.');
-  } else {
-    console.log('✅ Mobile configuration looks correct - using server IP');
-  }
-  
-  // Test the API endpoint
-  console.log('🧪 Testing API connectivity...');
-  fetch(config.apiBaseUrl + '/api/settings')
-    .then(response => {
-      console.log('✅ API test successful:', response.status);
-    })
-    .catch(error => {
-      console.error('❌ API test failed:', error.message);
-      console.error('This confirms the API URL is not reachable from mobile');
-    });
-}
-
 export default config;
