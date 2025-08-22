@@ -278,7 +278,13 @@ class ArtworkCacheService {
   /**
    * Get artwork URL for a custom order item (cached if available, fallback to remote)
    */
-  async getArtworkUrl(item, baseUrl = 'http://localhost:3001') {
+  async getArtworkUrl(item, baseUrl) {
+    // Determine the base URL dynamically if not provided
+    if (!baseUrl) {
+      // Default to localhost for development, but this should be passed from the calling function
+      baseUrl = process.env.API_BASE_URL || 'http://localhost:3001';
+    }
+    
     // If we have a locally cached file, return the local URL
     if (item.localArtworkPath) {
       try {
@@ -293,12 +299,17 @@ class ArtworkCacheService {
     }
 
     // Fallback to original remote URL logic
-    return this.getRemoteArtworkUrl(item);
+    return this.getRemoteArtworkUrl(item, baseUrl);
   }
   /**
    * Get remote artwork URL (fallback method)
    */
-  async getRemoteArtworkUrl(item) {
+  async getRemoteArtworkUrl(item, baseUrl) {
+    // Determine the base URL dynamically if not provided
+    if (!baseUrl) {
+      baseUrl = process.env.API_BASE_URL || 'http://localhost:3001';
+    }
+    
     switch (item.mediaType) {      case 'comic':
         // First priority: explicit originalArtworkUrl (set during comic reselection)
         if (item.originalArtworkUrl) {
@@ -322,7 +333,7 @@ class ArtworkCacheService {
         // Fallback to traditional comic series lookup
         if (item.comicSeries && item.comicYear) {
           const comicString = `${item.comicSeries} (${item.comicYear}) #${item.comicIssue || '1'}`;
-          return `http://localhost:3001/api/comicvine-cover?comic=${encodeURIComponent(comicString)}`;
+          return `${baseUrl}/api/comicvine-cover?comic=${encodeURIComponent(comicString)}`;
         }
         break;
       

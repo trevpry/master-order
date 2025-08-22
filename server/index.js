@@ -103,7 +103,7 @@ app.get('/api/up_next', async (req, res) => {
       res.json(movieData);
     } else if (data.orderType === 'CUSTOM_ORDER') {
       console.log('Custom order type selected, using getNextCustomOrder function');
-      const customOrderData = await getNextCustomOrder();
+      const customOrderData = await getNextCustomOrder(req);
       res.json(customOrderData);
     } else {
       // TV General selection
@@ -2364,7 +2364,7 @@ app.delete('/api/orders/:id', async (req, res) => {
 // Custom order next item endpoint (for testing and direct access)
 app.get('/api/get-next-custom-order', async (req, res) => {
   try {
-    const customOrderData = await getNextCustomOrder();
+    const customOrderData = await getNextCustomOrder(req);
     res.json(customOrderData);
   } catch (error) {
     console.error('Failed to get next custom order item:', error.message);

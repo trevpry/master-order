@@ -231,7 +231,7 @@ async function fetchMediaDetailsFromPlex(plexKey, mediaType, customOrderItem) {
       const comicString = `${customOrderItem.comicSeries} (${customOrderItem.comicYear}) #${customOrderItem.comicIssue}`;
       
       // Get the cached artwork URL for this comic
-      const artworkUrl = await artworkCache.getArtworkUrl(customOrderItem);
+      const artworkUrl = await artworkCache.getArtworkUrl(customOrderItem, baseUrl);
       console.log(`Comic item details:`, {
         id: customOrderItem.id,
         localArtworkPath: customOrderItem.localArtworkPath,
@@ -475,9 +475,13 @@ async function enhanceWithTVDBArtwork(selectedSeries) {
 }
 
 // Main function to get next custom order item
-async function getNextCustomOrder() {
+async function getNextCustomOrder(req = null) {
   try {
     console.log('Starting custom order selection...');
+
+    // Extract base URL from request if available
+    const baseUrl = req ? `${req.protocol}://${req.get('host')}` : 'http://localhost:3001';
+    console.log(`Using base URL for artwork: ${baseUrl}`);
 
     // Get all active custom orders with unwatched items
     const customOrders = await getActiveCustomOrders();
