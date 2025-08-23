@@ -3,6 +3,29 @@ const prisma = require('./prismaClient'); // Use the shared Prisma client
 class PlexDatabaseService {
   constructor() {
     this.prisma = prisma; // Assign the shared instance
+    
+    // Detect database provider to handle table name casing differences
+    this.isPostgreSQL = this.detectPostgreSQL();
+  }
+  
+  /**
+   * Detect if we're using PostgreSQL based on DATABASE_URL
+   */
+  detectPostgreSQL() {
+    const databaseUrl = process.env.DATABASE_URL || '';
+    return databaseUrl.startsWith('postgresql://') || databaseUrl.startsWith('postgres://');
+  }
+  
+  /**
+   * Get the correct table name based on database provider
+   * PostgreSQL uses Pascal case (PlexEpisode), SQLite uses camelCase (plexEpisode)
+   */
+  getTableName(tableName) {
+    if (this.isPostgreSQL) {
+      // Convert camelCase to PascalCase for PostgreSQL
+      return tableName.charAt(0).toUpperCase() + tableName.slice(1);
+    }
+    return tableName;
   }  // Get all library sections from database
   async getLibrarySections() {
     try {
@@ -705,9 +728,10 @@ class PlexDatabaseService {
   // Mark an episode as watched by updating its viewCount
   async markEpisodeAsWatched(ratingKey) {
     try {
-      console.log(`Marking episode with ratingKey ${ratingKey} as watched`);
+      console.log(`Marking episode with ratingKey ${ratingKey} as watched (DB: ${this.isPostgreSQL ? 'PostgreSQL' : 'SQLite'})`);
       
-      const result = await this.prisma.plexEpisode.update({
+      const tableName = this.getTableName('plexEpisode');
+      const result = await this.prisma[tableName].update({
         where: { ratingKey: ratingKey },
         data: { viewCount: 1 } // Set viewCount to 1 to mark as watched
       });
@@ -723,9 +747,10 @@ class PlexDatabaseService {
   // Mark a movie as watched by updating its viewCount
   async markMovieAsWatched(ratingKey) {
     try {
-      console.log(`Marking movie with ratingKey ${ratingKey} as watched`);
+      console.log(`Marking movie with ratingKey ${ratingKey} as watched (DB: ${this.isPostgreSQL ? 'PostgreSQL' : 'SQLite'})`);
       
-      const result = await this.prisma.plexMovie.update({
+      const tableName = this.getTableName('plexMovie');
+      const result = await this.prisma[tableName].update({
         where: { ratingKey: ratingKey },
         data: { viewCount: 1 } // Set viewCount to 1 to mark as watched
       });
