@@ -363,6 +363,25 @@ class WatchLogService {
   }
 
   /**
+   * Delete a watch log entry
+   * @param {number} id - Watch log ID to delete
+   * @returns {Promise<Object>} Deleted watch log
+   */
+  async deleteWatchLog(id) {
+    try {
+      const deletedLog = await this.prisma.watchLog.delete({
+        where: { id: parseInt(id) }
+      });
+
+      console.log(`Deleted watch log entry: ${deletedLog.title} (ID: ${id})`);
+      return deletedLog;
+    } catch (error) {
+      console.error('Error deleting watch log:', error);
+      throw error;
+    }
+  }
+
+  /**
    * Get the current date in the configured timezone
    * @returns {Date} Date object for "today" in the configured timezone
    */

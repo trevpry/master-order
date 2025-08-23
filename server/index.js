@@ -1074,6 +1074,15 @@ app.post('/webhook', upload.single('thumb'), async (req, res) => {
     // Process media.scrobble events to mark items as watched
     if (payload.event === 'media.scrobble') {
       console.log('\n🎯 Processing media.scrobble event for automatic watched marking...');
+      
+      // Only process episodes and movies, skip music tracks and other media types
+      const mediaType = payload.Metadata?.type;
+      if (mediaType !== 'episode' && mediaType !== 'movie') {
+        console.log(`   🎵 Skipping scrobble for media type: "${mediaType}" (only episodes and movies are tracked)`);
+        res.status(200).send('OK');
+        return;
+      }
+      
       const ratingKey = payload.Metadata?.ratingKey;
       
       if (ratingKey) {
@@ -4313,6 +4322,22 @@ app.post('/api/watch-logs', async (req, res) => {
   } catch (error) {
     console.error('Error creating watch log:', error);
     res.status(500).json({ error: 'Failed to create watch log' });
+  }
+});
+
+// Delete a watch log entry
+app.delete('/api/watch-logs/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const deletedLog = await watchLogService.deleteWatchLog(id);
+    res.json({ success: true, deletedLog, message: 'Watch log entry deleted successfully' });
+  } catch (error) {
+    console.error('Error deleting watch log:', error);
+    if (error.code === 'P2025') {
+      res.status(404).json({ error: 'Watch log entry not found' });
+    } else {
+      res.status(500).json({ error: 'Failed to delete watch log entry' });
+    }
   }
 });
 

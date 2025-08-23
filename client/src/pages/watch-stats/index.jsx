@@ -326,6 +326,40 @@ const WatchStats = () => {
     fetchChartStats(newChartPeriod);
   };
 
+  const handleDeleteWatchLog = async (watchLogId, title) => {
+    if (!window.confirm(`Are you sure you want to delete the activity entry for "${title}"? This cannot be undone.`)) {
+      return;
+    }
+
+    try {
+      const response = await fetch(`${config.apiBaseUrl}/api/watch-logs/${watchLogId}`, {
+        method: 'DELETE',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      });
+
+      if (response.ok) {
+        // Refresh the all activity stats to reflect the deletion
+        fetchAllActivityStats(globalPeriod);
+        
+        // Also refresh other stats that might be affected
+        fetchStats(globalPeriod);
+        fetchRecentActivity();
+        
+        // Show success message (you might want to add a toast notification here)
+        console.log(`Successfully deleted activity entry for "${title}"`);
+      } else {
+        const errorData = await response.json();
+        console.error('Failed to delete watch log:', errorData.error);
+        alert(`Failed to delete activity entry: ${errorData.error}`);
+      }
+    } catch (error) {
+      console.error('Error deleting watch log:', error);
+      alert('An error occurred while deleting the activity entry');
+    }
+  };
+
   const formatDate = (dateString) => {
     const timezone = settings?.timezone || 'UTC';
     
@@ -2318,6 +2352,15 @@ const WatchStats = () => {
                             <span className="separator">•</span>
                             <span className="time">{new Date(log.startTime).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</span>
                           </div>
+                        </div>
+                        <div className="activity-actions">
+                          <button 
+                            className="delete-btn"
+                            onClick={() => handleDeleteWatchLog(log.id, log.title)}
+                            title="Delete this activity entry"
+                          >
+                            🗑️
+                          </button>
                         </div>
                       </div>
                     ))}

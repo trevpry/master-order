@@ -381,6 +381,9 @@
   border-radius: 6px;
   padding: 15px;
   transition: border-color 0.2s ease;
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
 }
 
 .activity-item:hover {
@@ -391,6 +394,7 @@
   display: flex;
   flex-direction: column;
   gap: 8px;
+  flex: 1;
 }
 
 .activity-title {
@@ -428,8 +432,66 @@
   font-weight: 600;
 }
 
+/* Media type specific colors */
+.media-type-tv {
+  background-color: #2f81f7;
+}
+
+.media-type-movie {
+  background-color: #9a6700;
+}
+
+.media-type-book {
+  background-color: #238636;
+}
+
+.media-type-comic {
+  background-color: #8b5cf6;
+}
+
+.media-type-shortstory {
+  background-color: #da3633;
+}
+
+.media-type-webvideo {
+  background-color: #f85149;
+}
+
 .separator {
   color: #30363d;
+}
+
+.activity-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: 15px;
+}
+
+.delete-btn {
+  background: none;
+  border: 1px solid #f85149;
+  color: #f85149;
+  padding: 6px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 14px;
+  transition: all 0.2s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 32px;
+  height: 32px;
+}
+
+.delete-btn:hover {
+  background-color: #f85149;
+  color: #ffffff;
+  border-color: #f85149;
+}
+
+.delete-btn:active {
+  transform: scale(0.95);
 }
 
 /* No Data State */
