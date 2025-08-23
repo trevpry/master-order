@@ -6,7 +6,7 @@ class PlexDatabaseService {
   }  // Get all library sections from database
   async getLibrarySections() {
     try {
-      return await this.prisma.PlexLibrarySection.findMany();
+      return await this.prisma.plexLibrarySection.findMany();
     } catch (error) {
       console.error('Error fetching library sections:', error);
       throw error;
@@ -16,7 +16,7 @@ class PlexDatabaseService {
   // Get TV sections only
   async getTVSections() {
     try {
-      return await this.prisma.PlexLibrarySection.findMany({
+      return await this.prisma.plexLibrarySection.findMany({
         where: { type: 'show' }
       });
     } catch (error) {
@@ -28,7 +28,7 @@ class PlexDatabaseService {
   // Get movie sections only
   async getMovieSections() {
     try {
-      return await this.prisma.PlexLibrarySection.findMany({
+      return await this.prisma.plexLibrarySection.findMany({
         where: { type: 'movie' }
       });
     } catch (error) {
@@ -40,7 +40,7 @@ class PlexDatabaseService {
   // Get all TV shows from database
   async getAllTVShows() {
     try {
-      return await this.prisma.PlexTVShow.findMany({
+      return await this.prisma.plexTVShow.findMany({
         include: {
           section: true
         }
@@ -53,7 +53,7 @@ class PlexDatabaseService {
   // Get TV shows from specific section
   async getTVShowsBySection(sectionKey) {
     try {
-      return await this.prisma.PlexTVShow.findMany({
+      return await this.prisma.plexTVShow.findMany({
         where: { sectionKey },
         include: {
           section: true
@@ -68,7 +68,7 @@ class PlexDatabaseService {
   // Get TV shows by collection name
   async getTVShowsByCollection(collectionName) {
     try {
-      return await this.prisma.PlexTVShow.findMany({
+      return await this.prisma.plexTVShow.findMany({
         where: {
           collections: {
             contains: collectionName
@@ -87,7 +87,7 @@ class PlexDatabaseService {
   // Get all movies from database
   async getAllMovies() {
     try {
-      return await this.prisma.PlexMovie.findMany({
+      return await this.prisma.plexMovie.findMany({
         include: {
           section: true
         }
@@ -101,7 +101,7 @@ class PlexDatabaseService {
   // Get movies from specific section
   async getMoviesBySection(sectionKey) {
     try {
-      return await this.prisma.PlexMovie.findMany({
+      return await this.prisma.plexMovie.findMany({
         where: { sectionKey },
         include: {
           section: true
@@ -116,7 +116,7 @@ class PlexDatabaseService {
   // Get movies by collection name
   async getMoviesByCollection(collectionName) {
     try {
-      return await this.prisma.PlexMovie.findMany({
+      return await this.prisma.plexMovie.findMany({
         where: {
           collections: {
             contains: collectionName
@@ -135,7 +135,7 @@ class PlexDatabaseService {
   // Get TV show by rating key
   async getTVShowByRatingKey(ratingKey) {
     try {
-      return await this.prisma.PlexTVShow.findUnique({
+      return await this.prisma.plexTVShow.findUnique({
         where: { ratingKey },
         include: {
           section: true,
@@ -155,7 +155,7 @@ class PlexDatabaseService {
   // Get movie by rating key
   async getMovieByRatingKey(ratingKey) {
     try {
-      return await this.prisma.PlexMovie.findUnique({
+      return await this.prisma.plexMovie.findUnique({
         where: { ratingKey },
         include: {
           section: true
@@ -170,7 +170,7 @@ class PlexDatabaseService {
   // Get seasons for a TV show
   async getSeasonsByShowRatingKey(showRatingKey) {
     try {
-      return await this.prisma.PlexSeason.findMany({
+      return await this.prisma.plexSeason.findMany({
         where: { showRatingKey },
         include: {
           episodes: true
@@ -186,7 +186,7 @@ class PlexDatabaseService {
   // Get episodes for a season
   async getEpisodesBySeasonRatingKey(seasonRatingKey) {
     try {
-      return await this.prisma.PlexEpisode.findMany({
+      return await this.prisma.plexEpisode.findMany({
         where: { seasonRatingKey },
         orderBy: { index: 'asc' }
       });
@@ -221,7 +221,7 @@ class PlexDatabaseService {
         whereCondition.year = searchYear;
       }
       
-      return await this.prisma.PlexTVShow.findMany({
+      return await this.prisma.plexTVShow.findMany({
         where: whereCondition,
         include: {
           section: true,
@@ -241,7 +241,7 @@ class PlexDatabaseService {
   // Search for movies by title
   async searchMovies(query) {
     try {
-      return await this.prisma.PlexMovie.findMany({
+      return await this.prisma.plexMovie.findMany({
         where: {
           title: {
             contains: query,
@@ -310,7 +310,7 @@ class PlexDatabaseService {
         });
       }
       
-      return await this.prisma.PlexEpisode.findMany({
+      return await this.prisma.plexEpisode.findMany({
         where: whereCondition,
         include: {
           season: {
@@ -460,7 +460,7 @@ class PlexDatabaseService {
       }
       
       // Try to find in episodes
-      const episode = await this.prisma.PlexEpisode.findUnique({
+      const episode = await this.prisma.plexEpisode.findUnique({
         where: { ratingKey },
         include: {
           season: {
@@ -503,19 +503,19 @@ class PlexDatabaseService {
   // Get database sync status
   async getSyncStatus() {
     try {
-      const sections = await this.prisma.PlexLibrarySection.count();
-      const shows = await this.prisma.PlexTVShow.count();
-      const seasons = await this.prisma.PlexSeason.count();
-      const episodes = await this.prisma.PlexEpisode.count();
-      const movies = await this.prisma.PlexMovie.count();
+      const sections = await this.prisma.plexLibrarySection.count();
+      const shows = await this.prisma.plexTVShow.count();
+      const seasons = await this.prisma.plexSeason.count();
+      const episodes = await this.prisma.plexEpisode.count();
+      const movies = await this.prisma.plexMovie.count();
       
       // Get last sync time
-      const lastSyncedShow = await this.prisma.PlexTVShow.findFirst({
+      const lastSyncedShow = await this.prisma.plexTVShow.findFirst({
         orderBy: { lastSyncedAt: 'desc' },
         select: { lastSyncedAt: true }
       });
       
-      const lastSyncedMovie = await this.prisma.PlexMovie.findFirst({
+      const lastSyncedMovie = await this.prisma.plexMovie.findFirst({
         orderBy: { lastSyncedAt: 'desc' },
         select: { lastSyncedAt: true }
       });
@@ -566,7 +566,7 @@ class PlexDatabaseService {
       
       console.log(`📺 Database search condition:`, JSON.stringify(whereCondition, null, 2));
       
-      const results = await this.prisma.PlexTVShow.findMany({
+      const results = await this.prisma.plexTVShow.findMany({
         where: whereCondition,
         include: {
           section: true
@@ -616,7 +616,7 @@ class PlexDatabaseService {
         whereCondition.season.show.year = searchYear;
       }
       
-      return await this.prisma.PlexEpisode.findMany({
+      return await this.prisma.plexEpisode.findMany({
         where: whereCondition,
         include: {
           season: {
@@ -650,7 +650,7 @@ class PlexDatabaseService {
         whereCondition.year = year;
       }
       
-      return await this.prisma.PlexMovie.findMany({
+      return await this.prisma.plexMovie.findMany({
         where: whereCondition,
         include: {
           section: true
@@ -687,7 +687,7 @@ class PlexDatabaseService {
         };
       }
       
-      return await this.prisma.PlexEpisode.findMany({
+      return await this.prisma.plexEpisode.findMany({
         where: whereCondition,
         include: {
           season: {
@@ -707,7 +707,7 @@ class PlexDatabaseService {
     try {
       console.log(`Marking episode with ratingKey ${ratingKey} as watched`);
       
-      const result = await this.prisma.PlexEpisode.update({
+      const result = await this.prisma.plexEpisode.update({
         where: { ratingKey: ratingKey },
         data: { viewCount: 1 } // Set viewCount to 1 to mark as watched
       });
@@ -725,7 +725,7 @@ class PlexDatabaseService {
     try {
       console.log(`Marking movie with ratingKey ${ratingKey} as watched`);
       
-      const result = await this.prisma.PlexMovie.update({
+      const result = await this.prisma.plexMovie.update({
         where: { ratingKey: ratingKey },
         data: { viewCount: 1 } // Set viewCount to 1 to mark as watched
       });

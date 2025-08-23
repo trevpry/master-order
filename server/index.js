@@ -18,6 +18,9 @@ const ArtworkCacheService = require('./artworkCacheService'); // Added import
 const subOrderService = require('./subOrderService'); // Added import
 const WatchLogService = require('./watchLogService'); // Added import
 const openLibraryService = require('./openLibraryService'); // Added import
+const { getTimezoneAwarePeriodBounds, getTimezoneAwareDateGrouping, formatDateInTimezone } = require('./utils/timezoneUtils');
+const StatisticsService = require('./services/statisticsService');
+const WatchStatsRoutes = require('./routes/watchStatsRoutes');
 
 // Initialize services
 const plexDb = new PlexDatabaseService();
@@ -26,6 +29,8 @@ const plexSync = new PlexSyncService(); // Initialize the sync service
 const backgroundSync = new BackgroundSyncService(); // Initialize background sync service
 const artworkCache = new ArtworkCacheService(); // Initialize artwork cache service
 const watchLogService = new WatchLogService(prisma); // Initialize watch log service
+const statisticsService = new StatisticsService(prisma, watchLogService);
+const watchStatsRoutes = new WatchStatsRoutes(watchLogService, statisticsService);
 const PlexPlayerService = require('./plexPlayerService');
 const plexPlayer = new PlexPlayerService(); // Initialize Plex player service
 
@@ -4290,192 +4295,14 @@ app.post('/api/viewing/log', async (req, res) => {
 
 // ==================== WATCH STATISTICS ENDPOINTS ====================
 
-// Helper function to get timezone-aware period boundaries
-function getTimezoneAwarePeriodBounds(period, timezone) {
-  const now = new Date();
-  
-  // Get "today" in the configured timezone
-  const todayInTZ = now.toLocaleDateString('en-CA', { timeZone: timezone }); // YYYY-MM-DD
-  const [year, month, day] = todayInTZ.split('-').map(n => parseInt(n));
-  
-  let startDateInTZ, endDateInTZ;
-  
-  switch (period) {
-    case 'today':
-      startDateInTZ = `${todayInTZ}T00:00:00`;
-      endDateInTZ = `${todayInTZ}T23:59:59.999`;
-      break;
-      
-    case 'week':
-      // Start of current week (Sunday) in timezone
-      const todayDate = new Date(year, month - 1, day);
-      const startOfWeek = new Date(todayDate);
-      startOfWeek.setDate(day - todayDate.getDay());
-      
-      const weekStartStr = startOfWeek.toLocaleDateString('en-CA');
-      startDateInTZ = `${weekStartStr}T00:00:00`;
-      endDateInTZ = `${todayInTZ}T23:59:59.999`;
-      break;
-      
-    case 'month':
-      // Start of current month in timezone
-      const monthStartStr = `${year}-${month.toString().padStart(2, '0')}-01`;
-      startDateInTZ = `${monthStartStr}T00:00:00`;
-      endDateInTZ = `${todayInTZ}T23:59:59.999`;
-      break;
-      
-    case 'year':
-      // Start of current year in timezone
-      const yearStartStr = `${year}-01-01`;
-      startDateInTZ = `${yearStartStr}T00:00:00`;
-      endDateInTZ = `${todayInTZ}T23:59:59.999`;
-      break;
-      
-    default:
-      return { startDate: null, endDate: null };
-  }
-  
-  // Convert timezone dates to UTC
-  const startTzDate = new Date(`${startDateInTZ}`);
-  const endTzDate = new Date(`${endDateInTZ}`);
-  
-  // Calculate timezone offset
-  const testDate = new Date(`${todayInTZ}T12:00:00`);
-  const utcTime = testDate.getTime();
-  const tzTime = new Date(testDate.toLocaleString('en-US', { timeZone: timezone })).getTime();
-  const offsetMs = utcTime - tzTime;
-  
-  const startDate = new Date(startTzDate.getTime() + offsetMs);
-  const endDate = new Date(endTzDate.getTime() + offsetMs);
-  
-  return { startDate, endDate };
-}
-
 // Get watch statistics with flexible date filtering
-app.get('/api/watch-stats', async (req, res) => {
-  try {
-    const { 
-      startDate, 
-      endDate, 
-      groupBy = 'day',
-      period = 'week' // 'today', 'week', 'month', 'year', 'all', or 'custom'
-    } = req.query;
-
-    // Get timezone setting
-    const { getSettings } = require('./databaseUtils');
-    const settings = await getSettings();
-    const timezone = settings?.timezone || 'UTC';
-
-    let actualStartDate = null;
-    let actualEndDate = null;
-
-    // Handle predefined periods with timezone awareness
-    if (period !== 'custom' && period !== 'all') {
-      const bounds = getTimezoneAwarePeriodBounds(period, timezone);
-      actualStartDate = bounds.startDate;
-      actualEndDate = bounds.endDate;
-      
-      if (actualStartDate && actualEndDate) {
-        console.log(`Filtering for ${period} in timezone ${timezone}`);
-        console.log(`Start: ${actualStartDate.toISOString()}, End: ${actualEndDate.toISOString()}`);
-      }
-    } else if (period === 'custom') {
-      if (startDate) actualStartDate = new Date(startDate);
-      if (endDate) actualEndDate = new Date(endDate);
-    }
-    // For 'all' period, no date filtering (actualStartDate and actualEndDate remain null)
-
-    const stats = await watchLogService.getWatchStats({
-      startDate: actualStartDate,
-      endDate: actualEndDate,
-      groupBy: groupBy
-    });
-    
-    console.log('DEBUG: Overview stats result:', {
-      totalWatchTime: stats?.totalStats?.totalWatchTime,
-      totalLogs: stats?.totalStats?.totalLogs,
-      recentCount: stats?.recentActivity?.length,
-      firstFewRecent: stats?.recentActivity?.slice(0, 3).map(log => ({
-        title: log.title,
-        seriesTitle: log.seriesTitle,
-        mediaType: log.mediaType,
-        plexKey: log.plexKey
-      }))
-    });
-
-    // Add formatted time strings
-    stats.totalStats.totalWatchTimeFormatted = watchLogService.formatWatchTime(stats.totalStats.totalWatchTime);
-    stats.totalStats.totalTvWatchTimeFormatted = watchLogService.formatWatchTime(stats.totalStats.totalTvWatchTime);
-    stats.totalStats.totalMovieWatchTimeFormatted = watchLogService.formatWatchTime(stats.totalStats.totalMovieWatchTime);
-    stats.totalStats.totalWebVideoViewTimeFormatted = watchLogService.formatWatchTime(stats.totalStats.totalWebVideoViewTime);
-    stats.totalStats.totalReadTimeFormatted = watchLogService.formatWatchTime(stats.totalStats.totalReadTime);
-    stats.totalStats.totalBookReadTimeFormatted = watchLogService.formatWatchTime(stats.totalStats.totalBookReadTime);
-    stats.totalStats.totalComicReadTimeFormatted = watchLogService.formatWatchTime(stats.totalStats.totalComicReadTime);
-    stats.totalStats.totalShortStoryReadTimeFormatted = watchLogService.formatWatchTime(stats.totalStats.totalShortStoryReadTime);
-    stats.totalStats.totalActivityTimeFormatted = watchLogService.formatWatchTime(stats.totalStats.totalActivityTime);
-
-    stats.groupedStats = stats.groupedStats.map(group => ({
-      ...group,
-      totalWatchTimeFormatted: watchLogService.formatWatchTime(group.totalWatchTime),
-      tvWatchTimeFormatted: watchLogService.formatWatchTime(group.tvWatchTime),
-      movieWatchTimeFormatted: watchLogService.formatWatchTime(group.movieWatchTime),
-      webVideoViewTimeFormatted: watchLogService.formatWatchTime(group.webVideoViewTime || 0),
-      totalReadTimeFormatted: watchLogService.formatWatchTime(group.totalReadTime || 0),
-      bookReadTimeFormatted: watchLogService.formatWatchTime(group.bookReadTime || 0),
-      comicReadTimeFormatted: watchLogService.formatWatchTime(group.comicReadTime || 0),
-      shortStoryReadTimeFormatted: watchLogService.formatWatchTime(group.shortStoryReadTime || 0)
-    }));
-
-    res.json(stats);
-  } catch (error) {
-    console.error('Error getting watch statistics:', error);
-    res.status(500).json({ error: 'Failed to get watch statistics' });
-  }
-});
+app.get('/api/watch-stats', watchStatsRoutes.getWatchStats.bind(watchStatsRoutes));
 
 // Get recent watch activity
-app.get('/api/watch-stats/recent', async (req, res) => {
-  try {
-    const { limit = 20 } = req.query;
-    const recentActivity = await watchLogService.getRecentActivity(parseInt(limit));
-    
-    // Add formatted times
-    const formattedActivity = recentActivity.map(log => ({
-      ...log,
-      durationFormatted: watchLogService.formatWatchTime(log.duration),
-      totalWatchTimeFormatted: watchLogService.formatWatchTime(log.totalWatchTime)
-    }));
-
-    res.json(formattedActivity);
-  } catch (error) {
-    console.error('Error getting recent watch activity:', error);
-    res.status(500).json({ error: 'Failed to get recent watch activity' });
-  }
-});
+app.get('/api/watch-stats/recent', watchStatsRoutes.getRecentActivity.bind(watchStatsRoutes));
 
 // Get today's watch statistics
-app.get('/api/watch-stats/today', async (req, res) => {
-  try {
-    const todayStats = await watchLogService.getTodayStats();
-    
-    // Add formatted time strings for watch activities
-    todayStats.totalStats.totalWatchTimeFormatted = watchLogService.formatWatchTime(todayStats.totalStats.totalWatchTime);
-    todayStats.totalStats.totalTvWatchTimeFormatted = watchLogService.formatWatchTime(todayStats.totalStats.totalTvWatchTime);
-    todayStats.totalStats.totalMovieWatchTimeFormatted = watchLogService.formatWatchTime(todayStats.totalStats.totalMovieWatchTime);
-    
-    // Add formatted time strings for reading activities
-    todayStats.totalStats.totalReadTimeFormatted = watchLogService.formatWatchTime(todayStats.totalStats.totalReadTime || 0);
-    todayStats.totalStats.totalBookReadTimeFormatted = watchLogService.formatWatchTime(todayStats.totalStats.totalBookReadTime || 0);
-    todayStats.totalStats.totalComicReadTimeFormatted = watchLogService.formatWatchTime(todayStats.totalStats.totalComicReadTime || 0);
-    todayStats.totalStats.totalShortStoryReadTimeFormatted = watchLogService.formatWatchTime(todayStats.totalStats.totalShortStoryReadTime || 0);
-    todayStats.totalStats.totalActivityTimeFormatted = watchLogService.formatWatchTime(todayStats.totalStats.totalActivityTime || 0);
-
-    res.json(todayStats);
-  } catch (error) {
-    console.error('Error getting today\'s watch statistics:', error);
-    res.status(500).json({ error: 'Failed to get today\'s watch statistics' });
-  }
-});
+app.get('/api/watch-stats/today', watchStatsRoutes.getTodayStats.bind(watchStatsRoutes));
 
 // Manual watch log entry (for items not automatically tracked)
 app.post('/api/watch-logs', async (req, res) => {
@@ -4490,17 +4317,7 @@ app.post('/api/watch-logs', async (req, res) => {
 });
 
 // Get custom order statistics
-app.get('/api/watch-stats/custom-orders', async (req, res) => {
-  try {
-    const { period = 'all' } = req.query;
-    const customOrderStats = await watchLogService.getCustomOrderStats(period);
-    
-    res.json(customOrderStats);
-  } catch (error) {
-    console.error('Error getting custom order statistics:', error);
-    res.status(500).json({ error: 'Failed to get custom order statistics' });
-  }
-});
+app.get('/api/watch-stats/custom-orders', watchStatsRoutes.getCustomOrderStats.bind(watchStatsRoutes));
 
 // Debug endpoint to fix webvideo completion status
 app.post('/api/debug/fix-webvideo-completion', async (req, res) => {
@@ -4550,60 +4367,10 @@ app.get('/api/debug/webvideo-sessions', async (req, res) => {
 });
 
 // Get media type specific statistics
-app.get('/api/watch-stats/media-type/:mediaType', async (req, res) => {
-  try {
-    const { mediaType } = req.params;
-    const { period = 'all', groupBy = 'day', actorSortBy, movieActorSortBy } = req.query;
-    
-    console.log(`DEBUG: Media type stats requested for: ${mediaType}, period: ${period}`);
-    
-    const validMediaTypes = ['tv', 'movie', 'webvideo', 'book', 'comic', 'shortstory'];
-    if (!validMediaTypes.includes(mediaType)) {
-      return res.status(400).json({ error: 'Invalid media type' });
-    }
-    
-    const mediaTypeStats = await watchLogService.getMediaTypeStats(mediaType, period, groupBy, actorSortBy, movieActorSortBy);
-    
-    console.log(`DEBUG: ${mediaType} stats result:`, {
-      totalCount: mediaTypeStats?.totalCount,
-      logsLength: mediaTypeStats?.logs?.length,
-      period: mediaTypeStats?.period,
-      firstFewLogs: mediaTypeStats?.logs?.slice(0, 3).map(log => ({
-        title: log.title,
-        seriesTitle: log.seriesTitle,
-        plexKey: log.plexKey,
-        mediaType: log.mediaType
-      }))
-    });
-    
-    res.json(mediaTypeStats);
-  } catch (error) {
-    console.error(`Error getting ${req.params.mediaType} statistics:`, error);
-    res.status(500).json({ error: `Failed to get ${req.params.mediaType} statistics` });
-  }
-});
+app.get('/api/watch-stats/media-type/:mediaType', watchStatsRoutes.getMediaTypeStats.bind(watchStatsRoutes));
 
 // Get all activity across all media types
-app.get('/api/watch-stats/all-activity', async (req, res) => {
-  try {
-    console.log('All activity endpoint called with query:', req.query);
-    const { period = 'all', groupBy = 'day' } = req.query;
-    
-    console.log('Calling getAllActivityStats with period:', period, 'groupBy:', groupBy);
-    const allActivityStats = await watchLogService.getAllActivityStats(period, groupBy);
-    
-    console.log('All activity stats result:', {
-      totalCount: allActivityStats?.totalCount,
-      logsLength: allActivityStats?.logs?.length,
-      period: allActivityStats?.period
-    });
-    
-    res.json(allActivityStats);
-  } catch (error) {
-    console.error('Error getting all activity statistics:', error);
-    res.status(500).json({ error: 'Failed to get all activity statistics' });
-  }
-});
+app.get('/api/watch-stats/all-activity', watchStatsRoutes.getAllActivity.bind(watchStatsRoutes));
 
 // ==================== END WATCH STATISTICS ENDPOINTS ====================
 
