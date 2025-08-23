@@ -1230,7 +1230,7 @@ app.post('/webhook', upload.single('thumb'), async (req, res) => {
 
               // Mark as watched in Plex database
               try {
-                if (watchLogData.mediaType === 'episode') {
+                if (watchLogData.mediaType === 'tv' || payload.Metadata?.type === 'episode') {
                   await plexDb.markEpisodeAsWatched(ratingKey);
                   console.log(`   📺 Marked episode as watched in Plex database`);
                 } else if (watchLogData.mediaType === 'movie') {
