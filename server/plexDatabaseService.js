@@ -728,18 +728,32 @@ class PlexDatabaseService {
   // Mark an episode as watched by updating its viewCount
   async markEpisodeAsWatched(ratingKey) {
     try {
-      console.log(`Marking episode with ratingKey ${ratingKey} as watched (DB: ${this.isPostgreSQL ? 'PostgreSQL' : 'SQLite'})`);
+      console.log(`🔍 Marking episode with ratingKey ${ratingKey} as watched (DB: ${this.isPostgreSQL ? 'PostgreSQL' : 'SQLite'})`);
       
       const tableName = this.getTableName('plexEpisode');
+      console.log(`📊 Using table name: ${tableName}`);
+      
+      // First check if the episode exists
+      const existingEpisode = await this.prisma[tableName].findUnique({
+        where: { ratingKey: ratingKey }
+      });
+      
+      if (!existingEpisode) {
+        console.warn(`⚠️  Episode with ratingKey ${ratingKey} not found in ${tableName} table`);
+        return null;
+      }
+      
+      console.log(`✅ Found episode: ${existingEpisode.title} (current viewCount: ${existingEpisode.viewCount})`);
+      
       const result = await this.prisma[tableName].update({
         where: { ratingKey: ratingKey },
         data: { viewCount: 1 } // Set viewCount to 1 to mark as watched
       });
       
-      console.log(`Successfully marked episode ${ratingKey} as watched`);
+      console.log(`🎯 Successfully marked episode ${ratingKey} as watched (viewCount set to 1)`);
       return result;
     } catch (error) {
-      console.error(`Error marking episode ${ratingKey} as watched:`, error);
+      console.error(`❌ Error marking episode ${ratingKey} as watched:`, error);
       throw error;
     }
   }
@@ -747,18 +761,32 @@ class PlexDatabaseService {
   // Mark a movie as watched by updating its viewCount
   async markMovieAsWatched(ratingKey) {
     try {
-      console.log(`Marking movie with ratingKey ${ratingKey} as watched (DB: ${this.isPostgreSQL ? 'PostgreSQL' : 'SQLite'})`);
+      console.log(`🔍 Marking movie with ratingKey ${ratingKey} as watched (DB: ${this.isPostgreSQL ? 'PostgreSQL' : 'SQLite'})`);
       
       const tableName = this.getTableName('plexMovie');
+      console.log(`📊 Using table name: ${tableName}`);
+      
+      // First check if the movie exists
+      const existingMovie = await this.prisma[tableName].findUnique({
+        where: { ratingKey: ratingKey }
+      });
+      
+      if (!existingMovie) {
+        console.warn(`⚠️  Movie with ratingKey ${ratingKey} not found in ${tableName} table`);
+        return null;
+      }
+      
+      console.log(`✅ Found movie: ${existingMovie.title} (current viewCount: ${existingMovie.viewCount})`);
+      
       const result = await this.prisma[tableName].update({
         where: { ratingKey: ratingKey },
         data: { viewCount: 1 } // Set viewCount to 1 to mark as watched
       });
       
-      console.log(`Successfully marked movie ${ratingKey} as watched`);
+      console.log(`🎯 Successfully marked movie ${ratingKey} as watched (viewCount set to 1)`);
       return result;
     } catch (error) {
-      console.error(`Error marking movie ${ratingKey} as watched:`, error);
+      console.error(`❌ Error marking movie ${ratingKey} as watched:`, error);
       throw error;
     }
   }
