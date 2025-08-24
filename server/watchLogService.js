@@ -1975,13 +1975,11 @@ class WatchLogService {
         break;
         
       case 'week':
-        // Start of current week (Sunday) in timezone
-        const todayDate = new Date(year, month - 1, day);
-        const startOfWeek = new Date(todayDate);
-        startOfWeek.setDate(day - todayDate.getDay());
+        // Last 7 days from today (not calendar week)
+        const sevenDaysAgo = new Date(year, month - 1, day - 7);
+        const sevenDaysAgoStr = sevenDaysAgo.toLocaleDateString('en-CA', { timeZone: timezone });
         
-        const weekStartStr = startOfWeek.toLocaleDateString('en-CA');
-        startDateInTZ = `${weekStartStr}T00:00:00`;
+        startDateInTZ = `${sevenDaysAgoStr}T00:00:00`;
         endDateInTZ = `${todayInTZ}T23:59:59.999`;
         break;
         
