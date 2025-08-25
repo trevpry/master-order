@@ -28,6 +28,10 @@ model Settings {
   ignoredTVCollections              String?
   christmasFilterEnabled            Boolean   @default(false)
   plexSyncInterval                  Int       @default(12)
+  komgaUrl                          String?
+  komgaApiKey                       String?
+  stashUrl                          String?
+  stashApiKey                       String?
   createdAt                         DateTime  @default(now())
   updatedAt                         DateTime  @updatedAt
 }
@@ -124,6 +128,14 @@ model CustomOrderItem {
   tvdbStudio             String?
   tvdbArtworkUrl         String?
   referencedCustomOrderId Int?              // For sub-order items, references the CustomOrder id
+  
+  // Komga integration fields
+  komgaUrl               String?
+  komgaSeriesId          String?
+  komgaBookId            String?
+  komgaSeriesUrl         String?
+  komgaMetadata          String?
+  
   storyContainedInBook   CustomOrderItem?  @relation("StoryInBook", fields: [storyContainedInBookId], references: [id])
   containedStories       CustomOrderItem[] @relation("StoryInBook")
   referencedCustomOrder  CustomOrder?      @relation("SubOrderReference", fields: [referencedCustomOrderId], references: [id])
@@ -704,4 +716,150 @@ model PlexTrack {
   album             PlexAlbum? @relation(fields: [parentRatingKey], references: [ratingKey])
   
   @@map("PlexTrack")
+}
+
+// Stash models
+model StashScene {
+  id               String   @id
+  title            String
+  details          String?
+  url              String?
+  date             String?
+  rating           Int?
+  organized        Boolean  @default(false)
+  osHash           String?
+  checksum         String?
+  phash            String?
+  oCounter         Int?
+  path             String?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+  lastSyncedAt     DateTime @default(now())
+  fileModTime      DateTime?
+  
+  // Scene specific fields
+  studio           String?
+  code             String?
+  director         String?
+  synopsis         String?
+  
+  // Play status fields
+  lastPlayedAt     DateTime?
+  resumeTime       Float?
+  playDuration     Float?
+  playCount        Int?
+  
+  // Relationships
+  performers       StashScenePerformer[]
+  tags             StashSceneTag[]
+  studioObject     StashStudio? @relation(fields: [studio], references: [name])
+  
+  @@map("StashScene")
+}
+
+model StashPerformer {
+  id            String   @id
+  name          String
+  disambiguation String?
+  alias         String?
+  favorite      Boolean  @default(false)
+  ignore_auto_tag Boolean @default(false)
+  
+  // Physical characteristics
+  birthdate     String?
+  ethnicity     String?
+  country       String?
+  eye_color     String?
+  height        String?
+  measurements  String?
+  fake_tits     String?
+  career_length String?
+  tattoos       String?
+  piercings     String?
+  
+  // Images and URLs
+  image         String?
+  instagram     String?
+  twitter       String?
+  url           String?
+  
+  // Timestamps
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  lastSyncedAt  DateTime @default(now())
+  
+  // Relationships
+  scenes        StashScenePerformer[]
+  tags          StashPerformerTag[]
+  
+  @@map("StashPerformer")
+}
+
+model StashStudio {
+  id           String   @id
+  name         String   @unique
+  url          String?
+  image        String?
+  
+  // Timestamps
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  lastSyncedAt DateTime @default(now())
+  
+  // Relationships
+  scenes       StashScene[]
+  
+  @@map("StashStudio")
+}
+
+model StashTag {
+  id           String   @id
+  name         String   @unique
+  description  String?
+  image        String?
+  
+  // Timestamps
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  lastSyncedAt DateTime @default(now())
+  
+  // Relationships
+  scenes       StashSceneTag[]
+  performers   StashPerformerTag[]
+  
+  @@map("StashTag")
+}
+
+// Junction tables for many-to-many relationships
+model StashScenePerformer {
+  sceneId     String
+  performerId String
+  
+  scene       StashScene      @relation(fields: [sceneId], references: [id], onDelete: Cascade)
+  performer   StashPerformer  @relation(fields: [performerId], references: [id], onDelete: Cascade)
+  
+  @@id([sceneId, performerId])
+  @@map("StashScenePerformer")
+}
+
+model StashSceneTag {
+  sceneId String
+  tagId   String
+  
+  scene   StashScene @relation(fields: [sceneId], references: [id], onDelete: Cascade)
+  tag     StashTag   @relation(fields: [tagId], references: [id], onDelete: Cascade)
+  
+  @@id([sceneId, tagId])
+  @@map("StashSceneTag")
+}
+
+model StashPerformerTag {
+  performerId String
+  tagId       String
+  
+  performer   StashPerformer @relation(fields: [performerId], references: [id], onDelete: Cascade)
+  tag         StashTag       @relation(fields: [tagId], references: [id], onDelete: Cascade)
+  
+  @@id([performerId, tagId])
+  @@map("StashPerformerTag")
 }

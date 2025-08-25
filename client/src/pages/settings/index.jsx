@@ -18,6 +18,8 @@ function Settings() {
   const [tvdbBearerToken, setTvdbBearerToken] = useState('');
   const [komgaApiKey, setKomgaApiKey] = useState('');
   const [komgaUrl, setKomgaUrl] = useState('');
+  const [stashApiKey, setStashApiKey] = useState('');
+  const [stashUrl, setStashUrl] = useState('');
   const [timezone, setTimezone] = useState('UTC');
     // Percentage states
   const [tvGeneralPercent, setTvGeneralPercent] = useState(50);
@@ -37,6 +39,11 @@ function Settings() {
   const [backgroundSyncMessage, setBackgroundSyncMessage] = useState('');
   const [tvdbClearLoading, setTvdbClearLoading] = useState(false);
   const [tvdbClearMessage, setTvdbClearMessage] = useState('');
+  
+  // Stash sync states
+  const [stashSyncLoading, setStashSyncLoading] = useState(false);
+  const [stashSyncMessage, setStashSyncMessage] = useState('');
+  
   // Collection states
   const [customOrdersCount, setCustomOrdersCount] = useState(0);
   const [availableCollections, setAvailableCollections] = useState([]);
@@ -123,6 +130,8 @@ function Settings() {
           setTvdbBearerToken(settings.tvdbBearerToken || '');
           setKomgaApiKey(settings.komgaApiKey || '');
           setKomgaUrl(settings.komgaUrl || '');
+          setStashApiKey(settings.stashApiKey || '');
+          setStashUrl(settings.stashUrl || '');
           setSelectedPlayer(settings.selectedPlayer || '');
           setSelectedPlexUser(settings.selectedPlexUser || '');
           setTimezone(settings.timezone || 'UTC');
@@ -411,6 +420,8 @@ function Settings() {
           comicVineApiKey,
           komgaApiKey,
           komgaUrl,
+          stashApiKey,
+          stashUrl,
           plexToken,
           plexUrl,
           tvdbApiKey,
@@ -476,6 +487,32 @@ function Settings() {
       setPlexSyncMessage(`Sync failed: ${error.message}`);
     } finally {
       setPlexSyncLoading(false);
+    }
+  };
+
+  const handleStashSync = async () => {
+    setStashSyncLoading(true);
+    setStashSyncMessage('Starting Stash library sync...');
+    
+    try {
+      const data = await fetchWithErrorHandling(`${config.apiBaseUrl}/api/stash/sync`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        }
+      });
+      
+      if (data.success) {
+        const results = data.results;
+        setStashSyncMessage(`Sync completed! Synced ${results.scenes} scenes, ${results.performers} performers, ${results.studios} studios, and ${results.tags} tags`);
+      } else {
+        setStashSyncMessage(`Sync failed: ${data.message}`);
+      }
+      
+    } catch (error) {
+      setStashSyncMessage(`Sync failed: ${error.message}`);
+    } finally {
+      setStashSyncLoading(false);
     }
   };
 
@@ -649,6 +686,32 @@ function Settings() {
                     value={komgaApiKey}
                     onChange={(e) => setKomgaApiKey(e.target.value)}
                     placeholder="Enter Komga API key"
+                    className="api-input compact"
+                  />
+                </div>
+
+                <div className="config-field compact">
+                  <label htmlFor="stash_url">Stash Server URL:</label>
+                  <input 
+                    type="url" 
+                    id="stash_url"
+                    name="stash_url"
+                    value={stashUrl}
+                    onChange={(e) => setStashUrl(e.target.value)}
+                    placeholder="http://localhost:9999"
+                    className="url-input compact"
+                  />
+                </div>
+
+                <div className="config-field compact">
+                  <label htmlFor="stash_api_key">Stash API Key (optional):</label>
+                  <input 
+                    type="text" 
+                    id="stash_api_key"
+                    name="stash_api_key"
+                    value={stashApiKey}
+                    onChange={(e) => setStashApiKey(e.target.value)}
+                    placeholder="Enter API key if authentication is enabled"
                     className="api-input compact"
                   />
                 </div>
@@ -1327,7 +1390,16 @@ function Settings() {
                   disabled={plexSyncLoading}
                   className="sync-button primary compact"
                 >
-                  {plexSyncLoading ? '🔄 Syncing...' : '🔄 Sync Library'}
+                  {plexSyncLoading ? '🔄 Syncing...' : '🔄 Sync Plex'}
+                </Button>
+                
+                <Button
+                  onClick={handleStashSync}
+                  disabled={stashSyncLoading || !stashUrl}
+                  className="sync-button secondary compact"
+                  title={!stashUrl ? 'Configure Stash URL first' : 'Sync Stash library'}
+                >
+                  {stashSyncLoading ? '🔄 Syncing...' : '🎬 Sync Stash'}
                 </Button>
                 
                 <Button
@@ -1365,6 +1437,12 @@ function Settings() {
                       </div>
                     )}
                   </div>
+                </div>
+              )}
+
+              {stashSyncMessage && (
+                <div className="sync-message compact">
+                  <p>{stashSyncMessage}</p>
                 </div>
               )}
             </div>

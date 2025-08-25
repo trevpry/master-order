@@ -34,6 +34,39 @@ const statisticsService = new StatisticsService(prisma, watchLogService);
 const watchStatsRoutes = new WatchStatsRoutes(watchLogService, statisticsService);
 const PlexPlayerService = require('./plexPlayerService');
 const plexPlayer = new PlexPlayerService(); // Initialize Plex player service
+const StashService = require('./stashService');
+const StashSyncService = require('./stashSyncService');
+let stashService = null; // Initialize later with settings
+let stashSyncService = null; // Initialize later with settings
+
+// Initialize Stash service with current settings
+async function initializeStashService() {
+  try {
+    const { getSettings } = require('./databaseUtils');
+    const settings = await getSettings();
+    
+    if (settings && settings.stashUrl && settings.stashApiKey) {
+      stashService = new StashService(settings.stashUrl, settings.stashApiKey);
+      console.log('✅ Stash service initialized with settings');
+    } else {
+      stashService = null;
+      console.log('ℹ️  Stash service not initialized - missing URL or API key in settings');
+    }
+  } catch (error) {
+    console.error('❌ Error initializing Stash service:', error.message);
+    stashService = null;
+  }
+}
+
+async function initializeStashSyncService() {
+  try {
+    stashSyncService = new StashSyncService();
+    console.log('✅ Stash sync service initialized');
+  } catch (error) {
+    console.error('❌ Error initializing Stash sync service:', error.message);
+    stashSyncService = null;
+  }
+}
 
 // Add Docker startup diagnostics for artwork cache issues
 if (process.env.NODE_ENV === 'production') {
@@ -588,6 +621,816 @@ app.get('/api/komga/search-comic', async (req, res) => {
   } catch (error) {
     console.error('Error searching Komga for comic:', error);
     res.status(500).json({ error: 'Failed to search Komga for comic', message: error.message });
+  }
+});
+
+// Stash test connection endpoint
+app.get('/api/stash/test', async (req, res) => {
+  try {
+    if (!stashSyncService) {
+      await initializeStashSyncService();
+    }
+    
+    if (!stashSyncService) {
+      return res.status(400).json({ 
+        success: false, 
+        message: 'Stash sync service not configured',
+        configured: false
+      });
+    }
+    
+    const version = await stashSyncService.testConnection();
+    
+    // Get the Stash URL from settings
+    const settings = await prisma.settings.findUnique({ where: { id: 1 } });
+    
+    res.json({ 
+      success: true, 
+      message: 'Stash connection successful',
+      configured: true,
+      version: version,
+      stashUrl: settings?.stashUrl || null
+    });
+  } catch (error) {
+    console.error('Error testing Stash connection:', error);
+    res.status(500).json({ 
+      error: 'Failed to test Stash connection',
+      message: error.message,
+      configured: false
+    });
+  }
+});
+
+// Stash scenes endpoint
+app.get('/api/stash/scenes', async (req, res) => {
+  try {
+    const { page = 1, perPage = 20, sort = 'createdAt', direction = 'DESC', filter = '' } = req.query;
+    
+    const skip = (parseInt(page) - 1) * parseInt(perPage);
+    const take = parseInt(perPage);
+    
+    // Build search filter
+    const searchFilter = filter ? {
+      OR: [
+        { title: { contains: filter, mode: 'insensitive' } },
+        { details: { contains: filter, mode: 'insensitive' } },
+        { studio: { contains: filter, mode: 'insensitive' } },
+        { code: { contains: filter, mode: 'insensitive' } }
+      ]
+    } : {};
+    
+    // Build sort order
+    const orderBy = {};
+    const sortField = sort === 'date' ? 'date' : sort === 'title' ? 'title' : 'createdAt';
+    orderBy[sortField] = direction.toLowerCase();
+    
+    // Get total count
+    const total = await prisma.stashScene.count({
+      where: searchFilter
+    });
+    
+    // Get scenes with related data
+    const scenes = await prisma.stashScene.findMany({
+      where: searchFilter,
+      include: {
+        performers: {
+          include: {
+            performer: true
+          }
+        },
+        tags: {
+          include: {
+            tag: true
+          }
+        },
+        studioObject: true
+      },
+      orderBy: orderBy,
+      skip: skip,
+      take: take
+    });
+    
+    // Transform data to match expected format
+    const transformedScenes = scenes.map(scene => ({
+      id: scene.id,
+      title: scene.title,
+      details: scene.details,
+      url: scene.url,
+      date: scene.date,
+      rating: scene.rating,
+      organized: scene.organized,
+      path: scene.path,
+      studio: scene.studioObject ? { 
+        id: scene.studioObject.id, 
+        name: scene.studioObject.name 
+      } : scene.studio ? { name: scene.studio } : null,
+      code: scene.code,
+      director: scene.director,
+      synopsis: scene.synopsis,
+      // Play status fields
+      playCount: scene.playCount,
+      lastPlayedAt: scene.lastPlayedAt,
+      resumeTime: scene.resumeTime,
+      playDuration: scene.playDuration,
+      performers: scene.performers.map(sp => ({
+        id: sp.performer.id,
+        name: sp.performer.name
+      })),
+      tags: scene.tags.map(st => ({
+        id: st.tag.id,
+        name: st.tag.name
+      }))
+    }));
+    
+    res.json({
+      success: true,
+      data: transformedScenes,
+      pagination: {
+        page: parseInt(page),
+        perPage: parseInt(perPage),
+        total: total,
+        totalPages: Math.ceil(total / parseInt(perPage))
+      }
+    });
+  } catch (error) {
+    console.error('Error fetching Stash scenes from database:', error);
+    res.status(500).json({ 
+      error: 'Failed to fetch Stash scenes',
+      message: error.message 
+    });
+  }
+});
+
+// Stash scene by ID endpoint
+app.get('/api/stash/scenes/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    
+    const scene = await prisma.stashScene.findUnique({
+      where: { id: id },
+      include: {
+        performers: {
+          include: {
+            performer: true
+          }
+        },
+        tags: {
+          include: {
+            tag: true
+          }
+        },
+        studioObject: true
+      }
+    });
+    
+    if (!scene) {
+      return res.status(404).json({ 
+        error: 'Scene not found',
+        message: `Scene with ID ${id} not found in database`
+      });
+    }
+    
+    // Transform data to match expected format
+    const transformedScene = {
+      id: scene.id,
+      title: scene.title,
+      details: scene.details,
+      url: scene.url,
+      date: scene.date,
+      rating: scene.rating,
+      organized: scene.organized,
+      osHash: scene.osHash,
+      checksum: scene.checksum,
+      phash: scene.phash,
+      oCounter: scene.oCounter,
+      path: scene.path,
+      fileModTime: scene.fileModTime,
+      studio: scene.studioObject ? { 
+        id: scene.studioObject.id, 
+        name: scene.studioObject.name,
+        url: scene.studioObject.url,
+        image: scene.studioObject.image
+      } : scene.studio ? { name: scene.studio } : null,
+      code: scene.code,
+      director: scene.director,
+      synopsis: scene.synopsis,
+      // Play status fields
+      playCount: scene.playCount,
+      lastPlayedAt: scene.lastPlayedAt,
+      resumeTime: scene.resumeTime,
+      playDuration: scene.playDuration,
+      performers: scene.performers.map(sp => ({
+        id: sp.performer.id,
+        name: sp.performer.name,
+        disambiguation: sp.performer.disambiguation,
+        alias: sp.performer.alias,
+        favorite: sp.performer.favorite,
+        birthdate: sp.performer.birthdate,
+        ethnicity: sp.performer.ethnicity,
+        country: sp.performer.country,
+        eye_color: sp.performer.eye_color,
+        height: sp.performer.height,
+        measurements: sp.performer.measurements,
+        fake_tits: sp.performer.fake_tits,
+        career_length: sp.performer.career_length,
+        tattoos: sp.performer.tattoos,
+        piercings: sp.performer.piercings,
+        image: sp.performer.image,
+        instagram: sp.performer.instagram,
+        twitter: sp.performer.twitter,
+        url: sp.performer.url
+      })),
+      tags: scene.tags.map(st => ({
+        id: st.tag.id,
+        name: st.tag.name,
+        description: st.tag.description,
+        image: st.tag.image
+      }))
+    };
+    
+    res.json({
+      success: true,
+      data: transformedScene
+    });
+  } catch (error) {
+    console.error('Error fetching Stash scene from database:', error);
+    res.status(500).json({ 
+      error: 'Failed to fetch Stash scene',
+      message: error.message 
+    });
+  }
+});
+
+// Stash performers endpoint
+app.get('/api/stash/performers', async (req, res) => {
+  try {
+    const { page = 1, perPage = 20, filter = '' } = req.query;
+    
+    const skip = (parseInt(page) - 1) * parseInt(perPage);
+    const take = parseInt(perPage);
+    
+    // Build search filter
+    const searchFilter = filter ? {
+      OR: [
+        { name: { contains: filter, mode: 'insensitive' } },
+        { alias: { contains: filter, mode: 'insensitive' } },
+        { disambiguation: { contains: filter, mode: 'insensitive' } }
+      ]
+    } : {};
+    
+    // Get total count
+    const total = await prisma.stashPerformer.count({
+      where: searchFilter
+    });
+    
+    // Get performers with related data
+    const performers = await prisma.stashPerformer.findMany({
+      where: searchFilter,
+      include: {
+        tags: {
+          include: {
+            tag: true
+          }
+        },
+        scenes: {
+          include: {
+            scene: {
+              select: {
+                id: true,
+                title: true
+              }
+            }
+          }
+        }
+      },
+      orderBy: { name: 'asc' },
+      skip: skip,
+      take: take
+    });
+    
+    // Transform data to match expected format
+    const transformedPerformers = performers.map(performer => ({
+      id: performer.id,
+      name: performer.name,
+      disambiguation: performer.disambiguation,
+      alias: performer.alias,
+      favorite: performer.favorite,
+      ignore_auto_tag: performer.ignore_auto_tag,
+      birthdate: performer.birthdate,
+      ethnicity: performer.ethnicity,
+      country: performer.country,
+      eye_color: performer.eye_color,
+      height: performer.height,
+      measurements: performer.measurements,
+      fake_tits: performer.fake_tits,
+      career_length: performer.career_length,
+      tattoos: performer.tattoos,
+      piercings: performer.piercings,
+      image: performer.image,
+      instagram: performer.instagram,
+      twitter: performer.twitter,
+      url: performer.url,
+      tags: performer.tags.map(pt => ({
+        id: pt.tag.id,
+        name: pt.tag.name
+      })),
+      scene_count: performer.scenes.length
+    }));
+    
+    res.json({
+      success: true,
+      data: transformedPerformers,
+      pagination: {
+        page: parseInt(page),
+        perPage: parseInt(perPage),
+        total: total,
+        totalPages: Math.ceil(total / parseInt(perPage))
+      }
+    });
+  } catch (error) {
+    console.error('Error fetching Stash performers from database:', error);
+    res.status(500).json({ 
+      error: 'Failed to fetch Stash performers',
+      message: error.message 
+    });
+  }
+});
+
+// Stash studios endpoint
+app.get('/api/stash/studios', async (req, res) => {
+  try {
+    const { page = 1, perPage = 20, filter = '' } = req.query;
+    
+    const skip = (parseInt(page) - 1) * parseInt(perPage);
+    const take = parseInt(perPage);
+    
+    // Build search filter
+    const searchFilter = filter ? {
+      name: { contains: filter, mode: 'insensitive' }
+    } : {};
+    
+    // Get total count
+    const total = await prisma.stashStudio.count({
+      where: searchFilter
+    });
+    
+    // Get studios with scene counts
+    const studios = await prisma.stashStudio.findMany({
+      where: searchFilter,
+      include: {
+        scenes: {
+          select: {
+            id: true,
+            title: true
+          }
+        }
+      },
+      orderBy: { name: 'asc' },
+      skip: skip,
+      take: take
+    });
+    
+    // Transform data to match expected format
+    const transformedStudios = studios.map(studio => ({
+      id: studio.id,
+      name: studio.name,
+      url: studio.url,
+      image: studio.image,
+      scene_count: studio.scenes.length
+    }));
+    
+    res.json({
+      success: true,
+      data: transformedStudios,
+      pagination: {
+        page: parseInt(page),
+        perPage: parseInt(perPage),
+        total: total,
+        totalPages: Math.ceil(total / parseInt(perPage))
+      }
+    });
+  } catch (error) {
+    console.error('Error fetching Stash studios from database:', error);
+    res.status(500).json({ 
+      error: 'Failed to fetch Stash studios',
+      message: error.message 
+    });
+  }
+});
+
+// Stash tags endpoint
+app.get('/api/stash/tags', async (req, res) => {
+  try {
+    const { page = 1, perPage = 20, filter = '' } = req.query;
+    
+    const skip = (parseInt(page) - 1) * parseInt(perPage);
+    const take = parseInt(perPage);
+    
+    // Build search filter
+    const searchFilter = filter ? {
+      OR: [
+        { name: { contains: filter, mode: 'insensitive' } },
+        { description: { contains: filter, mode: 'insensitive' } }
+      ]
+    } : {};
+    
+    // Get total count
+    const total = await prisma.stashTag.count({
+      where: searchFilter
+    });
+    
+    // Get tags with usage counts
+    const tags = await prisma.stashTag.findMany({
+      where: searchFilter,
+      include: {
+        scenes: {
+          select: {
+            sceneId: true
+          }
+        },
+        performers: {
+          select: {
+            performerId: true
+          }
+        }
+      },
+      orderBy: { name: 'asc' },
+      skip: skip,
+      take: take
+    });
+    
+    // Transform data to match expected format
+    const transformedTags = tags.map(tag => ({
+      id: tag.id,
+      name: tag.name,
+      description: tag.description,
+      image: tag.image,
+      scene_count: tag.scenes.length,
+      performer_count: tag.performers.length
+    }));
+    
+    res.json({
+      success: true,
+      data: transformedTags,
+      pagination: {
+        page: parseInt(page),
+        perPage: parseInt(perPage),
+        total: total,
+        totalPages: Math.ceil(total / parseInt(perPage))
+      }
+    });
+  } catch (error) {
+    console.error('Error fetching Stash tags from database:', error);
+    res.status(500).json({ 
+      error: 'Failed to fetch Stash tags',
+      message: error.message 
+    });
+  }
+});
+
+// Stash search endpoint
+app.get('/api/stash/search', async (req, res) => {
+  try {
+    const { query, types = 'scene' } = req.query;
+    
+    if (!query) {
+      return res.status(400).json({ error: 'Query parameter is required' });
+    }
+    
+    const searchTypes = types.split(',').map(t => t.trim());
+    const results = {};
+    
+    // Search scenes
+    if (searchTypes.includes('scene')) {
+      const scenes = await prisma.stashScene.findMany({
+        where: {
+          OR: [
+            { title: { contains: query, mode: 'insensitive' } },
+            { details: { contains: query, mode: 'insensitive' } },
+            { studio: { contains: query, mode: 'insensitive' } },
+            { code: { contains: query, mode: 'insensitive' } },
+            { director: { contains: query, mode: 'insensitive' } },
+            { synopsis: { contains: query, mode: 'insensitive' } }
+          ]
+        },
+        include: {
+          performers: {
+            include: {
+              performer: {
+                select: {
+                  id: true,
+                  name: true
+                }
+              }
+            }
+          },
+          tags: {
+            include: {
+              tag: {
+                select: {
+                  id: true,
+                  name: true
+                }
+              }
+            }
+          },
+          studioObject: {
+            select: {
+              id: true,
+              name: true
+            }
+          }
+        },
+        take: 20,
+        orderBy: { createdAt: 'desc' }
+      });
+      
+      results.scenes = scenes.map(scene => ({
+        id: scene.id,
+        title: scene.title,
+        details: scene.details,
+        url: scene.url,
+        date: scene.date,
+        rating: scene.rating,
+        studio: scene.studioObject ? { 
+          id: scene.studioObject.id, 
+          name: scene.studioObject.name 
+        } : scene.studio ? { name: scene.studio } : null,
+        performers: scene.performers.map(sp => sp.performer),
+        tags: scene.tags.map(st => st.tag)
+      }));
+    }
+    
+    // Search performers
+    if (searchTypes.includes('performer')) {
+      const performers = await prisma.stashPerformer.findMany({
+        where: {
+          OR: [
+            { name: { contains: query, mode: 'insensitive' } },
+            { alias: { contains: query, mode: 'insensitive' } },
+            { disambiguation: { contains: query, mode: 'insensitive' } }
+          ]
+        },
+        include: {
+          scenes: {
+            select: {
+              sceneId: true
+            }
+          }
+        },
+        take: 20,
+        orderBy: { name: 'asc' }
+      });
+      
+      results.performers = performers.map(performer => ({
+        id: performer.id,
+        name: performer.name,
+        disambiguation: performer.disambiguation,
+        alias: performer.alias,
+        favorite: performer.favorite,
+        birthdate: performer.birthdate,
+        image: performer.image,
+        scene_count: performer.scenes.length
+      }));
+    }
+    
+    // Search studios
+    if (searchTypes.includes('studio')) {
+      const studios = await prisma.stashStudio.findMany({
+        where: {
+          name: { contains: query, mode: 'insensitive' }
+        },
+        include: {
+          scenes: {
+            select: {
+              id: true
+            }
+          }
+        },
+        take: 20,
+        orderBy: { name: 'asc' }
+      });
+      
+      results.studios = studios.map(studio => ({
+        id: studio.id,
+        name: studio.name,
+        url: studio.url,
+        image: studio.image,
+        scene_count: studio.scenes.length
+      }));
+    }
+    
+    // Search tags
+    if (searchTypes.includes('tag')) {
+      const tags = await prisma.stashTag.findMany({
+        where: {
+          OR: [
+            { name: { contains: query, mode: 'insensitive' } },
+            { description: { contains: query, mode: 'insensitive' } }
+          ]
+        },
+        include: {
+          scenes: {
+            select: {
+              sceneId: true
+            }
+          }
+        },
+        take: 20,
+        orderBy: { name: 'asc' }
+      });
+      
+      results.tags = tags.map(tag => ({
+        id: tag.id,
+        name: tag.name,
+        description: tag.description,
+        image: tag.image,
+        scene_count: tag.scenes.length
+      }));
+    }
+    
+    res.json({
+      success: true,
+      query: query,
+      results: results
+    });
+  } catch (error) {
+    console.error('Error searching Stash database:', error);
+    res.status(500).json({ 
+      error: 'Failed to search Stash',
+      message: error.message 
+    });
+  }
+});
+
+// Stash sync endpoints
+app.post('/api/stash/sync', async (req, res) => {
+  try {
+    if (!stashSyncService) {
+      await initializeStashSyncService();
+    }
+    
+    if (!stashSyncService) {
+      return res.status(400).json({ 
+        error: 'Stash sync service not configured',
+        message: 'Please configure Stash URL in settings'
+      });
+    }
+    
+    console.log('Starting Stash full sync...');
+    const results = await stashSyncService.fullSync();
+    
+    res.json({
+      success: true,
+      message: 'Stash sync completed successfully',
+      results: results
+    });
+  } catch (error) {
+    console.error('Error during Stash sync:', error);
+    res.status(500).json({ 
+      error: 'Stash sync failed',
+      message: error.message 
+    });
+  }
+});
+
+app.post('/api/stash/sync/scenes', async (req, res) => {
+  try {
+    if (!stashSyncService) {
+      await initializeStashSyncService();
+    }
+    
+    if (!stashSyncService) {
+      return res.status(400).json({ 
+        error: 'Stash sync service not configured'
+      });
+    }
+    
+    const { page = 1, perPage = 100 } = req.body;
+    console.log(`Starting Stash scenes sync (page ${page})...`);
+    
+    const results = await stashSyncService.syncScenes(parseInt(page), parseInt(perPage));
+    
+    res.json({
+      success: true,
+      message: `Synced ${results.scenes.length} scenes from page ${page}`,
+      results: {
+        synced: results.scenes.length,
+        hasMore: results.hasMore,
+        totalCount: results.totalCount
+      }
+    });
+  } catch (error) {
+    console.error('Error syncing Stash scenes:', error);
+    res.status(500).json({ 
+      error: 'Stash scenes sync failed',
+      message: error.message 
+    });
+  }
+});
+
+app.post('/api/stash/sync/performers', async (req, res) => {
+  try {
+    if (!stashSyncService) {
+      await initializeStashSyncService();
+    }
+    
+    if (!stashSyncService) {
+      return res.status(400).json({ 
+        error: 'Stash sync service not configured'
+      });
+    }
+    
+    const { page = 1, perPage = 100 } = req.body;
+    console.log(`Starting Stash performers sync (page ${page})...`);
+    
+    const results = await stashSyncService.syncPerformers(parseInt(page), parseInt(perPage));
+    
+    res.json({
+      success: true,
+      message: `Synced ${results.performers.length} performers from page ${page}`,
+      results: {
+        synced: results.performers.length,
+        hasMore: results.hasMore,
+        totalCount: results.totalCount
+      }
+    });
+  } catch (error) {
+    console.error('Error syncing Stash performers:', error);
+    res.status(500).json({ 
+      error: 'Stash performers sync failed',
+      message: error.message 
+    });
+  }
+});
+
+app.post('/api/stash/sync/studios', async (req, res) => {
+  try {
+    if (!stashSyncService) {
+      await initializeStashSyncService();
+    }
+    
+    if (!stashSyncService) {
+      return res.status(400).json({ 
+        error: 'Stash sync service not configured'
+      });
+    }
+    
+    const { page = 1, perPage = 100 } = req.body;
+    console.log(`Starting Stash studios sync (page ${page})...`);
+    
+    const results = await stashSyncService.syncStudios(parseInt(page), parseInt(perPage));
+    
+    res.json({
+      success: true,
+      message: `Synced ${results.studios.length} studios from page ${page}`,
+      results: {
+        synced: results.studios.length,
+        hasMore: results.hasMore,
+        totalCount: results.totalCount
+      }
+    });
+  } catch (error) {
+    console.error('Error syncing Stash studios:', error);
+    res.status(500).json({ 
+      error: 'Stash studios sync failed',
+      message: error.message 
+    });
+  }
+});
+
+app.post('/api/stash/sync/tags', async (req, res) => {
+  try {
+    if (!stashSyncService) {
+      await initializeStashSyncService();
+    }
+    
+    if (!stashSyncService) {
+      return res.status(400).json({ 
+        error: 'Stash sync service not configured'
+      });
+    }
+    
+    const { page = 1, perPage = 100 } = req.body;
+    console.log(`Starting Stash tags sync (page ${page})...`);
+    
+    const results = await stashSyncService.syncTags(parseInt(page), parseInt(perPage));
+    
+    res.json({
+      success: true,
+      message: `Synced ${results.tags.length} tags from page ${page}`,
+      results: {
+        synced: results.tags.length,
+        hasMore: results.hasMore,
+        totalCount: results.totalCount
+      }
+    });
+  } catch (error) {
+    console.error('Error syncing Stash tags:', error);
+    res.status(500).json({ 
+      error: 'Stash tags sync failed',
+      message: error.message 
+    });
   }
 });
 
@@ -1359,7 +2202,9 @@ app.post('/api/settings', async (req, res) => {
       ignoredTVCollections,
       christmasFilterEnabled,
       komgaApiKey,
-      komgaUrl
+      komgaUrl,
+      stashApiKey,
+      stashUrl
     } = req.body;
 
     // Validate percentages if provided
@@ -1410,6 +2255,8 @@ app.post('/api/settings', async (req, res) => {
     if (christmasFilterEnabled !== undefined) updateData.christmasFilterEnabled = christmasFilterEnabled;
     if (komgaApiKey !== undefined) updateData.komgaApiKey = komgaApiKey.trim() || null;
     if (komgaUrl !== undefined) updateData.komgaUrl = komgaUrl.trim() || null;
+    if (stashApiKey !== undefined) updateData.stashApiKey = stashApiKey.trim() || null;
+    if (stashUrl !== undefined) updateData.stashUrl = stashUrl.trim() || null;
 
     // Upsert settings (create if doesn't exist, update if it does)
     const { updateSettings } = require('./databaseUtils');
@@ -1442,6 +2289,17 @@ app.post('/api/settings', async (req, res) => {
         console.log('Plex player client refreshed due to settings update');
       } catch (error) {
         console.error('Failed to refresh Plex player client:', error);
+        // Don't fail the whole request if this fails
+      }
+    }
+    
+    // Refresh Stash service if Stash settings were changed
+    if (req.body.stashUrl !== undefined || req.body.stashApiKey !== undefined) {
+      try {
+        await initializeStashService();
+        console.log('Stash service refreshed due to settings update');
+      } catch (error) {
+        console.error('Failed to refresh Stash service:', error);
         // Don't fail the whole request if this fails
       }
     }    console.log('Saved settings:', settings);
@@ -4803,6 +5661,22 @@ server.listen(PORT, '0.0.0.0', async () => {
     await backgroundSync.start();
   } catch (error) {
     console.error('Failed to start background sync service:', error);
+  }
+  
+  // Initialize Stash service
+  try {
+    await initializeStashService();
+    console.log('✅ Stash service initialization completed');
+  } catch (error) {
+    console.error('❌ Failed to initialize Stash service:', error);
+  }
+  
+  // Initialize Stash sync service
+  try {
+    await initializeStashSyncService();
+    console.log('✅ Stash sync service initialization completed');
+  } catch (error) {
+    console.error('❌ Failed to initialize Stash sync service:', error);
   }
 });
 

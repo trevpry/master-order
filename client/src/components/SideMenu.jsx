@@ -58,6 +58,12 @@ const SideMenu = ({ isMobile, closeMobileMenu }) => {
       description: 'View your watching activity'
     },
     {
+      path: '/stash',
+      icon: '🎬',
+      label: 'Stash',
+      description: 'Browse video library'
+    },
+    {
       path: '/music',
       icon: '🎵',
       label: 'Music',
