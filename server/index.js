@@ -4056,6 +4056,12 @@ app.post('/api/reading/stop', async (req, res) => {
         
         if (progress.readPercentage !== undefined && progress.readPercentage >= 0 && progress.readPercentage <= 100) {
           updateData.bookPercentRead = progress.readPercentage;
+          
+          // If read percentage is 100%, mark as read/watched
+          if (progress.readPercentage === 100) {
+            updateData.isWatched = true;
+            console.log('Marking item as read/watched (100% completion)');
+          }
         }
         
         if (progress.totalPages !== undefined && progress.totalPages > 0) {
@@ -4226,6 +4232,12 @@ app.post('/api/viewing/stop', async (req, res) => {
         
         if (progress.watchedPercentage !== undefined && progress.watchedPercentage >= 0 && progress.watchedPercentage <= 100) {
           updateData.webvideoPercentWatched = progress.watchedPercentage;
+          
+          // If watched percentage is 100%, mark as watched
+          if (progress.watchedPercentage === 100) {
+            updateData.isWatched = true;
+            console.log('Marking item as watched (100% completion)');
+          }
         }
         
         if (progress.currentTime !== undefined && progress.currentTime >= 0) {
