@@ -28,6 +28,8 @@ model Settings {
   ignoredTVCollections              String?
   christmasFilterEnabled            Boolean   @default(false)
   plexSyncInterval                  Int       @default(12)
+  komgaApiKey                       String?
+  komgaUrl                          String?
   createdAt                         DateTime  @default(now())
   updatedAt                         DateTime  @updatedAt
 }
@@ -86,6 +88,13 @@ model CustomOrderItem {
   comicCreators          String?
   comicCharacters        String?
   comicStoryArcs         String?
+  
+  // Komga integration fields
+  komgaSeriesId          String?
+  komgaBookId            String?
+  komgaUrl               String?
+  komgaSeriesUrl         String?
+  komgaMetadata          String? // JSON string with Komga metadata
   
   customTitle            String?
   bookTitle              String?

@@ -16,6 +16,8 @@ function Settings() {
   const [plexUrl, setPlexUrl] = useState('');
   const [tvdbApiKey, setTvdbApiKey] = useState('');
   const [tvdbBearerToken, setTvdbBearerToken] = useState('');
+  const [komgaApiKey, setKomgaApiKey] = useState('');
+  const [komgaUrl, setKomgaUrl] = useState('');
   const [timezone, setTimezone] = useState('UTC');
     // Percentage states
   const [tvGeneralPercent, setTvGeneralPercent] = useState(50);
@@ -119,6 +121,8 @@ function Settings() {
           setPlexUrl(settings.plexUrl || '');
           setTvdbApiKey(settings.tvdbApiKey || '');
           setTvdbBearerToken(settings.tvdbBearerToken || '');
+          setKomgaApiKey(settings.komgaApiKey || '');
+          setKomgaUrl(settings.komgaUrl || '');
           setSelectedPlayer(settings.selectedPlayer || '');
           setSelectedPlexUser(settings.selectedPlexUser || '');
           setTimezone(settings.timezone || 'UTC');
@@ -405,6 +409,8 @@ function Settings() {
         },        body: JSON.stringify({ 
           collectionName, 
           comicVineApiKey,
+          komgaApiKey,
+          komgaUrl,
           plexToken,
           plexUrl,
           tvdbApiKey,
@@ -617,6 +623,32 @@ function Settings() {
                     value={comicVineApiKey}
                     onChange={(e) => setComicVineApiKey(e.target.value)}
                     placeholder="Enter ComicVine API key"
+                    className="api-input compact"
+                  />
+                </div>
+
+                <div className="config-field compact">
+                  <label htmlFor="komga_url">Komga Server URL:</label>
+                  <input 
+                    type="url" 
+                    id="komga_url"
+                    name="komga_url"
+                    value={komgaUrl}
+                    onChange={(e) => setKomgaUrl(e.target.value)}
+                    placeholder="http://localhost:25600"
+                    className="url-input compact"
+                  />
+                </div>
+
+                <div className="config-field compact">
+                  <label htmlFor="komga_api_key">Komga API Key:</label>
+                  <input 
+                    type="text" 
+                    id="komga_api_key"
+                    name="komga_api_key"
+                    value={komgaApiKey}
+                    onChange={(e) => setKomgaApiKey(e.target.value)}
+                    placeholder="Enter Komga API key"
                     className="api-input compact"
                   />
                 </div>

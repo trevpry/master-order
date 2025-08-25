@@ -3095,7 +3095,35 @@ function CustomOrders() {
                             )}
                           </span>
                         ) : item.mediaType === 'comic' && item.customTitle ? (
-                          item.customTitle
+                          // Comic with custom title - check for Komga URL
+                          item.komgaUrl ? (
+                            <a 
+                              href={item.komgaUrl} 
+                              target="_blank" 
+                              rel="noopener noreferrer"
+                              className="komga-link"
+                              title="Open in Komga"
+                            >
+                              {item.customTitle}
+                            </a>
+                          ) : (
+                            item.customTitle
+                          )
+                        ) : item.mediaType === 'comic' ? (
+                          // Comic with regular title - check for Komga URL
+                          item.komgaUrl ? (
+                            <a 
+                              href={item.komgaUrl} 
+                              target="_blank" 
+                              rel="noopener noreferrer"
+                              className="komga-link"
+                              title="Open in Komga"
+                            >
+                              {item.title}
+                            </a>
+                          ) : (
+                            item.title
+                          )
                         ) : (
                           item.title
                         )}

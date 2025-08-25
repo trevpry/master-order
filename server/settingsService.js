@@ -21,6 +21,8 @@ async function getSettings() {
         customOrderPercent: 0,
         partiallyWatchedCollectionPercent: 75,
         plexSyncInterval: 12,
+        komgaApiKey: null,
+        komgaUrl: null,
         ignoredMovieCollections: null,
         ignoredTVCollections: null
       };
@@ -70,6 +72,8 @@ async function getSettings() {
       customOrderPercent: 0,
       partiallyWatchedCollectionPercent: 75,
       plexSyncInterval: 12,
+      komgaApiKey: null,
+      komgaUrl: null,
       ignoredMovieCollections: [],
       ignoredTVCollections: []
     };
@@ -101,11 +105,23 @@ async function getPlexSyncInterval() {
   return settings.plexSyncInterval;
 }
 
+async function getKomgaApiKey() {
+  const settings = await getSettings();
+  return settings.komgaApiKey;
+}
+
+async function getKomgaUrl() {
+  const settings = await getSettings();
+  return settings.komgaUrl;
+}
+
 module.exports = {
   getSettings,
   getPlexToken,
   getPlexUrl,
   getTvdbApiKey,
   getTvdbBearerToken,
-  getPlexSyncInterval
+  getPlexSyncInterval,
+  getKomgaApiKey,
+  getKomgaUrl
 };

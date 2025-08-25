@@ -18,6 +18,7 @@ const ArtworkCacheService = require('./artworkCacheService'); // Added import
 const subOrderService = require('./subOrderService'); // Added import
 const WatchLogService = require('./watchLogService'); // Added import
 const openLibraryService = require('./openLibraryService'); // Added import
+const comicSearchService = require('./comicSearchService'); // Added import
 const { getTimezoneAwarePeriodBounds, getTimezoneAwareDateGrouping, formatDateInTimezone } = require('./utils/timezoneUtils');
 const StatisticsService = require('./services/statisticsService');
 const WatchStatsRoutes = require('./routes/watchStatsRoutes');
@@ -516,6 +517,77 @@ app.get('/api/comicvine-artwork', async (req, res) => {
     } else {
       res.status(500).send('Error loading ComicVine artwork');
     }
+  }
+});
+
+// Komga test connection endpoint
+app.get('/api/komga/test', async (req, res) => {
+  try {
+    const komgaService = require('./komgaService');
+    const result = await komgaService.testConnection();
+    
+    if (result.success) {
+      res.json({ 
+        success: true, 
+        message: 'Komga connection successful',
+        configured: true
+      });
+    } else {
+      res.status(400).json({ 
+        success: false, 
+        message: result.message,
+        configured: false
+      });
+    }
+  } catch (error) {
+    console.error('Error testing Komga connection:', error);
+    res.status(500).json({ 
+      error: 'Failed to test Komga connection',
+      message: error.message,
+      configured: false
+    });
+  }
+});
+
+// Komga search endpoint
+app.get('/api/komga/search', async (req, res) => {
+  try {
+    const { query } = req.query;
+    
+    if (!query) {
+      return res.status(400).json({ error: 'Query parameter is required' });
+    }
+    
+    const komgaService = require('./komgaService');
+    const results = await komgaService.searchSeries(query);
+    
+    res.json(results);
+  } catch (error) {
+    console.error('Error searching Komga:', error);
+    res.status(500).json({ error: 'Failed to search Komga', message: error.message });
+  }
+});
+
+// Komga comic search endpoint (searches for specific comic issue)
+app.get('/api/komga/search-comic', async (req, res) => {
+  try {
+    const { series, issue, year } = req.query;
+    
+    if (!series || !issue) {
+      return res.status(400).json({ error: 'series and issue parameters are required' });
+    }
+    
+    const komgaService = require('./komgaService');
+    const result = await komgaService.searchComic(series, issue, year ? parseInt(year) : null);
+    
+    if (result) {
+      res.json({ found: true, data: result });
+    } else {
+      res.json({ found: false, data: null });
+    }
+  } catch (error) {
+    console.error('Error searching Komga for comic:', error);
+    res.status(500).json({ error: 'Failed to search Komga for comic', message: error.message });
   }
 });
 
@@ -1285,7 +1357,9 @@ app.post('/api/settings', async (req, res) => {
       timezone,
       ignoredMovieCollections,
       ignoredTVCollections,
-      christmasFilterEnabled
+      christmasFilterEnabled,
+      komgaApiKey,
+      komgaUrl
     } = req.body;
 
     // Validate percentages if provided
@@ -1334,6 +1408,8 @@ app.post('/api/settings', async (req, res) => {
     if (ignoredMovieCollections !== undefined) updateData.ignoredMovieCollections = Array.isArray(ignoredMovieCollections) ? JSON.stringify(ignoredMovieCollections) : ignoredMovieCollections;
     if (ignoredTVCollections !== undefined) updateData.ignoredTVCollections = Array.isArray(ignoredTVCollections) ? JSON.stringify(ignoredTVCollections) : ignoredTVCollections;
     if (christmasFilterEnabled !== undefined) updateData.christmasFilterEnabled = christmasFilterEnabled;
+    if (komgaApiKey !== undefined) updateData.komgaApiKey = komgaApiKey.trim() || null;
+    if (komgaUrl !== undefined) updateData.komgaUrl = komgaUrl.trim() || null;
 
     // Upsert settings (create if doesn't exist, update if it does)
     const { updateSettings } = require('./databaseUtils');
@@ -2957,8 +3033,60 @@ app.post('/api/custom-orders/:id/items', async (req, res) => {
       }
     }
     
-    // Handle ComicVine data extraction for comics
+    // Handle Comic Search Integration (Komga first, then ComicVine)
+    let comicSearchResult = null;
+    let enhancedComicData = {};
+    
+    // Enhanced comic processing - ComicVine first, then Komga enhancement
     let comicVineExtractedData = {};
+    let komgaEnhancementData = {};
+    
+    if (mediaType === 'comic') {
+      // First, handle ComicVine data extraction if provided
+      if (comicVineDetailsJson) {
+        try {
+          console.log(`\n🔍 Processing ComicVine data for: "${comicSeries}" #${comicIssue}`);
+          const comicVineData = JSON.parse(comicVineDetailsJson);
+          
+          // Extract data from ComicVine
+          comicVineExtractedData = {
+            comicVineId: comicVineData.issue?.id || null,
+            comicYear: comicVineData.issue?.cover_date ? new Date(comicVineData.issue.cover_date).getFullYear() : (comicYear ? parseInt(comicYear) : null),
+            comicPublisher: comicVineData.series?.publisher?.name || comicPublisher,
+            // Add any other ComicVine extracted fields as needed
+          };
+          
+          console.log('✅ ComicVine data extracted successfully');
+        } catch (error) {
+          console.error('Error parsing ComicVine data:', error);
+        }
+      }
+      
+      // Then, search Komga for the same comic to enhance with Komga data
+      try {
+        console.log(`\n🔍 Searching Komga for enhancement: "${comicSeries}" #${comicIssue}` + (comicYear ? ` (${comicYear})` : ''));
+        const komgaService = require('./komgaService');
+        const komgaResult = await komgaService.searchComic(comicSeries, comicIssue, comicYear);
+        
+        if (komgaResult) {
+          console.log('✅ Found matching comic in Komga - adding Komga URLs');
+          komgaEnhancementData = {
+            komgaSeriesId: komgaResult.series.id,
+            komgaBookId: komgaResult.book.id,
+            komgaUrl: komgaResult.komgaUrl,
+            komgaSeriesUrl: komgaResult.komgaSeriesUrl,
+            komgaMetadata: JSON.stringify(komgaResult.metadata)
+          };
+        } else {
+          console.log('ℹ️  Comic not found in Komga - will use ComicVine data only');
+        }
+      } catch (error) {
+        console.error('Error searching Komga for enhancement:', error);
+        // Continue without Komga enhancement if search fails
+      }
+    }
+
+    // Handle ComicVine data extraction for comics
     if (mediaType === 'comic' && comicVineDetailsJson) {
       try {
         const comicVineData = JSON.parse(comicVineDetailsJson);
@@ -3050,6 +3178,8 @@ app.post('/api/custom-orders/:id/items', async (req, res) => {
         webUrl,
         webDescription,
         sortOrder: nextSortOrder,
+        // Add Komga enhancement fields if found in Komga
+        ...komgaEnhancementData,
         // Mark as TVDB-only if no plexKey was provided for episodes/movies
         isFromTvdbOnly: (mediaType === 'episode' || mediaType === 'movie') && !plexKey
       }
