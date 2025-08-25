@@ -8,6 +8,8 @@ const Music = () => {
   const [albums, setAlbums] = useState([]);
   const [tracks, setTracks] = useState([]);
   const [stats, setStats] = useState(null);
+  const [collections, setCollections] = useState([]);
+  const [playlists, setPlaylists] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [activeView, setActiveView] = useState('artists');
@@ -15,6 +17,11 @@ const Music = () => {
   const [selectedSection, setSelectedSection] = useState('all');
   const [selectedArtist, setSelectedArtist] = useState(null);
   const [selectedAlbum, setSelectedAlbum] = useState(null);
+  const [extractingMetadata, setExtractingMetadata] = useState(new Set());
+  const [metadataResults, setMetadataResults] = useState({});
+  const [showMetadataModal, setShowMetadataModal] = useState(false);
+  const [currentMetadataResult, setCurrentMetadataResult] = useState(null);
+  const [expandedSections, setExpandedSections] = useState({});
   
   // Audio player state
   const [currentTrack, setCurrentTrack] = useState(null);
@@ -152,24 +159,28 @@ const Music = () => {
       setLoading(true);
       
       // Load all data in parallel
-      const [sectionsRes, artistsRes, albumsRes, tracksRes, statsRes] = await Promise.all([
+      const [sectionsRes, artistsRes, albumsRes, tracksRes, statsRes, collectionsRes, playlistsRes] = await Promise.all([
         fetch(`${config.apiBaseUrl}/api/music/sections`),
         fetch(`${config.apiBaseUrl}/api/music/artists`),
         fetch(`${config.apiBaseUrl}/api/music/albums`),
         fetch(`${config.apiBaseUrl}/api/music/tracks`),
-        fetch(`${config.apiBaseUrl}/api/music/stats`)
+        fetch(`${config.apiBaseUrl}/api/music/stats`),
+        fetch(`${config.apiBaseUrl}/api/music/collections`),
+        fetch(`${config.apiBaseUrl}/api/music/playlists`)
       ]);
 
-      if (!sectionsRes.ok || !artistsRes.ok || !albumsRes.ok || !tracksRes.ok || !statsRes.ok) {
+      if (!sectionsRes.ok || !artistsRes.ok || !albumsRes.ok || !tracksRes.ok || !statsRes.ok || !collectionsRes.ok || !playlistsRes.ok) {
         throw new Error('Failed to fetch music data');
       }
 
-      const [sectionsData, artistsData, albumsData, tracksData, statsData] = await Promise.all([
+      const [sectionsData, artistsData, albumsData, tracksData, statsData, collectionsData, playlistsData] = await Promise.all([
         sectionsRes.json(),
         artistsRes.json(),
         albumsRes.json(),
         tracksRes.json(),
-        statsRes.json()
+        statsRes.json(),
+        collectionsRes.json(),
+        playlistsRes.json()
       ]);
 
       setSections(sectionsData);
@@ -177,6 +188,8 @@ const Music = () => {
       setAlbums(albumsData);
       setTracks(tracksData);
       setStats(statsData);
+      setCollections(collectionsData);
+      setPlaylists(playlistsData);
     } catch (err) {
       console.error('Error loading music data:', err);
       setError(err.message);
@@ -227,9 +240,34 @@ const Music = () => {
 
     try {
       setLoading(true);
-      const artistsRes = await fetch(`${config.apiBaseUrl}/api/music/artists?section=${sectionId}`);
-      const artistsData = await artistsRes.json();
+      
+      // Load section-filtered data in parallel
+      const [artistsRes, albumsRes, tracksRes, collectionsRes, playlistsRes] = await Promise.all([
+        fetch(`${config.apiBaseUrl}/api/music/artists/section/${sectionId}`),
+        fetch(`${config.apiBaseUrl}/api/music/albums/section/${sectionId}`),
+        fetch(`${config.apiBaseUrl}/api/music/tracks/section/${sectionId}`),
+        fetch(`${config.apiBaseUrl}/api/music/collections?section=${sectionId}`),
+        fetch(`${config.apiBaseUrl}/api/music/playlists/section/${sectionId}`)
+      ]);
+
+      const [artistsData, albumsData, tracksData, collectionsData, playlistsData] = await Promise.all([
+        artistsRes.json(),
+        albumsRes.json(),
+        tracksRes.json(),
+        collectionsRes.json(),
+        playlistsRes.json()
+      ]);
+
       setArtists(artistsData);
+      setAlbums(albumsData);
+      setTracks(tracksData);
+      setCollections(collectionsData);
+      setPlaylists(playlistsData);
+      
+      // Reset selected artist/album when filtering by section
+      setSelectedArtist(null);
+      setSelectedAlbum(null);
+      setActiveView('artists'); // Return to artists view
     } catch (err) {
       console.error('Error filtering by section:', err);
       setError(err.message);
@@ -244,8 +282,8 @@ const Music = () => {
     
     try {
       const [albumsRes, tracksRes] = await Promise.all([
-        fetch(`${config.apiBaseUrl}/api/music/albums?artist=${artist.ratingKey}`),
-        fetch(`${config.apiBaseUrl}/api/music/tracks?artist=${artist.ratingKey}`)
+        fetch(`${config.apiBaseUrl}/api/music/albums/artist/${artist.ratingKey}`),
+        fetch(`${config.apiBaseUrl}/api/music/tracks/artist/${artist.ratingKey}`)
       ]);
       
       const [albumsData, tracksData] = await Promise.all([
@@ -280,6 +318,106 @@ const Music = () => {
     setSelectedArtist(null);
     setSelectedAlbum(null);
     loadData();
+  };
+
+  const extractAlbumMetadata = async (album) => {
+    try {
+      setExtractingMetadata(prev => new Set([...prev, album.ratingKey]));
+      
+      const response = await fetch(`${config.apiBaseUrl}/api/music/albums/${album.ratingKey}/extract-file-metadata`, {
+        method: 'POST'
+      });
+      
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+      
+      const result = await response.json();
+      
+      // Store the results for display
+      setMetadataResults(prev => ({
+        ...prev,
+        [album.ratingKey]: result
+      }));
+      
+      console.log(`Metadata extraction completed for album "${album.title}":`, result);
+      
+      // Show metadata modal with results
+      setCurrentMetadataResult(result);
+      setShowMetadataModal(true);
+      
+    } catch (error) {
+      console.error('Error extracting metadata:', error);
+      alert(`Failed to extract metadata: ${error.message}`);
+    } finally {
+      setExtractingMetadata(prev => {
+        const newSet = new Set(prev);
+        newSet.delete(album.ratingKey);
+        return newSet;
+      });
+    }
+  };
+
+  const formatMetadataValue = (value) => {
+    if (value === null || value === undefined) return 'N/A';
+    if (typeof value === 'boolean') return value ? 'Yes' : 'No';
+    if (typeof value === 'object') return JSON.stringify(value, null, 2);
+    if (typeof value === 'number') return value.toLocaleString();
+    return String(value);
+  };
+
+  const formatMetadataFileSize = (bytes) => {
+    if (!bytes || bytes === 0) return 'N/A';
+    const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(1024));
+    return Math.round(bytes / Math.pow(1024, i) * 100) / 100 + ' ' + sizes[i];
+  };
+
+  const formatMetadataDuration = (seconds) => {
+    if (!seconds) return 'N/A';
+    const mins = Math.floor(seconds / 60);
+    const secs = Math.floor(seconds % 60);
+    return `${mins}:${secs.toString().padStart(2, '0')}`;
+  };
+
+  const renderMetadataSection = (title, data, trackIndex, isExpanded = false) => {
+    const sectionKey = `${trackIndex}-${title}`;
+    const expanded = expandedSections[sectionKey] || isExpanded;
+    
+    if (!data || (typeof data === 'object' && Object.keys(data).length === 0)) {
+      return null;
+    }
+
+    const toggleSection = () => {
+      setExpandedSections(prev => ({
+        ...prev,
+        [sectionKey]: !expanded
+      }));
+    };
+
+    return (
+      <div className="metadata-section" key={sectionKey}>
+        <h4 onClick={toggleSection} style={{cursor: 'pointer'}}>
+          {expanded ? '▼' : '▶'} {title}
+        </h4>
+        {expanded && (
+          <div className="metadata-content">
+            {typeof data === 'object' ? (
+              Object.entries(data).map(([key, value]) => (
+                <div key={key} className="metadata-row">
+                  <span className="metadata-key">{key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}:</span>
+                  <span className="metadata-value">{formatMetadataValue(value)}</span>
+                </div>
+              ))
+            ) : (
+              <div className="metadata-row">
+                <span className="metadata-value">{formatMetadataValue(data)}</span>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    );
   };
 
   // Helper function to format time in MM:SS
@@ -340,9 +478,10 @@ const Music = () => {
           <h1>🎵 Music Library</h1>
           {stats && (
             <div className="music-stats">
-              <span>{stats.artistCount} Artists</span>
-              <span>{stats.albumCount} Albums</span>
-              <span>{stats.trackCount} Tracks</span>
+              <span>{stats.artists} Artists</span>
+              <span>{stats.albums} Albums</span>
+              <span>{stats.tracks} Tracks</span>
+              <span>{stats.playlists} Playlists</span>
             </div>
           )}
         </div>
@@ -384,6 +523,18 @@ const Music = () => {
             className={`nav-button ${activeView === 'artists' ? 'active' : ''}`}
           >
             Artists
+          </button>
+          <button 
+            onClick={() => setActiveView('collections')}
+            className={`nav-button ${activeView === 'collections' ? 'active' : ''}`}
+          >
+            Collections
+          </button>
+          <button 
+            onClick={() => setActiveView('playlists')}
+            className={`nav-button ${activeView === 'playlists' ? 'active' : ''}`}
+          >
+            Playlists
           </button>
           {selectedArtist && (
             <button 
@@ -531,7 +682,6 @@ const Music = () => {
                 <div 
                   key={album.ratingKey} 
                   className="album-card"
-                  onClick={() => selectAlbum(album)}
                 >
                   {album.thumb && (
                     <div className="album-image">
@@ -545,7 +695,9 @@ const Music = () => {
                     </div>
                   )}
                   <div className="album-info">
-                    <h3>{album.title}</h3>
+                    <h3 onClick={() => selectAlbum(album)} style={{ cursor: 'pointer' }}>
+                      {album.title}
+                    </h3>
                     {album.year && <span className="album-year">({album.year})</span>}
                     {album.summary && (
                       <p className="album-summary">{album.summary}</p>
@@ -562,6 +714,44 @@ const Music = () => {
                         </span>
                       )}
                     </div>
+                    <div className="album-actions">
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          selectAlbum(album);
+                        }}
+                        className="view-button"
+                      >
+                        View Tracks
+                      </button>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          extractAlbumMetadata(album);
+                        }}
+                        className="extract-metadata-button"
+                        disabled={extractingMetadata.has(album.ratingKey)}
+                      >
+                        {extractingMetadata.has(album.ratingKey) ? (
+                          <>
+                            <span className="spinner">⟳</span>
+                            Extracting...
+                          </>
+                        ) : (
+                          <>
+                            🏷️ Extract Metadata
+                          </>
+                        )}
+                      </button>
+                    </div>
+                    {metadataResults[album.ratingKey] && (
+                      <div className="metadata-results">
+                        <small>
+                          ✅ Metadata extracted: {metadataResults[album.ratingKey].successCount}/
+                          {metadataResults[album.ratingKey].tracksProcessed} tracks
+                        </small>
+                      </div>
+                    )}
                   </div>
                 </div>
               ))
@@ -612,7 +802,227 @@ const Music = () => {
             )}
           </div>
         )}
+
+        {activeView === 'collections' && (
+          <div className="collections-grid">
+            {collections.length === 0 ? (
+              <div className="empty-state">
+                <p>No collections found.</p>
+              </div>
+            ) : (
+              collections.map(collection => (
+                <div key={collection.value} className="collection-card">
+                  <div className="collection-info">
+                    <h3>{collection.label}</h3>
+                    <div className="collection-meta">
+                      <span className="collection-type">Music Collection</span>
+                    </div>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        )}
+
+        {activeView === 'playlists' && (
+          <div className="playlists-grid">
+            {playlists.length === 0 ? (
+              <div className="empty-state">
+                <p>No playlists found.</p>
+              </div>
+            ) : (
+              playlists.map(playlist => (
+                <div key={playlist.ratingKey} className="playlist-card">
+                  {playlist.thumb && (
+                    <div className="playlist-thumbnail">
+                      <img 
+                        src={`${config.plexUrl}${playlist.thumb}?X-Plex-Token=${config.plexToken}`}
+                        alt={playlist.title}
+                        onError={(e) => {
+                          e.target.style.display = 'none';
+                        }}
+                      />
+                    </div>
+                  )}
+                  <div className="playlist-info">
+                    <h3>{playlist.title}</h3>
+                    {playlist.summary && (
+                      <p className="playlist-summary">{playlist.summary}</p>
+                    )}
+                    <div className="playlist-meta">
+                      <span className="track-count">
+                        {playlist.leafCount || playlist.items?.length || 0} track{(playlist.leafCount || playlist.items?.length || 0) !== 1 ? 's' : ''}
+                      </span>
+                      {playlist.duration && (
+                        <span className="playlist-duration">
+                          {Math.floor(playlist.duration / 60000)}:{String(Math.floor((playlist.duration % 60000) / 1000)).padStart(2, '0')}
+                        </span>
+                      )}
+                      {playlist.smart && (
+                        <span className="smart-playlist">Smart Playlist</span>
+                      )}
+                    </div>
+                    {playlist.items && playlist.items.length > 0 && (
+                      <div className="playlist-preview">
+                        <h4>Tracks:</h4>
+                        <div className="playlist-tracks">
+                          {playlist.items.slice(0, 5).map((item, index) => (
+                            <div key={`${item.ratingKey}-${index}`} className="playlist-track">
+                              <span className="track-index">{item.index}.</span>
+                              <span className="track-title">
+                                {item.track ? item.track.title : item.album ? item.album.title : 'Unknown'}
+                              </span>
+                            </div>
+                          ))}
+                          {playlist.items.length > 5 && (
+                            <div className="playlist-more">
+                              ...and {playlist.items.length - 5} more tracks
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        )}
       </div>
+      
+      {/* Metadata Modal */}
+      {showMetadataModal && currentMetadataResult && (
+        <div className="metadata-modal-overlay" onClick={() => setShowMetadataModal(false)}>
+          <div className="metadata-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="metadata-modal-header">
+              <h2>🏷️ Extracted Metadata Results</h2>
+              <button 
+                className="metadata-modal-close"
+                onClick={() => setShowMetadataModal(false)}
+              >
+                ✕
+              </button>
+            </div>
+            
+            <div className="metadata-modal-content">
+              <div className="metadata-summary">
+                <h3>Summary</h3>
+                <div className="metadata-stats">
+                  <div className="stat">
+                    <span className="stat-label">Tracks Processed:</span>
+                    <span className="stat-value">{currentMetadataResult.tracksProcessed}</span>
+                  </div>
+                  <div className="stat">
+                    <span className="stat-label">Successful:</span>
+                    <span className="stat-value success">{currentMetadataResult.successCount}</span>
+                  </div>
+                  <div className="stat">
+                    <span className="stat-label">Errors:</span>
+                    <span className="stat-value error">{currentMetadataResult.errorCount}</span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="metadata-tracks">
+                {currentMetadataResult.extractedMetadata?.map((track, index) => (
+                  <div key={track.ratingKey || index} className="metadata-track">
+                    <div className="metadata-track-header">
+                      <h4>
+                        {track.error ? '❌' : '✅'} {track.title}
+                      </h4>
+                      {track.filePath && (
+                        <small className="file-path">{track.filePath}</small>
+                      )}
+                    </div>
+                    
+                    {track.error ? (
+                      <div className="metadata-error">
+                        <p><strong>Error:</strong> {track.error}</p>
+                        {track.plexPath && <p><strong>Plex Path:</strong> {track.plexPath}</p>}
+                        {track.libraryBasePaths && (
+                          <p><strong>Tried Library Paths:</strong> {track.libraryBasePaths.join(', ')}</p>
+                        )}
+                      </div>
+                    ) : track.common && (
+                      <div className="metadata-details">
+                        {/* Basic Info */}
+                        {renderMetadataSection('Basic Information', {
+                          Title: track.common.title,
+                          Artist: track.common.artist,
+                          'Album Artist': track.common.albumartist,
+                          Album: track.common.album,
+                          Year: track.common.year,
+                          Track: track.common.track?.no ? `${track.common.track.no}${track.common.track.of ? `/${track.common.track.of}` : ''}` : track.common.track,
+                          Genre: track.common.genre?.join(', '),
+                          Duration: formatMetadataDuration(track.formatInfo?.duration),
+                          Composer: track.common.composer?.join(', '),
+                          Comment: track.common.comment?.join(', ')
+                        }, index, true)}
+                        
+                        {/* MusicBrainz IDs */}
+                        {renderMetadataSection('MusicBrainz IDs', {
+                          'Recording ID': track.common.musicbrainz_recordingid,
+                          'Track ID': track.common.musicbrainz_trackid,
+                          'Album ID': track.common.musicbrainz_albumid,
+                          'Artist ID': track.common.musicbrainz_artistid,
+                          'Album Artist ID': track.common.musicbrainz_albumartistid,
+                          'Release Group ID': track.common.musicbrainz_releasegroupid,
+                          'Work ID': track.common.musicbrainz_workid
+                        }, index)}
+                        
+                        {/* Technical Info */}
+                        {renderMetadataSection('Technical Information', {
+                          Format: track.formatInfo?.container,
+                          Codec: track.formatInfo?.codec,
+                          Lossless: track.formatInfo?.lossless,
+                          Bitrate: track.formatInfo?.bitrate ? `${track.formatInfo.bitrate} kbps` : null,
+                          'Sample Rate': track.formatInfo?.sampleRate ? `${track.formatInfo.sampleRate} Hz` : null,
+                          'Bits Per Sample': track.formatInfo?.bitsPerSample,
+                          Channels: track.formatInfo?.numberOfChannels,
+                          'File Size': formatMetadataFileSize(track.formatInfo?.size)
+                        }, index)}
+                        
+                        {/* Release Info */}
+                        {renderMetadataSection('Release Information', {
+                          Label: track.common.label?.join(', '),
+                          Date: track.common.date,
+                          'Original Date': track.common.originaldate,
+                          'Original Year': track.common.originalyear,
+                          'Release Type': track.common.releasetype?.join(', '),
+                          'Release Status': track.common.releasestatus,
+                          'Release Country': track.common.releasecountry,
+                          Barcode: track.common.barcode,
+                          'Catalog Number': track.common.catalognumber?.join(', '),
+                          ISRC: track.common.isrc?.join(', ')
+                        }, index)}
+                        
+                        {/* Additional Metadata */}
+                        {renderMetadataSection('Additional Information', {
+                          Language: track.common.language,
+                          Mood: track.common.mood?.join(', '),
+                          BPM: track.common.bpm,
+                          Key: track.common.key,
+                          Rating: track.common.rating?.join(', '),
+                          Compilation: track.common.compilation,
+                          Gapless: track.common.gapless,
+                          Copyright: track.common.copyright,
+                          License: track.common.license,
+                          'Encoded By': track.common.encodedby,
+                          'Encoder Settings': track.common.encodersettings
+                        }, index)}
+                        
+                        {/* Raw Tags for debugging */}
+                        {track.nativeTags && Object.keys(track.nativeTags).length > 0 && 
+                          renderMetadataSection('Raw Tags (Debug)', track.nativeTags, index)}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

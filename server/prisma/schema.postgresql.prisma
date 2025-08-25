@@ -166,6 +166,7 @@ model PlexLibrarySection {
   artists          PlexArtist[]
   albums           PlexAlbum[]
   tracks           PlexTrack[]
+  playlists        PlexPlaylist[]
 }
 
 model PlexTVShow {
@@ -647,6 +648,9 @@ model PlexArtist {
   updatedAt         DateTime?
   librarySectionID  Int?
   
+  // Collections field for Plex Collections
+  collections       String?
+  
   // Relations
   librarySection    PlexLibrarySection? @relation(fields: [librarySectionID], references: [id])
   albums            PlexAlbum[]
@@ -673,6 +677,9 @@ model PlexAlbum {
   addedAt           DateTime?
   updatedAt         DateTime?
   librarySectionID  Int?
+  
+  // Collections field for Plex Collections
+  collections       String?
   
   // Relations
   librarySection    PlexLibrarySection? @relation(fields: [librarySectionID], references: [id])
@@ -854,4 +861,46 @@ model StashPerformerTag {
   
   @@id([performerId, tagId])
   @@map("StashPerformerTag")
+}
+
+// Plex Playlist models for music playlists
+model PlexPlaylist {
+  id                Int      @id @default(autoincrement())
+  ratingKey         String   @unique
+  key               String
+  guid              String?
+  type              String   @default("playlist")
+  title             String
+  titleSort         String?
+  summary           String?
+  smart             Boolean  @default(false) // Smart playlist vs manual playlist
+  playlistType      String?  // audio, video, photo
+  thumb             String?
+  composite         String?
+  duration          Int?     // Total duration in milliseconds
+  leafCount         Int?     // Number of items in playlist
+  addedAt           DateTime?
+  updatedAt         DateTime?
+  librarySectionID  Int?
+  
+  // Relations
+  librarySection    PlexLibrarySection? @relation(fields: [librarySectionID], references: [id])
+  items             PlexPlaylistItem[]
+  
+  @@map("PlexPlaylist")
+}
+
+model PlexPlaylistItem {
+  id                Int      @id @default(autoincrement())
+  playlistRatingKey String   // Playlist ratingKey
+  ratingKey         String   // Item ratingKey (track, album, etc.)
+  type              String   // track, album, artist
+  title             String?
+  duration          Int?     // Duration in milliseconds
+  addedAt           DateTime?
+  
+  // Relations
+  playlist          PlexPlaylist @relation(fields: [playlistRatingKey], references: [ratingKey], onDelete: Cascade)
+  
+  @@map("PlexPlaylistItem")
 }

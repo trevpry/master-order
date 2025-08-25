@@ -32,6 +32,12 @@ export default function Stash() {
     lastSync: null,
     message: ''
   });
+  const [modal, setModal] = useState({
+    isOpen: false,
+    action: null, // 'play' or 'pause'
+    scene: null,
+    data: null
+  });
 
   // Test Stash connection on component mount
   useEffect(() => {
@@ -164,6 +170,69 @@ export default function Stash() {
       ? connectionStatus.stashUrl.slice(0, -1) 
       : connectionStatus.stashUrl;
     return `${baseUrl}/scenes/${sceneId}/stream`;
+  };
+
+  // Handle play button click
+  const handlePlayScene = (scene) => {
+    const playData = {
+      action: 'play',
+      scene: {
+        id: scene.id,
+        title: scene.title || scene.details || 'Untitled Scene',
+        duration: scene.file?.duration || 0,
+        resumeTime: scene.resumeTime || 0,
+        streamUrl: getStreamUrl(scene.id),
+        stashUrl: connectionStatus.stashUrl
+      },
+      timestamp: new Date().toISOString()
+    };
+
+    setModal({
+      isOpen: true,
+      action: 'play',
+      scene: scene,
+      data: playData
+    });
+  };
+
+  // Handle pause button click
+  const handlePauseScene = (scene) => {
+    const pauseData = {
+      action: 'pause',
+      scene: {
+        id: scene.id,
+        title: scene.title || scene.details || 'Untitled Scene',
+        currentTime: scene.resumeTime || 0 // This would ideally come from current playback position
+      },
+      timestamp: new Date().toISOString()
+    };
+
+    setModal({
+      isOpen: true,
+      action: 'pause',
+      scene: scene,
+      data: pauseData
+    });
+  };
+
+  // Close modal
+  const closeModal = () => {
+    setModal({
+      isOpen: false,
+      action: null,
+      scene: null,
+      data: null
+    });
+  };
+
+  // Send command to Android companion app (placeholder for now)
+  const sendToAndroidApp = async () => {
+    // This would be the actual API call to send data to Android companion app
+    console.log('Sending to Android app:', modal.data);
+    
+    // For now, just show it in console and close modal
+    alert(`Command sent to Android app:\n${JSON.stringify(modal.data, null, 2)}`);
+    closeModal();
   };
 
   const handleSync = async () => {
@@ -354,18 +423,22 @@ export default function Stash() {
               
               <div className="content-actions">
                 {scene.id && (
-                  <Button
-                    className="action-button"
-                    onClick={() => {
-                      const streamUrl = getStreamUrl(scene.id);
-                      if (streamUrl) {
-                        window.open(streamUrl, '_blank');
-                      }
-                    }}
-                    disabled={!connectionStatus.stashUrl}
-                  >
-                    🔗 View
-                  </Button>
+                  <div className="playback-buttons">
+                    <Button
+                      className="action-button play-button"
+                      onClick={() => handlePlayScene(scene)}
+                      disabled={!connectionStatus.stashUrl}
+                    >
+                      ▶️ Play
+                    </Button>
+                    <Button
+                      className="action-button pause-button"
+                      onClick={() => handlePauseScene(scene)}
+                      disabled={!connectionStatus.stashUrl}
+                    >
+                      ⏸️ Pause
+                    </Button>
+                  </div>
                 )}
               </div>
             </div>
@@ -658,6 +731,54 @@ export default function Stash() {
             </div>
           )}
         </>
+      )}
+
+      {/* Modal for showing Android companion app data */}
+      {modal.isOpen && (
+        <div className="modal-overlay" onClick={closeModal}>
+          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h3>
+                {modal.action === 'play' ? '▶️ Play Scene' : '⏸️ Pause Scene'}
+              </h3>
+              <button className="modal-close" onClick={closeModal}>×</button>
+            </div>
+            
+            <div className="modal-body">
+              <div className="scene-info">
+                <h4>{modal.scene?.title || modal.scene?.details || 'Untitled Scene'}</h4>
+                {modal.scene?.file?.duration && (
+                  <p>Duration: {formatDuration(modal.scene.file.duration)}</p>
+                )}
+                {modal.scene?.resumeTime > 0 && (
+                  <p>Resume from: {formatDuration(modal.scene.resumeTime)}</p>
+                )}
+              </div>
+              
+              <div className="data-preview">
+                <h4>Data to be sent to Android companion app:</h4>
+                <pre className="json-preview">
+                  {JSON.stringify(modal.data, null, 2)}
+                </pre>
+              </div>
+            </div>
+            
+            <div className="modal-footer">
+              <Button 
+                className="modal-button secondary" 
+                onClick={closeModal}
+              >
+                Cancel
+              </Button>
+              <Button 
+                className="modal-button primary" 
+                onClick={sendToAndroidApp}
+              >
+                Send to Android App
+              </Button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

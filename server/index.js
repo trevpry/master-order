@@ -18,6 +18,8 @@ const ArtworkCacheService = require('./artworkCacheService'); // Added import
 const subOrderService = require('./subOrderService'); // Added import
 const WatchLogService = require('./watchLogService'); // Added import
 const openLibraryService = require('./openLibraryService'); // Added import
+const mm = require('music-metadata');
+const fs = require('fs');
 const comicSearchService = require('./comicSearchService'); // Added import
 const { getTimezoneAwarePeriodBounds, getTimezoneAwareDateGrouping, formatDateInTimezone } = require('./utils/timezoneUtils');
 const StatisticsService = require('./services/statisticsService');
@@ -5555,6 +5557,17 @@ app.get('/api/music/tracks/album/:albumRatingKey', async (req, res) => {
   }
 });
 
+app.get('/api/music/tracks/artist/:artistRatingKey', async (req, res) => {
+  try {
+    const { artistRatingKey } = req.params;
+    const tracks = await plexDb.getTracksByArtist(artistRatingKey);
+    res.json(tracks);
+  } catch (error) {
+    console.error('Error fetching tracks by artist:', error);
+    res.status(500).json({ error: 'Failed to fetch tracks' });
+  }
+});
+
 app.get('/api/music/tracks/:ratingKey', async (req, res) => {
   try {
     const { ratingKey } = req.params;
@@ -5576,6 +5589,513 @@ app.get('/api/music/stats', async (req, res) => {
   } catch (error) {
     console.error('Error fetching music statistics:', error);
     res.status(500).json({ error: 'Failed to fetch music statistics' });
+  }
+});
+
+// Get all music collections
+app.get('/api/music/collections', async (req, res) => {
+  try {
+    const { section } = req.query;
+    
+    let artistCollections, albumCollections;
+    
+    if (section && section !== 'all') {
+      // Filter collections by section
+      artistCollections = await plexDb.getAllMusicArtistCollectionsBySection(section);
+      albumCollections = await plexDb.getAllMusicAlbumCollectionsBySection(section);
+    } else {
+      // Get all collections
+      artistCollections = await plexDb.getAllMusicArtistCollections();
+      albumCollections = await plexDb.getAllMusicAlbumCollections();
+    }
+    
+    // Combine and deduplicate collections
+    const allCollections = [...new Set([...artistCollections, ...albumCollections])];
+    
+    // Format for response
+    const formattedCollections = allCollections
+      .sort()
+      .map(collection => ({
+        value: collection,
+        label: collection,
+        type: 'music'
+      }));
+    
+    res.json(formattedCollections);
+  } catch (error) {
+    console.error('Error fetching music collections:', error);
+    res.status(500).json({ error: 'Failed to fetch music collections' });
+  }
+});
+
+// Get all music playlists
+app.get('/api/music/playlists', async (req, res) => {
+  try {
+    const playlists = await plexDb.getAllPlaylists();
+    res.json(playlists);
+  } catch (error) {
+    console.error('Error fetching music playlists:', error);
+    res.status(500).json({ error: 'Failed to fetch music playlists' });
+  }
+});
+
+// Get playlists from specific section
+app.get('/api/music/playlists/section/:sectionKey', async (req, res) => {
+  try {
+    const { sectionKey } = req.params;
+    const playlists = await plexDb.getPlaylistsBySection(sectionKey);
+    res.json(playlists);
+  } catch (error) {
+    console.error('Error fetching playlists by section:', error);
+    res.status(500).json({ error: 'Failed to fetch playlists' });
+  }
+});
+
+// Get playlist by rating key
+app.get('/api/music/playlists/:ratingKey', async (req, res) => {
+  try {
+    const { ratingKey } = req.params;
+    const playlist = await plexDb.getPlaylistByRatingKey(ratingKey);
+    if (!playlist) {
+      return res.status(404).json({ error: 'Playlist not found' });
+    }
+    res.json(playlist);
+  } catch (error) {
+    console.error('Error fetching playlist:', error);
+    res.status(500).json({ error: 'Failed to fetch playlist' });
+  }
+});
+
+// Extract detailed album track metadata including MusicBrainz fields
+app.post('/api/music/albums/:albumRatingKey/extract-metadata', async (req, res) => {
+  try {
+    const { albumRatingKey } = req.params;
+    
+    console.log(`Starting metadata extraction for album: ${albumRatingKey}`);
+    
+    // Get Plex settings
+    const { getSettings } = require('./databaseUtils');
+    const settings = await getSettings();
+    
+    if (!settings || !settings.plexUrl || !settings.plexToken) {
+      return res.status(500).json({ error: 'Plex settings not configured' });
+    }
+
+    // Use the PlexSyncService to make API requests
+    const plexSync = require('./plexSyncService');
+    const syncService = new plexSync();
+    
+    // Get all tracks for this album
+    const albumTracksData = await syncService.makeRequest(`/library/metadata/${albumRatingKey}/children`);
+    const tracks = albumTracksData.MediaContainer?.Metadata || [];
+    
+    console.log(`Found ${tracks.length} tracks for album ${albumRatingKey}`);
+    
+    const updatedTracks = [];
+    
+    // Process each track to get detailed metadata
+    for (const track of tracks) {
+      try {
+        // Get detailed metadata for this specific track
+        const detailedTrackData = await syncService.makeRequest(`/library/metadata/${track.ratingKey}`);
+        const detailedTrack = detailedTrackData.MediaContainer?.Metadata?.[0];
+        
+        if (detailedTrack) {
+          // Extract all available metadata including GUID tags
+          const guids = detailedTrack.Guid || [];
+          const musicBrainzData = {};
+          
+          // Parse GUIDs to extract MusicBrainz IDs
+          guids.forEach(guid => {
+            if (guid.id) {
+              if (guid.id.startsWith('mbid://')) {
+                musicBrainzData.musicbrainzTrackId = guid.id.replace('mbid://', '');
+              } else if (guid.id.startsWith('com.plexapp.agents.lastfm://')) {
+                musicBrainzData.lastFmId = guid.id.replace('com.plexapp.agents.lastfm://', '');
+              } else if (guid.id.startsWith('com.plexapp.agents.plexmusic://')) {
+                musicBrainzData.plexMusicId = guid.id.replace('com.plexapp.agents.plexmusic://', '');
+              }
+            }
+          });
+          
+          // Extract additional metadata that might be available
+          const trackMetadata = {
+            ratingKey: detailedTrack.ratingKey,
+            originalTitle: detailedTrack.originalTitle || null,
+            rating: detailedTrack.rating ? parseFloat(detailedTrack.rating) : null,
+            userRating: detailedTrack.userRating ? parseFloat(detailedTrack.userRating) : null,
+            viewCount: detailedTrack.viewCount ? parseInt(detailedTrack.viewCount) : null,
+            skipCount: detailedTrack.skipCount ? parseInt(detailedTrack.skipCount) : null,
+            lastViewedAt: detailedTrack.lastViewedAt ? new Date(parseInt(detailedTrack.lastViewedAt) * 1000) : null,
+            musicBrainzTrackId: musicBrainzData.musicbrainzTrackId || null,
+            lastFmId: musicBrainzData.lastFmId || null,
+            plexMusicId: musicBrainzData.plexMusicId || null,
+            // Media information
+            bitrate: detailedTrack.Media?.[0]?.bitrate ? parseInt(detailedTrack.Media[0].bitrate) : null,
+            container: detailedTrack.Media?.[0]?.container || null,
+            audioCodec: detailedTrack.Media?.[0]?.audioCodec || null,
+            audioChannels: detailedTrack.Media?.[0]?.audioChannels ? parseInt(detailedTrack.Media[0].audioChannels) : null,
+            // File information
+            file: detailedTrack.Media?.[0]?.Part?.[0]?.file || null,
+            size: detailedTrack.Media?.[0]?.Part?.[0]?.size ? parseInt(detailedTrack.Media[0].Part[0].size) : null
+          };
+          
+          updatedTracks.push(trackMetadata);
+          console.log(`Extracted metadata for track: ${detailedTrack.title}`);
+        }
+        
+        // Add a small delay to avoid overwhelming Plex
+        await new Promise(resolve => setTimeout(resolve, 100));
+        
+      } catch (trackError) {
+        console.error(`Error processing track ${track.ratingKey}:`, trackError);
+        // Continue with other tracks even if one fails
+      }
+    }
+    
+    console.log(`Successfully extracted metadata for ${updatedTracks.length} tracks`);
+    
+    res.json({
+      albumRatingKey,
+      tracksProcessed: updatedTracks.length,
+      totalTracks: tracks.length,
+      extractedMetadata: updatedTracks
+    });
+    
+  } catch (error) {
+    console.error('Error extracting album metadata:', error);
+    res.status(500).json({ error: 'Failed to extract album metadata' });
+  }
+});
+
+// Extract metadata directly from audio files using music-metadata library
+app.post('/api/music/albums/:albumRatingKey/extract-file-metadata', async (req, res) => {
+  try {
+    const { albumRatingKey } = req.params;
+    
+    console.log(`Starting file metadata extraction for album: ${albumRatingKey}`);
+    
+    // Get Plex settings
+    const { getSettings } = require('./databaseUtils');
+    const settings = await getSettings();
+    
+    if (!settings || !settings.plexUrl || !settings.plexToken) {
+      return res.status(500).json({ error: 'Plex settings not configured' });
+    }
+
+    // Use the PlexSyncService to get track file paths
+    const plexSync = require('./plexSyncService');
+    const syncService = new plexSync();
+    
+    // First, get the library sections to understand path mappings
+    console.log('Getting Plex library sections for path mapping...');
+    const sectionsData = await syncService.makeRequest('/library/sections');
+    const sections = sectionsData.MediaContainer?.Directory || [];
+    
+    // Create a mapping of library section keys to their base paths
+    const libraryPathMappings = {};
+    sections.forEach(section => {
+      if (section.Location) {
+        const locations = Array.isArray(section.Location) ? section.Location : [section.Location];
+        libraryPathMappings[section.key] = locations.map(loc => loc.path);
+      }
+    });
+    
+    console.log('Library path mappings:', libraryPathMappings);
+    
+    // Get all tracks for this album
+    const albumTracksData = await syncService.makeRequest(`/library/metadata/${albumRatingKey}/children`);
+    const tracks = albumTracksData.MediaContainer?.Metadata || [];
+    
+    console.log(`Found ${tracks.length} tracks for album ${albumRatingKey}`);
+    
+    // Get the library section ID from the album data
+    const albumData = await syncService.makeRequest(`/library/metadata/${albumRatingKey}`);
+    const album = albumData.MediaContainer?.Metadata?.[0];
+    const librarySectionID = album?.librarySectionID;
+    
+    console.log(`Album library section ID: ${librarySectionID}`);
+    
+    const updatedTracks = [];
+    let successCount = 0;
+    let errorCount = 0;
+    
+    // Helper function to resolve file paths using library mappings
+    const resolveFilePath = (plexPath, sectionID) => {
+      if (!plexPath) return null;
+      
+      // Get the base paths for this library section
+      const basePaths = libraryPathMappings[sectionID] || [];
+      
+      // Environment variable mapping for path translation
+      const pathMappings = {
+        '/xmas': process.env.XMAS_PATH || 'C:\\Media\\Christmas',
+        '/movies': process.env.MOVIES_PATH || 'C:\\Media\\Movies', 
+        '/music': process.env.MUSIC_PATH || 'C:\\Media\\Music',
+        '/classical': process.env.CLASSICAL_PATH || 'C:\\Media\\Classical',
+        '/tv': process.env.TV_PATH || 'C:\\Media\\TV',
+        '/video_games': process.env.VIDEO_GAMES_PATH || 'C:\\Media\\VideoGames',
+        '/pop_music': process.env.POP_MUSIC_PATH || 'C:\\Media\\PopMusic'
+      };
+      
+      // First try direct path mapping based on library section
+      for (const basePath of basePaths) {
+        if (pathMappings[basePath]) {
+          // Map the Plex base path to the local path
+          const localBasePath = pathMappings[basePath];
+          let testPath;
+          
+          if (plexPath.startsWith(basePath + '/')) {
+            // Replace the Plex base path with local base path
+            testPath = plexPath.replace(basePath, localBasePath);
+            // Convert forward slashes to backslashes on Windows
+            testPath = testPath.replace(/\//g, path.sep);
+          } else if (plexPath.startsWith('/')) {
+            // Try appending the relative path to local base
+            testPath = path.join(localBasePath, plexPath.substring(basePath.length + 1));
+          }
+          
+          if (testPath) {
+            console.log(`Trying mapped path: ${testPath}`);
+            if (fs.existsSync(testPath)) {
+              console.log(`✅ Found file at mapped path: ${testPath}`);
+              return testPath;
+            }
+          }
+        }
+      }
+      
+      // Fallback: Try original path resolution logic
+      const pathPrefixes = [
+        ...basePaths, // Plex library paths first
+        '', // Try the path as-is
+        '/media', // Docker media mount
+        '/mnt/user/Media', // Unraid media path
+        'C:\\Media', // Windows media path
+        'D:\\Media', // Windows alternate drive
+        '/volume1/Media', // Synology NAS
+        '/share/Media', // QNAP NAS
+        process.env.MEDIA_PATH || '', // Environment variable
+        settings.mediaPath || '' // From database settings if available
+      ];
+      
+      // If the plex path starts with /, it might be relative to library root
+      // Try combining it with each base path
+      for (const prefix of pathPrefixes) {
+        let testPath;
+        
+        if (prefix && plexPath.startsWith('/')) {
+          // Remove leading slash from plexPath when combining with base path
+          testPath = path.join(prefix, plexPath.substring(1));
+        } else if (prefix) {
+          testPath = path.join(prefix, plexPath);
+        } else {
+          testPath = plexPath;
+        }
+        
+        console.log(`Trying path: ${testPath}`);
+        
+        if (fs.existsSync(testPath)) {
+          console.log(`✅ Found file at: ${testPath}`);
+          return testPath;
+        }
+      }
+      
+      // If no direct mapping works, try some more creative approaches
+      // Sometimes the path is relative to a parent directory of the library path
+      for (const basePath of basePaths) {
+        if (basePath) {
+          // Try parent directories of the base path
+          const parentPath = path.dirname(basePath);
+          const grandParentPath = path.dirname(parentPath);
+          
+          for (const testBase of [parentPath, grandParentPath]) {
+            const testPath = plexPath.startsWith('/') 
+              ? path.join(testBase, plexPath.substring(1))
+              : path.join(testBase, plexPath);
+            
+            console.log(`Trying parent path: ${testPath}`);
+            
+            if (fs.existsSync(testPath)) {
+              console.log(`✅ Found file at parent path: ${testPath}`);
+              return testPath;
+            }
+          }
+        }
+      }
+      
+      return null;
+    };
+    
+    // Process each track to extract file metadata
+    for (const track of tracks) {
+      try {
+        // Get detailed track info to access file path
+        const detailedTrackData = await syncService.makeRequest(`/library/metadata/${track.ratingKey}`);
+        const detailedTrack = detailedTrackData.MediaContainer?.Metadata?.[0];
+        
+        if (detailedTrack?.Media?.[0]?.Part?.[0]?.file) {
+          const plexFilePath = detailedTrack.Media[0].Part[0].file;
+          const trackSectionID = detailedTrack.librarySectionID || librarySectionID;
+          
+          console.log(`Processing track "${track.title}" with path: ${plexFilePath}`);
+          console.log(`Using library section ID: ${trackSectionID}`);
+          
+          const resolvedPath = resolveFilePath(plexFilePath, trackSectionID);
+          
+          if (resolvedPath) {
+            console.log(`Reading metadata from file: ${resolvedPath}`);
+            
+            try {
+              // Parse metadata from the audio file
+              const metadata = await mm.parseFile(resolvedPath);
+              
+              // Extract all available metadata
+              const fileMetadata = {
+                ratingKey: track.ratingKey,
+                title: track.title,
+                filePath: resolvedPath,
+                plexPath: plexFilePath,
+                librarySectionID: trackSectionID,
+                // Common metadata
+                format: metadata.format,
+                common: {
+                  title: metadata.common.title || null,
+                  artist: metadata.common.artist || null,
+                  albumartist: metadata.common.albumartist || null,
+                  album: metadata.common.album || null,
+                  year: metadata.common.year || null,
+                  track: metadata.common.track || null,
+                  genre: metadata.common.genre || null,
+                  comment: metadata.common.comment || null,
+                  composer: metadata.common.composer || null,
+                  conductor: metadata.common.conductor || null,
+                  lyricist: metadata.common.lyricist || null,
+                  writer: metadata.common.writer || null,
+                  producer: metadata.common.producer || null,
+                  label: metadata.common.label || null,
+                  date: metadata.common.date || null,
+                  originaldate: metadata.common.originaldate || null,
+                  originalyear: metadata.common.originalyear || null,
+                  releasetype: metadata.common.releasetype || null,
+                  releasestatus: metadata.common.releasestatus || null,
+                  releasecountry: metadata.common.releasecountry || null,
+                  barcode: metadata.common.barcode || null,
+                  catalognumber: metadata.common.catalognumber || null,
+                  media: metadata.common.media || null,
+                  discsubtitle: metadata.common.discsubtitle || null,
+                  isrc: metadata.common.isrc || null,
+                  language: metadata.common.language || null,
+                  mood: metadata.common.mood || null,
+                  copyright: metadata.common.copyright || null,
+                  license: metadata.common.license || null,
+                  encodedby: metadata.common.encodedby || null,
+                  encodersettings: metadata.common.encodersettings || null,
+                  gapless: metadata.common.gapless || null,
+                  compilation: metadata.common.compilation || null,
+                  rating: metadata.common.rating || null,
+                  bpm: metadata.common.bpm || null,
+                  key: metadata.common.key || null,
+                  // MusicBrainz fields
+                  musicbrainz_recordingid: metadata.common.musicbrainz_recordingid || null,
+                  musicbrainz_trackid: metadata.common.musicbrainz_trackid || null,
+                  musicbrainz_albumid: metadata.common.musicbrainz_albumid || null,
+                  musicbrainz_artistid: metadata.common.musicbrainz_artistid || null,
+                  musicbrainz_albumartistid: metadata.common.musicbrainz_albumartistid || null,
+                  musicbrainz_releasegroupid: metadata.common.musicbrainz_releasegroupid || null,
+                  musicbrainz_workid: metadata.common.musicbrainz_workid || null,
+                  musicbrainz_trmid: metadata.common.musicbrainz_trmid || null,
+                  musicbrainz_discid: metadata.common.musicbrainz_discid || null,
+                  // Additional metadata
+                  acoustid_id: metadata.common.acoustid_id || null,
+                  acoustid_fingerprint: metadata.common.acoustid_fingerprint || null,
+                  musicip_puid: metadata.common.musicip_puid || null,
+                  musicip_fingerprint: metadata.common.musicip_fingerprint || null
+                },
+                // Technical format information
+                formatInfo: {
+                  container: metadata.format.container || null,
+                  codec: metadata.format.codec || null,
+                  lossless: metadata.format.lossless || null,
+                  duration: metadata.format.duration || null,
+                  bitrate: metadata.format.bitrate || null,
+                  sampleRate: metadata.format.sampleRate || null,
+                  bitsPerSample: metadata.format.bitsPerSample || null,
+                  numberOfChannels: metadata.format.numberOfChannels || null,
+                  codecProfile: metadata.format.codecProfile || null,
+                  tool: metadata.format.tool || null,
+                  tagTypes: metadata.format.tagTypes || null
+                },
+                // Raw native tags for debugging
+                nativeTags: metadata.native || {}
+              };
+              
+              updatedTracks.push(fileMetadata);
+              successCount++;
+              console.log(`✅ Successfully extracted file metadata for: ${track.title}`);
+              
+            } catch (parseError) {
+              console.error(`Error parsing metadata for ${resolvedPath}:`, parseError);
+              updatedTracks.push({
+                ratingKey: track.ratingKey,
+                title: track.title,
+                filePath: resolvedPath,
+                plexPath: plexFilePath,
+                error: `Metadata parsing failed: ${parseError.message}`
+              });
+              errorCount++;
+            }
+            
+          } else {
+            console.log(`❌ File not found in any expected location for path: ${plexFilePath}`);
+            updatedTracks.push({
+              ratingKey: track.ratingKey,
+              title: track.title,
+              plexPath: plexFilePath,
+              librarySectionID: trackSectionID,
+              libraryBasePaths: libraryPathMappings[trackSectionID] || [],
+              error: `File not found. Tried library paths: ${(libraryPathMappings[trackSectionID] || []).join(', ')}`
+            });
+            errorCount++;
+          }
+        } else {
+          console.log(`No file path found for track: ${track.title}`);
+          updatedTracks.push({
+            ratingKey: track.ratingKey,
+            title: track.title,
+            error: 'No file path found in Plex data'
+          });
+          errorCount++;
+        }
+        
+        // Add a small delay to avoid overwhelming the file system
+        await new Promise(resolve => setTimeout(resolve, 200));
+        
+      } catch (trackError) {
+        console.error(`Error processing track ${track.ratingKey}:`, trackError);
+        updatedTracks.push({
+          ratingKey: track.ratingKey,
+          title: track.title,
+          error: trackError.message
+        });
+        errorCount++;
+      }
+    }
+    
+    console.log(`File metadata extraction complete. Success: ${successCount}, Errors: ${errorCount}`);
+    
+    res.json({
+      albumRatingKey,
+      tracksProcessed: tracks.length,
+      successCount,
+      errorCount,
+      libraryMappings: libraryPathMappings,
+      extractedMetadata: updatedTracks
+    });
+    
+  } catch (error) {
+    console.error('Error extracting file metadata:', error);
+    res.status(500).json({ error: 'Failed to extract file metadata', details: error.message });
   }
 });
 

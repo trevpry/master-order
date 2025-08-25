@@ -755,6 +755,7 @@ class PlexSyncService {
       const artists = await prisma.plexArtist.count();
       const albums = await prisma.plexAlbum.count();
       const tracks = await prisma.plexTrack.count();
+      const playlists = await prisma.plexPlaylist.count();
       
       // Get last sync time
       const lastSyncedShow = await prisma.plexTVShow.findFirst({
@@ -766,7 +767,7 @@ class PlexSyncService {
         orderBy: { lastSyncedAt: 'desc' },
         select: { lastSyncedAt: true }
       });
-
+      
       const lastSyncedArtist = await prisma.plexArtist.findFirst({
         orderBy: { updatedAt: 'desc' },
         select: { updatedAt: true }
@@ -785,6 +786,7 @@ class PlexSyncService {
         artists,
         albums,
         tracks,
+        playlists,
         lastSync,
         hasData: sections > 0
       };
@@ -792,9 +794,7 @@ class PlexSyncService {
       console.error('Error getting sync status:', error);
       throw error;
     }
-  }
-
-  // Music sync methods
+  }  // Music sync methods
   async syncMusic(sectionKey) {
     console.log(`Syncing music for section ${sectionKey}...`);
     
@@ -827,6 +827,9 @@ class PlexSyncService {
         await this.syncTracks(sectionKey, album.ratingKey);
       }
 
+      // Finally sync playlists
+      await this.syncPlaylists(sectionKey);
+
       console.log(`✅ Music sync completed for section ${sectionKey}`);
     } catch (error) {
       console.error(`❌ Error syncing music for section ${sectionKey}:`, error);
@@ -849,24 +852,34 @@ class PlexSyncService {
       }
 
       for (const artist of artists) {
+        // Fetch detailed metadata for each artist to get collections
+        let detailedArtist = artist;
+        try {
+          const detailData = await this.makeRequest(`/library/metadata/${artist.ratingKey}`);
+          detailedArtist = detailData.MediaContainer?.Metadata?.[0] || artist;
+        } catch (error) {
+          console.warn(`Failed to fetch detailed metadata for artist ${artist.title} (${artist.ratingKey}):`, error.message);
+        }
+
         const artistData = {
-          ratingKey: artist.ratingKey,
-          key: artist.key,
-          guid: artist.guid || null,
-          type: artist.type || 'artist',
-          title: artist.title,
-          titleSort: artist.titleSort || null,
-          summary: artist.summary || null,
-          index: artist.index ? parseInt(artist.index) : null,
-          thumb: artist.thumb || null,
-          art: artist.art || null,
-          addedAt: artist.addedAt ? new Date(parseInt(artist.addedAt) * 1000) : null,
-          updatedAt: artist.updatedAt ? new Date(parseInt(artist.updatedAt) * 1000) : null,
-          librarySectionID: section.id
+          ratingKey: detailedArtist.ratingKey,
+          key: detailedArtist.key,
+          guid: detailedArtist.guid || null,
+          type: detailedArtist.type || 'artist',
+          title: detailedArtist.title,
+          titleSort: detailedArtist.titleSort || null,
+          summary: detailedArtist.summary || null,
+          index: detailedArtist.index ? parseInt(detailedArtist.index) : null,
+          thumb: detailedArtist.thumb || null,
+          art: detailedArtist.art || null,
+          addedAt: detailedArtist.addedAt ? new Date(parseInt(detailedArtist.addedAt) * 1000) : null,
+          updatedAt: detailedArtist.updatedAt ? new Date(parseInt(detailedArtist.updatedAt) * 1000) : null,
+          librarySectionID: section.id,
+          collections: detailedArtist.Collection ? JSON.stringify(detailedArtist.Collection.map(c => c.tag || c.title)) : null
         };
 
         await prisma.plexArtist.upsert({
-          where: { ratingKey: artist.ratingKey },
+          where: { ratingKey: detailedArtist.ratingKey },
           update: artistData,
           create: artistData
         });
@@ -894,28 +907,38 @@ class PlexSyncService {
       }
 
       for (const album of albums) {
+        // Fetch detailed metadata for each album to get collections
+        let detailedAlbum = album;
+        try {
+          const detailData = await this.makeRequest(`/library/metadata/${album.ratingKey}`);
+          detailedAlbum = detailData.MediaContainer?.Metadata?.[0] || album;
+        } catch (error) {
+          console.warn(`Failed to fetch detailed metadata for album ${album.title} (${album.ratingKey}):`, error.message);
+        }
+
         const albumData = {
-          ratingKey: album.ratingKey,
-          key: album.key,
-          parentRatingKey: album.parentRatingKey || artistRatingKey,
-          guid: album.guid || null,
-          type: album.type || 'album',
-          title: album.title,
-          titleSort: album.titleSort || null,
-          summary: album.summary || null,
-          index: album.index ? parseInt(album.index) : null,
-          year: album.year ? parseInt(album.year) : null,
-          thumb: album.thumb || null,
-          art: album.art || null,
-          parentThumb: album.parentThumb || null,
-          originallyAvailableAt: album.originallyAvailableAt ? new Date(album.originallyAvailableAt) : null,
-          addedAt: album.addedAt ? new Date(parseInt(album.addedAt) * 1000) : null,
-          updatedAt: album.updatedAt ? new Date(parseInt(album.updatedAt) * 1000) : null,
-          librarySectionID: section.id
+          ratingKey: detailedAlbum.ratingKey,
+          key: detailedAlbum.key,
+          parentRatingKey: detailedAlbum.parentRatingKey || artistRatingKey,
+          guid: detailedAlbum.guid || null,
+          type: detailedAlbum.type || 'album',
+          title: detailedAlbum.title,
+          titleSort: detailedAlbum.titleSort || null,
+          summary: detailedAlbum.summary || null,
+          index: detailedAlbum.index ? parseInt(detailedAlbum.index) : null,
+          year: detailedAlbum.year ? parseInt(detailedAlbum.year) : null,
+          thumb: detailedAlbum.thumb || null,
+          art: detailedAlbum.art || null,
+          parentThumb: detailedAlbum.parentThumb || null,
+          originallyAvailableAt: detailedAlbum.originallyAvailableAt ? new Date(detailedAlbum.originallyAvailableAt) : null,
+          addedAt: detailedAlbum.addedAt ? new Date(parseInt(detailedAlbum.addedAt) * 1000) : null,
+          updatedAt: detailedAlbum.updatedAt ? new Date(parseInt(detailedAlbum.updatedAt) * 1000) : null,
+          librarySectionID: section.id,
+          collections: detailedAlbum.Collection ? JSON.stringify(detailedAlbum.Collection.map(c => c.tag || c.title)) : null
         };
 
         await prisma.plexAlbum.upsert({
-          where: { ratingKey: album.ratingKey },
+          where: { ratingKey: detailedAlbum.ratingKey },
           update: albumData,
           create: albumData
         });
@@ -974,6 +997,131 @@ class PlexSyncService {
       console.log(`✅ Synced ${tracks.length} tracks for album ${albumRatingKey}`);
     } catch (error) {
       console.error('Error syncing tracks:', error);
+      throw error;
+    }
+  }
+
+  async syncPlaylists(sectionKey) {
+    try {
+      // Try the general playlists endpoint first
+      let data;
+      try {
+        data = await this.makeRequest(`/playlists/all`);
+      } catch (error) {
+        console.log(`No playlists found at /playlists/all, trying section-specific: ${error.message}`);
+        // If that fails, try to get playlists from the root
+        try {
+          data = await this.makeRequest(`/playlists`);
+        } catch (error2) {
+          console.log(`No playlists found at /playlists either: ${error2.message}`);
+          // If no playlists endpoint works, just log and continue
+          console.log(`✅ No playlists found for section ${sectionKey} (this is normal if no playlists exist)`);
+          return;
+        }
+      }
+      
+      const playlists = data.MediaContainer?.Metadata || [];
+      
+      // Filter to audio playlists only
+      const musicPlaylists = playlists.filter(playlist => 
+        playlist.playlistType === 'audio' || 
+        !playlist.playlistType // If no type specified, assume it could be music
+      );
+      
+      if (musicPlaylists.length === 0) {
+        console.log(`✅ No music playlists found for section ${sectionKey}`);
+        return;
+      }
+      
+      const section = await prisma.plexLibrarySection.findUnique({
+        where: { sectionKey: sectionKey }
+      });
+
+      if (!section) {
+        console.error(`Section ${sectionKey} not found`);
+        return;
+      }
+
+      for (const playlist of musicPlaylists) {
+        // Fetch detailed metadata for each playlist
+        let detailedPlaylist = playlist;
+        try {
+          const detailData = await this.makeRequest(`/library/metadata/${playlist.ratingKey}`);
+          detailedPlaylist = detailData.MediaContainer?.Metadata?.[0] || playlist;
+        } catch (error) {
+          console.warn(`Failed to fetch detailed metadata for playlist ${playlist.title} (${playlist.ratingKey}):`, error.message);
+        }
+
+        const playlistData = {
+          ratingKey: detailedPlaylist.ratingKey,
+          key: detailedPlaylist.key,
+          guid: detailedPlaylist.guid || null,
+          type: detailedPlaylist.type || 'playlist',
+          title: detailedPlaylist.title,
+          titleSort: detailedPlaylist.titleSort || null,
+          summary: detailedPlaylist.summary || null,
+          smart: detailedPlaylist.smart === '1' || detailedPlaylist.smart === true,
+          playlistType: detailedPlaylist.playlistType || 'audio',
+          thumb: detailedPlaylist.thumb || null,
+          art: detailedPlaylist.art || null,
+          duration: detailedPlaylist.duration ? parseInt(detailedPlaylist.duration) : null,
+          leafCount: detailedPlaylist.leafCount ? parseInt(detailedPlaylist.leafCount) : null,
+          addedAt: detailedPlaylist.addedAt ? new Date(parseInt(detailedPlaylist.addedAt) * 1000) : null,
+          updatedAt: detailedPlaylist.updatedAt ? new Date(parseInt(detailedPlaylist.updatedAt) * 1000) : null,
+          librarySectionID: section.id
+        };
+
+        await prisma.plexPlaylist.upsert({
+          where: { ratingKey: detailedPlaylist.ratingKey },
+          update: playlistData,
+          create: playlistData
+        });
+
+        // Sync playlist items
+        await this.syncPlaylistItems(detailedPlaylist.ratingKey);
+      }
+
+      console.log(`✅ Synced ${musicPlaylists.length} music playlists for section ${sectionKey}`);
+    } catch (error) {
+      console.error('Error syncing playlists:', error);
+      // Don't throw the error - just log and continue since playlists are optional
+      console.log(`⚠️ Continuing sync without playlists for section ${sectionKey}`);
+    }
+  }
+
+  async syncPlaylistItems(playlistRatingKey) {
+    try {
+      const data = await this.makeRequest(`/library/metadata/${playlistRatingKey}/children`);
+      const items = data.MediaContainer?.Metadata || [];
+
+      // Clear existing playlist items
+      await prisma.plexPlaylistItem.deleteMany({
+        where: { playlistRatingKey: playlistRatingKey }
+      });
+
+      for (let i = 0; i < items.length; i++) {
+        const item = items[i];
+        
+        const itemData = {
+          playlistRatingKey: playlistRatingKey,
+          ratingKey: item.ratingKey,
+          index: i + 1, // 1-based index
+          type: item.type || 'track',
+          addedAt: item.addedAt ? new Date(parseInt(item.addedAt) * 1000) : new Date()
+        };
+
+        try {
+          await prisma.plexPlaylistItem.create({
+            data: itemData
+          });
+        } catch (error) {
+          console.warn(`Failed to sync playlist item ${item.ratingKey} in playlist ${playlistRatingKey}:`, error.message);
+        }
+      }
+
+      console.log(`✅ Synced ${items.length} items for playlist ${playlistRatingKey}`);
+    } catch (error) {
+      console.error('Error syncing playlist items:', error);
       throw error;
     }
   }

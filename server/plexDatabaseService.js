@@ -1010,6 +1010,30 @@ class PlexDatabaseService {
     }
   }
 
+  // Get tracks by artist
+  async getTracksByArtist(artistRatingKey) {
+    try {
+      return await this.prisma.plexTrack.findMany({
+        where: { grandparentRatingKey: artistRatingKey },
+        include: {
+          librarySection: true,
+          album: {
+            include: {
+              artist: true
+            }
+          }
+        },
+        orderBy: [
+          { parentRatingKey: 'asc' }, // Group by album first
+          { index: 'asc' }            // Then by track index
+        ]
+      });
+    } catch (error) {
+      console.error('Error fetching tracks by artist:', error);
+      throw error;
+    }
+  }
+
   // Get track by rating key
   async getTrackByRatingKey(ratingKey) {
     try {
@@ -1077,6 +1101,217 @@ class PlexDatabaseService {
       });
     } catch (error) {
       console.error('Error fetching music sections:', error);
+      throw error;
+    }
+  }
+
+  // Get all music collections for artists
+  async getAllMusicArtistCollections() {
+    try {
+      const artists = await this.prisma.plexArtist.findMany({
+        where: {
+          collections: {
+            not: null
+          }
+        }
+      });
+      const collectionsSet = new Set();
+      
+      artists.forEach(artist => {
+        if (artist.collections) {
+          try {
+            const collections = JSON.parse(artist.collections);
+            collections.forEach(collection => collectionsSet.add(collection));
+          } catch (error) {
+            console.error('Error parsing collections for artist:', artist.title, error);
+          }
+        }
+      });
+      
+      return Array.from(collectionsSet).sort();
+    } catch (error) {
+      console.error('Error fetching music artist collections:', error);
+      throw error;
+    }
+  }
+
+  // Get all music collections for albums
+  async getAllMusicAlbumCollections() {
+    try {
+      const albums = await this.prisma.plexAlbum.findMany({
+        where: {
+          collections: {
+            not: null
+          }
+        }
+      });
+      const collectionsSet = new Set();
+      
+      albums.forEach(album => {
+        if (album.collections) {
+          try {
+            const collections = JSON.parse(album.collections);
+            collections.forEach(collection => collectionsSet.add(collection));
+          } catch (error) {
+            console.error('Error parsing collections for album:', album.title, error);
+          }
+        }
+      });
+      
+      return Array.from(collectionsSet).sort();
+    } catch (error) {
+      console.error('Error fetching music album collections:', error);
+      throw error;
+    }
+  }
+
+  // Get all music collections for artists by section
+  async getAllMusicArtistCollectionsBySection(sectionKey) {
+    try {
+      const artists = await this.prisma.plexArtist.findMany({
+        where: {
+          AND: [
+            { collections: { not: null } },
+            { librarySection: { sectionKey: sectionKey } }
+          ]
+        },
+        include: {
+          librarySection: true
+        }
+      });
+      const collectionsSet = new Set();
+      
+      artists.forEach(artist => {
+        if (artist.collections) {
+          try {
+            const collections = JSON.parse(artist.collections);
+            collections.forEach(collection => collectionsSet.add(collection));
+          } catch (error) {
+            console.error('Error parsing collections for artist:', artist.title, error);
+          }
+        }
+      });
+      
+      return Array.from(collectionsSet).sort();
+    } catch (error) {
+      console.error('Error fetching music artist collections by section:', error);
+      throw error;
+    }
+  }
+
+  // Get all music collections for albums by section
+  async getAllMusicAlbumCollectionsBySection(sectionKey) {
+    try {
+      const albums = await this.prisma.plexAlbum.findMany({
+        where: {
+          AND: [
+            { collections: { not: null } },
+            { librarySection: { sectionKey: sectionKey } }
+          ]
+        },
+        include: {
+          librarySection: true
+        }
+      });
+      const collectionsSet = new Set();
+      
+      albums.forEach(album => {
+        if (album.collections) {
+          try {
+            const collections = JSON.parse(album.collections);
+            collections.forEach(collection => collectionsSet.add(collection));
+          } catch (error) {
+            console.error('Error parsing collections for album:', album.title, error);
+          }
+        }
+      });
+      
+      return Array.from(collectionsSet).sort();
+    } catch (error) {
+      console.error('Error fetching music album collections by section:', error);
+      throw error;
+    }
+  }
+
+  // Get all playlists from database
+  async getAllPlaylists() {
+    try {
+      return await this.prisma.plexPlaylist.findMany({
+        include: {
+          librarySection: true,
+          items: {
+            orderBy: { addedAt: 'asc' }
+          }
+        },
+        orderBy: { title: 'asc' }
+      });
+    } catch (error) {
+      console.error('Error fetching all playlists:', error);
+      throw error;
+    }
+  }
+
+  // Get playlists from specific section
+  async getPlaylistsBySection(sectionKey) {
+    try {
+      return await this.prisma.plexPlaylist.findMany({
+        where: {
+          librarySection: {
+            sectionKey: sectionKey
+          }
+        },
+        include: {
+          librarySection: true,
+          items: {
+            orderBy: { id: 'asc' }
+          }
+        },
+        orderBy: { title: 'asc' }
+      });
+    } catch (error) {
+      console.error('Error fetching playlists by section:', error);
+      throw error;
+    }
+  }
+
+  // Get playlist by rating key
+  async getPlaylistByRatingKey(ratingKey) {
+    try {
+      return await this.prisma.plexPlaylist.findUnique({
+        where: { ratingKey },
+        include: {
+          librarySection: true,
+          items: {
+            orderBy: { id: 'asc' }
+          }
+        }
+      });
+    } catch (error) {
+      console.error('Error fetching playlist by rating key:', error);
+      throw error;
+    }
+  }
+
+  // Get music statistics including playlists
+  async getMusicStats() {
+    try {
+      const stats = await Promise.all([
+        this.prisma.plexArtist.count(),
+        this.prisma.plexAlbum.count(),
+        this.prisma.plexTrack.count(),
+        this.prisma.plexPlaylist.count(),
+        this.prisma.plexLibrarySection.count({ where: { type: 'artist' } })
+      ]);
+      
+      return {
+        artists: stats[0],
+        albums: stats[1],
+        tracks: stats[2],
+        playlists: stats[3],
+        sections: stats[4]
+      };
+    } catch (error) {
+      console.error('Error fetching music statistics:', error);
       throw error;
     }
   }
