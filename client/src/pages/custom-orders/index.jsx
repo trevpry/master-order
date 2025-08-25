@@ -1525,7 +1525,12 @@ function CustomOrders() {
               console.log(`Series search query: "${item.comicSeries}" for issue #${item.comicIssue}`);
                 // Use the ComicVine search with issue filtering to find the correct series
               const response = await fetch(`${config.apiBaseUrl}/api/comicvine/search-with-issues?query=${encodeURIComponent(item.comicSeries)}&issueNumber=${encodeURIComponent(item.comicIssue)}&issueTitle=${encodeURIComponent(normalizedTitle)}`);
-                if (response.ok) {
+              
+              // Add 10 second pause between ComicVine searches to avoid rate limiting
+              console.log('⏳ Pausing 10 seconds to avoid ComicVine rate limiting...');
+              await new Promise(resolve => setTimeout(resolve, 10000));
+              
+              if (response.ok) {
                 const searchResults = await response.json();
                 console.log(`Found ${searchResults.length} comic series with issue #${item.comicIssue}`);
                 console.log('Raw ComicVine search results:', JSON.stringify(searchResults, null, 2));
