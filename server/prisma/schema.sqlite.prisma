@@ -159,6 +159,9 @@ model PlexLibrarySection {
   uuid             String?
   movies           PlexMovie[]
   tvShows          PlexTVShow[]
+  artists          PlexArtist[]
+  albums           PlexAlbum[]
+  tracks           PlexTrack[]
 }
 
 model PlexTVShow {
@@ -621,4 +624,84 @@ model WatchLog {
   
   // Optional relation to custom order item
   customOrderItem CustomOrderItem? @relation(fields: [customOrderItemId], references: [id])
+}
+
+// Music models for Plex music library support
+model PlexArtist {
+  id                Int      @id @default(autoincrement())
+  ratingKey         String   @unique
+  key               String
+  guid              String?
+  type              String   @default("artist")
+  title             String
+  titleSort         String?
+  summary           String?
+  index             Int?
+  thumb             String?
+  art               String?
+  addedAt           DateTime?
+  updatedAt         DateTime?
+  librarySectionID  Int?
+  
+  // Relations
+  librarySection    PlexLibrarySection? @relation(fields: [librarySectionID], references: [id])
+  albums            PlexAlbum[]
+  
+  @@map("PlexArtist")
+}
+
+model PlexAlbum {
+  id                Int      @id @default(autoincrement())
+  ratingKey         String   @unique
+  key               String
+  parentRatingKey   String?  // Artist ratingKey
+  guid              String?
+  type              String   @default("album")
+  title             String
+  titleSort         String?
+  summary           String?
+  index             Int?
+  year              Int?
+  thumb             String?
+  art               String?
+  parentThumb       String?
+  originallyAvailableAt DateTime?
+  addedAt           DateTime?
+  updatedAt         DateTime?
+  librarySectionID  Int?
+  
+  // Relations
+  librarySection    PlexLibrarySection? @relation(fields: [librarySectionID], references: [id])
+  artist            PlexArtist? @relation(fields: [parentRatingKey], references: [ratingKey])
+  tracks            PlexTrack[]
+  
+  @@map("PlexAlbum")
+}
+
+model PlexTrack {
+  id                Int      @id @default(autoincrement())
+  ratingKey         String   @unique
+  key               String
+  parentRatingKey   String?  // Album ratingKey
+  grandparentRatingKey String? // Artist ratingKey
+  guid              String?
+  type              String   @default("track")
+  title             String
+  titleSort         String?
+  summary           String?
+  index             Int?
+  duration          Int?     // Duration in milliseconds
+  thumb             String?
+  art               String?
+  parentThumb       String?
+  grandparentThumb  String?
+  addedAt           DateTime?
+  updatedAt         DateTime?
+  librarySectionID  Int?
+  
+  // Relations
+  librarySection    PlexLibrarySection? @relation(fields: [librarySectionID], references: [id])
+  album             PlexAlbum? @relation(fields: [parentRatingKey], references: [ratingKey])
+  
+  @@map("PlexTrack")
 }

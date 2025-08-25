@@ -4431,6 +4431,225 @@ io.on('connection', (socket) => {
   });
 });
 
+// Music API endpoints
+app.get('/api/music/sections', async (req, res) => {
+  try {
+    const sections = await plexDb.getMusicSections();
+    res.json(sections);
+  } catch (error) {
+    console.error('Error fetching music sections:', error);
+    res.status(500).json({ error: 'Failed to fetch music sections' });
+  }
+});
+
+app.get('/api/music/artists', async (req, res) => {
+  try {
+    const artists = await plexDb.getAllArtists();
+    res.json(artists);
+  } catch (error) {
+    console.error('Error fetching all artists:', error);
+    res.status(500).json({ error: 'Failed to fetch artists' });
+  }
+});
+
+app.get('/api/music/artists/section/:sectionKey', async (req, res) => {
+  try {
+    const { sectionKey } = req.params;
+    const artists = await plexDb.getArtistsBySection(sectionKey);
+    res.json(artists);
+  } catch (error) {
+    console.error('Error fetching artists by section:', error);
+    res.status(500).json({ error: 'Failed to fetch artists' });
+  }
+});
+
+app.get('/api/music/artists/:ratingKey', async (req, res) => {
+  try {
+    const { ratingKey } = req.params;
+    const artist = await plexDb.getArtistByRatingKey(ratingKey);
+    if (!artist) {
+      return res.status(404).json({ error: 'Artist not found' });
+    }
+    res.json(artist);
+  } catch (error) {
+    console.error('Error fetching artist:', error);
+    res.status(500).json({ error: 'Failed to fetch artist' });
+  }
+});
+
+app.get('/api/music/albums', async (req, res) => {
+  try {
+    const albums = await plexDb.getAllAlbums();
+    res.json(albums);
+  } catch (error) {
+    console.error('Error fetching all albums:', error);
+    res.status(500).json({ error: 'Failed to fetch albums' });
+  }
+});
+
+app.get('/api/music/albums/section/:sectionKey', async (req, res) => {
+  try {
+    const { sectionKey } = req.params;
+    const albums = await plexDb.getAlbumsBySection(sectionKey);
+    res.json(albums);
+  } catch (error) {
+    console.error('Error fetching albums by section:', error);
+    res.status(500).json({ error: 'Failed to fetch albums' });
+  }
+});
+
+app.get('/api/music/albums/artist/:artistRatingKey', async (req, res) => {
+  try {
+    const { artistRatingKey } = req.params;
+    const albums = await plexDb.getAlbumsByArtist(artistRatingKey);
+    res.json(albums);
+  } catch (error) {
+    console.error('Error fetching albums by artist:', error);
+    res.status(500).json({ error: 'Failed to fetch albums' });
+  }
+});
+
+app.get('/api/music/albums/:ratingKey', async (req, res) => {
+  try {
+    const { ratingKey } = req.params;
+    const album = await plexDb.getAlbumByRatingKey(ratingKey);
+    if (!album) {
+      return res.status(404).json({ error: 'Album not found' });
+    }
+    res.json(album);
+  } catch (error) {
+    console.error('Error fetching album:', error);
+    res.status(500).json({ error: 'Failed to fetch album' });
+  }
+});
+
+app.get('/api/music/tracks', async (req, res) => {
+  try {
+    const tracks = await plexDb.getAllTracks();
+    res.json(tracks);
+  } catch (error) {
+    console.error('Error fetching all tracks:', error);
+    res.status(500).json({ error: 'Failed to fetch tracks' });
+  }
+});
+
+app.get('/api/music/tracks/section/:sectionKey', async (req, res) => {
+  try {
+    const { sectionKey } = req.params;
+    const tracks = await plexDb.getTracksBySection(sectionKey);
+    res.json(tracks);
+  } catch (error) {
+    console.error('Error fetching tracks by section:', error);
+    res.status(500).json({ error: 'Failed to fetch tracks' });
+  }
+});
+
+app.get('/api/music/tracks/album/:albumRatingKey', async (req, res) => {
+  try {
+    const { albumRatingKey } = req.params;
+    const tracks = await plexDb.getTracksByAlbum(albumRatingKey);
+    res.json(tracks);
+  } catch (error) {
+    console.error('Error fetching tracks by album:', error);
+    res.status(500).json({ error: 'Failed to fetch tracks' });
+  }
+});
+
+app.get('/api/music/tracks/:ratingKey', async (req, res) => {
+  try {
+    const { ratingKey } = req.params;
+    const track = await plexDb.getTrackByRatingKey(ratingKey);
+    if (!track) {
+      return res.status(404).json({ error: 'Track not found' });
+    }
+    res.json(track);
+  } catch (error) {
+    console.error('Error fetching track:', error);
+    res.status(500).json({ error: 'Failed to fetch track' });
+  }
+});
+
+app.get('/api/music/stats', async (req, res) => {
+  try {
+    const stats = await plexDb.getMusicStats();
+    res.json(stats);
+  } catch (error) {
+    console.error('Error fetching music statistics:', error);
+    res.status(500).json({ error: 'Failed to fetch music statistics' });
+  }
+});
+
+// Stream music track endpoint
+app.get('/api/music/stream/:ratingKey', async (req, res) => {
+  try {
+    const { ratingKey } = req.params;
+    
+    // Get Plex settings
+    const { getSettings } = require('./databaseUtils');
+    const settings = await getSettings();
+    
+    if (!settings || !settings.plexUrl || !settings.plexToken) {
+      return res.status(500).json({ error: 'Plex settings not configured' });
+    }
+
+    // Use the PlexSyncService to make the API request
+    const plexSync = require('./plexSyncService');
+    const syncService = new plexSync();
+    
+    // Get track metadata from Plex API
+    const trackData = await syncService.makeRequest(`/library/metadata/${ratingKey}`);
+    const track = trackData.MediaContainer?.Metadata?.[0];
+    
+    if (!track || !track.Media?.[0]?.Part?.[0]) {
+      return res.status(404).json({ error: 'Track not found or no media parts available' });
+    }
+
+    const mediaPart = track.Media[0].Part[0];
+    
+    // Build Plex streaming URL using the part key
+    const streamUrl = `${settings.plexUrl}${mediaPart.key}?X-Plex-Token=${settings.plexToken}`;
+    
+    console.log(`Streaming track: ${track.title} - URL: ${streamUrl}`);
+    
+    // Set appropriate headers for audio streaming
+    res.set({
+      'Accept-Ranges': 'bytes',
+      'Content-Type': 'audio/mpeg',
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Headers': 'Range'
+    });
+    
+    // Proxy the stream from Plex
+    const axios = require('axios');
+    const response = await axios({
+      method: 'GET',
+      url: streamUrl,
+      responseType: 'stream',
+      headers: {
+        'Range': req.headers.range || 'bytes=0-'
+      }
+    });
+
+    // Forward headers from Plex
+    if (response.headers['content-length']) {
+      res.set('Content-Length', response.headers['content-length']);
+    }
+    if (response.headers['content-range']) {
+      res.set('Content-Range', response.headers['content-range']);
+    }
+    
+    // Set status code for partial content if range was requested
+    res.status(response.status);
+    
+    // Pipe the audio data
+    response.data.pipe(res);
+    
+  } catch (error) {
+    console.error('Error streaming music track:', error);
+    res.status(500).json({ error: 'Failed to stream music track' });
+  }
+});
+
 // Start the server
 server.listen(PORT, '0.0.0.0', async () => {
   console.log(`Server running on port ${PORT}`);

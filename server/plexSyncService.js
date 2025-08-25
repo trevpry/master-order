@@ -57,8 +57,9 @@ class PlexSyncService {
       
       const syncedSections = [];
       
-      for (const section of sections) {        // Only sync TV and Movie sections
-        if (section.type === 'show' || section.type === 'movie') {        const sectionData = {
+      for (const section of sections) {        
+        // Sync TV, Movie, and Music sections
+        if (section.type === 'show' || section.type === 'movie' || section.type === 'artist') {        const sectionData = {
           sectionKey: section.key,
           title: section.title,
           type: section.type,
@@ -699,6 +700,7 @@ class PlexSyncService {
       
       let totalShows = 0;
       let totalMovies = 0;
+      let totalArtists = 0;
       
       // Step 2: Sync content for each section
       for (const section of sections) {
@@ -708,6 +710,16 @@ class PlexSyncService {
         } else if (section.type === 'movie') {
           const movies = await this.syncMovies(section.sectionKey);
           totalMovies += movies.length;
+        } else if (section.type === 'artist') {
+          await this.syncMusic(section.sectionKey);
+          const artists = await prisma.plexArtist.count({
+            where: {
+              librarySection: {
+                sectionKey: section.sectionKey
+              }
+            }
+          });
+          totalArtists += artists;
         }
       }
       
@@ -719,6 +731,7 @@ class PlexSyncService {
         sections: sections.length,
         totalShows,
         totalMovies,
+        totalArtists,
         duration: `${duration}s`,
         timestamp: new Date().toISOString()
       };
@@ -739,6 +752,9 @@ class PlexSyncService {
       const seasons = await prisma.plexSeason.count();
       const episodes = await prisma.plexEpisode.count();
       const movies = await prisma.plexMovie.count();
+      const artists = await prisma.plexArtist.count();
+      const albums = await prisma.plexAlbum.count();
+      const tracks = await prisma.plexTrack.count();
       
       // Get last sync time
       const lastSyncedShow = await prisma.plexTVShow.findFirst({
@@ -750,8 +766,13 @@ class PlexSyncService {
         orderBy: { lastSyncedAt: 'desc' },
         select: { lastSyncedAt: true }
       });
+
+      const lastSyncedArtist = await prisma.plexArtist.findFirst({
+        orderBy: { updatedAt: 'desc' },
+        select: { updatedAt: true }
+      });
       
-      const lastSync = [lastSyncedShow?.lastSyncedAt, lastSyncedMovie?.lastSyncedAt]
+      const lastSync = [lastSyncedShow?.lastSyncedAt, lastSyncedMovie?.lastSyncedAt, lastSyncedArtist?.updatedAt]
         .filter(Boolean)
         .sort((a, b) => b - a)[0];
       
@@ -761,11 +782,198 @@ class PlexSyncService {
         seasons,
         episodes,
         movies,
+        artists,
+        albums,
+        tracks,
         lastSync,
         hasData: sections > 0
       };
     } catch (error) {
       console.error('Error getting sync status:', error);
+      throw error;
+    }
+  }
+
+  // Music sync methods
+  async syncMusic(sectionKey) {
+    console.log(`Syncing music for section ${sectionKey}...`);
+    
+    try {
+      // Sync artists first
+      await this.syncArtists(sectionKey);
+      
+      // Then sync albums and tracks
+      const artists = await prisma.plexArtist.findMany({
+        where: {
+          librarySection: {
+            sectionKey: sectionKey
+          }
+        }
+      });
+
+      for (const artist of artists) {
+        await this.syncAlbums(sectionKey, artist.ratingKey);
+      }
+
+      const albums = await prisma.plexAlbum.findMany({
+        where: {
+          librarySection: {
+            sectionKey: sectionKey
+          }
+        }
+      });
+
+      for (const album of albums) {
+        await this.syncTracks(sectionKey, album.ratingKey);
+      }
+
+      console.log(`✅ Music sync completed for section ${sectionKey}`);
+    } catch (error) {
+      console.error(`❌ Error syncing music for section ${sectionKey}:`, error);
+      throw error;
+    }
+  }
+
+  async syncArtists(sectionKey) {
+    try {
+      const data = await this.makeRequest(`/library/sections/${sectionKey}/all`);
+      const artists = data.MediaContainer?.Metadata || [];
+      
+      const section = await prisma.plexLibrarySection.findUnique({
+        where: { sectionKey: sectionKey }
+      });
+
+      if (!section) {
+        console.error(`Section ${sectionKey} not found`);
+        return;
+      }
+
+      for (const artist of artists) {
+        const artistData = {
+          ratingKey: artist.ratingKey,
+          key: artist.key,
+          guid: artist.guid || null,
+          type: artist.type || 'artist',
+          title: artist.title,
+          titleSort: artist.titleSort || null,
+          summary: artist.summary || null,
+          index: artist.index ? parseInt(artist.index) : null,
+          thumb: artist.thumb || null,
+          art: artist.art || null,
+          addedAt: artist.addedAt ? new Date(parseInt(artist.addedAt) * 1000) : null,
+          updatedAt: artist.updatedAt ? new Date(parseInt(artist.updatedAt) * 1000) : null,
+          librarySectionID: section.id
+        };
+
+        await prisma.plexArtist.upsert({
+          where: { ratingKey: artist.ratingKey },
+          update: artistData,
+          create: artistData
+        });
+      }
+
+      console.log(`✅ Synced ${artists.length} artists for section ${sectionKey}`);
+    } catch (error) {
+      console.error('Error syncing artists:', error);
+      throw error;
+    }
+  }
+
+  async syncAlbums(sectionKey, artistRatingKey) {
+    try {
+      const data = await this.makeRequest(`/library/metadata/${artistRatingKey}/children`);
+      const albums = data.MediaContainer?.Metadata || [];
+      
+      const section = await prisma.plexLibrarySection.findUnique({
+        where: { sectionKey: sectionKey }
+      });
+
+      if (!section) {
+        console.error(`Section ${sectionKey} not found`);
+        return;
+      }
+
+      for (const album of albums) {
+        const albumData = {
+          ratingKey: album.ratingKey,
+          key: album.key,
+          parentRatingKey: album.parentRatingKey || artistRatingKey,
+          guid: album.guid || null,
+          type: album.type || 'album',
+          title: album.title,
+          titleSort: album.titleSort || null,
+          summary: album.summary || null,
+          index: album.index ? parseInt(album.index) : null,
+          year: album.year ? parseInt(album.year) : null,
+          thumb: album.thumb || null,
+          art: album.art || null,
+          parentThumb: album.parentThumb || null,
+          originallyAvailableAt: album.originallyAvailableAt ? new Date(album.originallyAvailableAt) : null,
+          addedAt: album.addedAt ? new Date(parseInt(album.addedAt) * 1000) : null,
+          updatedAt: album.updatedAt ? new Date(parseInt(album.updatedAt) * 1000) : null,
+          librarySectionID: section.id
+        };
+
+        await prisma.plexAlbum.upsert({
+          where: { ratingKey: album.ratingKey },
+          update: albumData,
+          create: albumData
+        });
+      }
+
+      console.log(`✅ Synced ${albums.length} albums for artist ${artistRatingKey}`);
+    } catch (error) {
+      console.error('Error syncing albums:', error);
+      throw error;
+    }
+  }
+
+  async syncTracks(sectionKey, albumRatingKey) {
+    try {
+      const data = await this.makeRequest(`/library/metadata/${albumRatingKey}/children`);
+      const tracks = data.MediaContainer?.Metadata || [];
+      
+      const section = await prisma.plexLibrarySection.findUnique({
+        where: { sectionKey: sectionKey }
+      });
+
+      if (!section) {
+        console.error(`Section ${sectionKey} not found`);
+        return;
+      }
+
+      for (const track of tracks) {
+        const trackData = {
+          ratingKey: track.ratingKey,
+          key: track.key,
+          parentRatingKey: track.parentRatingKey || albumRatingKey,
+          grandparentRatingKey: track.grandparentRatingKey || null,
+          guid: track.guid || null,
+          type: track.type || 'track',
+          title: track.title,
+          titleSort: track.titleSort || null,
+          summary: track.summary || null,
+          index: track.index ? parseInt(track.index) : null,
+          duration: track.duration ? parseInt(track.duration) : null,
+          thumb: track.thumb || null,
+          art: track.art || null,
+          parentThumb: track.parentThumb || null,
+          grandparentThumb: track.grandparentThumb || null,
+          addedAt: track.addedAt ? new Date(parseInt(track.addedAt) * 1000) : null,
+          updatedAt: track.updatedAt ? new Date(parseInt(track.updatedAt) * 1000) : null,
+          librarySectionID: section.id
+        };
+
+        await prisma.plexTrack.upsert({
+          where: { ratingKey: track.ratingKey },
+          update: trackData,
+          create: trackData
+        });
+      }
+
+      console.log(`✅ Synced ${tracks.length} tracks for album ${albumRatingKey}`);
+    } catch (error) {
+      console.error('Error syncing tracks:', error);
       throw error;
     }
   }

@@ -790,6 +790,296 @@ class PlexDatabaseService {
       throw error;
     }
   }
+
+  // Music-related methods
+  
+  // Get all artists from database
+  async getAllArtists() {
+    try {
+      return await this.prisma.plexArtist.findMany({
+        include: {
+          librarySection: true
+        },
+        orderBy: { title: 'asc' }
+      });
+    } catch (error) {
+      console.error('Error fetching all artists:', error);
+      throw error;
+    }
+  }
+
+  // Get artists from specific section
+  async getArtistsBySection(sectionKey) {
+    try {
+      return await this.prisma.plexArtist.findMany({
+        where: {
+          librarySection: {
+            sectionKey: sectionKey
+          }
+        },
+        include: {
+          librarySection: true
+        },
+        orderBy: { title: 'asc' }
+      });
+    } catch (error) {
+      console.error('Error fetching artists by section:', error);
+      throw error;
+    }
+  }
+
+  // Get artist by rating key
+  async getArtistByRatingKey(ratingKey) {
+    try {
+      return await this.prisma.plexArtist.findUnique({
+        where: { ratingKey },
+        include: {
+          librarySection: true,
+          albums: true
+        }
+      });
+    } catch (error) {
+      console.error('Error fetching artist by rating key:', error);
+      throw error;
+    }
+  }
+
+  // Create or update artist
+  async upsertArtist(artistData) {
+    try {
+      return await this.prisma.plexArtist.upsert({
+        where: { ratingKey: artistData.ratingKey },
+        update: artistData,
+        create: artistData
+      });
+    } catch (error) {
+      console.error('Error upserting artist:', error);
+      throw error;
+    }
+  }
+
+  // Get all albums from database
+  async getAllAlbums() {
+    try {
+      return await this.prisma.plexAlbum.findMany({
+        include: {
+          librarySection: true,
+          artist: true
+        },
+        orderBy: { title: 'asc' }
+      });
+    } catch (error) {
+      console.error('Error fetching all albums:', error);
+      throw error;
+    }
+  }
+
+  // Get albums from specific section
+  async getAlbumsBySection(sectionKey) {
+    try {
+      return await this.prisma.plexAlbum.findMany({
+        where: {
+          librarySection: {
+            sectionKey: sectionKey
+          }
+        },
+        include: {
+          librarySection: true,
+          artist: true
+        },
+        orderBy: { title: 'asc' }
+      });
+    } catch (error) {
+      console.error('Error fetching albums by section:', error);
+      throw error;
+    }
+  }
+
+  // Get albums by artist
+  async getAlbumsByArtist(artistRatingKey) {
+    try {
+      return await this.prisma.plexAlbum.findMany({
+        where: { parentRatingKey: artistRatingKey },
+        include: {
+          librarySection: true,
+          artist: true,
+          tracks: true
+        },
+        orderBy: { year: 'desc' }
+      });
+    } catch (error) {
+      console.error('Error fetching albums by artist:', error);
+      throw error;
+    }
+  }
+
+  // Get album by rating key
+  async getAlbumByRatingKey(ratingKey) {
+    try {
+      return await this.prisma.plexAlbum.findUnique({
+        where: { ratingKey },
+        include: {
+          librarySection: true,
+          artist: true,
+          tracks: true
+        }
+      });
+    } catch (error) {
+      console.error('Error fetching album by rating key:', error);
+      throw error;
+    }
+  }
+
+  // Create or update album
+  async upsertAlbum(albumData) {
+    try {
+      return await this.prisma.plexAlbum.upsert({
+        where: { ratingKey: albumData.ratingKey },
+        update: albumData,
+        create: albumData
+      });
+    } catch (error) {
+      console.error('Error upserting album:', error);
+      throw error;
+    }
+  }
+
+  // Get all tracks from database
+  async getAllTracks() {
+    try {
+      return await this.prisma.plexTrack.findMany({
+        include: {
+          librarySection: true,
+          album: {
+            include: {
+              artist: true
+            }
+          }
+        },
+        orderBy: { title: 'asc' }
+      });
+    } catch (error) {
+      console.error('Error fetching all tracks:', error);
+      throw error;
+    }
+  }
+
+  // Get tracks from specific section
+  async getTracksBySection(sectionKey) {
+    try {
+      return await this.prisma.plexTrack.findMany({
+        where: {
+          librarySection: {
+            sectionKey: sectionKey
+          }
+        },
+        include: {
+          librarySection: true,
+          album: {
+            include: {
+              artist: true
+            }
+          }
+        },
+        orderBy: { title: 'asc' }
+      });
+    } catch (error) {
+      console.error('Error fetching tracks by section:', error);
+      throw error;
+    }
+  }
+
+  // Get tracks by album
+  async getTracksByAlbum(albumRatingKey) {
+    try {
+      return await this.prisma.plexTrack.findMany({
+        where: { parentRatingKey: albumRatingKey },
+        include: {
+          librarySection: true,
+          album: {
+            include: {
+              artist: true
+            }
+          }
+        },
+        orderBy: { index: 'asc' }
+      });
+    } catch (error) {
+      console.error('Error fetching tracks by album:', error);
+      throw error;
+    }
+  }
+
+  // Get track by rating key
+  async getTrackByRatingKey(ratingKey) {
+    try {
+      return await this.prisma.plexTrack.findUnique({
+        where: { ratingKey },
+        include: {
+          librarySection: true,
+          album: {
+            include: {
+              artist: true
+            }
+          }
+        }
+      });
+    } catch (error) {
+      console.error('Error fetching track by rating key:', error);
+      throw error;
+    }
+  }
+
+  // Create or update track
+  async upsertTrack(trackData) {
+    try {
+      return await this.prisma.plexTrack.upsert({
+        where: { ratingKey: trackData.ratingKey },
+        update: trackData,
+        create: trackData
+      });
+    } catch (error) {
+      console.error('Error upserting track:', error);
+      throw error;
+    }
+  }
+
+  // Get music statistics
+  async getMusicStats() {
+    try {
+      const [artistCount, albumCount, trackCount, musicSections] = await Promise.all([
+        this.prisma.plexArtist.count(),
+        this.prisma.plexAlbum.count(),
+        this.prisma.plexTrack.count(),
+        this.prisma.plexLibrarySection.count({
+          where: { type: 'artist' }
+        })
+      ]);
+
+      return {
+        artists: artistCount,
+        albums: albumCount,
+        tracks: trackCount,
+        musicSections: musicSections
+      };
+    } catch (error) {
+      console.error('Error fetching music statistics:', error);
+      throw error;
+    }
+  }
+
+  // Get music sections only
+  async getMusicSections() {
+    try {
+      return await this.prisma.plexLibrarySection.findMany({
+        where: { type: 'artist' },
+        orderBy: { title: 'asc' }
+      });
+    } catch (error) {
+      console.error('Error fetching music sections:', error);
+      throw error;
+    }
+  }
 }
 
 module.exports = PlexDatabaseService;
