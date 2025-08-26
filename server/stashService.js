@@ -26,7 +26,8 @@ class StashService {
    * @returns {boolean}
    */
   isConfigured() {
-    return !!(this.apiUrl && this.apiKey);
+    // Only require URL - API key is optional for some Stash setups
+    return !!this.apiUrl;
   }
 
   /**
@@ -37,18 +38,24 @@ class StashService {
    */
   async makeGraphQLRequest(query, variables = {}) {
     if (!this.isConfigured()) {
-      throw new Error('Stash is not configured. Please set URL and API key in settings.');
+      throw new Error('Stash is not configured. Please set URL in settings.');
     }
 
     const endpoint = `${this.apiUrl}/graphql`;
     
+    // Build headers - only include API key if it exists
+    const headers = {
+      'Content-Type': 'application/json'
+    };
+    
+    if (this.apiKey) {
+      headers['ApiKey'] = this.apiKey;
+    }
+    
     try {
       const response = await fetch(endpoint, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'ApiKey': this.apiKey
-        },
+        headers,
         body: JSON.stringify({
           query,
           variables
@@ -56,12 +63,21 @@ class StashService {
       });
 
       if (!response.ok) {
-        throw new Error(`Stash API request failed: ${response.status} ${response.statusText}`);
+        // Get more detailed error information
+        let errorBody = '';
+        try {
+          errorBody = await response.text();
+          console.error('Stash API response body:', errorBody);
+        } catch (e) {
+          console.error('Could not read error response body');
+        }
+        throw new Error(`Stash API request failed: ${response.status} ${response.statusText} - ${errorBody}`);
       }
 
       const data = await response.json();
 
       if (data.errors && data.errors.length > 0) {
+        console.error('GraphQL errors details:', data.errors);
         throw new Error(`Stash GraphQL errors: ${data.errors.map(e => e.message).join(', ')}`);
       }
 
@@ -477,6 +493,125 @@ class StashService {
         error: error.message,
         tags: [],
         count: 0
+      };
+    }
+  }
+
+  /**
+   * Increment play count for a scene
+   * @param {string} sceneId - Scene ID
+   * @returns {Promise<Object>} Updated scene data
+   */
+  async incrementScenePlayCount(sceneId) {
+    try {
+      // Use the correct current Stash API: sceneAddPlay (sceneIncrementPlayCount is deprecated)
+      const mutation = `
+        mutation SceneAddPlay($id: ID!, $times: [Timestamp!]) {
+          sceneAddPlay(id: $id, times: $times) {
+            count
+            history {
+              date
+            }
+          }
+        }
+      `;
+
+      // Use current timestamp - Stash expects timestamp format
+      const currentTime = new Date().toISOString();
+      const variables = {
+        id: sceneId,
+        times: [currentTime]
+      };
+
+      console.log('🔍 Using correct sceneAddPlay mutation');
+      console.log('🔍 Variables:', variables);
+
+      const data = await this.makeGraphQLRequest(mutation, variables);
+      console.log('✅ sceneAddPlay succeeded, result:', data);
+      
+      return {
+        success: true,
+        result: data.sceneAddPlay,
+        message: 'Play count incremented successfully using sceneAddPlay'
+      };
+    } catch (error) {
+      console.error('❌ sceneAddPlay failed:', error.message);
+      
+      // If that fails, fall back to the deprecated but potentially still working method
+      try {
+        const deprecatedMutation = `
+          mutation SceneIncrementPlayCount($id: ID!) {
+            sceneIncrementPlayCount(id: $id)
+          }
+        `;
+
+        const deprecatedVariables = {
+          id: sceneId
+        };
+
+        console.log('🔍 Trying deprecated sceneIncrementPlayCount as fallback');
+
+        const deprecatedData = await this.makeGraphQLRequest(deprecatedMutation, deprecatedVariables);
+        console.log('✅ Deprecated sceneIncrementPlayCount succeeded, result:', deprecatedData);
+        
+        return {
+          success: true,
+          result: { count: deprecatedData.sceneIncrementPlayCount },
+          message: 'Play count incremented using deprecated method'
+        };
+      } catch (deprecatedError) {
+        console.error('❌ Both new and deprecated methods failed:');
+        console.error('   - sceneAddPlay error:', error.message);
+        console.error('   - sceneIncrementPlayCount error:', deprecatedError.message);
+        return {
+          success: false,
+          error: deprecatedError.message,
+          message: 'Failed to increment play count in Stash - both methods failed'
+        };
+      }
+    }
+  }
+
+  /**
+   * Delete a scene from Stash
+   * @param {string} sceneId - Scene ID
+   * @param {boolean} deleteFile - Whether to delete the actual video file
+   * @param {boolean} deleteGenerated - Whether to delete generated files (thumbnails, etc.)
+   * @returns {Promise<Object>} Deletion result
+   */
+  async deleteScene(sceneId, deleteFile = false, deleteGenerated = true) {
+    try {
+      const mutation = `
+        mutation SceneDestroy($input: SceneDestroyInput!) {
+          sceneDestroy(input: $input)
+        }
+      `;
+
+      const variables = {
+        input: {
+          id: sceneId,
+          delete_file: deleteFile,
+          delete_generated: deleteGenerated
+        }
+      };
+
+      console.log('🗑️ Deleting scene from Stash with mutation:', mutation);
+      console.log('🗑️ Variables:', variables);
+
+      const data = await this.makeGraphQLRequest(mutation, variables);
+      console.log('✅ Scene deleted from Stash successfully:', data);
+      
+      return {
+        success: true,
+        deleted: data.sceneDestroy,
+        message: 'Scene deleted successfully from Stash'
+      };
+    } catch (error) {
+      console.error('❌ Failed to delete scene from Stash:', error.message);
+      return {
+        success: false,
+        error: error.message,
+        message: 'Failed to delete scene from Stash'
       };
     }
   }

@@ -609,19 +609,26 @@ class WatchLogService {
 
       // Calculate time since last resume (or start if never paused)
       const now = new Date();
-      const sessionStartTime = viewingLog.endTime ? new Date(viewingLog.endTime) : new Date(viewingLog.startTime);
-      const timeElapsed = Math.floor((now - sessionStartTime) / 1000 / 60); // in minutes
+      
+      // For active (unpaused) sessions, endTime will be either:
+      // - null (never paused before) - use startTime
+      // - a resume time (paused and resumed before) - use endTime as last resume time
+      const lastActivityTime = (!viewingLog.isPaused && viewingLog.endTime) ? 
+        new Date(viewingLog.endTime) : 
+        new Date(viewingLog.startTime);
+      
+      const timeElapsed = Math.floor((now - lastActivityTime) / 1000 / 60); // in minutes
 
       const updatedLog = await this.prisma.watchLog.update({
         where: { id: viewingLogId },
         data: {
           isPaused: true,
-          endTime: now, // Temporarily store pause time in endTime
+          endTime: now, // Store pause time in endTime
           totalWatchTime: (viewingLog.totalWatchTime || 0) + timeElapsed
         }
       });
 
-      console.log(`Paused viewing session (${timeElapsed} minutes added)`);
+      console.log(`Paused viewing session (${timeElapsed} minutes added from last activity)`);
       return updatedLog;
     } catch (error) {
       console.error('Error pausing viewing session:', error);
@@ -659,11 +666,13 @@ class WatchLogService {
    */
   async resumeViewing(viewingLogId) {
     try {
+      const now = new Date();
+      
       const updatedLog = await this.prisma.watchLog.update({
         where: { id: viewingLogId },
         data: {
           isPaused: false,
-          endTime: null // Clear the temporary pause time
+          endTime: now // Set endTime to resume time for next pause calculation
         }
       });
 
@@ -761,10 +770,15 @@ class WatchLogService {
         finalTotalTime = activeSession.totalWatchTime || 0;
         console.log(`Session was paused. Using existing total time: ${finalTotalTime} minutes`);
       } else {
-        // Calculate total time including current session
-        const sessionTime = (endTime - new Date(activeSession.startTime)) / (1000 * 60); // Convert to minutes
+        // Calculate time from last resume (or start if never paused) to now
+        // For active sessions, endTime contains the last resume time (or null if never paused)
+        const lastActivityTime = activeSession.endTime ? 
+          new Date(activeSession.endTime) : 
+          new Date(activeSession.startTime);
+        
+        const sessionTime = (endTime - lastActivityTime) / (1000 * 60); // Convert to minutes
         finalTotalTime = (activeSession.totalWatchTime || 0) + sessionTime;
-        console.log(`Active session time: ${sessionTime.toFixed(2)} minutes, total: ${finalTotalTime.toFixed(2)} minutes`);
+        console.log(`Active session time since last activity: ${sessionTime.toFixed(2)} minutes, total: ${finalTotalTime.toFixed(2)} minutes`);
       }
 
       // Update the session as completed
@@ -838,23 +852,11 @@ class WatchLogService {
         ? {
             customOrderItemId: customOrderItemId,
             activityType: 'view',
-            OR: [
-              { endTime: null },  // Not ended
-              { 
-                endTime: { not: null }, 
-                isPaused: true 
-              }  // Paused (has endTime but is paused)
-            ]
+            isCompleted: false  // Only consider sessions that aren't completed yet
           }
         : {
             activityType: 'view',
-            OR: [
-              { endTime: null },  // Not ended
-              { 
-                endTime: { not: null }, 
-                isPaused: true 
-              }  // Paused (has endTime but is paused)
-            ]
+            isCompleted: false  // Only consider sessions that aren't completed yet
           };
 
       const activeSession = await this.prisma.watchLog.findFirst({

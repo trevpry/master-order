@@ -27,9 +27,7 @@ function Home() {
   
   // Settings modal state
   const [showSettingsModal, setShowSettingsModal] = useState(false);
-  const [tempSettings, setTempSettings] = useState({
-    nextItemIsStash: false
-  });
+  const [tempSettings, setTempSettings] = useState({});
   
   // Reading session state
   const [readingSession, setReadingSession] = useState(null);
@@ -1557,20 +1555,7 @@ function Home() {
             </div>
             
             <div className="settings-modal-body">
-              <div className="setting-item">
-                <label className="setting-label">
-                  <input
-                    type="checkbox"
-                    checked={tempSettings.nextItemIsStash}
-                    onChange={(e) => setTempSettings(prev => ({
-                      ...prev,
-                      nextItemIsStash: e.target.checked
-                    }))}
-                    className="setting-checkbox"
-                  />
-                  <span className="setting-text">Next item will be a Stash video</span>
-                </label>
-              </div>
+              {/* Settings content can be added here in the future */}
             </div>
             
             <div className="settings-modal-footer">

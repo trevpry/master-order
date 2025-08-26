@@ -39,7 +39,7 @@ const PlexPlayerService = require('./plexPlayerService');
 const plexPlayer = new PlexPlayerService(); // Initialize Plex player service
 const StashService = require('./stashService');
 const StashSyncService = require('./stashSyncService');
-let stashService = null; // Initialize later with settings
+let stashService = StashService; // Use the singleton instance directly
 let stashSyncService = null; // Initialize later with settings
 
 // Initialize Stash service with current settings
@@ -48,16 +48,25 @@ async function initializeStashService() {
     const { getSettings } = require('./databaseUtils');
     const settings = await getSettings();
     
-    if (settings && settings.stashUrl && settings.stashApiKey) {
-      stashService = new StashService(settings.stashUrl, settings.stashApiKey);
+    console.log('🔍 Initializing Stash service...');
+    console.log('   - Settings loaded:', !!settings);
+    console.log('   - Stash URL:', settings?.stashUrl || 'NOT SET');
+    console.log('   - Stash API Key:', settings?.stashApiKey ? 'SET' : 'NOT SET');
+    
+    if (settings && settings.stashUrl) {
+      // Configure the existing singleton instance
+      stashService.configure(settings.stashUrl, settings.stashApiKey || null);
       console.log('✅ Stash service initialized with settings');
+      console.log('   - Service configured:', stashService.isConfigured());
     } else {
-      stashService = null;
-      console.log('ℹ️  Stash service not initialized - missing URL or API key in settings');
+      // Reset the configuration if no URL is set
+      stashService.configure(null, null);
+      console.log('ℹ️  Stash service not initialized - missing URL in settings');
     }
   } catch (error) {
     console.error('❌ Error initializing Stash service:', error.message);
-    stashService = null;
+    // Reset configuration on error
+    stashService.configure(null, null);
   }
 }
 
@@ -806,6 +815,85 @@ app.get('/api/stash/scenes', async (req, res) => {
   }
 });
 
+// Get random unwatched Stash scene for "Next Stash" functionality
+app.get('/api/stash/scenes/next', async (req, res) => {
+  try {
+    console.log('🎲 Getting random unwatched scene...');
+    
+    // Find scenes with play_count = 0 or null, and exclude scenes with "__Watched" or "zzHide" tags
+    const unwatchedScenes = await prisma.stashScene.findMany({
+      where: {
+        AND: [
+          // Play count is 0 or null
+          {
+            OR: [
+              { playCount: 0 },
+              { playCount: null }
+            ]
+          },
+          // Exclude scenes with "__Watched" or "zzHide" tags
+          {
+            NOT: {
+              tags: {
+                some: {
+                  tag: {
+                    OR: [
+                      { name: '__Watched' },
+                      { name: 'zzHide' }
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        ]
+      },
+      include: {
+        performers: {
+          include: {
+            performer: true
+          }
+        },
+        tags: {
+          include: {
+            tag: true
+          }
+        },
+        studioObject: true
+      }
+    });
+
+    console.log(`📊 Found ${unwatchedScenes.length} unwatched scenes (excluding "__Watched" and "zzHide" tags)`);
+
+    if (unwatchedScenes.length === 0) {
+      return res.json({
+        success: false,
+        message: 'No unwatched scenes available (all scenes have been watched or are hidden)',
+        scene: null
+      });
+    }
+
+    // Select a random scene from the unwatched scenes
+    const randomIndex = Math.floor(Math.random() * unwatchedScenes.length);
+    const randomScene = unwatchedScenes[randomIndex];
+
+    console.log(`🎯 Selected random scene: ${randomScene.title} (ID: ${randomScene.id})`);
+
+    res.json({
+      success: true,
+      scene: randomScene,
+      totalUnwatched: unwatchedScenes.length,
+      message: `Selected 1 of ${unwatchedScenes.length} unwatched scenes`
+    });
+  } catch (error) {
+    console.error('Error getting random unwatched scene:', error);
+    res.status(500).json({ 
+      error: 'Failed to get random unwatched scene',
+      message: error.message 
+    });
+  }
+});
+
 // Stash scene by ID endpoint
 app.get('/api/stash/scenes/:id', async (req, res) => {
   try {
@@ -903,6 +991,199 @@ app.get('/api/stash/scenes/:id', async (req, res) => {
       error: 'Failed to fetch Stash scene',
       message: error.message 
     });
+  }
+});
+
+// Mark Stash scene as watched
+app.post('/api/stash/scenes/:id/watched', async (req, res) => {
+  try {
+    const sceneId = req.params.id;
+    
+    if (!sceneId) {
+      return res.status(400).json({ error: 'Invalid scene ID' });
+    }
+
+    // Update our local database
+    const updatedScene = await prisma.stashScene.update({
+      where: { id: sceneId },
+      data: {
+        playCount: {
+          increment: 1
+        },
+        lastPlayedAt: new Date()
+      }
+    });
+
+    // Also increment play count in Stash itself
+    let stashResult = null;
+    console.log('🔍 Checking Stash service for play count increment...');
+    console.log('   - stashService exists:', !!stashService);
+    console.log('   - stashService.isConfigured():', stashService ? stashService.isConfigured() : 'N/A');
+    
+    if (stashService && stashService.isConfigured()) {
+      console.log('📡 Incrementing play count in Stash...');
+      stashResult = await stashService.incrementScenePlayCount(sceneId);
+      if (!stashResult.success) {
+        console.warn('Failed to increment play count in Stash:', stashResult.error);
+      } else {
+        console.log('✅ Play count incremented in Stash successfully');
+      }
+    } else {
+      console.warn('Stash service not configured, skipping remote play count increment');
+      console.warn('   - Service exists:', !!stashService);
+      console.warn('   - Service configured:', stashService ? stashService.isConfigured() : false);
+    }
+
+    res.json({
+      success: true,
+      message: 'Scene marked as watched',
+      scene: updatedScene,
+      stashUpdate: stashResult
+    });
+  } catch (error) {
+    console.error('Error marking Stash scene as watched:', error);
+    if (error.code === 'P2025') {
+      res.status(404).json({ 
+        error: 'Scene not found',
+        message: 'The requested scene does not exist'
+      });
+    } else {
+      res.status(500).json({ 
+        error: 'Failed to mark scene as watched',
+        message: error.message 
+      });
+    }
+  }
+});
+
+// Delete Stash scene (from both local database and Stash itself)
+app.delete('/api/stash/scenes/:id', async (req, res) => {
+  try {
+    const sceneId = req.params.id;
+    const { deleteFile = false } = req.query; // Query parameter to optionally delete the actual file
+    
+    if (!sceneId) {
+      return res.status(400).json({ error: 'Invalid scene ID' });
+    }
+
+    console.log('🗑️ Deleting scene:', sceneId, 'deleteFile:', deleteFile);
+
+    // Delete from local database first
+    let localDeleted = false;
+    try {
+      await prisma.stashScene.delete({
+        where: { id: sceneId }
+      });
+      localDeleted = true;
+      console.log('✅ Scene deleted from local database');
+    } catch (localError) {
+      if (localError.code === 'P2025') {
+        console.log('ℹ️ Scene not found in local database (may not have been synced)');
+      } else {
+        console.error('❌ Error deleting from local database:', localError);
+        throw localError;
+      }
+    }
+
+    // Delete from Stash itself
+    let stashResult = null;
+    if (stashService && stashService.isConfigured()) {
+      console.log('🗑️ Deleting scene from Stash...');
+      stashResult = await stashService.deleteScene(
+        sceneId, 
+        deleteFile === 'true', // Convert string to boolean
+        true // Always delete generated files (thumbnails, etc.)
+      );
+      
+      if (!stashResult.success) {
+        console.warn('Failed to delete scene from Stash:', stashResult.error);
+      } else {
+        console.log('✅ Scene deleted from Stash successfully');
+      }
+    } else {
+      console.warn('Stash service not configured, skipping remote deletion');
+    }
+
+    res.json({
+      success: true,
+      message: 'Scene deletion completed',
+      localDeleted,
+      stashDeleted: stashResult?.success || false,
+      stashResult
+    });
+  } catch (error) {
+    console.error('Error deleting Stash scene:', error);
+    if (error.code === 'P2025') {
+      res.status(404).json({ 
+        error: 'Scene not found',
+        message: 'The requested scene does not exist in local database'
+      });
+    } else {
+      res.status(500).json({ 
+        error: 'Failed to delete scene',
+        message: error.message 
+      });
+    }
+  }
+});
+
+// Get Stash database statistics
+app.get('/api/stash/stats', async (req, res) => {
+  try {
+    console.log('📊 Fetching Stash database statistics...');
+    
+    // Get counts from each table
+    const [scenesCount, performersCount, studiosCount] = await Promise.all([
+      prisma.stashScene.count(),
+      prisma.stashPerformer.count(),
+      prisma.stashStudio.count()
+    ]);
+
+    const stats = {
+      scenes: scenesCount,
+      performers: performersCount,
+      studios: studiosCount,
+      lastUpdated: new Date().toISOString()
+    };
+
+    console.log('📊 Stats retrieved:', stats);
+
+    res.json({
+      success: true,
+      stats
+    });
+  } catch (error) {
+    console.error('Error fetching Stash stats:', error);
+    res.status(500).json({ 
+      error: 'Failed to fetch Stash statistics',
+      message: error.message 
+    });
+  }
+});
+
+// Debug endpoint to test Stash service initialization
+app.get('/api/debug/stash-service', async (req, res) => {
+  try {
+    const { getSettings } = require('./databaseUtils');
+    const settings = await getSettings();
+    
+    console.log('🔍 Debug: Manual Stash service test');
+    console.log('   - Settings:', JSON.stringify(settings, null, 2));
+    
+    const result = {
+      settingsLoaded: !!settings,
+      stashUrl: settings?.stashUrl || null,
+      stashApiKey: !!settings?.stashApiKey,
+      globalServiceExists: !!stashService,
+      globalServiceConfigured: stashService ? stashService.isConfigured() : false
+    };
+    
+    console.log('   - Debug result:', result);
+    
+    res.json(result);
+  } catch (error) {
+    console.error('Debug endpoint error:', error);
+    res.status(500).json({ error: error.message });
   }
 });
 
