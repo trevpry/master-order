@@ -15,6 +15,7 @@ const TvdbDatabaseService = require('./tvdbDatabaseService'); // Added import
 const TVDBService = require('./tvdbService'); // Added import
 const PlexSyncService = require('./plexSyncService'); // Added import
 const BackgroundSyncService = require('./backgroundSyncService'); // Added import
+const StashBackgroundSyncService = require('./stashBackgroundSyncService'); // Added import
 const ArtworkCacheService = require('./artworkCacheService'); // Added import
 const subOrderService = require('./subOrderService'); // Added import
 const WatchLogService = require('./watchLogService'); // Added import
@@ -31,6 +32,7 @@ const plexDb = new PlexDatabaseService();
 const tvdbDb = new TvdbDatabaseService();
 const plexSync = new PlexSyncService(); // Initialize the sync service
 const backgroundSync = new BackgroundSyncService(); // Initialize background sync service
+const stashBackgroundSync = new StashBackgroundSyncService(); // Initialize Stash background sync service
 const artworkCache = new ArtworkCacheService(); // Initialize artwork cache service
 const watchLogService = new WatchLogService(prisma); // Initialize watch log service
 const statisticsService = new StatisticsService(prisma, watchLogService);
@@ -774,9 +776,12 @@ app.get('/api/stash/scenes', async (req, res) => {
       rating: scene.rating,
       organized: scene.organized,
       path: scene.path,
+      duration: scene.duration,
       studio: scene.studioObject ? { 
         id: scene.studioObject.id, 
-        name: scene.studioObject.name 
+        name: scene.studioObject.name,
+        url: scene.studioObject.url,
+        image: scene.studioObject.image
       } : scene.studio ? { name: scene.studio } : null,
       code: scene.code,
       director: scene.director,
@@ -820,7 +825,7 @@ app.get('/api/stash/scenes/next', async (req, res) => {
   try {
     console.log('🎲 Getting random unwatched scene...');
     
-    // Find scenes with play_count = 0 or null, and exclude scenes with "__Watched" or "zzHide" tags
+    // Find scenes with play_count = 0 or null, and exclude scenes with "__Watched" tag
     const unwatchedScenes = await prisma.stashScene.findMany({
       where: {
         AND: [
@@ -831,16 +836,13 @@ app.get('/api/stash/scenes/next', async (req, res) => {
               { playCount: null }
             ]
           },
-          // Exclude scenes with "__Watched" or "zzHide" tags
+          // Exclude scenes with "__Watched" tag
           {
             NOT: {
               tags: {
                 some: {
                   tag: {
-                    OR: [
-                      { name: '__Watched' },
-                      { name: 'zzHide' }
-                    ]
+                    name: '__Watched'
                   }
                 }
               }
@@ -863,12 +865,12 @@ app.get('/api/stash/scenes/next', async (req, res) => {
       }
     });
 
-    console.log(`📊 Found ${unwatchedScenes.length} unwatched scenes (excluding "__Watched" and "zzHide" tags)`);
+    console.log(`📊 Found ${unwatchedScenes.length} unwatched scenes (excluding "__Watched" tags)`);
 
     if (unwatchedScenes.length === 0) {
       return res.json({
         success: false,
-        message: 'No unwatched scenes available (all scenes have been watched or are hidden)',
+        message: 'No unwatched scenes available (all scenes have been watched)',
         scene: null
       });
     }
@@ -937,6 +939,7 @@ app.get('/api/stash/scenes/:id', async (req, res) => {
       phash: scene.phash,
       oCounter: scene.oCounter,
       path: scene.path,
+      duration: scene.duration,
       fileModTime: scene.fileModTime,
       studio: scene.studioObject ? { 
         id: scene.studioObject.id, 
@@ -1139,10 +1142,67 @@ app.get('/api/stash/stats', async (req, res) => {
       prisma.stashStudio.count()
     ]);
 
+    // Get top 10 performers by scene count
+    const topPerformers = await prisma.stashPerformer.findMany({
+      select: {
+        id: true,
+        name: true,
+        image: true,
+        _count: {
+          select: {
+            scenes: true
+          }
+        }
+      },
+      orderBy: {
+        scenes: {
+          _count: 'desc'
+        }
+      },
+      take: 10
+    });
+
+    // Get top 10 studios by scene count
+    const topStudios = await prisma.stashStudio.findMany({
+      where: {
+        name: {
+          not: 'Only Fans'
+        }
+      },
+      select: {
+        id: true,
+        name: true,
+        image: true,
+        _count: {
+          select: {
+            scenes: true
+          }
+        }
+      },
+      orderBy: {
+        scenes: {
+          _count: 'desc'
+        }
+      },
+      take: 10
+    });
+
     const stats = {
       scenes: scenesCount,
       performers: performersCount,
       studios: studiosCount,
+      topPerformers: topPerformers.map(p => ({
+        id: p.id,
+        name: p.name,
+        image: p.image,
+        sceneCount: p._count.scenes
+      })),
+      topStudios: topStudios.map(s => ({
+        id: s.id,
+        name: s.name,
+        image: s.image,
+        sceneCount: s._count.scenes
+      })),
       lastUpdated: new Date().toISOString()
     };
 
@@ -1300,7 +1360,7 @@ app.get('/api/stash/studios', async (req, res) => {
       where: searchFilter
     });
     
-    // Get studios with scene counts
+    // Get studios with scene counts using the relationship
     const studios = await prisma.stashStudio.findMany({
       where: searchFilter,
       include: {
@@ -1460,12 +1520,7 @@ app.get('/api/stash/search', async (req, res) => {
               }
             }
           },
-          studioObject: {
-            select: {
-              id: true,
-              name: true
-            }
-          }
+          studioObject: true
         },
         take: 20,
         orderBy: { createdAt: 'desc' }
@@ -1478,9 +1533,12 @@ app.get('/api/stash/search', async (req, res) => {
         url: scene.url,
         date: scene.date,
         rating: scene.rating,
+        duration: scene.duration,
         studio: scene.studioObject ? { 
           id: scene.studioObject.id, 
-          name: scene.studioObject.name 
+          name: scene.studioObject.name,
+          url: scene.studioObject.url,
+          image: scene.studioObject.image
         } : scene.studio ? { name: scene.studio } : null,
         performers: scene.performers.map(sp => sp.performer),
         tags: scene.tags.map(st => st.tag)
@@ -2517,6 +2575,7 @@ app.post('/api/settings', async (req, res) => {
       partiallyWatchedCollectionPercent,
       comicVineApiKey, 
       plexSyncInterval,
+      stashSyncInterval,
       plexToken,
       plexUrl,
       tvdbApiKey,
@@ -2551,6 +2610,9 @@ app.post('/api/settings', async (req, res) => {
     if (plexSyncInterval !== undefined && (plexSyncInterval < 1 || plexSyncInterval > 168)) {
       return res.status(400).json({ error: 'Plex sync interval must be between 1 and 168 hours (1 week)' });
     }
+    if (stashSyncInterval !== undefined && (stashSyncInterval < 1 || stashSyncInterval > 168)) {
+      return res.status(400).json({ error: 'Stash sync interval must be between 1 and 168 hours (1 week)' });
+    }
 
     // Validate that percentages add up to 100% if all three are provided
     if (tvGeneralPercent !== undefined && moviesGeneralPercent !== undefined && customOrderPercent !== undefined) {
@@ -2569,6 +2631,7 @@ app.post('/api/settings', async (req, res) => {
     if (partiallyWatchedCollectionPercent !== undefined) updateData.partiallyWatchedCollectionPercent = partiallyWatchedCollectionPercent;
     if (comicVineApiKey !== undefined) updateData.comicVineApiKey = comicVineApiKey.trim() || null;
     if (plexSyncInterval !== undefined) updateData.plexSyncInterval = plexSyncInterval;
+    if (stashSyncInterval !== undefined) updateData.stashSyncInterval = stashSyncInterval;
     if (plexToken !== undefined) updateData.plexToken = plexToken.trim() || null;
     if (plexUrl !== undefined) updateData.plexUrl = plexUrl.trim() || null;
     if (tvdbApiKey !== undefined) updateData.tvdbApiKey = tvdbApiKey.trim() || null;
@@ -2595,6 +2658,7 @@ app.post('/api/settings', async (req, res) => {
       customOrderPercent: customOrderPercent ?? 0,
       partiallyWatchedCollectionPercent: partiallyWatchedCollectionPercent ?? 75,
       plexSyncInterval: plexSyncInterval ?? 12,
+      stashSyncInterval: stashSyncInterval ?? 24,
       christmasFilterEnabled: christmasFilterEnabled ?? false
     });
 
@@ -2605,6 +2669,16 @@ app.post('/api/settings', async (req, res) => {
         console.log('Background sync interval updated');
       } catch (error) {
         console.error('Failed to update background sync interval:', error);
+      }
+    }
+
+    // Update Stash background sync interval if it was changed
+    if (stashSyncInterval !== undefined) {
+      try {
+        await stashBackgroundSync.updateSyncInterval();
+        console.log('Stash background sync interval updated');
+      } catch (error) {
+        console.error('Failed to update Stash background sync interval:', error);
       }
     }
 
@@ -2710,6 +2784,59 @@ app.post('/api/plex/background-sync/force-now', async (req, res) => {
     console.error('Failed to force background sync:', error);
     res.status(500).json({ 
       error: 'Failed to force background sync',
+      details: error.message 
+    });
+  }
+});
+
+// Stash Background Sync Endpoints
+app.get('/api/stash/background-sync-status', async (req, res) => {
+  try {
+    const status = stashBackgroundSync.getSyncStatus();
+    res.json(status);
+  } catch (error) {
+    console.error('Failed to get Stash background sync status:', error);
+    res.status(500).json({ 
+      error: 'Failed to get Stash background sync status',
+      details: error.message 
+    });
+  }
+});
+
+app.post('/api/stash/background-sync/start', async (req, res) => {
+  try {
+    await stashBackgroundSync.start();
+    res.json({ message: 'Stash background sync service started successfully' });
+  } catch (error) {
+    console.error('Failed to start Stash background sync:', error);
+    res.status(500).json({ 
+      error: 'Failed to start Stash background sync',
+      details: error.message 
+    });
+  }
+});
+
+app.post('/api/stash/background-sync/stop', async (req, res) => {
+  try {
+    await stashBackgroundSync.stop();
+    res.json({ message: 'Stash background sync service stopped successfully' });
+  } catch (error) {
+    console.error('Failed to stop Stash background sync:', error);
+    res.status(500).json({ 
+      error: 'Failed to stop Stash background sync',
+      details: error.message 
+    });
+  }
+});
+
+app.post('/api/stash/background-sync/force-now', async (req, res) => {
+  try {
+    const result = await stashBackgroundSync.forceSyncNow();
+    res.json({ message: 'Stash background sync completed', result });
+  } catch (error) {
+    console.error('Failed to force Stash background sync:', error);
+    res.status(500).json({ 
+      error: 'Failed to force Stash background sync',
       details: error.message 
     });
   }
@@ -6951,6 +7078,13 @@ server.listen(PORT, '0.0.0.0', async () => {
     await backgroundSync.start();
   } catch (error) {
     console.error('Failed to start background sync service:', error);
+  }
+  
+  // Start Stash background sync service
+  try {
+    await stashBackgroundSync.start();
+  } catch (error) {
+    console.error('Failed to start Stash background sync service:', error);
   }
   
   // Initialize Stash service

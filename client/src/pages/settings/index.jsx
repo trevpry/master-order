@@ -27,6 +27,7 @@ function Settings() {
   const [customOrderPercent, setCustomOrderPercent] = useState(0);
   const [partiallyWatchedCollectionPercent, setPartiallyWatchedCollectionPercent] = useState(75);
   const [plexSyncInterval, setPlexSyncInterval] = useState(12);
+  const [stashSyncInterval, setStashSyncInterval] = useState(24);
   
   // Christmas filter state
   const [christmasFilterEnabled, setChristmasFilterEnabled] = useState(false);
@@ -140,6 +141,7 @@ function Settings() {
           setCustomOrderPercent(settings.customOrderPercent ?? 0);
           setPartiallyWatchedCollectionPercent(settings.partiallyWatchedCollectionPercent ?? 75);
           setPlexSyncInterval(settings.plexSyncInterval ?? 12);
+          setStashSyncInterval(settings.stashSyncInterval ?? 24);
           setIgnoredMovieCollections(settings.ignoredMovieCollections || []);
           setIgnoredTVCollections(settings.ignoredTVCollections || []);
           setChristmasFilterEnabled(settings.christmasFilterEnabled ?? false);
@@ -393,6 +395,13 @@ function Settings() {
       setPlexSyncInterval(value);
     }
   };
+
+  const handleStashSyncIntervalChange = (e) => {
+    const value = parseInt(e.target.value);
+    if (value >= 1 && value <= 168) { // 1 hour to 7 days (168 hours)
+      setStashSyncInterval(value);
+    }
+  };
   const handleSubmit = async () => {
     if (!validatePercentages()) {
       const effectiveCustomOrderPercent = customOrdersCount > 0 ? customOrderPercent : 0;
@@ -434,6 +443,7 @@ function Settings() {
           customOrderPercent,
           partiallyWatchedCollectionPercent,
           plexSyncInterval,
+          stashSyncInterval,
           ignoredMovieCollections,
           ignoredTVCollections,
           christmasFilterEnabled
@@ -1324,7 +1334,7 @@ function Settings() {
               <h4 className="subsection-title">🔄 Background Sync</h4>
               <div className="sync-config-row">
                 <div className="sync-interval-control compact">
-                  <label htmlFor="plex_sync_interval">⏰ Interval: {plexSyncInterval}h</label>
+                  <label htmlFor="plex_sync_interval">Plex Sync Interval: {plexSyncInterval}h</label>
                   <input 
                     type="range" 
                     id="plex_sync_interval"
@@ -1333,6 +1343,20 @@ function Settings() {
                     max="168"
                     value={plexSyncInterval}
                     onChange={handlePlexSyncIntervalChange}
+                    className="interval-slider"
+                  />
+                </div>
+
+                <div className="sync-interval-control compact">
+                  <label htmlFor="stash_sync_interval">Stash Sync Interval: {stashSyncInterval}h</label>
+                  <input 
+                    type="range" 
+                    id="stash_sync_interval"
+                    name="stash_sync_interval"
+                    min="1"
+                    max="168"
+                    value={stashSyncInterval}
+                    onChange={handleStashSyncIntervalChange}
                     className="interval-slider"
                   />
                 </div>

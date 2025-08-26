@@ -129,14 +129,6 @@ model CustomOrderItem {
   tvdbStudio             String?
   tvdbArtworkUrl         String?
   referencedCustomOrderId Int?              // For sub-order items, references the CustomOrder id
-  
-  // Komga integration fields
-  komgaUrl               String?
-  komgaSeriesId          String?
-  komgaBookId            String?
-  komgaSeriesUrl         String?
-  komgaMetadata          String?
-  
   storyContainedInBook   CustomOrderItem?  @relation("StoryInBook", fields: [storyContainedInBookId], references: [id])
   containedStories       CustomOrderItem[] @relation("StoryInBook")
   referencedCustomOrder  CustomOrder?      @relation("SubOrderReference", fields: [referencedCustomOrderId], references: [id])
@@ -708,7 +700,6 @@ model PlexTrack {
   type              String   @default("track")
   title             String
   titleSort         String?
-  originalTitle     String?  // Original title if different
   summary           String?
   index             Int?
   duration          Int?     // Duration in milliseconds
@@ -719,28 +710,6 @@ model PlexTrack {
   addedAt           DateTime?
   updatedAt         DateTime?
   librarySectionID  Int?
-  
-  // Rating and play data
-  rating            Float?    // Overall rating
-  userRating        Float?    // User's personal rating
-  viewCount         Int?      // Number of times played
-  skipCount         Int?      // Number of times skipped
-  lastViewedAt      DateTime? // Last time this track was played
-  
-  // MusicBrainz and external IDs
-  musicBrainzTrackId String?  // MusicBrainz Track ID
-  lastFmId          String?   // Last.fm ID
-  plexMusicId       String?   // Plex Music ID
-  
-  // Media technical information
-  bitrate           Int?      // Audio bitrate
-  container         String?   // File container (mp3, flac, etc.)
-  audioCodec        String?   // Audio codec
-  audioChannels     Int?      // Number of audio channels
-  
-  // File information
-  file              String?   // Full file path
-  size              Int?      // File size in bytes
   
   // Relations
   librarySection    PlexLibrarySection? @relation(fields: [librarySectionID], references: [id])
@@ -786,6 +755,8 @@ model StashScene {
   performers       StashScenePerformer[]
   tags             StashSceneTag[]
   studioObject     StashStudio? @relation(fields: [studioId], references: [id])
+  
+  @@map("StashScene")
   
   @@map("StashScene")
 }

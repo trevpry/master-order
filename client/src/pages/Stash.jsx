@@ -51,10 +51,16 @@ export default function Stash() {
     scene: null,
     deleteFile: false
   });
+  const [performerImageModal, setPerformerImageModal] = useState({
+    isOpen: false,
+    performer: null
+  });
   const [stats, setStats] = useState({
     scenes: 0,
     performers: 0,
     studios: 0,
+    topPerformers: [],
+    topStudios: [],
     lastUpdated: null,
     loading: false,
     error: null
@@ -308,6 +314,8 @@ export default function Stash() {
           scenes: result.stats.scenes,
           performers: result.stats.performers,
           studios: result.stats.studios,
+          topPerformers: result.stats.topPerformers || [],
+          topStudios: result.stats.topStudios || [],
           lastUpdated: result.stats.lastUpdated,
           loading: false,
           error: null
@@ -415,6 +423,20 @@ export default function Stash() {
 
   const closeDeleteModal = () => {
     setDeleteModal({ isOpen: false, scene: null, deleteFile: false });
+  };
+
+  const openPerformerImageModal = (performer) => {
+    setPerformerImageModal({
+      isOpen: true,
+      performer: performer
+    });
+  };
+
+  const closePerformerImageModal = () => {
+    setPerformerImageModal({
+      isOpen: false,
+      performer: null
+    });
   };
 
   // Send command to Android companion app
@@ -654,7 +676,7 @@ export default function Stash() {
                   }}
                 />
                 <div className="duration-badge">
-                  {formatDuration(scene.file?.duration)}
+                  {formatDuration(scene.duration)}
                 </div>
               </div>
             )}
@@ -783,17 +805,27 @@ export default function Stash() {
       <div className="content-grid performers-grid">
         {performers.map((performer) => (
           <div key={performer.id} className="content-card performer-card">
-            {performer.image_path && (
-              <div className="performer-avatar">
+            <div className="performer-image">
+              {performer.image ? (
                 <img
-                  src={performer.image_path}
+                  src={performer.image}
                   alt={performer.name}
                   onError={(e) => {
                     e.target.style.display = 'none';
+                    e.target.nextElementSibling.style.display = 'flex';
                   }}
                 />
-              </div>
-            )}
+              ) : (
+                <div className="performer-placeholder">
+                  <span>👤</span>
+                </div>
+              )}
+              {performer.image && (
+                <div className="performer-placeholder" style={{display: 'none'}}>
+                  <span>👤</span>
+                </div>
+              )}
+            </div>
             
             <div className="content-card-body">
               <h3 className="content-title">{performer.name}</h3>
@@ -834,19 +866,30 @@ export default function Stash() {
       <div className="content-grid studios-grid">
         {studios.map((studio) => (
           <div key={studio.id} className="content-card studio-card">
+            <div className="studio-image">
+              {studio.image ? (
+                <img
+                  src={studio.image}
+                  alt={studio.name}
+                  onError={(e) => {
+                    e.target.style.display = 'none';
+                    e.target.nextElementSibling.style.display = 'flex';
+                  }}
+                />
+              ) : (
+                <div className="studio-placeholder">
+                  <span>🏢</span>
+                </div>
+              )}
+              {studio.image && (
+                <div className="studio-placeholder" style={{display: 'none'}}>
+                  <span>🏢</span>
+                </div>
+              )}
+            </div>
+            
             <div className="content-card-body">
               <div className="studio-header">
-                {studio.image_path && (
-                  <img
-                    src={studio.image_path}
-                    alt={studio.name}
-                    className="studio-logo"
-                    onError={(e) => {
-                      e.target.style.display = 'none';
-                    }}
-                  />
-                )}
-                
                 <h3 className="content-title">{studio.name}</h3>
               </div>
               
@@ -1053,7 +1096,7 @@ export default function Stash() {
                               }}
                             />
                             <div className="duration-badge">
-                              {formatDuration(selectedScene.file?.duration)}
+                              {formatDuration(selectedScene.duration)}
                             </div>
                           </div>
                         )}
@@ -1072,7 +1115,12 @@ export default function Stash() {
                               {selectedScene.studio && (
                                 <div className="meta-item">
                                   <span className="meta-icon">🏢</span>
-                                  <span>{selectedScene.studio.name}</span>
+                                  <span>
+                                    {typeof selectedScene.studio === 'string' 
+                                      ? selectedScene.studio 
+                                      : selectedScene.studio.name || selectedScene.studio
+                                    }
+                                  </span>
                                 </div>
                               )}
                               
@@ -1080,7 +1128,11 @@ export default function Stash() {
                                 <div className="meta-item">
                                   <span className="meta-icon">👤</span>
                                   <span>
-                                    {selectedScene.performers.map(p => p.name).join(', ')}
+                                    {selectedScene.performers.map(p => {
+                                      if (typeof p === 'string') return p;
+                                      // Handle the nested structure: p.performer.name
+                                      return p.performer?.name || p.name || `Performer ${p.performerId || p.id}` || 'Unknown Performer';
+                                    }).join(', ')}
                                   </span>
                                 </div>
                               )}
@@ -1114,9 +1166,39 @@ export default function Stash() {
                                 <div className="meta-item">
                                   <span className="meta-icon">🏷️</span>
                                   <span>
-                                    {selectedScene.tags.slice(0, 3).map(t => t.name).join(', ')}
+                                    {selectedScene.tags.slice(0, 3).map(t => {
+                                      if (typeof t === 'string') return t;
+                                      // Handle nested structure similar to performers: t.tag.name
+                                      return t.tag?.name || t.name || `Tag ${t.tagId || t.id}` || 'Unknown Tag';
+                                    }).join(', ')}
                                     {selectedScene.tags.length > 3 && ` +${selectedScene.tags.length - 3}`}
                                   </span>
+                                </div>
+                              )}
+                              
+                              {/* Additional metadata fields */}
+                              {selectedScene.duration && (
+                                <div className="meta-item">
+                                  <span className="meta-icon">⏱️</span>
+                                  <span>{formatDuration(selectedScene.duration)}</span>
+                                </div>
+                              )}
+                              
+                              {selectedScene.details && (
+                                <div className="meta-item">
+                                  <span className="meta-icon">📝</span>
+                                  <span style={{ display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
+                                    {selectedScene.details}
+                                  </span>
+                                </div>
+                              )}
+                              
+                              {selectedScene.url && (
+                                <div className="meta-item">
+                                  <span className="meta-icon">🔗</span>
+                                  <a href={selectedScene.url} target="_blank" rel="noopener noreferrer" style={{ color: '#007bff', textDecoration: 'none' }}>
+                                    View on External Site
+                                  </a>
                                 </div>
                               )}
                             </div>
@@ -1273,31 +1355,118 @@ export default function Stash() {
                   </Button>
                 </div>
               ) : (
-                <div className="stats-grid">
-                  <div className="stat-card">
-                    <div className="stat-icon">🎬</div>
-                    <div className="stat-content">
-                      <div className="stat-number">{stats.scenes.toLocaleString()}</div>
-                      <div className="stat-label">Scenes</div>
+                <>
+                  <div className="stats-grid">
+                    <div className="stat-card">
+                      <div className="stat-icon">🎬</div>
+                      <div className="stat-content">
+                        <div className="stat-number">{stats.scenes.toLocaleString()}</div>
+                        <div className="stat-label">Scenes</div>
+                      </div>
+                    </div>
+
+                    <div className="stat-card">
+                      <div className="stat-icon">👥</div>
+                      <div className="stat-content">
+                        <div className="stat-number">{stats.performers.toLocaleString()}</div>
+                        <div className="stat-label">Performers</div>
+                      </div>
+                    </div>
+
+                    <div className="stat-card">
+                      <div className="stat-icon">🏢</div>
+                      <div className="stat-content">
+                        <div className="stat-number">{stats.studios.toLocaleString()}</div>
+                        <div className="stat-label">Studios</div>
+                      </div>
                     </div>
                   </div>
 
-                  <div className="stat-card">
-                    <div className="stat-icon">👥</div>
-                    <div className="stat-content">
-                      <div className="stat-number">{stats.performers.toLocaleString()}</div>
-                      <div className="stat-label">Performers</div>
+                  {/* Top Performers and Studios Lists */}
+                  <div className="top-lists">
+                    <div className="top-list">
+                      <h3 className="top-list-title">🌟 Top 10 Performers</h3>
+                      {stats.topPerformers && stats.topPerformers.length > 0 ? (
+                        <div className="top-list-items">
+                          {stats.topPerformers.map((performer, index) => (
+                            <div key={performer.id} className="top-list-item">
+                              <div className="rank">#{index + 1}</div>
+                              <div className="performer-info">
+                                <div className="performer-avatar-small" onClick={() => openPerformerImageModal(performer)}>
+                                  {performer.image ? (
+                                    <img
+                                      src={performer.image}
+                                      alt={performer.name}
+                                      onError={(e) => {
+                                        e.target.style.display = 'none';
+                                        e.target.nextElementSibling.style.display = 'flex';
+                                      }}
+                                    />
+                                  ) : (
+                                    <div className="performer-placeholder-small">
+                                      <span>👤</span>
+                                    </div>
+                                  )}
+                                  {performer.image && (
+                                    <div className="performer-placeholder-small" style={{display: 'none'}}>
+                                      <span>👤</span>
+                                    </div>
+                                  )}
+                                </div>
+                                <div className="name">{performer.name}</div>
+                              </div>
+                              <div className="count">{performer.sceneCount} scenes</div>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <div className="no-data">No performer data available</div>
+                      )}
                     </div>
-                  </div>
 
-                  <div className="stat-card">
-                    <div className="stat-icon">🏢</div>
-                    <div className="stat-content">
-                      <div className="stat-number">{stats.studios.toLocaleString()}</div>
-                      <div className="stat-label">Studios</div>
+                    <div className="top-list">
+                      <h3 className="top-list-title">🏆 Top 10 Studios</h3>
+                      {stats.topStudios && stats.topStudios.length > 0 ? (
+                        <div className="top-list-items">
+                          {stats.topStudios.map((studio, index) => {
+                            console.log('Studio data:', studio); // Debug log
+                            return (
+                            <div key={studio.id} className="top-list-item">
+                              <div className="rank">#{index + 1}</div>
+                              <div className="studio-info">
+                                {studio.image ? (
+                                  <div className="studio-image-small">
+                                    <img
+                                      src={studio.image}
+                                      alt={studio.name}
+                                      onLoad={(e) => {
+                                        console.log('Studio image loaded successfully:', studio.image);
+                                      }}
+                                      onError={(e) => {
+                                        console.log('Failed to load studio image:', studio.image);
+                                        e.target.style.display = 'none';
+                                        // Show the name when image fails
+                                        e.target.closest('.studio-info').querySelector('.studio-name-fallback').style.display = 'block';
+                                      }}
+                                    />
+                                    <div className="studio-name-fallback" style={{display: 'none'}}>
+                                      {studio.name}
+                                    </div>
+                                  </div>
+                                ) : (
+                                  <div className="name">{studio.name}</div>
+                                )}
+                              </div>
+                              <div className="count">{studio.sceneCount} scenes</div>
+                            </div>
+                          )})}
+                        </div>
+                      ) : (
+                        <div className="no-data">No studio data available</div>
+                      )}
                     </div>
                   </div>
-                </div>
+                </>
               )}
 
               <div className="stats-actions">
@@ -1401,6 +1570,35 @@ export default function Stash() {
               >
                 Delete Scene
               </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Performer Image Modal */}
+      {performerImageModal.isOpen && performerImageModal.performer && (
+        <div className="modal-overlay" onClick={closePerformerImageModal}>
+          <div className="modal-content performer-image-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h3>
+                {performerImageModal.performer.name}
+              </h3>
+              <button className="modal-close" onClick={closePerformerImageModal}>×</button>
+            </div>
+            
+            <div className="performer-image-container">
+              {performerImageModal.performer.image ? (
+                <img
+                  src={performerImageModal.performer.image}
+                  alt={performerImageModal.performer.name}
+                  className="full-performer-image"
+                />
+              ) : (
+                <div className="no-image-placeholder">
+                  <span>👤</span>
+                  <p>No image available</p>
+                </div>
+              )}
             </div>
           </div>
         </div>

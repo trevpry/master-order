@@ -28,6 +28,7 @@ model Settings {
   ignoredTVCollections              String?
   christmasFilterEnabled            Boolean   @default(false)
   plexSyncInterval                  Int       @default(12)
+  stashSyncInterval                 Int       @default(24)
   komgaUrl                          String?
   komgaApiKey                       String?
   stashUrl                          String?
@@ -768,7 +769,8 @@ model StashScene {
   fileModTime      DateTime?
   
   // Scene specific fields
-  studio           String?
+  studio           String?      // Studio name for display
+  studioId         String?      // Studio ID for relationship
   code             String?
   director         String?
   synopsis         String?
@@ -778,11 +780,12 @@ model StashScene {
   resumeTime       Float?
   playDuration     Float?
   playCount        Int?
+  duration         Float?      // Video duration in seconds
   
   // Relationships
   performers       StashScenePerformer[]
   tags             StashSceneTag[]
-  studioObject     StashStudio? @relation(fields: [studio], references: [name])
+  studioObject     StashStudio? @relation(fields: [studioId], references: [id])
   
   @@map("StashScene")
 }

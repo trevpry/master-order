@@ -118,6 +118,7 @@ class StashSyncService {
               id
               path
               size
+              duration
               mod_time
               fingerprints {
                 type
@@ -162,6 +163,12 @@ class StashSyncService {
       const syncedScenes = [];
       
       for (const scene of scenes) {
+        // Skip scenes with "zzHide" tag
+        if (scene.tags && scene.tags.some(tag => tag.name === 'zzHide')) {
+          console.log(`Skipping scene "${scene.title}" with zzHide tag`);
+          continue;
+        }
+
         // Extract file information from the files array
         const primaryFile = scene.files && scene.files.length > 0 ? scene.files[0] : null;
         const osHash = primaryFile?.fingerprints?.find(fp => fp.type === 'oshash')?.value || null;
@@ -182,6 +189,7 @@ class StashSyncService {
           path: primaryFile?.path || null,
           fileModTime: primaryFile?.mod_time ? new Date(primaryFile.mod_time) : null,
           studio: scene.studio?.name || null,
+          studioId: scene.studio?.id || null,
           code: scene.code || null,
           director: scene.director || null,
           synopsis: null, // Not available in current Stash API
@@ -190,6 +198,7 @@ class StashSyncService {
           resumeTime: scene.resume_time || null,
           playDuration: scene.play_duration || null,
           playCount: scene.play_count || null,
+          duration: primaryFile?.duration || null,
           lastSyncedAt: new Date()
         };
 
@@ -248,6 +257,94 @@ class StashSyncService {
     }
   }
 
+  async cleanupHiddenScenes() {
+    try {
+      console.log('Starting cleanup of scenes with "zzHide" tag...');
+      
+      // Find scenes that have the "zzHide" tag
+      const hiddenScenes = await prisma.stashScene.findMany({
+        include: {
+          tags: true
+        }
+      });
+
+      let removedCount = 0;
+      for (const scene of hiddenScenes) {
+        if (scene.tags.some(tag => tag.name === 'zzHide')) {
+          await prisma.stashScene.delete({
+            where: { id: scene.id }
+          });
+          removedCount++;
+        }
+      }
+
+      return removedCount;
+    } catch (error) {
+      console.error('Error cleaning up hidden scenes:', error);
+      return 0;
+    }
+  }
+
+  async cleanupPerformersWithZeroScenes() {
+    try {
+      console.log('Starting cleanup of performers with 0 scenes...');
+      
+      // Find performers that have no scenes
+      const performersWithScenes = await prisma.stashPerformer.findMany({
+        include: {
+          _count: {
+            select: { scenes: true }
+          }
+        }
+      });
+
+      let removedCount = 0;
+      for (const performer of performersWithScenes) {
+        if (performer._count.scenes === 0) {
+          await prisma.stashPerformer.delete({
+            where: { id: performer.id }
+          });
+          removedCount++;
+        }
+      }
+
+      return removedCount;
+    } catch (error) {
+      console.error('Error cleaning up performers with 0 scenes:', error);
+      return 0;
+    }
+  }
+
+  async cleanupStudiosWithZeroScenes() {
+    try {
+      console.log('Starting cleanup of studios with 0 scenes...');
+      
+      // Find studios that have no scenes
+      const studiosWithScenes = await prisma.stashStudio.findMany({
+        include: {
+          _count: {
+            select: { scenes: true }
+          }
+        }
+      });
+
+      let removedCount = 0;
+      for (const studio of studiosWithScenes) {
+        if (studio._count.scenes === 0) {
+          await prisma.stashStudio.delete({
+            where: { id: studio.id }
+          });
+          removedCount++;
+        }
+      }
+
+      return removedCount;
+    } catch (error) {
+      console.error('Error cleaning up studios with 0 scenes:', error);
+      return 0;
+    }
+  }
+
   async syncPerformers(page = 1, perPage = 100) {
     console.log(`Syncing performers (page ${page})...`);
     
@@ -276,6 +373,7 @@ class StashSyncService {
             instagram
             twitter
             url
+            scene_count
             tags {
               id
               name
@@ -304,6 +402,12 @@ class StashSyncService {
       const syncedPerformers = [];
       
       for (const performer of performers) {
+        // Skip performers with 0 scenes
+        if (performer.scene_count === 0) {
+          console.log(`Skipping performer ${performer.name} (0 scenes)`);
+          continue;
+        }
+
         const performerData = {
           id: performer.id,
           name: performer.name || '',
@@ -377,6 +481,7 @@ class StashSyncService {
             name
             url
             image_path
+            scene_count
           }
         }
       }
@@ -401,6 +506,12 @@ class StashSyncService {
       const syncedStudios = [];
       
       for (const studio of studios) {
+        // Skip studios with 0 scenes
+        if (studio.scene_count === 0) {
+          console.log(`Skipping studio ${studio.name} (0 scenes)`);
+          continue;
+        }
+
         const studioData = {
           id: studio.id,
           name: studio.name || '',
@@ -548,6 +659,21 @@ class StashSyncService {
         hasMore = result.hasMore;
         page++;
       }
+
+      // Cleanup: Remove scenes with "zzHide" tag
+      console.log('Cleaning up scenes with "zzHide" tag...');
+      const hiddenScenesRemoved = await this.cleanupHiddenScenes();
+      console.log(`Removed ${hiddenScenesRemoved} scenes with "zzHide" tag`);
+
+      // Cleanup: Remove performers with 0 scenes
+      console.log('Cleaning up performers with 0 scenes...');
+      const performersRemoved = await this.cleanupPerformersWithZeroScenes();
+      console.log(`Removed ${performersRemoved} performers with 0 scenes`);
+      
+      // Cleanup: Remove studios with 0 scenes
+      console.log('Cleaning up studios with 0 scenes...');
+      const studiosRemoved = await this.cleanupStudiosWithZeroScenes();
+      console.log(`Removed ${studiosRemoved} studios with 0 scenes`);
 
       const duration = (Date.now() - startTime) / 1000;
       console.log(`Full Stash sync completed in ${duration}s:`, totalSynced);
