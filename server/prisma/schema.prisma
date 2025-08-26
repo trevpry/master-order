@@ -935,3 +935,36 @@ model PlexPlaylistItem {
   
   @@map("PlexPlaylistItem")
 }
+
+// Custom Playlist models (separate from Plex)
+model CustomPlaylist {
+  id          Int       @id @default(autoincrement())
+  title       String
+  description String?
+  isPublic    Boolean   @default(false)
+  createdBy   String?   // User identifier (could be username or ID)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  
+  // Relations
+  tracks      CustomPlaylistTrack[]
+  
+  @@map("CustomPlaylist")
+}
+
+model CustomPlaylistTrack {
+  id           Int             @id @default(autoincrement())
+  playlistId   Int
+  ratingKey    String          // Plex track ratingKey
+  title        String?         // Track title for quick reference
+  artist       String?         // Artist name for quick reference
+  album        String?         // Album name for quick reference
+  duration     Int?            // Duration in milliseconds
+  sortOrder    Int             @default(0) // Order within playlist
+  addedAt      DateTime        @default(now())
+  
+  // Relations
+  playlist     CustomPlaylist  @relation(fields: [playlistId], references: [id], onDelete: Cascade)
+  
+  @@map("CustomPlaylistTrack")
+}

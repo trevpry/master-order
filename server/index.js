@@ -5761,6 +5761,7 @@ io.on('connection', (socket) => {
 app.get('/api/music/sections', async (req, res) => {
   try {
     const sections = await plexDb.getMusicSections();
+    console.log('Returning music sections:', sections);
     res.json(sections);
   } catch (error) {
     console.error('Error fetching music sections:', error);
@@ -5768,10 +5769,85 @@ app.get('/api/music/sections', async (req, res) => {
   }
 });
 
+// Serve Plex album artwork
+app.get('/api/plex-album-art/:ratingKey', async (req, res) => {
+  try {
+    const { ratingKey } = req.params;
+    const { width = 300, height = 300 } = req.query;
+    
+    // Get Plex settings to build the proper URL
+    const plexSettings = await plexDb.getPlexSettings();
+    if (!plexSettings || !plexSettings.plexUrl) {
+      return res.status(503).json({ error: 'Plex server not configured' });
+    }
+    
+    // Get album data to check if it has artwork
+    const album = await plexDb.getAlbumByRatingKey(ratingKey);
+    if (!album || !album.thumb) {
+      return res.status(404).json({ error: 'Album artwork not found' });
+    }
+    
+    // Build the Plex artwork URL
+    const plexUrl = plexSettings.plexUrl.replace(/\/$/, ''); // Remove trailing slash
+    const artworkUrl = `${plexUrl}${album.thumb}`;
+    
+    // If width/height specified, use Plex's photo transcode service
+    const finalUrl = (width !== '300' || height !== '300') 
+      ? `${plexUrl}/photo/:/transcode?url=${encodeURIComponent(album.thumb)}&width=${width}&height=${height}`
+      : artworkUrl;
+      
+    console.log(`Serving album art for ${ratingKey}: ${finalUrl}`);
+    
+    // Prepare headers for Plex request
+    const headers = {};
+    if (plexSettings.plexToken) {
+      headers['X-Plex-Token'] = plexSettings.plexToken;
+    }
+    
+    // Fetch the image from Plex and stream it to the client
+    const fetch = require('node-fetch');
+    const response = await fetch(finalUrl, { headers });
+    
+    if (!response.ok) {
+      console.error(`Failed to fetch album artwork: ${response.status} ${response.statusText} for URL: ${finalUrl}`);
+      return res.status(404).json({ error: 'Album artwork not available' });
+    }
+    
+    console.log(`Successfully fetched album art for ${ratingKey}, content-type: ${response.headers.get('content-type')}`);
+    
+    // Set proper headers and stream the image
+    res.setHeader('Content-Type', response.headers.get('content-type') || 'image/jpeg');
+    res.setHeader('Cache-Control', 'public, max-age=86400'); // Cache for 24 hours
+    response.body.pipe(res);
+    
+  } catch (error) {
+    console.error('Error serving Plex album artwork:', error);
+    res.status(500).json({ error: 'Failed to serve album artwork' });
+  }
+});
+
 app.get('/api/music/artists', async (req, res) => {
   try {
-    const artists = await plexDb.getAllArtists();
-    res.json(artists);
+    const { search, page = 1, limit = 20 } = req.query;
+    const offset = (page - 1) * limit;
+    
+    if (search) {
+      // For search, get all matching artists (existing behavior for compatibility)
+      const artists = await plexDb.searchArtists(search);
+      res.json(artists);
+    } else {
+      // For regular requests, use pagination
+      const artists = await plexDb.getAllArtists(parseInt(limit), offset);
+      const totalArtists = await plexDb.getArtistsCount();
+      
+      res.json({
+        artists,
+        page: parseInt(page),
+        limit: parseInt(limit),
+        total: totalArtists,
+        hasMore: offset + artists.length < totalArtists
+      });
+    }
   } catch (error) {
     console.error('Error fetching all artists:', error);
     res.status(500).json({ error: 'Failed to fetch artists' });
@@ -5781,8 +5857,28 @@ app.get('/api/music/artists', async (req, res) => {
 app.get('/api/music/artists/section/:sectionKey', async (req, res) => {
   try {
     const { sectionKey } = req.params;
-    const artists = await plexDb.getArtistsBySection(sectionKey);
-    res.json(artists);
+    const { search, page = 1, limit = 20 } = req.query;
+    const offset = (page - 1) * limit;
+    
+    let artists, totalArtists;
+    
+    if (search) {
+      // Search within the specific section
+      artists = await plexDb.searchArtistsBySection(sectionKey, search, parseInt(limit), offset);
+      totalArtists = await plexDb.searchArtistsBySectionCount(sectionKey, search);
+    } else {
+      // Get all artists from the section
+      artists = await plexDb.getArtistsBySection(sectionKey, parseInt(limit), offset);
+      totalArtists = await plexDb.getArtistsBySectionCount(sectionKey);
+    }
+    
+    res.json({
+      artists,
+      page: parseInt(page),
+      limit: parseInt(limit),
+      total: totalArtists,
+      hasMore: offset + artists.length < totalArtists
+    });
   } catch (error) {
     console.error('Error fetching artists by section:', error);
     res.status(500).json({ error: 'Failed to fetch artists' });
@@ -5805,8 +5901,31 @@ app.get('/api/music/artists/:ratingKey', async (req, res) => {
 
 app.get('/api/music/albums', async (req, res) => {
   try {
-    const albums = await plexDb.getAllAlbums();
-    res.json(albums);
+    const { search, page, limit } = req.query;
+    const pageNum = parseInt(page) || 1;
+    const limitNum = parseInt(limit) || 20;
+    const offset = (pageNum - 1) * limitNum;
+
+    let albums;
+    let total;
+
+    if (search) {
+      albums = await plexDb.searchAlbums(search, limitNum, offset);
+      total = await plexDb.getAlbumsCount(); // For simplicity, using total count
+    } else {
+      albums = await plexDb.getAllAlbums(limitNum, offset);
+      total = await plexDb.getAlbumsCount();
+    }
+
+    const hasMore = offset + albums.length < total;
+
+    res.json({
+      albums,
+      page: pageNum,
+      limit: limitNum,
+      total,
+      hasMore
+    });
   } catch (error) {
     console.error('Error fetching all albums:', error);
     res.status(500).json({ error: 'Failed to fetch albums' });
@@ -5816,8 +5935,35 @@ app.get('/api/music/albums', async (req, res) => {
 app.get('/api/music/albums/section/:sectionKey', async (req, res) => {
   try {
     const { sectionKey } = req.params;
-    const albums = await plexDb.getAlbumsBySection(sectionKey);
-    res.json(albums);
+    const { search, page, limit } = req.query;
+    const pageNum = parseInt(page) || 1;
+    const limitNum = parseInt(limit) || 20;
+    const offset = (pageNum - 1) * limitNum;
+
+    console.log(`Albums requested for section: ${sectionKey}, page: ${pageNum}, limit: ${limitNum}`);
+
+    let albums;
+    let total;
+
+    if (search) {
+      albums = await plexDb.searchAlbumsBySection(search, sectionKey, limitNum, offset);
+      total = await plexDb.getAlbumsBySectionCount(sectionKey); // For simplicity
+    } else {
+      albums = await plexDb.getAlbumsBySection(sectionKey, limitNum, offset);
+      total = await plexDb.getAlbumsBySectionCount(sectionKey);
+    }
+
+    console.log(`Returning ${albums.length} albums for section ${sectionKey}, total: ${total}`);
+
+    const hasMore = offset + albums.length < total;
+
+    res.json({
+      albums,
+      page: pageNum,
+      limit: limitNum,
+      total,
+      hasMore
+    });
   } catch (error) {
     console.error('Error fetching albums by section:', error);
     res.status(500).json({ error: 'Failed to fetch albums' });
@@ -5851,8 +5997,31 @@ app.get('/api/music/albums/:ratingKey', async (req, res) => {
 
 app.get('/api/music/tracks', async (req, res) => {
   try {
-    const tracks = await plexDb.getAllTracks();
-    res.json(tracks);
+    const { search, page, limit } = req.query;
+    const pageNum = parseInt(page) || 1;
+    const limitNum = parseInt(limit) || 20;
+    const offset = (pageNum - 1) * limitNum;
+
+    let tracks;
+    let total;
+
+    if (search) {
+      tracks = await plexDb.searchTracks(search, limitNum, offset);
+      total = await plexDb.getTracksCount(); // For simplicity, using total count
+    } else {
+      tracks = await plexDb.getAllTracks(limitNum, offset);
+      total = await plexDb.getTracksCount();
+    }
+
+    const hasMore = offset + tracks.length < total;
+
+    res.json({
+      tracks,
+      page: pageNum,
+      limit: limitNum,
+      total,
+      hasMore
+    });
   } catch (error) {
     console.error('Error fetching all tracks:', error);
     res.status(500).json({ error: 'Failed to fetch tracks' });
@@ -5862,8 +6031,31 @@ app.get('/api/music/tracks', async (req, res) => {
 app.get('/api/music/tracks/section/:sectionKey', async (req, res) => {
   try {
     const { sectionKey } = req.params;
-    const tracks = await plexDb.getTracksBySection(sectionKey);
-    res.json(tracks);
+    const { search, page, limit } = req.query;
+    const pageNum = parseInt(page) || 1;
+    const limitNum = parseInt(limit) || 20;
+    const offset = (pageNum - 1) * limitNum;
+
+    let tracks;
+    let total;
+
+    if (search) {
+      tracks = await plexDb.searchTracksBySection(search, sectionKey, limitNum, offset);
+      total = await plexDb.getTracksBySectionCount(sectionKey); // For simplicity
+    } else {
+      tracks = await plexDb.getTracksBySection(sectionKey, limitNum, offset);
+      total = await plexDb.getTracksBySectionCount(sectionKey);
+    }
+
+    const hasMore = offset + tracks.length < total;
+
+    res.json({
+      tracks,
+      page: pageNum,
+      limit: limitNum,
+      total,
+      hasMore
+    });
   } catch (error) {
     console.error('Error fetching tracks by section:', error);
     res.status(500).json({ error: 'Failed to fetch tracks' });
@@ -5987,6 +6179,260 @@ app.get('/api/music/playlists/:ratingKey', async (req, res) => {
   } catch (error) {
     console.error('Error fetching playlist:', error);
     res.status(500).json({ error: 'Failed to fetch playlist' });
+  }
+});
+
+// ========================
+// Custom Playlists API
+// ========================
+
+// Get all custom playlists
+app.get('/api/music/custom-playlists', async (req, res) => {
+  try {
+    const customPlaylists = await prisma.customPlaylist.findMany({
+      include: {
+        tracks: {
+          orderBy: {
+            sortOrder: 'asc'
+          }
+        }
+      },
+      orderBy: {
+        updatedAt: 'desc'
+      }
+    });
+    res.json(customPlaylists);
+  } catch (error) {
+    console.error('Error fetching custom playlists:', error);
+    res.status(500).json({ error: 'Failed to fetch custom playlists' });
+  }
+});
+
+// Create a new custom playlist
+app.post('/api/music/custom-playlists', async (req, res) => {
+  try {
+    const { title, description, isPublic, createdBy } = req.body;
+    
+    if (!title) {
+      return res.status(400).json({ error: 'Playlist title is required' });
+    }
+
+    const customPlaylist = await prisma.customPlaylist.create({
+      data: {
+        title,
+        description: description || null,
+        isPublic: isPublic || false,
+        createdBy: createdBy || 'Anonymous'
+      },
+      include: {
+        tracks: {
+          orderBy: {
+            sortOrder: 'asc'
+          }
+        }
+      }
+    });
+
+    res.status(201).json(customPlaylist);
+  } catch (error) {
+    console.error('Error creating custom playlist:', error);
+    res.status(500).json({ error: 'Failed to create custom playlist' });
+  }
+});
+
+// Get a specific custom playlist
+app.get('/api/music/custom-playlists/:playlistId', async (req, res) => {
+  try {
+    const { playlistId } = req.params;
+    
+    const customPlaylist = await prisma.customPlaylist.findUnique({
+      where: {
+        id: parseInt(playlistId)
+      },
+      include: {
+        tracks: {
+          orderBy: {
+            sortOrder: 'asc'
+          }
+        }
+      }
+    });
+
+    if (!customPlaylist) {
+      return res.status(404).json({ error: 'Custom playlist not found' });
+    }
+
+    res.json(customPlaylist);
+  } catch (error) {
+    console.error('Error fetching custom playlist:', error);
+    res.status(500).json({ error: 'Failed to fetch custom playlist' });
+  }
+});
+
+// Update a custom playlist
+app.put('/api/music/custom-playlists/:playlistId', async (req, res) => {
+  try {
+    const { playlistId } = req.params;
+    const { title, description, isPublic } = req.body;
+
+    const customPlaylist = await prisma.customPlaylist.update({
+      where: {
+        id: parseInt(playlistId)
+      },
+      data: {
+        ...(title && { title }),
+        ...(description !== undefined && { description }),
+        ...(isPublic !== undefined && { isPublic })
+      },
+      include: {
+        tracks: {
+          orderBy: {
+            sortOrder: 'asc'
+          }
+        }
+      }
+    });
+
+    res.json(customPlaylist);
+  } catch (error) {
+    console.error('Error updating custom playlist:', error);
+    res.status(500).json({ error: 'Failed to update custom playlist' });
+  }
+});
+
+// Delete a custom playlist
+app.delete('/api/music/custom-playlists/:playlistId', async (req, res) => {
+  try {
+    const { playlistId } = req.params;
+
+    await prisma.customPlaylist.delete({
+      where: {
+        id: parseInt(playlistId)
+      }
+    });
+
+    res.status(204).send();
+  } catch (error) {
+    console.error('Error deleting custom playlist:', error);
+    res.status(500).json({ error: 'Failed to delete custom playlist' });
+  }
+});
+
+// Add track to custom playlist
+app.post('/api/music/custom-playlists/:playlistId/tracks', async (req, res) => {
+  try {
+    const { playlistId } = req.params;
+    const { ratingKey, title, artist, album, duration } = req.body;
+
+    console.log('Received track data:', { ratingKey, title, artist, album, duration });
+
+    if (!ratingKey) {
+      return res.status(400).json({ error: 'Track ratingKey is required' });
+    }
+
+    // Validate and clean data types
+    const cleanedData = {
+      ratingKey: String(ratingKey),
+      title: title && typeof title === 'string' ? title : null,
+      artist: artist && typeof artist === 'string' ? artist : null,
+      album: album && typeof album === 'string' ? album : null,
+      duration: duration && typeof duration === 'number' ? duration : null
+    };
+
+    console.log('Cleaned track data:', cleanedData);
+
+    // Check if track already exists in playlist
+    const existingTrack = await prisma.customPlaylistTrack.findFirst({
+      where: {
+        playlistId: parseInt(playlistId),
+        ratingKey: cleanedData.ratingKey
+      }
+    });
+
+    if (existingTrack) {
+      return res.status(409).json({ error: 'Track already exists in playlist' });
+    }
+
+    // Get the next sort order
+    const lastTrack = await prisma.customPlaylistTrack.findFirst({
+      where: {
+        playlistId: parseInt(playlistId)
+      },
+      orderBy: {
+        sortOrder: 'desc'
+      }
+    });
+
+    const sortOrder = lastTrack ? lastTrack.sortOrder + 1 : 0;
+
+    const playlistTrack = await prisma.customPlaylistTrack.create({
+      data: {
+        playlistId: parseInt(playlistId),
+        ratingKey: cleanedData.ratingKey,
+        title: cleanedData.title,
+        artist: cleanedData.artist,
+        album: cleanedData.album,
+        duration: cleanedData.duration,
+        sortOrder
+      }
+    });
+
+    console.log('Successfully created playlist track:', playlistTrack);
+    res.status(201).json(playlistTrack);
+  } catch (error) {
+    console.error('Error adding track to custom playlist:', error);
+    res.status(500).json({ error: 'Failed to add track to playlist' });
+  }
+});
+
+// Remove track from custom playlist
+app.delete('/api/music/custom-playlists/:playlistId/tracks/:trackId', async (req, res) => {
+  try {
+    const { playlistId, trackId } = req.params;
+
+    await prisma.customPlaylistTrack.delete({
+      where: {
+        id: parseInt(trackId),
+        playlistId: parseInt(playlistId)
+      }
+    });
+
+    res.status(204).send();
+  } catch (error) {
+    console.error('Error removing track from custom playlist:', error);
+    res.status(500).json({ error: 'Failed to remove track from playlist' });
+  }
+});
+
+// Reorder tracks in custom playlist
+app.put('/api/music/custom-playlists/:playlistId/tracks/reorder', async (req, res) => {
+  try {
+    const { playlistId } = req.params;
+    const { trackOrders } = req.body; // Array of { trackId, sortOrder }
+
+    if (!trackOrders || !Array.isArray(trackOrders)) {
+      return res.status(400).json({ error: 'trackOrders array is required' });
+    }
+
+    // Update each track's sort order
+    await Promise.all(
+      trackOrders.map(({ trackId, sortOrder }) =>
+        prisma.customPlaylistTrack.update({
+          where: {
+            id: parseInt(trackId),
+            playlistId: parseInt(playlistId)
+          },
+          data: {
+            sortOrder
+          }
+        })
+      )
+    );
+
+    res.json({ message: 'Track order updated successfully' });
+  } catch (error) {
+    console.error('Error reordering custom playlist tracks:', error);
+    res.status(500).json({ error: 'Failed to reorder playlist tracks' });
   }
 });
 

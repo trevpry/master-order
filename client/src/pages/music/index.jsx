@@ -5,8 +5,17 @@ import './Music.css';
 const Music = () => {
   const [sections, setSections] = useState([]);
   const [artists, setArtists] = useState([]);
+  const [artistsLoading, setArtistsLoading] = useState(false);
+  const [artistsPage, setArtistsPage] = useState(1);
+  const [artistsHasMore, setArtistsHasMore] = useState(true);
   const [albums, setAlbums] = useState([]);
+  const [albumsLoading, setAlbumsLoading] = useState(false);
+  const [albumsPage, setAlbumsPage] = useState(1);
+  const [albumsHasMore, setAlbumsHasMore] = useState(true);
   const [tracks, setTracks] = useState([]);
+  const [tracksLoading, setTracksLoading] = useState(false);
+  const [tracksPage, setTracksPage] = useState(1);
+  const [tracksHasMore, setTracksHasMore] = useState(true);
   const [stats, setStats] = useState(null);
   const [collections, setCollections] = useState([]);
   const [playlists, setPlaylists] = useState([]);
@@ -22,6 +31,15 @@ const Music = () => {
   const [showMetadataModal, setShowMetadataModal] = useState(false);
   const [currentMetadataResult, setCurrentMetadataResult] = useState(null);
   const [expandedSections, setExpandedSections] = useState({});
+  
+  // Custom playlist state
+  const [showCreatePlaylistModal, setShowCreatePlaylistModal] = useState(false);
+  const [playlistFormData, setPlaylistFormData] = useState({
+    title: '',
+    description: '',
+    isPublic: false
+  });
+  const [creatingPlaylist, setCreatingPlaylist] = useState(false);
   
   // Audio player state
   const [currentTrack, setCurrentTrack] = useState(null);
@@ -154,42 +172,85 @@ const Music = () => {
     }
   };
 
+  // Load static data that doesn't change often
+  const loadStaticData = async () => {
+    try {
+      const [sectionsRes, statsRes, collectionsRes, playlistsRes, customPlaylistsRes] = await Promise.all([
+        fetch(`${config.apiBaseUrl}/api/music/sections`),
+        fetch(`${config.apiBaseUrl}/api/music/stats`),
+        fetch(`${config.apiBaseUrl}/api/music/collections`),
+        fetch(`${config.apiBaseUrl}/api/music/playlists`),
+        fetch(`${config.apiBaseUrl}/api/music/custom-playlists`)
+      ]);
+
+      if (!sectionsRes.ok || !statsRes.ok || !collectionsRes.ok || !playlistsRes.ok || !customPlaylistsRes.ok) {
+        throw new Error('Failed to fetch static music data');
+      }
+
+      const [sectionsData, statsData, collectionsData, playlistsData, customPlaylistsData] = await Promise.all([
+        sectionsRes.json(),
+        statsRes.json(),
+        collectionsRes.json(),
+        playlistsRes.json(),
+        customPlaylistsRes.json()
+      ]);
+
+      setSections(sectionsData);
+      console.log('Loaded sections:', sectionsData);
+      setStats(statsData);
+      setCollections(collectionsData);
+      
+      // Combine Plex playlists and custom playlists
+      const combinedPlaylists = [
+        ...playlistsData.map(playlist => ({ ...playlist, type: 'plex' })),
+        ...customPlaylistsData.map(playlist => ({ ...playlist, type: 'custom' }))
+      ];
+      setPlaylists(combinedPlaylists);
+    } catch (err) {
+      console.error('Error loading static music data:', err);
+      throw err;
+    }
+  };
+
+  // Load albums and tracks (for album/track views)
+  const loadAlbumsAndTracks = async () => {
+    try {
+      const [albumsRes, tracksRes] = await Promise.all([
+        fetch(`${config.apiBaseUrl}/api/music/albums`),
+        fetch(`${config.apiBaseUrl}/api/music/tracks`)
+      ]);
+
+      if (!albumsRes.ok || !tracksRes.ok) {
+        throw new Error('Failed to fetch albums and tracks');
+      }
+
+      const [albumsData, tracksData] = await Promise.all([
+        albumsRes.json(),
+        tracksRes.json()
+      ]);
+
+      setAlbums(albumsData);
+      setTracks(tracksData);
+    } catch (err) {
+      console.error('Error loading albums and tracks:', err);
+      throw err;
+    }
+  };
+
+  // Full data load (for initial load and explicit refresh)
   const loadData = async () => {
     try {
       setLoading(true);
       
-      // Load all data in parallel
-      const [sectionsRes, artistsRes, albumsRes, tracksRes, statsRes, collectionsRes, playlistsRes] = await Promise.all([
-        fetch(`${config.apiBaseUrl}/api/music/sections`),
-        fetch(`${config.apiBaseUrl}/api/music/artists`),
-        fetch(`${config.apiBaseUrl}/api/music/albums`),
-        fetch(`${config.apiBaseUrl}/api/music/tracks`),
-        fetch(`${config.apiBaseUrl}/api/music/stats`),
-        fetch(`${config.apiBaseUrl}/api/music/collections`),
-        fetch(`${config.apiBaseUrl}/api/music/playlists`)
-      ]);
+      // Reset pagination state for artists
+      setArtistsPage(1);
+      setArtistsHasMore(true);
+      
+      // Load static data first
+      await loadStaticData();
 
-      if (!sectionsRes.ok || !artistsRes.ok || !albumsRes.ok || !tracksRes.ok || !statsRes.ok || !collectionsRes.ok || !playlistsRes.ok) {
-        throw new Error('Failed to fetch music data');
-      }
-
-      const [sectionsData, artistsData, albumsData, tracksData, statsData, collectionsData, playlistsData] = await Promise.all([
-        sectionsRes.json(),
-        artistsRes.json(),
-        albumsRes.json(),
-        tracksRes.json(),
-        statsRes.json(),
-        collectionsRes.json(),
-        playlistsRes.json()
-      ]);
-
-      setSections(sectionsData);
-      setArtists(artistsData);
-      setAlbums(albumsData);
-      setTracks(tracksData);
-      setStats(statsData);
-      setCollections(collectionsData);
-      setPlaylists(playlistsData);
+      // Load first page of artists
+      await loadArtists(1, true);
     } catch (err) {
       console.error('Error loading music data:', err);
       setError(err.message);
@@ -198,30 +259,229 @@ const Music = () => {
     }
   };
 
+  // Refresh just the artists (for filtering/searching)
+  const refreshArtists = async (sectionOverride = null) => {
+    try {
+      // Reset pagination state for all views
+      setArtistsPage(1);
+      setArtistsHasMore(true);
+      setAlbumsPage(1);
+      setAlbumsHasMore(true);
+      setTracksPage(1);
+      setTracksHasMore(true);
+      
+      // Clear albums and tracks so they get lazily loaded with new context
+      setAlbums([]);
+      setTracks([]);
+      
+      // Load first page of artists with current settings
+      await loadArtists(1, true, sectionOverride);
+    } catch (err) {
+      console.error('Error refreshing artists:', err);
+      setError(err.message);
+    }
+  };
+
+  // Load albums and tracks when navigating to those views
+  const loadAlbumsView = async (forceReload = false) => {
+    if (!albums.length || forceReload) {
+      await loadAlbums(1, true, selectedSection);
+    }
+  };
+
+  const loadTracksView = async (forceReload = false) => {
+    if (!tracks.length || forceReload) {
+      await loadTracks(1, true, selectedSection);
+    }
+  };
+
+  const loadAlbums = async (page = 1, replace = false, sectionOverride = null) => {
+    try {
+      setAlbumsLoading(true);
+      
+      const currentSection = sectionOverride !== null ? sectionOverride : selectedSection;
+      
+      console.log('loadAlbums called with:', { page, replace, sectionOverride, currentSection, searchQuery });
+      
+      let url;
+      if (searchQuery.trim()) {
+        // For search, respect the selected section
+        if (currentSection !== 'all') {
+          url = `${config.apiBaseUrl}/api/music/albums/section/${currentSection}?search=${encodeURIComponent(searchQuery)}&page=${page}&limit=20`;
+        } else {
+          url = `${config.apiBaseUrl}/api/music/albums?search=${encodeURIComponent(searchQuery)}&page=${page}&limit=20`;
+        }
+      } else if (currentSection !== 'all') {
+        url = `${config.apiBaseUrl}/api/music/albums/section/${currentSection}?page=${page}&limit=20`;
+      } else {
+        url = `${config.apiBaseUrl}/api/music/albums?page=${page}&limit=20`;
+      }
+      
+      console.log('Fetching albums from:', url);
+      const response = await fetch(url);
+      
+      if (!response.ok) {
+        throw new Error('Failed to fetch albums');
+      }
+
+      const data = await response.json();
+      
+      console.log('Received albums data:', data, 'Replace:', replace);
+      
+      if (replace) {
+        setAlbums(data.albums || data);
+        setAlbumsPage(1);
+      } else {
+        setAlbums(prevAlbums => [...prevAlbums, ...(data.albums || data)]);
+        setAlbumsPage(page);
+      }
+      
+      // Check if we have more data to load
+      setAlbumsHasMore(data.hasMore !== false && (data.albums || data).length === 20);
+      
+    } catch (err) {
+      console.error('Error loading albums:', err);
+      setError(err.message);
+    } finally {
+      setAlbumsLoading(false);
+    }
+  };
+
+  const loadTracks = async (page = 1, replace = false, sectionOverride = null) => {
+    try {
+      setTracksLoading(true);
+      
+      const currentSection = sectionOverride !== null ? sectionOverride : selectedSection;
+      
+      console.log('loadTracks called with:', { page, replace, sectionOverride, currentSection, searchQuery });
+      
+      let url;
+      if (searchQuery.trim()) {
+        // For search, respect the selected section
+        if (currentSection !== 'all') {
+          url = `${config.apiBaseUrl}/api/music/tracks/section/${currentSection}?search=${encodeURIComponent(searchQuery)}&page=${page}&limit=20`;
+        } else {
+          url = `${config.apiBaseUrl}/api/music/tracks?search=${encodeURIComponent(searchQuery)}&page=${page}&limit=20`;
+        }
+      } else if (currentSection !== 'all') {
+        url = `${config.apiBaseUrl}/api/music/tracks/section/${currentSection}?page=${page}&limit=20`;
+      } else {
+        url = `${config.apiBaseUrl}/api/music/tracks?page=${page}&limit=20`;
+      }
+      
+      console.log('Fetching tracks from:', url);
+      const response = await fetch(url);
+      
+      if (!response.ok) {
+        throw new Error('Failed to fetch tracks');
+      }
+
+      const data = await response.json();
+      
+      console.log('Received tracks data:', data, 'Replace:', replace);
+      
+      if (replace) {
+        const tracksArray = Array.isArray(data.tracks) ? data.tracks : (Array.isArray(data) ? data : []);
+        setTracks(tracksArray);
+        setTracksPage(1);
+      } else {
+        const newTracksArray = Array.isArray(data.tracks) ? data.tracks : (Array.isArray(data) ? data : []);
+        setTracks(prevTracks => [...prevTracks, ...newTracksArray]);
+        setTracksPage(page);
+      }
+      
+      // Check if we have more data to load
+      setTracksHasMore(data.hasMore !== false && (data.tracks || data).length === 20);
+      
+    } catch (err) {
+      console.error('Error loading tracks:', err);
+      setError(err.message);
+    } finally {
+      setTracksLoading(false);
+    }
+  };
+
+  const loadMoreAlbums = () => {
+    if (!albumsLoading && albumsHasMore) {
+      loadAlbums(albumsPage + 1, false);
+    }
+  };
+
+  const loadMoreTracks = () => {
+    if (!tracksLoading && tracksHasMore) {
+      loadTracks(tracksPage + 1, false);
+    }
+  };
+
+  const loadArtists = async (page = 1, replace = false, sectionOverride = null) => {
+    try {
+      setArtistsLoading(true);
+      
+      const currentSection = sectionOverride !== null ? sectionOverride : selectedSection;
+      
+      console.log('loadArtists called with:', { page, replace, sectionOverride, currentSection, searchQuery });
+      
+      let url;
+      if (searchQuery) {
+        // For search, respect the selected section
+        if (currentSection !== 'all') {
+          url = `${config.apiBaseUrl}/api/music/artists/section/${currentSection}?search=${encodeURIComponent(searchQuery)}&page=${page}&limit=20`;
+        } else {
+          url = `${config.apiBaseUrl}/api/music/artists?search=${encodeURIComponent(searchQuery)}&page=${page}&limit=20`;
+        }
+      } else if (currentSection !== 'all') {
+        url = `${config.apiBaseUrl}/api/music/artists/section/${currentSection}?page=${page}&limit=20`;
+      } else {
+        url = `${config.apiBaseUrl}/api/music/artists?page=${page}&limit=20`;
+      }
+      
+      const response = await fetch(url);
+      
+      if (!response.ok) {
+        throw new Error('Failed to fetch artists');
+      }
+
+      const data = await response.json();
+      
+      console.log('Received artists data:', data, 'Replace:', replace);
+      
+      if (replace) {
+        setArtists(data.artists || data);
+        setArtistsPage(1);
+      } else {
+        setArtists(prevArtists => [...prevArtists, ...(data.artists || data)]);
+        setArtistsPage(page);
+      }
+      
+      // Check if we have more data to load
+      setArtistsHasMore(data.hasMore !== false && (data.artists || data).length === 20);
+      
+    } catch (err) {
+      console.error('Error loading artists:', err);
+      setError(err.message);
+    } finally {
+      setArtistsLoading(false);
+    }
+  };
+
+  const loadMoreArtists = () => {
+    if (!artistsLoading && artistsHasMore) {
+      loadArtists(artistsPage + 1, false);
+    }
+  };
+
   const searchMusic = async () => {
     if (!searchQuery.trim()) {
-      loadData();
+      refreshArtists();
       return;
     }
 
     try {
       setLoading(true);
       
-      const [artistsRes, albumsRes, tracksRes] = await Promise.all([
-        fetch(`${config.apiBaseUrl}/api/music/artists?search=${encodeURIComponent(searchQuery)}`),
-        fetch(`${config.apiBaseUrl}/api/music/albums?search=${encodeURIComponent(searchQuery)}`),
-        fetch(`${config.apiBaseUrl}/api/music/tracks?search=${encodeURIComponent(searchQuery)}`)
-      ]);
-
-      const [artistsData, albumsData, tracksData] = await Promise.all([
-        artistsRes.json(),
-        albumsRes.json(),
-        tracksRes.json()
-      ]);
-
-      setArtists(artistsData);
-      setAlbums(albumsData);
-      setTracks(tracksData);
+      // For search, just load artists initially
+      // Albums and tracks will be loaded if user navigates to those views
+      await refreshArtists();
     } catch (err) {
       console.error('Error searching music:', err);
       setError(err.message);
@@ -231,43 +491,33 @@ const Music = () => {
   };
 
   const filterBySection = async (sectionId) => {
-    setSelectedSection(sectionId);
+    console.log('filterBySection called with:', sectionId, 'Current selectedSection:', selectedSection, 'Current view:', activeView);
+    console.log('Available sections:', sections);
+    console.log('Selected section object:', sections.find(s => s.sectionKey === sectionId));
     
-    if (sectionId === 'all') {
-      loadData();
-      return;
-    }
+    setSelectedSection(sectionId);
 
     try {
       setLoading(true);
       
-      // Load section-filtered data in parallel
-      const [artistsRes, albumsRes, tracksRes, collectionsRes, playlistsRes] = await Promise.all([
-        fetch(`${config.apiBaseUrl}/api/music/artists/section/${sectionId}`),
-        fetch(`${config.apiBaseUrl}/api/music/albums/section/${sectionId}`),
-        fetch(`${config.apiBaseUrl}/api/music/tracks/section/${sectionId}`),
-        fetch(`${config.apiBaseUrl}/api/music/collections?section=${sectionId}`),
-        fetch(`${config.apiBaseUrl}/api/music/playlists/section/${sectionId}`)
-      ]);
-
-      const [artistsData, albumsData, tracksData, collectionsData, playlistsData] = await Promise.all([
-        artistsRes.json(),
-        albumsRes.json(),
-        tracksRes.json(),
-        collectionsRes.json(),
-        playlistsRes.json()
-      ]);
-
-      setArtists(artistsData);
-      setAlbums(albumsData);
-      setTracks(tracksData);
-      setCollections(collectionsData);
-      setPlaylists(playlistsData);
+      console.log('About to load data for section:', sectionId);
       
       // Reset selected artist/album when filtering by section
       setSelectedArtist(null);
       setSelectedAlbum(null);
-      setActiveView('artists'); // Return to artists view
+      
+      // Always refresh artists data
+      await refreshArtists(sectionId);
+      
+      // If we're currently viewing albums or tracks, reload that data too
+      if (activeView === 'albums') {
+        console.log('Reloading albums for new section');
+        await loadAlbums(1, true, sectionId); // Use sectionId instead of selectedSection
+      } else if (activeView === 'tracks') {
+        console.log('Reloading tracks for new section');
+        await loadTracks(1, true, sectionId); // Use sectionId instead of selectedSection
+      }
+      
     } catch (err) {
       console.error('Error filtering by section:', err);
       setError(err.message);
@@ -304,7 +554,7 @@ const Music = () => {
     setActiveView('tracks');
     
     try {
-      const tracksRes = await fetch(`${config.apiBaseUrl}/api/music/tracks?album=${album.ratingKey}`);
+      const tracksRes = await fetch(`${config.apiBaseUrl}/api/music/tracks/album/${album.ratingKey}`);
       const tracksData = await tracksRes.json();
       setTracks(tracksData);
     } catch (err) {
@@ -317,7 +567,8 @@ const Music = () => {
     setActiveView('artists');
     setSelectedArtist(null);
     setSelectedAlbum(null);
-    loadData();
+    // Just refresh artists, no need to reload all data
+    refreshArtists();
   };
 
   const extractAlbumMetadata = async (album) => {
@@ -428,6 +679,248 @@ const Music = () => {
     return `${mins}:${secs.toString().padStart(2, '0')}`;
   };
 
+  // Custom playlist functions
+  const createCustomPlaylist = async () => {
+    if (!playlistFormData.title.trim()) {
+      alert('Playlist title is required');
+      return;
+    }
+
+    setCreatingPlaylist(true);
+    try {
+      const response = await fetch(`${config.apiBaseUrl}/api/music/custom-playlists`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          title: playlistFormData.title,
+          description: playlistFormData.description,
+          isPublic: playlistFormData.isPublic,
+          createdBy: 'User' // You can implement proper user management later
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to create playlist');
+      }
+
+      const newPlaylist = await response.json();
+      
+      // Add the new playlist to the list with type marker
+      setPlaylists(prev => [
+        { ...newPlaylist, type: 'custom' },
+        ...prev
+      ]);
+
+      // Reset form and close modal
+      setPlaylistFormData({ title: '', description: '', isPublic: false });
+      setShowCreatePlaylistModal(false);
+      
+      console.log('Created custom playlist:', newPlaylist);
+    } catch (error) {
+      console.error('Error creating playlist:', error);
+      alert(`Failed to create playlist: ${error.message}`);
+    } finally {
+      setCreatingPlaylist(false);
+    }
+  };
+
+  const deleteCustomPlaylist = async (playlistId) => {
+    if (!confirm('Are you sure you want to delete this playlist?')) {
+      return;
+    }
+
+    try {
+      const response = await fetch(`${config.apiBaseUrl}/api/music/custom-playlists/${playlistId}`, {
+        method: 'DELETE',
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to delete playlist');
+      }
+
+      // Remove the playlist from the list
+      setPlaylists(prev => prev.filter(playlist => 
+        !(playlist.type === 'custom' && playlist.id === playlistId)
+      ));
+      
+      console.log('Deleted custom playlist:', playlistId);
+    } catch (error) {
+      console.error('Error deleting playlist:', error);
+      alert(`Failed to delete playlist: ${error.message}`);
+    }
+  };
+
+  const addTrackToCustomPlaylist = async (playlistId, track) => {
+    try {
+      // Extract album name properly - handle various track data structures
+      let albumName = null;
+      if (track.album) {
+        if (typeof track.album === 'string') {
+          albumName = track.album;
+        } else if (track.album.title) {
+          albumName = track.album.title;
+        }
+      } else if (track.parentTitle) {
+        albumName = track.parentTitle;
+      }
+
+      // Extract artist name properly
+      let artistName = null;
+      if (track.artist) {
+        if (typeof track.artist === 'string') {
+          artistName = track.artist;
+        } else if (track.artist.title) {
+          artistName = track.artist.title;
+        }
+      } else if (track.grandparentTitle) {
+        artistName = track.grandparentTitle;
+      }
+
+      console.log('Adding track to playlist:', {
+        ratingKey: track.ratingKey,
+        title: track.title,
+        artist: artistName,
+        album: albumName,
+        duration: track.duration
+      });
+
+      const response = await fetch(`${config.apiBaseUrl}/api/music/custom-playlists/${playlistId}/tracks`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          ratingKey: track.ratingKey,
+          title: track.title,
+          artist: artistName,
+          album: albumName,
+          duration: track.duration
+        }),
+      });
+
+      if (!response.ok) {
+        if (response.status === 409) {
+          alert('Track is already in this playlist');
+          return;
+        }
+        throw new Error('Failed to add track to playlist');
+      }
+
+      console.log('Added track to playlist:', track.title);
+      
+      // Refresh playlists to show updated track count
+      loadStaticData();
+    } catch (error) {
+      console.error('Error adding track to playlist:', error);
+      alert(`Failed to add track to playlist: ${error.message}`);
+    }
+  };
+
+  const addAlbumToCustomPlaylist = async (playlistId, album) => {
+    try {
+      // First, fetch all tracks from the album
+      const response = await fetch(`${config.apiBaseUrl}/api/music/tracks/album/${album.ratingKey}`);
+      if (!response.ok) {
+        throw new Error('Failed to fetch album tracks');
+      }
+      
+      const tracks = await response.json();
+      if (!tracks || tracks.length === 0) {
+        alert('No tracks found in this album');
+        return;
+      }
+
+      console.log(`Adding ${tracks.length} tracks from album "${album.title}" to playlist`);
+      
+      let addedCount = 0;
+      let skippedCount = 0;
+      let errors = [];
+
+      // Add each track to the playlist
+      for (const track of tracks) {
+        try {
+          // Extract album name properly
+          let albumName = null;
+          if (track.album) {
+            if (typeof track.album === 'string') {
+              albumName = track.album;
+            } else if (track.album.title) {
+              albumName = track.album.title;
+            }
+          } else if (track.parentTitle) {
+            albumName = track.parentTitle;
+          } else {
+            albumName = album.title; // Use the album title as fallback
+          }
+
+          // Extract artist name properly
+          let artistName = null;
+          if (track.artist) {
+            if (typeof track.artist === 'string') {
+              artistName = track.artist;
+            } else if (track.artist.title) {
+              artistName = track.artist.title;
+            }
+          } else if (track.grandparentTitle) {
+            artistName = track.grandparentTitle;
+          }
+
+          const trackResponse = await fetch(`${config.apiBaseUrl}/api/music/custom-playlists/${playlistId}/tracks`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              ratingKey: track.ratingKey,
+              title: track.title,
+              artist: artistName,
+              album: albumName,
+              duration: track.duration
+            }),
+          });
+
+          if (trackResponse.ok) {
+            addedCount++;
+          } else if (trackResponse.status === 409) {
+            skippedCount++; // Track already exists
+          } else {
+            errors.push(`${track.title}: ${trackResponse.statusText}`);
+          }
+        } catch (trackError) {
+          errors.push(`${track.title}: ${trackError.message}`);
+        }
+      }
+
+      // Show results to user
+      let message = `Album "${album.title}": `;
+      if (addedCount > 0) {
+        message += `${addedCount} track${addedCount !== 1 ? 's' : ''} added`;
+      }
+      if (skippedCount > 0) {
+        message += `${addedCount > 0 ? ', ' : ''}${skippedCount} track${skippedCount !== 1 ? 's' : ''} already in playlist`;
+      }
+      if (errors.length > 0) {
+        message += `${addedCount > 0 || skippedCount > 0 ? ', ' : ''}${errors.length} error${errors.length !== 1 ? 's' : ''}`;
+      }
+
+      if (errors.length > 0 && errors.length < 5) {
+        message += `\nErrors: ${errors.join(', ')}`;
+      }
+
+      alert(message);
+      
+      if (addedCount > 0) {
+        // Refresh playlists to show updated track count
+        loadStaticData();
+      }
+    } catch (error) {
+      console.error('Error adding album to playlist:', error);
+      alert(`Failed to add album to playlist: ${error.message}`);
+    }
+  };
+
   const formatDuration = (ms) => {
     if (!ms) return '';
     const seconds = Math.floor(ms / 1000);
@@ -509,7 +1002,7 @@ const Music = () => {
             >
               <option value="all">All Sections</option>
               {sections.map(section => (
-                <option key={section.id} value={section.id}>
+                <option key={section.id} value={section.sectionKey}>
                   {section.title}
                 </option>
               ))}
@@ -535,6 +1028,24 @@ const Music = () => {
             className={`nav-button ${activeView === 'playlists' ? 'active' : ''}`}
           >
             Playlists
+          </button>
+          <button 
+            onClick={async () => {
+              await loadAlbumsView();
+              setActiveView('albums');
+            }}
+            className={`nav-button ${activeView === 'albums' ? 'active' : ''}`}
+          >
+            Albums
+          </button>
+          <button 
+            onClick={async () => {
+              await loadTracksView();
+              setActiveView('tracks');
+            }}
+            className={`nav-button ${activeView === 'tracks' ? 'active' : ''}`}
+          >
+            Tracks
           </button>
           {selectedArtist && (
             <button 
@@ -636,37 +1147,31 @@ const Music = () => {
                   className="artist-card"
                   onClick={() => selectArtist(artist)}
                 >
-                  {artist.thumb && (
-                    <div className="artist-image">
-                      <img 
-                        src={`/api/plex-media/${artist.thumb}`} 
-                        alt={artist.title}
-                        onError={(e) => {
-                          e.target.style.display = 'none';
-                        }}
-                      />
-                    </div>
-                  )}
                   <div className="artist-info">
                     <h3>{artist.title}</h3>
-                    {artist.summary && (
-                      <p className="artist-summary">{artist.summary}</p>
-                    )}
-                    <div className="artist-meta">
-                      {artist.genres && artist.genres.length > 0 && (
-                        <span className="genres">
-                          {artist.genres.slice(0, 3).join(', ')}
-                        </span>
-                      )}
-                      {artist.childCount && (
-                        <span className="album-count">
-                          {artist.childCount} album{artist.childCount !== 1 ? 's' : ''}
-                        </span>
-                      )}
-                    </div>
                   </div>
                 </div>
               ))
+            )}
+            
+            {/* Load More Button */}
+            {artists.length > 0 && artistsHasMore && (
+              <div className="load-more-container">
+                <button 
+                  className="load-more-button"
+                  onClick={loadMoreArtists}
+                  disabled={artistsLoading}
+                >
+                  {artistsLoading ? 'Loading...' : 'Load More Artists'}
+                </button>
+              </div>
+            )}
+            
+            {/* Loading indicator for pagination */}
+            {artistsLoading && artists.length > 0 && (
+              <div className="pagination-loading">
+                <p>Loading more artists...</p>
+              </div>
             )}
           </div>
         )}
@@ -684,14 +1189,45 @@ const Music = () => {
                   className="album-card"
                 >
                   {album.thumb && (
-                    <div className="album-image">
+                    <div 
+                      className="album-image"
+                      style={{ position: 'relative' }}
+                    >
                       <img 
-                        src={`/api/plex-media/${album.thumb}`} 
+                        src={`${config.apiBaseUrl}/api/plex-album-art/${album.ratingKey}?width=300&height=300`}
                         alt={album.title}
+                        onClick={() => selectAlbum(album)}
+                        style={{ cursor: 'pointer', width: '100%', height: '100%' }}
                         onError={(e) => {
                           e.target.style.display = 'none';
                         }}
                       />
+                      
+                      {/* Add to Playlist Button Overlay */}
+                      <div className="album-playlist-overlay">
+                        <div className="album-playlist-dropdown">
+                          <select
+                            onChange={(e) => {
+                              if (e.target.value) {
+                                addAlbumToCustomPlaylist(parseInt(e.target.value), album);
+                                e.target.value = '';
+                              }
+                            }}
+                            defaultValue=""
+                            onClick={(e) => e.stopPropagation()} // Prevent triggering album click
+                          >
+                            <option value="">+ Add Album to...</option>
+                            {playlists
+                              .filter(p => p.type === 'custom')
+                              .map(playlist => (
+                                <option key={playlist.id} value={playlist.id}>
+                                  {playlist.title}
+                                </option>
+                              ))
+                            }
+                          </select>
+                        </div>
+                      </div>
                     </div>
                   )}
                   <div className="album-info">
@@ -715,15 +1251,6 @@ const Music = () => {
                       )}
                     </div>
                     <div className="album-actions">
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          selectAlbum(album);
-                        }}
-                        className="view-button"
-                      >
-                        View Tracks
-                      </button>
                       <button
                         onClick={(e) => {
                           e.stopPropagation();
@@ -756,14 +1283,32 @@ const Music = () => {
                 </div>
               ))
             )}
+            {albumsHasMore && (
+              <div className="pagination-section">
+                <button 
+                  onClick={loadMoreAlbums}
+                  className="load-more-button"
+                  disabled={albumsLoading}
+                >
+                  {albumsLoading ? (
+                    <>
+                      <span className="spinner">⟳</span>
+                      Loading...
+                    </>
+                  ) : (
+                    'Load More Albums'
+                  )}
+                </button>
+              </div>
+            )}
           </div>
         )}
 
         {activeView === 'tracks' && (
           <div className="tracks-list">
-            {tracks.length === 0 ? (
+            {!Array.isArray(tracks) || tracks.length === 0 ? (
               <div className="empty-state">
-                <p>No tracks found for this album.</p>
+                <p>No tracks found{selectedAlbum ? ` for ${selectedAlbum.title}` : ''}.</p>
               </div>
             ) : (
               <div className="tracks-table">
@@ -773,6 +1318,7 @@ const Music = () => {
                   <span className="track-title">Title</span>
                   <span className="track-duration">Duration</span>
                   <span className="track-size">Size</span>
+                  <span className="track-playlist">Playlist</span>
                 </div>
                 {tracks.map(track => (
                   <div key={track.ratingKey} className={`track-row ${currentTrack?.ratingKey === track.ratingKey ? 'playing' : ''}`}>
@@ -796,8 +1342,49 @@ const Music = () => {
                     <span className="track-size">
                       {formatFileSize(track.media?.[0]?.parts?.[0]?.size)}
                     </span>
+                    <div className="track-playlist">
+                      <div className="playlist-dropdown">
+                        <select
+                          onChange={(e) => {
+                            if (e.target.value) {
+                              addTrackToCustomPlaylist(parseInt(e.target.value), track);
+                              e.target.value = '';
+                            }
+                          }}
+                          defaultValue=""
+                        >
+                          <option value="">+ Add to...</option>
+                          {playlists
+                            .filter(p => p.type === 'custom')
+                            .map(playlist => (
+                              <option key={playlist.id} value={playlist.id}>
+                                {playlist.title}
+                              </option>
+                            ))
+                          }
+                        </select>
+                      </div>
+                    </div>
                   </div>
                 ))}
+              </div>
+            )}
+            {tracksHasMore && (
+              <div className="pagination-section">
+                <button 
+                  onClick={loadMoreTracks}
+                  className="load-more-button"
+                  disabled={tracksLoading}
+                >
+                  {tracksLoading ? (
+                    <>
+                      <span className="spinner">⟳</span>
+                      Loading...
+                    </>
+                  ) : (
+                    'Load More Tracks'
+                  )}
+                </button>
               </div>
             )}
           </div>
@@ -825,70 +1412,223 @@ const Music = () => {
         )}
 
         {activeView === 'playlists' && (
-          <div className="playlists-grid">
-            {playlists.length === 0 ? (
-              <div className="empty-state">
-                <p>No playlists found.</p>
-              </div>
-            ) : (
-              playlists.map(playlist => (
-                <div key={playlist.ratingKey} className="playlist-card">
-                  {playlist.thumb && (
-                    <div className="playlist-thumbnail">
-                      <img 
-                        src={`${config.plexUrl}${playlist.thumb}?X-Plex-Token=${config.plexToken}`}
-                        alt={playlist.title}
-                        onError={(e) => {
-                          e.target.style.display = 'none';
-                        }}
-                      />
+          <div className="playlists-section">
+            <div className="playlists-header">
+              <h2>Playlists</h2>
+              <button 
+                className="create-playlist-button"
+                onClick={() => setShowCreatePlaylistModal(true)}
+              >
+                + Create Custom Playlist
+              </button>
+            </div>
+            
+            <div className="playlists-grid">
+              {playlists.length === 0 ? (
+                <div className="empty-state">
+                  <p>No playlists found.</p>
+                  <p>Create your first custom playlist to get started!</p>
+                </div>
+              ) : (
+                playlists.map(playlist => (
+                  <div key={`${playlist.type}-${playlist.ratingKey || playlist.id}`} className={`playlist-card ${playlist.type}-playlist`}>
+                    <div className="playlist-type-badge">
+                      {playlist.type === 'plex' ? 'Plex' : 'Custom'}
                     </div>
-                  )}
-                  <div className="playlist-info">
-                    <h3>{playlist.title}</h3>
-                    {playlist.summary && (
-                      <p className="playlist-summary">{playlist.summary}</p>
-                    )}
-                    <div className="playlist-meta">
-                      <span className="track-count">
-                        {playlist.leafCount || playlist.items?.length || 0} track{(playlist.leafCount || playlist.items?.length || 0) !== 1 ? 's' : ''}
-                      </span>
-                      {playlist.duration && (
-                        <span className="playlist-duration">
-                          {Math.floor(playlist.duration / 60000)}:{String(Math.floor((playlist.duration % 60000) / 1000)).padStart(2, '0')}
-                        </span>
-                      )}
-                      {playlist.smart && (
-                        <span className="smart-playlist">Smart Playlist</span>
-                      )}
-                    </div>
-                    {playlist.items && playlist.items.length > 0 && (
-                      <div className="playlist-preview">
-                        <h4>Tracks:</h4>
-                        <div className="playlist-tracks">
-                          {playlist.items.slice(0, 5).map((item, index) => (
-                            <div key={`${item.ratingKey}-${index}`} className="playlist-track">
-                              <span className="track-index">{item.index}.</span>
-                              <span className="track-title">
-                                {item.track ? item.track.title : item.album ? item.album.title : 'Unknown'}
-                              </span>
-                            </div>
-                          ))}
-                          {playlist.items.length > 5 && (
-                            <div className="playlist-more">
-                              ...and {playlist.items.length - 5} more tracks
-                            </div>
-                          )}
-                        </div>
+                    
+                    {playlist.type === 'custom' && (
+                      <div className="playlist-actions">
+                        <button 
+                          className="delete-playlist-button"
+                          onClick={() => deleteCustomPlaylist(playlist.id)}
+                          title="Delete Playlist"
+                        >
+                          🗑️
+                        </button>
                       </div>
                     )}
+                    
+                    {playlist.thumb && playlist.type === 'plex' && (
+                      <div className="playlist-thumbnail">
+                        <img 
+                          src={`${config.plexUrl}${playlist.thumb}?X-Plex-Token=${config.plexToken}`}
+                          alt={playlist.title}
+                          onError={(e) => {
+                            e.target.style.display = 'none';
+                          }}
+                        />
+                      </div>
+                    )}
+                    
+                    <div className="playlist-info">
+                      <h3>{playlist.title}</h3>
+                      {(playlist.summary || playlist.description) && (
+                        <p className="playlist-summary">{playlist.summary || playlist.description}</p>
+                      )}
+                      
+                      <div className="playlist-meta">
+                        <span className="track-count">
+                          {playlist.leafCount || playlist.tracks?.length || 0} track{(playlist.leafCount || playlist.tracks?.length || 0) !== 1 ? 's' : ''}
+                        </span>
+                        
+                        {playlist.duration && (
+                          <span className="playlist-duration">
+                            {Math.floor(playlist.duration / 60000)}:{String(Math.floor((playlist.duration % 60000) / 1000)).padStart(2, '0')}
+                          </span>
+                        )}
+                        
+                        {playlist.smart && (
+                          <span className="smart-playlist">Smart Playlist</span>
+                        )}
+                        
+                        {playlist.type === 'custom' && playlist.isPublic && (
+                          <span className="public-playlist">Public</span>
+                        )}
+                        
+                        {playlist.type === 'custom' && (
+                          <span className="playlist-created">
+                            Created {new Date(playlist.createdAt).toLocaleDateString()}
+                          </span>
+                        )}
+                      </div>
+                      
+                      {/* Show preview tracks for Plex playlists */}
+                      {playlist.items && playlist.items.length > 0 && (
+                        <div className="playlist-preview">
+                          <h4>Tracks:</h4>
+                          <div className="playlist-tracks">
+                            {playlist.items.slice(0, 5).map((item, index) => (
+                              <div key={`${item.ratingKey}-${index}`} className="playlist-track">
+                                <span className="track-index">{item.index}.</span>
+                                <span className="track-title">
+                                  {item.track ? item.track.title : item.album ? item.album.title : 'Unknown'}
+                                </span>
+                              </div>
+                            ))}
+                            {playlist.items.length > 5 && (
+                              <div className="playlist-more">
+                                ...and {playlist.items.length - 5} more tracks
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      )}
+                      
+                      {/* Show preview tracks for Custom playlists */}
+                      {playlist.tracks && playlist.tracks.length > 0 && (
+                        <div className="playlist-preview">
+                          <h4>Tracks:</h4>
+                          <div className="playlist-tracks">
+                            {playlist.tracks.slice(0, 5).map((track, index) => (
+                              <div key={track.id} className="playlist-track">
+                                <span className="track-index">{index + 1}.</span>
+                                <span className="track-title">{track.title}</span>
+                                {track.artist && <span className="track-artist">by {track.artist}</span>}
+                              </div>
+                            ))}
+                            {playlist.tracks.length > 5 && (
+                              <div className="playlist-more">
+                                ...and {playlist.tracks.length - 5} more tracks
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      )}
+                    </div>
                   </div>
-                </div>
-              ))
-            )}
+                ))
+              )}
+            </div>
           </div>
         )}
       </div>
+      
+      {/* Create Playlist Modal */}
+      {showCreatePlaylistModal && (
+        <div className="modal-overlay" onClick={() => setShowCreatePlaylistModal(false)}>
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h2>Create Custom Playlist</h2>
+              <button 
+                className="modal-close"
+                onClick={() => setShowCreatePlaylistModal(false)}
+              >
+                ✕
+              </button>
+            </div>
+            
+            <div className="modal-content">
+              <div className="form-group">
+                <label htmlFor="playlist-title">Playlist Title *</label>
+                <input
+                  id="playlist-title"
+                  type="text"
+                  value={playlistFormData.title}
+                  onChange={(e) => setPlaylistFormData(prev => ({
+                    ...prev,
+                    title: e.target.value
+                  }))}
+                  placeholder="Enter playlist title"
+                  maxLength={100}
+                />
+              </div>
+              
+              <div className="form-group">
+                <label htmlFor="playlist-description">Description</label>
+                <textarea
+                  id="playlist-description"
+                  value={playlistFormData.description}
+                  onChange={(e) => setPlaylistFormData(prev => ({
+                    ...prev,
+                    description: e.target.value
+                  }))}
+                  placeholder="Optional description"
+                  rows={3}
+                  maxLength={500}
+                />
+              </div>
+              
+              <div className="form-group checkbox-group">
+                <label>
+                  <input
+                    type="checkbox"
+                    checked={playlistFormData.isPublic}
+                    onChange={(e) => setPlaylistFormData(prev => ({
+                      ...prev,
+                      isPublic: e.target.checked
+                    }))}
+                  />
+                  Make this playlist public
+                </label>
+              </div>
+            </div>
+            
+            <div className="modal-footer">
+              <button 
+                className="cancel-button"
+                onClick={() => setShowCreatePlaylistModal(false)}
+                disabled={creatingPlaylist}
+              >
+                Cancel
+              </button>
+              <button 
+                className="create-button"
+                onClick={createCustomPlaylist}
+                disabled={creatingPlaylist || !playlistFormData.title.trim()}
+              >
+                {creatingPlaylist ? (
+                  <>
+                    <span className="spinner">⟳</span>
+                    Creating...
+                  </>
+                ) : (
+                  'Create Playlist'
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       
       {/* Metadata Modal */}
       {showMetadataModal && currentMetadataResult && (

@@ -794,24 +794,44 @@ class PlexDatabaseService {
   // Music-related methods
   
   // Get all artists from database
-  async getAllArtists() {
+  async getAllArtists(limit, offset) {
     try {
-      return await this.prisma.plexArtist.findMany({
+      const query = {
         include: {
           librarySection: true
         },
         orderBy: { title: 'asc' }
-      });
+      };
+
+      // Add pagination if limit is provided
+      if (limit !== undefined) {
+        query.take = limit;
+        if (offset !== undefined) {
+          query.skip = offset;
+        }
+      }
+
+      return await this.prisma.plexArtist.findMany(query);
     } catch (error) {
       console.error('Error fetching all artists:', error);
       throw error;
     }
   }
 
-  // Get artists from specific section
-  async getArtistsBySection(sectionKey) {
+  // Get total count of artists
+  async getArtistsCount() {
     try {
-      return await this.prisma.plexArtist.findMany({
+      return await this.prisma.plexArtist.count();
+    } catch (error) {
+      console.error('Error fetching artists count:', error);
+      throw error;
+    }
+  }
+
+  // Get artists from specific section
+  async getArtistsBySection(sectionKey, limit, offset) {
+    try {
+      const query = {
         where: {
           librarySection: {
             sectionKey: sectionKey
@@ -821,9 +841,122 @@ class PlexDatabaseService {
           librarySection: true
         },
         orderBy: { title: 'asc' }
-      });
+      };
+
+      // Add pagination if limit is provided
+      if (limit !== undefined) {
+        query.take = limit;
+        if (offset !== undefined) {
+          query.skip = offset;
+        }
+      }
+
+      return await this.prisma.plexArtist.findMany(query);
     } catch (error) {
       console.error('Error fetching artists by section:', error);
+      throw error;
+    }
+  }
+
+  // Get total count of artists in a specific section
+  async getArtistsBySectionCount(sectionKey) {
+    try {
+      return await this.prisma.plexArtist.count({
+        where: {
+          librarySection: {
+            sectionKey: sectionKey
+          }
+        }
+      });
+    } catch (error) {
+      console.error('Error fetching artists count by section:', error);
+      throw error;
+    }
+  }
+
+  // Search artists by title
+  async searchArtists(searchQuery) {
+    try {
+      return await this.prisma.plexArtist.findMany({
+        where: {
+          title: {
+            contains: searchQuery,
+            mode: 'insensitive'
+          }
+        },
+        include: {
+          librarySection: true
+        },
+        orderBy: { title: 'asc' }
+      });
+    } catch (error) {
+      console.error('Error searching artists:', error);
+      throw error;
+    }
+  }
+
+  // Search artists by title within a specific section
+  async searchArtistsBySection(sectionKey, searchQuery, limit, offset) {
+    try {
+      const query = {
+        where: {
+          AND: [
+            {
+              title: {
+                contains: searchQuery,
+                mode: 'insensitive'
+              }
+            },
+            {
+              librarySection: {
+                sectionKey: sectionKey
+              }
+            }
+          ]
+        },
+        include: {
+          librarySection: true
+        },
+        orderBy: { title: 'asc' }
+      };
+
+      // Add pagination if limit is provided
+      if (limit !== undefined) {
+        query.take = limit;
+        if (offset !== undefined) {
+          query.skip = offset;
+        }
+      }
+
+      return await this.prisma.plexArtist.findMany(query);
+    } catch (error) {
+      console.error('Error searching artists by section:', error);
+      throw error;
+    }
+  }
+
+  // Get total count of searched artists in a specific section
+  async searchArtistsBySectionCount(sectionKey, searchQuery) {
+    try {
+      return await this.prisma.plexArtist.count({
+        where: {
+          AND: [
+            {
+              title: {
+                contains: searchQuery,
+                mode: 'insensitive'
+              }
+            },
+            {
+              librarySection: {
+                sectionKey: sectionKey
+              }
+            }
+          ]
+        }
+      });
+    } catch (error) {
+      console.error('Error counting searched artists by section:', error);
       throw error;
     }
   }
@@ -859,15 +992,25 @@ class PlexDatabaseService {
   }
 
   // Get all albums from database
-  async getAllAlbums() {
+  async getAllAlbums(limit, offset) {
     try {
-      return await this.prisma.plexAlbum.findMany({
+      const query = {
         include: {
           librarySection: true,
           artist: true
         },
         orderBy: { title: 'asc' }
-      });
+      };
+
+      // Add pagination if limit is provided
+      if (limit !== undefined) {
+        query.take = limit;
+        if (offset !== undefined) {
+          query.skip = offset;
+        }
+      }
+
+      return await this.prisma.plexAlbum.findMany(query);
     } catch (error) {
       console.error('Error fetching all albums:', error);
       throw error;
@@ -875,9 +1018,9 @@ class PlexDatabaseService {
   }
 
   // Get albums from specific section
-  async getAlbumsBySection(sectionKey) {
+  async getAlbumsBySection(sectionKey, limit, offset) {
     try {
-      return await this.prisma.plexAlbum.findMany({
+      const query = {
         where: {
           librarySection: {
             sectionKey: sectionKey
@@ -888,7 +1031,17 @@ class PlexDatabaseService {
           artist: true
         },
         orderBy: { title: 'asc' }
-      });
+      };
+
+      // Add pagination if limit is provided
+      if (limit !== undefined) {
+        query.take = limit;
+        if (offset !== undefined) {
+          query.skip = offset;
+        }
+      }
+
+      return await this.prisma.plexAlbum.findMany(query);
     } catch (error) {
       console.error('Error fetching albums by section:', error);
       throw error;
@@ -944,10 +1097,109 @@ class PlexDatabaseService {
     }
   }
 
-  // Get all tracks from database
-  async getAllTracks() {
+  // Get album count for pagination
+  async getAlbumsCount() {
     try {
-      return await this.prisma.plexTrack.findMany({
+      return await this.prisma.plexAlbum.count();
+    } catch (error) {
+      console.error('Error counting albums:', error);
+      throw error;
+    }
+  }
+
+  // Get albums by section count for pagination
+  async getAlbumsBySectionCount(sectionKey) {
+    try {
+      return await this.prisma.plexAlbum.count({
+        where: {
+          librarySection: {
+            sectionKey: sectionKey
+          }
+        }
+      });
+    } catch (error) {
+      console.error('Error counting albums by section:', error);
+      throw error;
+    }
+  }
+
+  // Search albums with pagination
+  async searchAlbums(searchTerm, limit, offset) {
+    try {
+      const query = {
+        where: {
+          OR: [
+            { title: { contains: searchTerm, mode: 'insensitive' } },
+            { artist: { title: { contains: searchTerm, mode: 'insensitive' } } }
+          ]
+        },
+        include: {
+          librarySection: true,
+          artist: true
+        },
+        orderBy: { title: 'asc' }
+      };
+
+      // Add pagination if limit is provided
+      if (limit !== undefined) {
+        query.take = limit;
+        if (offset !== undefined) {
+          query.skip = offset;
+        }
+      }
+
+      return await this.prisma.plexAlbum.findMany(query);
+    } catch (error) {
+      console.error('Error searching albums:', error);
+      throw error;
+    }
+  }
+
+  // Search albums by section with pagination
+  async searchAlbumsBySection(searchTerm, sectionKey, limit, offset) {
+    try {
+      const query = {
+        where: {
+          AND: [
+            {
+              OR: [
+                { title: { contains: searchTerm, mode: 'insensitive' } },
+                { artist: { title: { contains: searchTerm, mode: 'insensitive' } } }
+              ]
+            },
+            {
+              librarySection: {
+                sectionKey: sectionKey
+              }
+            }
+          ]
+        },
+        include: {
+          librarySection: true,
+          artist: true
+        },
+        orderBy: { title: 'asc' }
+      };
+
+      // Add pagination if limit is provided
+      if (limit !== undefined) {
+        query.take = limit;
+        if (offset !== undefined) {
+          query.skip = offset;
+        }
+      }
+
+      return await this.prisma.plexAlbum.findMany(query);
+    } catch (error) {
+      console.error('Error searching albums by section:', error);
+      throw error;
+    }
+  }
+
+  // Get all tracks from database
+  async getAllTracks(limit, offset) {
+    try {
+      const query = {
         include: {
           librarySection: true,
           album: {
@@ -957,7 +1209,17 @@ class PlexDatabaseService {
           }
         },
         orderBy: { title: 'asc' }
-      });
+      };
+
+      // Add pagination if limit is provided
+      if (limit !== undefined) {
+        query.take = limit;
+        if (offset !== undefined) {
+          query.skip = offset;
+        }
+      }
+
+      return await this.prisma.plexTrack.findMany(query);
     } catch (error) {
       console.error('Error fetching all tracks:', error);
       throw error;
@@ -965,9 +1227,9 @@ class PlexDatabaseService {
   }
 
   // Get tracks from specific section
-  async getTracksBySection(sectionKey) {
+  async getTracksBySection(sectionKey, limit, offset) {
     try {
-      return await this.prisma.plexTrack.findMany({
+      const query = {
         where: {
           librarySection: {
             sectionKey: sectionKey
@@ -982,7 +1244,17 @@ class PlexDatabaseService {
           }
         },
         orderBy: { title: 'asc' }
-      });
+      };
+
+      // Add pagination if limit is provided
+      if (limit !== undefined) {
+        query.take = limit;
+        if (offset !== undefined) {
+          query.skip = offset;
+        }
+      }
+
+      return await this.prisma.plexTrack.findMany(query);
     } catch (error) {
       console.error('Error fetching tracks by section:', error);
       throw error;
@@ -1064,6 +1336,115 @@ class PlexDatabaseService {
       });
     } catch (error) {
       console.error('Error upserting track:', error);
+      throw error;
+    }
+  }
+
+  // Get track count for pagination
+  async getTracksCount() {
+    try {
+      return await this.prisma.plexTrack.count();
+    } catch (error) {
+      console.error('Error counting tracks:', error);
+      throw error;
+    }
+  }
+
+  // Get tracks by section count for pagination
+  async getTracksBySectionCount(sectionKey) {
+    try {
+      return await this.prisma.plexTrack.count({
+        where: {
+          librarySection: {
+            sectionKey: sectionKey
+          }
+        }
+      });
+    } catch (error) {
+      console.error('Error counting tracks by section:', error);
+      throw error;
+    }
+  }
+
+  // Search tracks with pagination
+  async searchTracks(searchTerm, limit, offset) {
+    try {
+      const query = {
+        where: {
+          OR: [
+            { title: { contains: searchTerm, mode: 'insensitive' } },
+            { album: { title: { contains: searchTerm, mode: 'insensitive' } } },
+            { album: { artist: { title: { contains: searchTerm, mode: 'insensitive' } } } }
+          ]
+        },
+        include: {
+          librarySection: true,
+          album: {
+            include: {
+              artist: true
+            }
+          }
+        },
+        orderBy: { title: 'asc' }
+      };
+
+      // Add pagination if limit is provided
+      if (limit !== undefined) {
+        query.take = limit;
+        if (offset !== undefined) {
+          query.skip = offset;
+        }
+      }
+
+      return await this.prisma.plexTrack.findMany(query);
+    } catch (error) {
+      console.error('Error searching tracks:', error);
+      throw error;
+    }
+  }
+
+  // Search tracks by section with pagination
+  async searchTracksBySection(searchTerm, sectionKey, limit, offset) {
+    try {
+      const query = {
+        where: {
+          AND: [
+            {
+              OR: [
+                { title: { contains: searchTerm, mode: 'insensitive' } },
+                { album: { title: { contains: searchTerm, mode: 'insensitive' } } },
+                { album: { artist: { title: { contains: searchTerm, mode: 'insensitive' } } } }
+              ]
+            },
+            {
+              librarySection: {
+                sectionKey: sectionKey
+              }
+            }
+          ]
+        },
+        include: {
+          librarySection: true,
+          album: {
+            include: {
+              artist: true
+            }
+          }
+        },
+        orderBy: { title: 'asc' }
+      };
+
+      // Add pagination if limit is provided
+      if (limit !== undefined) {
+        query.take = limit;
+        if (offset !== undefined) {
+          query.skip = offset;
+        }
+      }
+
+      return await this.prisma.plexTrack.findMany(query);
+    } catch (error) {
+      console.error('Error searching tracks by section:', error);
       throw error;
     }
   }
@@ -1312,6 +1693,21 @@ class PlexDatabaseService {
       };
     } catch (error) {
       console.error('Error fetching music statistics:', error);
+      throw error;
+    }
+  }
+
+  // Get Plex settings for server configuration
+  async getPlexSettings() {
+    try {
+      return await this.prisma.settings.findFirst({
+        select: {
+          plexUrl: true,
+          plexToken: true
+        }
+      });
+    } catch (error) {
+      console.error('Error fetching Plex settings:', error);
       throw error;
     }
   }
