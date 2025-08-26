@@ -223,6 +223,76 @@ function Home() {
         const session = await response.json();
         setReadingSession(session);
         setReadingTimer(0);
+        
+        // Always log a mock Android app message when starting read sessions for books, comics, or stories
+        let androidMessage = {
+          action: 'START_READ_SESSION',
+          mediaTitle: session.title,
+          mediaType: selectedMedia.type,
+          timestamp: new Date().toISOString()
+        };
+        
+        // If this is part of a custom order, fetch playlist information
+        if (selectedMedia.customOrderItemId) {
+          try {
+            const itemResponse = await fetch(`${config.apiBaseUrl}/api/custom-orders/item/${selectedMedia.customOrderItemId}`);
+            if (itemResponse.ok) {
+              const itemData = await itemResponse.json();
+              
+              if (itemData.customOrder) {
+                const customOrder = itemData.customOrder;
+                androidMessage.customOrderName = customOrder.name;
+                androidMessage.customOrderDescription = customOrder.description;
+                
+                // Check if the custom order has a linked playlist
+                if (customOrder.plexPlaylist || customOrder.customPlaylist) {
+                  let playlistInfo = null;
+                  let playlistPath = null;
+                  
+                  if (customOrder.plexPlaylist) {
+                    playlistInfo = {
+                      name: customOrder.plexPlaylist.title,
+                      type: 'plex',
+                      playlistType: customOrder.plexPlaylist.playlistType || 'audio',
+                      trackCount: customOrder.plexPlaylist.leafCount || 0,
+                      duration: customOrder.plexPlaylist.duration
+                    };
+                    playlistPath = `plex://playlist/${customOrder.plexPlaylist.ratingKey}`;
+                  } else if (customOrder.customPlaylist) {
+                    playlistInfo = {
+                      name: customOrder.customPlaylist.title,
+                      type: 'custom',
+                      description: customOrder.customPlaylist.description,
+                      trackCount: customOrder.customPlaylist.trackCount || 0
+                    };
+                    playlistPath = `${config.apiBaseUrl}/api/custom-playlists/${customOrder.customPlaylist.id}/play`;
+                  }
+                  
+                  if (playlistInfo && playlistPath) {
+                    androidMessage.playlistName = playlistInfo.name;
+                    androidMessage.playlistPath = playlistPath;
+                    androidMessage.playlistType = playlistInfo.type;
+                    androidMessage.playlistTrackCount = playlistInfo.trackCount;
+                    androidMessage.playlistDescription = playlistInfo.description;
+                    androidMessage.playlistMetadata = playlistInfo;
+                  }
+                }
+              }
+            }
+          } catch (error) {
+            console.warn('Could not fetch custom order playlist info for Android app message:', error);
+            androidMessage.error = 'Failed to fetch playlist information';
+          }
+        } else {
+          androidMessage.note = 'Not part of a custom order - standalone reading session';
+        }
+        
+        // Log the mock Android companion app message
+        console.log('📱 [MOCK] Android Companion App Message:');
+        console.log('=====================================');
+        console.log(JSON.stringify(androidMessage, null, 2));
+        console.log('=====================================');
+        
         toast.success(`📚 Started reading "${session.title}"`, {
           duration: 3000,
           position: 'top-right'
@@ -352,7 +422,7 @@ function Home() {
         
         if (completedSession.deleted) {
           // Session was deleted because it was less than 1 minute
-          toast.info(`🗑️ Reading session discarded (less than 1 minute)`, {
+          toast(`🗑️ Reading session discarded (less than 1 minute)`, {
             duration: 4000,
             position: 'top-right'
           });
@@ -509,7 +579,7 @@ function Home() {
         setViewingSession(updatedSession);
         
         if (updatedSession.isPaused) {
-          toast.info('⏸️ Viewing session paused', {
+          toast('⏸️ Viewing session paused', {
             duration: 2000,
             position: 'top-right'
           });
@@ -581,7 +651,7 @@ function Home() {
         
         if (completedSession.deleted) {
           // Session was deleted because it was less than 1 minute
-          toast.info(`🗑️ Viewing session discarded (less than 1 minute)`, {
+          toast(`🗑️ Viewing session discarded (less than 1 minute)`, {
             duration: 4000,
             position: 'top-right'
           });

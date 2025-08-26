@@ -30,7 +30,8 @@
 }
 
 .form-group input,
-.form-group textarea {
+.form-group textarea,
+.form-group select {
   width: 100%;
   padding: 0.75rem;
   border: 1px solid #ced4da;
@@ -40,10 +41,52 @@
 }
 
 .form-group input:focus,
-.form-group textarea:focus {
+.form-group textarea:focus,
+.form-group select:focus {
   outline: none;
   border-color: #007bff;
   box-shadow: 0 0 0 0.2rem rgba(0, 123, 255, 0.25);
+}
+
+.form-group select:disabled {
+  background-color: #f8f9fa;
+  color: #6c757d;
+  cursor: not-allowed;
+}
+
+.form-section {
+  border-top: 1px solid #e9ecef;
+  padding-top: 1.5rem;
+  margin-top: 1.5rem;
+}
+
+.form-section h4 {
+  margin: 0 0 0.5rem 0;
+  color: #495057;
+  font-size: 1.1rem;
+  font-weight: 600;
+}
+
+.form-section .form-help {
+  margin-bottom: 1rem;
+  color: #6c757d;
+  font-size: 0.9rem;
+}
+
+.form-separator {
+  display: block;
+  text-align: center;
+  color: #6c757d;
+  font-weight: 600;
+  font-size: 0.9rem;
+  margin: 0.5rem 0;
+}
+
+.form-help {
+  font-size: 0.875rem;
+  color: #6c757d;
+  margin-top: 0.25rem;
+  display: block;
 }
 
 .form-group textarea {
@@ -270,6 +313,18 @@ h3.clickable-title {
   text-align: right;
   border-top: 1px solid #e9ecef;
   padding-top: 0.75rem;
+}
+
+.order-playlist {
+  font-size: 0.75rem;
+  color: #28a745;
+  text-align: right;
+  padding-top: 0.25rem;
+  font-weight: 500;
+}
+
+.order-meta {
+  margin-top: 1rem;
 }
 
 /* Button variations */

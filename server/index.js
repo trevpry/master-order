@@ -3788,12 +3788,30 @@ app.get('/api/custom-orders/item/:itemId', async (req, res) => {
       include: {
         storyContainedInBook: true,
         containedStories: true,
-        referencedCustomOrder: true
+        referencedCustomOrder: true,
+        customOrder: {
+          include: {
+            plexPlaylist: true,
+            customPlaylist: {
+              include: {
+                _count: {
+                  select: { tracks: true }
+                }
+              }
+            }
+          }
+        }
       }
     });
     
     if (!customOrderItem) {
       return res.status(404).json({ error: 'Custom order item not found' });
+    }
+    
+    // Transform the response to include trackCount for custom playlists
+    if (customOrderItem.customOrder?.customPlaylist) {
+      customOrderItem.customOrder.customPlaylist.trackCount = 
+        customOrderItem.customOrder.customPlaylist._count?.tracks || 0;
     }
     
     res.json(customOrderItem);
@@ -3819,6 +3837,14 @@ app.get('/api/custom-orders', async (req, res) => {
           orderBy: { sortOrder: 'asc' }
         },
         parentOrder: true,
+        plexPlaylist: true,
+        customPlaylist: {
+          include: {
+            _count: {
+              select: { tracks: true }
+            }
+          }
+        },
         subOrders: {
           include: {
             items: {
@@ -3839,6 +3865,11 @@ app.get('/api/custom-orders', async (req, res) => {
       if (order.subOrders.length > 0) {
         await subOrderService.syncSubOrderItems(order.id);
       }
+      
+      // Transform custom playlist to include trackCount
+      if (order.customPlaylist) {
+        order.customPlaylist.trackCount = order.customPlaylist._count?.tracks || 0;
+      }
     }
     
     res.json(customOrders);
@@ -3851,7 +3882,7 @@ app.get('/api/custom-orders', async (req, res) => {
 // Create a new custom order
 app.post('/api/custom-orders', async (req, res) => {
   try {
-    const { name, description, icon, parentOrderId } = req.body;
+    const { name, description, icon, parentOrderId, playlistRatingKey, customPlaylistId } = req.body;
     
     if (!name || name.trim() === '') {
       return res.status(400).json({ error: 'Custom order name is required' });
@@ -3867,16 +3898,39 @@ app.post('/api/custom-orders', async (req, res) => {
       }
     }
     
+    // Validate playlist exists if specified
+    if (playlistRatingKey) {
+      const playlist = await prisma.plexPlaylist.findUnique({
+        where: { ratingKey: playlistRatingKey }
+      });
+      if (!playlist) {
+        return res.status(400).json({ error: 'Plex playlist not found' });
+      }
+    }
+    
+    if (customPlaylistId) {
+      const playlist = await prisma.customPlaylist.findUnique({
+        where: { id: parseInt(customPlaylistId) }
+      });
+      if (!playlist) {
+        return res.status(400).json({ error: 'Custom playlist not found' });
+      }
+    }
+    
     const customOrder = await prisma.customOrder.create({
       data: {
         name: name.trim(),
         description: description?.trim() || null,
         icon: icon?.trim() || null,
-        parentOrderId: parentOrderId ? parseInt(parentOrderId) : null
+        parentOrderId: parentOrderId ? parseInt(parentOrderId) : null,
+        playlistRatingKey: playlistRatingKey?.trim() || null,
+        customPlaylistId: customPlaylistId ? parseInt(customPlaylistId) : null
       },
       include: {
         parentOrder: true,
-        subOrders: true
+        subOrders: true,
+        plexPlaylist: true,
+        customPlaylist: true
       }
     });
     
@@ -3889,6 +3943,48 @@ app.post('/api/custom-orders', async (req, res) => {
   } catch (error) {
     console.error('Error creating custom order:', error);
     res.status(500).json({ error: 'Failed to create custom order' });
+  }
+});
+
+// Get available playlists for linking to custom orders
+app.get('/api/playlists/available', async (req, res) => {
+  try {
+    const [plexPlaylists, customPlaylists] = await Promise.all([
+      prisma.plexPlaylist.findMany({
+        select: {
+          ratingKey: true,
+          title: true,
+          playlistType: true,
+          leafCount: true,
+          duration: true
+        },
+        orderBy: { title: 'asc' }
+      }),
+      prisma.customPlaylist.findMany({
+        select: {
+          id: true,
+          title: true,
+          description: true,
+          isPublic: true,
+          createdBy: true,
+          _count: {
+            select: { tracks: true }
+          }
+        },
+        orderBy: { title: 'asc' }
+      })
+    ]);
+
+    res.json({
+      plexPlaylists,
+      customPlaylists: customPlaylists.map(playlist => ({
+        ...playlist,
+        trackCount: playlist._count.tracks
+      }))
+    });
+  } catch (error) {
+    console.error('Error fetching available playlists:', error);
+    res.status(500).json({ error: 'Failed to fetch available playlists' });
   }
 });
 
@@ -3949,7 +4045,9 @@ app.get('/api/custom-orders/:id', async (req, res) => {
             referencedCustomOrder: true // Include referenced custom order for sub-order items
           },
           orderBy: { sortOrder: 'asc' }
-        }
+        },
+        plexPlaylist: true,
+        customPlaylist: true
       }
     });
     
@@ -3994,7 +4092,7 @@ app.get('/api/custom-orders/:id', async (req, res) => {
 app.put('/api/custom-orders/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    const { name, description, isActive, icon, parentOrderId } = req.body;
+    const { name, description, isActive, icon, parentOrderId, playlistRatingKey, customPlaylistId } = req.body;
     
     // Get current order to check for parent changes
     const currentOrder = await prisma.customOrder.findUnique({
@@ -4025,12 +4123,33 @@ app.put('/api/custom-orders/:id', async (req, res) => {
       }
     }
     
+    // Validate playlist exists if specified
+    if (playlistRatingKey !== undefined && playlistRatingKey !== null) {
+      const playlist = await prisma.plexPlaylist.findUnique({
+        where: { ratingKey: playlistRatingKey }
+      });
+      if (!playlist) {
+        return res.status(400).json({ error: 'Plex playlist not found' });
+      }
+    }
+    
+    if (customPlaylistId !== undefined && customPlaylistId !== null) {
+      const playlist = await prisma.customPlaylist.findUnique({
+        where: { id: parseInt(customPlaylistId) }
+      });
+      if (!playlist) {
+        return res.status(400).json({ error: 'Custom playlist not found' });
+      }
+    }
+    
     const updateData = {};
     if (name !== undefined) updateData.name = name.trim();
     if (description !== undefined) updateData.description = description?.trim() || null;
     if (isActive !== undefined) updateData.isActive = isActive;
     if (icon !== undefined) updateData.icon = icon?.trim() || null;
     if (parentOrderId !== undefined) updateData.parentOrderId = parentOrderId ? parseInt(parentOrderId) : null;
+    if (playlistRatingKey !== undefined) updateData.playlistRatingKey = playlistRatingKey?.trim() || null;
+    if (customPlaylistId !== undefined) updateData.customPlaylistId = customPlaylistId ? parseInt(customPlaylistId) : null;
 
     const customOrder = await prisma.customOrder.update({
       where: { id: parseInt(id) },
@@ -4045,6 +4164,8 @@ app.put('/api/custom-orders/:id', async (req, res) => {
           orderBy: { sortOrder: 'asc' }
         },
         parentOrder: true,
+        plexPlaylist: true,
+        customPlaylist: true,
         subOrders: {
           include: {
             items: {

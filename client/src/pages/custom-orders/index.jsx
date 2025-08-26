@@ -82,10 +82,17 @@ function CustomOrders() {
   
   // Watched items filter state
   const [showWatchedItems, setShowWatchedItems] = useState(true);
+  
+  // Available playlists for linking
+  const [availablePlaylists, setAvailablePlaylists] = useState({ plex: [], custom: [] });
+  const [playlistsLoading, setPlaylistsLoading] = useState(false);
+  
   const [formData, setFormData] = useState({
     name: '',
     description: '',
-    icon: ''
+    icon: '',
+    playlistRatingKey: '',
+    customPlaylistId: ''
   });
   // Helper function to filter items based on preferences
   const getFilteredItems = (items) => {
@@ -275,6 +282,29 @@ function CustomOrders() {
     }
   };
 
+  const fetchAvailablePlaylists = async () => {
+    try {
+      setPlaylistsLoading(true);
+      const response = await fetch(`${config.apiBaseUrl}/api/playlists/available`);
+      if (response.ok) {
+        const data = await response.json();
+        // Transform API response to match expected structure
+        setAvailablePlaylists({
+          plex: data.plexPlaylists || [],
+          custom: data.customPlaylists || []
+        });
+      } else {
+        console.error('Failed to fetch available playlists');
+        setAvailablePlaylists({ plex: [], custom: [] });
+      }
+    } catch (error) {
+      console.error('Error fetching available playlists:', error);
+      setAvailablePlaylists({ plex: [], custom: [] });
+    } finally {
+      setPlaylistsLoading(false);
+    }
+  };
+
   // Helper function to handle viewing an order and updating URL
   const handleViewOrder = async (orderIdOrOrder) => {
     let order;
@@ -328,22 +358,32 @@ function CustomOrders() {
     }
 
     try {
+      const requestBody = {
+        name: formData.name.trim(),
+        description: formData.description.trim(),
+        icon: formData.icon.trim(),
+        parentOrderId: selectedParentId
+      };
+
+      // Add playlist fields if selected
+      if (formData.playlistRatingKey) {
+        requestBody.playlistRatingKey = formData.playlistRatingKey;
+      }
+      if (formData.customPlaylistId) {
+        requestBody.customPlaylistId = parseInt(formData.customPlaylistId);
+      }
+
       const response = await fetch(`${config.apiBaseUrl}/api/custom-orders`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({
-          name: formData.name.trim(),
-          description: formData.description.trim(),
-          icon: formData.icon.trim(),
-          parentOrderId: selectedParentId
-        }),
+        body: JSON.stringify(requestBody),
       });
 
       if (response.ok) {
         setMessage('Custom order created successfully');
-        setFormData({ name: '', description: '', icon: '' });
+        setFormData({ name: '', description: '', icon: '', playlistRatingKey: '', customPlaylistId: '' });
         setSelectedParentId(null);
         setShowCreateForm(false);
         fetchCustomOrders(); // Refresh the list
@@ -410,9 +450,16 @@ function CustomOrders() {
     setFormData({
       name: order.name,
       description: order.description || '',
-      icon: order.icon || ''
+      icon: order.icon || '',
+      playlistRatingKey: order.playlistRatingKey || '',
+      customPlaylistId: order.customPlaylistId ? order.customPlaylistId.toString() : ''
     });
     setMessage('');
+    
+    // Load playlists when starting to edit
+    if (!availablePlaylists.plex.length && !availablePlaylists.custom.length) {
+      fetchAvailablePlaylists();
+    }
   };
 
   const handleUpdateOrder = async (e) => {
@@ -424,21 +471,31 @@ function CustomOrders() {
     }
 
     try {
+      const requestBody = {
+        name: formData.name.trim(),
+        description: formData.description.trim(),
+        icon: formData.icon.trim()
+      };
+
+      // Add playlist fields if selected
+      if (formData.playlistRatingKey) {
+        requestBody.playlistRatingKey = formData.playlistRatingKey;
+      }
+      if (formData.customPlaylistId) {
+        requestBody.customPlaylistId = parseInt(formData.customPlaylistId);
+      }
+
       const response = await fetch(`${config.apiBaseUrl}/api/custom-orders/${editingOrder.id}`, {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({
-          name: formData.name.trim(),
-          description: formData.description.trim(),
-          icon: formData.icon.trim()
-        }),
+        body: JSON.stringify(requestBody),
       });
 
       if (response.ok) {
         setMessage('Custom order updated successfully');
-        setFormData({ name: '', description: '', icon: '' });
+        setFormData({ name: '', description: '', icon: '', playlistRatingKey: '', customPlaylistId: '' });
         setEditingOrder(null);
         fetchCustomOrders(); // Refresh the list
         
@@ -3394,12 +3451,13 @@ function CustomOrders() {
           <div className="custom-orders-header">            <Button
               onClick={() => {
                 setShowCreateForm(!showCreateForm);
-                setFormData({ name: '', description: '', icon: '' });
+                setFormData({ name: '', description: '', icon: '', playlistRatingKey: '', customPlaylistId: '' });
                 setEditingOrder(null);
                 setMessage('');
                 setSelectedParentId(null);
                 if (!showCreateForm) {
                   fetchAvailableParents(); // Load available parent orders when opening form
+                  fetchAvailablePlaylists(); // Load available playlists when opening form
                 }
               }}
             >
@@ -3468,7 +3526,72 @@ function CustomOrders() {
                   />
                 </div>
               )}
-            </div>            <div className="form-actions">
+            </div>
+            
+            {/* Playlist Selection Section */}
+            <div className="form-section">
+              <h4>Music Playlist Integration (Optional)</h4>
+              <p className="form-help">Link this custom order to a music playlist to enhance the storytelling experience.</p>
+              
+              <div className="form-group">
+                <label htmlFor="plexPlaylist">Plex Playlist</label>
+                <select
+                  id="plexPlaylist"
+                  value={formData.playlistRatingKey}
+                  onChange={(e) => {
+                    setFormData({
+                      ...formData, 
+                      playlistRatingKey: e.target.value,
+                      customPlaylistId: '' // Clear custom playlist if Plex is selected
+                    });
+                  }}
+                  disabled={playlistsLoading}
+                >
+                  <option value="">-- Select Plex Playlist --</option>
+                  {(availablePlaylists.plex || []).map(playlist => (
+                    <option key={playlist.ratingKey} value={playlist.ratingKey}>
+                      {playlist.title} ({playlist.leafCount || 0} tracks)
+                    </option>
+                  ))}
+                </select>
+                {playlistsLoading && <small className="form-help">Loading playlists...</small>}
+              </div>
+              
+              <div className="form-group">
+                <span className="form-separator">OR</span>
+              </div>
+              
+              <div className="form-group">
+                <label htmlFor="customPlaylist">Custom Playlist</label>
+                <select
+                  id="customPlaylist"
+                  value={formData.customPlaylistId}
+                  onChange={(e) => {
+                    setFormData({
+                      ...formData, 
+                      customPlaylistId: e.target.value,
+                      playlistRatingKey: '' // Clear Plex playlist if custom is selected
+                    });
+                  }}
+                  disabled={playlistsLoading}
+                >
+                  <option value="">-- Select Custom Playlist --</option>
+                  {(availablePlaylists.custom || []).map(playlist => (
+                    <option key={playlist.id} value={playlist.id.toString()}>
+                      {playlist.title} ({playlist.trackCount || 0} tracks)
+                    </option>
+                  ))}
+                </select>
+              </div>
+              
+              {(formData.playlistRatingKey || formData.customPlaylistId) && (
+                <div className="form-help">
+                  <strong>Note:</strong> The selected playlist will be associated with this custom order and can be used for enhanced media experiences.
+                </div>
+              )}
+            </div>
+            
+            <div className="form-actions">
               <Button type="submit">Create Order</Button>
               <Button 
                 type="button" 
@@ -3526,6 +3649,70 @@ function CustomOrders() {
                 </div>
               )}
             </div>
+            
+            {/* Playlist Selection Section */}
+            <div className="form-section">
+              <h4>Music Playlist Integration (Optional)</h4>
+              <p className="form-help">Link this custom order to a music playlist to enhance the storytelling experience.</p>
+              
+              <div className="form-group">
+                <label htmlFor="editPlexPlaylist">Plex Playlist</label>
+                <select
+                  id="editPlexPlaylist"
+                  value={formData.playlistRatingKey}
+                  onChange={(e) => {
+                    setFormData({
+                      ...formData, 
+                      playlistRatingKey: e.target.value,
+                      customPlaylistId: '' // Clear custom playlist if Plex is selected
+                    });
+                  }}
+                  disabled={playlistsLoading}
+                >
+                  <option value="">-- Select Plex Playlist --</option>
+                  {(availablePlaylists.plex || []).map(playlist => (
+                    <option key={playlist.ratingKey} value={playlist.ratingKey}>
+                      {playlist.title} ({playlist.leafCount || 0} tracks)
+                    </option>
+                  ))}
+                </select>
+                {playlistsLoading && <small className="form-help">Loading playlists...</small>}
+              </div>
+              
+              <div className="form-group">
+                <span className="form-separator">OR</span>
+              </div>
+              
+              <div className="form-group">
+                <label htmlFor="editCustomPlaylist">Custom Playlist</label>
+                <select
+                  id="editCustomPlaylist"
+                  value={formData.customPlaylistId}
+                  onChange={(e) => {
+                    setFormData({
+                      ...formData, 
+                      customPlaylistId: e.target.value,
+                      playlistRatingKey: '' // Clear Plex playlist if custom is selected
+                    });
+                  }}
+                  disabled={playlistsLoading}
+                >
+                  <option value="">-- Select Custom Playlist --</option>
+                  {(availablePlaylists.custom || []).map(playlist => (
+                    <option key={playlist.id} value={playlist.id.toString()}>
+                      {playlist.title} ({playlist.trackCount || 0} tracks)
+                    </option>
+                  ))}
+                </select>
+              </div>
+              
+              {(formData.playlistRatingKey || formData.customPlaylistId) && (
+                <div className="form-help">
+                  <strong>Note:</strong> The selected playlist will be associated with this custom order and can be used for enhanced media experiences.
+                </div>
+              )}
+            </div>
+            
             <div className="form-actions">
               <Button type="submit" className="primary">Update Order</Button>
               <Button 
@@ -3597,10 +3784,20 @@ function CustomOrders() {
                     <span className="stat-label">Completed:</span>
                     <span className="stat-value">{order.items.filter(item => item.isWatched).length}</span>
                   </div>
-                </div>                <div className="order-meta">
+                </div>                
+                
+                <div className="order-meta">
                   <div className="order-created">
                     Created: {new Date(order.createdAt).toLocaleDateString()}
                   </div>
+                  {(order.plexPlaylist || order.customPlaylist) && (
+                    <div className="order-playlist">
+                      🎵 Playlist: {order.plexPlaylist ? 
+                        `${order.plexPlaylist.title} (Plex)` : 
+                        `${order.customPlaylist.title} (Custom)`
+                      }
+                    </div>
+                  )}
                 </div>
 
                 <div className="order-actions">

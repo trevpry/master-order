@@ -56,12 +56,20 @@ model CustomOrder {
   icon        String?
   parentOrderId Int?            // Foreign key for parent custom order
   
+  // Music playlist fields
+  playlistRatingKey String?     // For Plex playlists
+  customPlaylistId  Int?        // For custom playlists
+  
   items       CustomOrderItem[]
   referencingItems CustomOrderItem[] @relation("SubOrderReference") // Items that reference this order as a sub-order
   
   // Self-referencing relationships for hierarchical orders
   parentOrder CustomOrder?      @relation("OrderHierarchy", fields: [parentOrderId], references: [id])
   subOrders   CustomOrder[]     @relation("OrderHierarchy")
+  
+  // Playlist relationships
+  plexPlaylist    PlexPlaylist?  @relation(fields: [playlistRatingKey], references: [ratingKey])
+  customPlaylist  CustomPlaylist? @relation(fields: [customPlaylistId], references: [id])
 }
 
 model CustomOrderItem {
@@ -920,6 +928,7 @@ model PlexPlaylist {
   // Relations
   librarySection    PlexLibrarySection? @relation(fields: [librarySectionID], references: [id])
   items             PlexPlaylistItem[]
+  customOrders      CustomOrder[]       // Custom orders that reference this playlist
   
   @@map("PlexPlaylist")
 }
@@ -951,6 +960,7 @@ model CustomPlaylist {
   
   // Relations
   tracks      CustomPlaylistTrack[]
+  customOrders CustomOrder[]         // Custom orders that reference this playlist
   
   @@map("CustomPlaylist")
 }
