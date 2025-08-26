@@ -528,6 +528,15 @@
   background-color: #d97706 !important;
 }
 
+.stop-button {
+  background-color: #ef4444 !important;
+  color: white !important;
+}
+
+.stop-button:hover {
+  background-color: #dc2626 !important;
+}
+
 /* Modal Styles */
 .modal-overlay {
   position: fixed;

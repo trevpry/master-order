@@ -169,50 +169,51 @@ export default function Stash() {
     const baseUrl = connectionStatus.stashUrl.endsWith('/') 
       ? connectionStatus.stashUrl.slice(0, -1) 
       : connectionStatus.stashUrl;
-    return `${baseUrl}/scenes/${sceneId}/stream`;
+    return `${baseUrl}/scene/${sceneId}/stream`;
   };
 
   // Handle play button click
-  const handlePlayScene = (scene) => {
+  const handlePlayScene = async (scene) => {
     const playData = {
       action: 'play',
       scene: {
         id: scene.id,
         title: scene.title || scene.details || 'Untitled Scene',
-        duration: scene.file?.duration || 0,
-        resumeTime: scene.resumeTime || 0,
         streamUrl: getStreamUrl(scene.id),
+        resumeTime: scene.resumeTime || 0,
+        duration: scene.file?.duration || 0,
         stashUrl: connectionStatus.stashUrl
-      },
-      timestamp: new Date().toISOString()
+      }
     };
 
-    setModal({
-      isOpen: true,
-      action: 'play',
-      scene: scene,
-      data: playData
-    });
+    await sendCommandToAndroidApp(playData, 'Play');
   };
 
   // Handle pause button click
-  const handlePauseScene = (scene) => {
+  const handlePauseScene = async (scene) => {
     const pauseData = {
       action: 'pause',
       scene: {
         id: scene.id,
         title: scene.title || scene.details || 'Untitled Scene',
         currentTime: scene.resumeTime || 0 // This would ideally come from current playback position
-      },
-      timestamp: new Date().toISOString()
+      }
     };
 
-    setModal({
-      isOpen: true,
-      action: 'pause',
-      scene: scene,
-      data: pauseData
-    });
+    await sendCommandToAndroidApp(pauseData, 'Pause');
+  };
+
+  // Handle stop button click
+  const handleStopScene = async (scene) => {
+    const stopData = {
+      action: 'stop',
+      scene: {
+        id: scene.id,
+        title: scene.title || scene.details || 'Untitled Scene'
+      }
+    };
+
+    await sendCommandToAndroidApp(stopData, 'Stop');
   };
 
   // Close modal
@@ -225,13 +226,32 @@ export default function Stash() {
     });
   };
 
-  // Send command to Android companion app (placeholder for now)
+  // Send command to Android companion app
+  const sendCommandToAndroidApp = async (commandData, actionName) => {
+    try {
+      console.log(`Sending ${actionName} command to Android app:`, commandData);
+      
+      const response = await fetch(`${config.apiBaseUrl}/api/android/play`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(commandData)
+      });
+
+      if (response.ok) {
+        console.log(`${actionName} command sent successfully to Android app`);
+      } else {
+        console.error(`Failed to send ${actionName} command: HTTP ${response.status}: ${response.statusText}`);
+      }
+    } catch (error) {
+      console.error(`Failed to send ${actionName} command to Android app:`, error);
+    }
+  };
+
+  // Legacy function for modal (if needed elsewhere)
   const sendToAndroidApp = async () => {
-    // This would be the actual API call to send data to Android companion app
-    console.log('Sending to Android app:', modal.data);
-    
-    // For now, just show it in console and close modal
-    alert(`Command sent to Android app:\n${JSON.stringify(modal.data, null, 2)}`);
+    await sendCommandToAndroidApp(modal.data, modal.action);
     closeModal();
   };
 
@@ -437,6 +457,13 @@ export default function Stash() {
                       disabled={!connectionStatus.stashUrl}
                     >
                       ⏸️ Pause
+                    </Button>
+                    <Button
+                      className="action-button stop-button"
+                      onClick={() => handleStopScene(scene)}
+                      disabled={!connectionStatus.stashUrl}
+                    >
+                      ⏹️ Stop
                     </Button>
                   </div>
                 )}

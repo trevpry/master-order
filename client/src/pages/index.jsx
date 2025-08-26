@@ -25,6 +25,12 @@ function Home() {
   const [playingOnPlex, setPlayingOnPlex] = useState(false);
   const [findingNewSeries, setFindingNewSeries] = useState(false);
   
+  // Settings modal state
+  const [showSettingsModal, setShowSettingsModal] = useState(false);
+  const [tempSettings, setTempSettings] = useState({
+    nextItemIsStash: false
+  });
+  
   // Reading session state
   const [readingSession, setReadingSession] = useState(null);
   const [readingTimer, setReadingTimer] = useState(0);
@@ -980,6 +986,16 @@ function Home() {
     return `${config.apiBaseUrl}/api/artwork${thumb}`;
   };return (
     <div className="app-container home-responsive">
+      <div className="settings-icon-container">
+        <button 
+          className="settings-cog-button"
+          onClick={() => setShowSettingsModal(true)}
+          title="Temporary Settings"
+        >
+          ⚙️
+        </button>
+      </div>
+      
       <div className="app-card home-card">
         <div className="app-content home-content">
           
@@ -1522,6 +1538,49 @@ function Home() {
                 </Button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Settings Modal */}
+      {showSettingsModal && (
+        <div className="settings-modal-overlay" onClick={() => setShowSettingsModal(false)}>
+          <div className="settings-modal-content" onClick={(e) => e.stopPropagation()}>
+            <div className="settings-modal-header">
+              <h3>Temporary Settings</h3>
+              <button 
+                className="settings-modal-close" 
+                onClick={() => setShowSettingsModal(false)}
+              >
+                ×
+              </button>
+            </div>
+            
+            <div className="settings-modal-body">
+              <div className="setting-item">
+                <label className="setting-label">
+                  <input
+                    type="checkbox"
+                    checked={tempSettings.nextItemIsStash}
+                    onChange={(e) => setTempSettings(prev => ({
+                      ...prev,
+                      nextItemIsStash: e.target.checked
+                    }))}
+                    className="setting-checkbox"
+                  />
+                  <span className="setting-text">Next item will be a Stash video</span>
+                </label>
+              </div>
+            </div>
+            
+            <div className="settings-modal-footer">
+              <Button 
+                onClick={() => setShowSettingsModal(false)}
+                className="primary"
+              >
+                Close
+              </Button>
+            </div>
           </div>
         </div>
       )}

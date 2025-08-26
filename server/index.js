@@ -5,6 +5,7 @@ const http = require('http');
 const https = require('https');
 const socketIo = require('socket.io');
 const path = require('path');
+const fetch = require('node-fetch'); // For Android companion app proxy
 const getNextEpisode = require('./getNextEpisode');
 const getNextMovie = require('./getNextMovie');
 const { getNextCustomOrder, markCustomOrderItemAsWatched } = require('./getNextCustomOrder');
@@ -130,6 +131,48 @@ app.get('/api/health', async (req, res) => {
       status: 'unhealthy',
       error: error.message,
       timestamp: new Date().toISOString()
+    });
+  }
+});
+
+// Android companion app proxy endpoint
+app.post('/api/android/play', async (req, res) => {
+  try {
+    const commandData = req.body;
+    const action = commandData.action || 'play';
+    
+    // Map actions to appropriate Android app endpoints
+    let endpoint = 'http://localhost:8080/play';
+    if (action === 'pause') {
+      endpoint = 'http://localhost:8080/pause';
+    } else if (action === 'stop') {
+      endpoint = 'http://localhost:8080/stop';
+    }
+    
+    // Forward the request to the Android companion app
+    const response = await fetch(endpoint, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(commandData)
+    });
+
+    if (response.ok) {
+      const result = await response.text();
+      res.status(200).json({ 
+        success: true, 
+        message: `${action.charAt(0).toUpperCase() + action.slice(1)} command sent successfully to Android app`,
+        response: result 
+      });
+    } else {
+      throw new Error(`Android app responded with status ${response.status}`);
+    }
+  } catch (error) {
+    console.error('Failed to send command to Android app:', error);
+    res.status(500).json({ 
+      success: false, 
+      error: error.message 
     });
   }
 });
