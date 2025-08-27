@@ -9,6 +9,90 @@ const fetch = require('node-fetch'); // For Android companion app proxy
 const getNextEpisode = require('./getNextEpisode');
 const getNextMovie = require('./getNextMovie');
 const { getNextCustomOrder, markCustomOrderItemAsWatched } = require('./getNextCustomOrder');
+
+/**
+ * Generate optimized clips for a scene, merging short final clips with the penultimate clip
+ * @param {string} sceneId - The scene ID
+ * @param {number} sceneDuration - Total scene duration in seconds
+ * @param {number} clipDuration - Desired clip duration (default 60 seconds)
+ * @returns {Array} Array of clip objects ready for database insertion
+ */
+function generateOptimizedClips(sceneId, sceneDuration, clipDuration = 60) {
+  const clipsToCreate = [];
+  const totalFullClips = Math.floor(sceneDuration / clipDuration);
+  const remainingTime = sceneDuration % clipDuration;
+  
+  // If no clips can be created, return empty array
+  if (totalFullClips === 0) {
+    return [];
+  }
+  
+  // If there's no remaining time or remaining time is >= 60 seconds, use standard logic
+  if (remainingTime === 0 || remainingTime >= 60) {
+    for (let i = 0; i < totalFullClips; i++) {
+      const startTime = i * clipDuration;
+      const endTime = Math.min(startTime + clipDuration, sceneDuration);
+      
+      clipsToCreate.push({
+        sceneId: sceneId,
+        clipIndex: i,
+        startTime: startTime,
+        endTime: endTime,
+        duration: endTime - startTime,
+        watched: false
+      });
+    }
+    
+    // Add final partial clip if it's >= 60 seconds
+    if (remainingTime >= 60) {
+      const startTime = totalFullClips * clipDuration;
+      clipsToCreate.push({
+        sceneId: sceneId,
+        clipIndex: totalFullClips,
+        startTime: startTime,
+        endTime: sceneDuration,
+        duration: remainingTime,
+        watched: false
+      });
+    }
+  } else {
+    // Remaining time is < 60 seconds, merge with penultimate clip
+    // Create all clips except the last two
+    for (let i = 0; i < totalFullClips - 1; i++) {
+      const startTime = i * clipDuration;
+      const endTime = (i + 1) * clipDuration;
+      
+      clipsToCreate.push({
+        sceneId: sceneId,
+        clipIndex: i,
+        startTime: startTime,
+        endTime: endTime,
+        duration: clipDuration,
+        watched: false
+      });
+    }
+    
+    // Create the final extended clip that includes the last full clip + remaining time
+    if (totalFullClips >= 1) {
+      const startTime = (totalFullClips - 1) * clipDuration;
+      const endTime = sceneDuration;
+      const extendedDuration = endTime - startTime;
+      
+      clipsToCreate.push({
+        sceneId: sceneId,
+        clipIndex: totalFullClips - 1,
+        startTime: startTime,
+        endTime: endTime,
+        duration: extendedDuration,
+        watched: false
+      });
+      
+      console.log(`🔗 Merged short final clip (${remainingTime}s) with penultimate clip. Final clip duration: ${extendedDuration}s`);
+    }
+  }
+  
+  return clipsToCreate;
+}
 const prisma = require('./prismaClient'); // Import the shared client
 const PlexDatabaseService = require('./plexDatabaseService');
 const TvdbDatabaseService = require('./tvdbDatabaseService'); // Added import
@@ -50,20 +134,26 @@ async function initializeStashService() {
     const { getSettings } = require('./databaseUtils');
     const settings = await getSettings();
     
+    // Fall back to environment variable if database settings don't have Stash URL
+    const stashUrl = settings?.stashUrl || process.env.STASH_URL;
+    const stashApiKey = settings?.stashApiKey || process.env.STASH_API_KEY;
+    
     console.log('🔍 Initializing Stash service...');
     console.log('   - Settings loaded:', !!settings);
-    console.log('   - Stash URL:', settings?.stashUrl || 'NOT SET');
-    console.log('   - Stash API Key:', settings?.stashApiKey ? 'SET' : 'NOT SET');
+    console.log('   - Database Stash URL:', settings?.stashUrl || 'NOT SET');
+    console.log('   - Environment STASH_URL:', process.env.STASH_URL || 'NOT SET');
+    console.log('   - Final Stash URL:', stashUrl || 'NOT SET');
+    console.log('   - Stash API Key:', stashApiKey ? 'SET' : 'NOT SET');
     
-    if (settings && settings.stashUrl) {
+    if (stashUrl) {
       // Configure the existing singleton instance
-      stashService.configure(settings.stashUrl, settings.stashApiKey || null);
-      console.log('✅ Stash service initialized with settings');
+      stashService.configure(stashUrl, stashApiKey || null);
+      console.log('✅ Stash service initialized');
       console.log('   - Service configured:', stashService.isConfigured());
     } else {
       // Reset the configuration if no URL is set
       stashService.configure(null, null);
-      console.log('ℹ️  Stash service not initialized - missing URL in settings');
+      console.log('ℹ️  Stash service not initialized - missing URL in both settings and environment');
     }
   } catch (error) {
     console.error('❌ Error initializing Stash service:', error.message);
@@ -1205,23 +1295,18 @@ app.post('/api/stash/scenes/:id/clips/generate', async (req, res) => {
       });
     }
     
-    // Generate clips (1 minute each)
+    // Generate clips (1 minute each) with optimized final clip handling
     const clipDuration = 60; // 1 minute in seconds
     const totalDuration = scene.duration;
-    const clipCount = Math.floor(totalDuration / clipDuration);
     
-    const clipsToCreate = [];
-    for (let i = 0; i < clipCount; i++) {
-      const startTime = i * clipDuration;
-      const endTime = Math.min((i + 1) * clipDuration, totalDuration);
-      
-      clipsToCreate.push({
-        sceneId: sceneId,
-        clipIndex: i,
-        startTime: startTime,
-        endTime: endTime,
-        duration: endTime - startTime,
-        watched: false
+    console.log(`🎬 Generating optimized clips for scene ${sceneId} (${totalDuration}s)`);
+    const clipsToCreate = generateOptimizedClips(sceneId, totalDuration, clipDuration);
+    
+    if (clipsToCreate.length === 0) {
+      return res.status(400).json({ 
+        error: 'Scene too short for clip generation',
+        suggestion: 'Scene must be longer than 60 seconds',
+        sceneDuration: totalDuration
       });
     }
     
@@ -1560,30 +1645,14 @@ app.post('/api/stash/clip-play', async (req, res) => {
     } else {
       // Scene has no clips - generate them
       const clipDuration = 60; // 1 minute clips
-      const totalClips = Math.floor(selectedScene.duration / clipDuration);
       
-      if (totalClips === 0) {
+      console.log(`🎬 Generating optimized clips for scene: ${selectedScene.title} (${selectedScene.duration}s)`);
+      const clipsToCreate = generateOptimizedClips(selectedScene.id, selectedScene.duration, clipDuration);
+      
+      if (clipsToCreate.length === 0) {
         return res.status(400).json({ 
           error: 'Selected scene too short for clip generation',
           suggestion: 'Scene must be longer than 60 seconds'
-        });
-      }
-      
-      console.log(`🎬 Generating ${totalClips} clips for scene: ${selectedScene.title} (${selectedScene.duration}s)`);
-      
-      // Create clips
-      const clipsToCreate = [];
-      for (let i = 0; i < totalClips; i++) {
-        const startTime = i * clipDuration;
-        const endTime = Math.min(startTime + clipDuration, selectedScene.duration);
-        
-        clipsToCreate.push({
-          sceneId: selectedScene.id,
-          startTime: startTime,
-          endTime: endTime,
-          duration: endTime - startTime,
-          clipIndex: i,
-          watched: false
         });
       }
       
@@ -1593,7 +1662,7 @@ app.post('/api/stash/clip-play', async (req, res) => {
       });
       
       // Get a random generated clip
-      const randomClipIndex = Math.floor(Math.random() * totalClips);
+      const randomClipIndex = Math.floor(Math.random() * clipsToCreate.length);
       selectedClip = await prisma.stashClip.findFirst({
         where: { 
           sceneId: selectedScene.id,
@@ -1611,7 +1680,7 @@ app.post('/api/stash/clip-play', async (req, res) => {
         }
       });
       
-      console.log(`✅ Generated ${totalClips} clips for scene: ${selectedScene.title}, selected clip ${randomClipIndex + 1}`);
+      console.log(`✅ Generated ${clipsToCreate.length} optimized clips for scene: ${selectedScene.title}, selected clip ${randomClipIndex + 1}`);
     }
     
     // Get connection status for stream URL
@@ -1787,30 +1856,14 @@ app.get('/api/stash/clips/next', async (req, res) => {
     } else {
       // Scene has no clips - generate them
       const clipDuration = 60; // 1 minute clips
-      const totalClips = Math.floor(selectedScene.duration / clipDuration);
       
-      if (totalClips === 0) {
+      console.log(`🎬 Generating optimized clips for scene: ${selectedScene.title} (${selectedScene.duration}s)`);
+      const clipsToCreate = generateOptimizedClips(selectedScene.id, selectedScene.duration, clipDuration);
+      
+      if (clipsToCreate.length === 0) {
         return res.status(400).json({ 
           error: 'Selected scene too short for clip generation',
           suggestion: 'Scene must be longer than 60 seconds'
-        });
-      }
-      
-      console.log(`🎬 Generating ${totalClips} clips for scene: ${selectedScene.title}`);
-      
-      // Create clips
-      const clipsToCreate = [];
-      for (let i = 0; i < totalClips; i++) {
-        const startTime = i * clipDuration;
-        const endTime = Math.min(startTime + clipDuration, selectedScene.duration);
-        
-        clipsToCreate.push({
-          sceneId: selectedScene.id,
-          startTime: startTime,
-          endTime: endTime,
-          duration: endTime - startTime,
-          clipIndex: i,
-          watched: false
         });
       }
       
@@ -1820,7 +1873,7 @@ app.get('/api/stash/clips/next', async (req, res) => {
       });
       
       // Get a random generated clip
-      const randomClipIndex = Math.floor(Math.random() * totalClips);
+      const randomClipIndex = Math.floor(Math.random() * clipsToCreate.length);
       selectedClip = await prisma.stashClip.findFirst({
         where: { 
           sceneId: selectedScene.id,
@@ -1838,7 +1891,7 @@ app.get('/api/stash/clips/next', async (req, res) => {
         }
       });
       
-      console.log(`✅ Generated ${totalClips} clips for scene: ${selectedScene.title}, selected clip ${randomClipIndex + 1}`);
+      console.log(`✅ Generated ${clipsToCreate.length} optimized clips for scene: ${selectedScene.title}, selected clip ${randomClipIndex + 1}`);
     }
     
     // Get connection status for stream URL

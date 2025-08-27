@@ -17,12 +17,19 @@ class StashSyncService {
       const settings = await prisma.settings.findUnique({
         where: { id: 1 }
       });
-      this.stashUrl = settings?.stashUrl;
-      this.stashApiKey = settings?.stashApiKey; // Optional
+      
+      // Fall back to environment variables if database settings don't have Stash URL
+      this.stashUrl = settings?.stashUrl || process.env.STASH_URL;
+      this.stashApiKey = settings?.stashApiKey || process.env.STASH_API_KEY; // Optional
       
       if (!this.stashUrl) {
-        throw new Error('Stash URL not configured. Please set it in the Settings page.');
+        throw new Error('Stash URL not configured. Please set it in the Settings page or STASH_URL environment variable.');
       }
+      
+      console.log('🔧 StashSyncService config loaded:');
+      console.log('   - Database URL:', settings?.stashUrl || 'NOT SET');
+      console.log('   - Environment URL:', process.env.STASH_URL || 'NOT SET');
+      console.log('   - Final URL:', this.stashUrl);
     }
   }
 
