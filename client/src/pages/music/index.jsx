@@ -50,6 +50,24 @@ const Music = () => {
   const [isLoading, setIsLoading] = useState(false);
   const audioRef = useRef(null);
 
+  // Helper function to safely parse JSON responses
+  const safeJsonParse = async (response, url) => {
+    const text = await response.text();
+    
+    if (text.trim().startsWith('<!DOCTYPE') || text.trim().startsWith('<html')) {
+      console.error(`Server returned HTML instead of JSON for ${url}`);
+      console.error('Response text:', text.substring(0, 200) + '...');
+      throw new Error(`Server returned HTML page instead of JSON for ${url}. This usually indicates a routing issue or that the API endpoint is not available.`);
+    }
+    
+    try {
+      return JSON.parse(text);
+    } catch (err) {
+      console.error(`Failed to parse JSON for ${url}:`, text.substring(0, 200) + '...');
+      throw new Error(`Invalid JSON response from ${url}: ${err.message}`);
+    }
+  };
+
   useEffect(() => {
     loadData();
   }, []);
@@ -184,15 +202,23 @@ const Music = () => {
       ]);
 
       if (!sectionsRes.ok || !statsRes.ok || !collectionsRes.ok || !playlistsRes.ok || !customPlaylistsRes.ok) {
-        throw new Error('Failed to fetch static music data');
+        // Check which specific requests failed
+        const failedRequests = [];
+        if (!sectionsRes.ok) failedRequests.push(`sections (${sectionsRes.status})`);
+        if (!statsRes.ok) failedRequests.push(`stats (${statsRes.status})`);
+        if (!collectionsRes.ok) failedRequests.push(`collections (${collectionsRes.status})`);
+        if (!playlistsRes.ok) failedRequests.push(`playlists (${playlistsRes.status})`);
+        if (!customPlaylistsRes.ok) failedRequests.push(`custom-playlists (${customPlaylistsRes.status})`);
+        
+        throw new Error(`Failed to fetch music data: ${failedRequests.join(', ')}`);
       }
 
       const [sectionsData, statsData, collectionsData, playlistsData, customPlaylistsData] = await Promise.all([
-        sectionsRes.json(),
-        statsRes.json(),
-        collectionsRes.json(),
-        playlistsRes.json(),
-        customPlaylistsRes.json()
+        safeJsonParse(sectionsRes, `${config.apiBaseUrl}/api/music/sections`),
+        safeJsonParse(statsRes, `${config.apiBaseUrl}/api/music/stats`),
+        safeJsonParse(collectionsRes, `${config.apiBaseUrl}/api/music/collections`),
+        safeJsonParse(playlistsRes, `${config.apiBaseUrl}/api/music/playlists`),
+        safeJsonParse(customPlaylistsRes, `${config.apiBaseUrl}/api/music/custom-playlists`)
       ]);
 
       setSections(sectionsData);
@@ -221,12 +247,15 @@ const Music = () => {
       ]);
 
       if (!albumsRes.ok || !tracksRes.ok) {
-        throw new Error('Failed to fetch albums and tracks');
+        const failedRequests = [];
+        if (!albumsRes.ok) failedRequests.push(`albums (${albumsRes.status})`);
+        if (!tracksRes.ok) failedRequests.push(`tracks (${tracksRes.status})`);
+        throw new Error(`Failed to fetch: ${failedRequests.join(', ')}`);
       }
 
       const [albumsData, tracksData] = await Promise.all([
-        albumsRes.json(),
-        tracksRes.json()
+        safeJsonParse(albumsRes, `${config.apiBaseUrl}/api/music/albums`),
+        safeJsonParse(tracksRes, `${config.apiBaseUrl}/api/music/tracks`)
       ]);
 
       setAlbums(albumsData);
@@ -241,16 +270,25 @@ const Music = () => {
   const loadData = async () => {
     try {
       setLoading(true);
+      setError(null); // Clear any previous errors
+      
+      console.log('Starting Music page data load...');
+      console.log('API Base URL:', config.apiBaseUrl);
       
       // Reset pagination state for artists
       setArtistsPage(1);
       setArtistsHasMore(true);
       
       // Load static data first
+      console.log('Loading static data...');
       await loadStaticData();
+      console.log('Static data loaded successfully');
 
       // Load first page of artists
+      console.log('Loading first page of artists...');
       await loadArtists(1, true);
+      console.log('Artists loaded successfully');
+      
     } catch (err) {
       console.error('Error loading music data:', err);
       setError(err.message);
@@ -321,10 +359,10 @@ const Music = () => {
       const response = await fetch(url);
       
       if (!response.ok) {
-        throw new Error('Failed to fetch albums');
+        throw new Error(`Failed to fetch albums (${response.status})`);
       }
 
-      const data = await response.json();
+      const data = await safeJsonParse(response, url);
       
       console.log('Received albums data:', data, 'Replace:', replace);
       
@@ -373,10 +411,10 @@ const Music = () => {
       const response = await fetch(url);
       
       if (!response.ok) {
-        throw new Error('Failed to fetch tracks');
+        throw new Error(`Failed to fetch tracks (${response.status})`);
       }
 
-      const data = await response.json();
+      const data = await safeJsonParse(response, url);
       
       console.log('Received tracks data:', data, 'Replace:', replace);
       
@@ -438,10 +476,10 @@ const Music = () => {
       const response = await fetch(url);
       
       if (!response.ok) {
-        throw new Error('Failed to fetch artists');
+        throw new Error(`Failed to fetch artists (${response.status})`);
       }
 
-      const data = await response.json();
+      const data = await safeJsonParse(response, url);
       
       console.log('Received artists data:', data, 'Replace:', replace);
       
@@ -536,9 +574,16 @@ const Music = () => {
         fetch(`${config.apiBaseUrl}/api/music/tracks/artist/${artist.ratingKey}`)
       ]);
       
+      if (!albumsRes.ok || !tracksRes.ok) {
+        const failedRequests = [];
+        if (!albumsRes.ok) failedRequests.push(`albums (${albumsRes.status})`);
+        if (!tracksRes.ok) failedRequests.push(`tracks (${tracksRes.status})`);
+        throw new Error(`Failed to fetch artist data: ${failedRequests.join(', ')}`);
+      }
+      
       const [albumsData, tracksData] = await Promise.all([
-        albumsRes.json(),
-        tracksRes.json()
+        safeJsonParse(albumsRes, `${config.apiBaseUrl}/api/music/albums/artist/${artist.ratingKey}`),
+        safeJsonParse(tracksRes, `${config.apiBaseUrl}/api/music/tracks/artist/${artist.ratingKey}`)
       ]);
       
       setAlbums(albumsData);
@@ -555,7 +600,12 @@ const Music = () => {
     
     try {
       const tracksRes = await fetch(`${config.apiBaseUrl}/api/music/tracks/album/${album.ratingKey}`);
-      const tracksData = await tracksRes.json();
+      
+      if (!tracksRes.ok) {
+        throw new Error(`Failed to fetch album tracks (${tracksRes.status})`);
+      }
+      
+      const tracksData = await safeJsonParse(tracksRes, `${config.apiBaseUrl}/api/music/tracks/album/${album.ratingKey}`);
       setTracks(tracksData);
     } catch (err) {
       console.error('Error loading album tracks:', err);
@@ -583,7 +633,7 @@ const Music = () => {
         throw new Error(`HTTP error! status: ${response.status}`);
       }
       
-      const result = await response.json();
+      const result = await safeJsonParse(response, `${config.apiBaseUrl}/api/music/albums/${album.ratingKey}/extract-file-metadata`);
       
       // Store the results for display
       setMetadataResults(prev => ({
@@ -702,10 +752,10 @@ const Music = () => {
       });
 
       if (!response.ok) {
-        throw new Error('Failed to create playlist');
+        throw new Error(`Failed to create playlist (${response.status})`);
       }
 
-      const newPlaylist = await response.json();
+      const newPlaylist = await safeJsonParse(response, `${config.apiBaseUrl}/api/music/custom-playlists`);
       
       // Add the new playlist to the list with type marker
       setPlaylists(prev => [
@@ -823,10 +873,10 @@ const Music = () => {
       // First, fetch all tracks from the album
       const response = await fetch(`${config.apiBaseUrl}/api/music/tracks/album/${album.ratingKey}`);
       if (!response.ok) {
-        throw new Error('Failed to fetch album tracks');
+        throw new Error(`Failed to fetch album tracks (${response.status})`);
       }
       
-      const tracks = await response.json();
+      const tracks = await safeJsonParse(response, `${config.apiBaseUrl}/api/music/tracks/album/${album.ratingKey}`);
       if (!tracks || tracks.length === 0) {
         alert('No tracks found in this album');
         return;

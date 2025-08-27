@@ -6961,10 +6961,37 @@ app.get('/api/watch-stats/all-activity', watchStatsRoutes.getAllActivity.bind(wa
 
 // ==================== END WATCH STATISTICS ENDPOINTS ====================
 
-// ========================
-// MUSIC API ENDPOINTS
-// ========================
-// NOTE: These routes MUST be defined before the catch-all route (*) to work in production
+// Serve React app for all other routes in production
+if (process.env.NODE_ENV === 'production') {
+  app.get('*', (req, res) => {
+    const clientBuildPath = path.join(__dirname, '..', 'client', 'dist');
+    res.sendFile(path.join(clientBuildPath, 'index.html'));
+  });
+}
+
+// Graceful shutdown
+async function shutdown() {
+  console.log('Shutting down server...');
+  
+  // Stop background sync service
+  await backgroundSync.stop();
+  
+  await prisma.$disconnect();
+  console.log('Prisma client disconnected.');
+  process.exit(0);
+}
+
+process.on('SIGTERM', shutdown);
+process.on('SIGINT', shutdown);
+
+// Socket.IO connection handling
+io.on('connection', (socket) => {
+  console.log('Client connected to WebSocket');
+  
+  socket.on('disconnect', () => {
+    console.log('Client disconnected from WebSocket');
+  });
+});
 
 // Music API endpoints
 app.get('/api/music/sections', async (req, res) => {
@@ -6978,6 +7005,335 @@ app.get('/api/music/sections', async (req, res) => {
   }
 });
 
+// Serve Plex album artwork
+app.get('/api/plex-album-art/:ratingKey', async (req, res) => {
+  try {
+    const { ratingKey } = req.params;
+    const { width = 300, height = 300 } = req.query;
+    
+    // Get Plex settings to build the proper URL
+    const plexSettings = await plexDb.getPlexSettings();
+    if (!plexSettings || !plexSettings.plexUrl) {
+      return res.status(503).json({ error: 'Plex server not configured' });
+    }
+    
+    // Get album data to check if it has artwork
+    const album = await plexDb.getAlbumByRatingKey(ratingKey);
+    if (!album || !album.thumb) {
+      return res.status(404).json({ error: 'Album artwork not found' });
+    }
+    
+    // Build the Plex artwork URL
+    const plexUrl = plexSettings.plexUrl.replace(/\/$/, ''); // Remove trailing slash
+    const artworkUrl = `${plexUrl}${album.thumb}`;
+    
+    // If width/height specified, use Plex's photo transcode service
+    const finalUrl = (width !== '300' || height !== '300') 
+      ? `${plexUrl}/photo/:/transcode?url=${encodeURIComponent(album.thumb)}&width=${width}&height=${height}`
+      : artworkUrl;
+      
+    console.log(`Serving album art for ${ratingKey}: ${finalUrl}`);
+    
+    // Prepare headers for Plex request
+    const headers = {};
+    if (plexSettings.plexToken) {
+      headers['X-Plex-Token'] = plexSettings.plexToken;
+    }
+    
+    // Fetch the image from Plex and stream it to the client
+    const fetch = require('node-fetch');
+    const response = await fetch(finalUrl, { headers });
+    
+    if (!response.ok) {
+      console.error(`Failed to fetch album artwork: ${response.status} ${response.statusText} for URL: ${finalUrl}`);
+      return res.status(404).json({ error: 'Album artwork not available' });
+    }
+    
+    console.log(`Successfully fetched album art for ${ratingKey}, content-type: ${response.headers.get('content-type')}`);
+    
+    // Set proper headers and stream the image
+    res.setHeader('Content-Type', response.headers.get('content-type') || 'image/jpeg');
+    res.setHeader('Cache-Control', 'public, max-age=86400'); // Cache for 24 hours
+    response.body.pipe(res);
+    
+  } catch (error) {
+    console.error('Error serving Plex album artwork:', error);
+    res.status(500).json({ error: 'Failed to serve album artwork' });
+  }
+});
+
+app.get('/api/music/artists', async (req, res) => {
+  try {
+    const { search, page = 1, limit = 20 } = req.query;
+    const offset = (page - 1) * limit;
+    
+    if (search) {
+      // For search, get all matching artists (existing behavior for compatibility)
+      const artists = await plexDb.searchArtists(search);
+      res.json(artists);
+    } else {
+      // For regular requests, use pagination
+      const artists = await plexDb.getAllArtists(parseInt(limit), offset);
+      const totalArtists = await plexDb.getArtistsCount();
+      
+      res.json({
+        artists,
+        page: parseInt(page),
+        limit: parseInt(limit),
+        total: totalArtists,
+        hasMore: offset + artists.length < totalArtists
+      });
+    }
+  } catch (error) {
+    console.error('Error fetching all artists:', error);
+    res.status(500).json({ error: 'Failed to fetch artists' });
+  }
+});
+
+app.get('/api/music/artists/section/:sectionKey', async (req, res) => {
+  try {
+    const { sectionKey } = req.params;
+    const { search, page = 1, limit = 20 } = req.query;
+    const offset = (page - 1) * limit;
+    
+    let artists, totalArtists;
+    
+    if (search) {
+      // Search within the specific section
+      artists = await plexDb.searchArtistsBySection(sectionKey, search, parseInt(limit), offset);
+      totalArtists = await plexDb.searchArtistsBySectionCount(sectionKey, search);
+    } else {
+      // Get all artists from the section
+      artists = await plexDb.getArtistsBySection(sectionKey, parseInt(limit), offset);
+      totalArtists = await plexDb.getArtistsBySectionCount(sectionKey);
+    }
+    
+    res.json({
+      artists,
+      page: parseInt(page),
+      limit: parseInt(limit),
+      total: totalArtists,
+      hasMore: offset + artists.length < totalArtists
+    });
+  } catch (error) {
+    console.error('Error fetching artists by section:', error);
+    res.status(500).json({ error: 'Failed to fetch artists' });
+  }
+});
+
+app.get('/api/music/artists/:ratingKey', async (req, res) => {
+  try {
+    const { ratingKey } = req.params;
+    const artist = await plexDb.getArtistByRatingKey(ratingKey);
+    if (!artist) {
+      return res.status(404).json({ error: 'Artist not found' });
+    }
+    res.json(artist);
+  } catch (error) {
+    console.error('Error fetching artist:', error);
+    res.status(500).json({ error: 'Failed to fetch artist' });
+  }
+});
+
+app.get('/api/music/albums', async (req, res) => {
+  try {
+    const { search, page, limit } = req.query;
+    const pageNum = parseInt(page) || 1;
+    const limitNum = parseInt(limit) || 20;
+    const offset = (pageNum - 1) * limitNum;
+
+    let albums;
+    let total;
+
+    if (search) {
+      albums = await plexDb.searchAlbums(search, limitNum, offset);
+      total = await plexDb.getAlbumsCount(); // For simplicity, using total count
+    } else {
+      albums = await plexDb.getAllAlbums(limitNum, offset);
+      total = await plexDb.getAlbumsCount();
+    }
+
+    const hasMore = offset + albums.length < total;
+
+    res.json({
+      albums,
+      page: pageNum,
+      limit: limitNum,
+      total,
+      hasMore
+    });
+  } catch (error) {
+    console.error('Error fetching all albums:', error);
+    res.status(500).json({ error: 'Failed to fetch albums' });
+  }
+});
+
+app.get('/api/music/albums/section/:sectionKey', async (req, res) => {
+  try {
+    const { sectionKey } = req.params;
+    const { search, page, limit } = req.query;
+    const pageNum = parseInt(page) || 1;
+    const limitNum = parseInt(limit) || 20;
+    const offset = (pageNum - 1) * limitNum;
+
+    console.log(`Albums requested for section: ${sectionKey}, page: ${pageNum}, limit: ${limitNum}`);
+
+    let albums;
+    let total;
+
+    if (search) {
+      albums = await plexDb.searchAlbumsBySection(search, sectionKey, limitNum, offset);
+      total = await plexDb.getAlbumsBySectionCount(sectionKey); // For simplicity
+    } else {
+      albums = await plexDb.getAlbumsBySection(sectionKey, limitNum, offset);
+      total = await plexDb.getAlbumsBySectionCount(sectionKey);
+    }
+
+    console.log(`Returning ${albums.length} albums for section ${sectionKey}, total: ${total}`);
+
+    const hasMore = offset + albums.length < total;
+
+    res.json({
+      albums,
+      page: pageNum,
+      limit: limitNum,
+      total,
+      hasMore
+    });
+  } catch (error) {
+    console.error('Error fetching albums by section:', error);
+    res.status(500).json({ error: 'Failed to fetch albums' });
+  }
+});
+
+app.get('/api/music/albums/artist/:artistRatingKey', async (req, res) => {
+  try {
+    const { artistRatingKey } = req.params;
+    const albums = await plexDb.getAlbumsByArtist(artistRatingKey);
+    res.json(albums);
+  } catch (error) {
+    console.error('Error fetching albums by artist:', error);
+    res.status(500).json({ error: 'Failed to fetch albums' });
+  }
+});
+
+app.get('/api/music/albums/:ratingKey', async (req, res) => {
+  try {
+    const { ratingKey } = req.params;
+    const album = await plexDb.getAlbumByRatingKey(ratingKey);
+    if (!album) {
+      return res.status(404).json({ error: 'Album not found' });
+    }
+    res.json(album);
+  } catch (error) {
+    console.error('Error fetching album:', error);
+    res.status(500).json({ error: 'Failed to fetch album' });
+  }
+});
+
+app.get('/api/music/tracks', async (req, res) => {
+  try {
+    const { search, page, limit } = req.query;
+    const pageNum = parseInt(page) || 1;
+    const limitNum = parseInt(limit) || 20;
+    const offset = (pageNum - 1) * limitNum;
+
+    let tracks;
+    let total;
+
+    if (search) {
+      tracks = await plexDb.searchTracks(search, limitNum, offset);
+      total = await plexDb.getTracksCount(); // For simplicity, using total count
+    } else {
+      tracks = await plexDb.getAllTracks(limitNum, offset);
+      total = await plexDb.getTracksCount();
+    }
+
+    const hasMore = offset + tracks.length < total;
+
+    res.json({
+      tracks,
+      page: pageNum,
+      limit: limitNum,
+      total,
+      hasMore
+    });
+  } catch (error) {
+    console.error('Error fetching all tracks:', error);
+    res.status(500).json({ error: 'Failed to fetch tracks' });
+  }
+});
+
+app.get('/api/music/tracks/section/:sectionKey', async (req, res) => {
+  try {
+    const { sectionKey } = req.params;
+    const { search, page, limit } = req.query;
+    const pageNum = parseInt(page) || 1;
+    const limitNum = parseInt(limit) || 20;
+    const offset = (pageNum - 1) * limitNum;
+
+    let tracks;
+    let total;
+
+    if (search) {
+      tracks = await plexDb.searchTracksBySection(search, sectionKey, limitNum, offset);
+      total = await plexDb.getTracksBySectionCount(sectionKey); // For simplicity
+    } else {
+      tracks = await plexDb.getTracksBySection(sectionKey, limitNum, offset);
+      total = await plexDb.getTracksBySectionCount(sectionKey);
+    }
+
+    const hasMore = offset + tracks.length < total;
+
+    res.json({
+      tracks,
+      page: pageNum,
+      limit: limitNum,
+      total,
+      hasMore
+    });
+  } catch (error) {
+    console.error('Error fetching tracks by section:', error);
+    res.status(500).json({ error: 'Failed to fetch tracks' });
+  }
+});
+
+app.get('/api/music/tracks/album/:albumRatingKey', async (req, res) => {
+  try {
+    const { albumRatingKey } = req.params;
+    const tracks = await plexDb.getTracksByAlbum(albumRatingKey);
+    res.json(tracks);
+  } catch (error) {
+    console.error('Error fetching tracks by album:', error);
+    res.status(500).json({ error: 'Failed to fetch tracks' });
+  }
+});
+
+app.get('/api/music/tracks/artist/:artistRatingKey', async (req, res) => {
+  try {
+    const { artistRatingKey } = req.params;
+    const tracks = await plexDb.getTracksByArtist(artistRatingKey);
+    res.json(tracks);
+  } catch (error) {
+    console.error('Error fetching tracks by artist:', error);
+    res.status(500).json({ error: 'Failed to fetch tracks' });
+  }
+});
+
+app.get('/api/music/tracks/:ratingKey', async (req, res) => {
+  try {
+    const { ratingKey } = req.params;
+    const track = await plexDb.getTrackByRatingKey(ratingKey);
+    if (!track) {
+      return res.status(404).json({ error: 'Track not found' });
+    }
+    res.json(track);
+  } catch (error) {
+    console.error('Error fetching track:', error);
+    res.status(500).json({ error: 'Failed to fetch track' });
+  }
+});
+
 app.get('/api/music/stats', async (req, res) => {
   try {
     const stats = await plexDb.getMusicStats();
@@ -6988,6 +7344,7 @@ app.get('/api/music/stats', async (req, res) => {
   }
 });
 
+// Get all music collections
 app.get('/api/music/collections', async (req, res) => {
   try {
     const { section } = req.query;
@@ -7023,6 +7380,7 @@ app.get('/api/music/collections', async (req, res) => {
   }
 });
 
+// Get all music playlists
 app.get('/api/music/playlists', async (req, res) => {
   try {
     const playlists = await plexDb.getAllPlaylists();
@@ -7033,6 +7391,38 @@ app.get('/api/music/playlists', async (req, res) => {
   }
 });
 
+// Get playlists from specific section
+app.get('/api/music/playlists/section/:sectionKey', async (req, res) => {
+  try {
+    const { sectionKey } = req.params;
+    const playlists = await plexDb.getPlaylistsBySection(sectionKey);
+    res.json(playlists);
+  } catch (error) {
+    console.error('Error fetching playlists by section:', error);
+    res.status(500).json({ error: 'Failed to fetch playlists' });
+  }
+});
+
+// Get playlist by rating key
+app.get('/api/music/playlists/:ratingKey', async (req, res) => {
+  try {
+    const { ratingKey } = req.params;
+    const playlist = await plexDb.getPlaylistByRatingKey(ratingKey);
+    if (!playlist) {
+      return res.status(404).json({ error: 'Playlist not found' });
+    }
+    res.json(playlist);
+  } catch (error) {
+    console.error('Error fetching playlist:', error);
+    res.status(500).json({ error: 'Failed to fetch playlist' });
+  }
+});
+
+// ========================
+// Custom Playlists API
+// ========================
+
+// Get all custom playlists
 app.get('/api/music/custom-playlists', async (req, res) => {
   try {
     const customPlaylists = await prisma.customPlaylist.findMany({
@@ -7054,64 +7444,736 @@ app.get('/api/music/custom-playlists', async (req, res) => {
   }
 });
 
-app.get('/api/music/artists', async (req, res) => {
+// Create a new custom playlist
+app.post('/api/music/custom-playlists', async (req, res) => {
   try {
-    const { search, page = 1, limit = 20 } = req.query;
-    const offset = (page - 1) * limit;
+    const { title, description, isPublic, createdBy } = req.body;
     
-    if (search) {
-      // For search, get all matching artists (existing behavior for compatibility)
-      const artists = await plexDb.searchArtists(search);
-      res.json(artists);
-    } else {
-      // For regular requests, use pagination
-      const artists = await plexDb.getAllArtists(parseInt(limit), offset);
-      const totalArtists = await plexDb.getArtistsCount();
-      
-      res.json({
-        artists,
-        page: parseInt(page),
-        limit: parseInt(limit),
-        total: totalArtists,
-        hasMore: offset + artists.length < totalArtists
-      });
+    if (!title) {
+      return res.status(400).json({ error: 'Playlist title is required' });
     }
+
+    const customPlaylist = await prisma.customPlaylist.create({
+      data: {
+        title,
+        description: description || null,
+        isPublic: isPublic || false,
+        createdBy: createdBy || 'Anonymous'
+      },
+      include: {
+        tracks: {
+          orderBy: {
+            sortOrder: 'asc'
+          }
+        }
+      }
+    });
+
+    res.status(201).json(customPlaylist);
   } catch (error) {
-    console.error('Error fetching all artists:', error);
-    res.status(500).json({ error: 'Failed to fetch artists' });
+    console.error('Error creating custom playlist:', error);
+    res.status(500).json({ error: 'Failed to create custom playlist' });
   }
 });
 
-// Serve React app for all other routes in production
-if (process.env.NODE_ENV === 'production') {
-  app.get('*', (req, res) => {
-    const clientBuildPath = path.join(__dirname, '..', 'client', 'dist');
-    res.sendFile(path.join(clientBuildPath, 'index.html'));
-  });
-}
+// Get a specific custom playlist
+app.get('/api/music/custom-playlists/:playlistId', async (req, res) => {
+  try {
+    const { playlistId } = req.params;
+    
+    const customPlaylist = await prisma.customPlaylist.findUnique({
+      where: {
+        id: parseInt(playlistId)
+      },
+      include: {
+        tracks: {
+          orderBy: {
+            sortOrder: 'asc'
+          }
+        }
+      }
+    });
 
-// Graceful shutdown
-async function shutdown() {
-  console.log('Shutting down server...');
-  
-  // Stop background sync service
-  await backgroundSync.stop();
-  
-  await prisma.$disconnect();
-  console.log('Prisma client disconnected.');
-  process.exit(0);
-}
+    if (!customPlaylist) {
+      return res.status(404).json({ error: 'Custom playlist not found' });
+    }
 
-process.on('SIGTERM', shutdown);
-process.on('SIGINT', shutdown);
+    res.json(customPlaylist);
+  } catch (error) {
+    console.error('Error fetching custom playlist:', error);
+    res.status(500).json({ error: 'Failed to fetch custom playlist' });
+  }
+});
 
-// Socket.IO connection handling
-io.on('connection', (socket) => {
-  console.log('Client connected to WebSocket');
-  
-  socket.on('disconnect', () => {
-    console.log('Client disconnected from WebSocket');
-  });
+// Update a custom playlist
+app.put('/api/music/custom-playlists/:playlistId', async (req, res) => {
+  try {
+    const { playlistId } = req.params;
+    const { title, description, isPublic } = req.body;
+
+    const customPlaylist = await prisma.customPlaylist.update({
+      where: {
+        id: parseInt(playlistId)
+      },
+      data: {
+        ...(title && { title }),
+        ...(description !== undefined && { description }),
+        ...(isPublic !== undefined && { isPublic })
+      },
+      include: {
+        tracks: {
+          orderBy: {
+            sortOrder: 'asc'
+          }
+        }
+      }
+    });
+
+    res.json(customPlaylist);
+  } catch (error) {
+    console.error('Error updating custom playlist:', error);
+    res.status(500).json({ error: 'Failed to update custom playlist' });
+  }
+});
+
+// Delete a custom playlist
+app.delete('/api/music/custom-playlists/:playlistId', async (req, res) => {
+  try {
+    const { playlistId } = req.params;
+
+    await prisma.customPlaylist.delete({
+      where: {
+        id: parseInt(playlistId)
+      }
+    });
+
+    res.status(204).send();
+  } catch (error) {
+    console.error('Error deleting custom playlist:', error);
+    res.status(500).json({ error: 'Failed to delete custom playlist' });
+  }
+});
+
+// Add track to custom playlist
+app.post('/api/music/custom-playlists/:playlistId/tracks', async (req, res) => {
+  try {
+    const { playlistId } = req.params;
+    const { ratingKey, title, artist, album, duration } = req.body;
+
+    console.log('Received track data:', { ratingKey, title, artist, album, duration });
+
+    if (!ratingKey) {
+      return res.status(400).json({ error: 'Track ratingKey is required' });
+    }
+
+    // Validate and clean data types
+    const cleanedData = {
+      ratingKey: String(ratingKey),
+      title: title && typeof title === 'string' ? title : null,
+      artist: artist && typeof artist === 'string' ? artist : null,
+      album: album && typeof album === 'string' ? album : null,
+      duration: duration && typeof duration === 'number' ? duration : null
+    };
+
+    console.log('Cleaned track data:', cleanedData);
+
+    // Check if track already exists in playlist
+    const existingTrack = await prisma.customPlaylistTrack.findFirst({
+      where: {
+        playlistId: parseInt(playlistId),
+        ratingKey: cleanedData.ratingKey
+      }
+    });
+
+    if (existingTrack) {
+      return res.status(409).json({ error: 'Track already exists in playlist' });
+    }
+
+    // Get the next sort order
+    const lastTrack = await prisma.customPlaylistTrack.findFirst({
+      where: {
+        playlistId: parseInt(playlistId)
+      },
+      orderBy: {
+        sortOrder: 'desc'
+      }
+    });
+
+    const sortOrder = lastTrack ? lastTrack.sortOrder + 1 : 0;
+
+    const playlistTrack = await prisma.customPlaylistTrack.create({
+      data: {
+        playlistId: parseInt(playlistId),
+        ratingKey: cleanedData.ratingKey,
+        title: cleanedData.title,
+        artist: cleanedData.artist,
+        album: cleanedData.album,
+        duration: cleanedData.duration,
+        sortOrder
+      }
+    });
+
+    console.log('Successfully created playlist track:', playlistTrack);
+    res.status(201).json(playlistTrack);
+  } catch (error) {
+    console.error('Error adding track to custom playlist:', error);
+    res.status(500).json({ error: 'Failed to add track to playlist' });
+  }
+});
+
+// Remove track from custom playlist
+app.delete('/api/music/custom-playlists/:playlistId/tracks/:trackId', async (req, res) => {
+  try {
+    const { playlistId, trackId } = req.params;
+
+    await prisma.customPlaylistTrack.delete({
+      where: {
+        id: parseInt(trackId),
+        playlistId: parseInt(playlistId)
+      }
+    });
+
+    res.status(204).send();
+  } catch (error) {
+    console.error('Error removing track from custom playlist:', error);
+    res.status(500).json({ error: 'Failed to remove track from playlist' });
+  }
+});
+
+// Reorder tracks in custom playlist
+app.put('/api/music/custom-playlists/:playlistId/tracks/reorder', async (req, res) => {
+  try {
+    const { playlistId } = req.params;
+    const { trackOrders } = req.body; // Array of { trackId, sortOrder }
+
+    if (!trackOrders || !Array.isArray(trackOrders)) {
+      return res.status(400).json({ error: 'trackOrders array is required' });
+    }
+
+    // Update each track's sort order
+    await Promise.all(
+      trackOrders.map(({ trackId, sortOrder }) =>
+        prisma.customPlaylistTrack.update({
+          where: {
+            id: parseInt(trackId),
+            playlistId: parseInt(playlistId)
+          },
+          data: {
+            sortOrder
+          }
+        })
+      )
+    );
+
+    res.json({ message: 'Track order updated successfully' });
+  } catch (error) {
+    console.error('Error reordering custom playlist tracks:', error);
+    res.status(500).json({ error: 'Failed to reorder playlist tracks' });
+  }
+});
+
+// Extract detailed album track metadata including MusicBrainz fields
+app.post('/api/music/albums/:albumRatingKey/extract-metadata', async (req, res) => {
+  try {
+    const { albumRatingKey } = req.params;
+    
+    console.log(`Starting metadata extraction for album: ${albumRatingKey}`);
+    
+    // Get Plex settings
+    const { getSettings } = require('./databaseUtils');
+    const settings = await getSettings();
+    
+    if (!settings || !settings.plexUrl || !settings.plexToken) {
+      return res.status(500).json({ error: 'Plex settings not configured' });
+    }
+
+    // Use the PlexSyncService to make API requests
+    const plexSync = require('./plexSyncService');
+    const syncService = new plexSync();
+    
+    // Get all tracks for this album
+    const albumTracksData = await syncService.makeRequest(`/library/metadata/${albumRatingKey}/children`);
+    const tracks = albumTracksData.MediaContainer?.Metadata || [];
+    
+    console.log(`Found ${tracks.length} tracks for album ${albumRatingKey}`);
+    
+    const updatedTracks = [];
+    
+    // Process each track to get detailed metadata
+    for (const track of tracks) {
+      try {
+        // Get detailed metadata for this specific track
+        const detailedTrackData = await syncService.makeRequest(`/library/metadata/${track.ratingKey}`);
+        const detailedTrack = detailedTrackData.MediaContainer?.Metadata?.[0];
+        
+        if (detailedTrack) {
+          // Extract all available metadata including GUID tags
+          const guids = detailedTrack.Guid || [];
+          const musicBrainzData = {};
+          
+          // Parse GUIDs to extract MusicBrainz IDs
+          guids.forEach(guid => {
+            if (guid.id) {
+              if (guid.id.startsWith('mbid://')) {
+                musicBrainzData.musicbrainzTrackId = guid.id.replace('mbid://', '');
+              } else if (guid.id.startsWith('com.plexapp.agents.lastfm://')) {
+                musicBrainzData.lastFmId = guid.id.replace('com.plexapp.agents.lastfm://', '');
+              } else if (guid.id.startsWith('com.plexapp.agents.plexmusic://')) {
+                musicBrainzData.plexMusicId = guid.id.replace('com.plexapp.agents.plexmusic://', '');
+              }
+            }
+          });
+          
+          // Extract additional metadata that might be available
+          const trackMetadata = {
+            ratingKey: detailedTrack.ratingKey,
+            originalTitle: detailedTrack.originalTitle || null,
+            rating: detailedTrack.rating ? parseFloat(detailedTrack.rating) : null,
+            userRating: detailedTrack.userRating ? parseFloat(detailedTrack.userRating) : null,
+            viewCount: detailedTrack.viewCount ? parseInt(detailedTrack.viewCount) : null,
+            skipCount: detailedTrack.skipCount ? parseInt(detailedTrack.skipCount) : null,
+            lastViewedAt: detailedTrack.lastViewedAt ? new Date(parseInt(detailedTrack.lastViewedAt) * 1000) : null,
+            musicBrainzTrackId: musicBrainzData.musicbrainzTrackId || null,
+            lastFmId: musicBrainzData.lastFmId || null,
+            plexMusicId: musicBrainzData.plexMusicId || null,
+            // Media information
+            bitrate: detailedTrack.Media?.[0]?.bitrate ? parseInt(detailedTrack.Media[0].bitrate) : null,
+            container: detailedTrack.Media?.[0]?.container || null,
+            audioCodec: detailedTrack.Media?.[0]?.audioCodec || null,
+            audioChannels: detailedTrack.Media?.[0]?.audioChannels ? parseInt(detailedTrack.Media[0].audioChannels) : null,
+            // File information
+            file: detailedTrack.Media?.[0]?.Part?.[0]?.file || null,
+            size: detailedTrack.Media?.[0]?.Part?.[0]?.size ? parseInt(detailedTrack.Media[0].Part[0].size) : null
+          };
+          
+          updatedTracks.push(trackMetadata);
+          console.log(`Extracted metadata for track: ${detailedTrack.title}`);
+        }
+        
+        // Add a small delay to avoid overwhelming Plex
+        await new Promise(resolve => setTimeout(resolve, 100));
+        
+      } catch (trackError) {
+        console.error(`Error processing track ${track.ratingKey}:`, trackError);
+        // Continue with other tracks even if one fails
+      }
+    }
+    
+    console.log(`Successfully extracted metadata for ${updatedTracks.length} tracks`);
+    
+    res.json({
+      albumRatingKey,
+      tracksProcessed: updatedTracks.length,
+      totalTracks: tracks.length,
+      extractedMetadata: updatedTracks
+    });
+    
+  } catch (error) {
+    console.error('Error extracting album metadata:', error);
+    res.status(500).json({ error: 'Failed to extract album metadata' });
+  }
+});
+
+// Extract metadata directly from audio files using music-metadata library
+app.post('/api/music/albums/:albumRatingKey/extract-file-metadata', async (req, res) => {
+  try {
+    const { albumRatingKey } = req.params;
+    
+    console.log(`Starting file metadata extraction for album: ${albumRatingKey}`);
+    
+    // Get Plex settings
+    const { getSettings } = require('./databaseUtils');
+    const settings = await getSettings();
+    
+    if (!settings || !settings.plexUrl || !settings.plexToken) {
+      return res.status(500).json({ error: 'Plex settings not configured' });
+    }
+
+    // Use the PlexSyncService to get track file paths
+    const plexSync = require('./plexSyncService');
+    const syncService = new plexSync();
+    
+    // First, get the library sections to understand path mappings
+    console.log('Getting Plex library sections for path mapping...');
+    const sectionsData = await syncService.makeRequest('/library/sections');
+    const sections = sectionsData.MediaContainer?.Directory || [];
+    
+    // Create a mapping of library section keys to their base paths
+    const libraryPathMappings = {};
+    sections.forEach(section => {
+      if (section.Location) {
+        const locations = Array.isArray(section.Location) ? section.Location : [section.Location];
+        libraryPathMappings[section.key] = locations.map(loc => loc.path);
+      }
+    });
+    
+    console.log('Library path mappings:', libraryPathMappings);
+    
+    // Get all tracks for this album
+    const albumTracksData = await syncService.makeRequest(`/library/metadata/${albumRatingKey}/children`);
+    const tracks = albumTracksData.MediaContainer?.Metadata || [];
+    
+    console.log(`Found ${tracks.length} tracks for album ${albumRatingKey}`);
+    
+    // Get the library section ID from the album data
+    const albumData = await syncService.makeRequest(`/library/metadata/${albumRatingKey}`);
+    const album = albumData.MediaContainer?.Metadata?.[0];
+    const librarySectionID = album?.librarySectionID;
+    
+    console.log(`Album library section ID: ${librarySectionID}`);
+    
+    const updatedTracks = [];
+    let successCount = 0;
+    let errorCount = 0;
+    
+    // Helper function to resolve file paths using library mappings
+    const resolveFilePath = (plexPath, sectionID) => {
+      if (!plexPath) return null;
+      
+      // Get the base paths for this library section
+      const basePaths = libraryPathMappings[sectionID] || [];
+      
+      // Environment variable mapping for path translation
+      const pathMappings = {
+        '/xmas': process.env.XMAS_PATH || 'C:\\Media\\Christmas',
+        '/movies': process.env.MOVIES_PATH || 'C:\\Media\\Movies', 
+        '/music': process.env.MUSIC_PATH || 'C:\\Media\\Music',
+        '/classical': process.env.CLASSICAL_PATH || 'C:\\Media\\Classical',
+        '/tv': process.env.TV_PATH || 'C:\\Media\\TV',
+        '/video_games': process.env.VIDEO_GAMES_PATH || 'C:\\Media\\VideoGames',
+        '/pop_music': process.env.POP_MUSIC_PATH || 'C:\\Media\\PopMusic'
+      };
+      
+      // First try direct path mapping based on library section
+      for (const basePath of basePaths) {
+        if (pathMappings[basePath]) {
+          // Map the Plex base path to the local path
+          const localBasePath = pathMappings[basePath];
+          let testPath;
+          
+          if (plexPath.startsWith(basePath + '/')) {
+            // Replace the Plex base path with local base path
+            testPath = plexPath.replace(basePath, localBasePath);
+            // Convert forward slashes to backslashes on Windows
+            testPath = testPath.replace(/\//g, path.sep);
+          } else if (plexPath.startsWith('/')) {
+            // Try appending the relative path to local base
+            testPath = path.join(localBasePath, plexPath.substring(basePath.length + 1));
+          }
+          
+          if (testPath) {
+            console.log(`Trying mapped path: ${testPath}`);
+            if (fs.existsSync(testPath)) {
+              console.log(`✅ Found file at mapped path: ${testPath}`);
+              return testPath;
+            }
+          }
+        }
+      }
+      
+      // Fallback: Try original path resolution logic
+      const pathPrefixes = [
+        ...basePaths, // Plex library paths first
+        '', // Try the path as-is
+        '/media', // Docker media mount
+        '/mnt/user/Media', // Unraid media path
+        'C:\\Media', // Windows media path
+        'D:\\Media', // Windows alternate drive
+        '/volume1/Media', // Synology NAS
+        '/share/Media', // QNAP NAS
+        process.env.MEDIA_PATH || '', // Environment variable
+        settings.mediaPath || '' // From database settings if available
+      ];
+      
+      // If the plex path starts with /, it might be relative to library root
+      // Try combining it with each base path
+      for (const prefix of pathPrefixes) {
+        let testPath;
+        
+        if (prefix && plexPath.startsWith('/')) {
+          // Remove leading slash from plexPath when combining with base path
+          testPath = path.join(prefix, plexPath.substring(1));
+        } else if (prefix) {
+          testPath = path.join(prefix, plexPath);
+        } else {
+          testPath = plexPath;
+        }
+        
+        console.log(`Trying path: ${testPath}`);
+        
+        if (fs.existsSync(testPath)) {
+          console.log(`✅ Found file at: ${testPath}`);
+          return testPath;
+        }
+      }
+      
+      // If no direct mapping works, try some more creative approaches
+      // Sometimes the path is relative to a parent directory of the library path
+      for (const basePath of basePaths) {
+        if (basePath) {
+          // Try parent directories of the base path
+          const parentPath = path.dirname(basePath);
+          const grandParentPath = path.dirname(parentPath);
+          
+          for (const testBase of [parentPath, grandParentPath]) {
+            const testPath = plexPath.startsWith('/') 
+              ? path.join(testBase, plexPath.substring(1))
+              : path.join(testBase, plexPath);
+            
+            console.log(`Trying parent path: ${testPath}`);
+            
+            if (fs.existsSync(testPath)) {
+              console.log(`✅ Found file at parent path: ${testPath}`);
+              return testPath;
+            }
+          }
+        }
+      }
+      
+      return null;
+    };
+    
+    // Process each track to extract file metadata
+    for (const track of tracks) {
+      try {
+        // Get detailed track info to access file path
+        const detailedTrackData = await syncService.makeRequest(`/library/metadata/${track.ratingKey}`);
+        const detailedTrack = detailedTrackData.MediaContainer?.Metadata?.[0];
+        
+        if (detailedTrack?.Media?.[0]?.Part?.[0]?.file) {
+          const plexFilePath = detailedTrack.Media[0].Part[0].file;
+          const trackSectionID = detailedTrack.librarySectionID || librarySectionID;
+          
+          console.log(`Processing track "${track.title}" with path: ${plexFilePath}`);
+          console.log(`Using library section ID: ${trackSectionID}`);
+          
+          const resolvedPath = resolveFilePath(plexFilePath, trackSectionID);
+          
+          if (resolvedPath) {
+            console.log(`Reading metadata from file: ${resolvedPath}`);
+            
+            try {
+              // Parse metadata from the audio file
+              const metadata = await mm.parseFile(resolvedPath);
+              
+              // Extract all available metadata
+              const fileMetadata = {
+                ratingKey: track.ratingKey,
+                title: track.title,
+                filePath: resolvedPath,
+                plexPath: plexFilePath,
+                librarySectionID: trackSectionID,
+                // Common metadata
+                format: metadata.format,
+                common: {
+                  title: metadata.common.title || null,
+                  artist: metadata.common.artist || null,
+                  albumartist: metadata.common.albumartist || null,
+                  album: metadata.common.album || null,
+                  year: metadata.common.year || null,
+                  track: metadata.common.track || null,
+                  genre: metadata.common.genre || null,
+                  comment: metadata.common.comment || null,
+                  composer: metadata.common.composer || null,
+                  conductor: metadata.common.conductor || null,
+                  lyricist: metadata.common.lyricist || null,
+                  writer: metadata.common.writer || null,
+                  producer: metadata.common.producer || null,
+                  label: metadata.common.label || null,
+                  date: metadata.common.date || null,
+                  originaldate: metadata.common.originaldate || null,
+                  originalyear: metadata.common.originalyear || null,
+                  releasetype: metadata.common.releasetype || null,
+                  releasestatus: metadata.common.releasestatus || null,
+                  releasecountry: metadata.common.releasecountry || null,
+                  barcode: metadata.common.barcode || null,
+                  catalognumber: metadata.common.catalognumber || null,
+                  media: metadata.common.media || null,
+                  discsubtitle: metadata.common.discsubtitle || null,
+                  isrc: metadata.common.isrc || null,
+                  language: metadata.common.language || null,
+                  mood: metadata.common.mood || null,
+                  copyright: metadata.common.copyright || null,
+                  license: metadata.common.license || null,
+                  encodedby: metadata.common.encodedby || null,
+                  encodersettings: metadata.common.encodersettings || null,
+                  gapless: metadata.common.gapless || null,
+                  compilation: metadata.common.compilation || null,
+                  rating: metadata.common.rating || null,
+                  bpm: metadata.common.bpm || null,
+                  key: metadata.common.key || null,
+                  // MusicBrainz fields
+                  musicbrainz_recordingid: metadata.common.musicbrainz_recordingid || null,
+                  musicbrainz_trackid: metadata.common.musicbrainz_trackid || null,
+                  musicbrainz_albumid: metadata.common.musicbrainz_albumid || null,
+                  musicbrainz_artistid: metadata.common.musicbrainz_artistid || null,
+                  musicbrainz_albumartistid: metadata.common.musicbrainz_albumartistid || null,
+                  musicbrainz_releasegroupid: metadata.common.musicbrainz_releasegroupid || null,
+                  musicbrainz_workid: metadata.common.musicbrainz_workid || null,
+                  musicbrainz_trmid: metadata.common.musicbrainz_trmid || null,
+                  musicbrainz_discid: metadata.common.musicbrainz_discid || null,
+                  // Additional metadata
+                  acoustid_id: metadata.common.acoustid_id || null,
+                  acoustid_fingerprint: metadata.common.acoustid_fingerprint || null,
+                  musicip_puid: metadata.common.musicip_puid || null,
+                  musicip_fingerprint: metadata.common.musicip_fingerprint || null
+                },
+                // Technical format information
+                formatInfo: {
+                  container: metadata.format.container || null,
+                  codec: metadata.format.codec || null,
+                  lossless: metadata.format.lossless || null,
+                  duration: metadata.format.duration || null,
+                  bitrate: metadata.format.bitrate || null,
+                  sampleRate: metadata.format.sampleRate || null,
+                  bitsPerSample: metadata.format.bitsPerSample || null,
+                  numberOfChannels: metadata.format.numberOfChannels || null,
+                  codecProfile: metadata.format.codecProfile || null,
+                  tool: metadata.format.tool || null,
+                  tagTypes: metadata.format.tagTypes || null
+                },
+                // Raw native tags for debugging
+                nativeTags: metadata.native || {}
+              };
+              
+              updatedTracks.push(fileMetadata);
+              successCount++;
+              console.log(`✅ Successfully extracted file metadata for: ${track.title}`);
+              
+            } catch (parseError) {
+              console.error(`Error parsing metadata for ${resolvedPath}:`, parseError);
+              updatedTracks.push({
+                ratingKey: track.ratingKey,
+                title: track.title,
+                filePath: resolvedPath,
+                plexPath: plexFilePath,
+                error: `Metadata parsing failed: ${parseError.message}`
+              });
+              errorCount++;
+            }
+            
+          } else {
+            console.log(`❌ File not found in any expected location for path: ${plexFilePath}`);
+            updatedTracks.push({
+              ratingKey: track.ratingKey,
+              title: track.title,
+              plexPath: plexFilePath,
+              librarySectionID: trackSectionID,
+              libraryBasePaths: libraryPathMappings[trackSectionID] || [],
+              error: `File not found. Tried library paths: ${(libraryPathMappings[trackSectionID] || []).join(', ')}`
+            });
+            errorCount++;
+          }
+        } else {
+          console.log(`No file path found for track: ${track.title}`);
+          updatedTracks.push({
+            ratingKey: track.ratingKey,
+            title: track.title,
+            error: 'No file path found in Plex data'
+          });
+          errorCount++;
+        }
+        
+        // Add a small delay to avoid overwhelming the file system
+        await new Promise(resolve => setTimeout(resolve, 200));
+        
+      } catch (trackError) {
+        console.error(`Error processing track ${track.ratingKey}:`, trackError);
+        updatedTracks.push({
+          ratingKey: track.ratingKey,
+          title: track.title,
+          error: trackError.message
+        });
+        errorCount++;
+      }
+    }
+    
+    console.log(`File metadata extraction complete. Success: ${successCount}, Errors: ${errorCount}`);
+    
+    res.json({
+      albumRatingKey,
+      tracksProcessed: tracks.length,
+      successCount,
+      errorCount,
+      libraryMappings: libraryPathMappings,
+      extractedMetadata: updatedTracks
+    });
+    
+  } catch (error) {
+    console.error('Error extracting file metadata:', error);
+    res.status(500).json({ error: 'Failed to extract file metadata', details: error.message });
+  }
+});
+
+// Stream music track endpoint
+app.get('/api/music/stream/:ratingKey', async (req, res) => {
+  try {
+    const { ratingKey } = req.params;
+    
+    // Get Plex settings
+    const { getSettings } = require('./databaseUtils');
+    const settings = await getSettings();
+    
+    if (!settings || !settings.plexUrl || !settings.plexToken) {
+      return res.status(500).json({ error: 'Plex settings not configured' });
+    }
+
+    // Use the PlexSyncService to make the API request
+    const plexSync = require('./plexSyncService');
+    const syncService = new plexSync();
+    
+    // Get track metadata from Plex API
+    const trackData = await syncService.makeRequest(`/library/metadata/${ratingKey}`);
+    const track = trackData.MediaContainer?.Metadata?.[0];
+    
+    if (!track || !track.Media?.[0]?.Part?.[0]) {
+      return res.status(404).json({ error: 'Track not found or no media parts available' });
+    }
+
+    const mediaPart = track.Media[0].Part[0];
+    
+    // Build Plex streaming URL using the part key
+    const streamUrl = `${settings.plexUrl}${mediaPart.key}?X-Plex-Token=${settings.plexToken}`;
+    
+    console.log(`Streaming track: ${track.title} - URL: ${streamUrl}`);
+    
+    // Set appropriate headers for audio streaming
+    res.set({
+      'Accept-Ranges': 'bytes',
+      'Content-Type': 'audio/mpeg',
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Headers': 'Range'
+    });
+    
+    // Proxy the stream from Plex
+    const axios = require('axios');
+    const response = await axios({
+      method: 'GET',
+      url: streamUrl,
+      responseType: 'stream',
+      headers: {
+        'Range': req.headers.range || 'bytes=0-'
+      }
+    });
+
+    // Forward headers from Plex
+    if (response.headers['content-length']) {
+      res.set('Content-Length', response.headers['content-length']);
+    }
+    if (response.headers['content-range']) {
+      res.set('Content-Range', response.headers['content-range']);
+    }
+    
+    // Set status code for partial content if range was requested
+    res.status(response.status);
+    
+    // Pipe the audio data
+    response.data.pipe(res);
+    
+  } catch (error) {
+    console.error('Error streaming music track:', error);
+    res.status(500).json({ error: 'Failed to stream music track' });
+  }
 });
 
 // Start the server
