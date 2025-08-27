@@ -18,25 +18,63 @@ class StashSyncService {
         where: { id: 1 }
       });
       
-      // Prioritize environment variables over database settings
-      this.stashUrl = process.env.STASH_URL || process.env.STASH_URL_FALLBACK_1 || 
-                      process.env.STASH_URL_FALLBACK_2 || process.env.STASH_URL_FALLBACK_3 || 
-                      settings?.stashUrl;
+      // Try multiple Stash URLs in order of preference
+      const potentialUrls = [
+        process.env.STASH_URL,
+        process.env.STASH_URL_FALLBACK_1,
+        process.env.STASH_URL_FALLBACK_2,
+        process.env.STASH_URL_FALLBACK_3,
+        process.env.STASH_URL_FALLBACK_4,
+        settings?.stashUrl
+      ].filter(url => url); // Remove null/undefined values
+      
       this.stashApiKey = settings?.stashApiKey || process.env.STASH_API_KEY; // Optional
       
-      // Normalize URL - remove trailing slashes
-      if (this.stashUrl) {
-        this.stashUrl = this.stashUrl.replace(/\/+$/, '');
-      }
-      
-      if (!this.stashUrl) {
-        throw new Error('Stash URL not configured. Please set it in the Settings page or STASH_URL environment variable.');
-      }
-      
-      console.log('🔧 StashSyncService config loaded:');
+      console.log('🔧 StashSyncService config loading:');
       console.log('   - Database URL:', settings?.stashUrl || 'NOT SET');
-      console.log('   - Environment URL:', process.env.STASH_URL || 'NOT SET');
-      console.log('   - Final URL:', this.stashUrl);
+      console.log('   - Environment URLs:', potentialUrls.filter(url => url !== settings?.stashUrl));
+      
+      let workingUrl = null;
+      
+      // Test each URL to find one that works
+      for (const url of potentialUrls) {
+        try {
+          console.log(`   - Testing Stash connection: ${url}`);
+          
+          // Normalize URL - remove trailing slashes
+          const normalizedUrl = url.replace(/\/+$/, '');
+          
+          // Create timeout promise
+          const timeoutPromise = new Promise((_, reject) => 
+            setTimeout(() => reject(new Error('Connection timeout')), 5000)
+          );
+          
+          const fetchPromise = fetch(`${normalizedUrl}/graphql`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              query: '{ version { build_time } }'
+            })
+          });
+          
+          const testResponse = await Promise.race([fetchPromise, timeoutPromise]);
+          
+          if (testResponse.ok) {
+            workingUrl = normalizedUrl;
+            console.log(`   ✅ Stash connection successful: ${normalizedUrl}`);
+            break;
+          }
+        } catch (error) {
+          console.log(`   ❌ Stash connection failed: ${url} - ${error.message}`);
+        }
+      }
+      
+      if (workingUrl) {
+        this.stashUrl = workingUrl;
+        console.log('✅ StashSyncService configured with working URL:', workingUrl);
+      } else {
+        throw new Error('No working Stash URL found. Tested: ' + potentialUrls.join(', '));
+      }
     }
   }
 
