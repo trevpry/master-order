@@ -18,9 +18,16 @@ class StashSyncService {
         where: { id: 1 }
       });
       
-      // Fall back to environment variables if database settings don't have Stash URL
-      this.stashUrl = settings?.stashUrl || process.env.STASH_URL;
+      // Prioritize environment variables over database settings
+      this.stashUrl = process.env.STASH_URL || process.env.STASH_URL_FALLBACK_1 || 
+                      process.env.STASH_URL_FALLBACK_2 || process.env.STASH_URL_FALLBACK_3 || 
+                      settings?.stashUrl;
       this.stashApiKey = settings?.stashApiKey || process.env.STASH_API_KEY; // Optional
+      
+      // Normalize URL - remove trailing slashes
+      if (this.stashUrl) {
+        this.stashUrl = this.stashUrl.replace(/\/+$/, '');
+      }
       
       if (!this.stashUrl) {
         throw new Error('Stash URL not configured. Please set it in the Settings page or STASH_URL environment variable.');

@@ -134,66 +134,26 @@ async function initializeStashService() {
     const { getSettings } = require('./databaseUtils');
     const settings = await getSettings();
     
-    // Try multiple Stash URLs in order of preference
-    const potentialUrls = [
-      settings?.stashUrl,
-      process.env.STASH_URL,
-      process.env.STASH_URL_FALLBACK_1,
-      process.env.STASH_URL_FALLBACK_2, 
-      process.env.STASH_URL_FALLBACK_3
-    ].filter(url => url); // Remove null/undefined values
-    
+    // Use database settings, fall back to environment variable if needed
+    const stashUrl = settings?.stashUrl || process.env.STASH_URL;
     const stashApiKey = settings?.stashApiKey || process.env.STASH_API_KEY;
     
     console.log('🔍 Initializing Stash service...');
     console.log('   - Settings loaded:', !!settings);
     console.log('   - Database Stash URL:', settings?.stashUrl || 'NOT SET');
-    console.log('   - Environment URLs to try:', potentialUrls);
+    console.log('   - Environment STASH_URL:', process.env.STASH_URL || 'NOT SET');
+    console.log('   - Final Stash URL:', stashUrl || 'NOT SET');
     console.log('   - Stash API Key:', stashApiKey ? 'SET' : 'NOT SET');
     
-    let workingUrl = null;
-    
-    // Test each URL to find one that works
-    for (const url of potentialUrls) {
-      try {
-        console.log(`   - Testing connection to: ${url}`);
-        
-        // Create timeout promise
-        const timeoutPromise = new Promise((_, reject) => 
-          setTimeout(() => reject(new Error('Connection timeout')), 5000)
-        );
-        
-        const fetchPromise = fetch(`${url}/graphql`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            query: '{ version { build_time } }'
-          })
-        });
-        
-        const testResponse = await Promise.race([fetchPromise, timeoutPromise]);
-        
-        if (testResponse.ok) {
-          workingUrl = url;
-          console.log(`   ✅ Connection successful to: ${url}`);
-          break;
-        }
-      } catch (error) {
-        console.log(`   ❌ Connection failed to: ${url} - ${error.message}`);
-      }
-    }
-    
-    if (workingUrl) {
+    if (stashUrl) {
       // Configure the existing singleton instance
-      stashService.configure(workingUrl, stashApiKey || null);
+      stashService.configure(stashUrl, stashApiKey || null);
       console.log('✅ Stash service initialized');
-      console.log('   - Working URL:', workingUrl);
       console.log('   - Service configured:', stashService.isConfigured());
     } else {
-      // Reset the configuration if no URL works
+      // Reset the configuration if no URL is set
       stashService.configure(null, null);
-      console.log('❌ Stash service not initialized - no working URLs found');
-      console.log('   - URLs tested:', potentialUrls);
+      console.log('ℹ️  Stash service not initialized - missing URL in both settings and environment');
     }
   } catch (error) {
     console.error('❌ Error initializing Stash service:', error.message);
@@ -843,12 +803,17 @@ app.get('/api/stash/test', async (req, res) => {
     // Get the Stash URL from settings
     const settings = await prisma.settings.findUnique({ where: { id: 1 } });
     
+    // Prioritize environment variables for API response
+    const finalStashUrl = (process.env.STASH_URL || process.env.STASH_URL_FALLBACK_1 || 
+                          process.env.STASH_URL_FALLBACK_2 || process.env.STASH_URL_FALLBACK_3 || 
+                          settings?.stashUrl)?.replace(/\/+$/, '');
+    
     res.json({ 
       success: true, 
       message: 'Stash connection successful',
       configured: true,
       version: version,
-      stashUrl: settings?.stashUrl || null,
+      stashUrl: finalStashUrl || null,
       apiKey: settings?.stashApiKey || null // Include API key for frontend video streaming
     });
   } catch (error) {
@@ -1725,15 +1690,21 @@ app.post('/api/stash/clip-play', async (req, res) => {
     
     // Get connection status for stream URL
     const settings = await prisma.settings.findFirst();
-    const stashUrl = settings?.stashUrl;
+    let stashUrl = process.env.STASH_URL || process.env.STASH_URL_FALLBACK_1 || 
+                   process.env.STASH_URL_FALLBACK_2 || process.env.STASH_URL_FALLBACK_3 || 
+                   settings?.stashUrl;
     
-    if (!stashUrl) {
-      return res.status(400).json({ error: 'Stash URL not configured' });
+    // Normalize URL - remove trailing slashes
+    if (stashUrl) {
+      stashUrl = stashUrl.replace(/\/+$/, '');
     }
     
-    // Build stream URL
-    const baseUrl = stashUrl.endsWith('/') ? stashUrl.slice(0, -1) : stashUrl;
-    const streamUrl = `${baseUrl}/scene/${selectedClip.scene.id}/stream`;
+    if (!stashUrl) {
+      return res.status(400).json({ error: 'Stash URL not configured in settings or environment' });
+    }
+    
+    // Build stream URL (stashUrl is already normalized)
+    const streamUrl = `${stashUrl}/scene/${selectedClip.scene.id}/stream`;
     
     // Build Android companion app message
     const androidMessage = {
@@ -1936,15 +1907,21 @@ app.get('/api/stash/clips/next', async (req, res) => {
     
     // Get connection status for stream URL
     const settings = await prisma.settings.findFirst();
-    const stashUrl = settings?.stashUrl;
+    let stashUrl = process.env.STASH_URL || process.env.STASH_URL_FALLBACK_1 || 
+                   process.env.STASH_URL_FALLBACK_2 || process.env.STASH_URL_FALLBACK_3 || 
+                   settings?.stashUrl;
     
-    if (!stashUrl) {
-      return res.status(400).json({ error: 'Stash URL not configured' });
+    // Normalize URL - remove trailing slashes
+    if (stashUrl) {
+      stashUrl = stashUrl.replace(/\/+$/, '');
     }
     
-    // Build stream URL
-    const baseUrl = stashUrl.endsWith('/') ? stashUrl.slice(0, -1) : stashUrl;
-    const streamUrl = `${baseUrl}/scene/${selectedClip.scene.id}/stream`;
+    if (!stashUrl) {
+      return res.status(400).json({ error: 'Stash URL not configured in settings or environment' });
+    }
+    
+    // Build stream URL (stashUrl is already normalized)  
+    const streamUrl = `${stashUrl}/scene/${selectedClip.scene.id}/stream`;
     
     // Mark clip as watched immediately
     await prisma.stashClip.update({
@@ -2132,9 +2109,16 @@ app.get('/api/debug/stash-service', async (req, res) => {
     console.log('🔍 Debug: Manual Stash service test');
     console.log('   - Settings:', JSON.stringify(settings, null, 2));
     
+    // Prioritize environment variables for debug response
+    const finalStashUrl = (process.env.STASH_URL || process.env.STASH_URL_FALLBACK_1 || 
+                          process.env.STASH_URL_FALLBACK_2 || process.env.STASH_URL_FALLBACK_3 || 
+                          settings?.stashUrl)?.replace(/\/+$/, '');
+    
     const result = {
       settingsLoaded: !!settings,
-      stashUrl: settings?.stashUrl || null,
+      databaseStashUrl: settings?.stashUrl || null,
+      environmentStashUrl: process.env.STASH_URL || null,
+      finalStashUrl: finalStashUrl || null,
       stashApiKey: !!settings?.stashApiKey,
       globalServiceExists: !!stashService,
       globalServiceConfigured: stashService ? stashService.isConfigured() : false
