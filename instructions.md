@@ -398,7 +398,14 @@ When making schema changes:
 - **GET /api/stash/sync/status**: Get Stash sync status
 - **GET /api/stash/background-sync/status**: Get background sync service status
 - **POST /api/stash/background-sync/force**: Force immediate background sync
+- **POST /api/stash/clip-play**: Play random 1-minute clips with automatic generation
+- **GET /api/stash/clips/next**: Get next available unwatched clip
+- **POST /api/stash/scenes/:id/clips/generate**: Generate clips for a specific scene
+- **POST /api/stash/clips/:id/play**: Play a specific clip by ID
+- **POST /api/stash/clips/:id/watched**: Mark clip as watched
+- **POST /api/stash/clips/reset**: Reset all clips (mark as unwatched)
 - **Filtering**: Automatically excludes performers/studios with 0 scenes and scenes with 'zzHide' tag
+- **Clip Generation**: Automatically generates 1-minute clips for random scenes when no unwatched clips exist
 
 ### Custom Orders & Music Integration
 - **GET /api/custom-orders**: Get all custom orders with playlist relations

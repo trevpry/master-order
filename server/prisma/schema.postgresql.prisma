@@ -794,8 +794,27 @@ model StashScene {
   performers       StashScenePerformer[]
   tags             StashSceneTag[]
   studioObject     StashStudio? @relation(fields: [studioId], references: [id])
+  clips            StashClip[]
   
   @@map("StashScene")
+}
+
+model StashClip {
+  id               Int      @id @default(autoincrement())
+  sceneId          String
+  clipIndex        Int      // 0-based index (clip 1, clip 2, etc.)
+  startTime        Float    // Start time in seconds
+  endTime          Float    // End time in seconds
+  duration         Float    // Duration in seconds (should be ~60 seconds)
+  watched          Boolean  @default(false)
+  watchedAt        DateTime?
+  createdAt        DateTime @default(now())
+  
+  // Relationship
+  scene            StashScene @relation(fields: [sceneId], references: [id], onDelete: Cascade)
+  
+  @@unique([sceneId, clipIndex])
+  @@map("StashClip")
 }
 
 model StashPerformer {

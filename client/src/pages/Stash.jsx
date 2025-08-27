@@ -7,7 +7,8 @@ export default function Stash() {
   const [connectionStatus, setConnectionStatus] = useState({ 
     configured: false, 
     connected: false, 
-    stashUrl: null 
+    stashUrl: null,
+    apiKey: null 
   });
   const [isLoading, setIsLoading] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
@@ -21,16 +22,19 @@ export default function Stash() {
     scenes: [],
     performers: [],
     studios: [],
-    tags: []
+    tags: [],
+    clips: []
   });
   const [pagination, setPagination] = useState({
     scenes: { total: 0, hasMore: false },
     performers: { total: 0, hasMore: false },
     studios: { total: 0, hasMore: false },
-    tags: { total: 0, hasMore: false }
+    tags: { total: 0, hasMore: false },
+    clips: { total: 0, hasMore: false }
   });
   const [sortBy, setSortBy] = useState('date');
   const [sortDirection, setSortDirection] = useState('DESC');
+  const [watchStatusFilter, setWatchStatusFilter] = useState('all');
   const [syncStatus, setSyncStatus] = useState({
     isRunning: false,
     lastSync: null,
@@ -64,6 +68,14 @@ export default function Stash() {
     lastUpdated: null,
     loading: false,
     error: null
+  });
+
+  // Video player state for full-screen clip playback
+  const [videoPlayer, setVideoPlayer] = useState({
+    isOpen: false,
+    clip: null,
+    scene: null,
+    playbackInfo: null
   });
 
   // Helper function to extract filename from path without extension
@@ -138,7 +150,7 @@ export default function Stash() {
     if (connectionStatus.connected && mainTab === 'library') {
       loadData();
     }
-  }, [libraryTab, currentPage, sortBy, sortDirection, connectionStatus.connected, mainTab]);
+  }, [libraryTab, currentPage, sortBy, sortDirection, watchStatusFilter, connectionStatus.connected, mainTab]);
 
   const testConnection = async () => {
     try {
@@ -150,7 +162,8 @@ export default function Stash() {
         connected: result.success || false,
         message: result.message || 'Unknown status',
         version: result.version || null,
-        stashUrl: result.stashUrl || null
+        stashUrl: result.stashUrl || null,
+        apiKey: result.apiKey || null
       });
     } catch (error) {
       console.error('Failed to test Stash connection:', error);
@@ -158,7 +171,8 @@ export default function Stash() {
         configured: false,
         connected: false,
         message: 'Failed to test connection',
-        stashUrl: null
+        stashUrl: null,
+        apiKey: null
       });
     }
   };
@@ -179,6 +193,14 @@ export default function Stash() {
         params.append('direction', sortDirection);
       }
 
+      if (libraryTab === 'clips') {
+        params.append('sortBy', sortBy);
+        params.append('sortDirection', sortDirection);
+        if (watchStatusFilter !== 'all') {
+          params.append('watched', watchStatusFilter);
+        }
+      }
+
       if (searchQuery.trim()) {
         params.append('filter', searchQuery.trim());
       }
@@ -196,6 +218,9 @@ export default function Stash() {
         case 'tags':
           url = `${config.apiBaseUrl}/api/stash/tags?${params}`;
           break;
+        case 'clips':
+          url = `${config.apiBaseUrl}/api/stash/clips?${params}`;
+          break;
         default:
           return;
       }
@@ -203,8 +228,14 @@ export default function Stash() {
       const response = await fetch(url);
       const result = await response.json();
 
-      if (result.success || result.data) {
-        const items = result.data || result.scenes || result.performers || result.studios || result.tags || [];
+      if (result.success || result.data || result.clips) {
+        let items = [];
+        
+        if (libraryTab === 'clips') {
+          items = result.clips || [];
+        } else {
+          items = result.data || result.scenes || result.performers || result.studios || result.tags || [];
+        }
         
         setData(prev => ({
           ...prev,
@@ -214,8 +245,8 @@ export default function Stash() {
         setPagination(prev => ({
           ...prev,
           [libraryTab]: {
-            total: result.total || items.length,
-            hasMore: result.hasMore || items.length === 20
+            total: result.total || result.pagination?.totalItems || items.length,
+            hasMore: result.hasMore || result.pagination?.hasMore || items.length === 20
           }
         }));
       }
@@ -231,9 +262,79 @@ export default function Stash() {
     loadData();
   };
 
+  // Utility function to format time in seconds to MM:SS format
+  const formatTime = (seconds) => {
+    const mins = Math.floor(seconds / 60);
+    const secs = Math.floor(seconds % 60);
+    return `${mins}:${secs.toString().padStart(2, '0')}`;
+  };
+
+  // Play a specific clip
+  const playClip = async (clip) => {
+    try {
+      const response = await fetch(`${config.apiBaseUrl}/api/stash/clips/${clip.id}/play`, {
+        method: 'POST'
+      });
+      
+      if (response.ok) {
+        const result = await response.json();
+        console.log('Playing clip:', result);
+        
+        // Open the video player modal with the clip
+        setSelectedVideo({
+          id: clip.sceneId,
+          title: clip.scene?.title || 'Unknown Scene',
+          streamUrl: result.streamUrl,
+          clipId: clip.id,
+          startTime: clip.startTime,
+          endTime: clip.endTime,
+          duration: clip.duration
+        });
+        setShowVideo(true);
+      } else {
+        console.error('Failed to play clip');
+      }
+    } catch (error) {
+      console.error('Error playing clip:', error);
+    }
+  };
+
+  // Mark a clip as watched
+  const markClipWatched = async (clipId) => {
+    try {
+      const response = await fetch(`${config.apiBaseUrl}/api/stash/clips/${clipId}/watched`, {
+        method: 'POST'
+      });
+      
+      if (response.ok) {
+        console.log('Clip marked as watched');
+        // Reload the clips data to update the UI
+        if (libraryTab === 'clips') {
+          loadData();
+        }
+      } else {
+        console.error('Failed to mark clip as watched');
+      }
+    } catch (error) {
+      console.error('Error marking clip as watched:', error);
+    }
+  };
+
   const handleLibraryTabChange = (tab) => {
     setLibraryTab(tab);
     setCurrentPage(1);
+    
+    // Set appropriate default sort values for each tab
+    if (tab === 'clips') {
+      setSortBy('createdAt');
+      setSortDirection('desc');
+    } else if (tab === 'scenes') {
+      setSortBy('date');
+      setSortDirection('DESC');
+    } else {
+      setSortBy('date');
+      setSortDirection('DESC');
+    }
   };
 
   const formatDate = (dateString) => {
@@ -258,7 +359,9 @@ export default function Stash() {
     const baseUrl = connectionStatus.stashUrl.endsWith('/') 
       ? connectionStatus.stashUrl.slice(0, -1) 
       : connectionStatus.stashUrl;
-    return `${baseUrl}/scene/${sceneId}/stream`;
+    
+    // Use HLS streaming endpoint for best browser compatibility
+    return `${baseUrl}/scene/${sceneId}/stream.m3u8`;
   };
 
   // Helper function to build the scene image URL
@@ -944,6 +1047,86 @@ export default function Stash() {
     );
   };
 
+  const renderClips = () => {
+    const clips = data.clips || [];
+    
+    return (
+      <div className="content-grid clips-grid">
+        {clips.map((clip) => (
+          <div key={clip.id} className="content-card clip-card">
+            <div className="clip-thumbnail-container">
+              <div className="clip-placeholder">
+                🎬
+              </div>
+              <div className="clip-duration-badge">
+                {Math.round(clip.duration)}s
+              </div>
+              <div className={`clip-watch-status ${clip.watched ? 'watched' : 'unwatched'}`}>
+                {clip.watched ? '✅' : '⏳'}
+              </div>
+            </div>
+            
+            <div className="content-card-body">
+              <h3 className="content-title">{clip.scene?.title || 'Unknown Scene'}</h3>
+              
+              <div className="clip-info">
+                <div className="clip-timing">
+                  <span className="clip-index">Clip #{clip.clipIndex + 1}</span>
+                  <span className="clip-time-range">
+                    {formatTime(clip.startTime)} - {formatTime(clip.endTime)}
+                  </span>
+                </div>
+                
+                {clip.scene?.performers && clip.scene.performers.length > 0 && (
+                  <div className="clip-performers">
+                    <span className="meta-icon">👥</span>
+                    <span>{clip.scene.performers.map(p => p.performer.name).join(', ')}</span>
+                  </div>
+                )}
+                
+                {clip.scene?.studioObject && (
+                  <div className="clip-studio">
+                    <span className="meta-icon">🏢</span>
+                    <span>{clip.scene.studioObject.name}</span>
+                  </div>
+                )}
+              </div>
+              
+              <div className="clip-actions">
+                <button 
+                  className="clip-play-btn"
+                  onClick={() => playClip(clip)}
+                >
+                  ▶️ Play Clip
+                </button>
+                
+                {!clip.watched && (
+                  <button 
+                    className="clip-mark-watched-btn"
+                    onClick={() => markClipWatched(clip.id)}
+                  >
+                    ✅ Mark Watched
+                  </button>
+                )}
+                
+                {clip.watched && (
+                  <div className="clip-watched-info">
+                    <span>✅ Watched</span>
+                    {clip.watchedAt && (
+                      <span className="clip-watched-date">
+                        {new Date(clip.watchedAt).toLocaleDateString()}
+                      </span>
+                    )}
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+    );
+  };
+
   const renderContent = () => {
     if (!connectionStatus.connected) {
       return null;
@@ -967,6 +1150,8 @@ export default function Stash() {
         return renderStudios();
       case 'tags':
         return renderTags();
+      case 'clips':
+        return renderClips();
       default:
         return null;
     }
@@ -976,11 +1161,452 @@ export default function Stash() {
     scenes: '🎬 Scenes',
     performers: '👤 Performers',
     studios: '🏢 Studios',
-    tags: '🏷️ Tags'
+    tags: '🏷️ Tags',
+    clips: '🎞️ Clips'
+  };
+
+  // Handle Clip Play - get random clip and start playing
+  const handleClipPlay = async () => {
+    setUpNextLoading(true);
+    try {
+      console.log('🎬 Starting Clip Play...');
+      
+      const response = await fetch(`${config.apiBaseUrl}/api/stash/clip-play`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        }
+      });
+      
+      const result = await response.json();
+      
+      if (response.ok) {
+        console.log('✅ Clip Play started:', result);
+        console.log(`🎯 Playing clip ${result.clip.clipIndex + 1} from: ${result.clip.scene.title}`);
+        console.log(`⏱️ Clip duration: ${result.playbackInfo.duration}s (${Math.floor(result.playbackInfo.startTime / 60)}:${String(Math.floor(result.playbackInfo.startTime % 60)).padStart(2, '0')} - ${Math.floor(result.playbackInfo.endTime / 60)}:${String(Math.floor(result.playbackInfo.endTime % 60)).padStart(2, '0')})`);
+        
+        // Update selected scene to show what's playing
+        setSelectedScene({
+          ...result.clip.scene,
+          clipInfo: {
+            clipIndex: result.clip.clipIndex + 1,
+            startTime: result.playbackInfo.startTime,
+            endTime: result.playbackInfo.endTime,
+            duration: result.playbackInfo.duration,
+            unwatchedClipsRemaining: result.totalUnwatchedClips
+          }
+        });
+        
+        // Open full-screen video player
+        setVideoPlayer({
+          isOpen: true,
+          clip: result.clip,
+          scene: result.clip.scene,
+          playbackInfo: result.playbackInfo
+        });
+        
+      } else {
+        console.error('Clip Play failed:', result.error);
+        alert(`❌ Clip Play failed: ${result.error}\n💡 ${result.suggestion || 'Try generating clips for more scenes first'}`);
+      }
+      
+    } catch (error) {
+      console.error('Error in Clip Play:', error);
+      alert('❌ Failed to start Clip Play');
+    } finally {
+      setUpNextLoading(false);
+    }
   };
 
   return (
     <div className="stash-page">
+      {/* Full-Screen Video Player */}
+      {videoPlayer.isOpen && (
+        <div className="video-player-overlay">
+          <div className="video-player-container">
+            <div className="video-player-header">
+              <div className="video-info">
+                <h3>🎬 {getSceneDisplayTitle(videoPlayer.scene)}</h3>
+                {videoPlayer.playbackInfo ? (
+                  <p>Clip {videoPlayer.clip.clipIndex + 1} • {Math.floor(videoPlayer.playbackInfo.startTime / 60)}:{String(Math.floor(videoPlayer.playbackInfo.startTime % 60)).padStart(2, '0')} - {Math.floor(videoPlayer.playbackInfo.endTime / 60)}:{String(Math.floor(videoPlayer.playbackInfo.endTime % 60)).padStart(2, '0')}</p>
+                ) : (
+                  <p>Loading clip info...</p>
+                )}
+              </div>
+              <div className="video-player-controls">
+                <button 
+                  className="next-clip-btn"
+                  onClick={async () => {
+                    console.log('⏭️ Manual next clip requested');
+                    
+                    // Clean up current timer
+                    const video = document.querySelector('.clip-video-player');
+                    if (video && video.clipTimer) {
+                      clearTimeout(video.clipTimer);
+                      video.clipTimer = null;
+                    }
+                    
+                    try {
+                      console.log('🔄 Manually fetching next clip from API...');
+                      const response = await fetch(`${config.apiBaseUrl}/api/stash/clips/next`);
+                      const result = await response.json();
+                      
+                      console.log('📡 Manual API Response status:', response.status);
+                      console.log('📦 Manual API Response data:', result);
+                      
+                      if (response.ok) {
+                        if (result.clip && result.clip.scene) {
+                          console.log('🎯 Manually loaded next clip:', result.clip.scene.title);
+                          console.log('📊 Manual new clip data:', {
+                            clipId: result.clip.id,
+                            sceneTitle: result.clip.scene.title,
+                            startTime: result.playbackInfo.startTime,
+                            endTime: result.playbackInfo.endTime,
+                            duration: result.playbackInfo.duration
+                          });
+                          
+                          // Update video player with new clip
+                          setVideoPlayer({
+                            isOpen: true,
+                            clip: result.clip,
+                            scene: result.clip.scene,
+                            playbackInfo: result.playbackInfo
+                          });
+                        } else {
+                          console.error('❌ Invalid manual clip data received:', result);
+                          alert('❌ Invalid clip data received');
+                        }
+                      } else {
+                        console.error('Failed to manually load next clip:', result.error);
+                        alert(`❌ Failed to load next clip: ${result.error}`);
+                      }
+                    } catch (error) {
+                      console.error('Error manually loading next clip:', error);
+                      alert('❌ Error loading next clip');
+                    }
+                  }}
+                  title="Load next random clip"
+                >
+                  ⏭️ Next
+                </button>
+                <button 
+                  className="close-player-btn"
+                  onClick={() => {
+                    // Clean up timer before closing
+                    const video = document.querySelector('.clip-video-player');
+                    if (video && video.clipTimer) {
+                      clearTimeout(video.clipTimer);
+                      video.clipTimer = null;
+                      console.log('🧹 Cleaned up clip timer on close');
+                    }
+                    setVideoPlayer({ isOpen: false, clip: null, scene: null, playbackInfo: null });
+                  }}
+                >
+                  ✕
+                </button>
+              </div>
+            </div>
+            {videoPlayer.playbackInfo ? (
+              <video
+                src={(() => {
+                  // Use the stream URL provided by the backend, only if playbackInfo exists
+                  if (!videoPlayer.playbackInfo) {
+                    console.log('⚠️ No playback info available yet');
+                    return '';
+                  }
+                  
+                  const backendStreamUrl = videoPlayer.playbackInfo.streamUrl;
+                  console.log('🎥 Using backend-provided stream URL:', backendStreamUrl);
+                  console.log('📊 Scene data:', videoPlayer.scene);
+                  
+                  return backendStreamUrl;
+                })()}
+                controls
+                className="clip-video-player"
+                onLoadedMetadata={(e) => {
+                  // Only proceed if playbackInfo is available
+                  if (!videoPlayer.playbackInfo) {
+                    console.log('⚠️ No playback info in onLoadedMetadata');
+                    return;
+                  }
+                  
+                  console.log('📺 Video loaded, duration:', e.target.duration);
+                  console.log('⏰ Setting start time to:', videoPlayer.playbackInfo.startTime);
+                  console.log('⏰ End time should be:', videoPlayer.playbackInfo.endTime);
+                  console.log('⏰ Clip duration:', videoPlayer.playbackInfo.duration);
+                  
+                  // Set video to start at clip start time
+                  try {
+                    e.target.currentTime = videoPlayer.playbackInfo.startTime;
+                    console.log('✅ Successfully set start time');
+                    
+                    // Now start playing after timing is set
+                    e.target.play().then(() => {
+                      console.log('▶️ Video started playing at correct time');
+                    }).catch(error => {
+                      console.error('❌ Failed to start playback:', error);
+                    });
+                  } catch (error) {
+                    console.error('❌ Failed to set start time:', error);
+                  }
+                  
+                  // Backup timer to ensure clip stops after the actual clip duration
+                  const clipDurationMs = videoPlayer.playbackInfo.duration * 1000; // Convert to milliseconds
+                  const clipTimer = setTimeout(async () => {
+                    console.log(`⏰ Backup timer: Stopping video after ${videoPlayer.playbackInfo.duration} seconds of playback - loading next clip`);
+                    e.target.pause();
+                    
+                    // Load next clip after backup timer expires
+                    try {
+                      console.log('🔄 Fetching next clip from API...');
+                      const response = await fetch(`${config.apiBaseUrl}/api/stash/clips/next`);
+                      const result = await response.json();
+                      
+                      console.log('📡 API Response status:', response.status);
+                      console.log('📦 API Response data:', result);
+                      
+                      if (response.ok) {
+                        if (result.clip && result.clip.scene) {
+                          console.log('🎯 Auto-loaded next clip via backup timer:', result.clip.scene.title);
+                          console.log('📊 New clip data:', {
+                            clipId: result.clip.id,
+                            sceneTitle: result.clip.scene.title,
+                            startTime: result.playbackInfo.startTime,
+                            endTime: result.playbackInfo.endTime,
+                            duration: result.playbackInfo.duration
+                          });
+                          
+                          // Update video player with new clip
+                          setVideoPlayer({
+                            isOpen: true,
+                            clip: result.clip,
+                            scene: result.clip.scene,
+                            playbackInfo: result.playbackInfo
+                          });
+                        } else {
+                          console.error('❌ Invalid clip data received:', result);
+                          setVideoPlayer({ isOpen: false, clip: null, scene: null, playbackInfo: null });
+                        }
+                      } else {
+                        console.error('Failed to load next clip via backup timer:', result.error);
+                        // Close player if no more clips available
+                        setVideoPlayer({ isOpen: false, clip: null, scene: null, playbackInfo: null });
+                      }
+                    } catch (error) {
+                      console.error('Error loading next clip via backup timer:', error);
+                      // Close player on error
+                      setVideoPlayer({ isOpen: false, clip: null, scene: null, playbackInfo: null });
+                    }
+                  }, clipDurationMs);
+                  
+                  // Store timer reference for cleanup
+                  e.target.clipTimer = clipTimer;
+                }}
+                onTimeUpdate={(e) => {
+                  // Only proceed if playbackInfo is available
+                  if (!videoPlayer.playbackInfo) {
+                    return;
+                  }
+                  
+                  // Calculate if we've watched the full clip
+                  const currentTime = e.target.currentTime;
+                  const clipStartTime = videoPlayer.playbackInfo.startTime;
+                  const clipEndTime = videoPlayer.playbackInfo.endTime;
+                  const playedDuration = currentTime - clipStartTime;
+                  const clipDuration = videoPlayer.playbackInfo.duration;
+                
+                // Debug logging every 5 seconds
+                if (Math.floor(currentTime) % 5 === 0) {
+                  console.log(`⏱️ Current: ${currentTime.toFixed(1)}s, Clip Start: ${clipStartTime}s, Clip End: ${clipEndTime}s, Played: ${playedDuration.toFixed(1)}s/${clipDuration}s`);
+                }
+                
+                // Stop video when we've reached the clip end time or played the full clip duration
+                if (currentTime >= clipEndTime || playedDuration >= clipDuration) {
+                  console.log('⏹️ Reached clip end, loading next clip');
+                  console.log(`📊 Final stats: Current: ${currentTime.toFixed(1)}s, End: ${clipEndTime}s, Duration played: ${playedDuration.toFixed(1)}s/${clipDuration}s`);
+                  e.target.pause();
+                  
+                  // Clear the backup timer
+                  if (e.target.clipTimer) {
+                    clearTimeout(e.target.clipTimer);
+                    e.target.clipTimer = null;
+                  }
+                  
+                  // Load next clip automatically
+                  (async () => {
+                    try {
+                      console.log('🔄 TimeUpdate: fetching next clip from API...');
+                      const response = await fetch(`${config.apiBaseUrl}/api/stash/clips/next`);
+                      const result = await response.json();
+                      
+                      console.log('📡 TimeUpdate API Response status:', response.status);
+                      console.log('📦 TimeUpdate API Response data:', result);
+                      
+                      if (response.ok) {
+                        if (result.clip && result.clip.scene) {
+                          console.log('🎯 Auto-loaded next clip via timeUpdate:', result.clip.scene.title);
+                          console.log('📊 TimeUpdate new clip data:', {
+                            clipId: result.clip.id,
+                            sceneTitle: result.clip.scene.title,
+                            startTime: result.playbackInfo.startTime,
+                            endTime: result.playbackInfo.endTime,
+                            duration: result.playbackInfo.duration
+                          });
+                          
+                          // Update video player with new clip
+                          setVideoPlayer({
+                            isOpen: true,
+                            clip: result.clip,
+                            scene: result.clip.scene,
+                            playbackInfo: result.playbackInfo
+                          });
+                        } else {
+                          console.error('❌ Invalid timeUpdate clip data received:', result);
+                          setVideoPlayer({ isOpen: false, clip: null, scene: null, playbackInfo: null });
+                        }
+                      } else {
+                        console.error('Failed to load next clip via timeUpdate:', result.error);
+                        // Close player if no more clips available
+                        setVideoPlayer({ isOpen: false, clip: null, scene: null, playbackInfo: null });
+                      }
+                    } catch (error) {
+                      console.error('Error loading next clip via timeUpdate:', error);
+                      // Close player on error
+                      setVideoPlayer({ isOpen: false, clip: null, scene: null, playbackInfo: null });
+                    }
+                  })();
+                }
+              }}
+              onPause={() => {
+                console.log('⏸️ Video paused');
+              }}
+              onEnded={async () => {
+                console.log('🏁 Video ended - loading next clip...');
+                // Clear timer if video ends naturally
+                const video = document.querySelector('.clip-video-player');
+                if (video && video.clipTimer) {
+                  clearTimeout(video.clipTimer);
+                  video.clipTimer = null;
+                }
+                
+                // Automatically load next clip
+                try {
+                  console.log('🔄 OnEnded: fetching next clip from API...');
+                  const response = await fetch(`${config.apiBaseUrl}/api/stash/clips/next`);
+                  const result = await response.json();
+                  
+                  console.log('📡 OnEnded API Response status:', response.status);
+                  console.log('📦 OnEnded API Response data:', result);
+                  
+                  if (response.ok) {
+                    if (result.clip && result.clip.scene) {
+                      console.log('🎯 Auto-loaded next clip via onEnded:', result.clip.scene.title);
+                      console.log('📊 OnEnded new clip data:', {
+                        clipId: result.clip.id,
+                        sceneTitle: result.clip.scene.title,
+                        startTime: result.playbackInfo.startTime,
+                        endTime: result.playbackInfo.endTime,
+                        duration: result.playbackInfo.duration
+                      });
+                      
+                      // Update video player with new clip
+                      setVideoPlayer({
+                        isOpen: true,
+                        clip: result.clip,
+                        scene: result.clip.scene,
+                        playbackInfo: result.playbackInfo
+                      });
+                    } else {
+                      console.error('❌ Invalid onEnded clip data received:', result);
+                      setVideoPlayer({ isOpen: false, clip: null, scene: null, playbackInfo: null });
+                    }
+                  } else {
+                    console.error('Failed to load next clip via onEnded:', result.error);
+                    // Close player if no more clips available
+                    setVideoPlayer({ isOpen: false, clip: null, scene: null, playbackInfo: null });
+                  }
+                } catch (error) {
+                  console.error('Error loading next clip via onEnded:', error);
+                  // Close player on error
+                  setVideoPlayer({ isOpen: false, clip: null, scene: null, playbackInfo: null });
+                }
+              }}
+              onError={(e) => {
+                const errorCode = e.target.error?.code;
+                const errorMessage = e.target.error?.message;
+                
+                console.error('❌ Video error details:');
+                console.error('   Code:', errorCode);
+                console.error('   Message:', errorMessage);
+                console.error('   Failed URL:', e.target.src);
+                console.error('   Stash URL:', connectionStatus.stashUrl);
+                
+                // Error code meanings:
+                // 1: MEDIA_ERR_ABORTED - The user aborted the video
+                // 2: MEDIA_ERR_NETWORK - A network error occurred  
+                // 3: MEDIA_ERR_DECODE - A decode error occurred
+                // 4: MEDIA_ERR_SRC_NOT_SUPPORTED - The video format is not supported
+                
+                if (errorCode === 2) {
+                  console.error('🌐 Network error - check if Stash server is reachable');
+                } else if (errorCode === 4) {
+                  console.error('🎬 Format error - video format may not be supported by browser');
+                }
+                
+                // Try alternative Stash endpoints
+                const baseUrl = connectionStatus.stashUrl?.endsWith('/') 
+                  ? connectionStatus.stashUrl.slice(0, -1) 
+                  : connectionStatus.stashUrl;
+                
+                const currentSrc = e.target.src;
+                let nextUrl = null;
+                
+                // Try Stash's known streaming endpoints
+                if (currentSrc.includes('/stream') && !currentSrc.includes('.')) {
+                  // Try HLS stream format
+                  nextUrl = `${baseUrl}/scene/${videoPlayer.scene.id}/stream.m3u8`;
+                  console.log('🔄 Direct stream failed, trying HLS:', nextUrl);
+                } else if (currentSrc.includes('.m3u8')) {
+                  // Try direct file endpoint
+                  nextUrl = `${baseUrl}/scene/${videoPlayer.scene.id}/file`;
+                  console.log('🔄 HLS failed, trying direct file:', nextUrl);
+                } else {
+                  console.error('❌ All streaming formats failed');
+                  
+                  // Provide helpful error message
+                  const errorMsg = errorCode === 2 
+                    ? '❌ Network error: Cannot reach Stash server. Check if Stash is running and accessible.'
+                    : errorCode === 4 
+                    ? '❌ Format error: Browser cannot play this video format. Try opening the video directly in Stash.'
+                    : '❌ Video playback failed. Try refreshing the page or opening the video directly in Stash.';
+                  
+                  alert(errorMsg);
+                  return;
+                }
+                
+                if (nextUrl && nextUrl !== currentSrc) {
+                  console.log('🔄 Retrying with alternative URL...');
+                  e.target.src = nextUrl;
+                  e.target.load(); // Reload with new source
+                } else {
+                  console.error('❌ No more alternatives to try');
+                }
+              }}
+              onCanPlay={() => {
+                console.log('✅ Video can play');
+              }}
+            >
+              Your browser does not support the video tag.
+            </video>
+            ) : (
+              <div className="video-loading">
+                <p>⏳ Loading clip...</p>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Main Tabs */}
       <div className="main-tabs-section">
         <div className="main-tabs">
@@ -1019,11 +1645,36 @@ export default function Stash() {
                       {upNextLoading ? '🎲 Getting...' : '🎲 Next Stash'}
                     </Button>
                     
+                    <Button 
+                      onClick={handleClipPlay} 
+                      disabled={upNextLoading || !connectionStatus.connected}
+                      className={`clip-play-button ${upNextLoading ? 'loading' : ''}`}
+                      style={{ 
+                        backgroundColor: '#e74c3c', 
+                        color: '#fff',
+                        marginLeft: '10px'
+                      }}
+                    >
+                      {upNextLoading ? '🎬 Loading...' : '🎬 Clip Play'}
+                    </Button>
+                    
                     {selectedScene && (
                       <>
                         {/* Scene Title */}
                         <h3 className="selected-scene-title">
                           {getSceneDisplayTitle(selectedScene)}
+                          {selectedScene.clipInfo && (
+                            <span className="clip-info">
+                              <br />
+                              <small style={{ color: '#e74c3c', fontWeight: 'normal' }}>
+                                🎬 Clip {selectedScene.clipInfo.clipIndex} • 
+                                {Math.floor(selectedScene.clipInfo.startTime / 60)}:{String(Math.floor(selectedScene.clipInfo.startTime % 60)).padStart(2, '0')} - 
+                                {Math.floor(selectedScene.clipInfo.endTime / 60)}:{String(Math.floor(selectedScene.clipInfo.endTime % 60)).padStart(2, '0')} • 
+                                {selectedScene.clipInfo.duration}s • 
+                                {selectedScene.clipInfo.unwatchedClipsRemaining} clips left
+                              </small>
+                            </span>
+                          )}
                         </h3>
                         
                         {/* Action Buttons */}
@@ -1277,12 +1928,49 @@ export default function Stash() {
                     </Button>
                   </div>
                 )}
+
+                {libraryTab === 'clips' && (
+                  <div className="clip-controls">
+                    <div className="sort-controls">
+                      <select
+                        value={sortBy}
+                        onChange={(e) => setSortBy(e.target.value)}
+                        className="sort-select"
+                      >
+                        <option value="createdAt">Date Created</option>
+                        <option value="sceneTitle">Scene Title</option>
+                        <option value="duration">Duration</option>
+                        <option value="startTime">Start Time</option>
+                        <option value="watchedAt">Watch Date</option>
+                      </select>
+                      
+                      <Button
+                        className="sort-direction-button"
+                        onClick={() => setSortDirection(sortDirection === 'asc' ? 'desc' : 'asc')}
+                      >
+                        {sortDirection === 'asc' ? '↑' : '↓'}
+                      </Button>
+                    </div>
+                    
+                    <div className="watch-filter">
+                      <select
+                        value={watchStatusFilter}
+                        onChange={(e) => setWatchStatusFilter(e.target.value)}
+                        className="filter-select"
+                      >
+                        <option value="all">All Clips</option>
+                        <option value="false">Unwatched</option>
+                        <option value="true">Watched</option>
+                      </select>
+                    </div>
+                  </div>
+                )}
               </div>
 
               {/* Library Sub-Tabs */}
               <div className="tabs-section">
                 <div className="tabs">
-                  {['scenes', 'performers', 'studios', 'tags'].map((tab) => (
+                  {['scenes', 'performers', 'studios', 'tags', 'clips'].map((tab) => (
                     <button
                       key={tab}
                       className={`tab ${libraryTab === tab ? 'active' : ''}`}
