@@ -7255,75 +7255,7 @@ app.get('/api/music/tracks/artist/:artistRatingKey', async (req, res) => {
   }
 });
 
-// Serve React app for all other routes in production
-if (process.env.NODE_ENV === 'production') {
-  app.get('*', (req, res) => {
-    const clientBuildPath = path.join(__dirname, '..', 'client', 'dist');
-    res.sendFile(path.join(clientBuildPath, 'index.html'));
-  });
-}
-
-// Graceful shutdown
-async function shutdown() {
-  console.log('Shutting down server...');
-  
-  // Stop background sync service
-  await backgroundSync.stop();
-  
-  await prisma.$disconnect();
-  console.log('Prisma client disconnected.');
-  process.exit(0);
-}
-
-process.on('SIGTERM', shutdown);
-process.on('SIGINT', shutdown);
-
-// Socket.IO connection handling
-io.on('connection', (socket) => {
-  console.log('Client connected to WebSocket');
-  
-  socket.on('disconnect', () => {
-    console.log('Client disconnected from WebSocket');
-  });
-});
-
-// Start the server
-server.listen(PORT, '0.0.0.0', async () => {
-  console.log(`Server running on port ${PORT}`);
-  console.log(`Server accessible at http://192.168.1.252:${PORT}`);
-  console.log(`WebSocket server ready for real-time notifications`);
-  
-  // Start background sync service
-  try {
-    await backgroundSync.start();
-  } catch (error) {
-    console.error('Failed to start background sync service:', error);
-  }
-  
-  // Start Stash background sync service
-  try {
-    await stashBackgroundSync.start();
-  } catch (error) {
-    console.error('Failed to start Stash background sync service:', error);
-  }
-  
-  // Initialize Stash service
-  try {
-    await initializeStashService();
-    console.log('✅ Stash service initialization completed');
-  } catch (error) {
-    console.error('❌ Failed to initialize Stash service:', error);
-  }
-  
-  // Initialize Stash sync service
-  try {
-    await initializeStashSyncService();
-    console.log('✅ Stash sync service initialization completed');
-  } catch (error) {
-    console.error('❌ Failed to initialize Stash sync service:', error);
-  }
-});
-
+// Android companion app API endpoints (must be before catch-all route)
 // Android companion app endpoint - Next Stash
 app.get('/api/android/stash/next', async (req, res) => {
   console.log('📱 Android app requesting next Stash content...');
@@ -7565,6 +7497,75 @@ app.delete('/api/android/stash/scene/:id', async (req, res) => {
       error: 'Internal server error',
       details: error.message 
     });
+  }
+});
+
+// Serve React app for all other routes in production
+if (process.env.NODE_ENV === 'production') {
+  app.get('*', (req, res) => {
+    const clientBuildPath = path.join(__dirname, '..', 'client', 'dist');
+    res.sendFile(path.join(clientBuildPath, 'index.html'));
+  });
+}
+
+// Graceful shutdown
+async function shutdown() {
+  console.log('Shutting down server...');
+  
+  // Stop background sync service
+  await backgroundSync.stop();
+  
+  await prisma.$disconnect();
+  console.log('Prisma client disconnected.');
+  process.exit(0);
+}
+
+process.on('SIGTERM', shutdown);
+process.on('SIGINT', shutdown);
+
+// Socket.IO connection handling
+io.on('connection', (socket) => {
+  console.log('Client connected to WebSocket');
+  
+  socket.on('disconnect', () => {
+    console.log('Client disconnected from WebSocket');
+  });
+});
+
+// Start the server
+server.listen(PORT, '0.0.0.0', async () => {
+  console.log(`Server running on port ${PORT}`);
+  console.log(`Server accessible at http://192.168.1.252:${PORT}`);
+  console.log(`WebSocket server ready for real-time notifications`);
+  
+  // Start background sync service
+  try {
+    await backgroundSync.start();
+  } catch (error) {
+    console.error('Failed to start background sync service:', error);
+  }
+  
+  // Start Stash background sync service
+  try {
+    await stashBackgroundSync.start();
+  } catch (error) {
+    console.error('Failed to start Stash background sync service:', error);
+  }
+  
+  // Initialize Stash service
+  try {
+    await initializeStashService();
+    console.log('✅ Stash service initialization completed');
+  } catch (error) {
+    console.error('❌ Failed to initialize Stash service:', error);
+  }
+  
+  // Initialize Stash sync service
+  try {
+    await initializeStashSyncService();
+    console.log('✅ Stash sync service initialization completed');
+  } catch (error) {
+    console.error('❌ Failed to initialize Stash sync service:', error);
   }
 });
 

@@ -439,6 +439,19 @@ When making schema changes:
 - **POST /api/background-sync/stop**: Stop background sync services
 - **Configurable Intervals**: Set via settings API for both Plex and Stash sync
 
+### Android Companion App API
+- **GET /api/android/stash/next**: Get next clip for Android app playback
+  - Returns: `{"type":"PLAY_CLIP","data":{...}}` with URL, title, performers, studio, duration, timing
+- **GET /api/android/stash/scene/next**: Get next scene for Android app playback
+  - Returns: `{"type":"PLAY_SCENE","data":{...}}` with scene metadata and playback URL
+- **POST /api/android/stash/scene/:id/watched**: Mark scene as watched via Android app
+  - Returns: `{"type":"SCENE_MARKED_WATCHED","data":{...}}` with success status and timestamp
+- **DELETE /api/android/stash/scene/:id**: Delete scene via Android app
+  - Optional query parameter: `?deleteFile=true` to also delete the physical file
+  - Returns: `{"type":"SCENE_DELETED","data":{...}}` with deletion status
+
+**Note**: These endpoints are specifically designed for the Android companion app and return structured responses with `type` and `data` fields for easy mobile app integration.
+
 ### Episode Selection & Media Discovery
 - **GET /api/up_next**: Get random episode from configured collection
   - Fetches collection name from database
