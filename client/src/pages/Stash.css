@@ -1656,7 +1656,18 @@
   align-items: center;
   justify-content: center;
   z-index: 9999;
-  cursor: pointer; /* Allow clicking overlay to close */
+  cursor: none; /* Hide cursor by default */
+}
+
+/* Show cursor when moving mouse or controls visible */
+.video-player-overlay:focus-within,
+.video-player-overlay:hover {
+  cursor: default;
+}
+
+/* Full browser fullscreen mode */
+.video-player-overlay.fullscreen {
+  background-color: black;
 }
 
 .video-player-container {
@@ -1667,6 +1678,13 @@
   background: #000;
   border-radius: 0; /* Remove border radius for true full-screen */
   overflow: hidden;
+  position: relative; /* Make it a positioned container for absolute header */
+  padding-top: 80px; /* Reserve space for header */
+}
+
+/* In fullscreen mode, remove padding */
+.fullscreen .video-player-container {
+  padding-top: 0;
 }
 
 .video-player-header {
@@ -1677,15 +1695,27 @@
   background: rgba(0, 0, 0, 0.8);
   backdrop-filter: blur(10px);
   border-bottom: 1px solid rgba(255, 255, 255, 0.1);
-  /* Auto-hide header after 3 seconds of no mouse movement */
-  transition: transform 0.3s ease-in-out, opacity 0.3s ease-in-out;
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 100;
+  transition: opacity 0.3s ease, transform 0.3s ease;
 }
 
-/* Auto-hide header when not hovering */
-.video-player-container:not(:hover) .video-player-header {
-  transform: translateY(-100%);
+.video-player-header.visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.video-player-header.hidden {
   opacity: 0;
-  pointer-events: none;
+  transform: translateY(-100%);
+}
+
+/* In fullscreen mode, header stays at top */
+.fullscreen .video-player-header {
+  position: fixed;
 }
 
 .video-info h3 {
@@ -1710,6 +1740,44 @@
   display: flex;
   gap: 0.5rem;
   align-items: center;
+}
+
+.fullscreen-btn {
+  background: rgba(255, 255, 255, 0.2);
+  color: white;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  width: 44px;
+  height: 44px;
+  border-radius: 8px; /* More rectangular for better icon display */
+  cursor: pointer;
+  font-size: 1.2rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s;
+  margin-right: 0.5rem;
+  position: relative;
+}
+
+.fullscreen-btn:hover {
+  background: rgba(255, 255, 255, 0.3);
+  border-color: rgba(255, 255, 255, 0.5);
+  transform: scale(1.05);
+}
+
+.fullscreen-btn:hover::after {
+  content: "Fullscreen (F)";
+  position: absolute;
+  bottom: -35px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(0, 0, 0, 0.8);
+  color: white;
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-size: 0.8rem;
+  white-space: nowrap;
+  z-index: 1000;
 }
 
 .next-clip-btn {
@@ -1753,10 +1821,25 @@
 .clip-video-player {
   flex: 1;
   width: 100%;
-  height: 100%;
-  object-fit: cover; /* Changed from contain to cover for more immersive experience */
+  height: calc(100vh - 80px); /* Account for header space */
+  max-height: calc(100vh - 80px);
+  object-fit: contain; /* Ensure entire video is visible */
   background: #000;
-  cursor: pointer; /* Allow clicking video to toggle controls */
+  cursor: pointer;
+}
+
+/* Fullscreen video styling - use full screen */
+.clip-video-player.fullscreen-video {
+  height: 100vh;
+  max-height: 100vh;
+  object-fit: contain; /* Maintain aspect ratio in fullscreen */
+}
+
+/* In browser fullscreen, video should fill screen properly */
+.fullscreen .clip-video-player {
+  height: 100vh;
+  max-height: 100vh;
+  object-fit: contain;
 }
 
 /* Mobile responsive */

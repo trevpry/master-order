@@ -78,7 +78,110 @@ export default function Stash() {
     playbackInfo: null
   });
   const [autoSkipRetries, setAutoSkipRetries] = useState(0);
+  const [videoPlayerFullscreen, setVideoPlayerFullscreen] = useState(false);
+  const [videoPlayerControlsVisible, setVideoPlayerControlsVisible] = useState(true);
+  const [videoPlayerControlsTimeout, setVideoPlayerControlsTimeout] = useState(null);
   const MAX_AUTO_SKIP_RETRIES = 5; // Maximum number of auto-skip attempts
+
+  // Helper function to toggle fullscreen
+  const toggleVideoFullscreen = async () => {
+    const container = document.querySelector('.video-player-container');
+    if (!container) return;
+
+    try {
+      if (!document.fullscreenElement) {
+        await container.requestFullscreen();
+        setVideoPlayerFullscreen(true);
+      } else {
+        await document.exitFullscreen();
+        setVideoPlayerFullscreen(false);
+      }
+    } catch (error) {
+      console.error('Failed to toggle fullscreen:', error);
+    }
+  };
+
+  // Handle mouse movement to show/hide controls
+  const handleVideoPlayerMouseMove = () => {
+    setVideoPlayerControlsVisible(true);
+    
+    // Clear existing timeout
+    if (videoPlayerControlsTimeout) {
+      clearTimeout(videoPlayerControlsTimeout);
+    }
+    
+    // Set new timeout to hide controls after 3 seconds of inactivity
+    const timeout = setTimeout(() => {
+      setVideoPlayerControlsVisible(false);
+    }, 3000);
+    
+    setVideoPlayerControlsTimeout(timeout);
+  };
+
+  // Keyboard event handler for video player
+  const handleVideoPlayerKeyDown = (event) => {
+    const video = document.querySelector('.clip-video-player');
+    if (!video) return;
+
+    switch (event.key) {
+      case 'Escape':
+        event.preventDefault();
+        // Clean up timer before closing
+        if (video.clipTimer) {
+          clearTimeout(video.clipTimer);
+          video.clipTimer = null;
+        }
+        if (document.fullscreenElement) {
+          document.exitFullscreen();
+        }
+        setVideoPlayer({ isOpen: false, clip: null, scene: null, playbackInfo: null });
+        setAutoSkipRetries(0);
+        break;
+      case ' ':
+        event.preventDefault();
+        if (video.paused) {
+          video.play();
+        } else {
+          video.pause();
+        }
+        break;
+      case 'f':
+      case 'F':
+        event.preventDefault();
+        toggleVideoFullscreen();
+        break;
+      case 'ArrowRight':
+      case 'n':
+      case 'N':
+        event.preventDefault();
+        // Trigger next clip
+        document.querySelector('.next-clip-btn')?.click();
+        break;
+      default:
+        break;
+    }
+  };
+
+  // Listen for fullscreen changes
+  useEffect(() => {
+    const handleFullscreenChange = () => {
+      setVideoPlayerFullscreen(!!document.fullscreenElement);
+    };
+
+    document.addEventListener('fullscreenchange', handleFullscreenChange);
+    return () => {
+      document.removeEventListener('fullscreenchange', handleFullscreenChange);
+    };
+  }, []);
+
+  // Cleanup timeouts on unmount
+  useEffect(() => {
+    return () => {
+      if (videoPlayerControlsTimeout) {
+        clearTimeout(videoPlayerControlsTimeout);
+      }
+    };
+  }, [videoPlayerControlsTimeout]);
 
   // Helper function to extract filename from path without extension
   const getFileNameFromPath = (path) => {
@@ -1321,10 +1424,13 @@ export default function Stash() {
 
   return (
     <div className="stash-page">
-      {/* Full-Screen Video Player */}
+      {/* Enhanced Full-Screen Video Player */}
       {videoPlayer.isOpen && (
         <div 
-          className="video-player-overlay"
+          className={`video-player-overlay ${videoPlayerFullscreen ? 'fullscreen' : ''}`}
+          onMouseMove={handleVideoPlayerMouseMove}
+          onKeyDown={handleVideoPlayerKeyDown}
+          tabIndex={0} // Make div focusable for keyboard events
           onClick={(e) => {
             // Close player when clicking on overlay background (not the video or controls)
             if (e.target === e.currentTarget) {
@@ -1335,6 +1441,9 @@ export default function Stash() {
                 video.clipTimer = null;
                 console.log('🧹 Cleaned up clip timer on overlay click');
               }
+              if (document.fullscreenElement) {
+                document.exitFullscreen();
+              }
               setVideoPlayer({ isOpen: false, clip: null, scene: null, playbackInfo: null });
               setAutoSkipRetries(0);
             }
@@ -1344,19 +1453,27 @@ export default function Stash() {
             className="video-player-container"
             onClick={(e) => e.stopPropagation()} // Prevent overlay click when clicking inside container
           >
-            <div className="video-player-header">
+            {/* Enhanced Header with Auto-Hide */}
+            <div className={`video-player-header ${videoPlayerControlsVisible ? 'visible' : 'hidden'}`}>
               <div className="video-info">
                 <h3>🎬 {getSceneDisplayTitle(videoPlayer.scene)}</h3>
                 {videoPlayer.playbackInfo ? (
                   <>
                     <p>Clip {videoPlayer.clip.clipIndex + 1} • {Math.floor(videoPlayer.playbackInfo.startTime / 60)}:{String(Math.floor(videoPlayer.playbackInfo.startTime % 60)).padStart(2, '0')} - {Math.floor(videoPlayer.playbackInfo.endTime / 60)}:{String(Math.floor(videoPlayer.playbackInfo.endTime % 60)).padStart(2, '0')}</p>
-                    <p className="keyboard-shortcuts">ESC: Close • Space: Play/Pause • N/→: Next Clip • F: Fullscreen</p>
+                    <p className="keyboard-shortcuts">ESC: Close • Space: Play/Pause • N/→: Next • F: Fullscreen • Click: Hide Controls</p>
                   </>
                 ) : (
                   <p>Loading clip info...</p>
                 )}
               </div>
               <div className="video-player-controls">
+                <button 
+                  className="fullscreen-btn"
+                  onClick={toggleVideoFullscreen}
+                  title="Toggle fullscreen (F)"
+                >
+                  {videoPlayerFullscreen ? '🪟' : '⛶'}
+                </button>
                 <button 
                   className="next-clip-btn"
                   onClick={async () => {
@@ -1460,7 +1577,12 @@ export default function Stash() {
                   return backendStreamUrl;
                 })()}
                 controls
-                className="clip-video-player"
+                className={`clip-video-player ${videoPlayerFullscreen ? 'fullscreen-video' : ''}`}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  // Toggle controls visibility on video click
+                  setVideoPlayerControlsVisible(!videoPlayerControlsVisible);
+                }}
                 onLoadedMetadata={(e) => {
                   // Only proceed if playbackInfo is available
                   if (!videoPlayer.playbackInfo) {

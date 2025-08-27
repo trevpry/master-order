@@ -7082,6 +7082,179 @@ app.get('/api/music/artists', async (req, res) => {
   }
 });
 
+// Albums endpoints
+app.get('/api/music/albums', async (req, res) => {
+  try {
+    const { search, page, limit } = req.query;
+    const pageNum = parseInt(page) || 1;
+    const limitNum = parseInt(limit) || 20;
+    const offset = (pageNum - 1) * limitNum;
+
+    let albums;
+    let total;
+
+    if (search) {
+      albums = await plexDb.searchAlbums(search, limitNum, offset);
+      total = await plexDb.getAlbumsCount(); // For simplicity, using total count
+    } else {
+      albums = await plexDb.getAllAlbums(limitNum, offset);
+      total = await plexDb.getAlbumsCount();
+    }
+
+    const hasMore = offset + albums.length < total;
+
+    res.json({
+      albums,
+      page: pageNum,
+      limit: limitNum,
+      total,
+      hasMore
+    });
+  } catch (error) {
+    console.error('Error fetching all albums:', error);
+    res.status(500).json({ error: 'Failed to fetch albums' });
+  }
+});
+
+app.get('/api/music/albums/section/:sectionKey', async (req, res) => {
+  try {
+    const { sectionKey } = req.params;
+    const { search, page, limit } = req.query;
+    const pageNum = parseInt(page) || 1;
+    const limitNum = parseInt(limit) || 20;
+    const offset = (pageNum - 1) * limitNum;
+
+    console.log(`Albums requested for section: ${sectionKey}, page: ${pageNum}, limit: ${limitNum}`);
+
+    let albums;
+    let total;
+
+    if (search) {
+      albums = await plexDb.searchAlbumsBySection(search, sectionKey, limitNum, offset);
+      total = await plexDb.getAlbumsBySectionCount(sectionKey); // For simplicity
+    } else {
+      albums = await plexDb.getAlbumsBySection(sectionKey, limitNum, offset);
+      total = await plexDb.getAlbumsBySectionCount(sectionKey);
+    }
+
+    console.log(`Returning ${albums.length} albums for section ${sectionKey}, total: ${total}`);
+
+    const hasMore = offset + albums.length < total;
+
+    res.json({
+      albums,
+      page: pageNum,
+      limit: limitNum,
+      total,
+      hasMore
+    });
+  } catch (error) {
+    console.error('Error fetching albums by section:', error);
+    res.status(500).json({ error: 'Failed to fetch albums' });
+  }
+});
+
+app.get('/api/music/albums/artist/:artistRatingKey', async (req, res) => {
+  try {
+    const { artistRatingKey } = req.params;
+    const albums = await plexDb.getAlbumsByArtist(artistRatingKey);
+    res.json(albums);
+  } catch (error) {
+    console.error('Error fetching albums by artist:', error);
+    res.status(500).json({ error: 'Failed to fetch albums' });
+  }
+});
+
+// Tracks endpoints
+app.get('/api/music/tracks', async (req, res) => {
+  try {
+    const { search, page, limit } = req.query;
+    const pageNum = parseInt(page) || 1;
+    const limitNum = parseInt(limit) || 20;
+    const offset = (pageNum - 1) * limitNum;
+
+    let tracks;
+    let total;
+
+    if (search) {
+      tracks = await plexDb.searchTracks(search, limitNum, offset);
+      total = await plexDb.getTracksCount(); // For simplicity, using total count
+    } else {
+      tracks = await plexDb.getAllTracks(limitNum, offset);
+      total = await plexDb.getTracksCount();
+    }
+
+    const hasMore = offset + tracks.length < total;
+
+    res.json({
+      tracks,
+      page: pageNum,
+      limit: limitNum,
+      total,
+      hasMore
+    });
+  } catch (error) {
+    console.error('Error fetching all tracks:', error);
+    res.status(500).json({ error: 'Failed to fetch tracks' });
+  }
+});
+
+app.get('/api/music/tracks/section/:sectionKey', async (req, res) => {
+  try {
+    const { sectionKey } = req.params;
+    const { search, page, limit } = req.query;
+    const pageNum = parseInt(page) || 1;
+    const limitNum = parseInt(limit) || 20;
+    const offset = (pageNum - 1) * limitNum;
+
+    let tracks;
+    let total;
+
+    if (search) {
+      tracks = await plexDb.searchTracksBySection(search, sectionKey, limitNum, offset);
+      total = await plexDb.getTracksBySectionCount(sectionKey); // For simplicity
+    } else {
+      tracks = await plexDb.getTracksBySection(sectionKey, limitNum, offset);
+      total = await plexDb.getTracksBySectionCount(sectionKey);
+    }
+
+    const hasMore = offset + tracks.length < total;
+
+    res.json({
+      tracks,
+      page: pageNum,
+      limit: limitNum,
+      total,
+      hasMore
+    });
+  } catch (error) {
+    console.error('Error fetching tracks by section:', error);
+    res.status(500).json({ error: 'Failed to fetch tracks' });
+  }
+});
+
+app.get('/api/music/tracks/album/:albumRatingKey', async (req, res) => {
+  try {
+    const { albumRatingKey } = req.params;
+    const tracks = await plexDb.getTracksByAlbum(albumRatingKey);
+    res.json(tracks);
+  } catch (error) {
+    console.error('Error fetching tracks by album:', error);
+    res.status(500).json({ error: 'Failed to fetch tracks' });
+  }
+});
+
+app.get('/api/music/tracks/artist/:artistRatingKey', async (req, res) => {
+  try {
+    const { artistRatingKey } = req.params;
+    const tracks = await plexDb.getTracksByArtist(artistRatingKey);
+    res.json(tracks);
+  } catch (error) {
+    console.error('Error fetching tracks by artist:', error);
+    res.status(500).json({ error: 'Failed to fetch tracks' });
+  }
+});
+
 // Serve React app for all other routes in production
 if (process.env.NODE_ENV === 'production') {
   app.get('*', (req, res) => {
