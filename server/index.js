@@ -7341,6 +7341,48 @@ app.get('/api/android/stash/scene/next', async (req, res) => {
     
     const scene = nextSceneData.scene;
     
+    // Get Stash artwork from direct GraphQL call
+    let sceneArtwork = null;
+    try {
+      const settings = await prisma.settings.findFirst();
+      if (settings?.stashUrl) {
+        const stashQuery = `
+          query FindScene($id: ID!) {
+            findScene(id: $id) {
+              id
+              paths {
+                screenshot
+                preview
+                stream
+                webp
+              }
+            }
+          }
+        `;
+        
+        const stashResponse = await fetch(`${settings.stashUrl}/graphql`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'ApiKey': settings.stashApiKey || ''
+          },
+          body: JSON.stringify({
+            query: stashQuery,
+            variables: { id: scene.id }
+          })
+        });
+        
+        if (stashResponse.ok) {
+          const stashData = await stashResponse.json();
+          if (stashData.data?.findScene?.paths) {
+            sceneArtwork = stashData.data.findScene.paths;
+          }
+        }
+      }
+    } catch (artworkError) {
+      console.warn('⚠️ Failed to fetch scene artwork from Stash:', artworkError.message);
+    }
+    
     // Use filename without extension as fallback if title is empty
     let displayTitle = scene.title;
     if (!displayTitle || displayTitle.trim() === '') {
@@ -7363,7 +7405,8 @@ app.get('/api/android/stash/scene/next', async (req, res) => {
         duration: scene.duration || 0,
         sceneId: scene.id,
         rating: scene.rating || 0,
-        totalUnwatched: nextSceneData.totalUnwatched || 0
+        totalUnwatched: nextSceneData.totalUnwatched || 0,
+        artwork: sceneArtwork || null
       }
     };
     
