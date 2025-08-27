@@ -1031,6 +1031,18 @@ app.post('/api/stash/scenes/:id/watched', async (req, res) => {
       }
     });
 
+    // Handle the case where playCount was null before increment
+    // SQLite increment on null results in null, so we need to fix this
+    let finalPlayCount = updatedScene.playCount;
+    if (finalPlayCount === null) {
+      const fixedScene = await prisma.stashScene.update({
+        where: { id: sceneId },
+        data: { playCount: 1 }
+      });
+      finalPlayCount = 1;
+      updatedScene.playCount = 1;
+    }
+
     // Also increment play count in Stash itself
     let stashResult = null;
     console.log('🔍 Checking Stash service for play count increment...');
@@ -1087,7 +1099,18 @@ app.delete('/api/stash/scenes/:id', async (req, res) => {
 
     // Delete from local database first
     let localDeleted = false;
+    let clipsDeleted = 0;
     try {
+      // First, delete all clips associated with this scene
+      const clipDeletionResult = await prisma.stashClip.deleteMany({
+        where: { sceneId: sceneId }
+      });
+      clipsDeleted = clipDeletionResult.count;
+      if (clipsDeleted > 0) {
+        console.log(`✅ Deleted ${clipsDeleted} clips associated with scene`);
+      }
+      
+      // Then delete the scene
       await prisma.stashScene.delete({
         where: { id: sceneId }
       });
@@ -1125,6 +1148,7 @@ app.delete('/api/stash/scenes/:id', async (req, res) => {
       success: true,
       message: 'Scene deletion completed',
       localDeleted,
+      clipsDeleted,
       stashDeleted: stashResult?.success || false,
       stashResult
     });
@@ -8095,6 +8119,250 @@ server.listen(PORT, '0.0.0.0', async () => {
     console.log('✅ Stash sync service initialization completed');
   } catch (error) {
     console.error('❌ Failed to initialize Stash sync service:', error);
+  }
+});
+
+// Android companion app endpoint - Next Stash
+app.get('/api/android/stash/next', async (req, res) => {
+  console.log('📱 Android app requesting next Stash content...');
+  
+  try {
+    // Get next clip using existing logic
+    const nextClipResponse = await fetch(`http://localhost:${PORT}/api/stash/clips/next`);
+    
+    if (!nextClipResponse.ok) {
+      const errorText = await nextClipResponse.text();
+      console.error('Failed to get next clip:', errorText);
+      return res.status(500).json({ 
+        error: 'Failed to get next clip',
+        details: errorText 
+      });
+    }
+    
+    const nextClipData = await nextClipResponse.json();
+    console.log('📱 Next clip data received:', JSON.stringify(nextClipData, null, 2));
+    
+    if (!nextClipData.clip) {
+      return res.status(404).json({ 
+        error: 'No clips available',
+        message: 'No unwatched clips found. Try generating more clips first.' 
+      });
+    }
+    
+    // Build response in Android companion format
+    const androidResponse = {
+      type: 'PLAY_CLIP',
+      data: {
+        url: nextClipData.clip.paths?.stream || nextClipData.playbackInfo?.streamUrl || '',
+        title: nextClipData.scene?.title || 'Unknown Scene',
+        performers: nextClipData.scene?.performers?.map(p => p.name).join(', ') || 'Unknown',
+        studio: nextClipData.scene?.studio?.name || 'Unknown Studio',
+        duration: nextClipData.clip.duration || 60,
+        startTime: nextClipData.clip.startTime || 0,
+        endTime: nextClipData.clip.endTime || 60,
+        clipId: nextClipData.clip.id,
+        sceneId: nextClipData.scene?.id,
+        clipIndex: nextClipData.clip.clipIndex || 0
+      }
+    };
+    
+    console.log('📱 Sending Android companion response:', JSON.stringify(androidResponse, null, 2));
+    res.json(androidResponse);
+    
+  } catch (error) {
+    console.error('❌ Error in Android next Stash endpoint:', error);
+    res.status(500).json({ 
+      error: 'Internal server error',
+      details: error.message 
+    });
+  }
+});
+
+// Android companion app endpoint - Next Stash Scene
+app.get('/api/android/stash/scene/next', async (req, res) => {
+  console.log('📱 Android app requesting next Stash scene...');
+  
+  try {
+    // Get next scene using existing logic
+    const nextSceneResponse = await fetch(`http://localhost:${PORT}/api/stash/scenes/next`);
+    
+    if (!nextSceneResponse.ok) {
+      const errorText = await nextSceneResponse.text();
+      console.error('Failed to get next scene:', errorText);
+      return res.status(500).json({ 
+        error: 'Failed to get next scene',
+        details: errorText 
+      });
+    }
+    
+    const nextSceneData = await nextSceneResponse.json();
+    console.log('📱 Next scene data received:', JSON.stringify(nextSceneData, null, 2));
+    
+    if (!nextSceneData.success || !nextSceneData.scene) {
+      return res.status(404).json({ 
+        error: 'No scenes available',
+        message: nextSceneData.message || 'No unwatched scenes found.' 
+      });
+    }
+    
+    const scene = nextSceneData.scene;
+    
+    // Use filename without extension as fallback if title is empty
+    let displayTitle = scene.title;
+    if (!displayTitle || displayTitle.trim() === '') {
+      if (scene.path) {
+        const filename = path.basename(scene.path);
+        displayTitle = path.parse(filename).name; // Gets filename without extension
+      } else {
+        displayTitle = 'Unknown Scene';
+      }
+    }
+    
+    // Build response in Android companion format
+    const androidResponse = {
+      type: 'PLAY_SCENE',
+      data: {
+        url: scene.paths?.stream || '',
+        title: displayTitle,
+        performers: scene.performers?.map(p => p.performer.name).join(', ') || 'Unknown',
+        studio: scene.studioObject?.name || 'Unknown Studio',
+        duration: scene.duration || 0,
+        sceneId: scene.id,
+        rating: scene.rating || 0,
+        totalUnwatched: nextSceneData.totalUnwatched || 0
+      }
+    };
+    
+    console.log('📱 Sending Android companion scene response:', JSON.stringify(androidResponse, null, 2));
+    res.json(androidResponse);
+    
+  } catch (error) {
+    console.error('❌ Error in Android next Stash scene endpoint:', error);
+    res.status(500).json({ 
+      error: 'Internal server error',
+      details: error.message 
+    });
+  }
+});
+
+// Android companion app endpoint - Mark Stash scene as watched
+app.post('/api/android/stash/scene/:id/watched', async (req, res) => {
+  console.log('📱 Android app marking scene as watched...');
+  
+  try {
+    const sceneId = req.params.id;
+    
+    if (!sceneId) {
+      return res.status(400).json({ 
+        error: 'Invalid scene ID',
+        message: 'Scene ID is required' 
+      });
+    }
+
+    // Call the existing watched endpoint internally
+    const watchedResponse = await fetch(`http://localhost:${PORT}/api/stash/scenes/${sceneId}/watched`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      }
+    });
+    
+    if (!watchedResponse.ok) {
+      const errorData = await watchedResponse.json();
+      console.error('Failed to mark scene as watched:', errorData);
+      return res.status(watchedResponse.status).json({ 
+        error: 'Failed to mark scene as watched',
+        details: errorData 
+      });
+    }
+    
+    const watchedData = await watchedResponse.json();
+    console.log('📱 Scene marked as watched successfully:', JSON.stringify(watchedData, null, 2));
+    
+    // Build response in Android companion format
+    const androidResponse = {
+      type: 'SCENE_MARKED_WATCHED',
+      data: {
+        success: true,
+        sceneId: sceneId,
+        playCount: watchedData.scene?.playCount || 0,
+        lastPlayedAt: watchedData.scene?.lastPlayedAt || null,
+        stashUpdated: watchedData.stashUpdate?.success || false,
+        message: 'Scene marked as watched successfully'
+      }
+    };
+    
+    console.log('📱 Sending Android companion watched response:', JSON.stringify(androidResponse, null, 2));
+    res.json(androidResponse);
+    
+  } catch (error) {
+    console.error('❌ Error in Android mark scene as watched endpoint:', error);
+    res.status(500).json({ 
+      error: 'Internal server error',
+      details: error.message 
+    });
+  }
+});
+
+// Android companion app endpoint - Delete Stash scene
+app.delete('/api/android/stash/scene/:id', async (req, res) => {
+  console.log('📱 Android app requesting scene deletion...');
+  
+  try {
+    const sceneId = req.params.id;
+    const { deleteFile = false } = req.query; // Optional query parameter to delete file
+    
+    if (!sceneId) {
+      return res.status(400).json({ 
+        error: 'Invalid scene ID',
+        message: 'Scene ID is required' 
+      });
+    }
+
+    // Call the existing delete endpoint internally
+    const deleteUrl = `http://localhost:${PORT}/api/stash/scenes/${sceneId}${deleteFile ? '?deleteFile=true' : ''}`;
+    const deleteResponse = await fetch(deleteUrl, {
+      method: 'DELETE',
+      headers: {
+        'Content-Type': 'application/json'
+      }
+    });
+    
+    if (!deleteResponse.ok) {
+      const errorData = await deleteResponse.json();
+      console.error('Failed to delete scene:', errorData);
+      return res.status(deleteResponse.status).json({ 
+        error: 'Failed to delete scene',
+        details: errorData 
+      });
+    }
+    
+    const deleteData = await deleteResponse.json();
+    console.log('📱 Scene deleted successfully:', JSON.stringify(deleteData, null, 2));
+    
+    // Build response in Android companion format
+    const androidResponse = {
+      type: 'SCENE_DELETED',
+      data: {
+        success: true,
+        sceneId: sceneId,
+        localDeleted: deleteData.localDeleted || false,
+        clipsDeleted: deleteData.clipsDeleted || 0,
+        stashDeleted: deleteData.stashDeleted || false,
+        fileDeleted: deleteFile === 'true',
+        message: 'Scene deleted successfully'
+      }
+    };
+    
+    console.log('📱 Sending Android companion delete response:', JSON.stringify(androidResponse, null, 2));
+    res.json(androidResponse);
+    
+  } catch (error) {
+    console.error('❌ Error in Android delete scene endpoint:', error);
+    res.status(500).json({ 
+      error: 'Internal server error',
+      details: error.message 
+    });
   }
 });
 

@@ -139,6 +139,15 @@ class StashSyncService {
               id
               name
             }
+            scene_markers {
+              id
+              title
+              seconds
+              primary_tag {
+                id
+                name
+              }
+            }
           }
         }
       }
@@ -244,6 +253,32 @@ class StashSyncService {
             });
           }
         }
+
+        // Sync markers for this scene
+        if (scene.scene_markers && scene.scene_markers.length > 0) {
+          // Remove existing markers
+          await prisma.stashMarker.deleteMany({
+            where: { sceneId: scene.id }
+          });
+
+          // Add new markers
+          for (const marker of scene.scene_markers) {
+            await prisma.stashMarker.create({
+              data: {
+                stashId: marker.id,
+                sceneId: scene.id,
+                title: marker.title || '',
+                seconds: marker.seconds || 0,
+                primaryTag: marker.primary_tag?.name || null,
+                primaryTagId: marker.primary_tag?.id || null,
+                lastSyncedAt: new Date()
+              }
+            });
+          }
+
+          // Create marker-based clips for this scene
+          await this.createMarkerBasedClips(scene);
+        }
         
         syncedScenes.push(syncedScene);
       }
@@ -269,13 +304,26 @@ class StashSyncService {
       });
 
       let removedCount = 0;
+      let clipsRemovedCount = 0;
+      
       for (const scene of hiddenScenes) {
         if (scene.tags.some(tag => tag.name === 'zzHide')) {
+          // First, delete all clips associated with this scene
+          const clipsDeleted = await prisma.stashClip.deleteMany({
+            where: { sceneId: scene.id }
+          });
+          clipsRemovedCount += clipsDeleted.count;
+          
+          // Then delete the scene
           await prisma.stashScene.delete({
             where: { id: scene.id }
           });
           removedCount++;
         }
+      }
+
+      if (clipsRemovedCount > 0) {
+        console.log(`Removed ${clipsRemovedCount} clips associated with hidden scenes`);
       }
 
       return removedCount;
@@ -707,6 +755,88 @@ class StashSyncService {
     } catch (error) {
       console.error('Stash connection test failed:', error);
       throw error;
+    }
+  }
+
+  /**
+   * Create marker-based clips for a scene
+   * Uses markers to define clip boundaries for more intelligent segmentation
+   * Replaces any existing clips (marker-based or time-based) with new marker-based clips
+   */
+  async createMarkerBasedClips(scene) {
+    try {
+      console.log(`🎯 Creating marker-based clips for scene: ${scene.title}`);
+      
+      // First, remove any existing clips for this scene (both marker-based and time-based)
+      const existingClips = await prisma.stashClip.findMany({
+        where: { sceneId: scene.id }
+      });
+      
+      if (existingClips.length > 0) {
+        console.log(`🗑️ Removing ${existingClips.length} existing clips for scene: ${scene.title}`);
+        await prisma.stashClip.deleteMany({
+          where: { sceneId: scene.id }
+        });
+      }
+
+      // Get the scene's markers sorted by time
+      const markers = scene.scene_markers.sort((a, b) => a.seconds - b.seconds);
+      
+      if (markers.length === 0) {
+        console.log(`No markers found for scene: ${scene.title}`);
+        return;
+      }
+
+      // Get scene duration (from files)
+      const sceneDuration = scene.files && scene.files.length > 0 ? scene.files[0].duration : null;
+      
+      if (!sceneDuration) {
+        console.log(`No duration info for scene: ${scene.title}, skipping clip creation`);
+        return;
+      }
+
+      const clipsToCreate = [];
+      
+      for (let i = 0; i < markers.length; i++) {
+        const currentMarker = markers[i];
+        const nextMarker = markers[i + 1];
+        
+        // Calculate clip boundaries
+        const startTime = currentMarker.seconds;
+        const endTime = nextMarker ? nextMarker.seconds : sceneDuration;
+        const duration = endTime - startTime;
+        
+        // Only create clips that are at least 5 seconds long
+        if (duration >= 5) {
+          clipsToCreate.push({
+            sceneId: scene.id,
+            startTime: startTime,
+            endTime: endTime,
+            duration: duration,
+            clipIndex: i,
+            watched: false,
+            title: currentMarker.title || `Clip ${i + 1}`,
+            markerBased: true // Flag to indicate this is marker-based
+          });
+        }
+      }
+
+      if (clipsToCreate.length > 0) {
+        // Bulk create clips
+        await prisma.stashClip.createMany({
+          data: clipsToCreate
+        });
+        
+        console.log(`✅ Created ${clipsToCreate.length} marker-based clips for scene: ${scene.title}`);
+        if (existingClips.length > 0) {
+          console.log(`🔄 Replaced ${existingClips.length} existing clips with ${clipsToCreate.length} marker-based clips`);
+        }
+      } else {
+        console.log(`⚠️ No valid clips could be created from markers for scene: ${scene.title}`);
+      }
+      
+    } catch (error) {
+      console.error(`Error creating marker-based clips for scene ${scene.title}:`, error);
     }
   }
 }

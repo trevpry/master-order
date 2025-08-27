@@ -77,6 +77,8 @@ export default function Stash() {
     scene: null,
     playbackInfo: null
   });
+  const [autoSkipRetries, setAutoSkipRetries] = useState(0);
+  const MAX_AUTO_SKIP_RETRIES = 5; // Maximum number of auto-skip attempts
 
   // Helper function to extract filename from path without extension
   const getFileNameFromPath = (path) => {
@@ -267,6 +269,30 @@ export default function Stash() {
     const mins = Math.floor(seconds / 60);
     const secs = Math.floor(seconds % 60);
     return `${mins}:${secs.toString().padStart(2, '0')}`;
+  };
+
+  // Helper function to check if video format is supported by browsers
+  const isVideoFormatSupported = (filePath) => {
+    if (!filePath) return true; // Assume supported if no path provided
+    
+    const extension = filePath.split('.').pop()?.toLowerCase();
+    const unsupportedFormats = ['wmv', 'asf', 'avi', 'flv', 'divx'];
+    const supportedFormats = ['mp4', 'webm', 'ogg', 'm4v'];
+    const partiallySupported = ['mov', 'mkv']; // May work depending on codec and browser
+    
+    // Check if explicitly unsupported
+    if (unsupportedFormats.includes(extension)) {
+      return false;
+    }
+    
+    // Check if explicitly supported
+    if (supportedFormats.includes(extension)) {
+      return true;
+    }
+    
+    // For partially supported and unknown formats, let the browser try
+    // The error handler will catch format errors if they occur
+    return true;
   };
 
   // Play a specific clip
@@ -1071,7 +1097,11 @@ export default function Stash() {
               
               <div className="clip-info">
                 <div className="clip-timing">
-                  <span className="clip-index">Clip #{clip.clipIndex + 1}</span>
+                  {clip.markerBased && clip.title ? (
+                    <span className="clip-marker-title">📍 {clip.title}</span>
+                  ) : (
+                    <span className="clip-index">Clip #{clip.clipIndex + 1}</span>
+                  )}
                   <span className="clip-time-range">
                     {formatTime(clip.startTime)} - {formatTime(clip.endTime)}
                   </span>
@@ -1185,6 +1215,19 @@ export default function Stash() {
         console.log(`🎯 Playing clip ${result.clip.clipIndex + 1} from: ${result.clip.scene.title}`);
         console.log(`⏱️ Clip duration: ${result.playbackInfo.duration}s (${Math.floor(result.playbackInfo.startTime / 60)}:${String(Math.floor(result.playbackInfo.startTime % 60)).padStart(2, '0')} - ${Math.floor(result.playbackInfo.endTime / 60)}:${String(Math.floor(result.playbackInfo.endTime % 60)).padStart(2, '0')})`);
         
+        // Check if video format is supported before opening player
+        const filePath = result.clip.scene.path;
+        
+        if (!isVideoFormatSupported(filePath)) {
+          const extension = filePath?.split('.').pop()?.toUpperCase() || 'Unknown';
+          console.error(`🚫 Initial clip: Unsupported video format: ${extension}`);
+          
+          alert(`⚠️ Unsupported Video Format\n\nThe selected clip file "${filePath}" is in ${extension} format, which is not supported by modern browsers.\n\nSupported formats: MP4, WebM, OGG, M4V\nPartially supported: MOV, MKV\nNot supported: WMV, AVI, FLV, DIVX\n\nPlease convert the file to a supported format (MP4 recommended) or try again to get a different clip.`);
+          
+          setUpNextLoading(false);
+          return;
+        }
+        
         // Update selected scene to show what's playing
         setSelectedScene({
           ...result.clip.scene,
@@ -1256,6 +1299,20 @@ export default function Stash() {
                       
                       if (response.ok) {
                         if (result.clip && result.clip.scene) {
+                          // Check if video format is supported before opening player
+                          const filePath = result.clip.scene.path;
+                          
+                          if (!isVideoFormatSupported(filePath)) {
+                            const extension = filePath?.split('.').pop()?.toUpperCase() || 'Unknown';
+                            console.error(`🚫 Unsupported video format: ${extension}`);
+                            
+                            alert(`⚠️ Unsupported Video Format\n\nThe file "${filePath}" is in ${extension} format, which is not supported by modern browsers.\n\nSupported formats: MP4, WebM, OGG, M4V\nPartially supported: MOV, MKV\nNot supported: WMV, AVI, FLV, DIVX\n\nPlease convert the file to a supported format (MP4 recommended) or use a different video.`);
+                            
+                            // Try to get a different clip
+                            console.log('🔄 Attempting to fetch a different clip...');
+                            return; // Exit early, don't open the player
+                          }
+                          
                           console.log('🎯 Manually loaded next clip:', result.clip.scene.title);
                           console.log('📊 Manual new clip data:', {
                             clipId: result.clip.id,
@@ -1300,6 +1357,7 @@ export default function Stash() {
                       console.log('🧹 Cleaned up clip timer on close');
                     }
                     setVideoPlayer({ isOpen: false, clip: null, scene: null, playbackInfo: null });
+                    setAutoSkipRetries(0); // Reset retry counter when manually closing
                   }}
                 >
                   ✕
@@ -1367,6 +1425,18 @@ export default function Stash() {
                       
                       if (response.ok) {
                         if (result.clip && result.clip.scene) {
+                          // Check if video format is supported before opening player
+                          const filePath = result.clip.scene.path;
+                          
+                          if (!isVideoFormatSupported(filePath)) {
+                            const extension = filePath?.split('.').pop()?.toUpperCase() || 'Unknown';
+                            console.error(`🚫 Backup timer: Unsupported video format: ${extension}`);
+                            
+                            // Close player instead of showing unsupported format
+                            setVideoPlayer({ isOpen: false, clip: null, scene: null, playbackInfo: null });
+                            return;
+                          }
+                          
                           console.log('🎯 Auto-loaded next clip via backup timer:', result.clip.scene.title);
                           console.log('📊 New clip data:', {
                             clipId: result.clip.id,
@@ -1444,6 +1514,18 @@ export default function Stash() {
                       
                       if (response.ok) {
                         if (result.clip && result.clip.scene) {
+                          // Check if video format is supported before opening player
+                          const filePath = result.clip.scene.path;
+                          
+                          if (!isVideoFormatSupported(filePath)) {
+                            const extension = filePath?.split('.').pop()?.toUpperCase() || 'Unknown';
+                            console.error(`🚫 TimeUpdate: Unsupported video format: ${extension}`);
+                            
+                            // Close player instead of showing unsupported format
+                            setVideoPlayer({ isOpen: false, clip: null, scene: null, playbackInfo: null });
+                            return;
+                          }
+                          
                           console.log('🎯 Auto-loaded next clip via timeUpdate:', result.clip.scene.title);
                           console.log('📊 TimeUpdate new clip data:', {
                             clipId: result.clip.id,
@@ -1531,7 +1613,7 @@ export default function Stash() {
                   setVideoPlayer({ isOpen: false, clip: null, scene: null, playbackInfo: null });
                 }
               }}
-              onError={(e) => {
+              onError={async (e) => {
                 const errorCode = e.target.error?.code;
                 const errorMessage = e.target.error?.message;
                 
@@ -1540,6 +1622,7 @@ export default function Stash() {
                 console.error('   Message:', errorMessage);
                 console.error('   Failed URL:', e.target.src);
                 console.error('   Stash URL:', connectionStatus.stashUrl);
+                console.error('   Auto-skip retries:', autoSkipRetries);
                 
                 // Error code meanings:
                 // 1: MEDIA_ERR_ABORTED - The user aborted the video
@@ -1547,13 +1630,24 @@ export default function Stash() {
                 // 3: MEDIA_ERR_DECODE - A decode error occurred
                 // 4: MEDIA_ERR_SRC_NOT_SUPPORTED - The video format is not supported
                 
-                if (errorCode === 2) {
-                  console.error('🌐 Network error - check if Stash server is reachable');
-                } else if (errorCode === 4) {
-                  console.error('🎬 Format error - video format may not be supported by browser');
+                if (errorCode === 1) {
+                  // User aborted - don't auto-skip
+                  console.log('🛑 User aborted video playback');
+                  return;
                 }
                 
-                // Try alternative Stash endpoints
+                // Check retry limit
+                if (autoSkipRetries >= MAX_AUTO_SKIP_RETRIES) {
+                  console.error(`❌ Maximum auto-skip retries reached (${MAX_AUTO_SKIP_RETRIES})`);
+                  alert(`❌ Unable to find a playable video after ${MAX_AUTO_SKIP_RETRIES} attempts.\n\nThis may indicate:\n• Network issues with Stash server\n• All available clips have unsupported formats\n• Stash server problems\n\nTry again later or check your Stash server.`);
+                  setVideoPlayer({ isOpen: false, clip: null, scene: null, playbackInfo: null });
+                  setAutoSkipRetries(0); // Reset for next session
+                  return;
+                }
+                
+                console.log('🔄 Video error detected - automatically skipping to next clip without marking as watched');
+                
+                // Try alternative Stash endpoints first for network/decode errors
                 const baseUrl = connectionStatus.stashUrl?.endsWith('/') 
                   ? connectionStatus.stashUrl.slice(0, -1) 
                   : connectionStatus.stashUrl;
@@ -1561,39 +1655,95 @@ export default function Stash() {
                 const currentSrc = e.target.src;
                 let nextUrl = null;
                 
-                // Try Stash's known streaming endpoints
-                if (currentSrc.includes('/stream') && !currentSrc.includes('.')) {
-                  // Try HLS stream format
-                  nextUrl = `${baseUrl}/scene/${videoPlayer.scene.id}/stream.m3u8`;
-                  console.log('🔄 Direct stream failed, trying HLS:', nextUrl);
-                } else if (currentSrc.includes('.m3u8')) {
-                  // Try direct file endpoint
-                  nextUrl = `${baseUrl}/scene/${videoPlayer.scene.id}/file`;
-                  console.log('🔄 HLS failed, trying direct file:', nextUrl);
-                } else {
-                  console.error('❌ All streaming formats failed');
+                // Only try alternatives for network/decode errors, not format errors
+                if (errorCode === 2 || errorCode === 3) {
+                  // Try Stash's known streaming endpoints
+                  if (currentSrc.includes('/stream') && !currentSrc.includes('.')) {
+                    // Try HLS stream format
+                    nextUrl = `${baseUrl}/scene/${videoPlayer.scene.id}/stream.m3u8`;
+                    console.log('� Direct stream failed, trying HLS:', nextUrl);
+                  } else if (currentSrc.includes('.m3u8')) {
+                    // Try direct file endpoint
+                    nextUrl = `${baseUrl}/scene/${videoPlayer.scene.id}/file`;
+                    console.log('🔄 HLS failed, trying direct file:', nextUrl);
+                  }
                   
-                  // Provide helpful error message
-                  const errorMsg = errorCode === 2 
-                    ? '❌ Network error: Cannot reach Stash server. Check if Stash is running and accessible.'
-                    : errorCode === 4 
-                    ? '❌ Format error: Browser cannot play this video format. Try opening the video directly in Stash.'
-                    : '❌ Video playback failed. Try refreshing the page or opening the video directly in Stash.';
-                  
-                  alert(errorMsg);
-                  return;
+                  // If we have an alternative URL to try, attempt it once
+                  if (nextUrl && nextUrl !== currentSrc && !e.target.hasTriedAlternative) {
+                    console.log('🔄 Retrying with alternative URL...');
+                    e.target.hasTriedAlternative = true; // Prevent infinite retry loop
+                    e.target.src = nextUrl;
+                    e.target.load(); // Reload with new source
+                    return;
+                  }
                 }
                 
-                if (nextUrl && nextUrl !== currentSrc) {
-                  console.log('🔄 Retrying with alternative URL...');
-                  e.target.src = nextUrl;
-                  e.target.load(); // Reload with new source
-                } else {
-                  console.error('❌ No more alternatives to try');
+                // All alternatives failed or this is a format error - skip to next clip
+                console.log('🚀 Auto-skipping to next clip due to playback error');
+                setAutoSkipRetries(prev => prev + 1); // Increment retry counter
+                
+                try {
+                  const response = await fetch(`${config.apiBaseUrl}/api/stash/clips/next`);
+                  const result = await response.json();
+                  
+                  if (response.ok) {
+                    if (result.clip && result.clip.scene) {
+                      // Check if the next video format is supported before switching
+                      const filePath = result.clip.scene.path;
+                      
+                      if (!isVideoFormatSupported(filePath)) {
+                        const extension = filePath?.split('.').pop()?.toUpperCase() || 'Unknown';
+                        console.error(`🚫 Auto-skip: Next clip also has unsupported format: ${extension}`);
+                        
+                        // Recursively try the next clip
+                        console.log('🔄 Auto-skipping again to find supported format...');
+                        // Trigger another skip by calling this error handler again
+                        setTimeout(() => {
+                          if (videoPlayer.isOpen) {
+                            e.target.dispatchEvent(new Event('error'));
+                          }
+                        }, 100);
+                        return;
+                      }
+                      
+                      console.log('🎯 Auto-skipped to next clip:', result.clip.scene.title);
+                      console.log('� Auto-skip new clip data:', {
+                        clipId: result.clip.id,
+                        sceneTitle: result.clip.scene.title,
+                        startTime: result.playbackInfo.startTime,
+                        endTime: result.playbackInfo.endTime,
+                        duration: result.playbackInfo.duration
+                      });
+                      
+                      // Update video player with new clip (don't mark previous as watched)
+                      setVideoPlayer({
+                        isOpen: true,
+                        clip: result.clip,
+                        scene: result.clip.scene,
+                        playbackInfo: result.playbackInfo
+                      });
+                    } else {
+                      console.error('❌ No more clips available for auto-skip');
+                      alert('❌ No more playable clips available');
+                      setVideoPlayer({ isOpen: false, clip: null, scene: null, playbackInfo: null });
+                      setAutoSkipRetries(0); // Reset for next session
+                    }
+                  } else {
+                    console.error('Failed to auto-skip to next clip:', result.error);
+                    alert(`❌ Auto-skip failed: ${result.error || 'No more clips available'}`);
+                    setVideoPlayer({ isOpen: false, clip: null, scene: null, playbackInfo: null });
+                    setAutoSkipRetries(0); // Reset for next session
+                  }
+                } catch (error) {
+                  console.error('Error during auto-skip:', error);
+                  alert('❌ Failed to skip to next clip');
+                  setVideoPlayer({ isOpen: false, clip: null, scene: null, playbackInfo: null });
+                  setAutoSkipRetries(0); // Reset for next session
                 }
               }}
               onCanPlay={() => {
                 console.log('✅ Video can play');
+                setAutoSkipRetries(0); // Reset retry counter on successful video load
               }}
             >
               Your browser does not support the video tag.

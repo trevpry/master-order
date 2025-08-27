@@ -795,6 +795,7 @@ model StashScene {
   tags             StashSceneTag[]
   studioObject     StashStudio? @relation(fields: [studioId], references: [id])
   clips            StashClip[]
+  markers          StashMarker[]
   
   @@map("StashScene")
 }
@@ -805,16 +806,36 @@ model StashClip {
   clipIndex        Int      // 0-based index (clip 1, clip 2, etc.)
   startTime        Float    // Start time in seconds
   endTime          Float    // End time in seconds
-  duration         Float    // Duration in seconds (should be ~60 seconds)
+  duration         Float    // Duration in seconds
   watched          Boolean  @default(false)
   watchedAt        DateTime?
   createdAt        DateTime @default(now())
+  title            String?  // Optional title (from marker or auto-generated)
+  markerBased      Boolean  @default(false) // True if created from markers, false if time-based
   
   // Relationship
   scene            StashScene @relation(fields: [sceneId], references: [id], onDelete: Cascade)
   
   @@unique([sceneId, clipIndex])
   @@map("StashClip")
+}
+
+model StashMarker {
+  id               Int      @id @default(autoincrement())
+  stashId          String   @unique  // Stash's internal marker ID
+  sceneId          String   // Foreign key to StashScene
+  title            String
+  seconds          Float    // Marker position in seconds
+  primaryTag       String?  // Primary tag name
+  primaryTagId     String?  // Primary tag ID
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+  lastSyncedAt     DateTime @default(now())
+  
+  // Relationships
+  scene            StashScene @relation(fields: [sceneId], references: [id], onDelete: Cascade)
+  
+  @@map("StashMarker")
 }
 
 model StashPerformer {
