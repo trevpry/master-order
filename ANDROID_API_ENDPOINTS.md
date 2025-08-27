@@ -17,6 +17,514 @@ Currently, no authentication is required for these endpoints. They are designed 
 
 ---
 
+## Master Order Integration Endpoints
+
+### 1. Get Up Next
+
+**Endpoint**: `GET /api/android/up-next`
+
+**Description**: Retrieves the next recommended content from the Master Order system, equivalent to pressing the "Get Up Next" button on the home page. This can return TV episodes, movies, or custom order items based on the current configuration.
+
+**Response Format**:
+
+**TV Episode Response**:
+```json
+{
+  "type": "PLAY_TV_EPISODE",
+  "data": {
+    "ratingKey": "12345",
+    "title": "Series Name",
+    "summary": "Series description...",
+    "leafCount": 100,
+    "viewedLeafCount": 45,
+    "thumb": "/library/metadata/12345/thumb/1234567890",
+    "art": "/library/metadata/12345/art/1234567890",
+    "streamUrl": "http://plex-server:32400/video/:/transcode/...",
+    "otherCollections": [...]
+  }
+}
+```
+
+**Movie Response**:
+```json
+{
+  "type": "PLAY_MOVIE",
+  "data": {
+    "ratingKey": "67890",
+    "title": "Movie Title",
+    "year": 2023,
+    "duration": 7200,
+    "summary": "Movie description...",
+    "studio": "Studio Name",
+    "rating": 8.5,
+    "thumb": "/library/metadata/67890/thumb/1234567890",
+    "art": "/library/metadata/67890/art/1234567890",
+    "streamUrl": "http://plex-server:32400/video/:/transcode/...",
+    "otherCollections": [...]
+  }
+}
+```
+
+**Custom Order Item Response**:
+```json
+{
+  "type": "PLAY_CUSTOM_ORDER_ITEM",
+  "data": {
+    "id": 123,
+    "title": "Custom Item Title",
+    "type": "tv_episode",
+    "orderName": "My Custom Order",
+    "summary": "Item description...",
+    "duration": 2400,
+    "localArtworkPath": "/path/to/artwork.jpg",
+    "artworkUrl": "http://localhost:3000/api/artwork/artwork-filename.jpg",
+    "streamUrl": "http://plex-server:32400/video/:/transcode/...",
+    "ratingKey": "54321",
+    "customOrderId": 456
+  }
+}
+```
+
+**Response Fields**:
+- `type`: Indicates the content type (`PLAY_TV_EPISODE`, `PLAY_MOVIE`, or `PLAY_CUSTOM_ORDER_ITEM`)
+- TV Episode Fields:
+  - `ratingKey`: Plex rating key for the series
+  - `title`: Series name
+  - `summary`: Series description
+  - `leafCount`: Total episodes in series
+  - `viewedLeafCount`: Number of watched episodes
+  - `thumb`/`art`: Plex artwork URLs
+  - `streamUrl`: Direct stream URL for playback
+  - `otherCollections`: Array of other collections this series belongs to
+- Movie Fields:
+  - `ratingKey`: Plex rating key for the movie
+  - `title`: Movie title
+  - `year`: Release year
+  - `duration`: Duration in seconds
+  - `summary`: Movie description
+  - `studio`: Production studio
+  - `rating`: Movie rating
+  - `thumb`/`art`: Plex artwork URLs
+  - `streamUrl`: Direct stream URL for playback
+  - `otherCollections`: Array of collections this movie belongs to
+- Custom Order Fields:
+  - `id`: Custom order item ID
+  - `title`: Item title (can be TV episode, movie, book, comic, etc.)
+  - `type`: Item media type (tv_episode, movie, book, comic, etc.)
+  - `orderName`: Name of the actual custom order containing this item
+  - `summary`: Item description
+  - `duration`: Duration in seconds
+  - `localArtworkPath`: Local artwork file path (for reference)
+  - `artworkUrl`: Network-accessible artwork URL for Android consumption
+  - `streamUrl`: Direct stream URL for playback
+  - `ratingKey`: Associated Plex rating key (if applicable)
+  - `customOrderId`: ID of the parent custom order
+
+**Content Selection Logic**: The endpoint uses the same logic as the web interface to determine what content to return based on current settings and order type configuration.
+
+**Order Name Context**: The `orderName` field is only included in custom order item responses (`PLAY_CUSTOM_ORDER_ITEM` type) and contains the actual name of the custom order containing the item. This applies to all media types within custom orders (TV episodes, movies, books, comics, etc.).
+
+**Error Responses**:
+- `404`: No content available
+- `500`: Server error
+
+**Example Usage**:
+```bash
+curl -X GET "http://localhost:3001/api/android/up-next"
+```
+
+---
+
+### 2. Play Plex Media
+
+**Endpoint**: `POST /api/android/play-plex`
+
+**Description**: Triggers playback of media content on the configured Plex player, equivalent to pressing the "Play" button on the home page. This endpoint emulates the exact same functionality as the web interface's play button.
+
+**Request Body**:
+```json
+{
+  "ratingKey": "12345",
+  "mediaType": "episode",
+  "title": "Series Name - Episode Title"
+}
+```
+
+**Request Fields**:
+- `ratingKey` (required): Plex rating key for the content to play
+- `mediaType` (optional): Type of media (episode, movie, etc.) for logging purposes
+- `title` (optional): Human-readable title for logging and notifications
+
+**Success Response**:
+```json
+{
+  "type": "PLAY_SUCCESS",
+  "data": {
+    "success": true,
+    "ratingKey": "12345",
+    "title": "Series Name - Episode Title",
+    "mediaType": "episode",
+    "player": "Living Room TV",
+    "message": "Playing \"Series Name - Episode Title\" on Living Room TV",
+    "timestamp": "2024-01-15T10:30:00.000Z"
+  }
+}
+```
+
+**Error Response**:
+```json
+{
+  "type": "PLAY_ERROR",
+  "data": {
+    "success": false,
+    "ratingKey": "12345",
+    "title": "Series Name - Episode Title",
+    "mediaType": "episode",
+    "error": "No Plex player selected. Please configure a player in Settings.",
+    "details": "Check Plex server connection and player availability",
+    "timestamp": "2024-01-15T10:30:00.000Z"
+  }
+}
+```
+
+**Response Fields**:
+- `success`: Boolean indicating if playback started successfully
+- `ratingKey`: Plex rating key that was played
+- `title`: Media title
+- `mediaType`: Type of media played
+- `player`: Name of the Plex player used (success only)
+- `message`: Human-readable success message (success only)
+- `error`: Error message (error only)
+- `details`: Additional error details (error only)
+- `timestamp`: ISO timestamp of the response
+
+**Functionality**:
+- Uses the same Plex player configuration as the web interface
+- Sends webhook notifications to Node-RED (if configured)
+- Supports TV episodes and movies
+- Provides detailed error messages for troubleshooting
+
+**Common Error Scenarios**:
+- Missing or invalid rating key
+- No Plex player configured in settings
+- Selected Plex player is offline or unavailable
+- Plex server connection issues
+
+**Example Usage**:
+```bash
+curl -X POST "http://localhost:3001/api/android/play-plex" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "ratingKey": "12345",
+    "mediaType": "episode",
+    "title": "Breaking Bad - Pilot"
+  }'
+```
+
+---
+
+### 3. Mark Item as Read/Watched
+
+**Endpoint**: `POST /api/android/mark-watched`
+
+**Description**: Marks a comic, book, story, or web video as read/watched, equivalent to pressing the "Mark as Read" or "Mark as Watched" button on the home page.
+
+**Request Body**:
+```json
+{
+  "itemId": 123,
+  "mediaType": "book",
+  "title": "The Great Gatsby"
+}
+```
+
+**Request Fields**:
+- `itemId` (required): Custom order item ID to mark as watched
+- `mediaType` (optional): Type of media (book, comic, shortstory, webvideo) for logging purposes
+- `title` (optional): Human-readable title for logging and notifications
+
+**Success Response**:
+```json
+{
+  "type": "MARK_WATCHED_SUCCESS",
+  "data": {
+    "success": true,
+    "itemId": 123,
+    "title": "The Great Gatsby",
+    "mediaType": "book",
+    "message": "Successfully marked \"The Great Gatsby\" as read/watched",
+    "watchLogCreated": true,
+    "plexUpdated": false,
+    "timestamp": "2024-01-15T10:30:00.000Z"
+  }
+}
+```
+
+**Error Response**:
+```json
+{
+  "type": "MARK_WATCHED_ERROR",
+  "data": {
+    "success": false,
+    "itemId": 123,
+    "title": "The Great Gatsby",
+    "mediaType": "book",
+    "error": "Item already marked as watched",
+    "details": "Check item exists and is not already watched",
+    "timestamp": "2024-01-15T10:30:00.000Z"
+  }
+}
+```
+
+**Example Usage**:
+```bash
+curl -X POST "http://localhost:3001/api/android/mark-watched" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "itemId": 123,
+    "mediaType": "book",
+    "title": "The Great Gatsby"
+  }'
+```
+
+---
+
+### 4. Reading Session Management
+
+#### Start Reading Session
+
+**Endpoint**: `POST /api/android/reading/start`
+
+**Description**: Starts a reading session for books, comics, or stories, equivalent to pressing the "Start" button on the home page for reading content.
+
+**Request Body**:
+```json
+{
+  "mediaType": "book",
+  "title": "The Great Gatsby",
+  "seriesTitle": "F. Scott Fitzgerald Collection",
+  "customOrderItemId": 123
+}
+```
+
+**Request Fields**:
+- `mediaType` (required): Must be "book", "comic", or "shortstory"
+- `title` (required): Title of the content being read
+- `seriesTitle` (optional): Series or collection title
+- `customOrderItemId` (optional): Associated custom order item ID
+
+**Success Response**:
+```json
+{
+  "type": "READING_SESSION_STARTED",
+  "data": {
+    "success": true,
+    "sessionId": 456,
+    "mediaType": "book",
+    "title": "The Great Gatsby",
+    "seriesTitle": "F. Scott Fitzgerald Collection",
+    "customOrderItemId": 123,
+    "startedAt": "2024-01-15T10:30:00.000Z",
+    "isPaused": false,
+    "message": "Started reading session for \"The Great Gatsby\"",
+    "timestamp": "2024-01-15T10:30:00.000Z"
+  }
+}
+```
+
+#### Pause/Resume Reading Session
+
+**Endpoint**: `POST /api/android/reading/pause`
+
+**Description**: Pauses or resumes the active reading session, equivalent to pressing the "Pause" or "Resume" button.
+
+**Request Body**: Empty `{}`
+
+**Success Response**:
+```json
+{
+  "type": "READING_SESSION_PAUSED",
+  "data": {
+    "success": true,
+    "sessionId": 456,
+    "isPaused": true,
+    "title": "The Great Gatsby",
+    "mediaType": "book",
+    "message": "Paused reading session for \"The Great Gatsby\"",
+    "pausedAt": "2024-01-15T10:35:00.000Z",
+    "totalActiveTime": 300,
+    "timestamp": "2024-01-15T10:35:00.000Z"
+  }
+}
+```
+
+#### Stop Reading Session
+
+**Endpoint**: `POST /api/android/reading/stop`
+
+**Description**: Stops the active reading session, equivalent to pressing the "Stop" button, with optional progress tracking.
+
+**Request Body**:
+```json
+{
+  "progress": {
+    "currentPage": 150,
+    "totalPages": 200,
+    "readPercentage": 75
+  }
+}
+```
+
+**Request Fields**:
+- `progress` (optional): Reading progress information
+  - `currentPage`: Current page number
+  - `totalPages`: Total page count
+  - `readPercentage`: Percentage read (0-100)
+
+**Success Response**:
+```json
+{
+  "type": "READING_SESSION_STOPPED",
+  "data": {
+    "success": true,
+    "sessionId": 456,
+    "title": "The Great Gatsby",
+    "mediaType": "book",
+    "duration": 600,
+    "totalActiveTime": 480,
+    "progressUpdated": true,
+    "progress": {
+      "currentPage": 150,
+      "totalPages": 200,
+      "readPercentage": 75
+    },
+    "message": "Stopped reading session for \"The Great Gatsby\"",
+    "completedAt": "2024-01-15T10:40:00.000Z",
+    "timestamp": "2024-01-15T10:40:00.000Z"
+  }
+}
+```
+
+---
+
+### 5. Viewing Session Management
+
+#### Start Viewing Session
+
+**Endpoint**: `POST /api/android/viewing/start`
+
+**Description**: Starts a viewing session for web videos, equivalent to pressing the "Start" button on the home page for video content.
+
+**Request Body**:
+```json
+{
+  "mediaType": "webvideo",
+  "title": "Educational Video",
+  "seriesTitle": "Learning Series",
+  "customOrderItemId": 789
+}
+```
+
+**Request Fields**:
+- `mediaType` (required): Must be "webvideo"
+- `title` (required): Title of the video being watched
+- `seriesTitle` (optional): Series or collection title
+- `customOrderItemId` (optional): Associated custom order item ID
+
+**Success Response**:
+```json
+{
+  "type": "VIEWING_SESSION_STARTED",
+  "data": {
+    "success": true,
+    "sessionId": 101,
+    "mediaType": "webvideo",
+    "title": "Educational Video",
+    "seriesTitle": "Learning Series",
+    "customOrderItemId": 789,
+    "startedAt": "2024-01-15T11:00:00.000Z",
+    "isPaused": false,
+    "message": "Started viewing session for \"Educational Video\"",
+    "timestamp": "2024-01-15T11:00:00.000Z"
+  }
+}
+```
+
+#### Pause/Resume Viewing Session
+
+**Endpoint**: `POST /api/android/viewing/pause`
+
+**Description**: Pauses or resumes the active viewing session, equivalent to pressing the "Pause" or "Resume" button.
+
+**Request Body**: Empty `{}`
+
+**Success Response**:
+```json
+{
+  "type": "VIEWING_SESSION_PAUSED",
+  "data": {
+    "success": true,
+    "sessionId": 101,
+    "isPaused": true,
+    "title": "Educational Video",
+    "mediaType": "webvideo",
+    "message": "Paused viewing session for \"Educational Video\"",
+    "pausedAt": "2024-01-15T11:05:00.000Z",
+    "totalActiveTime": 300,
+    "timestamp": "2024-01-15T11:05:00.000Z"
+  }
+}
+```
+
+#### Stop Viewing Session
+
+**Endpoint**: `POST /api/android/viewing/stop`
+
+**Description**: Stops the active viewing session, equivalent to pressing the "Stop" button, with optional progress tracking.
+
+**Request Body**:
+```json
+{
+  "progress": {
+    "currentTime": 1200,
+    "totalDuration": 1800,
+    "watchedPercentage": 67
+  }
+}
+```
+
+**Request Fields**:
+- `progress` (optional): Viewing progress information
+  - `currentTime`: Current playback time in seconds
+  - `totalDuration`: Total video duration in seconds
+  - `watchedPercentage`: Percentage watched (0-100)
+
+**Success Response**:
+```json
+{
+  "type": "VIEWING_SESSION_STOPPED",
+  "data": {
+    "success": true,
+    "sessionId": 101,
+    "title": "Educational Video",
+    "mediaType": "webvideo",
+    "duration": 900,
+    "totalActiveTime": 720,
+    "progressUpdated": true,
+    "progress": {
+      "currentTime": 1200,
+      "totalDuration": 1800,
+      "watchedPercentage": 67
+    },
+    "message": "Stopped viewing session for \"Educational Video\"",
+    "completedAt": "2024-01-15T11:15:00.000Z",
+    "timestamp": "2024-01-15T11:15:00.000Z"
+  }
+}
+```
+
+---
+
 ## Stash Integration Endpoints
 
 ### 1. Get Next Stash Clip
@@ -85,7 +593,13 @@ curl -X GET "http://localhost:3001/api/android/stash/next"
     "duration": 1498.11,
     "sceneId": "16152",
     "rating": 0,
-    "totalUnwatched": 26621
+    "totalUnwatched": 26621,
+    "artwork": {
+      "screenshot": "/screenshot/16152.webp",
+      "preview": "/scene/16152/preview",
+      "stream": "/scene/16152/stream",
+      "webp": "/scene/16152/webp"
+    }
   }
 }
 ```
@@ -99,6 +613,11 @@ curl -X GET "http://localhost:3001/api/android/stash/next"
 - `sceneId`: Unique identifier for the scene
 - `rating`: Scene rating (0-5, or null)
 - `totalUnwatched`: Total number of unwatched scenes remaining
+- `artwork`: Object containing Stash artwork URLs (null if not available)
+  - `screenshot`: Path to scene screenshot image
+  - `preview`: Path to scene preview video
+  - `stream`: Path to scene stream URL
+  - `webp`: Path to scene WebP image
 
 **Title Logic**: If the scene has no title or an empty title, the endpoint extracts the filename from the file path and removes the extension, matching the behavior of the web interface.
 

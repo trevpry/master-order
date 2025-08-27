@@ -440,6 +440,30 @@ When making schema changes:
 - **Configurable Intervals**: Set via settings API for both Plex and Stash sync
 
 ### Android Companion App API
+- **GET /api/android/up-next**: Get next recommended content (TV episode, movie, or custom order item)
+  - Returns: `{"type":"PLAY_TV_EPISODE|PLAY_MOVIE|PLAY_CUSTOM_ORDER_ITEM","data":{...}}` with content metadata and playback URL
+- **POST /api/android/play-plex**: Play media content on configured Plex player
+  - Request: `{"ratingKey":"12345","mediaType":"episode","title":"Series - Episode"}`
+  - Returns: `{"type":"PLAY_SUCCESS|PLAY_ERROR","data":{...}}` with playback status and player information
+- **POST /api/android/mark-watched**: Mark comic, book, story, or web video as read/watched
+  - Request: `{"itemId":123,"mediaType":"book","title":"Book Title"}`
+  - Returns: `{"type":"MARK_WATCHED_SUCCESS|MARK_WATCHED_ERROR","data":{...}}` with watch status
+- **POST /api/android/reading/start**: Start reading session for books, comics, stories
+  - Request: `{"mediaType":"book","title":"Book Title","customOrderItemId":123}`
+  - Returns: `{"type":"READING_SESSION_STARTED|READING_SESSION_ERROR","data":{...}}` with session info
+- **POST /api/android/reading/pause**: Pause/resume active reading session
+  - Returns: `{"type":"READING_SESSION_PAUSED|READING_SESSION_RESUMED|READING_SESSION_ERROR","data":{...}}`
+- **POST /api/android/reading/stop**: Stop reading session with optional progress tracking
+  - Request: `{"progress":{"currentPage":150,"readPercentage":75}}`
+  - Returns: `{"type":"READING_SESSION_STOPPED|READING_SESSION_ERROR","data":{...}}`
+- **POST /api/android/viewing/start**: Start viewing session for web videos
+  - Request: `{"mediaType":"webvideo","title":"Video Title","customOrderItemId":789}`
+  - Returns: `{"type":"VIEWING_SESSION_STARTED|VIEWING_SESSION_ERROR","data":{...}}` with session info
+- **POST /api/android/viewing/pause**: Pause/resume active viewing session
+  - Returns: `{"type":"VIEWING_SESSION_PAUSED|VIEWING_SESSION_RESUMED|VIEWING_SESSION_ERROR","data":{...}}`
+- **POST /api/android/viewing/stop**: Stop viewing session with optional progress tracking
+  - Request: `{"progress":{"currentTime":1200,"watchedPercentage":67}}`
+  - Returns: `{"type":"VIEWING_SESSION_STOPPED|VIEWING_SESSION_ERROR","data":{...}}`
 - **GET /api/android/stash/next**: Get next clip for Android app playback
   - Returns: `{"type":"PLAY_CLIP","data":{...}}` with URL, title, performers, studio, duration, timing
 - **GET /api/android/stash/scene/next**: Get next scene for Android app playback

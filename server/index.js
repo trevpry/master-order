@@ -7256,6 +7256,115 @@ app.get('/api/music/tracks/artist/:artistRatingKey', async (req, res) => {
 });
 
 // Android companion app API endpoints (must be before catch-all route)
+// Android companion app endpoint - Get Up Next
+app.get('/api/android/up-next', async (req, res) => {
+  console.log('📱 Android app requesting up next content...');
+  
+  try {
+    // Get up next using existing logic
+    const upNextResponse = await fetch(`http://localhost:${PORT}/api/up_next`);
+    
+    if (!upNextResponse.ok) {
+      const errorText = await upNextResponse.text();
+      console.error('Failed to get up next:', errorText);
+      return res.status(500).json({ 
+        error: 'Failed to get up next',
+        details: errorText 
+      });
+    }
+    
+    const upNextData = await upNextResponse.json();
+    console.log('📱 Up next data received:', JSON.stringify(upNextData, null, 2));
+    
+    if (!upNextData || upNextData.error) {
+      return res.status(404).json({ 
+        error: 'No content available',
+        message: upNextData?.error || 'No content found for up next.' 
+      });
+    }
+    
+    // Determine content type and build appropriate response
+    let androidResponse;
+    
+    if (upNextData.orderType === 'MOVIES_GENERAL') {
+      // Movie response - use Plex artwork URLs directly
+      androidResponse = {
+        type: 'PLAY_MOVIE',
+        data: {
+          ratingKey: upNextData.ratingKey,
+          title: upNextData.title,
+          year: upNextData.year,
+          duration: upNextData.duration || 0,
+          summary: upNextData.summary || '',
+          studio: upNextData.studio || 'Unknown Studio',
+          rating: upNextData.rating || 0,
+          thumb: upNextData.thumb || '',
+          art: upNextData.art || '',
+          streamUrl: upNextData.streamUrl || '',
+          otherCollections: upNextData.otherCollections || []
+        }
+      };
+    } else if (upNextData.orderType === 'CUSTOM_ORDER') {
+      // Custom order response - convert local artwork paths to network URLs
+      let artworkUrl = '';
+      if (upNextData.localArtworkPath) {
+        // Only convert if it's actually a local file path, not a Plex URL
+        if (upNextData.localArtworkPath.startsWith('/') && !upNextData.localArtworkPath.includes('/library/metadata/')) {
+          // Local file path - convert to network URL
+          const filename = path.basename(upNextData.localArtworkPath);
+          artworkUrl = `http://localhost:${PORT}/api/artwork/${filename}`;
+        } else if (upNextData.localArtworkPath.startsWith('/library/metadata/')) {
+          // Plex artwork path - use as is (will be handled by Plex server)
+          artworkUrl = upNextData.localArtworkPath;
+        }
+      }
+      
+      androidResponse = {
+        type: 'PLAY_CUSTOM_ORDER_ITEM',
+        data: {
+          id: upNextData.id,
+          title: upNextData.title,
+          type: upNextData.type,
+          orderName: upNextData.customOrderName || 'Custom Order', // Use the actual custom order name
+          summary: upNextData.summary || '',
+          duration: upNextData.duration || 0,
+          localArtworkPath: upNextData.localArtworkPath || '',
+          artworkUrl: artworkUrl, // Network-accessible artwork URL for Android
+          streamUrl: upNextData.streamUrl || '',
+          ratingKey: upNextData.ratingKey || null,
+          customOrderId: upNextData.customOrderId || null
+        }
+      };
+    } else {
+      // TV Show response (default) - use Plex artwork URLs directly
+      androidResponse = {
+        type: 'PLAY_TV_EPISODE',
+        data: {
+          ratingKey: upNextData.ratingKey,
+          title: upNextData.title,
+          summary: upNextData.summary || '',
+          leafCount: upNextData.leafCount || 0,
+          viewedLeafCount: upNextData.viewedLeafCount || 0,
+          thumb: upNextData.thumb || '',
+          art: upNextData.art || '',
+          streamUrl: upNextData.streamUrl || '',
+          otherCollections: upNextData.otherCollections || []
+        }
+      };
+    }
+    
+    console.log('📱 Sending Android companion up next response:', JSON.stringify(androidResponse, null, 2));
+    res.json(androidResponse);
+    
+  } catch (error) {
+    console.error('❌ Error in Android up next endpoint:', error);
+    res.status(500).json({ 
+      error: 'Internal server error',
+      details: error.message 
+    });
+  }
+});
+
 // Android companion app endpoint - Next Stash
 app.get('/api/android/stash/next', async (req, res) => {
   console.log('📱 Android app requesting next Stash content...');
@@ -7540,6 +7649,707 @@ app.delete('/api/android/stash/scene/:id', async (req, res) => {
       error: 'Internal server error',
       details: error.message 
     });
+  }
+});
+
+// Android companion app endpoint - Play Plex Media
+app.post('/api/android/play-plex', async (req, res) => {
+  console.log('📱 Android app requesting Plex media playback...');
+  
+  try {
+    const { ratingKey, mediaType = 'unknown', title = 'Unknown Media' } = req.body;
+    
+    if (!ratingKey) {
+      return res.status(400).json({ 
+        type: 'PLAY_ERROR',
+        data: {
+          error: 'Rating key is required',
+          message: 'Unable to play: missing media identifier'
+        }
+      });
+    }
+    
+    console.log(`📱 Android play request - ratingKey: ${ratingKey}, mediaType: ${mediaType}, title: ${title}`);
+    
+    // Send webhook notification (same as web interface)
+    try {
+      console.log('Sending webhook notification with ratingKey:', ratingKey);
+      const webhookResponse = await fetch(`http://localhost:${PORT}/api/webhook/notify`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          ratingKey: ratingKey,
+          action: 'play_on_plex',
+          title: title,
+          type: mediaType,
+          timestamp: new Date().toISOString(),
+          source: 'android_app'
+        }),
+      });
+      
+      if (webhookResponse.ok) {
+        console.log('✅ Webhook notification sent successfully');
+      } else {
+        console.warn('⚠️ Webhook notification failed:', await webhookResponse.text());
+      }
+    } catch (webhookError) {
+      console.warn('⚠️ Failed to send webhook notification:', webhookError);
+      // Don't stop the Plex playback if webhook fails
+    }
+    
+    // Use existing Plex play endpoint
+    const playResponse = await fetch(`http://localhost:${PORT}/api/plex/play`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        ratingKey: ratingKey
+      }),
+    });
+    
+    const playData = await playResponse.json();
+    
+    if (playResponse.ok) {
+      // Success response in Android format
+      const androidResponse = {
+        type: 'PLAY_SUCCESS',
+        data: {
+          success: true,
+          ratingKey: ratingKey,
+          title: title,
+          mediaType: mediaType,
+          player: playData.player || 'Unknown Player',
+          message: `Playing "${title}" on ${playData.player || 'Plex'}`,
+          timestamp: new Date().toISOString()
+        }
+      };
+      
+      console.log('✅ Playback started successfully:', JSON.stringify(androidResponse, null, 2));
+      res.json(androidResponse);
+    } else {
+      // Error response in Android format
+      let errorMessage = playData.error || 'Failed to start playback';
+      
+      // Provide helpful error messages for common issues
+      if (errorMessage.includes('No player specified') || errorMessage.includes('not found')) {
+        errorMessage = 'No Plex player selected. Please configure a player in Settings.';
+      } else if (errorMessage.includes('not currently available')) {
+        errorMessage = 'Selected Plex player is not currently available. Try selecting a different player.';
+      }
+      
+      const androidErrorResponse = {
+        type: 'PLAY_ERROR',
+        data: {
+          success: false,
+          ratingKey: ratingKey,
+          title: title,
+          mediaType: mediaType,
+          error: errorMessage,
+          details: playData.details || 'Check Plex server connection and player availability',
+          timestamp: new Date().toISOString()
+        }
+      };
+      
+      console.error('❌ Playback failed:', JSON.stringify(androidErrorResponse, null, 2));
+      res.status(playResponse.status).json(androidErrorResponse);
+    }
+    
+  } catch (error) {
+    console.error('❌ Error in Android play endpoint:', error);
+    
+    const androidErrorResponse = {
+      type: 'PLAY_ERROR',
+      data: {
+        success: false,
+        error: 'Internal server error',
+        details: error.message,
+        timestamp: new Date().toISOString()
+      }
+    };
+    
+    res.status(500).json(androidErrorResponse);
+  }
+});
+
+// Android companion app endpoint - Mark Item as Read/Watched
+app.post('/api/android/mark-watched', async (req, res) => {
+  console.log('📱 Android app requesting to mark item as read/watched...');
+  
+  try {
+    const { itemId, mediaType, title = 'Unknown Item' } = req.body;
+    
+    if (!itemId) {
+      return res.status(400).json({
+        type: 'MARK_WATCHED_ERROR',
+        data: {
+          error: 'Item ID is required',
+          message: 'Unable to mark as watched: missing item identifier'
+        }
+      });
+    }
+    
+    console.log(`📱 Mark watched request - itemId: ${itemId}, mediaType: ${mediaType}, title: ${title}`);
+    
+    // Use existing mark custom order item as watched endpoint
+    const watchedResponse = await fetch(`http://localhost:${PORT}/api/mark-custom-order-item-watched/${itemId}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      }
+    });
+    
+    if (!watchedResponse.ok) {
+      const errorData = await watchedResponse.json();
+      console.error('Failed to mark item as watched:', errorData);
+      
+      const androidErrorResponse = {
+        type: 'MARK_WATCHED_ERROR',
+        data: {
+          success: false,
+          itemId: itemId,
+          title: title,
+          mediaType: mediaType,
+          error: errorData.error || 'Failed to mark as watched',
+          details: errorData.details || 'Check item exists and is not already watched',
+          timestamp: new Date().toISOString()
+        }
+      };
+      
+      return res.status(watchedResponse.status).json(androidErrorResponse);
+    }
+    
+    const watchedData = await watchedResponse.json();
+    console.log('✅ Item marked as watched successfully:', JSON.stringify(watchedData, null, 2));
+    
+    // Success response in Android format
+    const androidResponse = {
+      type: 'MARK_WATCHED_SUCCESS',
+      data: {
+        success: true,
+        itemId: itemId,
+        title: title,
+        mediaType: mediaType,
+        message: `Successfully marked "${title}" as read/watched`,
+        watchLogCreated: watchedData.watchLogCreated || false,
+        plexUpdated: watchedData.plexUpdated || false,
+        timestamp: new Date().toISOString()
+      }
+    };
+    
+    console.log('✅ Mark watched successful:', JSON.stringify(androidResponse, null, 2));
+    res.json(androidResponse);
+    
+  } catch (error) {
+    console.error('❌ Error in Android mark watched endpoint:', error);
+    
+    const androidErrorResponse = {
+      type: 'MARK_WATCHED_ERROR',
+      data: {
+        success: false,
+        error: 'Internal server error',
+        details: error.message,
+        timestamp: new Date().toISOString()
+      }
+    };
+    
+    res.status(500).json(androidErrorResponse);
+  }
+});
+
+// Android companion app endpoint - Start Reading Session
+app.post('/api/android/reading/start', async (req, res) => {
+  console.log('📱 Android app requesting to start reading session...');
+  
+  try {
+    const { mediaType, title, seriesTitle, customOrderItemId } = req.body;
+    
+    if (!mediaType || !title) {
+      return res.status(400).json({
+        type: 'READING_SESSION_ERROR',
+        data: {
+          error: 'Missing required fields',
+          message: 'mediaType and title are required'
+        }
+      });
+    }
+    
+    if (!['book', 'comic', 'shortstory'].includes(mediaType)) {
+      return res.status(400).json({
+        type: 'READING_SESSION_ERROR', 
+        data: {
+          error: 'Invalid media type',
+          message: 'Reading sessions are only supported for books, comics, and stories'
+        }
+      });
+    }
+    
+    console.log(`📱 Start reading session - mediaType: ${mediaType}, title: ${title}, customOrderItemId: ${customOrderItemId}`);
+    
+    // Use existing reading session start endpoint
+    const sessionResponse = await fetch(`http://localhost:${PORT}/api/reading/start`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        mediaType,
+        title,
+        seriesTitle,
+        customOrderItemId
+      })
+    });
+    
+    const sessionData = await sessionResponse.json();
+    
+    if (!sessionResponse.ok) {
+      console.error('Failed to start reading session:', sessionData);
+      
+      const androidErrorResponse = {
+        type: 'READING_SESSION_ERROR',
+        data: {
+          success: false,
+          mediaType: mediaType,
+          title: title,
+          error: sessionData.error || 'Failed to start reading session',
+          details: sessionData.details || 'Check server logs for more information',
+          timestamp: new Date().toISOString()
+        }
+      };
+      
+      return res.status(sessionResponse.status).json(androidErrorResponse);
+    }
+    
+    console.log('✅ Reading session started successfully:', JSON.stringify(sessionData, null, 2));
+    
+    // Success response in Android format
+    const androidResponse = {
+      type: 'READING_SESSION_STARTED',
+      data: {
+        success: true,
+        sessionId: sessionData.id,
+        mediaType: mediaType,
+        title: title,
+        seriesTitle: seriesTitle,
+        customOrderItemId: customOrderItemId,
+        startedAt: sessionData.startedAt,
+        isPaused: sessionData.isPaused || false,
+        message: `Started reading session for "${title}"`,
+        timestamp: new Date().toISOString()
+      }
+    };
+    
+    console.log('✅ Reading session start successful:', JSON.stringify(androidResponse, null, 2));
+    res.json(androidResponse);
+    
+  } catch (error) {
+    console.error('❌ Error in Android reading session start endpoint:', error);
+    
+    const androidErrorResponse = {
+      type: 'READING_SESSION_ERROR',
+      data: {
+        success: false,
+        error: 'Internal server error',
+        details: error.message,
+        timestamp: new Date().toISOString()
+      }
+    };
+    
+    res.status(500).json(androidErrorResponse);
+  }
+});
+
+// Android companion app endpoint - Pause/Resume Reading Session
+app.post('/api/android/reading/pause', async (req, res) => {
+  console.log('📱 Android app requesting to pause/resume reading session...');
+  
+  try {
+    // Use existing reading session pause endpoint
+    const pauseResponse = await fetch(`http://localhost:${PORT}/api/reading/pause`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      }
+    });
+    
+    const pauseData = await pauseResponse.json();
+    
+    if (!pauseResponse.ok) {
+      console.error('Failed to pause/resume reading session:', pauseData);
+      
+      const androidErrorResponse = {
+        type: 'READING_SESSION_ERROR',
+        data: {
+          success: false,
+          error: pauseData.error || 'Failed to pause/resume reading session',
+          details: pauseData.details || 'No active reading session found',
+          timestamp: new Date().toISOString()
+        }
+      };
+      
+      return res.status(pauseResponse.status).json(androidErrorResponse);
+    }
+    
+    console.log('✅ Reading session paused/resumed successfully:', JSON.stringify(pauseData, null, 2));
+    
+    // Success response in Android format
+    const androidResponse = {
+      type: pauseData.isPaused ? 'READING_SESSION_PAUSED' : 'READING_SESSION_RESUMED',
+      data: {
+        success: true,
+        sessionId: pauseData.id,
+        isPaused: pauseData.isPaused,
+        title: pauseData.title,
+        mediaType: pauseData.mediaType,
+        message: pauseData.isPaused ? 
+          `Paused reading session for "${pauseData.title}"` : 
+          `Resumed reading session for "${pauseData.title}"`,
+        pausedAt: pauseData.pausedAt,
+        totalActiveTime: pauseData.totalActiveTime,
+        timestamp: new Date().toISOString()
+      }
+    };
+    
+    console.log('✅ Reading session pause/resume successful:', JSON.stringify(androidResponse, null, 2));
+    res.json(androidResponse);
+    
+  } catch (error) {
+    console.error('❌ Error in Android reading session pause endpoint:', error);
+    
+    const androidErrorResponse = {
+      type: 'READING_SESSION_ERROR',
+      data: {
+        success: false,
+        error: 'Internal server error',
+        details: error.message,
+        timestamp: new Date().toISOString()
+      }
+    };
+    
+    res.status(500).json(androidErrorResponse);
+  }
+});
+
+// Android companion app endpoint - Stop Reading Session
+app.post('/api/android/reading/stop', async (req, res) => {
+  console.log('📱 Android app requesting to stop reading session...');
+  
+  try {
+    const { progress } = req.body;
+    
+    // Use existing reading session stop endpoint
+    const stopResponse = await fetch(`http://localhost:${PORT}/api/reading/stop`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ progress })
+    });
+    
+    const stopData = await stopResponse.json();
+    
+    if (!stopResponse.ok) {
+      console.error('Failed to stop reading session:', stopData);
+      
+      const androidErrorResponse = {
+        type: 'READING_SESSION_ERROR',
+        data: {
+          success: false,
+          error: stopData.error || 'Failed to stop reading session',
+          details: stopData.details || 'No active reading session found',
+          timestamp: new Date().toISOString()
+        }
+      };
+      
+      return res.status(stopResponse.status).json(androidErrorResponse);
+    }
+    
+    console.log('✅ Reading session stopped successfully:', JSON.stringify(stopData, null, 2));
+    
+    // Success response in Android format
+    const androidResponse = {
+      type: 'READING_SESSION_STOPPED',
+      data: {
+        success: true,
+        sessionId: stopData.id,
+        title: stopData.title,
+        mediaType: stopData.mediaType,
+        duration: stopData.duration,
+        totalActiveTime: stopData.totalActiveTime,
+        progressUpdated: progress ? true : false,
+        progress: progress || null,
+        message: `Stopped reading session for "${stopData.title}"`,
+        completedAt: stopData.completedAt,
+        timestamp: new Date().toISOString()
+      }
+    };
+    
+    console.log('✅ Reading session stop successful:', JSON.stringify(androidResponse, null, 2));
+    res.json(androidResponse);
+    
+  } catch (error) {
+    console.error('❌ Error in Android reading session stop endpoint:', error);
+    
+    const androidErrorResponse = {
+      type: 'READING_SESSION_ERROR',
+      data: {
+        success: false,
+        error: 'Internal server error',
+        details: error.message,
+        timestamp: new Date().toISOString()
+      }
+    };
+    
+    res.status(500).json(androidErrorResponse);
+  }
+});
+
+// Android companion app endpoint - Start Viewing Session
+app.post('/api/android/viewing/start', async (req, res) => {
+  console.log('📱 Android app requesting to start viewing session...');
+  
+  try {
+    const { mediaType, title, seriesTitle, customOrderItemId } = req.body;
+    
+    if (!mediaType || !title) {
+      return res.status(400).json({
+        type: 'VIEWING_SESSION_ERROR',
+        data: {
+          error: 'Missing required fields',
+          message: 'mediaType and title are required'
+        }
+      });
+    }
+    
+    if (!['webvideo'].includes(mediaType)) {
+      return res.status(400).json({
+        type: 'VIEWING_SESSION_ERROR',
+        data: {
+          error: 'Invalid media type',
+          message: 'Viewing sessions are only supported for web videos'
+        }
+      });
+    }
+    
+    console.log(`📱 Start viewing session - mediaType: ${mediaType}, title: ${title}, customOrderItemId: ${customOrderItemId}`);
+    
+    // Use existing viewing session start endpoint
+    const sessionResponse = await fetch(`http://localhost:${PORT}/api/viewing/start`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        mediaType,
+        title,
+        seriesTitle,
+        customOrderItemId
+      })
+    });
+    
+    const sessionData = await sessionResponse.json();
+    
+    if (!sessionResponse.ok) {
+      console.error('Failed to start viewing session:', sessionData);
+      
+      const androidErrorResponse = {
+        type: 'VIEWING_SESSION_ERROR',
+        data: {
+          success: false,
+          mediaType: mediaType,
+          title: title,
+          error: sessionData.error || 'Failed to start viewing session',
+          details: sessionData.details || 'Check server logs for more information',
+          timestamp: new Date().toISOString()
+        }
+      };
+      
+      return res.status(sessionResponse.status).json(androidErrorResponse);
+    }
+    
+    console.log('✅ Viewing session started successfully:', JSON.stringify(sessionData, null, 2));
+    
+    // Success response in Android format
+    const androidResponse = {
+      type: 'VIEWING_SESSION_STARTED',
+      data: {
+        success: true,
+        sessionId: sessionData.id,
+        mediaType: mediaType,
+        title: title,
+        seriesTitle: seriesTitle,
+        customOrderItemId: customOrderItemId,
+        startedAt: sessionData.startedAt,
+        isPaused: sessionData.isPaused || false,
+        message: `Started viewing session for "${title}"`,
+        timestamp: new Date().toISOString()
+      }
+    };
+    
+    console.log('✅ Viewing session start successful:', JSON.stringify(androidResponse, null, 2));
+    res.json(androidResponse);
+    
+  } catch (error) {
+    console.error('❌ Error in Android viewing session start endpoint:', error);
+    
+    const androidErrorResponse = {
+      type: 'VIEWING_SESSION_ERROR',
+      data: {
+        success: false,
+        error: 'Internal server error',
+        details: error.message,
+        timestamp: new Date().toISOString()
+      }
+    };
+    
+    res.status(500).json(androidErrorResponse);
+  }
+});
+
+// Android companion app endpoint - Pause/Resume Viewing Session
+app.post('/api/android/viewing/pause', async (req, res) => {
+  console.log('📱 Android app requesting to pause/resume viewing session...');
+  
+  try {
+    // Use existing viewing session pause endpoint
+    const pauseResponse = await fetch(`http://localhost:${PORT}/api/viewing/pause`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      }
+    });
+    
+    const pauseData = await pauseResponse.json();
+    
+    if (!pauseResponse.ok) {
+      console.error('Failed to pause/resume viewing session:', pauseData);
+      
+      const androidErrorResponse = {
+        type: 'VIEWING_SESSION_ERROR',
+        data: {
+          success: false,
+          error: pauseData.error || 'Failed to pause/resume viewing session',
+          details: pauseData.details || 'No active viewing session found',
+          timestamp: new Date().toISOString()
+        }
+      };
+      
+      return res.status(pauseResponse.status).json(androidErrorResponse);
+    }
+    
+    console.log('✅ Viewing session paused/resumed successfully:', JSON.stringify(pauseData, null, 2));
+    
+    // Success response in Android format
+    const androidResponse = {
+      type: pauseData.isPaused ? 'VIEWING_SESSION_PAUSED' : 'VIEWING_SESSION_RESUMED',
+      data: {
+        success: true,
+        sessionId: pauseData.id,
+        isPaused: pauseData.isPaused,
+        title: pauseData.title,
+        mediaType: pauseData.mediaType,
+        message: pauseData.isPaused ? 
+          `Paused viewing session for "${pauseData.title}"` : 
+          `Resumed viewing session for "${pauseData.title}"`,
+        pausedAt: pauseData.pausedAt,
+        totalActiveTime: pauseData.totalActiveTime,
+        timestamp: new Date().toISOString()
+      }
+    };
+    
+    console.log('✅ Viewing session pause/resume successful:', JSON.stringify(androidResponse, null, 2));
+    res.json(androidResponse);
+    
+  } catch (error) {
+    console.error('❌ Error in Android viewing session pause endpoint:', error);
+    
+    const androidErrorResponse = {
+      type: 'VIEWING_SESSION_ERROR',
+      data: {
+        success: false,
+        error: 'Internal server error',
+        details: error.message,
+        timestamp: new Date().toISOString()
+      }
+    };
+    
+    res.status(500).json(androidErrorResponse);
+  }
+});
+
+// Android companion app endpoint - Stop Viewing Session
+app.post('/api/android/viewing/stop', async (req, res) => {
+  console.log('📱 Android app requesting to stop viewing session...');
+  
+  try {
+    const { progress } = req.body;
+    
+    // Use existing viewing session stop endpoint
+    const stopResponse = await fetch(`http://localhost:${PORT}/api/viewing/stop`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ progress })
+    });
+    
+    const stopData = await stopResponse.json();
+    
+    if (!stopResponse.ok) {
+      console.error('Failed to stop viewing session:', stopData);
+      
+      const androidErrorResponse = {
+        type: 'VIEWING_SESSION_ERROR',
+        data: {
+          success: false,
+          error: stopData.error || 'Failed to stop viewing session',
+          details: stopData.details || 'No active viewing session found',
+          timestamp: new Date().toISOString()
+        }
+      };
+      
+      return res.status(stopResponse.status).json(androidErrorResponse);
+    }
+    
+    console.log('✅ Viewing session stopped successfully:', JSON.stringify(stopData, null, 2));
+    
+    // Success response in Android format
+    const androidResponse = {
+      type: 'VIEWING_SESSION_STOPPED',
+      data: {
+        success: true,
+        sessionId: stopData.id,
+        title: stopData.title,
+        mediaType: stopData.mediaType,
+        duration: stopData.duration,
+        totalActiveTime: stopData.totalActiveTime,
+        progressUpdated: progress ? true : false,
+        progress: progress || null,
+        message: `Stopped viewing session for "${stopData.title}"`,
+        completedAt: stopData.completedAt,
+        timestamp: new Date().toISOString()
+      }
+    };
+    
+    console.log('✅ Viewing session stop successful:', JSON.stringify(androidResponse, null, 2));
+    res.json(androidResponse);
+    
+  } catch (error) {
+    console.error('❌ Error in Android viewing session stop endpoint:', error);
+    
+    const androidErrorResponse = {
+      type: 'VIEWING_SESSION_ERROR',
+      data: {
+        success: false,
+        error: 'Internal server error',
+        details: error.message,
+        timestamp: new Date().toISOString()
+      }
+    };
+    
+    res.status(500).json(androidErrorResponse);
   }
 });
 
