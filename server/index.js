@@ -134,26 +134,66 @@ async function initializeStashService() {
     const { getSettings } = require('./databaseUtils');
     const settings = await getSettings();
     
-    // Fall back to environment variable if database settings don't have Stash URL
-    const stashUrl = settings?.stashUrl || process.env.STASH_URL;
+    // Try multiple Stash URLs in order of preference
+    const potentialUrls = [
+      settings?.stashUrl,
+      process.env.STASH_URL,
+      process.env.STASH_URL_FALLBACK_1,
+      process.env.STASH_URL_FALLBACK_2, 
+      process.env.STASH_URL_FALLBACK_3
+    ].filter(url => url); // Remove null/undefined values
+    
     const stashApiKey = settings?.stashApiKey || process.env.STASH_API_KEY;
     
     console.log('🔍 Initializing Stash service...');
     console.log('   - Settings loaded:', !!settings);
     console.log('   - Database Stash URL:', settings?.stashUrl || 'NOT SET');
-    console.log('   - Environment STASH_URL:', process.env.STASH_URL || 'NOT SET');
-    console.log('   - Final Stash URL:', stashUrl || 'NOT SET');
+    console.log('   - Environment URLs to try:', potentialUrls);
     console.log('   - Stash API Key:', stashApiKey ? 'SET' : 'NOT SET');
     
-    if (stashUrl) {
+    let workingUrl = null;
+    
+    // Test each URL to find one that works
+    for (const url of potentialUrls) {
+      try {
+        console.log(`   - Testing connection to: ${url}`);
+        
+        // Create timeout promise
+        const timeoutPromise = new Promise((_, reject) => 
+          setTimeout(() => reject(new Error('Connection timeout')), 5000)
+        );
+        
+        const fetchPromise = fetch(`${url}/graphql`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            query: '{ version { build_time } }'
+          })
+        });
+        
+        const testResponse = await Promise.race([fetchPromise, timeoutPromise]);
+        
+        if (testResponse.ok) {
+          workingUrl = url;
+          console.log(`   ✅ Connection successful to: ${url}`);
+          break;
+        }
+      } catch (error) {
+        console.log(`   ❌ Connection failed to: ${url} - ${error.message}`);
+      }
+    }
+    
+    if (workingUrl) {
       // Configure the existing singleton instance
-      stashService.configure(stashUrl, stashApiKey || null);
+      stashService.configure(workingUrl, stashApiKey || null);
       console.log('✅ Stash service initialized');
+      console.log('   - Working URL:', workingUrl);
       console.log('   - Service configured:', stashService.isConfigured());
     } else {
-      // Reset the configuration if no URL is set
+      // Reset the configuration if no URL works
       stashService.configure(null, null);
-      console.log('ℹ️  Stash service not initialized - missing URL in both settings and environment');
+      console.log('❌ Stash service not initialized - no working URLs found');
+      console.log('   - URLs tested:', potentialUrls);
     }
   } catch (error) {
     console.error('❌ Error initializing Stash service:', error.message);

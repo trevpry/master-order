@@ -1,13 +1,25 @@
 version: '3.8'
 
+networks:
+  master-order-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
+          gateway: 172.20.0.1
+
 services:
   master-order:
     build: .
     container_name: master-order
     restart: unless-stopped
-    network_mode: host
+    networks:
+      - master-order-network
     ports:
       - "3001:3001"
+    extra_hosts:
+      - "host.docker.internal:172.20.0.1"
+      - "stash.local:192.168.1.154"
     volumes:
       # Persistent data storage - Updated paths for Unraid
       - /mnt/user/appdata/master-order/data:/app/data
@@ -27,8 +39,12 @@ services:
       - "DATABASE_URL=postgresql://master_order_user:secure_password_change_me@192.168.1.113:5432/master_order"
       - "POSTGRES_PASSWORD=secure_password_change_me"
       - PORT=3001
-      # Stash server configuration
-      - "STASH_URL=http://192.168.1.154:9999"
+      # Stash server configuration - Try multiple potential URLs
+      - "STASH_URL=http://stash.local:9999"
+      # Fallback Stash URLs for different Docker setups
+      - "STASH_URL_FALLBACK_1=http://192.168.1.154:9999"
+      - "STASH_URL_FALLBACK_2=http://host.docker.internal:9999"
+      - "STASH_URL_FALLBACK_3=http://172.20.0.1:9999"
       # Add your API keys and settings here or use a .env file
       # - PLEX_URL=http://your-plex-server:32400
       # - PLEX_TOKEN=your-plex-token
