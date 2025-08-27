@@ -154,6 +154,64 @@ export default function Stash() {
     }
   }, [libraryTab, currentPage, sortBy, sortDirection, watchStatusFilter, connectionStatus.connected, mainTab]);
 
+  // Keyboard controls for video player
+  useEffect(() => {
+    const handleKeyPress = (e) => {
+      if (!videoPlayer.isOpen) return;
+
+      switch (e.key) {
+        case 'Escape':
+          // Close video player
+          const video = document.querySelector('.clip-video-player');
+          if (video && video.clipTimer) {
+            clearTimeout(video.clipTimer);
+            video.clipTimer = null;
+            console.log('🧹 Cleaned up clip timer on ESC key');
+          }
+          setVideoPlayer({ isOpen: false, clip: null, scene: null, playbackInfo: null });
+          setAutoSkipRetries(0);
+          break;
+        case 'n':
+        case 'N':
+        case 'ArrowRight':
+          // Next clip (simulate click on next button)
+          document.querySelector('.next-clip-btn')?.click();
+          break;
+        case ' ':
+          // Space bar - play/pause video
+          e.preventDefault();
+          const videoEl = document.querySelector('.clip-video-player');
+          if (videoEl) {
+            if (videoEl.paused) {
+              videoEl.play();
+            } else {
+              videoEl.pause();
+            }
+          }
+          break;
+        case 'f':
+        case 'F':
+          // Toggle native browser fullscreen
+          const videoElement = document.querySelector('.clip-video-player');
+          if (videoElement) {
+            if (document.fullscreenElement) {
+              document.exitFullscreen();
+            } else {
+              videoElement.requestFullscreen().catch(err => {
+                console.log('Fullscreen not supported:', err);
+              });
+            }
+          }
+          break;
+      }
+    };
+
+    if (videoPlayer.isOpen) {
+      document.addEventListener('keydown', handleKeyPress);
+      return () => document.removeEventListener('keydown', handleKeyPress);
+    }
+  }, [videoPlayer.isOpen]);
+
   const testConnection = async () => {
     try {
       const response = await fetch(`${config.apiBaseUrl}/api/stash/test`);
@@ -1265,13 +1323,35 @@ export default function Stash() {
     <div className="stash-page">
       {/* Full-Screen Video Player */}
       {videoPlayer.isOpen && (
-        <div className="video-player-overlay">
-          <div className="video-player-container">
+        <div 
+          className="video-player-overlay"
+          onClick={(e) => {
+            // Close player when clicking on overlay background (not the video or controls)
+            if (e.target === e.currentTarget) {
+              // Clean up timer before closing
+              const video = document.querySelector('.clip-video-player');
+              if (video && video.clipTimer) {
+                clearTimeout(video.clipTimer);
+                video.clipTimer = null;
+                console.log('🧹 Cleaned up clip timer on overlay click');
+              }
+              setVideoPlayer({ isOpen: false, clip: null, scene: null, playbackInfo: null });
+              setAutoSkipRetries(0);
+            }
+          }}
+        >
+          <div 
+            className="video-player-container"
+            onClick={(e) => e.stopPropagation()} // Prevent overlay click when clicking inside container
+          >
             <div className="video-player-header">
               <div className="video-info">
                 <h3>🎬 {getSceneDisplayTitle(videoPlayer.scene)}</h3>
                 {videoPlayer.playbackInfo ? (
-                  <p>Clip {videoPlayer.clip.clipIndex + 1} • {Math.floor(videoPlayer.playbackInfo.startTime / 60)}:{String(Math.floor(videoPlayer.playbackInfo.startTime % 60)).padStart(2, '0')} - {Math.floor(videoPlayer.playbackInfo.endTime / 60)}:{String(Math.floor(videoPlayer.playbackInfo.endTime % 60)).padStart(2, '0')}</p>
+                  <>
+                    <p>Clip {videoPlayer.clip.clipIndex + 1} • {Math.floor(videoPlayer.playbackInfo.startTime / 60)}:{String(Math.floor(videoPlayer.playbackInfo.startTime % 60)).padStart(2, '0')} - {Math.floor(videoPlayer.playbackInfo.endTime / 60)}:{String(Math.floor(videoPlayer.playbackInfo.endTime % 60)).padStart(2, '0')}</p>
+                    <p className="keyboard-shortcuts">ESC: Close • Space: Play/Pause • N/→: Next Clip • F: Fullscreen</p>
+                  </>
                 ) : (
                   <p>Loading clip info...</p>
                 )}

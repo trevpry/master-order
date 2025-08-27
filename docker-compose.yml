@@ -8,6 +8,7 @@ services:
     network_mode: host
     extra_hosts:
       - "stash.internal:192.168.1.154"
+      - "plex.local:192.168.1.116"
     volumes:
       # Persistent data storage - Updated paths for Unraid
       - /mnt/user/appdata/master-order/data:/app/data

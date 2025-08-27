@@ -786,19 +786,25 @@ app.get('/api/komga/search-comic', async (req, res) => {
 // Stash test connection endpoint
 app.get('/api/stash/test', async (req, res) => {
   try {
+    console.log('🧪 Testing Stash connection...');
+    
     if (!stashSyncService) {
+      console.log('⚠️ StashSyncService not initialized, initializing now...');
       await initializeStashSyncService();
     }
     
     if (!stashSyncService) {
+      console.log('❌ StashSyncService still not available after initialization');
       return res.status(400).json({ 
         success: false, 
         message: 'Stash sync service not configured',
         configured: false
       });
     }
-    
+
+    console.log('🔍 Calling stashSyncService.testConnection()...');
     const version = await stashSyncService.testConnection();
+    console.log('✅ Stash connection test successful:', version);
     
     // Get the Stash URL from settings
     const settings = await prisma.settings.findUnique({ where: { id: 1 } });
@@ -807,6 +813,13 @@ app.get('/api/stash/test', async (req, res) => {
     const finalStashUrl = (process.env.STASH_URL || process.env.STASH_URL_FALLBACK_1 || 
                           process.env.STASH_URL_FALLBACK_2 || process.env.STASH_URL_FALLBACK_3 || 
                           settings?.stashUrl)?.replace(/\/+$/, '');
+
+    console.log('📋 Stash connection test results:', {
+      success: true,
+      version: version,
+      finalStashUrl,
+      hasApiKey: !!(settings?.stashApiKey)
+    });
     
     res.json({ 
       success: true, 
@@ -817,9 +830,10 @@ app.get('/api/stash/test', async (req, res) => {
       apiKey: settings?.stashApiKey || null // Include API key for frontend video streaming
     });
   } catch (error) {
-    console.error('Error testing Stash connection:', error);
+    console.error('❌ Error testing Stash connection:', error.message);
+    console.error('❌ Full error:', error);
     res.status(500).json({ 
-      error: 'Failed to test Stash connection',
+      success: false, 
       message: error.message,
       configured: false
     });
