@@ -1,5 +1,5 @@
 {
-  "name": "master-order",
+  "name": "eddie-life-management",
   "version": "1.0.0",
   "main": "start.js",
   "scripts": {
@@ -9,10 +9,16 @@
     "dev": "concurrently \"npm run server\" \"npm run client\"",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
-  "keywords": [],
+  "keywords": [
+    "life-management",
+    "personal-assistant",
+    "media-management",
+    "productivity",
+    "personal-dashboard"
+  ],
   "author": "",
   "license": "ISC",
-  "description": "Master Order application with React, Express, Vite, SQLite",
+  "description": "Eddie - A comprehensive life management application with media management, task tracking, health monitoring, and personal organization tools",
   "dependencies": {
     "axios": "^1.9.0",
     "cors": "^2.8.5",
@@ -21,6 +27,7 @@
     "node-fetch": "^2.7.0",
     "plex-api": "^5.3.2",
     "plex-control": "^3.0.1",
+    "react-hot-toast": "^2.6.0",
     "react-router-dom": "^7.6.0",
     "sqlite3": "^5.1.7"
   },

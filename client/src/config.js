@@ -17,4 +17,7 @@ const config = {
   })(),
 };
 
+// Backward compatibility alias
+config.API_URL = config.apiBaseUrl;
+
 export default config;

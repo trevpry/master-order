@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import Button from '../components/Button';
+import Button from '../../../shared/components/Button';
 import './Stash.css';
-import config from '../config';
+import config from '../../../config';
 
 export default function Stash() {
   const [connectionStatus, setConnectionStatus] = useState({ 

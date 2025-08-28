@@ -37,6 +37,16 @@ model Settings {
   updatedAt                         DateTime  @updatedAt
 }
 
+model EddieSettings {
+  id             Int     @id @default(autoincrement())
+  weatherEnabled Boolean @default(false)
+  weatherUnits   String  @default("metric")
+  weatherApiKey  String?
+  weatherLocation String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+}
+
 model Order {
   id           Int      @id @default(autoincrement())
   customerName String

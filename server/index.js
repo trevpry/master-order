@@ -253,6 +253,141 @@ app.get('/api/health', async (req, res) => {
   }
 });
 
+// Weather API endpoint
+app.get('/api/weather', async (req, res) => {
+  try {
+    // Get Eddie settings for weather configuration
+    const eddieSettings = await prisma.eddieSettings.findFirst();
+    
+    if (!eddieSettings?.weatherEnabled) {
+      return res.status(400).json({
+        error: 'Weather is not enabled in settings'
+      });
+    }
+    
+    if (!eddieSettings?.weatherApiKey) {
+      return res.status(400).json({
+        error: 'Weather API key not configured'
+      });
+    }
+    
+    if (!eddieSettings?.weatherLocation) {
+      return res.status(400).json({
+        error: 'Weather location not configured'
+      });
+    }
+    
+    const apiKey = eddieSettings.weatherApiKey;
+    const location = eddieSettings.weatherLocation;
+    const units = eddieSettings.weatherUnits || 'metric';
+    
+    // Check if location is coordinates (lat,lon) or city name
+    let weatherUrl;
+    // Check if it's coordinates by looking for numeric lat,lon pattern
+    const coordPattern = /^[-+]?\d*\.?\d+\s*,\s*[-+]?\d*\.?\d+$/;
+    if (coordPattern.test(location.trim())) {
+      // It's coordinates format "lat,lon"
+      const [lat, lon] = location.split(',').map(coord => coord.trim());
+      weatherUrl = `https://api.openweathermap.org/data/2.5/weather?lat=${lat}&lon=${lon}&appid=${apiKey}&units=${units}`;
+    } else {
+      // It's a city name (possibly with state/country)
+      weatherUrl = `https://api.openweathermap.org/data/2.5/weather?q=${encodeURIComponent(location)}&appid=${apiKey}&units=${units}`;
+    }
+    
+    const response = await fetch(weatherUrl);
+    
+    if (!response.ok) {
+      const errorData = await response.json();
+      throw new Error(`OpenWeatherMap API error: ${response.status} - ${errorData.message || 'Unknown error'}`);
+    }
+    
+    const weatherData = await response.json();
+    
+    // Add units info to response
+    weatherData.units = units;
+    weatherData.tempUnit = units === 'metric' ? '°C' : units === 'imperial' ? '°F' : 'K';
+    weatherData.speedUnit = units === 'metric' ? 'm/s' : 'mph';
+    
+    res.json(weatherData);
+  } catch (error) {
+    console.error('Weather API error:', error);
+    res.status(500).json({
+      error: 'Failed to fetch weather data',
+      details: error.message
+    });
+  }
+});
+
+// Eddie Settings API endpoints
+app.get('/api/eddie-settings', async (req, res) => {
+  try {
+    let settings = await prisma.eddieSettings.findFirst();
+    
+    // Create default settings if none exist
+    if (!settings) {
+      settings = await prisma.eddieSettings.create({
+        data: {
+          weatherEnabled: false,
+          weatherUnits: 'metric'
+        }
+      });
+    }
+    
+    res.json(settings);
+  } catch (error) {
+    console.error('Error fetching Eddie settings:', error);
+    res.status(500).json({
+      error: 'Failed to fetch Eddie settings',
+      details: error.message
+    });
+  }
+});
+
+app.put('/api/eddie-settings', async (req, res) => {
+  try {
+    const {
+      weatherApiKey,
+      weatherLocation,
+      weatherUnits,
+      weatherEnabled
+    } = req.body;
+    
+    // Get or create settings
+    let settings = await prisma.eddieSettings.findFirst();
+    
+    if (settings) {
+      // Update existing settings
+      settings = await prisma.eddieSettings.update({
+        where: { id: settings.id },
+        data: {
+          ...(weatherApiKey !== undefined && { weatherApiKey }),
+          ...(weatherLocation !== undefined && { weatherLocation }),
+          ...(weatherUnits !== undefined && { weatherUnits }),
+          ...(weatherEnabled !== undefined && { weatherEnabled }),
+        }
+      });
+    } else {
+      // Create new settings
+      settings = await prisma.eddieSettings.create({
+        data: {
+          weatherApiKey: weatherApiKey || null,
+          weatherLocation: weatherLocation || null,
+          weatherUnits: weatherUnits || 'metric',
+          weatherEnabled: weatherEnabled || false,
+        }
+      });
+    }
+    
+    res.json(settings);
+  } catch (error) {
+    console.error('Error updating Eddie settings:', error);
+    res.status(500).json({
+      error: 'Failed to update Eddie settings',
+      details: error.message
+    });
+  }
+});
+
 // Android companion app proxy endpoint
 app.post('/api/android/play', async (req, res) => {
   try {
@@ -7325,10 +7460,7 @@ app.post('/api/reading/start', async (req, res) => {
     }
 
     if (!customOrderItemId) {
-      console.log('Missing customOrderItemId - using default value');
-      // Use a default value or generate one if customOrderItemId is missing
-      const defaultId = Date.now(); // Use timestamp as fallback
-      console.log('Using fallback customOrderItemId:', defaultId);
+      console.log('No customOrderItemId provided - this reading session will not be linked to a custom order');
     }
 
     if (!['book', 'comic', 'shortstory'].includes(mediaType)) {
@@ -7336,7 +7468,10 @@ app.post('/api/reading/start', async (req, res) => {
       return res.status(400).json({ error: 'Invalid media type for reading' });
     }
 
-    const finalCustomOrderItemId = customOrderItemId || Date.now();
+    // Only use customOrderItemId if it's a valid integer, otherwise pass null
+    const finalCustomOrderItemId = customOrderItemId && Number.isInteger(parseInt(customOrderItemId)) 
+      ? parseInt(customOrderItemId) 
+      : null;
     
     const readingSession = await watchLogService.startReading({
       mediaType,
@@ -7593,10 +7728,7 @@ app.post('/api/viewing/start', async (req, res) => {
     }
 
     if (!customOrderItemId) {
-      console.log('Missing customOrderItemId - using default value');
-      // Use a default value or generate one if customOrderItemId is missing
-      const defaultId = Date.now(); // Use timestamp as fallback
-      console.log('Using fallback customOrderItemId:', defaultId);
+      console.log('No customOrderItemId provided - this viewing session will not be linked to a custom order');
     }
 
     if (!['webvideo'].includes(mediaType)) {
@@ -7604,7 +7736,10 @@ app.post('/api/viewing/start', async (req, res) => {
       return res.status(400).json({ error: 'Invalid media type for viewing' });
     }
 
-    const finalCustomOrderItemId = customOrderItemId || Date.now();
+    // Only use customOrderItemId if it's a valid integer, otherwise pass null
+    const finalCustomOrderItemId = customOrderItemId && Number.isInteger(parseInt(customOrderItemId)) 
+      ? parseInt(customOrderItemId) 
+      : null;
     
     const viewingSession = await watchLogService.startViewing({
       mediaType,

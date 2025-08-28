@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import Button from '../../components/Button';
-import config from '../../config';
+import Button from '../../../../shared/components/Button';
+import config from '../../../../config';
 import './CustomOrders.css';
 
 function CustomOrders() {  

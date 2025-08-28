@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import './WatchStats.css';
-import config from '../../config';
+import config from '../../../../config';
 import {
   Chart as ChartJS,
   CategoryScale,

@@ -1,0 +1,32 @@
+/* Targeted fix for image blur on external artwork sources for all viewport sizes */
+
+/* Apply to all devices, not just mobile */
+img[src*="tvdb-artwork"] {
+  image-rendering: -webkit-crisp-edges !important;
+  image-rendering: crisp-edges !important;
+  image-rendering: pixelated !important;
+  -webkit-image-rendering: -webkit-crisp-edges !important;
+  -ms-interpolation-mode: nearest-neighbor !important;
+  transform: none !important;
+  -webkit-transform: none !important;
+}
+
+img[src*="comicvine-artwork"] {
+  image-rendering: -webkit-crisp-edges !important;
+  image-rendering: crisp-edges !important;
+  image-rendering: pixelated !important;
+  -webkit-image-rendering: -webkit-crisp-edges !important;
+  -ms-interpolation-mode: nearest-neighbor !important;
+  transform: none !important;
+  -webkit-transform: none !important;
+}
+
+img[src*="openlibrary-artwork"] {
+  image-rendering: -webkit-crisp-edges !important;
+  image-rendering: crisp-edges !important;
+  image-rendering: pixelated !important;
+  -webkit-image-rendering: -webkit-crisp-edges !important;
+  -ms-interpolation-mode: nearest-neighbor !important;
+  transform: none !important;
+  -webkit-transform: none !important;
+}

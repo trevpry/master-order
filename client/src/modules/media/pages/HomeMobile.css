@@ -17,6 +17,25 @@ body {
   transform: none !important;
 }
 
+/* FORCE CRISP IMAGE RENDERING FOR ALL ARTWORK */
+.home-responsive .media-artwork-responsive img {
+  /* Remove any transforms that cause blur */
+  transform: none !important;
+  -webkit-transform: none !important;
+  
+  /* Force crisp rendering */
+  image-rendering: -webkit-crisp-edges !important;
+  image-rendering: crisp-edges !important;
+  image-rendering: pixelated !important;
+  -webkit-image-rendering: -webkit-crisp-edges !important;
+  -ms-interpolation-mode: nearest-neighbor !important;
+  
+  /* Disable hardware acceleration that can cause blur */
+  will-change: auto !important;
+  backface-visibility: visible !important;
+  -webkit-backface-visibility: visible !important;
+}
+
 /* AGGRESSIVE FIX: Ensure containers don't stretch images AT ALL */
 .home-responsive .media-artwork-responsive {
   line-height: 0 !important;
@@ -51,19 +70,19 @@ body {
     max-height: none !important;
     
     /* DISABLE ALL GPU ACCELERATION AND 3D RENDERING */
-    transform: translateZ(0) !important;
-    -webkit-transform: translateZ(0) !important;
+    transform: none !important;
+    -webkit-transform: none !important;
     will-change: auto !important;
     backface-visibility: visible !important;
     -webkit-backface-visibility: visible !important;
     perspective: none !important;
     -webkit-perspective: none !important;
     
-    /* FORCE SOFTWARE RENDERING */
-    image-rendering: -webkit-optimize-contrast !important;
-    image-rendering: optimize-contrast !important;
-    -webkit-image-rendering: -webkit-optimize-contrast !important;
-    -ms-interpolation-mode: bicubic !important;
+    /* FORCE CRISP IMAGE RENDERING */
+    image-rendering: -webkit-crisp-edges !important;
+    image-rendering: crisp-edges !important;
+    -webkit-image-rendering: -webkit-crisp-edges !important;
+    -ms-interpolation-mode: nearest-neighbor !important;
     
     /* PREVENT FRACTIONAL PIXEL RENDERING */
     object-fit: contain !important;
@@ -266,7 +285,8 @@ body {
     bottom: 0;
     left: 0;
     right: 0;
-    background: linear-gradient(transparent, rgba(0, 0, 0, 0.8));
+    /* Remove all background darkening - make completely transparent */
+    background: transparent;
     padding: 20px 16px 16px;
     border-radius: 0 0 12px 12px;
   }
@@ -275,7 +295,12 @@ body {
     color: white;
     font-size: 14px;
     font-weight: 600;
-    text-shadow: 0 1px 3px rgba(0, 0, 0, 0.7);
+    /* Stronger text shadow for visibility without dark background */
+    text-shadow: 
+      2px 2px 4px rgba(0, 0, 0, 0.9),
+      -1px -1px 2px rgba(0, 0, 0, 0.9),
+      1px -1px 2px rgba(0, 0, 0, 0.9),
+      -1px 1px 2px rgba(0, 0, 0, 0.9);
     line-height: 1.4;
     display: block;
   }
@@ -462,9 +487,9 @@ body {
     image-rendering: -webkit-crisp-edges !important;
     -webkit-image-rendering: -webkit-crisp-edges !important;
     
-    /* Enhance contrast to counteract any remaining softness */
-    filter: contrast(1.15) saturate(1.05) !important;
-    -webkit-filter: contrast(1.15) saturate(1.05) !important;
+    /* Remove contrast enhancement that was darkening images */
+    filter: none !important;
+    -webkit-filter: none !important;
   }
 
   /* SPECIAL HANDLING FOR TVDB ARTWORK - EXTERNAL SOURCE ISSUES */
@@ -482,9 +507,9 @@ body {
     -webkit-image-rendering: -webkit-crisp-edges !important;
     -ms-interpolation-mode: nearest-neighbor !important;
     
-    /* ENHANCED SHARPENING FOR COMPRESSED SOURCES */
-    filter: contrast(1.2) saturate(1.1) sharpen(1) !important;
-    -webkit-filter: contrast(1.2) saturate(1.1) !important;
+    /* Remove enhanced contrast that was darkening images */
+    filter: none !important;
+    -webkit-filter: none !important;
   }
 
   /* PLEX ARTWORK (movies/custom order) - ALREADY CRISP, MINIMAL INTERVENTION */

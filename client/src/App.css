@@ -113,8 +113,7 @@
   position: absolute;
   top: 20px;
   left: 20px;
-  background: rgba(0, 0, 0, 0.8);
-  backdrop-filter: blur(10px);
+  background: transparent; /* Remove dark background */
   border-radius: 8px;
   padding: 8px 12px;
   z-index: 10;
@@ -128,7 +127,12 @@
   color: white;
   font-size: 14px;
   font-weight: 600;
-  text-shadow: 0 2px 4px rgba(0, 0, 0, 0.5);
+  /* Stronger text shadow for visibility without dark background */
+  text-shadow: 
+    2px 2px 4px rgba(0, 0, 0, 0.9),
+    -1px -1px 2px rgba(0, 0, 0, 0.9),
+    1px -1px 2px rgba(0, 0, 0, 0.9),
+    -1px 1px 2px rgba(0, 0, 0, 0.9);
   letter-spacing: 0.5px;
 }
 
@@ -627,26 +631,81 @@
 .media-artwork-responsive {
   position: relative;
   width: 100%;
-  max-width: 400px;
-  min-width: 300px; /* Ensure minimum width for consistency */
-  aspect-ratio: 2/3; /* Standard poster aspect ratio */
+  max-width: 100%;
+  min-width: 100%; /* Fill viewport horizontally */
+  height: 60vh; /* Fixed height for consistency */
+  aspect-ratio: unset; /* Remove aspect ratio constraint */
   border-radius: 12px;
   overflow: hidden;
-  background-color: #000;
+  background-color: transparent; /* Remove black background */
   display: flex;
   align-items: center;
   justify-content: center;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.15);
+  /* Remove dark shadow that was making images appear darker */
+  /* box-shadow: 0 8px 32px rgba(0, 0, 0, 0.15); */
   flex-shrink: 0;
+  margin: 20px 0; /* Add some vertical spacing */
+}
+
+/* Top button row layout */
+.top-button-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: center;
+  align-items: center;
+  margin-bottom: 20px;
+  padding: 0 20px;
+}
+
+.top-button-row .button-group {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.top-button-row .timer-display {
+  color: #fff;
+  font-size: 14px;
+  font-weight: bold;
+  padding: 8px 12px;
+  border-radius: 4px;
+  min-width: 80px;
+  text-align: center;
 }
 
 .media-artwork-responsive img {
   max-width: 100%;
   max-height: 100%;
-  width: auto;
-  height: auto;
-  object-fit: contain;
+  width: 100%;
+  height: 100%;
+  object-fit: cover; /* Cover the container for consistent sizing */
   object-position: center;
+  /* Force crisp rendering for all external artwork sources */
+  image-rendering: -webkit-crisp-edges;
+  image-rendering: crisp-edges;
+  image-rendering: pixelated;
+  -webkit-image-rendering: -webkit-crisp-edges;
+  -ms-interpolation-mode: nearest-neighbor;
+}
+
+/* Specific fixes for external artwork proxy endpoints */
+.media-artwork-responsive img[src*="tvdb-artwork"],
+.media-artwork-responsive img[src*="comicvine-artwork"], 
+.media-artwork-responsive img[src*="openlibrary-artwork"] {
+  /* Force crisp edges for external sources */
+  image-rendering: -webkit-crisp-edges !important;
+  image-rendering: crisp-edges !important;
+  image-rendering: pixelated !important;
+  -webkit-image-rendering: -webkit-crisp-edges !important;
+  -ms-interpolation-mode: nearest-neighbor !important;
+  
+  /* Disable any transforms that might cause blur */
+  transform: none !important;
+  -webkit-transform: none !important;
+  will-change: auto !important;
+  backface-visibility: visible !important;
+  -webkit-backface-visibility: visible !important;
 }
 
 /* Additional responsive utilities for artwork sizing */

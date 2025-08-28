@@ -2,7 +2,7 @@
  * components/Button.jsx
  * Button component for Master Order
  */
-import '../styles/Button.css';
+import "../styles/Button.css";
 
 function Button({ children, onClick, className = '', ...props }) {
   return (

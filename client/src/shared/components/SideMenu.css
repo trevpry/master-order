@@ -96,6 +96,72 @@
   margin-bottom: 8px;
 }
 
+.menu-item.submenu-item {
+  margin-left: 10px;
+  margin-bottom: 4px;
+}
+
+/* Media Header Styles */
+.menu-item.media-header {
+  margin-top: 20px;
+  margin-bottom: 8px;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  padding-top: 15px;
+}
+
+.media-header-link {
+  background: rgba(52, 152, 219, 0.15) !important;
+  border-left: 3px solid #3498db !important;
+  font-weight: 600 !important;
+  cursor: pointer;
+  justify-content: space-between;
+}
+
+.media-header-link:hover {
+  background: rgba(52, 152, 219, 0.25) !important;
+}
+
+.media-header .menu-label {
+  font-weight: 600;
+  color: #3498db;
+  font-size: 15px;
+}
+
+.media-header .menu-description {
+  color: #85c1e9;
+  font-weight: 500;
+}
+
+.collapse-arrow {
+  font-size: 12px;
+  color: #3498db;
+  margin-left: 10px;
+  transition: transform 0.2s ease;
+  flex-shrink: 0;
+}
+
+.submenu-item .menu-link {
+  padding: 8px 20px;
+  margin-right: 25px;
+  border-radius: 0 20px 20px 0;
+  transition: all 0.3s ease;
+}
+
+.submenu-item .menu-icon {
+  font-size: 16px;
+  width: 20px;
+  height: 20px;
+  margin-right: 12px;
+}
+
+.submenu-item .menu-label {
+  font-size: 13px;
+}
+
+.submenu-item .menu-description {
+  font-size: 10px;
+}
+
 .menu-link {
   display: flex;
   align-items: center;
