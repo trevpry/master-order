@@ -796,8 +796,22 @@ model StashScene {
   studioObject     StashStudio? @relation(fields: [studioId], references: [id])
   clips            StashClip[]
   markers          StashMarker[]
+  watchHistory     StashSceneWatchHistory[]
   
   @@map("StashScene")
+}
+
+model StashSceneWatchHistory {
+  id         Int      @id @default(autoincrement())
+  sceneId    String
+  watchedAt  DateTime @default(now())
+  platform   String?  // e.g., "web", "android", "ios"
+  progress   Float?   // Watch progress (0-1)
+  
+  // Relationship
+  scene      StashScene @relation(fields: [sceneId], references: [id], onDelete: Cascade)
+  
+  @@map("StashSceneWatchHistory")
 }
 
 model StashClip {
@@ -872,6 +886,8 @@ model StashPerformer {
   // Relationships
   scenes        StashScenePerformer[]
   tags          StashPerformerTag[]
+  galleries     StashGalleryPerformer[]
+  images        StashImagePerformer[]     // Added for standalone images
   
   @@map("StashPerformer")
 }
@@ -889,6 +905,8 @@ model StashStudio {
   
   // Relationships
   scenes       StashScene[]
+  galleries    StashGallery[]
+  images       StashImage[]             // Added for standalone images
   
   @@map("StashStudio")
 }
@@ -907,6 +925,8 @@ model StashTag {
   // Relationships
   scenes       StashSceneTag[]
   performers   StashPerformerTag[]
+  galleries    StashGalleryTag[]         // Added for galleries
+  images       StashImageTag[]           // Added for standalone images
   
   @@map("StashTag")
 }
@@ -943,6 +963,115 @@ model StashPerformerTag {
   
   @@id([performerId, tagId])
   @@map("StashPerformerTag")
+}
+
+// Stash Gallery and Image models
+model StashGallery {
+  id           String   @id
+  title        String?
+  code         String?
+  date         String?
+  details      String?
+  photographer String?
+  url          String?
+  rating       Int?     // 1-5 stars
+  organized    Boolean  @default(false)
+  studio       String?
+  studioId     String?
+  
+  // File paths for gallery
+  path         String?
+  checksum     String?
+  
+  // Timestamps
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  lastSyncedAt DateTime @default(now())
+  
+  // Relationships
+  images       StashImage[]
+  performers   StashGalleryPerformer[]
+  tags         StashGalleryTag[]
+  studioObject StashStudio? @relation(fields: [studioId], references: [id])
+  
+  @@map("StashGallery")
+}
+
+model StashImage {
+  id           String   @id
+  galleryId    String?  // Made optional to support standalone images
+  title        String?
+  code         String?  // Added missing fields
+  date         String?
+  details      String?
+  photographer String?
+  url          String?
+  rating       Int?
+  organized    Boolean  @default(false)
+  studio       String?
+  studioId     String?
+  path         String?
+  checksum     String?
+  fileModTime  DateTime?
+  
+  // Timestamps
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  lastSyncedAt DateTime @default(now())
+  
+  // Relationships
+  gallery      StashGallery?           @relation(fields: [galleryId], references: [id], onDelete: Cascade) // Made optional
+  performers   StashImagePerformer[]   // Added for standalone images
+  tags         StashImageTag[]         // Added for standalone images
+  studioObject StashStudio?            @relation(fields: [studioId], references: [id]) // Added studio relationship
+  
+  @@map("StashImage")
+}
+
+// Junction tables for gallery relationships
+model StashGalleryPerformer {
+  galleryId   String
+  performerId String
+  
+  gallery     StashGallery    @relation(fields: [galleryId], references: [id], onDelete: Cascade)
+  performer   StashPerformer  @relation(fields: [performerId], references: [id], onDelete: Cascade)
+  
+  @@id([galleryId, performerId])
+  @@map("StashGalleryPerformer")
+}
+
+model StashGalleryTag {
+  galleryId String
+  tagId     String
+  
+  gallery   StashGallery @relation(fields: [galleryId], references: [id], onDelete: Cascade)
+  tag       StashTag     @relation(fields: [tagId], references: [id], onDelete: Cascade)
+  
+  @@id([galleryId, tagId])
+  @@map("StashGalleryTag")
+}
+
+// Junction tables for standalone image relationships
+model StashImagePerformer {
+  imageId     String
+  performerId String
+  
+  image       StashImage     @relation(fields: [imageId], references: [id], onDelete: Cascade)
+  performer   StashPerformer @relation(fields: [performerId], references: [id], onDelete: Cascade)
+  
+  @@id([imageId, performerId])
+  @@map("StashImagePerformer")
+}
+
+model StashImageTag {
+  imageId String
+  tagId   String
+  
+  image   StashImage @relation(fields: [imageId], references: [id], onDelete: Cascade)
+  tag     StashTag   @relation(fields: [tagId], references: [id], onDelete: Cascade)
+  
+  @@id([imageId, tagId])
+  @@map("StashImageTag")
 }
 
 // Plex Playlist models for music playlists

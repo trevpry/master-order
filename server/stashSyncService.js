@@ -106,7 +106,7 @@ class StashSyncService {
     }
   }
 
-  async syncScenes(page = 1, perPage = 100) {
+  async syncScenes(page = 1, perPage = 250) {
     console.log(`Syncing scenes (page ${page})...`);
     
     const query = `
@@ -194,17 +194,41 @@ class StashSyncService {
       
       const syncedScenes = [];
       
+      // Pre-load all existing studios and performers for batch validation
+      const allExistingStudios = await prisma.stashStudio.findMany({
+        select: { id: true }
+      });
+      const studioIds = new Set(allExistingStudios.map(s => s.id));
+      
+      const allExistingPerformers = await prisma.stashPerformer.findMany({
+        select: { id: true }
+      });
+      const performerIds = new Set(allExistingPerformers.map(p => p.id));
+      
+      const allExistingTags = await prisma.stashTag.findMany({
+        select: { id: true }
+      });
+      const tagIds = new Set(allExistingTags.map(t => t.id));
+      
+      console.log(`🔧 Pre-loaded validation data: ${studioIds.size} studios, ${performerIds.size} performers, ${tagIds.size} tags`);
+      
       for (const scene of scenes) {
-        // Skip scenes with "zzHide" tag
-        if (scene.tags && scene.tags.some(tag => tag.name === 'zzHide')) {
-          console.log(`Skipping scene "${scene.title}" with zzHide tag`);
-          continue;
-        }
-
         // Extract file information from the files array
         const primaryFile = scene.files && scene.files.length > 0 ? scene.files[0] : null;
         const osHash = primaryFile?.fingerprints?.find(fp => fp.type === 'oshash')?.value || null;
         const checksum = primaryFile?.fingerprints?.find(fp => fp.type === 'md5')?.value || null;
+        
+        // Validate foreign key references before creating scene data
+        let validatedStudioId = null;
+        
+        // Check if studio exists using pre-loaded data
+        if (scene.studio?.id) {
+          if (studioIds.has(scene.studio.id)) {
+            validatedStudioId = scene.studio.id;
+          } else {
+            console.log(`⚠️ Studio ${scene.studio.id} not found for scene ${scene.id}, setting studioId to null`);
+          }
+        }
         
         const sceneData = {
           id: scene.id,
@@ -221,7 +245,7 @@ class StashSyncService {
           path: primaryFile?.path || null,
           fileModTime: primaryFile?.mod_time ? new Date(primaryFile.mod_time) : null,
           studio: scene.studio?.name || null,
-          studioId: scene.studio?.id || null,
+          studioId: validatedStudioId, // Use validated studio ID or null
           code: scene.code || null,
           director: scene.director || null,
           synopsis: null, // Not available in current Stash API
@@ -248,13 +272,23 @@ class StashSyncService {
             where: { sceneId: scene.id }
           });
 
-          // Add new performer relationships
-          for (const performer of scene.performers) {
-            await prisma.stashScenePerformer.create({
-              data: {
+          // Filter valid performers using pre-loaded data
+          const validPerformers = scene.performers.filter(performer => {
+            if (performerIds.has(performer.id)) {
+              return true;
+            } else {
+              console.log(`⚠️ Skipping performer relationship - performer ${performer.id} not found for scene ${scene.id}`);
+              return false;
+            }
+          });
+
+          // Batch create performer relationships
+          if (validPerformers.length > 0) {
+            await prisma.stashScenePerformer.createMany({
+              data: validPerformers.map(performer => ({
                 sceneId: scene.id,
                 performerId: performer.id
-              }
+              }))
             });
           }
         }
@@ -266,13 +300,23 @@ class StashSyncService {
             where: { sceneId: scene.id }
           });
 
-          // Add new tag relationships
-          for (const tag of scene.tags) {
-            await prisma.stashSceneTag.create({
-              data: {
+          // Filter valid tags using pre-loaded data
+          const validTags = scene.tags.filter(tag => {
+            if (tagIds.has(tag.id)) {
+              return true;
+            } else {
+              console.log(`⚠️ Skipping tag relationship - tag ${tag.id} not found for scene ${scene.id}`);
+              return false;
+            }
+          });
+
+          // Batch create tag relationships
+          if (validTags.length > 0) {
+            await prisma.stashSceneTag.createMany({
+              data: validTags.map(tag => ({
                 sceneId: scene.id,
                 tagId: tag.id
-              }
+              }))
             });
           }
         }
@@ -416,7 +460,7 @@ class StashSyncService {
     }
   }
 
-  async syncPerformers(page = 1, perPage = 100) {
+  async syncPerformers(page = 1, perPage = 250) {
     console.log(`Syncing performers (page ${page})...`);
     
     const query = `
@@ -472,6 +516,14 @@ class StashSyncService {
       
       const syncedPerformers = [];
       
+      // Pre-load all existing tags for batch validation
+      const allExistingTags = await prisma.stashTag.findMany({
+        select: { id: true }
+      });
+      const tagIds = new Set(allExistingTags.map(t => t.id));
+      
+      console.log(`🔧 Pre-loaded validation data: ${tagIds.size} tags`);
+      
       for (const performer of performers) {
         // Skip performers with 0 scenes
         if (performer.scene_count === 0) {
@@ -517,13 +569,23 @@ class StashSyncService {
             where: { performerId: performer.id }
           });
 
-          // Add new tag relationships
-          for (const tag of performer.tags) {
-            await prisma.stashPerformerTag.create({
-              data: {
+          // Filter valid tags using pre-loaded data
+          const validTags = performer.tags.filter(tag => {
+            if (tagIds.has(tag.id)) {
+              return true;
+            } else {
+              console.log(`⚠️ Skipping tag relationship - tag ${tag.id} not found for performer ${performer.id}`);
+              return false;
+            }
+          });
+
+          // Batch create tag relationships
+          if (validTags.length > 0) {
+            await prisma.stashPerformerTag.createMany({
+              data: validTags.map(tag => ({
                 performerId: performer.id,
                 tagId: tag.id
-              }
+              }))
             });
           }
         }
@@ -540,7 +602,7 @@ class StashSyncService {
     }
   }
 
-  async syncStudios(page = 1, perPage = 100) {
+  async syncStudios(page = 1, perPage = 250) {
     console.log(`Syncing studios (page ${page})...`);
     
     const query = `
@@ -610,7 +672,7 @@ class StashSyncService {
     }
   }
 
-  async syncTags(page = 1, perPage = 100) {
+  async syncTags(page = 1, perPage = 250) {
     console.log(`Syncing tags (page ${page})...`);
     
     const query = `
@@ -674,7 +736,7 @@ class StashSyncService {
   }
 
   async fullSync() {
-    console.log('Starting full Stash sync...');
+    console.log('🔄 Starting full Stash sync...');
     const startTime = Date.now();
     
     try {
@@ -684,11 +746,13 @@ class StashSyncService {
         scenes: 0,
         performers: 0,
         studios: 0,
-        tags: 0
+        tags: 0,
+        galleries: 0,
+        images: 0
       };
 
-      // Sync tags first (needed for performers and scenes)
-      console.log('Syncing tags...');
+      // Sync tags first (needed for performers, scenes, and galleries)
+      console.log('📋 Syncing tags...');
       let page = 1;
       let hasMore = true;
       while (hasMore) {
@@ -696,10 +760,12 @@ class StashSyncService {
         totalSynced.tags += result.tags.length;
         hasMore = result.hasMore;
         page++;
+        console.log(`   Page ${page-1}: ${result.tags.length} tags`);
       }
+      console.log(`✅ Tags sync completed: ${totalSynced.tags} total`);
 
-      // Sync studios (needed for scenes)
-      console.log('Syncing studios...');
+      // Sync studios (needed for scenes and galleries)
+      console.log('🏢 Syncing studios...');
       page = 1;
       hasMore = true;
       while (hasMore) {
@@ -707,10 +773,12 @@ class StashSyncService {
         totalSynced.studios += result.studios.length;
         hasMore = result.hasMore;
         page++;
+        console.log(`   Page ${page-1}: ${result.studios.length} studios`);
       }
+      console.log(`✅ Studios sync completed: ${totalSynced.studios} total`);
 
-      // Sync performers (needed for scenes)
-      console.log('Syncing performers...');
+      // Sync performers (needed for scenes and galleries)
+      console.log('👥 Syncing performers...');
       page = 1;
       hasMore = true;
       while (hasMore) {
@@ -718,10 +786,12 @@ class StashSyncService {
         totalSynced.performers += result.performers.length;
         hasMore = result.hasMore;
         page++;
+        console.log(`   Page ${page-1}: ${result.performers.length} performers`);
       }
+      console.log(`✅ Performers sync completed: ${totalSynced.performers} total`);
 
       // Sync scenes (references performers and studios)
-      console.log('Syncing scenes...');
+      console.log('🎬 Syncing scenes...');
       page = 1;
       hasMore = true;
       while (hasMore) {
@@ -729,25 +799,50 @@ class StashSyncService {
         totalSynced.scenes += result.scenes.length;
         hasMore = result.hasMore;
         page++;
+        console.log(`   Page ${page-1}: ${result.scenes.length} scenes`);
       }
+      console.log(`✅ Scenes sync completed: ${totalSynced.scenes} total`);
 
-      // Cleanup: Remove scenes with "zzHide" tag
-      console.log('Cleaning up scenes with "zzHide" tag...');
-      const hiddenScenesRemoved = await this.cleanupHiddenScenes();
-      console.log(`Removed ${hiddenScenesRemoved} scenes with "zzHide" tag`);
+      // Sync galleries (references performers and studios)
+      console.log('🖼️  Syncing galleries...');
+      page = 1;
+      hasMore = true;
+      while (hasMore) {
+        const result = await this.syncGalleries(page);
+        totalSynced.galleries += result.galleries.length;
+        hasMore = result.hasMore;
+        page++;
+        console.log(`   Page ${page-1}: ${result.galleries.length} galleries`);
+      }
+      console.log(`✅ Galleries sync completed: ${totalSynced.galleries} total`);
+
+      // Sync standalone images (not part of any gallery)
+      console.log('📸 Syncing standalone images...');
+      page = 1;
+      hasMore = true;
+      while (hasMore) {
+        const result = await this.syncAllImages(page);
+        totalSynced.images += result.images.length;
+        hasMore = result.hasMore;
+        page++;
+        console.log(`   Page ${page-1}: ${result.images.length} standalone images`);
+      }
+      console.log(`✅ Standalone images sync completed: ${totalSynced.images} total`);
+
+      console.log(`✅ Standalone images sync completed: ${totalSynced.images} total`);
 
       // Cleanup: Remove performers with 0 scenes
-      console.log('Cleaning up performers with 0 scenes...');
+      console.log('🧹 Cleaning up performers with 0 scenes...');
       const performersRemoved = await this.cleanupPerformersWithZeroScenes();
-      console.log(`Removed ${performersRemoved} performers with 0 scenes`);
+      console.log(`✅ Removed ${performersRemoved} performers with 0 scenes`);
       
       // Cleanup: Remove studios with 0 scenes
-      console.log('Cleaning up studios with 0 scenes...');
+      console.log('🧹 Cleaning up studios with 0 scenes...');
       const studiosRemoved = await this.cleanupStudiosWithZeroScenes();
-      console.log(`Removed ${studiosRemoved} studios with 0 scenes`);
+      console.log(`✅ Removed ${studiosRemoved} studios with 0 scenes`);
 
       const duration = (Date.now() - startTime) / 1000;
-      console.log(`Full Stash sync completed in ${duration}s:`, totalSynced);
+      console.log(`🎉 Full Stash sync completed in ${duration}s:`, totalSynced);
       
       return totalSynced;
       
@@ -788,25 +883,23 @@ class StashSyncService {
    */
   async createMarkerBasedClips(scene) {
     try {
-      console.log(`🎯 Creating marker-based clips for scene: ${scene.title}`);
+      console.log(`🎯 Evaluating marker-based clips for scene: ${scene.title}`);
       
-      // First, remove any existing clips for this scene (both marker-based and time-based)
+      // Check existing clips - only proceed if they weren't previously created from markers
       const existingClips = await prisma.stashClip.findMany({
         where: { sceneId: scene.id }
       });
       
-      if (existingClips.length > 0) {
-        console.log(`🗑️ Removing ${existingClips.length} existing clips for scene: ${scene.title}`);
-        await prisma.stashClip.deleteMany({
-          where: { sceneId: scene.id }
-        });
+      if (existingClips.length > 0 && existingClips.some(clip => clip.markerBased)) {
+        console.log(`⏭️ Scene already has marker-based clips, skipping: ${scene.title}`);
+        return;
       }
 
       // Get the scene's markers sorted by time
       const markers = scene.scene_markers.sort((a, b) => a.seconds - b.seconds);
       
-      if (markers.length === 0) {
-        console.log(`No markers found for scene: ${scene.title}`);
+      if (markers.length < 4) {
+        console.log(`⚠️ Scene has only ${markers.length} markers (minimum 4 required), skipping: ${scene.title}`);
         return;
       }
 
@@ -816,6 +909,16 @@ class StashSyncService {
       if (!sceneDuration) {
         console.log(`No duration info for scene: ${scene.title}, skipping clip creation`);
         return;
+      }
+
+      console.log(`🎯 Creating marker-based clips for scene: ${scene.title} (${markers.length} markers)`);
+      
+      // Remove existing clips (they were not marker-based)
+      if (existingClips.length > 0) {
+        console.log(`🗑️ Removing ${existingClips.length} existing non-marker clips for scene: ${scene.title}`);
+        await prisma.stashClip.deleteMany({
+          where: { sceneId: scene.id }
+        });
       }
 
       const clipsToCreate = [];
@@ -852,7 +955,7 @@ class StashSyncService {
         
         console.log(`✅ Created ${clipsToCreate.length} marker-based clips for scene: ${scene.title}`);
         if (existingClips.length > 0) {
-          console.log(`🔄 Replaced ${existingClips.length} existing clips with ${clipsToCreate.length} marker-based clips`);
+          console.log(`🔄 Replaced ${existingClips.length} existing time-based clips with ${clipsToCreate.length} marker-based clips`);
         }
       } else {
         console.log(`⚠️ No valid clips could be created from markers for scene: ${scene.title}`);
@@ -860,6 +963,468 @@ class StashSyncService {
       
     } catch (error) {
       console.error(`Error creating marker-based clips for scene ${scene.title}:`, error);
+    }
+  }
+
+  async syncAllImages(page = 1, perPage = 250) {
+    console.log(`Syncing all images (page ${page})...`);
+    
+    const query = `
+      query FindImages($filter: FindFilterType!) {
+        findImages(filter: $filter) {
+          count
+          images {
+            id
+            title
+            code
+            date
+            details
+            photographer
+            url
+            rating100
+            organized
+            studio {
+              id
+              name
+            }
+            performers {
+              id
+              name
+            }
+            tags {
+              id
+              name
+            }
+            galleries {
+              id
+            }
+            paths {
+              thumbnail
+              preview
+              image
+            }
+            files {
+              id
+              path
+              mod_time
+            }
+          }
+        }
+      }
+    `;
+
+    const variables = {
+      filter: {
+        page,
+        per_page: perPage,
+        sort: "created_at",
+        direction: "DESC"
+      }
+    };
+
+    try {
+      const data = await this.makeGraphQLRequest(query, variables);
+      const images = data.findImages?.images || [];
+      const count = data.findImages?.count || 0;
+      
+      console.log(`Found ${images.length} images on page ${page} of ${Math.ceil(count / perPage)}`);
+      
+      const syncedImages = [];
+      
+      // Pre-load all existing entities for batch validation
+      const allExistingGalleries = await prisma.stashGallery.findMany({
+        select: { id: true }
+      });
+      const galleryIds = new Set(allExistingGalleries.map(g => g.id));
+      
+      const allExistingStudios = await prisma.stashStudio.findMany({
+        select: { id: true }
+      });
+      const studioIds = new Set(allExistingStudios.map(s => s.id));
+      
+      const allExistingPerformers = await prisma.stashPerformer.findMany({
+        select: { id: true }
+      });
+      const performerIds = new Set(allExistingPerformers.map(p => p.id));
+      
+      const allExistingTags = await prisma.stashTag.findMany({
+        select: { id: true }
+      });
+      const tagIds = new Set(allExistingTags.map(t => t.id));
+      
+      console.log(`🔧 Pre-loaded validation data: ${galleryIds.size} galleries, ${studioIds.size} studios, ${performerIds.size} performers, ${tagIds.size} tags`);
+      
+      for (const image of images) {
+        // Skip images that have "zzHide" tag
+        // Determine if image is part of a gallery
+        const galleryId = image.galleries && image.galleries.length > 0 ? image.galleries[0].id : null;
+        const imageType = galleryId ? 'gallery' : 'standalone';
+        
+        const imagePath = image.files && image.files.length > 0 ? image.files[0].path : null;
+        
+        // Validate foreign key references before creating image data
+        let validatedGalleryId = null;
+        let validatedStudioId = null;
+        
+        // Check if gallery exists using pre-loaded data
+        if (galleryId) {
+          if (galleryIds.has(galleryId)) {
+            validatedGalleryId = galleryId;
+          } else {
+            console.log(`⚠️ Gallery ${galleryId} not found for image ${image.id}, setting galleryId to null`);
+          }
+        }
+        
+        // Check if studio exists using pre-loaded data
+        if (image.studio?.id) {
+          if (studioIds.has(image.studio.id)) {
+            validatedStudioId = image.studio.id;
+          } else {
+            console.log(`⚠️ Studio ${image.studio.id} not found for image ${image.id}, setting studioId to null`);
+          }
+        }
+        
+        const imageData = {
+          id: image.id,
+          galleryId: validatedGalleryId, // Use validated gallery ID or null
+          title: image.title || null,
+          code: image.code || null,
+          date: image.date || null,
+          details: image.details || null,
+          photographer: image.photographer || null,
+          url: image.url || null,
+          rating: image.rating100 ? Math.round(image.rating100 / 20) : null, // Convert from 100-scale to 5-star
+          organized: image.organized || false,
+          studio: image.studio?.name || null,
+          studioId: validatedStudioId, // Use validated studio ID or null
+          path: imagePath,
+          checksum: null, // Will be set from files if available
+          fileModTime: image.files && image.files.length > 0 && image.files[0].mod_time ? new Date(image.files[0].mod_time) : null,
+          lastSyncedAt: new Date()
+        };
+
+        // Upsert image
+        const syncedImage = await prisma.stashImage.upsert({
+          where: { id: image.id },
+          update: imageData,
+          create: imageData
+        });
+
+        // Sync performers for this image
+        if (image.performers && image.performers.length > 0) {
+          // Remove existing performer relationships
+          await prisma.stashImagePerformer.deleteMany({
+            where: { imageId: image.id }
+          });
+
+          // Filter valid performers using pre-loaded data
+          const validPerformers = image.performers.filter(performer => {
+            if (performerIds.has(performer.id)) {
+              return true;
+            } else {
+              console.log(`⚠️ Skipping performer relationship - performer ${performer.id} not found for image ${image.id}`);
+              return false;
+            }
+          });
+
+          // Batch create performer relationships
+          if (validPerformers.length > 0) {
+            await prisma.stashImagePerformer.createMany({
+              data: validPerformers.map(performer => ({
+                imageId: image.id,
+                performerId: performer.id
+              }))
+            });
+          }
+        }
+
+        // Sync tags for this image
+        if (image.tags && image.tags.length > 0) {
+          // Remove existing tag relationships
+          await prisma.stashImageTag.deleteMany({
+            where: { imageId: image.id }
+          });
+
+          // Filter valid tags using pre-loaded data
+          const validTags = image.tags.filter(tag => {
+            if (tagIds.has(tag.id)) {
+              return true;
+            } else {
+              console.log(`⚠️ Skipping tag relationship - tag ${tag.id} not found for image ${image.id}`);
+              return false;
+            }
+          });
+
+          // Batch create tag relationships
+          if (validTags.length > 0) {
+            await prisma.stashImageTag.createMany({
+              data: validTags.map(tag => ({
+                imageId: image.id,
+                tagId: tag.id
+              }))
+            });
+          }
+        }
+
+        syncedImages.push(syncedImage);
+      }
+
+      const hasMore = page * perPage < count;
+      console.log(`✅ Synced ${syncedImages.length} images (${syncedImages.filter(i => i.galleryId).length} gallery, ${syncedImages.filter(i => !i.galleryId).length} standalone) on page ${page}`);
+
+      return {
+        images: syncedImages,
+        hasMore,
+        total: count,
+        page
+      };
+
+    } catch (error) {
+      console.error('Error syncing images:', error);
+      throw error;
+    }
+  }
+
+  async syncGalleries(page = 1, perPage = 250) {
+    console.log(`Syncing galleries (page ${page})...`);
+    
+    const query = `
+      query FindGalleries($filter: FindFilterType!) {
+        findGalleries(filter: $filter) {
+          count
+          galleries {
+            id
+            title
+            code
+            date
+            details
+            photographer
+            url
+            rating100
+            organized
+            studio {
+              id
+              name
+            }
+            performers {
+              id
+              name
+            }
+            tags {
+              id
+              name
+            }
+            files {
+              id
+              path
+              basename
+              parent_folder_id
+              zip_file_id
+              mod_time
+            }
+            folder {
+              path
+            }
+          }
+        }
+      }
+    `;
+
+    const variables = {
+      filter: {
+        page,
+        per_page: perPage,
+        sort: "created_at",
+        direction: "DESC"
+      }
+    };
+
+    try {
+      const data = await this.makeGraphQLRequest(query, variables);
+      const galleries = data.findGalleries?.galleries || [];
+      const count = data.findGalleries?.count || 0;
+      
+      console.log(`Found ${galleries.length} galleries on page ${page} of ${Math.ceil(count / perPage)}`);
+      
+      const syncedGalleries = [];
+      
+      // Pre-load all existing entities for batch validation
+      const allExistingStudios = await prisma.stashStudio.findMany({
+        select: { id: true }
+      });
+      const studioIds = new Set(allExistingStudios.map(s => s.id));
+      
+      const allExistingPerformers = await prisma.stashPerformer.findMany({
+        select: { id: true }
+      });
+      const performerIds = new Set(allExistingPerformers.map(p => p.id));
+      
+      const allExistingTags = await prisma.stashTag.findMany({
+        select: { id: true }
+      });
+      const tagIds = new Set(allExistingTags.map(t => t.id));
+      
+      console.log(`🔧 Pre-loaded validation data: ${studioIds.size} studios, ${performerIds.size} performers, ${tagIds.size} tags`);
+      
+      for (const gallery of galleries) {
+        const galleryPath = gallery.folder?.path || null;
+        
+        // Validate foreign key references before creating gallery data
+        let validatedStudioId = null;
+        
+        // Check if studio exists using pre-loaded data
+        if (gallery.studio?.id) {
+          if (studioIds.has(gallery.studio.id)) {
+            validatedStudioId = gallery.studio.id;
+          } else {
+            console.log(`⚠️ Studio ${gallery.studio.id} not found for gallery ${gallery.id}, setting studioId to null`);
+          }
+        }
+        
+        const galleryData = {
+          id: gallery.id,
+          title: gallery.title || '',
+          code: gallery.code || null,
+          date: gallery.date || null,
+          details: gallery.details || null,
+          photographer: gallery.photographer || null,
+          url: gallery.url || null,
+          rating: gallery.rating100 ? Math.round(gallery.rating100 / 20) : null, // Convert from 100-scale to 5-star
+          organized: gallery.organized || false,
+          studio: gallery.studio?.name || null,
+          studioId: validatedStudioId, // Use validated studio ID or null
+          path: galleryPath,
+          checksum: null, // Not provided in current Stash API
+          lastSyncedAt: new Date()
+        };
+
+        // Upsert gallery
+        const syncedGallery = await prisma.stashGallery.upsert({
+          where: { id: gallery.id },
+          update: galleryData,
+          create: galleryData
+        });
+
+        // Sync performers for this gallery
+        if (gallery.performers && gallery.performers.length > 0) {
+          // Remove existing performer relationships
+          await prisma.stashGalleryPerformer.deleteMany({
+            where: { galleryId: gallery.id }
+          });
+
+          // Filter valid performers using pre-loaded data
+          const validPerformers = gallery.performers.filter(performer => {
+            if (performerIds.has(performer.id)) {
+              return true;
+            } else {
+              console.log(`⚠️ Skipping performer relationship - performer ${performer.id} not found for gallery ${gallery.id}`);
+              return false;
+            }
+          });
+
+          // Batch create performer relationships
+          if (validPerformers.length > 0) {
+            await prisma.stashGalleryPerformer.createMany({
+              data: validPerformers.map(performer => ({
+                galleryId: gallery.id,
+                performerId: performer.id
+              }))
+            });
+          }
+        }
+
+        // Sync tags for this gallery
+        if (gallery.tags && gallery.tags.length > 0) {
+          // Remove existing tag relationships
+          await prisma.stashGalleryTag.deleteMany({
+            where: { galleryId: gallery.id }
+          });
+
+          // Filter valid tags using pre-loaded data
+          const validTags = gallery.tags.filter(tag => {
+            if (tagIds.has(tag.id)) {
+              return true;
+            } else {
+              console.log(`⚠️ Skipping tag relationship - tag ${tag.id} not found for gallery ${gallery.id}`);
+              return false;
+            }
+          });
+
+          // Batch create tag relationships
+          if (validTags.length > 0) {
+            await prisma.stashGalleryTag.createMany({
+              data: validTags.map(tag => ({
+                galleryId: gallery.id,
+                tagId: tag.id
+              }))
+            });
+          }
+        }
+
+        // Sync files for this gallery (gallery files are different from standalone images)
+        if (gallery.files && gallery.files.length > 0) {
+          // For now, we're just storing the gallery metadata
+          // File-level processing can be added later if needed
+          console.log(`Gallery "${gallery.title || gallery.id}" has ${gallery.files.length} files`);
+        }
+        
+        syncedGalleries.push(syncedGallery);
+      }
+      
+      console.log(`Synced ${syncedGalleries.length} galleries from page ${page}`);
+      return { galleries: syncedGalleries, hasMore: (page * perPage) < count, totalCount: count };
+      
+    } catch (error) {
+      console.error('Error syncing galleries:', error);
+      throw error;
+    }
+  }
+
+  async cleanupHiddenGalleries() {
+    try {
+      console.log('Starting cleanup of galleries with "zzHide" tag...');
+      
+      // Find galleries that have the "zzHide" tag
+      const hiddenGalleries = await prisma.stashGallery.findMany({
+        include: {
+          tags: true
+        }
+      });
+
+      let removedCount = 0;
+      let imagesRemovedCount = 0;
+      
+      for (const gallery of hiddenGalleries) {
+        if (gallery.tags.some(tag => tag.name === 'zzHide')) {
+          // First, delete all images associated with this gallery
+          const imagesDeleted = await prisma.stashImage.deleteMany({
+            where: { galleryId: gallery.id }
+          });
+          imagesRemovedCount += imagesDeleted.count;
+          
+          // Then delete the gallery
+          await prisma.stashGallery.delete({
+            where: { id: gallery.id }
+          });
+          removedCount++;
+        }
+      }
+
+      if (imagesRemovedCount > 0) {
+        console.log(`🗑️ Cleaned up ${imagesRemovedCount} images from hidden galleries`);
+      }
+      
+      if (removedCount > 0) {
+        console.log(`🗑️ Cleaned up ${removedCount} hidden galleries`);
+      } else {
+        console.log('✅ No hidden galleries to clean up');
+      }
+      
+      return removedCount;
+      
+    } catch (error) {
+      console.error('Error during hidden galleries cleanup:', error);
+      throw error;
     }
   }
 }

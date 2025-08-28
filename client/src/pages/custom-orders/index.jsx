@@ -4038,7 +4038,7 @@ function CustomOrders() {
       )}      {/* Bulk Import Modal */}
       {showBulkImportModal && (
         <div className="modal-overlay">
-          <div className="modal-content">
+          <div className="modal-content bulk-import-modal">
             <div className="modal-header">
               <h3>Bulk Import Media</h3>
               <Button
@@ -4128,7 +4128,7 @@ Dune	Frank Herbert (1965)	Dune	book
       {/* CMRO Bulk Import Modal */}
       {showCmroBulkImportModal && (
         <div className="modal-overlay">
-          <div className="modal-content">
+          <div className="modal-content bulk-import-modal">
             <div className="modal-header">
               <h3>CMRO Bulk Import</h3>
               <Button

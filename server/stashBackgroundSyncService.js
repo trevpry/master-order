@@ -1,19 +1,30 @@
 const StashSyncService = require('./stashSyncService');
+const StashSyncServiceOptimized = require('./stashSyncServiceOptimized');
 const prisma = require('./prismaClient');
 
 class StashBackgroundSyncService {
   constructor() {
     this.syncService = null;
+    this.syncServiceOptimized = null;
     this.isRunning = false;
     this.currentTimer = null;
     this.lastSyncStatus = null;
     this.syncInProgress = false;
+    
+    // Configuration for sync service type
+    this.syncType = process.env.STASH_SYNC_OPTIMIZED === 'false' ? 'legacy' : 'optimized';
   }
 
   async initializeSyncService() {
-    if (!this.syncService) {
+    if (!this.syncService || !this.syncServiceOptimized) {
       this.syncService = new StashSyncService();
+      this.syncServiceOptimized = new StashSyncServiceOptimized();
+      console.log(`Background sync initialized with ${this.syncType} service`);
     }
+  }
+
+  getActiveSyncService() {
+    return this.syncType === 'optimized' ? this.syncServiceOptimized : this.syncService;
   }
 
   async start() {
@@ -92,21 +103,24 @@ class StashBackgroundSyncService {
       return;
     }
 
-    console.log('Starting scheduled Stash sync...');
+    console.log(`Starting scheduled Stash sync (${this.syncType})...`);
     this.syncInProgress = true;
 
     try {
-      // Make sure sync service is initialized
+      // Make sure sync services are initialized
       await this.initializeSyncService();
       
-      if (!this.syncService) {
+      const activeSyncService = this.getActiveSyncService();
+      if (!activeSyncService) {
         throw new Error('Stash sync service not configured');
       }
 
       const startTime = Date.now();
       
-      // Perform the sync using existing sync service (same as manual button)
-      const result = await this.syncService.fullSync();
+      // Use optimized sync if available, fallback to legacy
+      const result = this.syncType === 'optimized' && activeSyncService.fullSyncOptimized
+        ? await activeSyncService.fullSyncOptimized()
+        : await activeSyncService.fullSync();
       
       const endTime = Date.now();
       const duration = (endTime - startTime) / 1000;
@@ -115,20 +129,27 @@ class StashBackgroundSyncService {
         success: true,
         timestamp: new Date(),
         duration: `${duration}s`,
+        syncType: this.syncType,
         results: result,
-        message: `Background Stash sync completed in ${duration}s`
+        performanceImprovement: result?.performanceImprovement || null,
+        message: `Background Stash sync (${this.syncType}) completed in ${duration}s`
       };
       
       console.log('Background Stash sync completed successfully:', this.lastSyncStatus.message);
       
+      if (this.lastSyncStatus.performanceImprovement) {
+        console.log(`Performance: ${this.lastSyncStatus.performanceImprovement.speedup}x faster than baseline`);
+      }
+      
     } catch (error) {
-      console.error('Background Stash sync failed:', error);
+      console.error(`Background Stash sync (${this.syncType}) failed:`, error);
       
       this.lastSyncStatus = {
         success: false,
         timestamp: new Date(),
+        syncType: this.syncType,
         error: error.message,
-        message: `Background Stash sync failed: ${error.message}`
+        message: `Background Stash sync (${this.syncType}) failed: ${error.message}`
       };
     } finally {
       this.syncInProgress = false;

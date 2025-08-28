@@ -305,6 +305,46 @@
   transform: none !important;
 }
 
+.mixed-mode-button {
+  font-size: 1.3rem !important;
+  padding: 1.2rem 2.5rem !important;
+  background: linear-gradient(135deg, #34495e, #2c3e50) !important;
+  color: white !important;
+  border: none !important;
+  border-radius: 0.75rem !important;
+  font-weight: 600 !important;
+  box-shadow: 0 8px 20px rgba(52, 73, 94, 0.3) !important;
+  transition: all 0.3s ease !important;
+}
+
+.mixed-mode-button:hover {
+  transform: translateY(-2px) !important;
+  box-shadow: 0 12px 28px rgba(52, 73, 94, 0.4) !important;
+  background: linear-gradient(135deg, #2c3e50, #1a252f) !important;
+}
+
+.mixed-mode-button.active {
+  background: linear-gradient(135deg, #e67e22, #d68910) !important;
+  box-shadow: 0 8px 20px rgba(230, 126, 34, 0.3) !important;
+}
+
+.mixed-mode-button.active:hover {
+  background: linear-gradient(135deg, #d68910, #b7950b) !important;
+  box-shadow: 0 12px 28px rgba(230, 126, 34, 0.4) !important;
+}
+
+.mixed-mode-button.loading {
+  background: linear-gradient(135deg, #6b7280, #9ca3af) !important;
+  cursor: not-allowed !important;
+  transform: none !important;
+  box-shadow: 0 4px 12px rgba(107, 114, 128, 0.3) !important;
+}
+
+.mixed-mode-button.loading:hover {
+  background: linear-gradient(135deg, #6b7280, #9ca3af) !important;
+  transform: none !important;
+}
+
 .clip-info {
   display: block;
   margin-top: 0.5rem;

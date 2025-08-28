@@ -83,6 +83,28 @@ export default function Stash() {
   const [videoPlayerControlsTimeout, setVideoPlayerControlsTimeout] = useState(null);
   const MAX_AUTO_SKIP_RETRIES = 5; // Maximum number of auto-skip attempts
 
+  // Slideshow state for full-screen image slideshow
+  const [slideshow, setSlideshow] = useState({
+    isOpen: false,
+    images: [],
+    currentIndex: 0,
+    isLoading: false,
+    interval: null,
+    duration: 6000, // 6 seconds per image
+    includeGalleries: true,
+    includeStandalone: true,
+    isFullscreen: false
+  });
+
+  // Mixed mode state for clips + slideshow
+  const [mixedMode, setMixedMode] = useState({
+    isActive: false,
+    isLoading: false,
+    currentType: null, // 'clip' or 'slideshow'
+    timeout: null,
+    shouldContinue: false
+  });
+
   // Helper function to toggle fullscreen
   const toggleVideoFullscreen = async () => {
     const container = document.querySelector('.video-player-container');
@@ -98,6 +120,24 @@ export default function Stash() {
       }
     } catch (error) {
       console.error('Failed to toggle fullscreen:', error);
+    }
+  };
+
+  // Helper function to toggle slideshow fullscreen
+  const toggleSlideshowFullscreen = async () => {
+    const container = document.querySelector('.slideshow-modal');
+    if (!container) return;
+
+    try {
+      if (!document.fullscreenElement) {
+        await container.requestFullscreen();
+        setSlideshow(prev => ({ ...prev, isFullscreen: true }));
+      } else {
+        await document.exitFullscreen();
+        setSlideshow(prev => ({ ...prev, isFullscreen: false }));
+      }
+    } catch (error) {
+      console.error('Failed to toggle slideshow fullscreen:', error);
     }
   };
 
@@ -134,8 +174,14 @@ export default function Stash() {
         if (document.fullscreenElement) {
           document.exitFullscreen();
         }
-        setVideoPlayer({ isOpen: false, clip: null, scene: null, playbackInfo: null });
-        setAutoSkipRetries(0);
+        
+        // If mixed mode is active, stop it completely
+        if (mixedMode.isActive) {
+          stopMixedMode();
+        } else {
+          setVideoPlayer({ isOpen: false, clip: null, scene: null, playbackInfo: null });
+          setAutoSkipRetries(0);
+        }
         break;
       case ' ':
         event.preventDefault();
@@ -162,10 +208,399 @@ export default function Stash() {
     }
   };
 
+  // Slideshow functions
+  const startSlideshow = async () => {
+    try {
+      setSlideshow(prev => ({ ...prev, isLoading: true }));
+      
+      // Fetch random images for the slideshow
+      const response = await fetch(
+        `${config.apiBaseUrl}/api/stash/images/slideshow?count=50&includeGalleries=${slideshow.includeGalleries}&includeStandalone=${slideshow.includeStandalone}`
+      );
+      
+      if (!response.ok) {
+        throw new Error('Failed to fetch images for slideshow');
+      }
+      
+      const result = await response.json();
+      
+      if (result.success && result.data && result.data.length > 0) {
+        setSlideshow(prev => ({
+          ...prev,
+          isOpen: true,
+          images: result.data,
+          currentIndex: 0,
+          isLoading: false
+        }));
+        
+        // Start the automatic progression
+        startSlideshowInterval();
+      } else {
+        throw new Error('No images available for slideshow');
+      }
+    } catch (error) {
+      console.error('Error starting slideshow:', error);
+      setSlideshow(prev => ({ ...prev, isLoading: false }));
+      alert('Failed to start slideshow: ' + error.message);
+    }
+  };
+
+  const startSlideshowInterval = () => {
+    const interval = setInterval(() => {
+      setSlideshow(prev => {
+        const nextIndex = (prev.currentIndex + 1) % prev.images.length;
+        return { ...prev, currentIndex: nextIndex };
+      });
+    }, slideshow.duration);
+    
+    setSlideshow(prev => ({ ...prev, interval }));
+  };
+
+  const stopSlideshow = () => {
+    if (slideshow.interval) {
+      clearInterval(slideshow.interval);
+    }
+    
+    setSlideshow({
+      isOpen: false,
+      images: [],
+      currentIndex: 0,
+      isLoading: false,
+      interval: null,
+      duration: 6000,
+      includeGalleries: true,
+      includeStandalone: true
+    });
+  };
+
+  const nextSlide = () => {
+    setSlideshow(prev => {
+      const nextIndex = (prev.currentIndex + 1) % prev.images.length;
+      return { ...prev, currentIndex: nextIndex };
+    });
+  };
+
+  const prevSlide = () => {
+    setSlideshow(prev => {
+      const prevIndex = prev.currentIndex === 0 ? prev.images.length - 1 : prev.currentIndex - 1;
+      return { ...prev, currentIndex: prevIndex };
+    });
+  };
+
+  const handleSlideshowKeyDown = (event) => {
+    switch (event.key) {
+      case 'Escape':
+        event.preventDefault();
+        // If mixed mode is active, stop it completely
+        if (mixedMode.isActive) {
+          stopMixedMode();
+        } else {
+          stopSlideshow();
+        }
+        break;
+      case 'ArrowRight':
+      case ' ':
+        event.preventDefault();
+        nextSlide();
+        break;
+      case 'ArrowLeft':
+        event.preventDefault();
+        prevSlide();
+        break;
+      case 'f':
+      case 'F':
+        event.preventDefault();
+        toggleSlideshowFullscreen();
+        break;
+      default:
+        break;
+    }
+  };
+
+  // Mixed mode functions (Clips + Slideshow)
+  const startMixedMode = async () => {
+    console.log('🎬🖼️ Starting Mixed Mode (80% clips, 20% slideshow)...');
+    
+    setMixedMode(prev => ({ ...prev, isActive: true, isLoading: true, shouldContinue: true }));
+    
+    try {
+      // Pass true to force execution on first run
+      await executeNextMixedModeItem(true);
+    } catch (error) {
+      console.error('Error starting mixed mode:', error);
+      stopMixedMode();
+      alert('Failed to start mixed mode: ' + error.message);
+    }
+  };
+
+  const stopMixedMode = () => {
+    console.log('🛑 Stopping Mixed Mode...');
+    
+    // Clear any pending timeout
+    if (mixedMode.timeout) {
+      clearTimeout(mixedMode.timeout);
+    }
+    
+    // Stop any active slideshow
+    if (slideshow.isOpen) {
+      stopSlideshow();
+    }
+    
+    // Close any active video player
+    if (videoPlayer.isOpen) {
+      setVideoPlayer({ isOpen: false, clip: null, scene: null, playbackInfo: null });
+    }
+    
+    // Reset mixed mode state
+    setMixedMode({
+      isActive: false,
+      isLoading: false,
+      currentType: null,
+      timeout: null,
+      shouldContinue: false
+    });
+  };
+
+  // Helper function to safely continue mixed mode after a delay
+  const scheduleNextMixedModeItem = (delay = 2000) => {
+    console.log(`⏳ Mixed mode: Scheduling next item in ${delay}ms`);
+    const timeout = setTimeout(() => {
+      console.log('⏰ Mixed mode scheduled timeout fired');
+      // Check state at execution time
+      setMixedMode(current => {
+        if (current.shouldContinue) {
+          console.log('✅ Mixed mode: State allows continuation, executing next item');
+          executeNextMixedModeItem();
+        } else {
+          console.log('🛑 Mixed mode scheduled execution cancelled - not continuing');
+        }
+        return { ...current, timeout: null };
+      });
+    }, delay);
+    setMixedMode(prev => ({ ...prev, timeout }));
+  };
+
+  const executeNextMixedModeItem = async (forceExecute = false) => {
+    console.log('🎭 Mixed mode: executeNextMixedModeItem called', { forceExecute });
+    
+    // Use a ref or state callback to get current state
+    let currentMixedModeState = null;
+    setMixedMode(current => {
+      currentMixedModeState = current;
+      return current;
+    });
+
+    console.log('🎭 Mixed mode state:', { 
+      shouldContinue: currentMixedModeState?.shouldContinue,
+      isActive: currentMixedModeState?.isActive,
+      currentType: currentMixedModeState?.currentType
+    });
+
+    // Check if we should continue (either forced or state allows it)
+    if (!forceExecute && !currentMixedModeState?.shouldContinue) {
+      console.log('🛑 Mixed mode stopped - not continuing');
+      return;
+    }
+
+    // Determine what to play next: 80% chance for clips, 20% for slideshow
+    const randomValue = Math.random();
+    const isClip = randomValue < 0.8;
+    const currentType = isClip ? 'clip' : 'slideshow';
+    
+    console.log(`🎲 Mixed mode rolling (${randomValue.toFixed(3)}): ${isClip ? '🎬 Playing Clip (80%)' : '🖼️ Playing Slideshow (20%)'}`);
+    console.log(`🎭 Mixed mode: Setting currentType to "${currentType}"`);
+    
+    setMixedMode(prev => ({ 
+      ...prev, 
+      currentType, 
+      isLoading: false 
+    }));
+
+    try {
+      if (isClip) {
+        console.log('🎬 Mixed mode: Executing clip...');
+        await executeMixedModeClip();
+      } else {
+        console.log('🖼️ Mixed mode: Executing slideshow...');
+        await executeMixedModeSlideshow();
+      }
+    } catch (error) {
+      console.error('❌ Error in mixed mode execution:', error);
+      // Continue to next item after a short delay if there's an error
+      if (forceExecute || currentMixedModeState?.shouldContinue) {
+        console.log('🔄 Mixed mode: Scheduling next item after error...');
+        scheduleNextMixedModeItem(2000);
+      }
+    }
+  };
+
+  const executeMixedModeClip = async () => {
+    console.log('🎬 Mixed mode: Executing clip...');
+    
+    try {
+      const response = await fetch(`${config.apiBaseUrl}/api/stash/clip-play`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        }
+      });
+      
+      const result = await response.json();
+      
+      if (response.ok) {
+        console.log('✅ Mixed mode clip started:', result);
+        
+        // Check if video format is supported
+        const filePath = result.clip.scene.path;
+        if (!isVideoFormatSupported(filePath)) {
+          const extension = filePath?.split('.').pop()?.toUpperCase() || 'Unknown';
+          console.log(`🚫 Mixed mode: Unsupported video format: ${extension}, skipping to next...`);
+          
+          // Skip to next item immediately
+          if (mixedMode.shouldContinue) {
+            scheduleNextMixedModeItem(1000);
+          }
+          return;
+        }
+        
+        // Update selected scene to show what's playing
+        setSelectedScene({
+          ...result.clip.scene,
+          clipInfo: {
+            clipIndex: result.clip.clipIndex + 1,
+            startTime: result.playbackInfo.startTime,
+            endTime: result.playbackInfo.endTime,
+            duration: result.playbackInfo.duration,
+            unwatchedClipsRemaining: result.totalUnwatchedClips,
+            mixedMode: true
+          }
+        });
+        
+        // Open full-screen video player
+        setVideoPlayer({
+          isOpen: true,
+          clip: result.clip,
+          scene: result.clip.scene,
+          playbackInfo: result.playbackInfo
+        });
+        
+        // Automatically enter fullscreen for mixed mode
+        setTimeout(() => {
+          const container = document.querySelector('.video-player-container');
+          if (container && !document.fullscreenElement) {
+            container.requestFullscreen().catch(err => {
+              console.log('Could not enter fullscreen for mixed mode video:', err);
+            });
+          }
+        }, 100);
+        
+        // Set timeout to move to next item after the clip duration
+        const timeout = setTimeout(() => {
+          console.log('⏰ Mixed mode clip timeout fired - moving to next item');
+          setVideoPlayer({ isOpen: false, clip: null, scene: null, playbackInfo: null });
+          // Check current state and continue if mixed mode is still active
+          setMixedMode(current => {
+            if (current.shouldContinue) {
+              console.log('✅ Mixed mode: State allows continuation after clip, executing next item');
+              executeNextMixedModeItem();
+            } else {
+              console.log('🛑 Mixed mode clip timeout cancelled - not continuing');
+            }
+            return { ...current, timeout: null };
+          });
+        }, result.playbackInfo.duration * 1000);
+        
+        console.log(`⏱️ Mixed mode clip timeout set for ${result.playbackInfo.duration} seconds`);
+        setMixedMode(prev => ({ ...prev, timeout }));
+        
+      } else {
+        console.error('Mixed mode clip failed:', result.error);
+        // Continue to next item after a short delay
+        if (mixedMode.shouldContinue) {
+          scheduleNextMixedModeItem(2000);
+        }
+      }
+    } catch (error) {
+      throw error;
+    }
+  };
+
+  const executeMixedModeSlideshow = async () => {
+    console.log('🖼️ Mixed mode: Executing slideshow for 60 seconds...');
+    
+    try {
+      // Fetch random images for the slideshow
+      const response = await fetch(
+        `${config.apiBaseUrl}/api/stash/images/slideshow?count=50&includeGalleries=${slideshow.includeGalleries}&includeStandalone=${slideshow.includeStandalone}`
+      );
+      
+      if (!response.ok) {
+        throw new Error('Failed to fetch images for mixed mode slideshow');
+      }
+      
+      const result = await response.json();
+      
+      if (result.success && result.data && result.data.length > 0) {
+        console.log(`✅ Mixed mode slideshow: Loaded ${result.data.length} images`);
+        
+        setSlideshow(prev => ({
+          ...prev,
+          isOpen: true,
+          images: result.data,
+          currentIndex: 0,
+          isLoading: false
+        }));
+        
+        // Start the automatic progression
+        startSlideshowInterval();
+        
+        // Automatically enter fullscreen for mixed mode slideshow
+        setTimeout(() => {
+          const container = document.querySelector('.slideshow-modal');
+          if (container && !document.fullscreenElement) {
+            container.requestFullscreen().catch(err => {
+              console.log('Could not enter fullscreen for mixed mode slideshow:', err);
+            });
+          }
+        }, 100);
+        
+        // Set timeout to stop slideshow after 60 seconds and move to next item
+        const timeout = setTimeout(() => {
+          console.log('⏰ Mixed mode slideshow timeout fired - moving to next item');
+          stopSlideshow();
+          // Check current state and continue if mixed mode is still active
+          setMixedMode(current => {
+            if (current.shouldContinue) {
+              console.log('✅ Mixed mode: State allows continuation after slideshow, executing next item');
+              executeNextMixedModeItem();
+            } else {
+              console.log('🛑 Mixed mode slideshow timeout cancelled - not continuing');
+            }
+            return { ...current, timeout: null };
+          });
+        }, 60000); // 60 seconds
+        
+        console.log('⏱️ Mixed mode slideshow timeout set for 60 seconds');
+        setMixedMode(prev => ({ ...prev, timeout }));
+        
+      } else {
+        throw new Error('No images available for mixed mode slideshow');
+      }
+    } catch (error) {
+      throw error;
+    }
+  };
+
   // Listen for fullscreen changes
   useEffect(() => {
     const handleFullscreenChange = () => {
-      setVideoPlayerFullscreen(!!document.fullscreenElement);
+      const isFullscreen = !!document.fullscreenElement;
+      setVideoPlayerFullscreen(isFullscreen);
+      
+      // Update slideshow fullscreen state if slideshow is open
+      if (slideshow.isOpen) {
+        setSlideshow(prev => ({ ...prev, isFullscreen }));
+      }
     };
 
     document.addEventListener('fullscreenchange', handleFullscreenChange);
@@ -635,6 +1070,45 @@ export default function Stash() {
       console.warn('Failed to persist main tab:', error);
     }
   }, [mainTab]);
+
+  // Handle slideshow keyboard events and cleanup
+  useEffect(() => {
+    if (slideshow.isOpen) {
+      const handleKeyDown = (event) => {
+        handleSlideshowKeyDown(event);
+      };
+
+      // Focus the slideshow modal for keyboard events
+      const slideshowModal = document.querySelector('.slideshow-modal');
+      if (slideshowModal) {
+        slideshowModal.focus();
+      }
+
+      document.addEventListener('keydown', handleKeyDown);
+      
+      return () => {
+        document.removeEventListener('keydown', handleKeyDown);
+      };
+    }
+  }, [slideshow.isOpen]);
+
+  // Cleanup slideshow interval on component unmount
+  useEffect(() => {
+    return () => {
+      if (slideshow.interval) {
+        clearInterval(slideshow.interval);
+      }
+    };
+  }, [slideshow.interval]);
+
+  // Cleanup mixed mode timeout on component unmount
+  useEffect(() => {
+    return () => {
+      if (mixedMode.timeout) {
+        clearTimeout(mixedMode.timeout);
+      }
+    };
+  }, [mixedMode.timeout]);
 
   const getSceneImageUrl = (scene) => {
     if (!connectionStatus.stashUrl || !scene) return null;
@@ -1611,68 +2085,73 @@ export default function Stash() {
                   }
                   
                   // Backup timer to ensure clip stops after the actual clip duration
-                  const clipDurationMs = videoPlayer.playbackInfo.duration * 1000; // Convert to milliseconds
-                  const clipTimer = setTimeout(async () => {
-                    console.log(`⏰ Backup timer: Stopping video after ${videoPlayer.playbackInfo.duration} seconds of playback - loading next clip`);
-                    e.target.pause();
-                    
-                    // Load next clip after backup timer expires
-                    try {
-                      console.log('🔄 Fetching next clip from API...');
-                      const response = await fetch(`${config.apiBaseUrl}/api/stash/clips/next`);
-                      const result = await response.json();
+                  // Skip backup timer if mixed mode is active (mixed mode handles its own flow)
+                  if (!mixedMode.isActive) {
+                    const clipDurationMs = videoPlayer.playbackInfo.duration * 1000; // Convert to milliseconds
+                    const clipTimer = setTimeout(async () => {
+                      console.log(`⏰ Backup timer: Stopping video after ${videoPlayer.playbackInfo.duration} seconds of playback - loading next clip`);
+                      e.target.pause();
                       
-                      console.log('📡 API Response status:', response.status);
-                      console.log('📦 API Response data:', result);
-                      
-                      if (response.ok) {
-                        if (result.clip && result.clip.scene) {
-                          // Check if video format is supported before opening player
-                          const filePath = result.clip.scene.path;
-                          
-                          if (!isVideoFormatSupported(filePath)) {
-                            const extension = filePath?.split('.').pop()?.toUpperCase() || 'Unknown';
-                            console.error(`🚫 Backup timer: Unsupported video format: ${extension}`);
+                      // Load next clip after backup timer expires
+                      try {
+                        console.log('🔄 Fetching next clip from API...');
+                        const response = await fetch(`${config.apiBaseUrl}/api/stash/clips/next`);
+                        const result = await response.json();
+                        
+                        console.log('📡 API Response status:', response.status);
+                        console.log('📦 API Response data:', result);
+                        
+                        if (response.ok) {
+                          if (result.clip && result.clip.scene) {
+                            // Check if video format is supported before opening player
+                            const filePath = result.clip.scene.path;
                             
-                            // Close player instead of showing unsupported format
+                            if (!isVideoFormatSupported(filePath)) {
+                              const extension = filePath?.split('.').pop()?.toUpperCase() || 'Unknown';
+                              console.error(`🚫 Backup timer: Unsupported video format: ${extension}`);
+                              
+                              // Close player instead of showing unsupported format
+                              setVideoPlayer({ isOpen: false, clip: null, scene: null, playbackInfo: null });
+                              return;
+                            }
+                            
+                            console.log('🎯 Auto-loaded next clip via backup timer:', result.clip.scene.title);
+                            console.log('📊 New clip data:', {
+                              clipId: result.clip.id,
+                              sceneTitle: result.clip.scene.title,
+                              startTime: result.playbackInfo.startTime,
+                              endTime: result.playbackInfo.endTime,
+                              duration: result.playbackInfo.duration
+                            });
+                            
+                            // Update video player with new clip
+                            setVideoPlayer({
+                              isOpen: true,
+                              clip: result.clip,
+                              scene: result.clip.scene,
+                              playbackInfo: result.playbackInfo
+                            });
+                          } else {
+                            console.error('❌ Invalid clip data received:', result);
                             setVideoPlayer({ isOpen: false, clip: null, scene: null, playbackInfo: null });
-                            return;
                           }
-                          
-                          console.log('🎯 Auto-loaded next clip via backup timer:', result.clip.scene.title);
-                          console.log('📊 New clip data:', {
-                            clipId: result.clip.id,
-                            sceneTitle: result.clip.scene.title,
-                            startTime: result.playbackInfo.startTime,
-                            endTime: result.playbackInfo.endTime,
-                            duration: result.playbackInfo.duration
-                          });
-                          
-                          // Update video player with new clip
-                          setVideoPlayer({
-                            isOpen: true,
-                            clip: result.clip,
-                            scene: result.clip.scene,
-                            playbackInfo: result.playbackInfo
-                          });
                         } else {
-                          console.error('❌ Invalid clip data received:', result);
+                          console.error('Failed to load next clip via backup timer:', result.error);
+                          // Close player if no more clips available
                           setVideoPlayer({ isOpen: false, clip: null, scene: null, playbackInfo: null });
                         }
-                      } else {
-                        console.error('Failed to load next clip via backup timer:', result.error);
-                        // Close player if no more clips available
+                      } catch (error) {
+                        console.error('Error loading next clip via backup timer:', error);
+                        // Close player on error
                         setVideoPlayer({ isOpen: false, clip: null, scene: null, playbackInfo: null });
                       }
-                    } catch (error) {
-                      console.error('Error loading next clip via backup timer:', error);
-                      // Close player on error
-                      setVideoPlayer({ isOpen: false, clip: null, scene: null, playbackInfo: null });
-                    }
-                  }, clipDurationMs);
-                  
-                  // Store timer reference for cleanup
-                  e.target.clipTimer = clipTimer;
+                    }, clipDurationMs);
+                    
+                    // Store timer reference for cleanup
+                    e.target.clipTimer = clipTimer;
+                  } else {
+                    console.log('🎭 Mixed mode active - skipping backup timer');
+                  }
                 }}
                 onTimeUpdate={(e) => {
                   // Only proceed if playbackInfo is available
@@ -2010,6 +2489,55 @@ export default function Stash() {
                       {upNextLoading ? '🎬 Loading...' : '🎬 Clip Play'}
                     </Button>
                     
+                    <Button 
+                      onClick={startSlideshow} 
+                      disabled={slideshow.isLoading || !connectionStatus.connected}
+                      className={`slideshow-button ${slideshow.isLoading ? 'loading' : ''}`}
+                      style={{ 
+                        backgroundColor: '#9b59b6', 
+                        color: '#fff',
+                        marginLeft: '10px'
+                      }}
+                    >
+                      {slideshow.isLoading ? '🖼️ Loading...' : '🖼️ Slideshow'}
+                    </Button>
+                    
+                    <Button 
+                      onClick={mixedMode.isActive ? stopMixedMode : startMixedMode} 
+                      disabled={mixedMode.isLoading || !connectionStatus.connected}
+                      className={`mixed-mode-button ${mixedMode.isLoading ? 'loading' : ''} ${mixedMode.isActive ? 'active' : ''}`}
+                      style={{ 
+                        backgroundColor: mixedMode.isActive ? '#e67e22' : '#34495e', 
+                        color: '#fff',
+                        marginLeft: '10px'
+                      }}
+                    >
+                      {mixedMode.isLoading ? '🎭 Loading...' : mixedMode.isActive ? '🛑 Stop Mixed' : '🎭 Clips + Slideshow'}
+                    </Button>
+                    
+                    {/* Mixed Mode Status */}
+                    {mixedMode.isActive && (
+                      <div className="mixed-mode-status" style={{
+                        marginTop: '15px',
+                        padding: '10px 15px',
+                        backgroundColor: '#e67e22',
+                        color: 'white',
+                        borderRadius: '8px',
+                        fontSize: '0.9rem',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '8px'
+                      }}>
+                        <span>🎭</span>
+                        <span>Mixed Mode Active</span>
+                        <span style={{ opacity: 0.8 }}>
+                          {mixedMode.currentType === 'clip' ? '(Currently: 🎬 Clip)' : 
+                           mixedMode.currentType === 'slideshow' ? '(Currently: 🖼️ Slideshow)' : 
+                           '(Selecting next...)'}
+                        </span>
+                      </div>
+                    )}
+                    
                     {selectedScene && (
                       <>
                         {/* Scene Title */}
@@ -2018,7 +2546,8 @@ export default function Stash() {
                           {selectedScene.clipInfo && (
                             <span className="clip-info">
                               <br />
-                              <small style={{ color: '#e74c3c', fontWeight: 'normal' }}>
+                              <small style={{ color: selectedScene.clipInfo.mixedMode ? '#e67e22' : '#e74c3c', fontWeight: 'normal' }}>
+                                {selectedScene.clipInfo.mixedMode ? '🎭 Mixed Mode • ' : ''}
                                 🎬 Clip {selectedScene.clipInfo.clipIndex} • 
                                 {Math.floor(selectedScene.clipInfo.startTime / 60)}:{String(Math.floor(selectedScene.clipInfo.startTime % 60)).padStart(2, '0')} - 
                                 {Math.floor(selectedScene.clipInfo.endTime / 60)}:{String(Math.floor(selectedScene.clipInfo.endTime % 60)).padStart(2, '0')} • 
@@ -2641,6 +3170,191 @@ export default function Stash() {
               )}
             </div>
           </div>
+        </div>
+      )}
+
+      {/* Slideshow Modal */}
+      {slideshow.isOpen && (
+        <div 
+          className="slideshow-modal" 
+          onKeyDown={handleSlideshowKeyDown}
+          tabIndex={0}
+          style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            width: '100vw',
+            height: '100vh',
+            backgroundColor: 'black',
+            zIndex: 10000,
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            justifyContent: 'center'
+          }}
+        >
+          {/* Close button */}
+          <button 
+            className="slideshow-close"
+            onClick={stopSlideshow}
+            style={{
+              position: 'absolute',
+              top: '20px',
+              right: '20px',
+              backgroundColor: 'rgba(255, 255, 255, 0.2)',
+              border: 'none',
+              color: 'white',
+              fontSize: '24px',
+              width: '50px',
+              height: '50px',
+              borderRadius: '50%',
+              cursor: 'pointer',
+              zIndex: 10001
+            }}
+          >
+            ×
+          </button>
+          
+          {/* Controls */}
+          <div 
+            className="slideshow-controls"
+            style={{
+              position: 'absolute',
+              bottom: '20px',
+              left: '50%',
+              transform: 'translateX(-50%)',
+              display: 'flex',
+              gap: '10px',
+              zIndex: 10001
+            }}
+          >
+            <button 
+              onClick={prevSlide}
+              style={{
+                backgroundColor: 'rgba(255, 255, 255, 0.2)',
+                border: 'none',
+                color: 'white',
+                padding: '10px 15px',
+                borderRadius: '5px',
+                cursor: 'pointer'
+              }}
+            >
+              ← Previous
+            </button>
+            <span style={{ color: 'white', alignSelf: 'center' }}>
+              {slideshow.currentIndex + 1} / {slideshow.images.length}
+            </span>
+            <button 
+              onClick={nextSlide}
+              style={{
+                backgroundColor: 'rgba(255, 255, 255, 0.2)',
+                border: 'none',
+                color: 'white',
+                padding: '10px 15px',
+                borderRadius: '5px',
+                cursor: 'pointer'
+              }}
+            >
+              Next →
+            </button>
+            <button 
+              onClick={toggleSlideshowFullscreen}
+              style={{
+                backgroundColor: 'rgba(255, 255, 255, 0.2)',
+                border: 'none',
+                color: 'white',
+                padding: '10px 15px',
+                borderRadius: '5px',
+                cursor: 'pointer'
+              }}
+              title={slideshow.isFullscreen ? 'Exit Fullscreen' : 'Enter Fullscreen'}
+            >
+              {slideshow.isFullscreen ? '🗗' : '🗖'}
+            </button>
+          </div>
+
+          {/* Current Image */}
+          {slideshow.images.length > 0 && slideshow.images[slideshow.currentIndex] && (
+            <div 
+              className="slideshow-image-container"
+              style={{
+                width: '100%',
+                height: '100%',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                position: 'relative'
+              }}
+            >
+              <img
+                src={`${config.apiBaseUrl}/api/stash-image-proxy/${encodeURIComponent(slideshow.images[slideshow.currentIndex].path)}`}
+                alt={slideshow.images[slideshow.currentIndex].title || 'Stash Image'}
+                style={slideshow.isFullscreen ? {
+                  maxWidth: '100vw',
+                  maxHeight: '100vh',
+                  width: '100%',
+                  height: '100vh',
+                  objectFit: 'contain'
+                } : {
+                  maxWidth: '100vw',
+                  maxHeight: '100vh',
+                  width: 'auto',
+                  height: 'auto',
+                  objectFit: 'contain'
+                }}
+                onError={(e) => {
+                  console.error('Failed to load image:', slideshow.images[slideshow.currentIndex].path);
+                  // Try next image if current fails to load
+                  nextSlide();
+                }}
+              />
+              
+              {/* Image info overlay */}
+              <div 
+                className="slideshow-info"
+                style={{
+                  position: 'absolute',
+                  top: '20px',
+                  left: '20px',
+                  backgroundColor: 'rgba(0, 0, 0, 0.7)',
+                  color: 'white',
+                  padding: '15px',
+                  borderRadius: '5px',
+                  maxWidth: '400px'
+                }}
+              >
+                {slideshow.images[slideshow.currentIndex].title && (
+                  <h3 style={{ margin: '0 0 10px 0', fontSize: '18px' }}>
+                    {slideshow.images[slideshow.currentIndex].title}
+                  </h3>
+                )}
+                
+                {slideshow.images[slideshow.currentIndex].gallery && (
+                  <p style={{ margin: '5px 0', fontSize: '14px' }}>
+                    📁 {slideshow.images[slideshow.currentIndex].gallery.title}
+                  </p>
+                )}
+                
+                {slideshow.images[slideshow.currentIndex].performers && slideshow.images[slideshow.currentIndex].performers.length > 0 && (
+                  <p style={{ margin: '5px 0', fontSize: '14px' }}>
+                    👥 {slideshow.images[slideshow.currentIndex].performers.map(p => p.name).join(', ')}
+                  </p>
+                )}
+                
+                {slideshow.images[slideshow.currentIndex].photographer && (
+                  <p style={{ margin: '5px 0', fontSize: '14px' }}>
+                    📸 {slideshow.images[slideshow.currentIndex].photographer}
+                  </p>
+                )}
+                
+                {slideshow.images[slideshow.currentIndex].studioObject && (
+                  <p style={{ margin: '5px 0', fontSize: '14px' }}>
+                    🏢 {slideshow.images[slideshow.currentIndex].studioObject.name}
+                  </p>
+                )}
+              </div>
+            </div>
+          )}
         </div>
       )}
     </div>

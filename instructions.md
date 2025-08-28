@@ -57,7 +57,7 @@ master-order/
 │   │   ├── pages/
 │   │   │   ├── index.jsx           # Home page (episode selection)
 │   │   │   ├── settings/index.jsx  # Settings page (collection config)
-│   │   │   ├── Stash.jsx          # Stash integration with visual enhancements
+│   │   │   ├── Stash.jsx          # Stash integration with slideshow and visual enhancements
 │   │   │   ├── music/index.jsx    # Music and playlist management
 │   │   │   ├── books/index.jsx    # Book library management
 │   │   │   └── comics/index.jsx   # Comic library management
@@ -162,7 +162,7 @@ services:
 - **Pages**:
   - **Home**: Episode selection and recommendation engine
   - **Settings**: Configuration management for all integrations
-  - **Stash**: Adult content library with visual enhancements, performer/studio stats
+  - **Stash**: Adult content library with visual enhancements, performer/studio stats, full-screen image slideshow
   - **Music**: Playlist management and music library integration
   - **Books**: Book library management with OpenLibrary integration
   - **Comics**: Comic library management with ComicVine integration
@@ -395,9 +395,18 @@ When making schema changes:
 ### Stash Integration
 - **GET /api/stash/data**: Get Stash library data with statistics
 - **POST /api/stash/sync**: Trigger manual Stash sync with filtering
+- **POST /api/stash/sync/galleries**: Sync Stash galleries with images
+- **POST /api/stash/sync/images**: Sync standalone Stash images (not in galleries)
 - **GET /api/stash/sync/status**: Get Stash sync status
 - **GET /api/stash/background-sync/status**: Get background sync service status
 - **POST /api/stash/background-sync/force**: Force immediate background sync
+- **GET /api/stash/galleries**: Get Stash galleries with pagination and filtering
+- **GET /api/stash/galleries/:id**: Get specific gallery with images and metadata
+- **GET /api/stash/images**: Get standalone Stash images (not part of galleries)
+- **GET /api/stash/images/slideshow**: Get random images for full-screen slideshow
+  - Query parameters: `count` (1-100), `includeGalleries` (true/false), `includeStandalone` (true/false)
+  - Returns shuffled collection of images with metadata for 6-second interval slideshow
+- **GET /api/stash-image-proxy/***: Proxy endpoint to serve Stash images through the application
 - **POST /api/stash/clip-play**: Play random 1-minute clips with automatic generation
 - **GET /api/stash/clips/next**: Get next available unwatched clip
 - **POST /api/stash/scenes/:id/clips/generate**: Generate clips for a specific scene
@@ -406,6 +415,7 @@ When making schema changes:
 - **POST /api/stash/clips/reset**: Reset all clips (mark as unwatched)
 - **Filtering**: Automatically excludes performers/studios with 0 scenes and scenes with 'zzHide' tag
 - **Clip Generation**: Automatically generates 1-minute clips for random scenes when no unwatched clips exist
+- **Image Slideshow**: Full-screen slideshow with keyboard controls (ESC, arrows, space) and automatic 6-second progression
 
 ### Custom Orders & Music Integration
 - **GET /api/custom-orders**: Get all custom orders with playlist relations
@@ -563,6 +573,16 @@ When making schema changes:
 - Database cleanup: removes filtered content during sync operations
 - Next selection: removes redundant filtering (zzHide already excluded during sync)
 
+**Image Slideshow**:
+- Full-screen slideshow mode accessible from Next Stash tab
+- Supports both gallery images and standalone images
+- Configurable content inclusion (galleries, standalone, or both)
+- Automatic 6-second progression with manual navigation controls
+- Keyboard controls: ESC (exit), arrows (navigate), space (next)
+- Image metadata overlay with gallery, performer, photographer, and studio information
+- Proxy serving of images through application for consistent access
+- Error handling with automatic skip to next image on load failures
+
 ### External API Integration Details
 **Plex Media Server**:
 - **Library Section**: Currently hardcoded to section `1` for initial search
@@ -671,6 +691,37 @@ model StashStudio {
   image        String?
   scene_count  Int     @default(0)
   // ... studio details
+}
+
+model StashGallery {
+  id           String   @id
+  title        String?
+  code         String?
+  date         String?
+  details      String?
+  photographer String?
+  url          String?
+  rating       Int?     // 1-5 stars
+  organized    Boolean  @default(false)
+  studio       String?
+  studioId     String?
+  path         String?
+  // ... gallery relationships with images, performers, tags, studio
+}
+
+model StashImage {
+  id           String   @id
+  galleryId    String?  // Optional - supports standalone images
+  title        String?
+  code         String?
+  path         String?  // File path for proxy serving
+  checksum     String?
+  photographer String?
+  studio       String?
+  studioId     String?
+  rating       Int?     // 1-5 stars
+  organized    Boolean  @default(false)
+  // ... image relationships with gallery, performers, tags, studio
 }
 
 // Music Integration Models

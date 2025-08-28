@@ -740,6 +740,100 @@ curl -X DELETE "http://localhost:3001/api/android/stash/scene/2475?deleteFile=tr
 
 ---
 
+### 5. Get Random Stash Images
+
+**Endpoint**: `GET /api/android/stash/images`
+
+**Description**: Retrieves a specified number of random images from the Stash library, including both gallery images and standalone images. Perfect for creating image viewers, wallpaper apps, or random image displays.
+
+**Query Parameters**:
+- `count` (optional): Number of random images to return (default: 1, min: 1, max: 50)
+
+**Response Format**:
+```json
+{
+  "type": "RANDOM_IMAGES",
+  "data": {
+    "images": [
+      {
+        "id": "12345",
+        "title": "Image Title",
+        "path": "/path/to/image.jpg",
+        "url": "http://localhost:3001/api/stash-image-proxy/encoded-path",
+        "photographer": "Photographer Name",
+        "performers": [
+          {
+            "name": "Performer Name",
+            "image": "performer_image_url"
+          }
+        ],
+        "studio": {
+          "name": "Studio Name",
+          "image": "studio_image_url"
+        },
+        "gallery": {
+          "title": "Gallery Title"
+        },
+        "rating": 4,
+        "organized": true
+      }
+    ],
+    "count": 1,
+    "totalAvailable": 1523
+  }
+}
+```
+
+**Response Fields**:
+- `images`: Array of image objects
+  - `id`: Unique image identifier
+  - `title`: Image title (from image or gallery)
+  - `path`: Original file path on Stash server
+  - `url`: Complete proxy URL for accessing the image through Master Order
+  - `photographer`: Name of the photographer (if available)
+  - `performers`: Array of associated performers with names and images
+  - `studio`: Studio object with name and image (if available)
+  - `gallery`: Gallery object with title (if image is part of a gallery)
+  - `rating`: Star rating (1-5, if available)
+  - `organized`: Boolean indicating if the image is marked as organized
+- `count`: Number of images returned
+- `totalAvailable`: Total number of images available in the library
+
+**Image Sources**:
+- Gallery images (images that are part of organized galleries)
+- Standalone images (images not associated with any gallery)
+
+**Error Responses**:
+```json
+{
+  "type": "NO_IMAGES",
+  "data": {
+    "message": "No images found in Stash library",
+    "images": []
+  }
+}
+```
+
+**Example Usage**:
+```bash
+# Get 1 random image (default)
+curl -X GET "http://localhost:3001/api/android/stash/images"
+
+# Get 5 random images
+curl -X GET "http://localhost:3001/api/android/stash/images?count=5"
+
+# Get maximum 50 random images
+curl -X GET "http://localhost:3001/api/android/stash/images?count=50"
+```
+
+**Use Cases**:
+- Random wallpaper/background image selection
+- Image gallery/slideshow applications
+- Sample image preview for browsing
+- Random image widgets or displays
+
+---
+
 ## Response Format Standards
 
 All Android endpoints follow a consistent response format:
