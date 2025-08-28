@@ -450,14 +450,67 @@ When making schema changes:
 - **Configurable Intervals**: Set via settings API for both Plex and Stash sync
 
 ### Android Companion App API
+
+The Android Companion App API provides structured endpoints specifically designed for mobile integration, returning consistent response formats with `type` and `data` fields.
+
+#### Content Discovery & Playback
 - **GET /api/android/up-next**: Get next recommended content (TV episode, movie, or custom order item)
-  - Returns: `{"type":"PLAY_TV_EPISODE|PLAY_MOVIE|PLAY_CUSTOM_ORDER_ITEM","data":{...}}` with content metadata and playback URL
+  - Returns: `{"type":"PLAY_TV_EPISODE|PLAY_MOVIE|PLAY_CUSTOM_ORDER_ITEM","data":{...}}` with comprehensive metadata
+  
+  **TV Episode Response** includes:
+  - **Episode Information**: `seasonNumber`, `episodeNumber`, `episodeTitle`, `seasonTitle`
+  - **Series Metadata**: `ratingKey`, `title`, `summary`, `leafCount`, `viewedLeafCount`
+  - **Final Season Status**: `isCurrentSeasonFinal` (boolean), `seriesStatus` (e.g., "Ended", "Continuing"), `finaleType` (e.g., "Season Finale", "Mid-Season Finale", "Series Finale")
+  - **Artwork URLs**: `thumb`, `art`, `artworkUrl` (resolved URLs matching web app display)
+  - **Collections**: `otherCollections` array with related content
+  
+  **Movie Response** includes:
+  - **Movie Metadata**: `ratingKey`, `title`, `year`, `duration`, `summary`, `studio`, `rating`
+  - **Artwork URLs**: `thumb`, `art`, `artworkUrl` (resolved URLs matching web app display)
+  - **Collections**: `otherCollections` array with related content
+  
+  **Custom Order Response** includes:
+  - **Order Information**: `id`, `title`, `type`, `orderName`, `summary`, `duration`
+  - **Artwork URLs**: `artworkUrl` (supports cached artwork, TVDB, ComicVine, OpenLibrary, and Plex sources)
+  - **References**: `ratingKey`, `customOrderId`, `customOrderItemId`
+  
+  **Artwork URL Resolution Priority**:
+  1. Cached artwork files: `/api/artwork/{filename}`
+  2. TVDB artwork: `/api/tvdb-artwork?url={encoded_url}`
+  3. ComicVine artwork: `/api/comicvine-artwork?url={encoded_url}`
+  4. OpenLibrary artwork: `/api/openlibrary-artwork?url={encoded_url}`
+  5. Plex artwork: `/api/artwork{plex_path}`
+  
+  **Example TV Episode Response**:
+  ```json
+  {
+    "type": "PLAY_TV_EPISODE",
+    "data": {
+      "ratingKey": "18042",
+      "title": "Young Sheldon",
+      "seasonNumber": 2,
+      "episodeNumber": 7,
+      "seasonTitle": "Season 2",
+      "episodeTitle": "Carbon Dating and a Stuffed Raccoon",
+      "isCurrentSeasonFinal": false,
+      "seriesStatus": "Ended",
+      "finaleType": null,
+      "artworkUrl": "http://localhost:3001/api/artwork/library/metadata/18042/thumb/1754560674",
+      "otherCollections": [...]
+    }
+  }
+  ```
+#### Media Control & Playback
 - **POST /api/android/play-plex**: Play media content on configured Plex player
   - Request: `{"ratingKey":"12345","mediaType":"episode","title":"Series - Episode"}`
   - Returns: `{"type":"PLAY_SUCCESS|PLAY_ERROR","data":{...}}` with playback status and player information
+
+#### Content Management
 - **POST /api/android/mark-watched**: Mark comic, book, story, or web video as read/watched
   - Request: `{"itemId":123,"mediaType":"book","title":"Book Title"}`
   - Returns: `{"type":"MARK_WATCHED_SUCCESS|MARK_WATCHED_ERROR","data":{...}}` with watch status
+
+#### Reading Session Management
 - **POST /api/android/reading/start**: Start reading session for books, comics, stories
   - Request: `{"mediaType":"book","title":"Book Title","customOrderItemId":123}`
   - Returns: `{"type":"READING_SESSION_STARTED|READING_SESSION_ERROR","data":{...}}` with session info
@@ -466,6 +519,8 @@ When making schema changes:
 - **POST /api/android/reading/stop**: Stop reading session with optional progress tracking
   - Request: `{"progress":{"currentPage":150,"readPercentage":75}}`
   - Returns: `{"type":"READING_SESSION_STOPPED|READING_SESSION_ERROR","data":{...}}`
+
+#### Video Viewing Session Management
 - **POST /api/android/viewing/start**: Start viewing session for web videos
   - Request: `{"mediaType":"webvideo","title":"Video Title","customOrderItemId":789}`
   - Returns: `{"type":"VIEWING_SESSION_STARTED|VIEWING_SESSION_ERROR","data":{...}}` with session info
@@ -474,6 +529,8 @@ When making schema changes:
 - **POST /api/android/viewing/stop**: Stop viewing session with optional progress tracking
   - Request: `{"progress":{"currentTime":1200,"watchedPercentage":67}}`
   - Returns: `{"type":"VIEWING_SESSION_STOPPED|VIEWING_SESSION_ERROR","data":{...}}`
+
+#### Stash Integration (Adult Content)
 - **GET /api/android/stash/next**: Get next clip for Android app playback
   - Returns: `{"type":"PLAY_CLIP","data":{...}}` with URL, title, performers, studio, duration, timing
 - **GET /api/android/stash/scene/next**: Get next scene for Android app playback
@@ -484,7 +541,13 @@ When making schema changes:
   - Optional query parameter: `?deleteFile=true` to also delete the physical file
   - Returns: `{"type":"SCENE_DELETED","data":{...}}` with deletion status
 
-**Note**: These endpoints are specifically designed for the Android companion app and return structured responses with `type` and `data` fields for easy mobile app integration.
+#### Key Features & Benefits
+- **Consistent Response Format**: All endpoints return structured responses with `type` and `data` fields
+- **Rich Metadata**: Complete episode information including season/episode numbers and final season detection
+- **Artwork Integration**: Verified artwork URLs that return actual images matching web app display
+- **Session Management**: Full support for reading and viewing session tracking
+- **Content Discovery**: Smart recommendations with collection awareness
+- **Final Season Detection**: Automatic detection of final seasons and finale episodes for enhanced UI display
 
 ### Episode Selection & Media Discovery
 - **GET /api/up_next**: Get random episode from configured collection

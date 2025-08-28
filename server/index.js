@@ -8177,11 +8177,72 @@ app.get('/api/android/up-next', async (req, res) => {
       });
     }
     
+    // Helper function to generate artwork URL like web app does
+    const getAndroidArtworkUrl = (media) => {
+      // Web videos don't have artwork
+      if (media?.type === 'webvideo') {
+        return null;
+      }
+      
+      // First priority: Check for cached artwork (works for all media types)
+      if (media?.localArtworkPath) {
+        const filename = media.localArtworkPath.includes('\\') || media.localArtworkPath.includes('/')
+          ? media.localArtworkPath.split(/[\\\/]/).pop() 
+          : media.localArtworkPath;
+        console.log('📱 Using cached artwork:', filename);
+        return `http://localhost:${PORT}/api/artwork/${filename}`;
+      }
+      
+      // For comics, fallback to ComicVine artwork if no cached artwork
+      if (media?.type === 'comic' && media?.comicDetails?.coverUrl) {
+        console.log('📱 Using ComicVine artwork (fallback):', media.comicDetails.coverUrl);
+        return `http://localhost:${PORT}/api/comicvine-artwork?url=${encodeURIComponent(media.comicDetails.coverUrl)}`;
+      }
+      
+      // For books, use OpenLibrary artwork
+      if (media?.type === 'book' && media?.bookCoverUrl) {
+        console.log('📱 Using OpenLibrary artwork:', media.bookCoverUrl);
+        return `http://localhost:${PORT}/api/openlibrary-artwork?url=${encodeURIComponent(media.bookCoverUrl)}`;
+      }
+      
+      // For short stories, use story cover or fallback to containing book's cover
+      if (media?.type === 'shortstory') {
+        if (media?.storyCoverUrl) {
+          console.log('📱 Using short story cover artwork:', media.storyCoverUrl);
+          return `http://localhost:${PORT}/api/openlibrary-artwork?url=${encodeURIComponent(media.storyCoverUrl)}`;
+        } else if (media?.containedInBookDetails?.coverUrl) {
+          console.log('📱 Using containing book cover artwork for short story:', media.containedInBookDetails.coverUrl);
+          return `http://localhost:${PORT}/api/openlibrary-artwork?url=${encodeURIComponent(media.containedInBookDetails.coverUrl)}`;
+        }
+      }
+      
+      // Prioritize TVDB artwork if available for TV content
+      if (media?.tvdbArtwork?.url) {
+        console.log('📱 Using TVDB artwork:', media.tvdbArtwork.url);
+        return `http://localhost:${PORT}/api/tvdb-artwork?url=${encodeURIComponent(media.tvdbArtwork.url)}`;
+      }
+      
+      // Fall back to Plex artwork
+      const thumb = media?.thumb || media?.art;
+      if (!thumb) return null;
+      
+      // Check if thumb is already a full URL (starts with http)
+      if (thumb.startsWith('http')) {
+        console.log('📱 Using full artwork URL:', thumb);
+        return thumb;
+      }
+      
+      // Otherwise, it's a relative path, so add the base URL
+      console.log('📱 Using Plex artwork:', thumb);
+      return `http://localhost:${PORT}/api/artwork${thumb}`;
+    };
+    
     // Determine content type and build appropriate response
     let androidResponse;
     
     if (upNextData.orderType === 'MOVIES_GENERAL') {
-      // Movie response - use Plex artwork URLs directly
+      // Movie response - use proper artwork URL generation
+      const artworkUrl = getAndroidArtworkUrl(upNextData);
       androidResponse = {
         type: 'PLAY_MOVIE',
         data: {
@@ -8194,24 +8255,14 @@ app.get('/api/android/up-next', async (req, res) => {
           rating: upNextData.rating || 0,
           thumb: upNextData.thumb || '',
           art: upNextData.art || '',
+          artworkUrl: artworkUrl || '', // Use proper artwork URL matching web app display
           streamUrl: upNextData.streamUrl || '',
           otherCollections: upNextData.otherCollections || []
         }
       };
     } else if (upNextData.orderType === 'CUSTOM_ORDER') {
-      // Custom order response - convert local artwork paths to network URLs
-      let artworkUrl = '';
-      if (upNextData.localArtworkPath) {
-        // Only convert if it's actually a local file path, not a Plex URL
-        if (upNextData.localArtworkPath.startsWith('/') && !upNextData.localArtworkPath.includes('/library/metadata/')) {
-          // Local file path - convert to network URL
-          const filename = path.basename(upNextData.localArtworkPath);
-          artworkUrl = `http://localhost:${PORT}/api/artwork/${filename}`;
-        } else if (upNextData.localArtworkPath.startsWith('/library/metadata/')) {
-          // Plex artwork path - use as is (will be handled by Plex server)
-          artworkUrl = upNextData.localArtworkPath;
-        }
-      }
+      // Custom order response - use proper artwork URL generation
+      const artworkUrl = getAndroidArtworkUrl(upNextData);
       
       androidResponse = {
         type: 'PLAY_CUSTOM_ORDER_ITEM',
@@ -8223,14 +8274,15 @@ app.get('/api/android/up-next', async (req, res) => {
           summary: upNextData.summary || '',
           duration: upNextData.duration || 0,
           localArtworkPath: upNextData.localArtworkPath || '',
-          artworkUrl: artworkUrl, // Network-accessible artwork URL for Android
+          artworkUrl: artworkUrl || '', // Use proper artwork URL matching web app display
           streamUrl: upNextData.streamUrl || '',
           ratingKey: upNextData.ratingKey || null,
           customOrderId: upNextData.customOrderId || null
         }
       };
     } else {
-      // TV Show response (default) - use Plex artwork URLs directly
+      // TV Show response (default) - use proper artwork URL generation
+      const artworkUrl = getAndroidArtworkUrl(upNextData);
       androidResponse = {
         type: 'PLAY_TV_EPISODE',
         data: {
@@ -8239,8 +8291,19 @@ app.get('/api/android/up-next', async (req, res) => {
           summary: upNextData.summary || '',
           leafCount: upNextData.leafCount || 0,
           viewedLeafCount: upNextData.viewedLeafCount || 0,
+          // Season and episode information for TV shows
+          seasonNumber: upNextData.currentSeason || upNextData.seasonNumber || null,
+          episodeNumber: upNextData.currentEpisode || upNextData.episodeNumber || null,
+          episodeTitle: upNextData.episodeTitle || null,
+          seasonTitle: upNextData.seasonTitle || null,
+          // Final season and finale information
+          isCurrentSeasonFinal: upNextData.isCurrentSeasonFinal || false,
+          seriesStatus: upNextData.seriesStatus || null,
+          finaleType: upNextData.finaleType || null,
+          // Artwork URLs
           thumb: upNextData.thumb || '',
           art: upNextData.art || '',
+          artworkUrl: artworkUrl || '', // Use proper artwork URL matching web app display
           streamUrl: upNextData.streamUrl || '',
           otherCollections: upNextData.otherCollections || []
         }
