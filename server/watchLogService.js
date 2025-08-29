@@ -20,6 +20,18 @@ class WatchLogService {
    */
   async startWatching(params) {
     try {
+      // Validate customOrderItemId exists if provided
+      if (params.customOrderItemId) {
+        const existingItem = await this.prisma.customOrderItem.findUnique({
+          where: { id: params.customOrderItemId }
+        });
+        
+        if (!existingItem) {
+          console.log(`⚠️  CustomOrderItem ${params.customOrderItemId} not found in startWatching - removing link`);
+          params.customOrderItemId = null;
+        }
+      }
+
       const watchLog = await this.prisma.watchLog.create({
         data: {
           mediaType: params.mediaType,
@@ -41,6 +53,11 @@ class WatchLogService {
       return watchLog;
     } catch (error) {
       console.error('Error starting watch session:', error);
+      // If it's a foreign key constraint error, provide more helpful information
+      if (error.code === 'P2003' || error.message.includes('Foreign key constraint')) {
+        console.error('❌ Foreign key constraint violation - CustomOrderItem may not exist');
+        throw new Error('Invalid customOrderItemId: Referenced item does not exist');
+      }
       throw error;
     }
   }
@@ -82,6 +99,18 @@ class WatchLogService {
    */
   async logWatched(params) {
     try {
+      // Validate customOrderItemId exists if provided
+      if (params.customOrderItemId) {
+        const existingItem = await this.prisma.customOrderItem.findUnique({
+          where: { id: params.customOrderItemId }
+        });
+        
+        if (!existingItem) {
+          console.log(`⚠️  CustomOrderItem ${params.customOrderItemId} not found in logWatched - removing link`);
+          params.customOrderItemId = null;
+        }
+      }
+
       const now = new Date();
       const startTime = params.startTime || new Date(now.getTime() - (params.duration || 30) * 60000);
       
@@ -106,6 +135,11 @@ class WatchLogService {
       return watchLog;
     } catch (error) {
       console.error('Error logging watched item:', error);
+      // If it's a foreign key constraint error, provide more helpful information
+      if (error.code === 'P2003' || error.message.includes('Foreign key constraint')) {
+        console.error('❌ Foreign key constraint violation - CustomOrderItem may not exist');
+        throw new Error('Invalid customOrderItemId: Referenced item does not exist');
+      }
       throw error;
     }
   }
@@ -454,6 +488,18 @@ class WatchLogService {
    */
   async startReading(params) {
     try {
+      // Validate customOrderItemId exists if provided
+      if (params.customOrderItemId) {
+        const existingItem = await this.prisma.customOrderItem.findUnique({
+          where: { id: params.customOrderItemId }
+        });
+        
+        if (!existingItem) {
+          console.log(`⚠️  CustomOrderItem ${params.customOrderItemId} not found in startReading - removing link`);
+          params.customOrderItemId = null;
+        }
+      }
+
       // Check if there's already an active reading session for this item
       const activeSession = await this.prisma.watchLog.findFirst({
         where: {
@@ -489,6 +535,11 @@ class WatchLogService {
       return readingLog;
     } catch (error) {
       console.error('Error starting reading session:', error);
+      // If it's a foreign key constraint error, provide more helpful information
+      if (error.code === 'P2003' || error.message.includes('Foreign key constraint')) {
+        console.error('❌ Foreign key constraint violation - CustomOrderItem may not exist');
+        throw new Error('Invalid customOrderItemId: Referenced item does not exist');
+      }
       throw error;
     }
   }
@@ -504,6 +555,18 @@ class WatchLogService {
    */
   async startViewing(params) {
     try {
+      // Validate customOrderItemId exists if provided
+      if (params.customOrderItemId) {
+        const existingItem = await this.prisma.customOrderItem.findUnique({
+          where: { id: params.customOrderItemId }
+        });
+        
+        if (!existingItem) {
+          console.log(`⚠️  CustomOrderItem ${params.customOrderItemId} not found in startViewing - removing link`);
+          params.customOrderItemId = null;
+        }
+      }
+
       // Check if there's already an active viewing session for this item
       const activeSession = await this.prisma.watchLog.findFirst({
         where: {
@@ -539,6 +602,11 @@ class WatchLogService {
       return viewingLog;
     } catch (error) {
       console.error('Error starting viewing session:', error);
+      // If it's a foreign key constraint error, provide more helpful information
+      if (error.code === 'P2003' || error.message.includes('Foreign key constraint')) {
+        console.error('❌ Foreign key constraint violation - CustomOrderItem may not exist');
+        throw new Error('Invalid customOrderItemId: Referenced item does not exist');
+      }
       throw error;
     }
   }

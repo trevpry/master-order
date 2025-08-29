@@ -33,12 +33,19 @@ Currently, no authentication is required for these endpoints. They are designed 
   "type": "PLAY_TV_EPISODE",
   "data": {
     "ratingKey": "12345",
+    "plexId": "12345",
     "title": "Series Name",
+    "episodeTitle": "Episode Title",
     "summary": "Series description...",
+    "episodeSummary": "Episode description...",
+    "seasonNumber": 3,
+    "episodeNumber": 8,
+    "isFinalSeason": false,
     "leafCount": 100,
     "viewedLeafCount": 45,
     "thumb": "/library/metadata/12345/thumb/1234567890",
     "art": "/library/metadata/12345/art/1234567890",
+    "artworkUrl": "http://localhost:3000/api/artwork/series-artwork.jpg",
     "streamUrl": "http://plex-server:32400/video/:/transcode/...",
     "otherCollections": [...]
   }
@@ -51,6 +58,7 @@ Currently, no authentication is required for these endpoints. They are designed 
   "type": "PLAY_MOVIE",
   "data": {
     "ratingKey": "67890",
+    "plexId": "67890",
     "title": "Movie Title",
     "year": 2023,
     "duration": 7200,
@@ -59,6 +67,7 @@ Currently, no authentication is required for these endpoints. They are designed 
     "rating": 8.5,
     "thumb": "/library/metadata/67890/thumb/1234567890",
     "art": "/library/metadata/67890/art/1234567890",
+    "artworkUrl": "http://localhost:3000/api/artwork/movie-artwork.jpg",
     "streamUrl": "http://plex-server:32400/video/:/transcode/...",
     "otherCollections": [...]
   }
@@ -72,7 +81,7 @@ Currently, no authentication is required for these endpoints. They are designed 
   "data": {
     "id": 123,
     "title": "Custom Item Title",
-    "type": "tv_episode",
+    "type": "webvideo",
     "orderName": "My Custom Order",
     "summary": "Item description...",
     "duration": 2400,
@@ -80,6 +89,8 @@ Currently, no authentication is required for these endpoints. They are designed 
     "artworkUrl": "http://localhost:3000/api/artwork/artwork-filename.jpg",
     "streamUrl": "http://plex-server:32400/video/:/transcode/...",
     "ratingKey": "54321",
+    "plexId": "54321",
+    "webUrl": "https://example.com/video-url",
     "customOrderId": 456
   }
 }
@@ -89,15 +100,23 @@ Currently, no authentication is required for these endpoints. They are designed 
 - `type`: Indicates the content type (`PLAY_TV_EPISODE`, `PLAY_MOVIE`, or `PLAY_CUSTOM_ORDER_ITEM`)
 - TV Episode Fields:
   - `ratingKey`: Plex rating key for the series
+  - `plexId`: Plex identifier for direct media access (same as ratingKey)
   - `title`: Series name
+  - `episodeTitle`: Specific episode title
   - `summary`: Series description
+  - `episodeSummary`: Episode-specific description
+  - `seasonNumber`: Season number (integer)
+  - `episodeNumber`: Episode number within the season (integer)
+  - `isFinalSeason`: Boolean indicating if this is the final/last season
   - `leafCount`: Total episodes in series
   - `viewedLeafCount`: Number of watched episodes
   - `thumb`/`art`: Plex artwork URLs
+  - `artworkUrl`: Network-accessible artwork URL for Android consumption
   - `streamUrl`: Direct stream URL for playback
   - `otherCollections`: Array of other collections this series belongs to
 - Movie Fields:
   - `ratingKey`: Plex rating key for the movie
+  - `plexId`: Plex identifier for direct media access (same as ratingKey)
   - `title`: Movie title
   - `year`: Release year
   - `duration`: Duration in seconds
@@ -105,19 +124,22 @@ Currently, no authentication is required for these endpoints. They are designed 
   - `studio`: Production studio
   - `rating`: Movie rating
   - `thumb`/`art`: Plex artwork URLs
+  - `artworkUrl`: Network-accessible artwork URL for Android consumption
   - `streamUrl`: Direct stream URL for playback
   - `otherCollections`: Array of collections this movie belongs to
 - Custom Order Fields:
   - `id`: Custom order item ID
-  - `title`: Item title (can be TV episode, movie, book, comic, etc.)
-  - `type`: Item media type (tv_episode, movie, book, comic, etc.)
+  - `title`: Item title (can be TV episode, movie, book, comic, web video, etc.)
+  - `type`: Item media type (tv_episode, movie, book, comic, webvideo, etc.)
   - `orderName`: Name of the actual custom order containing this item
   - `summary`: Item description
   - `duration`: Duration in seconds
   - `localArtworkPath`: Local artwork file path (for reference)
   - `artworkUrl`: Network-accessible artwork URL for Android consumption
-  - `streamUrl`: Direct stream URL for playback
+  - `streamUrl`: Direct stream URL for playback (for Plex content)
   - `ratingKey`: Associated Plex rating key (if applicable)
+  - `plexId`: Plex identifier for direct media access (if applicable, same as ratingKey)
+  - `webUrl`: Direct web video URL (for webvideo type items)
   - `customOrderId`: ID of the parent custom order
 
 **Content Selection Logic**: The endpoint uses the same logic as the web interface to determine what content to return based on current settings and order type configuration.

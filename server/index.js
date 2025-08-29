@@ -7459,19 +7459,31 @@ app.post('/api/reading/start', async (req, res) => {
       return res.status(400).json({ error: 'Missing required fields: mediaType and title are required' });
     }
 
-    if (!customOrderItemId) {
-      console.log('No customOrderItemId provided - this reading session will not be linked to a custom order');
-    }
-
     if (!['book', 'comic', 'shortstory'].includes(mediaType)) {
       console.log('Invalid media type:', mediaType);
       return res.status(400).json({ error: 'Invalid media type for reading' });
     }
 
-    // Only use customOrderItemId if it's a valid integer, otherwise pass null
-    const finalCustomOrderItemId = customOrderItemId && Number.isInteger(parseInt(customOrderItemId)) 
-      ? parseInt(customOrderItemId) 
-      : null;
+    // Validate customOrderItemId if provided - Fix for foreign key constraint error
+    let finalCustomOrderItemId = null;
+    if (customOrderItemId) {
+      const parsedId = parseInt(customOrderItemId);
+      if (Number.isInteger(parsedId)) {
+        // Verify the customOrderItem exists before using it
+        const existingItem = await prisma.customOrderItem.findUnique({
+          where: { id: parsedId }
+        });
+        
+        if (existingItem) {
+          finalCustomOrderItemId = parsedId;
+          console.log(`✅ Validated customOrderItemId: ${finalCustomOrderItemId}`);
+        } else {
+          console.log(`⚠️  CustomOrderItem ${parsedId} not found - proceeding without link`);
+        }
+      } else {
+        console.log('⚠️  Invalid customOrderItemId format - proceeding without link');
+      }
+    }
     
     const readingSession = await watchLogService.startReading({
       mediaType,
@@ -8382,6 +8394,7 @@ app.get('/api/android/up-next', async (req, res) => {
         type: 'PLAY_MOVIE',
         data: {
           ratingKey: upNextData.ratingKey,
+          plexId: upNextData.ratingKey, // Add plexId field for direct media access
           title: upNextData.title,
           year: upNextData.year,
           duration: upNextData.duration || 0,
@@ -8412,6 +8425,8 @@ app.get('/api/android/up-next', async (req, res) => {
           artworkUrl: artworkUrl || '', // Use proper artwork URL matching web app display
           streamUrl: upNextData.streamUrl || '',
           ratingKey: upNextData.ratingKey || null,
+          plexId: upNextData.ratingKey || null, // Add plexId field for Plex content
+          webUrl: upNextData.webUrl || null, // Add webUrl field for web video content
           customOrderId: upNextData.customOrderId || null
         }
       };
@@ -8422,19 +8437,17 @@ app.get('/api/android/up-next', async (req, res) => {
         type: 'PLAY_TV_EPISODE',
         data: {
           ratingKey: upNextData.ratingKey,
+          plexId: upNextData.ratingKey, // Add plexId field for direct media access
           title: upNextData.title,
+          episodeTitle: upNextData.episodeTitle || upNextData.nextEpisodeTitle || null, // Add episode title
           summary: upNextData.summary || '',
+          episodeSummary: upNextData.episodeSummary || null, // Add episode-specific summary
           leafCount: upNextData.leafCount || 0,
           viewedLeafCount: upNextData.viewedLeafCount || 0,
           // Season and episode information for TV shows
           seasonNumber: upNextData.currentSeason || upNextData.seasonNumber || null,
           episodeNumber: upNextData.currentEpisode || upNextData.episodeNumber || null,
-          episodeTitle: upNextData.episodeTitle || null,
-          seasonTitle: upNextData.seasonTitle || null,
-          // Final season and finale information
-          isCurrentSeasonFinal: upNextData.isCurrentSeasonFinal || false,
-          seriesStatus: upNextData.seriesStatus || null,
-          finaleType: upNextData.finaleType || null,
+          isFinalSeason: upNextData.isCurrentSeasonFinal || false, // Add final season flag
           // Artwork URLs
           thumb: upNextData.thumb || '',
           art: upNextData.art || '',
