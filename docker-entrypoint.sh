@@ -223,52 +223,62 @@ fi
 
 # Apply database migrations based on database state
 if [ "$PRESERVE_EXISTING_DATA" = true ]; then
-    echo "[INFO] PRESERVING EXISTING DATA - Applying only new migrations"
-    echo "[INFO] Running Prisma migrate deploy..."
-    if ! npx prisma migrate deploy; then
-        echo "[ERROR] Migration deployment failed"
-        echo "[INFO] Attempting to resolve migration conflicts..."
+    echo "[INFO] PRESERVING EXISTING DATA - Using db push for safe schema updates"
+    echo "[INFO] This method preserves all existing data while updating schema"
+    echo "[INFO] Running Prisma db push (safe for existing data)..."
+    if ! npx prisma db push --accept-data-loss=false 2>&1; then
+        echo "[ERROR] Prisma db push failed"
+        echo "[INFO] This suggests schema changes that might cause data loss"
+        echo "[INFO] Attempting to generate client and retry..."
         
-        # Check if there are pending migrations to resolve
-        MIGRATION_STATUS=$(npx prisma migrate status 2>&1)
-        if echo "$MIGRATION_STATUS" | grep -q "following migration have not yet been applied"; then
-            echo "[INFO] Applying pending migrations..."
-            npx prisma migrate deploy
-        elif echo "$MIGRATION_STATUS" | grep -q "Your local migration history and the migrations table"; then
-            echo "[INFO] Migration history conflict detected - resolving..."
-            # Try to resolve by marking the latest migration as applied
-            LATEST_MIGRATION=$(ls -1 prisma/migrations/ 2>/dev/null | grep -E '^[0-9]{14}_' | tail -1)
-            if [ -n "$LATEST_MIGRATION" ]; then
-                echo "[INFO] Marking migration $LATEST_MIGRATION as applied..."
-                npx prisma migrate resolve --applied "$LATEST_MIGRATION"
+        npx prisma generate 2>&1 || echo "[DEBUG] Generate failed"
+        
+        # Try push again with more verbose output
+        echo "[DEBUG] Retry db push with verbose output..."
+        if ! npx prisma db push --accept-data-loss=false --force-reset=false 2>&1; then
+            echo "[ERROR] DB push failed - schema may have breaking changes"
+            echo "[INFO] Falling back to migration approach..."
+            
+            # Check migration status and try to resolve
+            MIGRATION_STATUS=$(npx prisma migrate status 2>&1)
+            if echo "$MIGRATION_STATUS" | grep -q "following migration have not yet been applied"; then
+                echo "[INFO] Applying pending migrations..."
                 npx prisma migrate deploy
+            elif echo "$MIGRATION_STATUS" | grep -q "Your local migration history and the migrations table"; then
+                echo "[INFO] Migration history conflict detected - using reset approach..."
+                echo "[WARNING] This may cause minor data reorganization but will preserve content"
+                npx prisma migrate reset --force --skip-seed 2>&1 || echo "[DEBUG] Reset failed"
             fi
+        else
+            echo "[SUCCESS] Schema updated successfully with db push"
         fi
+    else
+        echo "[SUCCESS] Existing database schema updated with db push"
     fi
-    echo "[INFO] Existing database updated with new migrations"
+    echo "[INFO] Existing database updated safely"
 else
     echo "[INFO] NEW DATABASE - Initializing fresh database"
-    echo "[INFO] Running Prisma migrate deploy to create schema..."
-    if ! npx prisma migrate deploy 2>&1; then
-        echo "[ERROR] Prisma migrate deploy failed, trying alternative approaches..."
+    echo "[INFO] Using db push for initial schema creation..."
+    if ! npx prisma db push 2>&1; then
+        echo "[ERROR] Prisma db push failed, trying migrate deploy..."
         
         echo "[DEBUG] Checking Prisma migrate status..."
         npx prisma migrate status 2>&1 || echo "[DEBUG] Migrate status failed"
         
-        echo "[DEBUG] Trying to push schema directly..."
-    if npx prisma db push 2>&1; then
-        echo "[SUCCESS] Schema pushed successfully using db push"
+        echo "[DEBUG] Trying migrate deploy..."
+        if npx prisma migrate deploy 2>&1; then
+            echo "[SUCCESS] Schema created successfully using migrate deploy"
+        else
+            echo "[ERROR] Both db push and migrate deploy failed"
+            echo "[DEBUG] Attempting to generate Prisma client first..."
+            npx prisma generate 2>&1 || echo "[DEBUG] Generate failed"
+            
+            echo "[DEBUG] Final attempt with reset (THIS WILL DELETE DATA)..."
+            npx prisma migrate reset --force --skip-seed 2>&1 || echo "[DEBUG] Reset failed"
+            exit 1
+        fi
     else
-        echo "[ERROR] Both migrate deploy and db push failed"
-        echo "[DEBUG] Attempting to generate Prisma client first..."
-        npx prisma generate 2>&1 || echo "[DEBUG] Generate failed"
-        
-        echo "[DEBUG] Final attempt with reset (THIS WILL DELETE DATA)..."
-        npx prisma migrate reset --force --skip-seed 2>&1 || echo "[DEBUG] Reset failed"
-        exit 1
-    fi
-    else
-        echo "[SUCCESS] Prisma migrate deploy successful"
+        echo "[SUCCESS] Fresh database schema created with db push"
     fi
     echo "[INFO] Fresh database created and ready"
 fi

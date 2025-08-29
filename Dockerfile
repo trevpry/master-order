@@ -30,7 +30,7 @@ RUN find . -name ".env*" -type f -delete || true
 # Note: This only sets up the schema files, no database connection during build
 WORKDIR /app/server
 ENV DATABASE_URL="postgresql://placeholder:placeholder@localhost:5432/placeholder"
-RUN npm run build
+RUN npm run build:production
 
 # Build client
 WORKDIR /app/client
