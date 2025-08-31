@@ -10,6 +10,7 @@ const getNextEpisode = require('./getNextEpisode');
 const getNextMovie = require('./getNextMovie');
 const { getNextCustomOrder, markCustomOrderItemAsWatched } = require('./getNextCustomOrder');
 const datingRoutes = require('./routes/dating');
+const notesRoutes = require('./routes/notes');
 
 /**
  * Generate optimized clips for a scene, merging short final clips with the penultimate clip
@@ -224,6 +225,9 @@ if (process.env.NODE_ENV === 'production') {
 
 // Dating API routes
 app.use('/api/dating', datingRoutes);
+
+// Notes API routes
+app.use('/api/notes', notesRoutes);
 
 // Helper function for generating a simple hash (used for web video uniqueness)
 function simpleHash(str) {

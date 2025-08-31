@@ -1417,3 +1417,72 @@ enum EncounterType {
   RELATIONSHIP
   ONE_TIME
 }
+
+// Notes Management Models
+model Note {
+  id          Int      @id @default(autoincrement())
+  title       String
+  content     String   @default("")
+  type        String   @default("note")
+  tags        String   @default("[]")  // JSON array of tags
+  folderId    Int?
+  userId      Int      @default(1)
+  isFavorite  Boolean  @default(false)
+  isPublic    Boolean  @default(false)
+  attachments String   @default("[]")  // JSON array of attachments
+  links       String   @default("[]")  // JSON array of links
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  folder      NoteFolder? @relation(fields: [folderId], references: [id])
+  fromLinks   NoteCrossLink[] @relation("FromNote")
+  toLinks     NoteCrossLink[] @relation("ToNote")
+  
+  @@index([userId])
+  @@index([type])
+  @@index([folderId])
+  @@index([isFavorite])
+  @@index([createdAt])
+  @@index([updatedAt])
+}
+
+model NoteFolder {
+  id        Int      @id @default(autoincrement())
+  name      String
+  parentId  Int?
+  userId    Int      @default(1)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  
+  parent   NoteFolder?  @relation("FolderHierarchy", fields: [parentId], references: [id])
+  children NoteFolder[] @relation("FolderHierarchy")
+  notes    Note[]
+  
+  @@index([userId])
+  @@index([parentId])
+}
+
+model NoteTag {
+  id        Int      @id @default(autoincrement())
+  name      String   @unique
+  userId    Int      @default(1)
+  count     Int      @default(1)
+  createdAt DateTime @default(now())
+  
+  @@index([userId])
+  @@index([count])
+}
+
+model NoteCrossLink {
+  id         Int      @id @default(autoincrement())
+  fromNoteId Int
+  toNoteId   Int
+  createdAt  DateTime @default(now())
+  
+  fromNote Note @relation("FromNote", fields: [fromNoteId], references: [id], onDelete: Cascade)
+  toNote   Note @relation("ToNote", fields: [toNoteId], references: [id], onDelete: Cascade)
+  
+  @@unique([fromNoteId, toNoteId])
+  @@index([fromNoteId])
+  @@index([toNoteId])
+}
