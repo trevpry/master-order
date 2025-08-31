@@ -9,6 +9,7 @@ const fetch = require('node-fetch'); // For Android companion app proxy
 const getNextEpisode = require('./getNextEpisode');
 const getNextMovie = require('./getNextMovie');
 const { getNextCustomOrder, markCustomOrderItemAsWatched } = require('./getNextCustomOrder');
+const datingRoutes = require('./routes/dating');
 
 /**
  * Generate optimized clips for a scene, merging short final clips with the penultimate clip
@@ -220,6 +221,9 @@ if (process.env.NODE_ENV === 'production') {
   app.use(express.static(clientBuildPath));
   console.log('Serving static files from:', clientBuildPath);
 }
+
+// Dating API routes
+app.use('/api/dating', datingRoutes);
 
 // Helper function for generating a simple hash (used for web video uniqueness)
 function simpleHash(str) {

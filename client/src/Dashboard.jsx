@@ -146,7 +146,15 @@ function Dashboard() {
           <div className="absolute inset-0 transform bg-gradient-to-r from-gray-700 to-gray-900 rounded-3xl rotate-1"></div>
           <div className="relative p-8 text-white bg-gray-800 shadow-2xl rounded-3xl">
             <h2 className="mb-8 text-3xl font-bold text-center">🎬 Media Library Quick Access</h2>
-            <div className="grid grid-cols-2 gap-6 md:grid-cols-5">
+            <div className="grid grid-cols-2 gap-6 md:grid-cols-6">
+              <Link to="/dating" className="transition-all duration-300 transform group hover:scale-105">
+                <div className="p-6 text-center transition-all duration-300 bg-gray-700 border border-gray-600 hover:bg-gray-600 rounded-2xl hover:border-gray-500">
+                  <div className="mb-3 text-4xl transition-transform duration-300 group-hover:scale-110">💕</div>
+                  <div className="mb-1 text-lg font-bold">Dating</div>
+                  <div className="text-sm text-gray-300">Connections & dates</div>
+                </div>
+              </Link>
+              
               <Link to="/media/custom-orders" className="transition-all duration-300 transform group hover:scale-105">
                 <div className="p-6 text-center transition-all duration-300 bg-gray-700 border border-gray-600 hover:bg-gray-600 rounded-2xl hover:border-gray-500">
                   <div className="mb-3 text-4xl transition-transform duration-300 group-hover:scale-110">📋</div>

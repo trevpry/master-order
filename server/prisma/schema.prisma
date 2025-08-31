@@ -1191,3 +1191,229 @@ model CustomPlaylistTrack {
   
   @@map("CustomPlaylistTrack")
 }
+
+// Dating Management Models
+model DatingApp {
+  id          Int          @id @default(autoincrement())
+  name        String       @unique
+  description String?
+  createdAt   DateTime     @default(now())
+  connections Connection[]
+  
+  @@map("DatingApp")
+}
+
+model Connection {
+  id          Int       @id @default(autoincrement())
+  appId       Int
+  
+  // Basic guy details
+  guyName     String
+  age         Int?
+  location    String?
+  profileUrl  String?
+  bio         String?
+  photos      String?   // JSON string of photo URLs
+  
+  // Physical attributes (common across apps)
+  height      String?
+  weight      String?
+  bodyType    String?
+  bodyHair    String?   // Body hair amount/type
+  ethnicity   String?
+  hair        String?   // Hair color/type
+  
+  // App-specific fields (Scruff, Grindr, etc.)
+  tribe       String?   // Scruff: Bear, Otter, Wolf, etc.
+  position    String?   // Top, Bottom, Versatile, etc.
+  hivStatus   String?   // Negative, Positive, Undetectable, etc.
+  lastTested  String?   // Recent test date
+  lookingFor  String?   // Chat, Dates, Friends, etc.
+  relationshipStatus String? // Single, Partnered, etc.
+  sexPractices String?  // Sexual practices preferences
+  
+  // Scruff-specific detailed fields
+  verification     String?  // Verified badge type
+  globalPosition   String?  // Global grid position
+  travelMode       Boolean  @default(false)
+  privatePhotos    Int      @default(0) // Count of private photos
+  woofCount        Int      @default(0) // Number of woofs received
+  viewCount        Int      @default(0) // Profile view count
+  
+  // "What interests me" section
+  interests        String?  // JSON string of interests
+  
+  // "They are" preferences
+  theyAre          String?  // JSON string of preferences for partner
+  theyAreInto      String?  // JSON string of what partner should be into
+  
+  // Identity fields
+  pronouns         String?  // Pronoun preferences
+  genderIdentity   String?  // Gender identity
+  
+  // "Open to" preferences
+  openTo           String?  // JSON string of what they're open to
+  
+  // Sexual health details
+  sexualHealth     String?  // JSON string of sexual health info
+  
+  // Distance and activity
+  distance         String?  // "2.3 mi", "1.5 km"
+  
+  // Conversation tracking
+  firstContact DateTime @default(now())
+  lastContact  DateTime @default(now())
+  status       ConnectionStatus @default(ACTIVE)
+  notes        String?
+  
+  // Stats
+  messagesExchanged Int @default(0)
+  responseRate     Float @default(0.0) // Percentage
+  avgResponseTime  Int?  // Minutes
+  
+  // Import tracking
+  source               String?  // "manual", "screenshot_import", etc.
+  extractionConfidence Float?   // 0.0 - 1.0 confidence score
+  
+  // Relations
+  app         DatingApp  @relation(fields: [appId], references: [id])
+  dates       Date[]
+  encounters  Encounter[]
+  messages    Message[]
+  screenshots Screenshot[]
+  
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+  
+  @@unique([appId, guyName])
+  @@map("Connection")
+}
+
+model Date {
+  id           Int       @id @default(autoincrement())
+  connectionId Int?
+  
+  // Date details
+  guyName      String
+  dateTime     DateTime
+  location     String
+  activity     String
+  duration     Int?      // Minutes
+  cost         Float?    // How much spent
+  
+  // Rating and notes
+  rating       Int?      // 1-5 stars
+  chemistry    Int?      // 1-5 rating
+  conversation Int?      // 1-5 rating
+  attraction   Int?      // 1-5 rating
+  notes        String?
+  
+  // Outcome
+  outcome      DateOutcome @default(NEUTRAL)
+  secondDate   Boolean     @default(false)
+  
+  connection   Connection? @relation(fields: [connectionId], references: [id])
+  encounters   Encounter[]
+  
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+  
+  @@map("Date")
+}
+
+model Encounter {
+  id           Int       @id @default(autoincrement())
+  connectionId Int?
+  dateId       Int?
+  
+  // Encounter details
+  guyName      String
+  dateTime     DateTime
+  location     String?
+  type         EncounterType
+  duration     Int?      // Minutes
+  
+  // Ratings
+  satisfaction Int?      // 1-5 rating
+  performance  Int?      // 1-5 rating
+  chemistry    Int?      // 1-5 rating
+  notes        String?
+  
+  // Safety and health
+  protection   Boolean   @default(false)
+  tested       Boolean   @default(false)
+  testDate     DateTime?
+  
+  connection   Connection? @relation(fields: [connectionId], references: [id])
+  date         Date?       @relation(fields: [dateId], references: [id])
+  
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+  
+  @@map("Encounter")
+}
+
+model Message {
+  id           Int       @id @default(autoincrement())
+  connectionId Int
+  connection   Connection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
+  
+  // Message content
+  content      String
+  timestamp    DateTime
+  sender       String    // "me" or participant name
+  
+  // OCR metadata
+  confidence   Float?    // OCR confidence score
+  screenshotId String?   // Reference to original screenshot
+  
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  
+  @@map("Message")
+}
+
+model Screenshot {
+  id           String    @id @default(cuid())
+  connectionId Int
+  connection   Connection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
+  
+  // File info
+  filename     String
+  originalName String
+  size         Int
+  
+  // Processing status
+  processed    Boolean   @default(false)
+  ocrText      String?   // Raw OCR output
+  messagesExtracted Int @default(0)
+  
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  
+  @@map("Screenshot")
+}
+
+enum ConnectionStatus {
+  ACTIVE
+  PAUSED
+  BLOCKED
+  UNMATCHED
+  MET
+  RELATIONSHIP
+}
+
+enum DateOutcome {
+  GREAT
+  GOOD
+  NEUTRAL
+  POOR
+  TERRIBLE
+}
+
+enum EncounterType {
+  HOOKUP
+  FWB
+  RELATIONSHIP
+  ONE_TIME
+}

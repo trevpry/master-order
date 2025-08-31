@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import './SideMenu.css';
+import logoImage from '../../assets/logo.png';
 
 const SideMenu = ({ isMobile, closeMobileMenu }) => {
   const [isCollapsed, setIsCollapsed] = useState(false);
@@ -65,6 +66,12 @@ const SideMenu = ({ isMobile, closeMobileMenu }) => {
       icon: '📝',
       label: 'Notes',
       description: 'Knowledge & ideas'
+    },
+    {
+      path: '/dating',
+      icon: '💕',
+      label: 'Dating',
+      description: 'Connections & dates'
     },
     {
       path: '/eddie-settings',
@@ -145,13 +152,37 @@ const SideMenu = ({ isMobile, closeMobileMenu }) => {
         <div className="logo-section">
           {!isCollapsed && (
             <div className="logo-text">
-              <h2>Eddie</h2>
+              <h2>
+                <img 
+                  src={logoImage} 
+                  alt="Eddie Logo" 
+                  className="logo-image"
+                  style={{ 
+                    width: '24px', 
+                    height: '24px', 
+                    marginRight: '8px',
+                    borderRadius: '50%',
+                    display: 'inline-block',
+                    verticalAlign: 'middle'
+                  }}
+                />
+                Eddie
+              </h2>
               <span className="logo-subtitle">Life Management</span>
             </div>
           )}
           {isCollapsed && (
             <div className="logo-collapsed">
-              <span className="logo-icon">🧠</span>
+              <img 
+                src={logoImage} 
+                alt="Eddie Logo" 
+                className="logo-icon"
+                style={{ 
+                  width: '24px', 
+                  height: '24px',
+                  borderRadius: '50%'
+                }}
+              />
             </div>
           )}
         </div>
