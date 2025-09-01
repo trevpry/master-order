@@ -92,8 +92,35 @@ const Music = () => {
 
     const handleError = (e) => {
       console.error('Audio error:', e);
-      setError('Failed to play audio track');
+      const errorEvent = e.nativeEvent || e;
+      const errorTarget = errorEvent.target || errorEvent.currentTarget;
+      
+      // Check the network state to provide better error messages
+      if (errorTarget && errorTarget.networkState === HTMLMediaElement.NETWORK_NO_SOURCE) {
+        setError('Audio source not found. Please check if Plex is accessible and the track exists.');
+      } else if (errorTarget && errorTarget.error) {
+        switch (errorTarget.error.code) {
+          case MediaError.MEDIA_ERR_ABORTED:
+            setError('Audio playback was aborted.');
+            break;
+          case MediaError.MEDIA_ERR_NETWORK:
+            setError('Network error occurred while loading audio.');
+            break;
+          case MediaError.MEDIA_ERR_DECODE:
+            setError('Audio format not supported or corrupted.');
+            break;
+          case MediaError.MEDIA_ERR_SRC_NOT_SUPPORTED:
+            setError('Audio format not supported by this browser.');
+            break;
+          default:
+            setError('An unknown audio error occurred.');
+        }
+      } else {
+        setError('Failed to play audio track. Please check if Plex is accessible.');
+      }
+      
       setIsPlaying(false);
+      setIsLoading(false);
     };
 
     audio.addEventListener('loadedmetadata', handleLoadedMetadata);
@@ -112,6 +139,15 @@ const Music = () => {
   // Play/pause track
   const playTrack = async (track) => {
     try {
+      // Debug track information
+      try {
+        const debugResponse = await fetch(`${config.apiBaseUrl}/api/music/debug/${track.ratingKey}`);
+        const debugData = await debugResponse.json();
+        console.log('🔍 Track debug data:', debugData);
+      } catch (debugError) {
+        console.log('Debug endpoint not available:', debugError.message);
+      }
+
       if (currentTrack?.ratingKey === track.ratingKey) {
         // Toggle play/pause for current track
         if (isPlaying) {
@@ -142,21 +178,61 @@ const Music = () => {
         setCurrentTime(0);
         setDuration(0);
         setIsLoading(true);
+        setError(null); // Clear any previous errors
         
         const streamUrl = `${config.apiBaseUrl}/api/music/stream/${track.ratingKey}`;
+        console.log('🎵 Loading track:', track.title, 'from:', streamUrl);
+        
+        // Set the source and wait for it to load
         audioRef.current.src = streamUrl;
+        audioRef.current.load(); // Explicitly load the new source
         
-        // Wait for the source to be set
-        await new Promise(resolve => setTimeout(resolve, 100));
-        
-        try {
-          await audioRef.current.play();
-          setIsPlaying(true);
-        } catch (playError) {
-          console.error('Failed to play track:', playError);
-          setError('Failed to play track. Please check if Plex is accessible.');
-        } finally {
-          setIsLoading(false);
+        // Wait for the audio to be ready to play
+        const playAudio = async () => {
+          try {
+            await audioRef.current.play();
+            setIsPlaying(true);
+            setError(null);
+            console.log('✅ Audio playback started successfully');
+          } catch (playError) {
+            console.error('Failed to play track:', playError);
+            
+            // Provide specific error messages based on the error type
+            if (playError.name === 'NotSupportedError') {
+              setError('Audio format not supported by this browser.');
+            } else if (playError.name === 'NotAllowedError') {
+              setError('Audio playback blocked. Please interact with the page first, then try again.');
+            } else if (playError.name === 'AbortError') {
+              setError('Audio playback was interrupted.');
+            } else if (playError.message.includes('network')) {
+              setError('Network error: Unable to load audio from Plex server.');
+            } else {
+              setError(`Playback failed: ${playError.message || 'Unknown error'}`);
+            }
+          } finally {
+            setIsLoading(false);
+          }
+        };
+
+        // Try to play immediately, or wait for canplay event
+        if (audioRef.current.readyState >= HTMLMediaElement.HAVE_ENOUGH_DATA) {
+          await playAudio();
+        } else {
+          // Wait for the audio to be ready
+          const onCanPlay = async () => {
+            audioRef.current.removeEventListener('canplay', onCanPlay);
+            await playAudio();
+          };
+          
+          const onError = () => {
+            audioRef.current.removeEventListener('canplay', onCanPlay);
+            audioRef.current.removeEventListener('error', onError);
+            setError('Failed to load audio track. Please check if Plex server is accessible.');
+            setIsLoading(false);
+          };
+          
+          audioRef.current.addEventListener('canplay', onCanPlay, { once: true });
+          audioRef.current.addEventListener('error', onError, { once: true });
         }
       }
     } catch (error) {
@@ -1129,13 +1205,47 @@ const Music = () => {
           setIsPlaying(false);
           setCurrentTime(0);
         }}
-        onLoadStart={() => setIsLoading(true)}
-        onCanPlay={() => setIsLoading(false)}
+        onLoadStart={() => {
+          console.log('🔄 Audio loading started');
+          setIsLoading(true);
+        }}
+        onCanPlay={() => {
+          console.log('✅ Audio can play');
+          setIsLoading(false);
+          setError(null); // Clear any previous errors when audio loads successfully
+        }}
         onError={(e) => {
           console.error('Audio error:', e);
+          const errorTarget = e.target;
+          
+          // Provide specific error messages based on the error type
+          if (errorTarget && errorTarget.error) {
+            console.error('Audio error details:', errorTarget.error);
+            switch (errorTarget.error.code) {
+              case MediaError.MEDIA_ERR_ABORTED:
+                setError('Audio playback was stopped.');
+                break;
+              case MediaError.MEDIA_ERR_NETWORK:
+                setError('Network error: Unable to load audio. Check if Plex server is accessible.');
+                break;
+              case MediaError.MEDIA_ERR_DECODE:
+                setError('Audio decode error: The audio file may be corrupted.');
+                break;
+              case MediaError.MEDIA_ERR_SRC_NOT_SUPPORTED:
+                setError('Audio format not supported: This browser cannot play this audio format.');
+                break;
+              default:
+                setError('Unknown audio error occurred.');
+            }
+          } else {
+            setError('Failed to load audio. Please check if Plex server is running and accessible.');
+          }
+          
           setIsPlaying(false);
           setIsLoading(false);
         }}
+        preload="metadata"
+        crossOrigin="anonymous"
       />
 
       {/* Audio Player Controls */}

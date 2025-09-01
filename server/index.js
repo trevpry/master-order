@@ -8304,6 +8304,163 @@ app.get('/api/music/tracks/artist/:artistRatingKey', async (req, res) => {
   }
 });
 
+// Music streaming endpoint - Stream audio track from Plex
+app.get('/api/music/stream/:ratingKey', async (req, res) => {
+  try {
+    const { ratingKey } = req.params;
+    const settings = await prisma.settings.findFirst();
+    
+    if (!settings || !settings.plexUrl || !settings.plexToken) {
+      return res.status(500).json({ error: 'Plex configuration not found' });
+    }
+
+    // Get track details to verify it exists
+    const trackUrl = `${settings.plexUrl}/library/metadata/${ratingKey}`;
+    const trackResponse = await fetch(trackUrl, {
+      headers: {
+        'X-Plex-Token': settings.plexToken,
+        'Accept': 'application/json'
+      }
+    });
+
+    if (!trackResponse.ok) {
+      return res.status(404).json({ error: 'Track not found' });
+    }
+
+    const trackData = await trackResponse.json();
+    const track = trackData.MediaContainer?.Metadata?.[0];
+    
+    if (!track) {
+      return res.status(404).json({ error: 'Track metadata not found' });
+    }
+
+    // Get the media part for streaming
+    const mediaPart = track.Media?.[0]?.Part?.[0];
+    if (!mediaPart) {
+      return res.status(404).json({ error: 'No media part found for track' });
+    }
+
+    // Construct Plex stream URL
+    const streamUrl = `${settings.plexUrl}${mediaPart.key}?X-Plex-Token=${settings.plexToken}`;
+    
+    console.log(`🎵 Streaming track: ${track.title} by ${track.originalTitle || track.grandparentTitle}`);
+    console.log(`🔗 Stream URL: ${streamUrl}`);
+
+    // Set appropriate headers for audio streaming
+    res.setHeader('Content-Type', 'audio/mpeg');
+    res.setHeader('Accept-Ranges', 'bytes');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Headers', 'Range');
+    res.setHeader('Access-Control-Expose-Headers', 'Content-Range, Content-Length');
+
+    // Stream the audio from Plex
+    const streamResponse = await fetch(streamUrl, {
+      headers: {
+        'Range': req.headers.range || 'bytes=0-',
+        'User-Agent': 'Eddie-Life-Management/1.0'
+      }
+    });
+
+    if (!streamResponse.ok) {
+      console.error(`❌ Failed to get stream from Plex: ${streamResponse.status} ${streamResponse.statusText}`);
+      console.error(`   Stream URL: ${streamUrl}`);
+      return res.status(streamResponse.status).json({ error: `Failed to stream from Plex: ${streamResponse.statusText}` });
+    }
+
+    console.log(`✅ Successfully got stream from Plex: ${streamResponse.status}`);
+
+    // Copy relevant headers from Plex response
+    const contentType = streamResponse.headers.get('content-type');
+    if (contentType) {
+      res.setHeader('Content-Type', contentType);
+    }
+    
+    if (streamResponse.headers.get('content-length')) {
+      res.setHeader('Content-Length', streamResponse.headers.get('content-length'));
+    }
+    if (streamResponse.headers.get('content-range')) {
+      res.setHeader('Content-Range', streamResponse.headers.get('content-range'));
+    }
+    if (streamResponse.headers.get('accept-ranges')) {
+      res.setHeader('Accept-Ranges', streamResponse.headers.get('accept-ranges'));
+    }
+
+    // Set status code for range requests
+    if (req.headers.range && streamResponse.status === 206) {
+      res.status(206);
+    }
+
+    // Handle stream errors
+    streamResponse.body.on('error', (error) => {
+      console.error('Stream error:', error);
+      if (!res.headersSent) {
+        res.status(500).json({ error: 'Stream error occurred' });
+      }
+    });
+
+    // Pipe the stream
+    streamResponse.body.pipe(res);
+    
+  } catch (error) {
+    console.error('Error streaming music track:', error);
+    res.status(500).json({ error: 'Failed to stream track' });
+  }
+});
+
+// Music streaming debug endpoint
+app.get('/api/music/debug/:ratingKey', async (req, res) => {
+  try {
+    const { ratingKey } = req.params;
+    const settings = await prisma.settings.findFirst();
+    
+    if (!settings || !settings.plexUrl || !settings.plexToken) {
+      return res.json({ 
+        error: 'Plex configuration not found',
+        hasSettings: !!settings,
+        hasPlexUrl: !!(settings && settings.plexUrl),
+        hasPlexToken: !!(settings && settings.plexToken)
+      });
+    }
+
+    // Get track details
+    const trackUrl = `${settings.plexUrl}/library/metadata/${ratingKey}`;
+    const trackResponse = await fetch(trackUrl, {
+      headers: {
+        'X-Plex-Token': settings.plexToken,
+        'Accept': 'application/json'
+      }
+    });
+
+    const trackData = await trackResponse.json();
+    const track = trackData.MediaContainer?.Metadata?.[0];
+    const mediaPart = track?.Media?.[0]?.Part?.[0];
+    
+    res.json({
+      success: true,
+      track: {
+        title: track?.title,
+        artist: track?.originalTitle || track?.grandparentTitle,
+        album: track?.parentTitle,
+        ratingKey: track?.ratingKey,
+        duration: track?.duration
+      },
+      media: {
+        hasMedia: !!track?.Media,
+        hasPart: !!mediaPart,
+        partKey: mediaPart?.key,
+        container: mediaPart?.container,
+        size: mediaPart?.size
+      },
+      streamUrl: mediaPart ? `${settings.plexUrl}${mediaPart.key}?X-Plex-Token=${settings.plexToken}` : null,
+      plexUrl: settings.plexUrl
+    });
+  } catch (error) {
+    console.error('Music debug error:', error);
+    res.json({ error: error.message, stack: error.stack });
+  }
+});
+
 // Android companion app API endpoints (must be before catch-all route)
 // Android companion app endpoint - Get Up Next
 app.get('/api/android/up-next', async (req, res) => {
