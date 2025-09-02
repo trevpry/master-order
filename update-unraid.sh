@@ -84,11 +84,17 @@ cd "$REPO_PATH"
 
 # Step 2: Pull latest code from GitHub
 echo "📥 Pulling latest code from GitHub..."
+# Configure git to handle divergent branches if needed
+git config pull.rebase false 2>/dev/null || true
 git pull origin master
 
 if [ $? -ne 0 ]; then
-    echo "❌ Failed to pull latest code. Please check your git repository."
-    exit 1
+    echo "⚠️ Standard pull failed, trying with merge strategy..."
+    git pull --no-rebase origin master
+    if [ $? -ne 0 ]; then
+        echo "❌ Failed to pull latest code. Please check your git repository."
+        exit 1
+    fi
 fi
 
 # Step 3: Stop the running container
