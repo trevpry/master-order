@@ -8462,13 +8462,24 @@ app.get('/api/music/debug/:ratingKey', async (req, res) => {
 });
 
 // Android companion app API endpoints (must be before catch-all route)
+
+// Helper function to get base URL for Android API
+const getAndroidApiBaseUrl = () => {
+  const externalIp = process.env.EXTERNAL_IP;
+  return externalIp ? `http://${externalIp}:${PORT}` : `http://localhost:${PORT}`;
+};
+
 // Android companion app endpoint - Get Up Next
 app.get('/api/android/up-next', async (req, res) => {
   console.log('📱 Android app requesting up next content...');
   
   try {
+    // Get base URL for Android API (use external IP if available)
+    const baseUrl = getAndroidApiBaseUrl();
+    console.log('📱 Using base URL for Android API:', baseUrl);
+    
     // Get up next using existing logic
-    const upNextResponse = await fetch(`http://localhost:${PORT}/api/up_next`);
+    const upNextResponse = await fetch(`${baseUrl}/api/up_next`);
     
     if (!upNextResponse.ok) {
       const errorText = await upNextResponse.text();
@@ -8502,36 +8513,36 @@ app.get('/api/android/up-next', async (req, res) => {
           ? media.localArtworkPath.split(/[\\\/]/).pop() 
           : media.localArtworkPath;
         console.log('📱 Using cached artwork:', filename);
-        return `http://localhost:${PORT}/api/artwork/${filename}`;
+        return `${baseUrl}/api/artwork/${filename}`;
       }
       
       // For comics, fallback to ComicVine artwork if no cached artwork
       if (media?.type === 'comic' && media?.comicDetails?.coverUrl) {
         console.log('📱 Using ComicVine artwork (fallback):', media.comicDetails.coverUrl);
-        return `http://localhost:${PORT}/api/comicvine-artwork?url=${encodeURIComponent(media.comicDetails.coverUrl)}`;
+        return `${baseUrl}/api/comicvine-artwork?url=${encodeURIComponent(media.comicDetails.coverUrl)}`;
       }
       
       // For books, use OpenLibrary artwork
       if (media?.type === 'book' && media?.bookCoverUrl) {
         console.log('📱 Using OpenLibrary artwork:', media.bookCoverUrl);
-        return `http://localhost:${PORT}/api/openlibrary-artwork?url=${encodeURIComponent(media.bookCoverUrl)}`;
+        return `${baseUrl}/api/openlibrary-artwork?url=${encodeURIComponent(media.bookCoverUrl)}`;
       }
       
       // For short stories, use story cover or fallback to containing book's cover
       if (media?.type === 'shortstory') {
         if (media?.storyCoverUrl) {
           console.log('📱 Using short story cover artwork:', media.storyCoverUrl);
-          return `http://localhost:${PORT}/api/openlibrary-artwork?url=${encodeURIComponent(media.storyCoverUrl)}`;
+          return `${baseUrl}/api/openlibrary-artwork?url=${encodeURIComponent(media.storyCoverUrl)}`;
         } else if (media?.containedInBookDetails?.coverUrl) {
           console.log('📱 Using containing book cover artwork for short story:', media.containedInBookDetails.coverUrl);
-          return `http://localhost:${PORT}/api/openlibrary-artwork?url=${encodeURIComponent(media.containedInBookDetails.coverUrl)}`;
+          return `${baseUrl}/api/openlibrary-artwork?url=${encodeURIComponent(media.containedInBookDetails.coverUrl)}`;
         }
       }
       
       // Prioritize TVDB artwork if available for TV content
       if (media?.tvdbArtwork?.url) {
         console.log('📱 Using TVDB artwork:', media.tvdbArtwork.url);
-        return `http://localhost:${PORT}/api/tvdb-artwork?url=${encodeURIComponent(media.tvdbArtwork.url)}`;
+        return `${baseUrl}/api/tvdb-artwork?url=${encodeURIComponent(media.tvdbArtwork.url)}`;
       }
       
       // Fall back to Plex artwork
@@ -8546,7 +8557,7 @@ app.get('/api/android/up-next', async (req, res) => {
       
       // Otherwise, it's a relative path, so add the base URL
       console.log('📱 Using Plex artwork:', thumb);
-      return `http://localhost:${PORT}/api/artwork${thumb}`;
+      return `${baseUrl}/api/artwork${thumb}`;
     };
     
     // Determine content type and build appropriate response
@@ -8726,7 +8737,7 @@ app.get('/api/android/stash/images', async (req, res) => {
       id: image.id,
       title: image.title || image.gallery?.title || 'Untitled',
       path: image.path,
-      url: `${req.protocol}://${req.get('host')}/api/stash-image-proxy/${encodeURIComponent(image.path)}`,
+      url: `${getAndroidApiBaseUrl()}/api/stash-image-proxy/${encodeURIComponent(image.path)}`,
       photographer: image.photographer || image.gallery?.photographer,
       performers: image.performers.map(p => ({
         name: p.performer.name,
@@ -8771,8 +8782,10 @@ app.get('/api/android/stash/next', async (req, res) => {
   console.log('📱 Android app requesting next Stash content...');
   
   try {
+    const baseUrl = getAndroidApiBaseUrl();
+    
     // Get next clip using existing logic
-    const nextClipResponse = await fetch(`http://localhost:${PORT}/api/stash/clips/next`);
+    const nextClipResponse = await fetch(`${baseUrl}/api/stash/clips/next`);
     
     if (!nextClipResponse.ok) {
       const errorText = await nextClipResponse.text();
@@ -8828,7 +8841,8 @@ app.get('/api/android/stash/scene/next', async (req, res) => {
   
   try {
     // Get next scene using existing logic
-    const nextSceneResponse = await fetch(`http://localhost:${PORT}/api/stash/scenes/next`);
+    const baseUrl = getAndroidApiBaseUrl();
+    const nextSceneResponse = await fetch(`${baseUrl}/api/stash/scenes/next`);
     
     if (!nextSceneResponse.ok) {
       const errorText = await nextSceneResponse.text();
@@ -8947,7 +8961,8 @@ app.post('/api/android/stash/scene/:id/watched', async (req, res) => {
     }
 
     // Call the existing watched endpoint internally
-    const watchedResponse = await fetch(`http://localhost:${PORT}/api/stash/scenes/${sceneId}/watched`, {
+    const baseUrl = getAndroidApiBaseUrl();
+    const watchedResponse = await fetch(`${baseUrl}/api/stash/scenes/${sceneId}/watched`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json'
@@ -9007,7 +9022,8 @@ app.delete('/api/android/stash/scene/:id', async (req, res) => {
     }
 
     // Call the existing delete endpoint internally
-    const deleteUrl = `http://localhost:${PORT}/api/stash/scenes/${sceneId}${deleteFile ? '?deleteFile=true' : ''}`;
+    const baseUrl = getAndroidApiBaseUrl();
+    const deleteUrl = `${baseUrl}/api/stash/scenes/${sceneId}${deleteFile ? '?deleteFile=true' : ''}`;
     const deleteResponse = await fetch(deleteUrl, {
       method: 'DELETE',
       headers: {
@@ -9075,7 +9091,8 @@ app.post('/api/android/play-plex', async (req, res) => {
     // Send webhook notification (same as web interface)
     try {
       console.log('Sending webhook notification with ratingKey:', ratingKey);
-      const webhookResponse = await fetch(`http://localhost:${PORT}/api/webhook/notify`, {
+      const baseUrl = getAndroidApiBaseUrl();
+      const webhookResponse = await fetch(`${baseUrl}/api/webhook/notify`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -9101,7 +9118,8 @@ app.post('/api/android/play-plex', async (req, res) => {
     }
     
     // Use existing Plex play endpoint
-    const playResponse = await fetch(`http://localhost:${PORT}/api/plex/play`, {
+    const baseUrl = getAndroidApiBaseUrl();
+    const playResponse = await fetch(`${baseUrl}/api/plex/play`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -9195,7 +9213,8 @@ app.post('/api/android/mark-watched', async (req, res) => {
     console.log(`📱 Mark watched request - itemId: ${itemId}, mediaType: ${mediaType}, title: ${title}`);
     
     // Use existing mark custom order item as watched endpoint
-    const watchedResponse = await fetch(`http://localhost:${PORT}/api/mark-custom-order-item-watched/${itemId}`, {
+    const baseUrl = getAndroidApiBaseUrl();
+    const watchedResponse = await fetch(`${baseUrl}/api/mark-custom-order-item-watched/${itemId}`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json'
@@ -9290,7 +9309,8 @@ app.post('/api/android/reading/start', async (req, res) => {
     console.log(`📱 Start reading session - mediaType: ${mediaType}, title: ${title}, customOrderItemId: ${customOrderItemId}`);
     
     // Use existing reading session start endpoint
-    const sessionResponse = await fetch(`http://localhost:${PORT}/api/reading/start`, {
+    const baseUrl = getAndroidApiBaseUrl();
+    const sessionResponse = await fetch(`${baseUrl}/api/reading/start`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json'
@@ -9368,7 +9388,8 @@ app.post('/api/android/reading/pause', async (req, res) => {
   
   try {
     // Use existing reading session pause endpoint
-    const pauseResponse = await fetch(`http://localhost:${PORT}/api/reading/pause`, {
+    const baseUrl = getAndroidApiBaseUrl();
+    const pauseResponse = await fetch(`${baseUrl}/api/reading/pause`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json'
@@ -9441,7 +9462,8 @@ app.post('/api/android/reading/stop', async (req, res) => {
     const { progress } = req.body;
     
     // Use existing reading session stop endpoint
-    const stopResponse = await fetch(`http://localhost:${PORT}/api/reading/stop`, {
+    const baseUrl = getAndroidApiBaseUrl();
+    const stopResponse = await fetch(`${baseUrl}/api/reading/stop`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json'
@@ -9537,7 +9559,8 @@ app.post('/api/android/viewing/start', async (req, res) => {
     console.log(`📱 Start viewing session - mediaType: ${mediaType}, title: ${title}, customOrderItemId: ${customOrderItemId}`);
     
     // Use existing viewing session start endpoint
-    const sessionResponse = await fetch(`http://localhost:${PORT}/api/viewing/start`, {
+    const baseUrl = getAndroidApiBaseUrl();
+    const sessionResponse = await fetch(`${baseUrl}/api/viewing/start`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json'
@@ -9615,7 +9638,8 @@ app.post('/api/android/viewing/pause', async (req, res) => {
   
   try {
     // Use existing viewing session pause endpoint
-    const pauseResponse = await fetch(`http://localhost:${PORT}/api/viewing/pause`, {
+    const baseUrl = getAndroidApiBaseUrl();
+    const pauseResponse = await fetch(`${baseUrl}/api/viewing/pause`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json'
@@ -9688,7 +9712,8 @@ app.post('/api/android/viewing/stop', async (req, res) => {
     const { progress } = req.body;
     
     // Use existing viewing session stop endpoint
-    const stopResponse = await fetch(`http://localhost:${PORT}/api/viewing/stop`, {
+    const baseUrl = getAndroidApiBaseUrl();
+    const stopResponse = await fetch(`${baseUrl}/api/viewing/stop`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json'
