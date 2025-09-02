@@ -33,7 +33,7 @@ If the current setup doesn't work, try these alternative Stash URLs:
 
 3. **Unraid Host IP** (if Stash is on same Unraid server):
    ```yaml
-   - "STASH_URL=http://192.168.1.113:9999"
+   - "STASH_URL=http://192.168.1.114:9999"
    ```
 
 ### Solution 4: Custom Docker Network

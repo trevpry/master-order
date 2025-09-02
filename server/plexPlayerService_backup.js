@@ -354,7 +354,7 @@ class PlexPlayerService {
       if (this.lastSettingsCheck) {
         const parts = this.lastSettingsCheck.split(':');
         if (parts.length >= 2) {
-          // Extract hostname from URL format like "http://192.168.1.113:token"
+          // Extract hostname from URL format like "http://192.168.1.114:token"
           const urlPart = parts[0];
           if (urlPart.includes('//')) {
             serverAddress = urlPart.split('//')[1] || 'localhost';

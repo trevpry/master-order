@@ -6,7 +6,7 @@ async function testPlexControl() {
     
     // Initialize plex-control with server details
     const plexControl = new PlexControl({
-      hostname: '192.168.1.113',
+      hostname: '192.168.1.114',
       port: 32400,
       token: 'Bazf-s9L36e4roJGMhHs' // Your Plex token
     });

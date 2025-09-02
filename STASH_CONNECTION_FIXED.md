@@ -73,7 +73,7 @@ If `192.168.1.154:9999` still doesn't work from Docker, try these alternatives:
 
 ### For Docker on Unraid (if Stash is on same server):
 ```yaml  
-- "STASH_URL=http://192.168.1.113:9999"  # Use your Unraid server IP
+- "STASH_URL=http://192.168.1.114:9999"  # Use your Unraid server IP
 ```
 
 ### For Bridge Network:

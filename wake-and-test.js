@@ -48,7 +48,7 @@ async function wakeUpAndTest() {
     const simpleParams = new URLSearchParams({
       commandID: Date.now(),
       key: '/library/metadata/22578',
-      address: '192.168.1.113',
+      address: '192.168.1.114',
       port: '32400',
       machineIdentifier: 'a184c4479e3fd964b765907bbcc5727839a224be'
     });

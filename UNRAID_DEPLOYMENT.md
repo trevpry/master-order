@@ -28,7 +28,7 @@ First, ensure you have a PostgreSQL database running. You can use the official P
 - **Environment Variables:**
   ```
   NODE_ENV=production
-  DATABASE_URL=postgresql://master_order_user:your_secure_password_here@192.168.1.113:5432/master_order
+  DATABASE_URL=postgresql://master_order_user:your_secure_password_here@192.168.1.114:5432/master_order
   POSTGRES_PASSWORD=your_secure_password_here
   PORT=3001
   ```
