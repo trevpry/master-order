@@ -86,13 +86,24 @@ cd "$REPO_PATH"
 echo "📥 Pulling latest code from GitHub..."
 # Configure git to handle divergent branches if needed
 git config pull.rebase false 2>/dev/null || true
-git pull origin master
 
+# Check if there are any uncommitted changes or conflicts
+if ! git status --porcelain | grep -q .; then
+    # No local changes, try normal pull
+    git pull origin master
+else
+    echo "⚠️ Local changes detected, will reset to remote version..."
+    git fetch origin master
+    git reset --hard origin/master
+fi
+
+# If pull still fails, force reset to remote
 if [ $? -ne 0 ]; then
-    echo "⚠️ Standard pull failed, trying with merge strategy..."
-    git pull --no-rebase origin master
+    echo "⚠️ Pull failed, forcing reset to remote version..."
+    git fetch origin master
+    git reset --hard origin/master
     if [ $? -ne 0 ]; then
-        echo "❌ Failed to pull latest code. Please check your git repository."
+        echo "❌ Failed to update code. Please check your git repository."
         exit 1
     fi
 fi
