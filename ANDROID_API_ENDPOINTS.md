@@ -32,8 +32,10 @@ Currently, no authentication is required for these endpoints. They are designed 
 {
   "type": "PLAY_TV_EPISODE",
   "data": {
-    "ratingKey": "12345",
-    "plexId": "12345",
+    "ratingKey": "67890",
+    "episodeRatingKey": "67890",
+    "seriesRatingKey": "12345",
+    "plexId": "67890",
     "title": "Series Name",
     "episodeTitle": "Episode Title",
     "summary": "Series description...",
@@ -43,8 +45,8 @@ Currently, no authentication is required for these endpoints. They are designed 
     "isFinalSeason": false,
     "leafCount": 100,
     "viewedLeafCount": 45,
-    "thumb": "/library/metadata/12345/thumb/1234567890",
-    "art": "/library/metadata/12345/art/1234567890",
+    "thumb": "/library/metadata/67890/thumb/1234567890",
+    "art": "/library/metadata/67890/art/1234567890",
     "artworkUrl": "http://localhost:3000/api/artwork/series-artwork.jpg",
     "streamUrl": "http://plex-server:32400/video/:/transcode/...",
     "otherCollections": [...]
@@ -99,8 +101,10 @@ Currently, no authentication is required for these endpoints. They are designed 
 **Response Fields**:
 - `type`: Indicates the content type (`PLAY_TV_EPISODE`, `PLAY_MOVIE`, or `PLAY_CUSTOM_ORDER_ITEM`)
 - TV Episode Fields:
-  - `ratingKey`: Plex rating key for the series
-  - `plexId`: Plex identifier for direct media access (same as ratingKey)
+  - `ratingKey`: Plex rating key for the specific episode (not the series)
+  - `episodeRatingKey`: Explicit episode-specific rating key for direct episode playback
+  - `seriesRatingKey`: Plex rating key for the series (for reference)
+  - `plexId`: Plex identifier for direct media access (same as episodeRatingKey)
   - `title`: Series name
   - `episodeTitle`: Specific episode title
   - `summary`: Series description
@@ -240,6 +244,201 @@ curl -X POST "http://localhost:3001/api/android/play-plex" \
     "ratingKey": "12345",
     "mediaType": "episode",
     "title": "Breaking Bad - Pilot"
+  }'
+```
+
+---
+
+### 7. Play Episode or Movie by Identification (POST /api/android/play-episode)
+
+**Purpose**: Initiate playback of specific media content, supporting both TV episodes (identified by series/season/episode) and movies (identified by title). Primarily designed for custom order items that need to be identified by metadata rather than direct Plex rating keys.
+
+**Request Body for Episodes**:
+```json
+{
+  "seriesTitle": "Star Wars",
+  "seasonNumber": 2,
+  "episodeNumber": 5,
+  "customOrderItemId": 123
+}
+```
+
+**Request Body for Movies**:
+```json
+{
+  "movieTitle": "Star Wars: A New Hope",
+  "customOrderItemId": 456
+}
+```
+
+**Request Fields**:
+- **For Episodes**:
+  - `seriesTitle`: Name of the TV series (string, required for episodes)
+  - `seasonNumber`: Season number (integer, required for episodes)
+  - `episodeNumber`: Episode number within the season (integer, required for episodes)
+- **For Movies**:
+  - `movieTitle`: Title of the movie (string, required for movies)
+- **Common Fields**:
+  - `customOrderItemId`: ID of the custom order item (integer, optional)
+  - `title`: Fallback title if movieTitle not provided (string, optional)
+
+**Episode Response Format**: 
+```json
+{
+  "type": "PLAY_TV_EPISODE",
+  "data": {
+    "success": true,
+    "ratingKey": "4829",
+    "episodeRatingKey": "4829", 
+    "seriesRatingKey": "4701",
+    "plexId": "4829",
+    "title": "Star Wars",
+    "episodeTitle": "Revenge of the Sith",
+    "summary": "The entire galaxy is at war...",
+    "seasonNumber": 2,
+    "episodeNumber": 5,
+    "duration": 2700,
+    "thumb": "/library/metadata/4829/thumb/1638360183",
+    "art": "/library/metadata/4701/art/1638360183",
+    "artworkUrl": "http://192.168.1.114:32400/library/metadata/4829/thumb/1638360183?X-Plex-Token=xyz",
+    "mediaType": "episode",
+    "customOrderItemId": 123,
+    "player": "Living Room TV",
+    "message": "Playing \"Revenge of the Sith\" on Living Room TV",
+    "timestamp": "2024-01-15T10:30:00.000Z"
+  }
+}
+```
+
+**Movie Response Format**: 
+```json
+{
+  "type": "PLAY_MOVIE", 
+  "data": {
+    "success": true,
+    "ratingKey": "5829",
+    "plexId": "5829",
+    "title": "Star Wars: A New Hope",
+    "year": 1977,
+    "duration": 7260,
+    "summary": "A young farm boy becomes a hero...",
+    "studio": "Lucasfilm",
+    "rating": 8.6,
+    "thumb": "/library/metadata/5829/thumb/1638360183",
+    "art": "/library/metadata/5829/art/1638360183", 
+    "artworkUrl": "http://192.168.1.114:32400/library/metadata/5829/thumb/1638360183?X-Plex-Token=xyz",
+    "mediaType": "movie",
+    "customOrderItemId": 456,
+    "player": "Living Room TV",
+    "message": "Playing \"Star Wars: A New Hope\" on Living Room TV",
+    "timestamp": "2024-01-15T10:30:00.000Z"
+  }
+}
+```
+
+**Custom Order Item Response** (when customOrderItemId provided):
+```json
+{
+  "type": "PLAY_CUSTOM_ORDER_ITEM",
+  "data": {
+    "success": true,
+    "ratingKey": "4829",
+    "plexId": "4829", 
+    "title": "Star Wars: A New Hope",
+    "type": "movie",
+    "orderName": "Custom Order",
+    "summary": "A young farm boy becomes a hero...",
+    "duration": 7260,
+    "artworkUrl": "http://192.168.1.114:32400/library/metadata/5829/thumb/1638360183?X-Plex-Token=xyz",
+    "mediaType": "movie",
+    "customOrderItemId": 456,
+    "player": "Living Room TV",
+    "message": "Playing \"Star Wars: A New Hope\" on Living Room TV", 
+    "timestamp": "2024-01-15T10:30:00.000Z"
+  }
+}
+```
+
+**Error Response**:
+```json
+{
+  "type": "PLAY_ERROR",
+  "data": {
+    "success": false,
+    "error": "Media not found: [Media Title]",
+    "mediaType": "episode",
+    "mediaTitle": "Star Wars",
+    "seasonNumber": 2,
+    "episodeNumber": 5,
+    "timestamp": "2024-01-15T10:30:00.000Z"
+  }
+}
+```
+
+**Response Fields**:
+- **Episode Responses**:
+  - `type`: `PLAY_TV_EPISODE` for regular episodes, `PLAY_CUSTOM_ORDER_ITEM` for custom order episodes
+  - `ratingKey`: Plex rating key for the specific episode (for direct playback)
+  - `episodeRatingKey`: Same as ratingKey, explicitly the episode-specific rating key
+  - `seriesRatingKey`: Plex rating key for the parent series
+  - `plexId`: Episode identifier for media access (same as episodeRatingKey)
+  - `title`: Series name
+  - `episodeTitle`: Specific episode title
+  - `summary`: Episode description
+  - `seasonNumber`/`episodeNumber`: Episode identification numbers
+  - `duration`: Episode duration in seconds
+  
+- **Movie Responses**:
+  - `type`: `PLAY_MOVIE` for regular movies, `PLAY_CUSTOM_ORDER_ITEM` for custom order movies
+  - `ratingKey`: Plex rating key for the movie (for direct playback)
+  - `plexId`: Movie identifier for media access (same as ratingKey)
+  - `title`: Movie title
+  - `year`: Release year
+  - `duration`: Movie duration in seconds
+  - `summary`: Movie description
+  - `studio`: Movie studio/distributor
+  - `rating`: Movie rating (0-10)
+  
+- **Common Fields**:
+  - `success`: Boolean indicating if playback started successfully
+  - `artworkUrl`: Network-accessible artwork URL for Android consumption
+  - `thumb`/`art`: Plex artwork paths
+  - `mediaType`: Type of media (`episode` or `movie`)
+  - `customOrderItemId`: Custom order item ID (if applicable)
+  - `player`: Name of the Plex player used
+  - `message`: Human-readable success/error message
+  - `timestamp`: ISO timestamp of the response
+
+**Functionality**:
+- **Episode Support**: Searches Plex libraries to find exact episodes based on series title, season, and episode number
+- **Movie Support**: Searches Plex libraries to find movies based on movie title
+- **Custom Order Integration**: Returns appropriate response types for custom order items vs. regular Plex content
+- **Fallback Handling**: For episode requests, falls back to movie search if no TV series match found
+- **Webhook Integration**: Sends webhook notifications to trigger actual playback on connected Plex clients
+- **Consistent Response Format**: Uses same structured response format as other Android API endpoints
+- **Artwork URL Generation**: Provides network-accessible artwork URLs for Android consumption
+
+**Example Usage**:
+
+*Play an episode:*
+```bash
+curl -X POST "http://localhost:3001/api/android/play-episode" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "seriesTitle": "Star Wars",
+    "seasonNumber": 2,
+    "episodeNumber": 5,
+    "customOrderItemId": 123
+  }'
+```
+
+*Play a movie:*
+```bash
+curl -X POST "http://localhost:3001/api/android/play-episode" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "movieTitle": "Star Wars: A New Hope",
+    "customOrderItemId": 456
   }'
 ```
 

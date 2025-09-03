@@ -5,6 +5,7 @@ const http = require('http');
 const https = require('https');
 const socketIo = require('socket.io');
 const path = require('path');
+const fs = require('fs');
 const fetch = require('node-fetch'); // For Android companion app proxy
 const getNextEpisode = require('./getNextEpisode');
 const getNextMovie = require('./getNextMovie');
@@ -107,7 +108,6 @@ const subOrderService = require('./subOrderService'); // Added import
 const WatchLogService = require('./watchLogService'); // Added import
 const openLibraryService = require('./openLibraryService'); // Added import
 const mm = require('music-metadata');
-const fs = require('fs');
 const comicSearchService = require('./comicSearchService'); // Added import
 const { getTimezoneAwarePeriodBounds, getTimezoneAwareDateGrouping, formatDateInTimezone } = require('./utils/timezoneUtils');
 const StatisticsService = require('./services/statisticsService');
@@ -8103,6 +8103,174 @@ app.get('/api/music/custom-playlists', async (req, res) => {
   }
 });
 
+// Create a new custom playlist
+app.post('/api/music/custom-playlists', async (req, res) => {
+  try {
+    const { title, description, isPublic, createdBy } = req.body;
+    
+    if (!title || title.trim() === '') {
+      return res.status(400).json({ error: 'Playlist title is required' });
+    }
+
+    const customPlaylist = await prisma.customPlaylist.create({
+      data: {
+        title: title.trim(),
+        description: description?.trim() || null,
+        isPublic: isPublic || false,
+        createdBy: createdBy || 'User'
+      },
+      include: {
+        tracks: {
+          orderBy: {
+            sortOrder: 'asc'
+          }
+        }
+      }
+    });
+
+    res.status(201).json(customPlaylist);
+  } catch (error) {
+    console.error('Error creating custom playlist:', error);
+    res.status(500).json({ error: 'Failed to create custom playlist' });
+  }
+});
+
+// Delete a custom playlist
+app.delete('/api/music/custom-playlists/:id', async (req, res) => {
+  try {
+    const playlistId = parseInt(req.params.id);
+    
+    // Check if playlist exists
+    const playlist = await prisma.customPlaylist.findUnique({
+      where: { id: playlistId }
+    });
+    
+    if (!playlist) {
+      return res.status(404).json({ error: 'Playlist not found' });
+    }
+
+    // Delete the playlist (tracks will be deleted due to cascade)
+    await prisma.customPlaylist.delete({
+      where: { id: playlistId }
+    });
+
+    res.json({ message: 'Playlist deleted successfully' });
+  } catch (error) {
+    console.error('Error deleting custom playlist:', error);
+    res.status(500).json({ error: 'Failed to delete custom playlist' });
+  }
+});
+
+// Add a track to a custom playlist
+app.post('/api/music/custom-playlists/:id/tracks', async (req, res) => {
+  try {
+    const playlistId = parseInt(req.params.id);
+    const { ratingKey, title, artist, album, duration } = req.body;
+    
+    if (!ratingKey || !title) {
+      return res.status(400).json({ error: 'Track ratingKey and title are required' });
+    }
+
+    // Check if playlist exists
+    const playlist = await prisma.customPlaylist.findUnique({
+      where: { id: playlistId }
+    });
+    
+    if (!playlist) {
+      return res.status(404).json({ error: 'Playlist not found' });
+    }
+
+    // Check if track is already in the playlist
+    const existingTrack = await prisma.customPlaylistTrack.findFirst({
+      where: {
+        playlistId: playlistId,
+        ratingKey: ratingKey
+      }
+    });
+
+    if (existingTrack) {
+      return res.status(409).json({ error: 'Track is already in this playlist' });
+    }
+
+    // Get the next sort order
+    const lastTrack = await prisma.customPlaylistTrack.findFirst({
+      where: { playlistId: playlistId },
+      orderBy: { sortOrder: 'desc' }
+    });
+    
+    const nextSortOrder = (lastTrack?.sortOrder || 0) + 1;
+
+    // Add the track to the playlist
+    const playlistTrack = await prisma.customPlaylistTrack.create({
+      data: {
+        playlistId: playlistId,
+        ratingKey: ratingKey,
+        title: title,
+        artist: artist || null,
+        album: album || null,
+        duration: duration ? parseInt(duration) : null,
+        sortOrder: nextSortOrder
+      }
+    });
+
+    // Update playlist's updatedAt timestamp
+    await prisma.customPlaylist.update({
+      where: { id: playlistId },
+      data: { updatedAt: new Date() }
+    });
+
+    res.status(201).json(playlistTrack);
+  } catch (error) {
+    console.error('Error adding track to custom playlist:', error);
+    res.status(500).json({ error: 'Failed to add track to playlist' });
+  }
+});
+
+// Remove a track from a custom playlist
+app.delete('/api/music/custom-playlists/:id/tracks/:trackId', async (req, res) => {
+  try {
+    const playlistId = parseInt(req.params.id);
+    const trackId = parseInt(req.params.trackId);
+    
+    // Check if playlist exists
+    const playlist = await prisma.customPlaylist.findUnique({
+      where: { id: playlistId }
+    });
+    
+    if (!playlist) {
+      return res.status(404).json({ error: 'Playlist not found' });
+    }
+
+    // Check if track exists in playlist
+    const track = await prisma.customPlaylistTrack.findFirst({
+      where: {
+        id: trackId,
+        playlistId: playlistId
+      }
+    });
+
+    if (!track) {
+      return res.status(404).json({ error: 'Track not found in playlist' });
+    }
+
+    // Delete the track
+    await prisma.customPlaylistTrack.delete({
+      where: { id: trackId }
+    });
+
+    // Update playlist's updatedAt timestamp
+    await prisma.customPlaylist.update({
+      where: { id: playlistId },
+      data: { updatedAt: new Date() }
+    });
+
+    res.json({ message: 'Track removed from playlist successfully' });
+  } catch (error) {
+    console.error('Error removing track from custom playlist:', error);
+    res.status(500).json({ error: 'Failed to remove track from playlist' });
+  }
+});
+
 app.get('/api/music/artists', async (req, res) => {
   try {
     const { search, page = 1, limit = 20 } = req.query;
@@ -8128,6 +8296,62 @@ app.get('/api/music/artists', async (req, res) => {
   } catch (error) {
     console.error('Error fetching all artists:', error);
     res.status(500).json({ error: 'Failed to fetch artists' });
+  }
+});
+
+// Artists by section endpoint
+app.get('/api/music/artists/section/:sectionKey', async (req, res) => {
+  try {
+    const { sectionKey } = req.params;
+    const { search, page = 1, limit = 20 } = req.query;
+    const pageNum = parseInt(page);
+    const limitNum = parseInt(limit);
+    const offset = (pageNum - 1) * limitNum;
+
+    console.log(`Artists requested for section: ${sectionKey}, page: ${pageNum}, limit: ${limitNum}, search: ${search}`);
+
+    let artists;
+    let total;
+
+    if (search) {
+      artists = await plexDb.searchArtistsBySection(sectionKey, search, limitNum, offset);
+      total = await plexDb.getArtistsBySectionCount(sectionKey); // For simplicity, using section total
+    } else {
+      artists = await plexDb.getArtistsBySection(sectionKey, limitNum, offset);
+      total = await plexDb.getArtistsBySectionCount(sectionKey);
+    }
+
+    console.log(`Returning ${artists.length} artists for section ${sectionKey}, total: ${total}`);
+
+    const hasMore = offset + artists.length < total;
+
+    res.json({
+      artists,
+      page: pageNum,
+      limit: limitNum,
+      total,
+      hasMore
+    });
+  } catch (error) {
+    console.error('Error fetching artists by section:', error);
+    res.status(500).json({ error: 'Failed to fetch artists' });
+  }
+});
+
+// Get individual artist by rating key
+app.get('/api/music/artists/:ratingKey', async (req, res) => {
+  try {
+    const { ratingKey } = req.params;
+    
+    const artist = await plexDb.getArtistByRatingKey(ratingKey);
+    if (!artist) {
+      return res.status(404).json({ error: 'Artist not found' });
+    }
+    
+    res.json(artist);
+  } catch (error) {
+    console.error('Error fetching artist:', error);
+    res.status(500).json({ error: 'Failed to fetch artist' });
   }
 });
 
@@ -8211,6 +8435,209 @@ app.get('/api/music/albums/artist/:artistRatingKey', async (req, res) => {
   } catch (error) {
     console.error('Error fetching albums by artist:', error);
     res.status(500).json({ error: 'Failed to fetch albums' });
+  }
+});
+
+// Get individual album by rating key
+app.get('/api/music/albums/:ratingKey', async (req, res) => {
+  try {
+    const { ratingKey } = req.params;
+    
+    const album = await plexDb.getAlbumByRatingKey(ratingKey);
+    if (!album) {
+      return res.status(404).json({ error: 'Album not found' });
+    }
+    
+    res.json(album);
+  } catch (error) {
+    console.error('Error fetching album:', error);
+    res.status(500).json({ error: 'Failed to fetch album' });
+  }
+});
+
+// Extract metadata from album files
+app.post('/api/music/albums/:ratingKey/extract-file-metadata', async (req, res) => {
+  try {
+    const { ratingKey } = req.params;
+    
+    // Get album and its tracks from database
+    const album = await plexDb.getAlbumByRatingKey(ratingKey);
+    if (!album) {
+      return res.status(404).json({ error: 'Album not found' });
+    }
+    
+    const tracks = await plexDb.getTracksByAlbum(ratingKey);
+    if (!tracks || tracks.length === 0) {
+      return res.status(404).json({ error: 'No tracks found for this album' });
+    }
+
+    // Get Plex settings for API access
+    const settings = await prisma.settings.findFirst();
+    if (!settings || !settings.plexUrl || !settings.plexToken) {
+      return res.status(400).json({ error: 'Plex configuration not found in settings' });
+    }
+
+    const extractedMetadata = [];
+    let successCount = 0;
+    let errorCount = 0;
+
+    console.log(`Starting metadata extraction for ${tracks.length} tracks from album ${ratingKey}`);
+    
+    for (const track of tracks) {
+      try {
+        // Fetch full track metadata from Plex API to get file paths
+        const plexResponse = await fetch(`${settings.plexUrl}/library/metadata/${track.ratingKey}?X-Plex-Token=${settings.plexToken}`, {
+          headers: { 'Accept': 'application/json' }
+        });
+        
+        if (!plexResponse.ok) {
+          throw new Error(`Plex API error: ${plexResponse.status}`);
+        }
+        
+        const plexData = await plexResponse.json();
+        const plexTrack = plexData.MediaContainer?.Metadata?.[0];
+        
+        if (!plexTrack || !plexTrack.Media || plexTrack.Media.length === 0) {
+          throw new Error('No media information found in Plex metadata');
+        }
+        
+        const mediaPart = plexTrack.Media[0].Part?.[0];
+        if (!mediaPart || !mediaPart.file) {
+          throw new Error('No file path found in Plex metadata');
+        }
+        
+        // Map Plex file path to container path
+        let filePath = mediaPart.file;
+        const originalPath = filePath;
+        
+        // Map Plex paths to actual file system paths
+        // In Docker: use container mount points
+        // In development: use environment variables to map to local paths
+        const isDocker = process.env.NODE_ENV === 'production' || process.env.DOCKER_ENV === 'true';
+        
+        if (isDocker) {
+          // Docker environment: Map to container mount points
+          if (filePath.includes('/mnt/user/Media/Music/')) {
+            filePath = filePath.replace('/mnt/user/Media/Music/', '/music/');
+          } else if (filePath.includes('/mnt/user/Media/Classical/')) {
+            filePath = filePath.replace('/mnt/user/Media/Classical/', '/classical/');
+          } else if (filePath.includes('/mnt/user/Media/PopMusic/')) {
+            filePath = filePath.replace('/mnt/user/Media/PopMusic/', '/pop_music/');
+          } else if (filePath.startsWith('/classical/') || filePath.startsWith('/music/') || filePath.startsWith('/pop_music/')) {
+            // Path is already in container format, no mapping needed
+            console.log(`Path already in container format: ${filePath}`);
+          } else {
+            console.warn(`Unknown Docker path pattern for file: ${mediaPart.file}`);
+            throw new Error(`Docker path mapping not configured for: ${mediaPart.file}`);
+          }
+        } else {
+          // Development environment: Map to local file system using environment variables
+          if (filePath.startsWith('/classical/')) {
+            const classicalPath = process.env.CLASSICAL_PATH;
+            if (!classicalPath) {
+              throw new Error('CLASSICAL_PATH environment variable not set. Add CLASSICAL_PATH to your .env file.');
+            }
+            filePath = filePath.replace('/classical/', classicalPath + path.sep);
+          } else if (filePath.startsWith('/music/')) {
+            const musicPath = process.env.MUSIC_PATH;
+            if (!musicPath) {
+              throw new Error('MUSIC_PATH environment variable not set. Add MUSIC_PATH to your .env file.');
+            }
+            filePath = filePath.replace('/music/', musicPath + path.sep);
+          } else if (filePath.startsWith('/pop_music/')) {
+            const popMusicPath = process.env.POP_MUSIC_PATH;
+            if (!popMusicPath) {
+              throw new Error('POP_MUSIC_PATH environment variable not set. Add POP_MUSIC_PATH to your .env file.');
+            }
+            filePath = filePath.replace('/pop_music/', popMusicPath + path.sep);
+          } else if (filePath.includes('/mnt/user/Media/Music/')) {
+            const musicPath = process.env.MUSIC_PATH;
+            if (!musicPath) {
+              throw new Error('MUSIC_PATH environment variable not set. Add MUSIC_PATH to your .env file.');
+            }
+            filePath = filePath.replace('/mnt/user/Media/Music/', musicPath + path.sep);
+          } else if (filePath.includes('/mnt/user/Media/Classical/')) {
+            const classicalPath = process.env.CLASSICAL_PATH;
+            if (!classicalPath) {
+              throw new Error('CLASSICAL_PATH environment variable not set. Add CLASSICAL_PATH to your .env file.');
+            }
+            filePath = filePath.replace('/mnt/user/Media/Classical/', classicalPath + path.sep);
+          } else if (filePath.includes('/mnt/user/Media/PopMusic/')) {
+            const popMusicPath = process.env.POP_MUSIC_PATH;
+            if (!popMusicPath) {
+              throw new Error('POP_MUSIC_PATH environment variable not set. Add POP_MUSIC_PATH to your .env file.');
+            }
+            filePath = filePath.replace('/mnt/user/Media/PopMusic/', popMusicPath + path.sep);
+          } else {
+            console.warn(`Unknown development path pattern for file: ${mediaPart.file}`);
+            throw new Error(`Development path mapping not configured for: ${mediaPart.file}. Check your .env file for required PATH variables.`);
+          }
+        }
+        
+        console.log(`Processing track: ${track.title}, mapped path: ${filePath}`);
+        
+        // Extract metadata using music-metadata library
+        const metadata = await mm.parseFile(filePath);
+        
+        extractedMetadata.push({
+          ratingKey: track.ratingKey,
+          title: track.title,
+          filePath: filePath,
+          plexPath: originalPath,
+          fileSize: mediaPart.size || null,
+          common: {
+            title: metadata.common.title,
+            artist: metadata.common.artist,
+            album: metadata.common.album,
+            year: metadata.common.year,
+            track: metadata.common.track,
+            genre: metadata.common.genre,
+            picture: metadata.common.picture?.length > 0 ? `${metadata.common.picture.length} embedded images` : null
+          },
+          format: {
+            duration: metadata.format.duration,
+            bitrate: metadata.format.bitrate,
+            sampleRate: metadata.format.sampleRate,
+            numberOfChannels: metadata.format.numberOfChannels,
+            codec: metadata.format.codec,
+            container: metadata.format.container,
+            tool: metadata.format.tool,
+            tagTypes: metadata.format.tagTypes
+          }
+        });
+        
+        successCount++;
+        
+      } catch (error) {
+        console.error(`Error extracting metadata for track ${track.ratingKey} (${track.title}):`, error.message);
+        
+        extractedMetadata.push({
+          ratingKey: track.ratingKey,
+          title: track.title,
+          error: error.message,
+          plexPath: 'Unknown'
+        });
+        
+        errorCount++;
+      }
+    }
+
+    const result = {
+      albumTitle: album.title,
+      albumRatingKey: ratingKey,
+      tracksProcessed: tracks.length,
+      successCount,
+      errorCount,
+      extractedMetadata
+    };
+
+    console.log(`Metadata extraction completed for album ${ratingKey}: ${successCount} successful, ${errorCount} errors`);
+    
+    res.json(result);
+    
+  } catch (error) {
+    console.error('Error extracting album metadata:', error);
+    res.status(500).json({ error: 'Failed to extract album metadata' });
   }
 });
 
@@ -8474,23 +8901,21 @@ app.get('/api/android/up-next', async (req, res) => {
   console.log('📱 Android app requesting up next content...');
   
   try {
-    // Get base URL for Android API (use external IP if available)
-    const baseUrl = getAndroidApiBaseUrl();
-    console.log('📱 Using base URL for Android API:', baseUrl);
+    // Call the internal getNextEpisode function directly to ensure consistent data
+    const data = await getNextEpisode(); // This handles order type selection internally
     
-    // Get up next using existing logic
-    const upNextResponse = await fetch(`${baseUrl}/api/up_next`);
-    
-    if (!upNextResponse.ok) {
-      const errorText = await upNextResponse.text();
-      console.error('Failed to get up next:', errorText);
-      return res.status(500).json({ 
-        error: 'Failed to get up next',
-        details: errorText 
-      });
+    let upNextData;
+    // If movies were selected, use the new getNextMovie function
+    if (data.orderType === 'MOVIES_GENERAL') {
+      console.log('📱 Movie order type selected, using getNextMovie function');
+      upNextData = await getNextMovie();
+    } else if (data.orderType === 'CUSTOM_ORDER') {
+      console.log('📱 Custom order type selected, using getNextCustomOrder function');
+      upNextData = await getNextCustomOrder(req);
+    } else {
+      // TV General selection
+      upNextData = data;
     }
-    
-    const upNextData = await upNextResponse.json();
     console.log('📱 Up next data received:', JSON.stringify(upNextData, null, 2));
     
     if (!upNextData || upNextData.error) {
@@ -8588,6 +9013,13 @@ app.get('/api/android/up-next', async (req, res) => {
       // Custom order response - use proper artwork URL generation
       const artworkUrl = getAndroidArtworkUrl(upNextData);
       
+      // For episodes in custom orders, make sure we use the episode rating key
+      let episodeRatingKey = upNextData.ratingKey;
+      if (upNextData.type === 'episode' && upNextData.episodeRatingKey) {
+        episodeRatingKey = upNextData.episodeRatingKey;
+        console.log('📱 Using episode-specific rating key for Android:', episodeRatingKey);
+      }
+      
       androidResponse = {
         type: 'PLAY_CUSTOM_ORDER_ITEM',
         data: {
@@ -8600,20 +9032,48 @@ app.get('/api/android/up-next', async (req, res) => {
           localArtworkPath: upNextData.localArtworkPath || '',
           artworkUrl: artworkUrl || '', // Use proper artwork URL matching web app display
           streamUrl: upNextData.streamUrl || '',
-          ratingKey: upNextData.ratingKey || null,
-          plexId: upNextData.ratingKey || null, // Add plexId field for Plex content
+          ratingKey: episodeRatingKey || null,
+          plexId: episodeRatingKey || null, // Add plexId field for Plex content
           webUrl: upNextData.webUrl || null, // Add webUrl field for web video content
-          customOrderId: upNextData.customOrderId || null
+          customOrderId: upNextData.customOrderId || null,
+          // Episode-specific fields for custom orders
+          ...(upNextData.type === 'episode' && {
+            seasonNumber: upNextData.seasonNumber || upNextData.currentSeason || null,
+            episodeNumber: upNextData.episodeNumber || upNextData.currentEpisode || null,
+            episodeTitle: upNextData.episodeTitle || upNextData.nextEpisodeTitle || null,
+            seriesTitle: upNextData.seriesTitle || upNextData.grandparentTitle || null
+          })
         }
       };
     } else {
       // TV Show response (default) - use proper artwork URL generation
       const artworkUrl = getAndroidArtworkUrl(upNextData);
+      
+      // For TV episodes from Plex, make sure we use the episode rating key
+      let episodeRatingKey = upNextData.ratingKey; // Default to series rating key
+      let seriesRatingKey = upNextData.ratingKey; // Keep series rating key for reference
+      
+      // Priority order for finding episode-specific rating key
+      if (upNextData.episodeRatingKey) {
+        episodeRatingKey = upNextData.episodeRatingKey;
+        console.log('📱 Using episodeRatingKey for Android:', episodeRatingKey);
+      } else if (upNextData.currentEpisodeRatingKey) {
+        episodeRatingKey = upNextData.currentEpisodeRatingKey;
+        console.log('📱 Using currentEpisodeRatingKey for Android:', episodeRatingKey);
+      } else if (upNextData.nextEpisodeRatingKey) {
+        episodeRatingKey = upNextData.nextEpisodeRatingKey;
+        console.log('📱 Using nextEpisodeRatingKey for Android:', episodeRatingKey);
+      } else {
+        console.log('📱 No episode-specific rating key found, using series rating key:', episodeRatingKey);
+      }
+      
       androidResponse = {
         type: 'PLAY_TV_EPISODE',
         data: {
-          ratingKey: upNextData.ratingKey,
-          plexId: upNextData.ratingKey, // Add plexId field for direct media access
+          ratingKey: episodeRatingKey, // This should be the episode rating key, not series
+          episodeRatingKey: episodeRatingKey, // Explicit episode rating key field
+          seriesRatingKey: seriesRatingKey, // Series rating key for reference
+          plexId: episodeRatingKey, // Add plexId field for direct media access (episode-specific)
           title: upNextData.title,
           episodeTitle: upNextData.episodeTitle || upNextData.nextEpisodeTitle || null, // Add episode title
           summary: upNextData.summary || '',
@@ -9178,6 +9638,360 @@ app.post('/api/android/play-plex', async (req, res) => {
     
   } catch (error) {
     console.error('❌ Error in Android play endpoint:', error);
+    
+    const androidErrorResponse = {
+      type: 'PLAY_ERROR',
+      data: {
+        success: false,
+        error: 'Internal server error',
+        details: error.message,
+        timestamp: new Date().toISOString()
+      }
+    };
+    
+    res.status(500).json(androidErrorResponse);
+  }
+});
+
+// Android companion app endpoint - Play Custom Order Episode or Movie
+app.post('/api/android/play-episode', async (req, res) => {
+  console.log('📱 Android app requesting custom order episode/movie playback...');
+  
+  try {
+    const { 
+      seriesTitle, 
+      seasonNumber, 
+      episodeNumber, 
+      movieTitle, // Support direct movie title for movie playback
+      customOrderItemId, 
+      title = 'Unknown Media' 
+    } = req.body;
+    
+    // Determine if this is an episode or movie request
+    const isEpisodeRequest = seriesTitle && seasonNumber !== undefined && episodeNumber !== undefined;
+    const isMovieRequest = movieTitle || (!isEpisodeRequest && title);
+    
+    if (!isEpisodeRequest && !isMovieRequest) {
+      return res.status(400).json({ 
+        type: 'PLAY_ERROR',
+        data: {
+          error: 'Missing media identification',
+          message: 'Either provide (seriesTitle, seasonNumber, episodeNumber) for episodes or movieTitle for movies',
+          received: { seriesTitle, seasonNumber, episodeNumber, movieTitle, title }
+        }
+      });
+    }
+    
+    const mediaTitle = isEpisodeRequest ? seriesTitle : (movieTitle || title);
+    const mediaType = isEpisodeRequest ? 'episode' : 'movie';
+    
+    console.log(`📱 Android ${mediaType} request - ${mediaTitle}${isEpisodeRequest ? ` S${seasonNumber}E${episodeNumber}` : ''} (customOrderItemId: ${customOrderItemId})`);
+    
+    // Try to find the media's rating key by searching Plex
+    let episodeRatingKey = null;
+    let movieRatingKey = null;
+    let foundMediaMetadata = null;
+    
+    try {
+      // Get Plex settings
+      const settings = await prisma.settings.findFirst();
+      if (!settings?.plexUrl || !settings?.plexToken) {
+        return res.status(500).json({
+          type: 'PLAY_ERROR',
+          data: {
+            error: 'Plex not configured',
+            message: 'Plex server URL and token are required'
+          }
+        });
+      }
+      
+      // Search for the media in Plex
+      const searchUrl = `${settings.plexUrl}/search?query=${encodeURIComponent(mediaTitle)}&X-Plex-Token=${settings.plexToken}`;
+      const searchResponse = await fetch(searchUrl);
+      
+      if (searchResponse.ok) {
+        const searchData = await searchResponse.text();
+        const xml2js = require('xml2js');
+        const parser = new xml2js.Parser();
+        const result = await parser.parseStringPromise(searchData);
+        
+        if (isEpisodeRequest) {
+          // Look for TV series first for episode requests
+          const tvResults = result?.MediaContainer?.Directory?.filter(item => 
+            item.$.type === 'show' && 
+            item.$.title.toLowerCase() === seriesTitle.toLowerCase()
+          ) || [];
+          
+          if (tvResults.length > 0) {
+            // Found TV series, now get episodes
+            const seriesRatingKey = tvResults[0].$.ratingKey;
+            const episodesUrl = `${settings.plexUrl}/library/metadata/${seriesRatingKey}/allLeaves?X-Plex-Token=${settings.plexToken}`;
+            const episodesResponse = await fetch(episodesUrl);
+            
+            if (episodesResponse.ok) {
+              const episodesData = await episodesResponse.text();
+              const episodesResult = await parser.parseStringPromise(episodesData);
+              
+              // Find the specific episode
+              const episodes = episodesResult?.MediaContainer?.Video || [];
+              const targetEpisode = episodes.find(ep => 
+                parseInt(ep.$.parentIndex) === seasonNumber && 
+                parseInt(ep.$.index) === episodeNumber
+              );
+              
+              if (targetEpisode) {
+                episodeRatingKey = targetEpisode.$.ratingKey;
+                foundMediaMetadata = {
+                  type: 'episode',
+                  ratingKey: targetEpisode.$.ratingKey,
+                  title: targetEpisode.$.title,
+                  seriesTitle: tvResults[0].$.title,
+                  seasonNumber: parseInt(targetEpisode.$.parentIndex),
+                  episodeNumber: parseInt(targetEpisode.$.index),
+                  summary: targetEpisode.$.summary || '',
+                  duration: parseInt(targetEpisode.$.duration) || 0,
+                  thumb: targetEpisode.$.thumb || '',
+                  art: targetEpisode.$.art || tvResults[0].$.art || '',
+                  seriesRatingKey: seriesRatingKey
+                };
+                console.log(`✅ Found episode rating key: ${episodeRatingKey}`);
+              }
+            }
+          }
+        }
+        
+        // Look for movies (either for movie requests or as fallback for episode requests)
+        if (!episodeRatingKey) {
+          const movieResults = result?.MediaContainer?.Video?.filter(item => 
+            item.$.type === 'movie' && 
+            (item.$.title.toLowerCase() === mediaTitle.toLowerCase() ||
+             item.$.title.toLowerCase().includes(mediaTitle.toLowerCase()))
+          ) || [];
+          
+          if (movieResults.length > 0) {
+            const movie = movieResults[0];
+            movieRatingKey = movie.$.ratingKey;
+            foundMediaMetadata = {
+              type: 'movie',
+              ratingKey: movie.$.ratingKey,
+              title: movie.$.title,
+              year: parseInt(movie.$.year) || null,
+              duration: parseInt(movie.$.duration) || 0,
+              summary: movie.$.summary || '',
+              studio: movie.$.studio || '',
+              rating: parseFloat(movie.$.rating) || 0,
+              thumb: movie.$.thumb || '',
+              art: movie.$.art || '',
+              originallyAvailableAt: movie.$.originallyAvailableAt || null
+            };
+            console.log(`✅ Found movie rating key: ${movieRatingKey}`);
+          }
+        }
+        
+      }
+    } catch (plexError) {
+      console.warn('⚠️ Failed to search Plex for media:', plexError.message);
+    }
+    
+    // Use the found rating key or return error
+    const ratingKeyToUse = episodeRatingKey || movieRatingKey;
+    
+    if (!ratingKeyToUse) {
+      return res.status(404).json({
+        type: 'PLAY_ERROR',
+        data: {
+          error: 'Media not found',
+          message: `Could not find ${mediaTitle}${isEpisodeRequest ? ` S${seasonNumber}E${episodeNumber}` : ''} in Plex library`,
+          mediaTitle,
+          mediaType,
+          ...(isEpisodeRequest && { seasonNumber, episodeNumber })
+        }
+      });
+    }
+    
+    // Send webhook notification
+    try {
+      console.log('Sending webhook notification for media:', title);
+      const baseUrl = getAndroidApiBaseUrl();
+      const webhookResponse = await fetch(`${baseUrl}/api/webhook/notify`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          ratingKey: ratingKeyToUse,
+          action: 'play_on_plex',
+          title: foundMediaMetadata?.title || mediaTitle,
+          type: mediaType,
+          ...(isEpisodeRequest && { 
+            seriesTitle,
+            seasonNumber,
+            episodeNumber 
+          }),
+          ...(isMovieRequest && {
+            movieTitle: mediaTitle
+          }),
+          customOrderItemId,
+          timestamp: new Date().toISOString(),
+          source: 'android_app'
+        }),
+      });
+      
+      if (webhookResponse.ok) {
+        console.log('✅ Webhook notification sent successfully');
+      } else {
+        console.warn('⚠️ Webhook notification failed:', await webhookResponse.text());
+      }
+    } catch (webhookError) {
+      console.warn('⚠️ Failed to send webhook notification:', webhookError);
+    }
+    
+    // Use existing Plex play endpoint
+    const baseUrl = getAndroidApiBaseUrl();
+    const playResponse = await fetch(`${baseUrl}/api/plex/play`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        ratingKey: ratingKeyToUse
+      }),
+    });
+    
+    const playData = await playResponse.json();
+    
+    if (playResponse.ok) {
+      // Helper function to get proper artwork URL (matching up-next endpoint logic)
+      const getAndroidArtworkUrl = (metadata) => {
+        if (!metadata) return null;
+        
+        const baseUrl = getAndroidApiBaseUrl();
+        const thumb = metadata.thumb;
+        
+        if (!thumb) return null;
+        
+        // Check if thumb is already a full URL (starts with http)
+        if (thumb.startsWith('http')) {
+          console.log('📱 Using full artwork URL:', thumb);
+          return thumb;
+        }
+        
+        // Otherwise, it's a relative path, so add the base URL
+        console.log('📱 Using Plex artwork:', thumb);
+        return `${baseUrl}/api/artwork${thumb}`;
+      };
+      
+      // Success response in Android format based on media type
+      let androidResponse;
+      
+      if (foundMediaMetadata?.type === 'episode') {
+        // Episode response format (matching up-next endpoint)
+        androidResponse = {
+          type: customOrderItemId ? 'PLAY_CUSTOM_ORDER_ITEM' : 'PLAY_TV_EPISODE',
+          data: {
+            success: true,
+            ratingKey: ratingKeyToUse,
+            episodeRatingKey: episodeRatingKey,
+            seriesRatingKey: foundMediaMetadata.seriesRatingKey,
+            plexId: episodeRatingKey,
+            title: foundMediaMetadata.seriesTitle,
+            episodeTitle: foundMediaMetadata.title,
+            summary: foundMediaMetadata.summary,
+            seasonNumber: foundMediaMetadata.seasonNumber,
+            episodeNumber: foundMediaMetadata.episodeNumber,
+            duration: foundMediaMetadata.duration,
+            thumb: foundMediaMetadata.thumb,
+            art: foundMediaMetadata.art,
+            artworkUrl: getAndroidArtworkUrl(foundMediaMetadata),
+            mediaType: 'episode',
+            customOrderItemId: customOrderItemId || null,
+            player: playData.player || 'Unknown Player',
+            message: `Playing "${foundMediaMetadata.title}" on ${playData.player || 'Plex'}`,
+            timestamp: new Date().toISOString()
+          }
+        };
+      } else if (foundMediaMetadata?.type === 'movie') {
+        // Movie response format (matching up-next endpoint)
+        androidResponse = {
+          type: customOrderItemId ? 'PLAY_CUSTOM_ORDER_ITEM' : 'PLAY_MOVIE',
+          data: {
+            success: true,
+            ratingKey: ratingKeyToUse,
+            plexId: ratingKeyToUse,
+            title: foundMediaMetadata.title,
+            year: foundMediaMetadata.year,
+            duration: foundMediaMetadata.duration,
+            summary: foundMediaMetadata.summary,
+            studio: foundMediaMetadata.studio,
+            rating: foundMediaMetadata.rating,
+            thumb: foundMediaMetadata.thumb,
+            art: foundMediaMetadata.art,
+            artworkUrl: getAndroidArtworkUrl(foundMediaMetadata),
+            mediaType: 'movie',
+            customOrderItemId: customOrderItemId || null,
+            ...(customOrderItemId && {
+              type: 'movie',
+              orderName: 'Custom Order' // Could be enhanced to get actual order name
+            }),
+            player: playData.player || 'Unknown Player',
+            message: `Playing "${foundMediaMetadata.title}" on ${playData.player || 'Plex'}`,
+            timestamp: new Date().toISOString()
+          }
+        };
+      } else {
+        // Fallback response format
+        androidResponse = {
+          type: 'PLAY_SUCCESS',
+          data: {
+            success: true,
+            ratingKey: ratingKeyToUse,
+            episodeRatingKey: episodeRatingKey,
+            movieRatingKey: movieRatingKey,
+            title: title,
+            mediaTitle: mediaTitle,
+            mediaType: mediaType,
+            ...(isEpisodeRequest && {
+              seriesTitle,
+              seasonNumber,
+              episodeNumber
+            }),
+            customOrderItemId,
+            player: playData.player || 'Unknown Player',
+            message: `Playing "${mediaTitle}" on ${playData.player || 'Plex'}`,
+            timestamp: new Date().toISOString()
+          }
+        };
+      }
+      
+      console.log('✅ Media playback successful:', JSON.stringify(androidResponse, null, 2));
+      res.json(androidResponse);
+    } else {
+      // Error response in Android format
+      const androidErrorResponse = {
+        type: 'PLAY_ERROR',
+        data: {
+          success: false,
+          ratingKey: ratingKeyToUse,
+          title: foundMediaMetadata?.title || mediaTitle,
+          mediaType: mediaType,
+          ...(isEpisodeRequest && {
+            seriesTitle,
+            seasonNumber,
+            episodeNumber
+          }),
+          customOrderItemId,
+          error: playData.error || 'Playback failed',
+          details: playData.details || 'Check Plex server connection and player availability',
+          timestamp: new Date().toISOString()
+        }
+      };
+      
+      console.error('❌ Media playback failed:', JSON.stringify(androidErrorResponse, null, 2));
+      res.status(playResponse.status).json(androidErrorResponse);
+    }
+    
+  } catch (error) {
+    console.error('❌ Error in Android media play endpoint:', error);
     
     const androidErrorResponse = {
       type: 'PLAY_ERROR',

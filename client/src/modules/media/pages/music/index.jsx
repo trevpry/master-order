@@ -1,8 +1,13 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import config from '../../../../config';
 import './Music.css';
 
 const Music = () => {
+  const navigate = useNavigate();
+  const location = useLocation();
+  const [searchParams, setSearchParams] = useSearchParams();
+  
   const [sections, setSections] = useState([]);
   const [artists, setArtists] = useState([]);
   const [artistsLoading, setArtistsLoading] = useState(false);
@@ -21,11 +26,17 @@ const Music = () => {
   const [playlists, setPlaylists] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [activeView, setActiveView] = useState('artists');
-  const [searchQuery, setSearchQuery] = useState('');
-  const [selectedSection, setSelectedSection] = useState('all');
+  
+  // Get navigation state from URL parameters
+  const activeView = searchParams.get('view') || 'artists';
+  const artistRatingKey = searchParams.get('artist');
+  const albumRatingKey = searchParams.get('album');
   const [selectedArtist, setSelectedArtist] = useState(null);
   const [selectedAlbum, setSelectedAlbum] = useState(null);
+  
+  const [searchQuery, setSearchQuery] = useState(searchParams.get('search') || '');
+  const [selectedSection, setSelectedSection] = useState(searchParams.get('section') || 'all');
+  
   const [extractingMetadata, setExtractingMetadata] = useState(new Set());
   const [metadataResults, setMetadataResults] = useState({});
   const [showMetadataModal, setShowMetadataModal] = useState(false);
@@ -49,6 +60,146 @@ const Music = () => {
   const [volume, setVolume] = useState(1);
   const [isLoading, setIsLoading] = useState(false);
   const audioRef = useRef(null);
+
+  // Helper functions for URL management
+  const updateUrlParams = (updates, replace = true) => {
+    const newParams = new URLSearchParams(searchParams);
+    
+    Object.entries(updates).forEach(([key, value]) => {
+      if (value === null || value === undefined || value === '') {
+        newParams.delete(key);
+      } else {
+        newParams.set(key, value);
+      }
+    });
+    
+    setSearchParams(newParams, { replace }); // Allow control over replace behavior
+  };
+
+  const navigateToView = (view, params = {}) => {
+    const updates = { view, ...params };
+    
+    // Clear irrelevant params based on view
+    if (view === 'artists') {
+      updates.artist = null;
+      updates.album = null;
+    } else if (view === 'albums' && !params.artist) {
+      updates.artist = null;
+      updates.album = null;
+    } else if (view === 'tracks' && !params.album && !params.artist) {
+      updates.artist = null;
+      updates.album = null;
+    }
+    
+    // For major view changes, create new history entries (not replace)
+    const newParams = new URLSearchParams(searchParams);
+    
+    Object.entries(updates).forEach(([key, value]) => {
+      if (value === null || value === undefined || value === '') {
+        newParams.delete(key);
+      } else {
+        newParams.set(key, value);
+      }
+    });
+    
+    setSearchParams(newParams); // This creates a new history entry
+  };
+
+  // Load artist/album data from URL parameters
+  useEffect(() => {
+    const loadDataFromUrl = async () => {
+      try {
+        // Load selected artist data if artistRatingKey exists
+        if (artistRatingKey && (!selectedArtist || selectedArtist.ratingKey !== artistRatingKey)) {
+          const artistRes = await fetch(`${config.apiBaseUrl}/api/music/artists/${artistRatingKey}`);
+          if (artistRes.ok) {
+            const artistData = await artistRes.json();
+            setSelectedArtist(artistData);
+            
+            // Load albums for this artist if we're in albums or tracks view
+            if (activeView === 'albums' || (activeView === 'tracks' && albumRatingKey)) {
+              const albumsRes = await fetch(`${config.apiBaseUrl}/api/music/albums/artist/${artistRatingKey}`);
+              if (albumsRes.ok) {
+                const albumsData = await albumsRes.json();
+                setAlbums(albumsData);
+              }
+            }
+          }
+        }
+        
+        // Load selected album data if albumRatingKey exists
+        if (albumRatingKey && (!selectedAlbum || selectedAlbum.ratingKey !== albumRatingKey)) {
+          const albumRes = await fetch(`${config.apiBaseUrl}/api/music/albums/${albumRatingKey}`);
+          if (albumRes.ok) {
+            const albumData = await albumRes.json();
+            setSelectedAlbum(albumData);
+            
+            // Load tracks for this album if we're in tracks view
+            if (activeView === 'tracks') {
+              const tracksRes = await fetch(`${config.apiBaseUrl}/api/music/tracks/album/${albumRatingKey}`);
+              if (tracksRes.ok) {
+                const tracksData = await tracksRes.json();
+                setTracks(tracksData);
+              }
+            }
+          }
+        }
+        
+        // Clear selected data if not in URL
+        if (!artistRatingKey && selectedArtist) {
+          setSelectedArtist(null);
+        }
+        if (!albumRatingKey && selectedAlbum) {
+          setSelectedAlbum(null);
+        }
+      } catch (error) {
+        console.error('Error loading data from URL:', error);
+        setError(error.message);
+      }
+    };
+
+    loadDataFromUrl();
+  }, [artistRatingKey, albumRatingKey, activeView]);
+
+  // Initialize component with URL parameters on first load
+  useEffect(() => {
+    const initializeFromUrl = async () => {
+      try {
+        setLoading(true);
+        
+        // Load static data first
+        await loadStaticData();
+        
+        // If there are URL parameters, load the specific data
+        if (artistRatingKey || albumRatingKey || activeView !== 'artists') {
+          // The loadDataFromUrl effect will handle this
+        } else {
+          // Default load for artists view
+          await refreshArtists();
+        }
+      } catch (error) {
+        console.error('Error initializing from URL:', error);
+        setError(error.message);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    initializeFromUrl();
+  }, []); // Only run on component mount
+
+  // Update local state when URL parameters change (for browser back/forward)
+  useEffect(() => {
+    const urlSearch = searchParams.get('search') || '';
+    const urlSection = searchParams.get('section') || 'all';
+    
+    if (urlSearch !== searchQuery) {
+      setSearchQuery(urlSearch);
+    }
+    if (urlSection !== selectedSection) {
+      setSelectedSection(urlSection);
+    }
+  }, [searchParams]);
 
   // Helper function to safely parse JSON responses
   const safeJsonParse = async (response, url) => {
@@ -269,15 +420,16 @@ const Music = () => {
   // Load static data that doesn't change often
   const loadStaticData = async () => {
     try {
-      const [sectionsRes, statsRes, collectionsRes, playlistsRes, customPlaylistsRes] = await Promise.all([
+      const [sectionsRes, statsRes, collectionsRes, playlistsRes, customPlaylistsRes, settingsRes] = await Promise.all([
         fetch(`${config.apiBaseUrl}/api/music/sections`),
         fetch(`${config.apiBaseUrl}/api/music/stats`),
         fetch(`${config.apiBaseUrl}/api/music/collections`),
         fetch(`${config.apiBaseUrl}/api/music/playlists`),
-        fetch(`${config.apiBaseUrl}/api/music/custom-playlists`)
+        fetch(`${config.apiBaseUrl}/api/music/custom-playlists`),
+        fetch(`${config.apiBaseUrl}/api/settings`)
       ]);
 
-      if (!sectionsRes.ok || !statsRes.ok || !collectionsRes.ok || !playlistsRes.ok || !customPlaylistsRes.ok) {
+      if (!sectionsRes.ok || !statsRes.ok || !collectionsRes.ok || !playlistsRes.ok || !customPlaylistsRes.ok || !settingsRes.ok) {
         // Check which specific requests failed
         const failedRequests = [];
         if (!sectionsRes.ok) failedRequests.push(`sections (${sectionsRes.status})`);
@@ -285,22 +437,33 @@ const Music = () => {
         if (!collectionsRes.ok) failedRequests.push(`collections (${collectionsRes.status})`);
         if (!playlistsRes.ok) failedRequests.push(`playlists (${playlistsRes.status})`);
         if (!customPlaylistsRes.ok) failedRequests.push(`custom-playlists (${customPlaylistsRes.status})`);
+        if (!settingsRes.ok) failedRequests.push(`settings (${settingsRes.status})`);
         
         throw new Error(`Failed to fetch music data: ${failedRequests.join(', ')}`);
       }
 
-      const [sectionsData, statsData, collectionsData, playlistsData, customPlaylistsData] = await Promise.all([
+      const [sectionsData, statsData, collectionsData, playlistsData, customPlaylistsData, settingsData] = await Promise.all([
         safeJsonParse(sectionsRes, `${config.apiBaseUrl}/api/music/sections`),
         safeJsonParse(statsRes, `${config.apiBaseUrl}/api/music/stats`),
         safeJsonParse(collectionsRes, `${config.apiBaseUrl}/api/music/collections`),
         safeJsonParse(playlistsRes, `${config.apiBaseUrl}/api/music/playlists`),
-        safeJsonParse(customPlaylistsRes, `${config.apiBaseUrl}/api/music/custom-playlists`)
+        safeJsonParse(customPlaylistsRes, `${config.apiBaseUrl}/api/music/custom-playlists`),
+        safeJsonParse(settingsRes, `${config.apiBaseUrl}/api/settings`)
       ]);
 
       setSections(sectionsData);
       console.log('Loaded sections:', sectionsData);
       setStats(statsData);
       setCollections(collectionsData);
+      
+      // Store Plex settings in config for image URLs
+      config.plexUrl = settingsData.plexUrl;
+      config.plexToken = settingsData.plexToken;
+      
+      console.log('Updated config with Plex settings:', { 
+        plexUrl: config.plexUrl, 
+        hasToken: !!config.plexToken 
+      });
       
       // Combine Plex playlists and custom playlists
       const combinedPlaylists = [
@@ -586,9 +749,12 @@ const Music = () => {
 
   const searchMusic = async () => {
     if (!searchQuery.trim()) {
+      updateUrlParams({ search: null }, true); // Replace current entry
       refreshArtists();
       return;
     }
+
+    updateUrlParams({ search: searchQuery.trim() }, true); // Replace current entry
 
     try {
       setLoading(true);
@@ -610,6 +776,7 @@ const Music = () => {
     console.log('Selected section object:', sections.find(s => s.sectionKey === sectionId));
     
     setSelectedSection(sectionId);
+    updateUrlParams({ section: sectionId === 'all' ? null : sectionId }, true); // Replace current entry
 
     try {
       setLoading(true);
@@ -619,6 +786,7 @@ const Music = () => {
       // Reset selected artist/album when filtering by section
       setSelectedArtist(null);
       setSelectedAlbum(null);
+      navigateToView('artists', { section: sectionId === 'all' ? null : sectionId });
       
       // Always refresh artists data
       await refreshArtists(sectionId);
@@ -642,7 +810,7 @@ const Music = () => {
 
   const selectArtist = async (artist) => {
     setSelectedArtist(artist);
-    setActiveView('albums');
+    navigateToView('albums', { artist: artist.ratingKey });
     
     try {
       const [albumsRes, tracksRes] = await Promise.all([
@@ -672,7 +840,10 @@ const Music = () => {
 
   const selectAlbum = async (album) => {
     setSelectedAlbum(album);
-    setActiveView('tracks');
+    navigateToView('tracks', { 
+      artist: selectedArtist?.ratingKey || artistRatingKey,
+      album: album.ratingKey 
+    });
     
     try {
       const tracksRes = await fetch(`${config.apiBaseUrl}/api/music/tracks/album/${album.ratingKey}`);
@@ -690,11 +861,70 @@ const Music = () => {
   };
 
   const resetToArtists = () => {
-    setActiveView('artists');
+    navigateToView('artists');
     setSelectedArtist(null);
     setSelectedAlbum(null);
     // Just refresh artists, no need to reload all data
     refreshArtists();
+  };
+
+  // Navigation helpers
+  const goBackToArtists = () => {
+    navigateToView('artists');
+    setSelectedArtist(null);
+    setSelectedAlbum(null);
+  };
+
+  const goBackToAlbums = () => {
+    if (selectedArtist || artistRatingKey) {
+      navigateToView('albums', { artist: selectedArtist?.ratingKey || artistRatingKey });
+      setSelectedAlbum(null);
+    } else {
+      // If no selected artist, go back to all albums view
+      navigateToView('albums');
+      loadAlbumsView();
+    }
+  };
+
+  const goBackFromTracks = () => {
+    if (selectedAlbum || albumRatingKey) {
+      // Coming from an album, go back to albums view
+      goBackToAlbums();
+    } else if (selectedArtist || artistRatingKey) {
+      // Coming from artist tracks, go back to artist albums
+      navigateToView('albums', { artist: selectedArtist?.ratingKey || artistRatingKey });
+    } else {
+      // In all tracks view, go back to artists
+      goBackToArtists();
+    }
+  };
+
+  // Get breadcrumb path
+  const getBreadcrumbs = () => {
+    const breadcrumbs = [{ label: 'Music', onClick: goBackToArtists }];
+    
+    if (selectedArtist) {
+      breadcrumbs.push({
+        label: 'Artists',
+        onClick: goBackToArtists
+      });
+      breadcrumbs.push({
+        label: selectedArtist.title,
+        onClick: () => navigateToView('albums', { artist: selectedArtist.ratingKey })
+      });
+    }
+    
+    if (selectedAlbum) {
+      breadcrumbs.push({
+        label: selectedAlbum.title,
+        onClick: () => navigateToView('tracks', { 
+          artist: selectedArtist?.ratingKey || artistRatingKey,
+          album: selectedAlbum.ratingKey 
+        })
+      });
+    }
+    
+    return breadcrumbs;
   };
 
   const extractAlbumMetadata = async (album) => {
@@ -1105,6 +1335,22 @@ const Music = () => {
           )}
         </div>
         
+        {/* Breadcrumb Navigation */}
+        <div className="breadcrumb-nav">
+          {getBreadcrumbs().map((crumb, index) => (
+            <React.Fragment key={index}>
+              {index > 0 && <span className="breadcrumb-separator">›</span>}
+              <button
+                className={`breadcrumb-item ${index === getBreadcrumbs().length - 1 ? 'current' : ''}`}
+                onClick={crumb.onClick}
+                disabled={index === getBreadcrumbs().length - 1}
+              >
+                {crumb.label}
+              </button>
+            </React.Fragment>
+          ))}
+        </div>
+        
         <div className="music-controls">
           <div className="search-section">
             <input
@@ -1138,19 +1384,19 @@ const Music = () => {
 
         <div className="view-navigation">
           <button 
-            onClick={resetToArtists}
+            onClick={() => navigateToView('artists')}
             className={`nav-button ${activeView === 'artists' ? 'active' : ''}`}
           >
             Artists
           </button>
           <button 
-            onClick={() => setActiveView('collections')}
+            onClick={() => navigateToView('collections')}
             className={`nav-button ${activeView === 'collections' ? 'active' : ''}`}
           >
             Collections
           </button>
           <button 
-            onClick={() => setActiveView('playlists')}
+            onClick={() => navigateToView('playlists')}
             className={`nav-button ${activeView === 'playlists' ? 'active' : ''}`}
           >
             Playlists
@@ -1158,7 +1404,7 @@ const Music = () => {
           <button 
             onClick={async () => {
               await loadAlbumsView();
-              setActiveView('albums');
+              navigateToView('albums');
             }}
             className={`nav-button ${activeView === 'albums' ? 'active' : ''}`}
           >
@@ -1167,7 +1413,7 @@ const Music = () => {
           <button 
             onClick={async () => {
               await loadTracksView();
-              setActiveView('tracks');
+              navigateToView('tracks');
             }}
             className={`nav-button ${activeView === 'tracks' ? 'active' : ''}`}
           >
@@ -1175,16 +1421,19 @@ const Music = () => {
           </button>
           {selectedArtist && (
             <button 
-              onClick={() => setActiveView('albums')}
-              className={`nav-button ${activeView === 'albums' ? 'active' : ''}`}
+              onClick={() => navigateToView('albums', { artist: selectedArtist.ratingKey })}
+              className={`nav-button ${activeView === 'albums' && artistRatingKey ? 'active' : ''}`}
             >
               Albums ({selectedArtist.title})
             </button>
           )}
           {selectedAlbum && (
             <button 
-              onClick={() => setActiveView('tracks')}
-              className={`nav-button ${activeView === 'tracks' ? 'active' : ''}`}
+              onClick={() => navigateToView('tracks', { 
+                artist: selectedArtist?.ratingKey || artistRatingKey,
+                album: selectedAlbum.ratingKey 
+              })}
+              className={`nav-button ${activeView === 'tracks' && albumRatingKey ? 'active' : ''}`}
             >
               Tracks ({selectedAlbum.title})
             </button>
@@ -1307,6 +1556,17 @@ const Music = () => {
                   className="artist-card"
                   onClick={() => selectArtist(artist)}
                 >
+                  {artist.thumb && (
+                    <div className="artist-image">
+                      <img 
+                        src={`${config.plexUrl}${artist.thumb}?X-Plex-Token=${config.plexToken}`}
+                        alt={artist.title}
+                        onError={(e) => {
+                          e.target.style.display = 'none';
+                        }}
+                      />
+                    </div>
+                  )}
                   <div className="artist-info">
                     <h3>{artist.title}</h3>
                   </div>
@@ -1337,12 +1597,25 @@ const Music = () => {
         )}
 
         {activeView === 'albums' && (
-          <div className="albums-grid">
-            {albums.length === 0 ? (
-              <div className="empty-state">
-                <p>No albums found for this artist.</p>
-              </div>
-            ) : (
+          <div className="albums-section">
+            <div className="section-header">
+              <button 
+                className="back-button" 
+                onClick={goBackToArtists}
+                title="Back to Artists"
+              >
+                ← Back
+              </button>
+              <h2>
+                {selectedArtist ? `Albums by ${selectedArtist.title}` : 'All Albums'}
+              </h2>
+            </div>
+            <div className="albums-grid">
+              {albums.length === 0 ? (
+                <div className="empty-state">
+                  <p>No albums found{selectedArtist ? ' for this artist' : ''}.</p>
+                </div>
+              ) : (
               albums.map(album => (
                 <div 
                   key={album.ratingKey} 
@@ -1354,11 +1627,19 @@ const Music = () => {
                       style={{ position: 'relative' }}
                     >
                       <img 
-                        src={`${config.apiBaseUrl}/api/plex-album-art/${album.ratingKey}?width=300&height=300`}
+                        src={`${config.plexUrl}${album.thumb}?X-Plex-Token=${config.plexToken}`}
                         alt={album.title}
                         onClick={() => selectAlbum(album)}
                         style={{ cursor: 'pointer', width: '100%', height: '100%' }}
+                        onLoad={() => console.log('Album image loaded:', album.title)}
                         onError={(e) => {
+                          console.error('Album image failed to load:', {
+                            album: album.title,
+                            thumb: album.thumb,
+                            url: e.target.src,
+                            plexUrl: config.plexUrl,
+                            hasToken: !!config.plexToken
+                          });
                           e.target.style.display = 'none';
                         }}
                       />
@@ -1461,11 +1742,27 @@ const Music = () => {
                 </button>
               </div>
             )}
+            </div>
           </div>
         )}
 
         {activeView === 'tracks' && (
-          <div className="tracks-list">
+          <div className="tracks-section">
+            <div className="section-header">
+              <button 
+                className="back-button" 
+                onClick={goBackFromTracks}
+                title={selectedAlbum ? `Back to ${selectedAlbum.title}` : selectedArtist ? `Back to ${selectedArtist.title}` : 'Back to Artists'}
+              >
+                ← Back
+              </button>
+              <h2>
+                {selectedAlbum ? `Tracks from ${selectedAlbum.title}` : 
+                 selectedArtist ? `All tracks by ${selectedArtist.title}` : 
+                 'All Tracks'}
+              </h2>
+            </div>
+            <div className="tracks-list">
             {!Array.isArray(tracks) || tracks.length === 0 ? (
               <div className="empty-state">
                 <p>No tracks found{selectedAlbum ? ` for ${selectedAlbum.title}` : ''}.</p>
@@ -1547,6 +1844,7 @@ const Music = () => {
                 </button>
               </div>
             )}
+            </div>
           </div>
         )}
 

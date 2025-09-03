@@ -1674,3 +1674,104 @@
     font-size: 0.9rem;
   }
 }
+
+/* Breadcrumb Navigation */
+.breadcrumb-nav {
+  display: flex;
+  align-items: center;
+  margin: 1rem 0;
+  padding: 0.5rem 0;
+  border-bottom: 1px solid #e9ecef;
+}
+
+.breadcrumb-item {
+  background: none;
+  border: none;
+  color: #007bff;
+  cursor: pointer;
+  font-size: 1rem;
+  padding: 0.5rem;
+  border-radius: 4px;
+  transition: background-color 0.2s;
+}
+
+.breadcrumb-item:hover:not(:disabled) {
+  background-color: #f8f9fa;
+  color: #0056b3;
+}
+
+.breadcrumb-item.current {
+  color: #6c757d;
+  cursor: default;
+  font-weight: 500;
+}
+
+.breadcrumb-item:disabled {
+  cursor: default;
+}
+
+.breadcrumb-separator {
+  margin: 0 0.5rem;
+  color: #6c757d;
+  font-size: 1.1rem;
+}
+
+/* Section Headers with Back Buttons */
+.section-header {
+  display: flex;
+  align-items: center;
+  margin-bottom: 2rem;
+  gap: 1rem;
+}
+
+.back-button {
+  background: #6c757d;
+  color: white;
+  border: none;
+  padding: 0.5rem 1rem;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.9rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  transition: background-color 0.2s;
+}
+
+.back-button:hover {
+  background: #5a6268;
+}
+
+.section-header h2 {
+  margin: 0;
+  color: #333;
+  font-size: 1.5rem;
+}
+
+/* Container adjustments for new navigation */
+.albums-section,
+.tracks-section {
+  width: 100%;
+}
+
+/* Responsive adjustments for navigation */
+@media (max-width: 768px) {
+  .breadcrumb-nav {
+    flex-wrap: wrap;
+    gap: 0.25rem;
+  }
+  
+  .section-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.5rem;
+  }
+  
+  .section-header h2 {
+    font-size: 1.25rem;
+  }
+  
+  .back-button {
+    align-self: flex-start;
+  }
+}
