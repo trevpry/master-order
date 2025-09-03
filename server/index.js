@@ -8902,7 +8902,15 @@ app.get('/api/android/up-next', async (req, res) => {
   
   try {
     // Call the internal getNextEpisode function directly to ensure consistent data
+    console.log('📱 Calling getNextEpisode() directly...');
     const data = await getNextEpisode(); // This handles order type selection internally
+    
+    console.log('📱 getNextEpisode() returned:', {
+      orderType: data?.orderType,
+      title: data?.title,
+      ratingKey: data?.ratingKey,
+      episodeRatingKey: data?.episodeRatingKey
+    });
     
     let upNextData;
     // If movies were selected, use the new getNextMovie function
@@ -8916,6 +8924,10 @@ app.get('/api/android/up-next', async (req, res) => {
       // TV General selection
       upNextData = data;
     }
+    
+    // Get base URL for Android API (needed for artwork URLs)
+    const baseUrl = getAndroidApiBaseUrl();
+    console.log('📱 Using base URL for Android API:', baseUrl);
     console.log('📱 Up next data received:', JSON.stringify(upNextData, null, 2));
     
     if (!upNextData || upNextData.error) {
