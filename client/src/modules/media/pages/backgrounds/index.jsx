@@ -198,6 +198,85 @@ const Backgrounds = () => {
     }
   };
 
+  // Edit gallery
+  const [showEditGallery, setShowEditGallery] = useState(false);
+  const [editingGallery, setEditingGallery] = useState(null);
+  const [editGalleryName, setEditGalleryName] = useState('');
+  const [editGalleryDescription, setEditGalleryDescription] = useState('');
+
+  const handleEditGallery = (gallery, event) => {
+    event.stopPropagation(); // Prevent gallery selection
+    setEditingGallery(gallery);
+    setEditGalleryName(gallery.name);
+    setEditGalleryDescription(gallery.description || '');
+    setShowEditGallery(true);
+  };
+
+  const handleUpdateGallery = async () => {
+    if (!editGalleryName.trim()) {
+      toast.error('Please enter a gallery name');
+      return;
+    }
+
+    try {
+      const response = await fetch(`${config.apiBaseUrl}/api/background-galleries/${editingGallery.id}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          name: editGalleryName.trim(),
+          description: editGalleryDescription.trim()
+        })
+      });
+
+      if (!response.ok) throw new Error('Failed to update gallery');
+      
+      toast.success('Gallery updated successfully');
+      
+      fetchGalleries(); // Refresh galleries
+      setShowEditGallery(false);
+      setEditingGallery(null);
+      setEditGalleryName('');
+      setEditGalleryDescription('');
+      
+    } catch (error) {
+      console.error('Update gallery error:', error);
+      toast.error('Failed to update gallery');
+    }
+  };
+
+  // Delete gallery
+  const handleDeleteGallery = async (gallery, event) => {
+    event.stopPropagation(); // Prevent gallery selection
+    
+    if (!confirm(`Are you sure you want to delete the gallery "${gallery.name}"? This will remove all backgrounds from the gallery but not delete the background files themselves.`)) {
+      return;
+    }
+
+    try {
+      const response = await fetch(`${config.apiBaseUrl}/api/background-galleries/${gallery.id}`, {
+        method: 'DELETE'
+      });
+
+      if (!response.ok) throw new Error('Failed to delete gallery');
+      
+      toast.success('Gallery deleted successfully');
+      
+      fetchGalleries(); // Refresh galleries
+      
+      // Clear selected gallery if it was the one deleted
+      if (selectedGallery?.id === gallery.id) {
+        setSelectedGallery(null);
+        setGalleryBackgrounds([]);
+      }
+      
+    } catch (error) {
+      console.error('Delete gallery error:', error);
+      toast.error('Failed to delete gallery');
+    }
+  };
+
   // Load gallery backgrounds
   const handleSelectGallery = async (gallery) => {
     setSelectedGallery(gallery);
@@ -435,6 +514,45 @@ const Backgrounds = () => {
           </div>
         )}
 
+        {/* Edit Gallery Modal */}
+        {showEditGallery && (
+          <div className="modal-overlay">
+            <div className="modal">
+              <h3>Edit Gallery</h3>
+              <input
+                type="text"
+                placeholder="Gallery name"
+                value={editGalleryName}
+                onChange={(e) => setEditGalleryName(e.target.value)}
+                className="gallery-name-input"
+              />
+              <textarea
+                placeholder="Gallery description (optional)"
+                value={editGalleryDescription}
+                onChange={(e) => setEditGalleryDescription(e.target.value)}
+                className="gallery-description-input"
+                rows="3"
+              />
+              <div className="gallery-form-actions">
+                <button onClick={handleUpdateGallery} className="save-btn">
+                  Update
+                </button>
+                <button 
+                  onClick={() => {
+                    setShowEditGallery(false);
+                    setEditingGallery(null);
+                    setEditGalleryName('');
+                    setEditGalleryDescription('');
+                  }}
+                  className="cancel-btn"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
         <div className="galleries-list">
           {galleries.map(gallery => (
             <div
@@ -442,9 +560,27 @@ const Backgrounds = () => {
               className={`gallery-card ${selectedGallery?.id === gallery.id ? 'selected' : ''}`}
               onClick={() => handleSelectGallery(gallery)}
             >
-              <h4>{gallery.name}</h4>
-              <p>{gallery.description || 'No description'}</p>
-              <span className="background-count">{gallery.backgroundCount || 0} backgrounds</span>
+              <div className="gallery-info">
+                <h4>{gallery.name}</h4>
+                <p>{gallery.description || 'No description'}</p>
+                <span className="background-count">{gallery.backgroundCount || 0} backgrounds</span>
+              </div>
+              <div className="gallery-actions">
+                <button
+                  onClick={(e) => handleEditGallery(gallery, e)}
+                  className="edit-btn"
+                  title="Edit gallery"
+                >
+                  ✏️
+                </button>
+                <button
+                  onClick={(e) => handleDeleteGallery(gallery, e)}
+                  className="delete-btn"
+                  title="Delete gallery"
+                >
+                  🗑️
+                </button>
+              </div>
             </div>
           ))}
         </div>

@@ -11688,7 +11688,7 @@ app.post('/api/backgrounds/download-gallery-bulk', async (req, res) => {
     let gallery = null;
     if (galleryId) {
       gallery = await prisma.BackgroundGallery.findUnique({
-        where: { id: galleryId }
+        where: { id: parseInt(galleryId, 10) }
       });
     }
     
