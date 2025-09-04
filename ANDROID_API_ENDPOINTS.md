@@ -93,7 +93,16 @@ Currently, no authentication is required for these endpoints. They are designed 
     "ratingKey": "54321",
     "plexId": "54321",
     "webUrl": "https://example.com/video-url",
-    "customOrderId": 456
+    "customOrderId": 456,
+    "customOrderItemId": 789,
+    "playlistName": "My Playlist",
+    "playlistType": "plex",
+    "backgroundGalleryName": "Background Gallery",
+    "backgroundGalleryId": 321,
+    "seasonNumber": 2,
+    "episodeNumber": 5,
+    "episodeTitle": "Episode Title",
+    "seriesTitle": "Series Name"
   }
 }
 ```
@@ -145,6 +154,16 @@ Currently, no authentication is required for these endpoints. They are designed 
   - `plexId`: Plex identifier for direct media access (if applicable, same as ratingKey)
   - `webUrl`: Direct web video URL (for webvideo type items)
   - `customOrderId`: ID of the parent custom order
+  - `customOrderItemId`: Specific ID of this item within the custom order
+  - `playlistName`: Name of associated playlist (if any)
+  - `playlistType`: Type of playlist ("plex" or "custom", if any)
+  - `backgroundGalleryName`: Name of associated background gallery (if any)
+  - `backgroundGalleryId`: ID of associated background gallery (if any)
+  - Episode-specific fields (only included for TV episode items):
+    - `seasonNumber`: Season number (integer)
+    - `episodeNumber`: Episode number within the season (integer)  
+    - `episodeTitle`: Specific episode title
+    - `seriesTitle`: Name of the TV series
 
 **Content Selection Logic**: The endpoint uses the same logic as the web interface to determine what content to return based on current settings and order type configuration.
 
@@ -249,9 +268,9 @@ curl -X POST "http://localhost:3001/api/android/play-plex" \
 
 ---
 
-### 7. Play Episode or Movie by Identification (POST /api/android/play-episode)
+### 7. Play Episode, Movie, or Web Video by Identification (POST /api/android/play-episode)
 
-**Purpose**: Initiate playback of specific media content, supporting both TV episodes (identified by series/season/episode) and movies (identified by title). Primarily designed for custom order items that need to be identified by metadata rather than direct Plex rating keys.
+**Purpose**: Initiate playback of specific media content, supporting TV episodes (identified by series/season/episode), movies (identified by title), and web videos (identified by URL). Primarily designed for custom order items that need to be identified by metadata rather than direct Plex rating keys. For web videos, automatically starts a viewing session that can be managed through the viewing session endpoints.
 
 **Request Body for Episodes**:
 ```json
@@ -271,6 +290,16 @@ curl -X POST "http://localhost:3001/api/android/play-plex" \
 }
 ```
 
+**Request Body for Web Videos**:
+```json
+{
+  "webUrl": "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+  "mediaType": "webvideo",
+  "title": "Educational Video",
+  "customOrderItemId": 789
+}
+```
+
 **Request Fields**:
 - **For Episodes**:
   - `seriesTitle`: Name of the TV series (string, required for episodes)
@@ -278,6 +307,9 @@ curl -X POST "http://localhost:3001/api/android/play-plex" \
   - `episodeNumber`: Episode number within the season (integer, required for episodes)
 - **For Movies**:
   - `movieTitle`: Title of the movie (string, required for movies)
+- **For Web Videos**:
+  - `webUrl`: Direct URL to the web video (string, required for web videos)
+  - `mediaType`: Must be "webvideo" (string, required for web videos)
 - **Common Fields**:
   - `customOrderItemId`: ID of the custom order item (integer, optional)
   - `title`: Fallback title if movieTitle not provided (string, optional)
@@ -332,6 +364,32 @@ curl -X POST "http://localhost:3001/api/android/play-plex" \
     "player": "Living Room TV",
     "message": "Playing \"Star Wars: A New Hope\" on Living Room TV",
     "timestamp": "2024-01-15T10:30:00.000Z"
+  }
+}
+```
+
+**Web Video Response Format**:
+```json
+{
+  "type": "PLAY_CUSTOM_ORDER_ITEM",
+  "data": {
+    "success": true,
+    "id": 789,
+    "title": "Educational Video",
+    "type": "webvideo",
+    "orderName": "Custom Order",
+    "summary": "",
+    "duration": 0,
+    "artworkUrl": null,
+    "webUrl": "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+    "customOrderItemId": 789,
+    "viewingSession": {
+      "sessionId": 101,
+      "startedAt": "2024-01-15T11:00:00.000Z",
+      "isPaused": false
+    },
+    "message": "Started viewing session for \"Educational Video\"",
+    "timestamp": "2024-01-15T11:00:00.000Z"
   }
 }
 ```
@@ -399,24 +457,38 @@ curl -X POST "http://localhost:3001/api/android/play-plex" \
   - `studio`: Movie studio/distributor
   - `rating`: Movie rating (0-10)
   
+- **Web Video Responses**:
+  - `type`: Always `PLAY_CUSTOM_ORDER_ITEM` for web videos
+  - `id`: Custom order item ID
+  - `title`: Web video title
+  - `type`: Always "webvideo"
+  - `orderName`: Name of the custom order containing this video
+  - `webUrl`: Direct URL to the web video
+  - `viewingSession`: Object containing viewing session information (if successfully started):
+    - `sessionId`: Unique identifier for the viewing session
+    - `startedAt`: ISO timestamp when the session was started
+    - `isPaused`: Boolean indicating if the session is currently paused (initially false)
+  
 - **Common Fields**:
   - `success`: Boolean indicating if playback started successfully
   - `artworkUrl`: Network-accessible artwork URL for Android consumption
-  - `thumb`/`art`: Plex artwork paths
-  - `mediaType`: Type of media (`episode` or `movie`)
+  - `thumb`/`art`: Plex artwork paths (not applicable for web videos)
+  - `mediaType`: Type of media (`episode`, `movie`, or `webvideo`)
   - `customOrderItemId`: Custom order item ID (if applicable)
-  - `player`: Name of the Plex player used
+  - `player`: Name of the Plex player used (not applicable for web videos)
   - `message`: Human-readable success/error message
   - `timestamp`: ISO timestamp of the response
 
 **Functionality**:
 - **Episode Support**: Searches Plex libraries to find exact episodes based on series title, season, and episode number
 - **Movie Support**: Searches Plex libraries to find movies based on movie title
+- **Web Video Support**: Handles web video playback by automatically starting a viewing session, enabling pause/resume/stop functionality
 - **Custom Order Integration**: Returns appropriate response types for custom order items vs. regular Plex content
+- **Viewing Session Management**: For web videos, automatically initiates a viewing session that can be controlled via `/api/android/viewing/pause` and `/api/android/viewing/stop` endpoints
 - **Fallback Handling**: For episode requests, falls back to movie search if no TV series match found
-- **Webhook Integration**: Sends webhook notifications to trigger actual playback on connected Plex clients
+- **Webhook Integration**: Sends webhook notifications to trigger actual playback on connected Plex clients (for Plex content)
 - **Consistent Response Format**: Uses same structured response format as other Android API endpoints
-- **Artwork URL Generation**: Provides network-accessible artwork URLs for Android consumption
+- **Artwork URL Generation**: Provides network-accessible artwork URLs for Android consumption (Plex content only)
 
 **Example Usage**:
 
@@ -439,6 +511,18 @@ curl -X POST "http://localhost:3001/api/android/play-episode" \
   -d '{
     "movieTitle": "Star Wars: A New Hope",
     "customOrderItemId": 456
+  }'
+```
+
+*Play a web video:*
+```bash
+curl -X POST "http://localhost:3001/api/android/play-episode" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "webUrl": "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+    "mediaType": "webvideo",
+    "title": "Educational Video",
+    "customOrderItemId": 789
   }'
 ```
 
@@ -752,7 +836,7 @@ curl -X POST "http://localhost:3001/api/android/mark-watched" \
 
 **Endpoint**: `GET /api/android/gallery/:galleryName/random-image`
 
-**Description**: Returns a path to a random image from the specified gallery. The gallery name matching is case-insensitive and supports partial matching.
+**Description**: Returns a random image from the specified background gallery with complete metadata. Uses exact name matching to find the gallery and returns comprehensive image information including direct URLs, dimensions, and file details.
 
 **Parameters**:
 - `galleryName` (URL parameter): Name of the gallery to search for
@@ -760,11 +844,24 @@ curl -X POST "http://localhost:3001/api/android/mark-watched" \
 **Response Format**:
 ```json
 {
-  "type": "RANDOM_IMAGE",
+  "type": "RANDOM_IMAGE_SUCCESS",
   "data": {
-    "imagePath": "/path/to/random/image.jpg",
-    "galleryName": "My Photo Gallery",
-    "galleryId": 123
+    "success": true,
+    "galleryName": "Star Warss",
+    "galleryId": 1,
+    "galleryDescription": null,
+    "image": {
+      "id": 82,
+      "filename": "bg-1757010659871-3618122.jpg",
+      "originalName": "Image 63",
+      "url": "https://i.imgur.com/YZocsK0.jpg",
+      "width": 1920,
+      "height": 1080,
+      "size": 482147,
+      "mimetype": "image/jpeg"
+    },
+    "totalImages": 145,
+    "timestamp": "2025-09-04T23:08:57.741Z"
   }
 }
 ```
@@ -772,9 +869,12 @@ curl -X POST "http://localhost:3001/api/android/mark-watched" \
 **Error Response**:
 ```json
 {
-  "type": "ERROR",
+  "type": "RANDOM_IMAGE_ERROR",
   "data": {
-    "error": "Gallery 'NonExistentGallery' not found"
+    "error": "Gallery not found",
+    "message": "Gallery \"NonExistentGallery\" does not exist",
+    "galleryName": "NonExistentGallery",
+    "timestamp": "2025-09-04T23:08:57.741Z"
   }
 }
 ```
@@ -784,14 +884,50 @@ curl -X POST "http://localhost:3001/api/android/mark-watched" \
 GET /api/android/gallery/vacation%20photos/random-image
 ```
 
+**Response Fields**:
+- `success`: Boolean indicating successful operation
+- `galleryName`: Name of the gallery containing the image
+- `galleryId`: Unique identifier for the gallery
+- `galleryDescription`: Gallery description (may be null)
+- `image`: Object containing complete image metadata:
+  - `id`: Unique image identifier in the database
+  - `filename`: Image filename on the server
+  - `originalName`: Original name or title of the image
+  - `url`: Direct URL to the image (may be external URL or server-based path)
+  - `width`: Image width in pixels
+  - `height`: Image height in pixels  
+  - `size`: File size in bytes
+  - `mimetype`: MIME type of the image (e.g., "image/jpeg")
+- `totalImages`: Total number of images available in the gallery
+- `timestamp`: ISO timestamp of the response
+
+**Notes**:
+- Gallery name matching uses exact match (case-sensitive)
+- Images are selected from the `BackgroundImage` table associated with `BackgroundGallery`
+- URLs may be direct external links (e.g., Imgur) or server-relative paths
+- All image metadata is preserved from the database for client-side use
+
 **Example Response**:
 ```json
 {
-  "type": "RANDOM_IMAGE",
+  "type": "RANDOM_IMAGE_SUCCESS",
   "data": {
-    "imagePath": "/galleries/vacation-photos/IMG_001.jpg",
+    "success": true,
     "galleryName": "Vacation Photos",
-    "galleryId": 45
+    "galleryId": 45,
+    "galleryDescription": "Summer vacation memories",
+    "image": {
+      "id": 150,
+      "filename": "vacation_beach_001.jpg",
+      "originalName": "Beach Sunset",
+      "url": "https://i.imgur.com/abc123.jpg",
+      "width": 1920,
+      "height": 1080,
+      "size": 524288,
+      "mimetype": "image/jpeg"
+    },
+    "totalImages": 87,
+    "timestamp": "2025-09-04T23:08:57.741Z"
   }
 }
 ```
@@ -800,7 +936,7 @@ GET /api/android/gallery/vacation%20photos/random-image
 
 **Endpoint**: `GET /api/android/playlist/:playlistName/random-track`
 
-**Description**: Returns a random track from the specified playlist with full Plex streaming capabilities. Includes the complete Plex streaming URL that can be played directly on Android devices, along with comprehensive artwork metadata.
+**Description**: Returns a random track from the specified playlist with full Plex streaming capabilities. Searches both Plex playlists and custom playlists for exact name matches. Includes the complete Plex streaming URL that can be played directly on Android devices, along with comprehensive artwork metadata and track information.
 
 **Parameters**:
 - `playlistName` (URL parameter): Name of the playlist to search for
@@ -808,27 +944,31 @@ GET /api/android/gallery/vacation%20photos/random-image
 **Response Format**:
 ```json
 {
-  "type": "RANDOM_TRACK",
+  "type": "RANDOM_TRACK_SUCCESS",
   "data": {
+    "success": true,
+    "playlistName": "Rock Classics",
+    "playlistType": "plex",
+    "playlistId": 15,
+    "playlistDescription": "Best rock songs of all time",
     "track": {
-      "id": 12345,
-      "title": "Song Title",
-      "artist": "Artist Name",
-      "album": "Album Name",
-      "duration": 240000,
-      "year": 2023,
-      "genre": "Rock",
-      "trackNumber": 5,
-      "discNumber": 1
+      "ratingKey": "98765",
+      "title": "Bohemian Rhapsody",
+      "artist": "Queen",
+      "album": "A Night at the Opera",
+      "duration": 355000,
+      "type": "track",
+      "streamUrl": "http://192.168.1.100:32400/library/parts/98765/1234567890/file.mp3?X-Plex-Token=abc123def456",
+      "artworkUrl": "http://192.168.1.100:32400/library/metadata/98760/thumb?X-Plex-Token=abc123def456",
+      "plexUrl": "http://192.168.1.100:32400",
+      "year": 1975,
+      "index": 11,
+      "parentIndex": 1,
+      "rating": 9.5,
+      "addedAt": "2024-01-15T10:30:00.000Z"
     },
-    "plexStreamingUrl": "http://your-plex-server:32400/library/metadata/12345/file.mp3?X-Plex-Token=your-token",
-    "artwork": {
-      "trackArtwork": "http://your-plex-server:32400/library/metadata/12345/thumb?X-Plex-Token=your-token",
-      "albumArtwork": "http://your-plex-server:32400/library/metadata/12340/thumb?X-Plex-Token=your-token",
-      "artistArtwork": "http://your-plex-server:32400/library/metadata/12300/thumb?X-Plex-Token=your-token"
-    },
-    "playlistName": "My Favorite Songs",
-    "playlistId": 67
+    "totalTracks": 42,
+    "timestamp": "2025-09-04T23:08:57.741Z"
   }
 }
 ```
@@ -836,9 +976,12 @@ GET /api/android/gallery/vacation%20photos/random-image
 **Error Response**:
 ```json
 {
-  "type": "ERROR",
+  "type": "RANDOM_TRACK_ERROR",
   "data": {
-    "error": "Playlist 'NonExistentPlaylist' not found"
+    "error": "Playlist not found",
+    "message": "Playlist \"NonExistentPlaylist\" does not exist in Plex or Custom playlists",
+    "playlistName": "NonExistentPlaylist",
+    "timestamp": "2025-09-04T23:08:57.741Z"
   }
 }
 ```
@@ -848,41 +991,73 @@ GET /api/android/gallery/vacation%20photos/random-image
 GET /api/android/playlist/rock%20classics/random-track
 ```
 
+**Response Fields**:
+- `success`: Boolean indicating successful operation
+- `playlistName`: Name of the playlist containing the track
+- `playlistType`: Type of playlist (`plex` or `custom`)
+- `playlistId`: Unique identifier for the playlist (ratingKey for Plex, database ID for custom)
+- `playlistDescription`: Playlist description or summary (may be null)
+- `track`: Object containing complete track metadata:
+  - `ratingKey`: Plex rating key for the track (for streaming)
+  - `title`: Track title
+  - `artist`: Artist name (from Plex metadata or database)
+  - `album`: Album title (from Plex metadata or database)
+  - `duration`: Track duration in milliseconds
+  - `type`: Media type (typically "track")
+  - `streamUrl`: Direct Plex streaming URL with authentication token
+  - `artworkUrl`: Artwork URL with fallback hierarchy (track → album → artist)
+  - `plexUrl`: Base Plex server URL for reference
+  - `year`: Release year (from Plex metadata)
+  - `index`: Track number within the album
+  - `parentIndex`: Disc number (for multi-disc albums)
+  - `rating`: Track rating (from Plex metadata)
+  - `addedAt`: When the track was added to the playlist
+- `totalTracks`: Total number of tracks available in the playlist
+- `timestamp`: ISO timestamp of the response
+
 **Example Response**:
 ```json
 {
-  "type": "RANDOM_TRACK",
+  "type": "RANDOM_TRACK_SUCCESS",
   "data": {
+    "success": true,
+    "playlistName": "Rock Classics",
+    "playlistType": "plex",
+    "playlistId": 15,
+    "playlistDescription": "Classic rock hits from the 70s and 80s",
     "track": {
-      "id": 98765,
+      "ratingKey": "98765",
       "title": "Bohemian Rhapsody",
       "artist": "Queen",
       "album": "A Night at the Opera",
       "duration": 355000,
+      "type": "track",
+      "streamUrl": "http://192.168.1.100:32400/library/parts/98765/1234567890/file.mp3?X-Plex-Token=abc123def456",
+      "artworkUrl": "http://192.168.1.100:32400/library/metadata/98760/thumb?X-Plex-Token=abc123def456",
+      "plexUrl": "http://192.168.1.100:32400",
       "year": 1975,
-      "genre": "Rock",
-      "trackNumber": 11,
-      "discNumber": 1
+      "index": 11,
+      "parentIndex": 1,
+      "rating": 9.5,
+      "addedAt": "2024-01-15T10:30:00.000Z"
     },
-    "plexStreamingUrl": "http://192.168.1.100:32400/library/metadata/98765/file.mp3?X-Plex-Token=abc123def456",
-    "artwork": {
-      "trackArtwork": null,
-      "albumArtwork": "http://192.168.1.100:32400/library/metadata/98760/thumb?X-Plex-Token=abc123def456",
-      "artistArtwork": "http://192.168.1.100:32400/library/metadata/98700/thumb?X-Plex-Token=abc123def456"
-    },
-    "playlistName": "Rock Classics",
-    "playlistId": 15
+    "totalTracks": 42,
+    "timestamp": "2025-09-04T23:08:57.741Z"
   }
 }
 ```
 
 **Notes**:
-- The `plexStreamingUrl` is a direct streaming URL compatible with Android MediaPlayer
-- Artwork URLs are prioritized: track artwork → album artwork → artist artwork
-- All artwork URLs include the necessary Plex authentication token
+- The `streamUrl` is a direct Plex streaming URL compatible with Android MediaPlayer
+- Artwork URL is provided in a single `artworkUrl` field with fallback hierarchy: track artwork → album artwork → artist artwork
+- All URLs include the necessary Plex authentication token
 - Duration is provided in milliseconds for Android compatibility
-- Playlist name matching is case-insensitive and supports partial matching
+- Playlist name matching uses exact match (case-sensitive)
+- Searches both Plex playlists (`PlexPlaylist` table) and custom playlists (`CustomPlaylist` table)
+- Response includes playlist type (`plex` or `custom`) for client-side handling
+- Additional metadata includes track index (track number), parent index (disc number), and rating
 - If no tracks are found in the playlist, an appropriate error message is returned
+- Supports both Plex playlists (with `ratingKey`) and custom playlists (with database `id`)
 
 ---
 
@@ -923,7 +1098,8 @@ GET /api/android/playlist/rock%20classics/random-track
       "tempMax": 25.8,
       "humidity": 65,
       "pressure": 1013,
-      "visibility": 10.0
+      "visibility": 10.0,
+      "uvIndex": null
     },
     "weather": {
       "condition": "Clear",
@@ -938,6 +1114,14 @@ GET /api/android/playlist/rock%20classics/random-track
     },
     "clouds": {
       "cloudiness": 0
+    },
+    "rain": {
+      "oneHour": null,
+      "threeHours": null
+    },
+    "snow": {
+      "oneHour": null,
+      "threeHours": null
     },
     "units": {
       "system": "metric",

@@ -9778,9 +9778,9 @@ app.post('/api/android/play-plex', async (req, res) => {
   }
 });
 
-// Android companion app endpoint - Play Custom Order Episode or Movie
+// Android companion app endpoint - Play Custom Order Episode, Movie, or Web Video
 app.post('/api/android/play-episode', async (req, res) => {
-  console.log('📱 Android app requesting custom order episode/movie playback...');
+  console.log('📱 Android app requesting custom order media playback...');
   
   try {
     const { 
@@ -9788,31 +9788,119 @@ app.post('/api/android/play-episode', async (req, res) => {
       seasonNumber, 
       episodeNumber, 
       movieTitle, // Support direct movie title for movie playback
+      webUrl, // Support web video URL for web video playback
+      mediaType: requestedMediaType, // Support explicit media type
       customOrderItemId, 
       title = 'Unknown Media' 
     } = req.body;
     
-    // Determine if this is an episode or movie request
+    // Determine media type and request type
     const isEpisodeRequest = seriesTitle && seasonNumber !== undefined && episodeNumber !== undefined;
-    const isMovieRequest = movieTitle || (!isEpisodeRequest && title);
+    const isMovieRequest = movieTitle || (!isEpisodeRequest && !webUrl && title);
+    const isWebVideoRequest = webUrl || requestedMediaType === 'webvideo';
     
-    if (!isEpisodeRequest && !isMovieRequest) {
+    if (!isEpisodeRequest && !isMovieRequest && !isWebVideoRequest) {
       return res.status(400).json({ 
         type: 'PLAY_ERROR',
         data: {
           error: 'Missing media identification',
-          message: 'Either provide (seriesTitle, seasonNumber, episodeNumber) for episodes or movieTitle for movies',
-          received: { seriesTitle, seasonNumber, episodeNumber, movieTitle, title }
+          message: 'Provide (seriesTitle, seasonNumber, episodeNumber) for episodes, movieTitle for movies, or webUrl/mediaType for web videos',
+          received: { seriesTitle, seasonNumber, episodeNumber, movieTitle, webUrl, requestedMediaType, title }
         }
       });
     }
     
     const mediaTitle = isEpisodeRequest ? seriesTitle : (movieTitle || title);
-    const mediaType = isEpisodeRequest ? 'episode' : 'movie';
+    const mediaType = isEpisodeRequest ? 'episode' : isWebVideoRequest ? 'webvideo' : 'movie';
     
-    console.log(`📱 Android ${mediaType} request - ${mediaTitle}${isEpisodeRequest ? ` S${seasonNumber}E${episodeNumber}` : ''} (customOrderItemId: ${customOrderItemId})`);
+    console.log(`📱 Android ${mediaType} request - ${mediaTitle}${isEpisodeRequest ? ` S${seasonNumber}E${episodeNumber}` : isWebVideoRequest ? ` (webURL: ${webUrl})` : ''} (customOrderItemId: ${customOrderItemId})`);
     
-    // Try to find the media's rating key by searching Plex
+    // Handle web video playback
+    if (isWebVideoRequest) {
+      console.log('📱 Processing web video playback request...');
+      
+      // For web videos, automatically start a viewing session
+      try {
+        const baseUrl = getAndroidApiBaseUrl();
+        const viewingSessionResponse = await fetch(`${baseUrl}/api/android/viewing/start`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            mediaType: 'webvideo',
+            title: mediaTitle,
+            seriesTitle: seriesTitle,
+            customOrderItemId: customOrderItemId
+          })
+        });
+        
+        const viewingSessionData = await viewingSessionResponse.json();
+        
+        if (viewingSessionResponse.ok) {
+          console.log('✅ Viewing session started for web video:', viewingSessionData);
+          
+          // Success response for web video with viewing session info
+          const androidResponse = {
+            type: 'PLAY_CUSTOM_ORDER_ITEM',
+            data: {
+              success: true,
+              id: customOrderItemId,
+              title: mediaTitle,
+              type: 'webvideo',
+              orderName: 'Custom Order', // Could be enhanced to get actual order name
+              summary: '',
+              duration: 0,
+              artworkUrl: null,
+              webUrl: webUrl,
+              customOrderItemId: customOrderItemId,
+              viewingSession: {
+                sessionId: viewingSessionData.data?.sessionId,
+                startedAt: viewingSessionData.data?.startedAt,
+                isPaused: false
+              },
+              message: `Started viewing session for "${mediaTitle}"`,
+              timestamp: new Date().toISOString()
+            }
+          };
+          
+          console.log('✅ Web video playback successful with viewing session:', JSON.stringify(androidResponse, null, 2));
+          res.json(androidResponse);
+          return;
+        } else {
+          console.warn('⚠️ Failed to start viewing session, proceeding without it:', viewingSessionData);
+          // Continue with regular web video response
+        }
+      } catch (viewingError) {
+        console.warn('⚠️ Error starting viewing session, proceeding without it:', viewingError);
+        // Continue with regular web video response
+      }
+      
+      // Regular web video response (fallback if viewing session fails)
+      const androidResponse = {
+        type: 'PLAY_CUSTOM_ORDER_ITEM',
+        data: {
+          success: true,
+          id: customOrderItemId,
+          title: mediaTitle,
+          type: 'webvideo',
+          orderName: 'Custom Order',
+          summary: '',
+          duration: 0,
+          artworkUrl: null,
+          webUrl: webUrl,
+          customOrderItemId: customOrderItemId,
+          message: `Playing web video "${mediaTitle}"`,
+          timestamp: new Date().toISOString()
+        }
+      };
+      
+      console.log('✅ Web video playback successful:', JSON.stringify(androidResponse, null, 2));
+      res.json(androidResponse);
+      return;
+    }
+    
+    // Try to find the media's rating key by searching Plex (for episodes/movies)
     let episodeRatingKey = null;
     let movieRatingKey = null;
     let foundMediaMetadata = null;
@@ -10736,19 +10824,10 @@ app.get('/api/android/gallery/:galleryName/random-image', async (req, res) => {
       });
     }
     
-    // Find the gallery by name (case-insensitive for SQLite compatibility)
+    // Find the gallery by name (exact match only)
     const gallery = await prisma.BackgroundGallery.findFirst({
       where: {
-        name: galleryName // Exact match first
-      },
-      include: {
-        backgrounds: true
-      }
-    }) || await prisma.BackgroundGallery.findFirst({
-      where: {
-        name: {
-          contains: galleryName // Fallback to partial match
-        }
+        name: galleryName
       },
       include: {
         backgrounds: true
@@ -10864,19 +10943,10 @@ app.get('/api/android/playlist/:playlistName/random-track', async (req, res) => 
     let playlistType = null;
     let tracks = [];
     
-    // Try Plex playlists first (case-insensitive for SQLite compatibility)
+    // Try Plex playlists first (exact match only)
     const plexPlaylist = await prisma.plexPlaylist.findFirst({
       where: {
-        title: playlistName // Exact match first
-      },
-      include: {
-        items: true
-      }
-    }) || await prisma.plexPlaylist.findFirst({
-      where: {
-        title: {
-          contains: playlistName // Fallback to partial match
-        }
+        title: playlistName
       },
       include: {
         items: true
@@ -10888,19 +10958,10 @@ app.get('/api/android/playlist/:playlistName/random-track', async (req, res) => 
       playlistType = 'plex';
       tracks = plexPlaylist.items || [];
     } else {
-      // Try Custom playlists (case-insensitive for SQLite compatibility)
+      // Try Custom playlists (exact match only)
       const customPlaylist = await prisma.customPlaylist.findFirst({
         where: {
-          title: playlistName // Exact match first
-        },
-        include: {
-          tracks: true
-        }
-      }) || await prisma.customPlaylist.findFirst({
-        where: {
-          title: {
-            contains: playlistName // Fallback to partial match
-          }
+          title: playlistName
         },
         include: {
           tracks: true
@@ -12085,26 +12146,18 @@ server.listen(PORT, '0.0.0.0', async () => {
     // Check critical tables
     console.log('🚀 Checking critical tables...');
     try {
-      const backgroundImageExists = await prisma.$queryRaw`
-        SELECT EXISTS (
-          SELECT FROM information_schema.tables 
-          WHERE table_schema = 'public' 
-          AND table_name = 'BackgroundImage'
-        );
-      `;
-      console.log('✅ BackgroundImage table exists:', backgroundImageExists);
-      
-      const backgroundGalleryExists = await prisma.$queryRaw`
-        SELECT EXISTS (
-          SELECT FROM information_schema.tables 
-          WHERE table_schema = 'public' 
-          AND table_name = 'BackgroundGallery'
-        );
-      `;
-      console.log('✅ BackgroundGallery table exists:', backgroundGalleryExists);
-      
-    } catch (tableError) {
-      console.error('❌ Error checking tables:', tableError);
+      // Use a simple query to check if tables exist instead of database-specific syntax
+      const backgroundImageCount = await prisma.backgroundImage.count();
+      console.log('✅ BackgroundImage table exists, rows:', backgroundImageCount);
+    } catch (error) {
+      console.log('⚠️ BackgroundImage table may not exist or be accessible:', error.message);
+    }
+    
+    try {
+      const backgroundGalleryCount = await prisma.backgroundGallery.count();
+      console.log('✅ BackgroundGallery table exists, rows:', backgroundGalleryCount);
+    } catch (error) {
+      console.log('⚠️ BackgroundGallery table may not exist or be accessible:', error.message);
     }
     
   } catch (dbError) {
