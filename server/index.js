@@ -11226,40 +11226,10 @@ app.get('/api/android/weather', async (req, res) => {
   }
 });
 
-// Serve React app for all other routes in production
-if (process.env.NODE_ENV === 'production') {
-  app.get('*', (req, res) => {
-    console.log(`⚠️  [FALLBACK] Request fell through to React app catch-all: ${req.method} ${req.url}`);
-    console.log(`⚠️  [FALLBACK] This means the API route was not matched!`);
-    console.log(`⚠️  [FALLBACK] User-Agent: ${req.get('User-Agent')}`);
-    console.log(`⚠️  [FALLBACK] Accept: ${req.get('Accept')}`);
-    
-    if (req.url.includes('/api/')) {
-      console.log(`❌ [FALLBACK] ERROR: API route ${req.url} not found - serving HTML instead!`);
-      console.log(`❌ [FALLBACK] This is why you're getting HTML instead of JSON!`);
-    }
-    
-    const clientBuildPath = path.join(__dirname, '..', 'client', 'dist');
-    res.sendFile(path.join(clientBuildPath, 'index.html'));
-  });
-}
+// ==========================================
+// BACKGROUND IMAGES API ENDPOINTS
+// ==========================================
 
-// Graceful shutdown
-async function shutdown() {
-  console.log('Shutting down server...');
-  
-  // Stop background sync service
-  await backgroundSync.stop();
-  
-  await prisma.$disconnect();
-  console.log('Prisma client disconnected.');
-  process.exit(0);
-}
-
-process.on('SIGTERM', shutdown);
-process.on('SIGINT', shutdown);
-
-// Background Images API Endpoints
 // Configure multer for file uploads
 const backgroundStorage = multer.diskStorage({
   destination: (req, file, cb) => {
@@ -11309,13 +11279,9 @@ app.get('/api/backgrounds', async (req, res) => {
     // Check if BackgroundImage table exists
     console.log('📸 [BACKGROUNDS] Checking if BackgroundImage table exists...');
     const tableExists = await prisma.$queryRaw`
-      SELECT EXISTS (
-        SELECT FROM information_schema.tables 
-        WHERE table_schema = 'public' 
-        AND table_name = 'BackgroundImage'
-      );
+      SELECT name FROM sqlite_master WHERE type='table' AND name='BackgroundImage';
     `;
-    console.log('📸 [BACKGROUNDS] BackgroundImage table exists:', tableExists);
+    console.log('📸 [BACKGROUNDS] BackgroundImage table exists:', tableExists.length > 0);
     
     console.log('📸 [BACKGROUNDS] Attempting to query BackgroundImage table...');
     const backgrounds = await prisma.BackgroundImage.findMany({
@@ -11401,710 +11367,6 @@ app.post('/api/backgrounds/upload', backgroundUpload.array('backgrounds'), async
   }
 });
 
-// Download background from URL
-app.post('/api/backgrounds/download', async (req, res) => {
-  try {
-    const { url, galleryId } = req.body;
-    if (!url) {
-      return res.status(400).json({ error: 'URL is required' });
-    }
-
-    // Validate URL format
-    let validUrl;
-    try {
-      validUrl = new URL(url);
-    } catch (error) {
-      return res.status(400).json({ error: 'Invalid URL format' });
-    }
-
-    console.log('Attempting to download image from URL:', url);
-
-    // Detect gallery pages vs direct images
-    const isGalleryPage = isGalleryUrl(url);
-    const isDirectImage = /\.(jpg|jpeg|png|gif|bmp|webp)(\?.*)?$/i.test(validUrl.pathname.toLowerCase());
-    const hasImageKeywords = /\/(image|img|photo|picture|avatar|thumbnail)[\/?]/i.test(url.toLowerCase()) || 
-                             /\.(jpg|jpeg|png|gif|bmp|webp)[\/?]/i.test(url.toLowerCase());
-    
-    // Allow testing URLs
-    const isTestUrl = validUrl.hostname.includes('httpbin.org') || 
-                      validUrl.hostname.includes('picsum.photos') ||
-                      validUrl.hostname.includes('via.placeholder.com') ||
-                      validUrl.hostname.includes('unsplash.com');
-    
-    if (isGalleryPage) {
-      console.log('Detected gallery page, attempting to extract images...');
-      try {
-        const galleryImages = await extractGalleryImages(url);
-        
-        if (galleryImages.length === 0) {
-          return res.status(400).json({ 
-            error: 'No images found in the gallery page. The gallery may be empty or unsupported.' 
-          });
-        }
-        
-        console.log(`Found ${galleryImages.length} images in gallery`);
-        
-        // Return gallery info for user to decide on download/assignment
-        return res.json({
-          isGallery: true,
-          galleryUrl: url,
-          galleryTitle: galleryImages[0]?.galleryTitle || 'Image Gallery',
-          images: galleryImages,
-          totalImages: galleryImages.length
-        });
-        
-      } catch (error) {
-        console.error('Gallery parsing failed:', error);
-        return res.status(400).json({ 
-          error: `Failed to parse gallery page: ${error.message}. Try using a direct image URL instead.` 
-        });
-      }
-    }
-    
-    if (!isDirectImage && !hasImageKeywords && !isTestUrl) {
-      console.log('Warning: URL does not appear to be a direct image link or supported gallery');
-      return res.status(400).json({ 
-        error: 'URL must be a direct link to an image file, an image API endpoint, or a supported gallery page (imgur.com, etc.).' 
-      });
-    }
-
-    // Handle direct image download
-    try {
-      const downloadedImage = await downloadSingleImage(url);
-      
-      // Assign to gallery if specified
-      if (galleryId) {
-        await prisma.BackgroundImage.update({
-          where: { id: downloadedImage.id },
-          data: { galleryId: parseInt(galleryId) }
-        });
-        downloadedImage.galleryId = parseInt(galleryId);
-      }
-      
-      return res.json(downloadedImage);
-    } catch (error) {
-      console.error('Download error:', error);
-      return res.status(500).json({ error: error.message || 'Failed to download background' });
-    }
-  } catch (error) {
-    console.error('Download error:', error);
-    res.status(500).json({ error: error.message || 'Failed to download background' });
-  }
-});
-
-// Bulk download from gallery with gallery assignment
-app.post('/api/backgrounds/download-gallery-bulk', async (req, res) => {
-  try {
-    const { url, galleryId, selectedImages } = req.body;
-    
-    if (!url) {
-      return res.status(400).json({ error: 'Gallery URL is required' });
-    }
-
-    // Check if this is a gallery page
-    const isGalleryPage = isGalleryUrl(url);
-    if (!isGalleryPage) {
-      return res.status(400).json({ 
-        error: 'URL must be a supported gallery page (imgur.com, etc.)' 
-      });
-    }
-
-    console.log(`Bulk downloading from gallery: ${url}`);
-
-    try {
-      const galleryImages = await extractGalleryImages(url);
-      
-      if (galleryImages.length === 0) {
-        return res.status(400).json({ 
-          error: 'No images found in the gallery page.' 
-        });
-      }
-
-      // If selectedImages specified, only download those indices
-      const imagesToDownload = selectedImages && selectedImages.length > 0 
-        ? selectedImages.map(index => galleryImages[index]).filter(Boolean)
-        : galleryImages;
-
-      console.log(`Downloading ${imagesToDownload.length} images from gallery`);
-
-      const results = [];
-      let successCount = 0;
-      let errorCount = 0;
-
-      for (let i = 0; i < imagesToDownload.length; i++) {
-        const image = imagesToDownload[i];
-        try {
-          console.log(`Downloading ${i + 1}/${imagesToDownload.length}: ${image.url}`);
-          
-          const downloadedImage = await downloadSingleImage(image.url, image.title || `Gallery Image ${i + 1}`);
-          
-          // Assign to gallery if specified
-          if (galleryId) {
-            await prisma.BackgroundImage.update({
-              where: { id: downloadedImage.id },
-              data: { galleryId: parseInt(galleryId) }
-            });
-            downloadedImage.galleryId = parseInt(galleryId);
-          }
-          
-          // Add gallery metadata
-          downloadedImage.isFromGallery = true;
-          downloadedImage.galleryUrl = url;
-          downloadedImage.galleryTitle = image.galleryTitle;
-          downloadedImage.originalIndex = selectedImages ? selectedImages[i] : i;
-          
-          results.push({
-            success: true,
-            image: downloadedImage,
-            originalUrl: image.url,
-            index: i
-          });
-          
-          successCount++;
-          
-          // Add a small delay between downloads to be respectful
-          if (i < imagesToDownload.length - 1) {
-            await new Promise(resolve => setTimeout(resolve, 500));
-          }
-          
-        } catch (error) {
-          console.error(`Failed to download image ${i + 1}:`, error);
-          results.push({
-            success: false,
-            error: error.message,
-            originalUrl: image.url,
-            index: i
-          });
-          errorCount++;
-        }
-      }
-
-      console.log(`Bulk download complete: ${successCount} successful, ${errorCount} failed`);
-
-      res.json({
-        success: true,
-        galleryUrl: url,
-        galleryTitle: imagesToDownload[0]?.galleryTitle || 'Image Gallery',
-        totalRequested: imagesToDownload.length,
-        successCount,
-        errorCount,
-        results,
-        galleryId: galleryId ? parseInt(galleryId) : null
-      });
-
-    } catch (error) {
-      console.error('Gallery bulk download failed:', error);
-      res.status(400).json({ 
-        error: `Failed to download from gallery: ${error.message}` 
-      });
-    }
-  } catch (error) {
-    console.error('Gallery bulk download error:', error);
-    res.status(500).json({ error: error.message || 'Failed to download from gallery' });
-  }
-});
-
-// Helper function to detect if URL is a gallery page
-function isGalleryUrl(url) {
-  const urlObj = new URL(url);
-  const hostname = urlObj.hostname.toLowerCase();
-  const pathname = urlObj.pathname.toLowerCase();
-  
-  // Imgur gallery detection
-  if (hostname.includes('imgur.com')) {
-    return pathname.includes('/gallery/') || pathname.includes('/a/') || pathname.includes('/r/');
-  }
-  
-  // Add more gallery sites here as needed
-  // Reddit image galleries
-  if (hostname.includes('reddit.com')) {
-    return pathname.includes('/gallery/');
-  }
-  
-  return false;
-}
-
-// Helper function to extract images from gallery pages
-async function extractGalleryImages(url) {
-  const urlObj = new URL(url);
-  const hostname = urlObj.hostname.toLowerCase();
-  
-  if (hostname.includes('imgur.com')) {
-    return await extractImgurGalleryImages(url);
-  }
-  
-  // Add more gallery extractors here
-  throw new Error('Unsupported gallery site');
-}
-
-// Imgur gallery image extractor with comprehensive support for all gallery formats
-async function extractImgurGalleryImages(url) {
-  console.log('Extracting images from Imgur gallery:', url);
-  
-  // Extract gallery/album ID from URL
-  let galleryId = '';
-  const urlObj = new URL(url);
-  const pathname = urlObj.pathname;
-  
-  // Handle different Imgur URL formats
-  const galleryMatch = pathname.match(/\/gallery\/([a-zA-Z0-9-]+)/);
-  const albumMatch = pathname.match(/\/a\/([a-zA-Z0-9]+)/);
-  const rMatch = pathname.match(/\/r\/[^/]+\/([a-zA-Z0-9-]+)/);
-  const hashMatch = pathname.match(/#([a-zA-Z0-9]+)/);
-  
-  if (galleryMatch) {
-    galleryId = galleryMatch[1];
-  } else if (albumMatch) {
-    galleryId = albumMatch[1];
-  } else if (rMatch) {
-    galleryId = rMatch[1];
-  } else if (hashMatch) {
-    galleryId = hashMatch[1];
-  } else {
-    throw new Error('Could not extract gallery ID from Imgur URL');
-  }
-  
-  console.log('Extracted gallery ID:', galleryId);
-  
-  try {
-    const images = [];
-    
-    // Method 1: Try Imgur API approach (if we can get all image hashes)
-    try {
-      const apiImages = await extractImgurApiData(url, galleryId);
-      if (apiImages.length > 0) {
-        images.push(...apiImages);
-        console.log(`Found ${images.length} images via API method`);
-        return images;
-      }
-    } catch (apiError) {
-      console.log('API method failed, trying HTML parsing');
-    }
-    
-    // Method 2: Enhanced HTML parsing with multiple extraction methods
-    const response = await fetch(url, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8',
-        'Accept-Language': 'en-US,en;q=0.9',
-        'Accept-Encoding': 'gzip, deflate, br',
-        'Cache-Control': 'no-cache',
-        'Pragma': 'no-cache',
-        'Sec-Fetch-Dest': 'document',
-        'Sec-Fetch-Mode': 'navigate',
-        'Sec-Fetch-Site': 'none',
-        'Upgrade-Insecure-Requests': '1'
-      }
-    });
-    
-    if (!response.ok) {
-      throw new Error(`Failed to fetch gallery page: ${response.status} ${response.statusText}`);
-    }
-    
-    const html = await response.text();
-    console.log('Fetched gallery HTML, length:', html.length);
-    
-    // Method 2a: Extract from window.postDataJSON
-    const postDataMatch = html.match(/window\.postDataJSON\s*=\s*'([^']+)'/);
-    if (postDataMatch) {
-      try {
-        const jsonStr = postDataMatch[1].replace(/\\"/g, '"').replace(/\\\\/g, '\\');
-        const postData = JSON.parse(jsonStr);
-        console.log('Found postDataJSON, media items:', postData.media?.length || 0);
-        
-        if (postData.media && Array.isArray(postData.media)) {
-          for (const item of postData.media) {
-            if (item.type === 'image' && item.url) {
-              images.push({
-                url: item.url.startsWith('//') ? 'https:' + item.url : item.url,
-                title: item.title || item.description || `Image ${images.length + 1}`,
-                galleryTitle: postData.title || 'Imgur Gallery'
-              });
-            }
-          }
-        }
-      } catch (parseError) {
-        console.log('Failed to parse postDataJSON:', parseError.message);
-      }
-    }
-    
-    // Method 2b: Extract image hashes from various HTML patterns
-    if (images.length === 0) {
-      const extractedHashes = new Set();
-      
-      // Pattern 1: Direct image URLs
-      const imgUrlPattern = /https?:\/\/i\.imgur\.com\/([a-zA-Z0-9]+)\.(jpg|jpeg|png|gif|webp)/gi;
-      let match;
-      while ((match = imgUrlPattern.exec(html)) !== null) {
-        extractedHashes.add(match[1]);
-      }
-      
-      // Pattern 2: Image hashes in JavaScript data
-      const hashPattern = /['"]['"]([a-zA-Z0-9]{5,})['"]['"] *: *{[^}]*['"]['"]mimetype['"]['"] *: *['"]['"]image/gi;
-      while ((match = hashPattern.exec(html)) !== null) {
-        extractedHashes.add(match[1]);
-      }
-      
-      // Pattern 3: Image placeholder data attributes
-      const placeholderPattern = /data-src=['"]['"]https?:\/\/i\.imgur\.com\/([a-zA-Z0-9]+)[^'"]['"]['"]['\"]/gi;
-      while ((match = placeholderPattern.exec(html)) !== null) {
-        extractedHashes.add(match[1]);
-      }
-      
-      // Pattern 4: Look for image hashes in JSON-LD or other structured data
-      const structuredDataPattern = /"url" *: *"https?:\/\/i\.imgur\.com\/([a-zA-Z0-9]+)\./gi;
-      while ((match = structuredDataPattern.exec(html)) !== null) {
-        extractedHashes.add(match[1]);
-      }
-      
-      // Pattern 5: Find image hashes in any imgur.com URL patterns
-      const generalPattern = /imgur\.com\/([a-zA-Z0-9]{5,})/gi;
-      while ((match = generalPattern.exec(html)) !== null) {
-        // Filter out obvious non-image hashes (like gallery IDs that are too long)
-        const hash = match[1];
-        if (hash.length >= 5 && hash.length <= 15 && !hash.includes('-')) {
-          extractedHashes.add(hash);
-        }
-      }
-      
-      console.log(`Extracted ${extractedHashes.size} unique image hashes from HTML`);
-      
-      // Convert hashes to full image URLs
-      for (const hash of extractedHashes) {
-        // Try different image formats
-        const formats = ['jpg', 'png', 'gif', 'webp', 'jpeg'];
-        for (const format of formats) {
-          const imageUrl = `https://i.imgur.com/${hash}.${format}`;
-          try {
-            // Quick HEAD request to verify the image exists
-            const headResponse = await fetch(imageUrl, { 
-              method: 'HEAD',
-              timeout: 5000,
-              headers: {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-              }
-            });
-            
-            if (headResponse.ok && headResponse.headers.get('content-type')?.startsWith('image/')) {
-              images.push({
-                url: imageUrl,
-                title: `Image ${images.length + 1}`,
-                galleryTitle: 'Imgur Gallery'
-              });
-              break; // Found a working format, move to next hash
-            }
-          } catch (error) {
-            // Continue to next format
-          }
-        }
-      }
-    }
-    
-    // Method 2c: If still no images, try the gallery ID as an image
-    if (images.length === 0) {
-      const extensions = ['jpg', 'png', 'gif', 'jpeg', 'webp'];
-      for (const ext of extensions) {
-        const testUrl = `https://i.imgur.com/${galleryId}.${ext}`;
-        try {
-          const testResponse = await fetch(testUrl, { method: 'HEAD', timeout: 5000 });
-          if (testResponse.ok) {
-            images.push({
-              url: testUrl,
-              title: `Image from gallery`,
-              galleryTitle: 'Imgur Gallery'
-            });
-            break;
-          }
-        } catch (error) {
-          // Continue trying other extensions
-        }
-      }
-    }
-    
-    console.log(`Found ${images.length} images in Imgur gallery`);
-    
-    if (images.length === 0) {
-      throw new Error('No images found in gallery. The gallery might be private, deleted, or require authentication.');
-    }
-    
-    return images;
-    
-  } catch (error) {
-    throw new Error(`Failed to extract Imgur gallery images: ${error.message}`);
-  }
-}
-
-// Helper function to extract images using API-like approaches
-async function extractImgurApiData(url, galleryId) {
-  const images = [];
-  
-  try {
-    // Try to fetch JSON data that might be available
-    const jsonUrl = `https://imgur.com/ajaxalbums/getimages/${galleryId}/hit.json`;
-    const response = await fetch(jsonUrl, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-        'Accept': 'application/json, text/javascript, */*; q=0.01',
-        'X-Requested-With': 'XMLHttpRequest',
-        'Referer': url
-      },
-      timeout: 10000
-    });
-    
-    if (response.ok) {
-      const data = await response.json();
-      if (data.data && data.data.images) {
-        for (const img of data.data.images) {
-          if (img.hash) {
-            const imageUrl = `https://i.imgur.com/${img.hash}${img.ext || '.jpg'}`;
-            images.push({
-              url: imageUrl,
-              title: img.title || img.description || `Image ${images.length + 1}`,
-              galleryTitle: data.data.title || 'Imgur Gallery'
-            });
-          }
-        }
-      }
-    }
-  } catch (error) {
-    console.log('API approach failed:', error.message);
-  }
-  
-  return images;
-}
-
-// Helper function to download a single image
-async function downloadSingleImage(url, customOriginalName = null) {
-  let response;
-  let retryCount = 0;
-  const maxRetries = 3;
-  
-  console.log('Downloading single image from:', url);
-  
-  while (retryCount <= maxRetries) {
-    try {
-      // Download the image using node-fetch with proper headers
-      response = await fetch(url, {
-        method: 'GET',
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-          'Accept': 'image/*,*/*;q=0.8',
-          'Accept-Encoding': 'gzip, deflate, br',
-          'Accept-Language': 'en-US,en;q=0.9',
-          'Cache-Control': 'no-cache',
-          'Pragma': 'no-cache'
-        },
-        timeout: 30000 // 30 second timeout
-      });
-      
-      console.log('Response status:', response.status, response.statusText);
-      
-      // Handle rate limiting
-      if (response.status === 429) {
-        const retryAfter = response.headers.get('retry-after');
-        const waitTime = retryAfter ? parseInt(retryAfter) * 1000 : Math.pow(2, retryCount) * 1000;
-        
-        if (retryCount < maxRetries) {
-          console.log(`Rate limited (429). Retrying in ${waitTime}ms... (attempt ${retryCount + 1}/${maxRetries + 1})`);
-          await new Promise(resolve => setTimeout(resolve, waitTime));
-          retryCount++;
-          continue;
-        } else {
-          throw new Error(`Rate limited by server. Please try again later or use a different image URL.`);
-        }
-      }
-      
-      // Break out of retry loop if successful or non-retryable error
-      break;
-      
-    } catch (fetchError) {
-      // Handle specific network errors
-      if (fetchError.code === 'ENOTFOUND') {
-        throw new Error(`DNS resolution failed for the image URL. Please check your internet connection and verify the URL is correct.`);
-      } else if (fetchError.code === 'ECONNREFUSED') {
-        throw new Error(`Connection refused by the server. The image server may be down or blocking requests.`);
-      } else if (fetchError.code === 'CERT_HAS_EXPIRED' || fetchError.code === 'CERT_AUTHORITY_INVALID') {
-        throw new Error(`SSL certificate error. The image server has an invalid or expired certificate.`);
-      } else if (retryCount < maxRetries && (fetchError.code === 'ECONNRESET' || fetchError.code === 'ETIMEDOUT' || fetchError.code === 'ENETUNREACH')) {
-        console.log(`Network error: ${fetchError.message}. Retrying... (attempt ${retryCount + 1}/${maxRetries + 1})`);
-        retryCount++;
-        await new Promise(resolve => setTimeout(resolve, 1000 * retryCount));
-        continue;
-      }
-      throw fetchError;
-    }
-  }
-  
-  if (!response.ok) {
-    if (response.status === 403) {
-      throw new Error(`Access forbidden (403). The server may be blocking automated requests. Try using a different image URL.`);
-    } else if (response.status === 404) {
-      throw new Error(`Image not found (404). Please check the URL and try again.`);
-    } else {
-      throw new Error(`Failed to download image: ${response.status} ${response.statusText}`);
-    }
-  }
-
-  const buffer = await response.buffer();
-  console.log('Downloaded buffer size:', buffer.length);
-  const contentType = response.headers.get('content-type');
-  console.log('Content type:', contentType);
-
-  // Validate it's an image
-  if (!contentType || !contentType.startsWith('image/')) {
-    throw new Error('URL does not point to an image');
-  }
-
-  // Generate filename from URL
-  const validUrl = new URL(url);
-  const filenamePath = validUrl.pathname;
-  const originalFilename = customOriginalName || path.basename(filenamePath) || 'downloaded-image';
-  const ext = path.extname(originalFilename) || '.jpg';
-  const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
-  const storedFilename = 'bg-' + uniqueSuffix + ext;
-
-  // Save file
-  const uploadDir = path.join(__dirname, 'uploads', 'backgrounds');
-  if (!fs.existsSync(uploadDir)) {
-    fs.mkdirSync(uploadDir, { recursive: true });
-  }
-  const filePath = path.join(uploadDir, storedFilename);
-  fs.writeFileSync(filePath, buffer);
-
-  // Get image metadata
-  const sharp = require('sharp');
-  const metadata = await sharp(filePath).metadata();
-
-  // Save to database
-  const background = await prisma.BackgroundImage.create({
-    data: {
-      filename: storedFilename, // Use the stored filename
-      originalName: originalFilename, // Use originalName field
-      path: filePath, // Use path field
-      mimetype: contentType, // Use mimetype field (lowercase)
-      size: buffer.length, // Use size field
-      url: url, // Use url field for source URL
-      width: metadata.width,
-      height: metadata.height
-    }
-  });
-
-  return background;
-}
-
-// Preview gallery contents (without downloading)
-app.post('/api/backgrounds/gallery-preview', async (req, res) => {
-  try {
-    const { url } = req.body;
-    if (!url) {
-      return res.status(400).json({ error: 'URL is required' });
-    }
-
-    // Validate URL format
-    let validUrl;
-    try {
-      validUrl = new URL(url);
-    } catch (error) {
-      return res.status(400).json({ error: 'Invalid URL format' });
-    }
-
-    console.log('Previewing gallery:', url);
-
-    // Check if this is a gallery page
-    const isGalleryPage = isGalleryUrl(url);
-    
-    if (!isGalleryPage) {
-      return res.status(400).json({ 
-        error: 'URL is not a supported gallery page. Supported: imgur.com galleries.' 
-      });
-    }
-
-    try {
-      const galleryImages = await extractGalleryImages(url);
-      
-      res.json({
-        url: url,
-        isGallery: true,
-        totalImages: galleryImages.length,
-        galleryTitle: galleryImages[0]?.galleryTitle || 'Gallery',
-        images: galleryImages.slice(0, 10).map((img, index) => ({ // Return first 10 for preview
-          index: index,
-          url: img.url,
-          title: img.title
-        })),
-        hasMore: galleryImages.length > 10
-      });
-      
-    } catch (error) {
-      console.error('Gallery preview failed:', error);
-      res.status(400).json({ 
-        error: `Failed to preview gallery: ${error.message}` 
-      });
-    }
-  } catch (error) {
-    console.error('Gallery preview error:', error);
-    res.status(500).json({ error: error.message || 'Failed to preview gallery' });
-  }
-});
-
-// Download specific image from gallery by index
-app.post('/api/backgrounds/gallery-download-specific', async (req, res) => {
-  try {
-    const { url, imageIndex } = req.body;
-    if (!url) {
-      return res.status(400).json({ error: 'URL is required' });
-    }
-    if (imageIndex === undefined || imageIndex === null) {
-      return res.status(400).json({ error: 'Image index is required' });
-    }
-
-    console.log(`Downloading image ${imageIndex} from gallery:`, url);
-
-    // Check if this is a gallery page
-    const isGalleryPage = isGalleryUrl(url);
-    
-    if (!isGalleryPage) {
-      return res.status(400).json({ 
-        error: 'URL is not a supported gallery page. Supported: imgur.com galleries.' 
-      });
-    }
-
-    try {
-      const galleryImages = await extractGalleryImages(url);
-      
-      if (imageIndex < 0 || imageIndex >= galleryImages.length) {
-        return res.status(400).json({ 
-          error: `Image index ${imageIndex} is out of range. Gallery has ${galleryImages.length} images (0-${galleryImages.length-1}).` 
-        });
-      }
-      
-      const selectedImage = galleryImages[imageIndex];
-      console.log(`Downloading selected image: ${selectedImage.url}`);
-      
-      // Download the selected image
-      const downloadedImage = await downloadSingleImage(selectedImage.url, selectedImage.title);
-      
-      // Add gallery information to the response
-      downloadedImage.isFromGallery = true;
-      downloadedImage.galleryUrl = url;
-      downloadedImage.galleryTitle = selectedImage.galleryTitle;
-      downloadedImage.imageIndex = imageIndex;
-      downloadedImage.totalImages = galleryImages.length;
-      
-      res.json(downloadedImage);
-      
-    } catch (error) {
-      console.error('Gallery download failed:', error);
-      res.status(400).json({ 
-        error: `Failed to download from gallery: ${error.message}` 
-      });
-    }
-  } catch (error) {
-    console.error('Gallery download error:', error);
-    res.status(500).json({ error: error.message || 'Failed to download from gallery' });
-  }
-});
-
 // Get background image file
 app.get('/api/backgrounds/:id/image', async (req, res) => {
   try {
@@ -12164,8 +11426,6 @@ app.delete('/api/backgrounds/:id', async (req, res) => {
   }
 });
 
-// Background Galleries API Endpoints
-
 // Get all galleries
 app.get('/api/background-galleries', async (req, res) => {
   console.log('🖼️  [GALLERIES] API endpoint called');
@@ -12183,13 +11443,9 @@ app.get('/api/background-galleries', async (req, res) => {
     // Check if BackgroundGallery table exists
     console.log('🖼️  [GALLERIES] Checking if BackgroundGallery table exists...');
     const tableExists = await prisma.$queryRaw`
-      SELECT EXISTS (
-        SELECT FROM information_schema.tables 
-        WHERE table_schema = 'public' 
-        AND table_name = 'BackgroundGallery'
-      );
+      SELECT name FROM sqlite_master WHERE type='table' AND name='BackgroundGallery';
     `;
-    console.log('🖼️  [GALLERIES] BackgroundGallery table exists:', tableExists);
+    console.log('🖼️  [GALLERIES] BackgroundGallery table exists:', tableExists.length > 0);
     
     console.log('🖼️  [GALLERIES] Attempting to query BackgroundGallery table...');
     const galleries = await prisma.BackgroundGallery.findMany({
@@ -12408,6 +11664,39 @@ app.delete('/api/background-galleries/:id', async (req, res) => {
     res.status(500).json({ error: 'Failed to delete gallery' });
   }
 });
+
+// Serve React app for all other routes in production
+if (process.env.NODE_ENV === 'production') {
+  app.get('*', (req, res) => {
+    console.log(`⚠️  [FALLBACK] Request fell through to React app catch-all: ${req.method} ${req.url}`);
+    console.log(`⚠️  [FALLBACK] This means the API route was not matched!`);
+    console.log(`⚠️  [FALLBACK] User-Agent: ${req.get('User-Agent')}`);
+    console.log(`⚠️  [FALLBACK] Accept: ${req.get('Accept')}`);
+    
+    if (req.url.includes('/api/')) {
+      console.log(`❌ [FALLBACK] ERROR: API route ${req.url} not found - serving HTML instead!`);
+      console.log(`❌ [FALLBACK] This is why you're getting HTML instead of JSON!`);
+    }
+    
+    const clientBuildPath = path.join(__dirname, '..', 'client', 'dist');
+    res.sendFile(path.join(clientBuildPath, 'index.html'));
+  });
+}
+
+// Graceful shutdown
+async function shutdown() {
+  console.log('Shutting down server...');
+  
+  // Stop background sync service
+  await backgroundSync.stop();
+  
+  await prisma.$disconnect();
+  console.log('Prisma client disconnected.');
+  process.exit(0);
+}
+
+process.on('SIGTERM', shutdown);
+process.on('SIGINT', shutdown);
 
 // Socket.IO connection handling
 io.on('connection', (socket) => {
