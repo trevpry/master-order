@@ -22,6 +22,13 @@ const Backgrounds = () => {
   // Selection state for adding to galleries
   const [selectedBackgrounds, setSelectedBackgrounds] = useState(new Set());
   const [showAddToGallery, setShowAddToGallery] = useState(false);
+  
+  // Gallery download modal state
+  const [showGalleryModal, setShowGalleryModal] = useState(false);
+  const [galleryData, setGalleryData] = useState(null);
+  const [selectedGalleryForDownload, setSelectedGalleryForDownload] = useState('');
+  const [selectedImageIndices, setSelectedImageIndices] = useState(new Set());
+  const [bulkDownloadLoading, setBulkDownloadLoading] = useState(false);
 
   // Load backgrounds and galleries on component mount
   useEffect(() => {
@@ -116,10 +123,17 @@ const Backgrounds = () => {
       if (!response.ok) throw new Error('Download failed');
       
       const result = await response.json();
-      toast.success(`Successfully downloaded: ${result.filename}`);
       
-      fetchBackgrounds(); // Refresh the list
-      setDownloadUrl(''); // Clear the input
+      // Check if this is a gallery
+      if (result.isGallery) {
+        setGalleryData(result);
+        setShowGalleryModal(true);
+        setSelectedImageIndices(new Set()); // Start with no images selected
+      } else {
+        toast.success(`Successfully downloaded: ${result.filename}`);
+        fetchBackgrounds(); // Refresh the list
+        setDownloadUrl(''); // Clear the input
+      }
       
     } catch (error) {
       console.error('Download error:', error);
@@ -243,6 +257,84 @@ const Backgrounds = () => {
       newSelection.add(backgroundId);
     }
     setSelectedBackgrounds(newSelection);
+  };
+
+  // Toggle image selection for gallery download
+  const toggleImageSelection = (index) => {
+    const newSelection = new Set(selectedImageIndices);
+    if (newSelection.has(index)) {
+      newSelection.delete(index);
+    } else {
+      newSelection.add(index);
+    }
+    setSelectedImageIndices(newSelection);
+  };
+
+  // Select all images in gallery
+  const selectAllImages = () => {
+    if (!galleryData?.images) return;
+    const allIndices = galleryData.images.map((_, index) => index);
+    setSelectedImageIndices(new Set(allIndices));
+  };
+
+  // Clear all image selections
+  const clearImageSelection = () => {
+    setSelectedImageIndices(new Set());
+  };
+
+  // Handle bulk download from gallery
+  const handleBulkDownload = async () => {
+    if (!galleryData || selectedImageIndices.size === 0) {
+      toast.error('Please select at least one image to download');
+      return;
+    }
+
+    setBulkDownloadLoading(true);
+    try {
+      const response = await fetch(`${config.apiBaseUrl}/api/backgrounds/download-gallery-bulk`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          url: galleryData.galleryUrl,
+          galleryId: selectedGalleryForDownload || null,
+          selectedImages: Array.from(selectedImageIndices)
+        })
+      });
+
+      if (!response.ok) throw new Error('Bulk download failed');
+      
+      const result = await response.json();
+      
+      toast.success(`Successfully downloaded ${result.successCount} of ${result.totalRequested} images`);
+      
+      if (result.errorCount > 0) {
+        toast.error(`${result.errorCount} images failed to download`);
+      }
+
+      // Close modal and refresh
+      setShowGalleryModal(false);
+      setGalleryData(null);
+      setSelectedImageIndices(new Set());
+      setSelectedGalleryForDownload('');
+      fetchBackgrounds();
+      setDownloadUrl('');
+      
+    } catch (error) {
+      console.error('Bulk download error:', error);
+      toast.error('Failed to download images from gallery');
+    } finally {
+      setBulkDownloadLoading(false);
+    }
+  };
+
+  // Close gallery modal
+  const closeGalleryModal = () => {
+    setShowGalleryModal(false);
+    setGalleryData(null);
+    setSelectedImageIndices(new Set());
+    setSelectedGalleryForDownload('');
   };
 
   return (
@@ -485,7 +577,12 @@ const Backgrounds = () => {
                       <span className="filename">{bg.filename}</span>
                       <div className="background-meta">
                         <span className="dimensions">{bg.width} × {bg.height}</span>
-                        <span className="file-size">{Math.round(bg.fileSize / 1024)} KB</span>
+                        <span className="file-size">{Math.round(bg.size / 1024)} KB</span>
+                        {bg.gallery && (
+                          <span className="gallery-tag" title={`Gallery: ${bg.gallery.name}`}>
+                            📂 {bg.gallery.name}
+                          </span>
+                        )}
                       </div>
                     </div>
                   </div>
@@ -495,6 +592,117 @@ const Backgrounds = () => {
           </div>
         )}
       </div>
+
+      {/* Gallery Assignment Modal */}
+      {showGalleryModal && galleryData && (
+        <div className="modal-overlay" onClick={closeGalleryModal}>
+          <div className="gallery-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h2>📂 Download Gallery Images</h2>
+              <button className="close-btn" onClick={closeGalleryModal}>×</button>
+            </div>
+            
+            <div className="modal-content">
+              <div className="gallery-info">
+                <h3>{galleryData.galleryTitle}</h3>
+                <p>Found {galleryData.totalImages} images in this gallery</p>
+                <small>URL: {galleryData.galleryUrl}</small>
+              </div>
+
+              {/* Gallery Assignment */}
+              <div className="gallery-assignment">
+                <label htmlFor="gallery-select">Assign to Gallery (optional):</label>
+                <select
+                  id="gallery-select"
+                  value={selectedGalleryForDownload}
+                  onChange={(e) => setSelectedGalleryForDownload(e.target.value)}
+                  className="gallery-select"
+                >
+                  <option value="">No gallery (individual images)</option>
+                  {galleries.map(gallery => (
+                    <option key={gallery.id} value={gallery.id}>
+                      {gallery.name} ({gallery.backgroundCount || 0} images)
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Image Selection */}
+              <div className="image-selection">
+                <div className="selection-controls">
+                  <h4>Select Images to Download:</h4>
+                  <div className="selection-buttons">
+                    <button 
+                      onClick={selectAllImages}
+                      className="select-all-btn"
+                      type="button"
+                    >
+                      Select All ({galleryData.totalImages})
+                    </button>
+                    <button 
+                      onClick={clearImageSelection}
+                      className="clear-selection-btn"
+                      type="button"
+                    >
+                      Clear Selection
+                    </button>
+                  </div>
+                  <p className="selection-count">
+                    {selectedImageIndices.size} of {galleryData.totalImages} images selected
+                  </p>
+                </div>
+
+                <div className="images-grid">
+                  {galleryData.images.map((image, index) => (
+                    <div 
+                      key={index}
+                      className={`gallery-image-item ${selectedImageIndices.has(index) ? 'selected' : ''}`}
+                      onClick={() => toggleImageSelection(index)}
+                    >
+                      <div className="image-preview">
+                        <img 
+                          src={image.url} 
+                          alt={image.title || `Image ${index + 1}`}
+                          loading="lazy"
+                        />
+                        <div className="image-overlay">
+                          <div className="selection-checkbox">
+                            {selectedImageIndices.has(index) && <span>✓</span>}
+                          </div>
+                        </div>
+                      </div>
+                      <div className="image-info">
+                        <p className="image-title">{image.title || `Image ${index + 1}`}</p>
+                        <small className="image-url">{image.url}</small>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            <div className="modal-footer">
+              <button 
+                onClick={closeGalleryModal}
+                className="cancel-btn"
+                disabled={bulkDownloadLoading}
+              >
+                Cancel
+              </button>
+              <button 
+                onClick={handleBulkDownload}
+                className="download-btn"
+                disabled={bulkDownloadLoading || selectedImageIndices.size === 0}
+              >
+                {bulkDownloadLoading 
+                  ? 'Downloading...' 
+                  : `Download ${selectedImageIndices.size} Image${selectedImageIndices.size !== 1 ? 's' : ''}`
+                }
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

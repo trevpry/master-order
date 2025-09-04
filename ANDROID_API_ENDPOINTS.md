@@ -746,6 +746,146 @@ curl -X POST "http://localhost:3001/api/android/mark-watched" \
 
 ---
 
+## Gallery and Playlist Endpoints
+
+### 1. Get Random Gallery Image
+
+**Endpoint**: `GET /api/android/gallery/:galleryName/random-image`
+
+**Description**: Returns a path to a random image from the specified gallery. The gallery name matching is case-insensitive and supports partial matching.
+
+**Parameters**:
+- `galleryName` (URL parameter): Name of the gallery to search for
+
+**Response Format**:
+```json
+{
+  "type": "RANDOM_IMAGE",
+  "data": {
+    "imagePath": "/path/to/random/image.jpg",
+    "galleryName": "My Photo Gallery",
+    "galleryId": 123
+  }
+}
+```
+
+**Error Response**:
+```json
+{
+  "type": "ERROR",
+  "data": {
+    "error": "Gallery 'NonExistentGallery' not found"
+  }
+}
+```
+
+**Example Request**:
+```
+GET /api/android/gallery/vacation%20photos/random-image
+```
+
+**Example Response**:
+```json
+{
+  "type": "RANDOM_IMAGE",
+  "data": {
+    "imagePath": "/galleries/vacation-photos/IMG_001.jpg",
+    "galleryName": "Vacation Photos",
+    "galleryId": 45
+  }
+}
+```
+
+### 2. Get Random Playlist Track
+
+**Endpoint**: `GET /api/android/playlist/:playlistName/random-track`
+
+**Description**: Returns a random track from the specified playlist with full Plex streaming capabilities. Includes the complete Plex streaming URL that can be played directly on Android devices, along with comprehensive artwork metadata.
+
+**Parameters**:
+- `playlistName` (URL parameter): Name of the playlist to search for
+
+**Response Format**:
+```json
+{
+  "type": "RANDOM_TRACK",
+  "data": {
+    "track": {
+      "id": 12345,
+      "title": "Song Title",
+      "artist": "Artist Name",
+      "album": "Album Name",
+      "duration": 240000,
+      "year": 2023,
+      "genre": "Rock",
+      "trackNumber": 5,
+      "discNumber": 1
+    },
+    "plexStreamingUrl": "http://your-plex-server:32400/library/metadata/12345/file.mp3?X-Plex-Token=your-token",
+    "artwork": {
+      "trackArtwork": "http://your-plex-server:32400/library/metadata/12345/thumb?X-Plex-Token=your-token",
+      "albumArtwork": "http://your-plex-server:32400/library/metadata/12340/thumb?X-Plex-Token=your-token",
+      "artistArtwork": "http://your-plex-server:32400/library/metadata/12300/thumb?X-Plex-Token=your-token"
+    },
+    "playlistName": "My Favorite Songs",
+    "playlistId": 67
+  }
+}
+```
+
+**Error Response**:
+```json
+{
+  "type": "ERROR",
+  "data": {
+    "error": "Playlist 'NonExistentPlaylist' not found"
+  }
+}
+```
+
+**Example Request**:
+```
+GET /api/android/playlist/rock%20classics/random-track
+```
+
+**Example Response**:
+```json
+{
+  "type": "RANDOM_TRACK",
+  "data": {
+    "track": {
+      "id": 98765,
+      "title": "Bohemian Rhapsody",
+      "artist": "Queen",
+      "album": "A Night at the Opera",
+      "duration": 355000,
+      "year": 1975,
+      "genre": "Rock",
+      "trackNumber": 11,
+      "discNumber": 1
+    },
+    "plexStreamingUrl": "http://192.168.1.100:32400/library/metadata/98765/file.mp3?X-Plex-Token=abc123def456",
+    "artwork": {
+      "trackArtwork": null,
+      "albumArtwork": "http://192.168.1.100:32400/library/metadata/98760/thumb?X-Plex-Token=abc123def456",
+      "artistArtwork": "http://192.168.1.100:32400/library/metadata/98700/thumb?X-Plex-Token=abc123def456"
+    },
+    "playlistName": "Rock Classics",
+    "playlistId": 15
+  }
+}
+```
+
+**Notes**:
+- The `plexStreamingUrl` is a direct streaming URL compatible with Android MediaPlayer
+- Artwork URLs are prioritized: track artwork → album artwork → artist artwork
+- All artwork URLs include the necessary Plex authentication token
+- Duration is provided in milliseconds for Android compatibility
+- Playlist name matching is case-insensitive and supports partial matching
+- If no tracks are found in the playlist, an appropriate error message is returned
+
+---
+
 ## Stash Integration Endpoints
 
 ### 1. Get Next Stash Clip

@@ -581,6 +581,67 @@ The Android Companion App API provides structured endpoints specifically designe
 - **Content Discovery**: Smart recommendations with collection awareness
 - **Final Season Detection**: Automatic detection of final seasons and finale episodes for enhanced UI display
 
+#### Gallery & Playlist Content Access
+- **GET /api/android/gallery/:galleryName/random-image**: Get random image from specified background gallery
+  - URL Parameters: `galleryName` (URL-encoded gallery name)
+  - Returns: `{"type":"RANDOM_IMAGE_SUCCESS|RANDOM_IMAGE_ERROR","data":{...}}` with image metadata and URLs
+  - **Success Response**:
+    ```json
+    {
+      "type": "RANDOM_IMAGE_SUCCESS",
+      "data": {
+        "success": true,
+        "galleryName": "Star Wars",
+        "galleryId": 1,
+        "image": {
+          "id": 103,
+          "filename": "bg-1757010673087-577498178.jpg",
+          "originalName": "Image 84",
+          "url": "https://i.imgur.com/oqL4p79.jpg",
+          "width": 1429,
+          "height": 951,
+          "size": 316640,
+          "mimetype": "image/jpeg"
+        },
+        "totalImages": 145
+      }
+    }
+    ```
+
+- **GET /api/android/playlist/:playlistName/random-track**: Get random track from specified playlist with full Plex streaming data
+  - URL Parameters: `playlistName` (URL-encoded playlist name, searches both Plex and Custom playlists)
+  - Returns: `{"type":"RANDOM_TRACK_SUCCESS|RANDOM_TRACK_ERROR","data":{...}}` with complete track metadata and streaming URLs
+  - **Success Response**:
+    ```json
+    {
+      "type": "RANDOM_TRACK_SUCCESS",
+      "data": {
+        "success": true,
+        "playlistName": "Star Trek",
+        "playlistType": "custom",
+        "playlistId": 1,
+        "track": {
+          "ratingKey": "117556",
+          "title": "Oht, Ayem, Hekem and Yoodt (The Soul Cairn)",
+          "artist": "Absolute Pitch",
+          "album": "The Elder Scrolls Legends: Battlespire",
+          "duration": 183373,
+          "streamUrl": "http://192.168.1.114:32400/library/parts/141482/1513454819/file.flac?X-Plex-Token=...",
+          "artworkUrl": "http://192.168.1.114:32400/library/metadata/117552/thumb/1724704619?X-Plex-Token=...",
+          "plexUrl": "http://192.168.1.114:32400",
+          "year": null,
+          "index": 4,
+          "parentIndex": 1,
+          "rating": null
+        },
+        "totalTracks": 100
+      }
+    }
+    ```
+  - **Android Integration**: Stream URLs are ready for direct use with `MediaPlayer.setDataSource()`, artwork URLs work with image loading libraries like Picasso/Glide
+  - **Enhanced Metadata**: Includes track number (`index`), disc number (`parentIndex`), year, rating, and full artist/album information from Plex
+  - **Fallback Artwork**: Uses track → album → artist artwork hierarchy for best image availability
+
 ### Episode Selection & Media Discovery
 - **GET /api/up_next**: Get random episode from configured collection
   - Fetches collection name from database

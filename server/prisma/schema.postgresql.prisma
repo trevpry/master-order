@@ -70,6 +70,9 @@ model CustomOrder {
   playlistRatingKey String?     // For Plex playlists
   customPlaylistId  Int?        // For custom playlists
   
+  // Background gallery fields
+  backgroundGalleryId Int?      // For background galleries
+  
   items       CustomOrderItem[]
   referencingItems CustomOrderItem[] @relation("SubOrderReference") // Items that reference this order as a sub-order
   
@@ -80,6 +83,9 @@ model CustomOrder {
   // Playlist relationships
   plexPlaylist    PlexPlaylist?  @relation(fields: [playlistRatingKey], references: [ratingKey])
   customPlaylist  CustomPlaylist? @relation(fields: [customPlaylistId], references: [id])
+  
+  // Background gallery relationship
+  backgroundGallery BackgroundGallery? @relation(fields: [backgroundGalleryId], references: [id])
 }
 
 model CustomOrderItem {
@@ -1485,4 +1491,34 @@ model NoteCrossLink {
   @@unique([fromNoteId, toNoteId])
   @@index([fromNoteId])
   @@index([toNoteId])
+}
+
+model BackgroundImage {
+  id          Int      @id @default(autoincrement())
+  filename    String
+  originalName String?
+  path        String
+  url         String?
+  size        Int?
+  mimetype    String?
+  width       Int?
+  height      Int?
+  galleryId   Int?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  gallery BackgroundGallery? @relation(fields: [galleryId], references: [id], onDelete: SetNull)
+  
+  @@index([galleryId])
+}
+
+model BackgroundGallery {
+  id          Int      @id @default(autoincrement())
+  name        String
+  description String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  backgrounds BackgroundImage[]
+  customOrders CustomOrder[]
 }

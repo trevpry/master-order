@@ -706,14 +706,19 @@ h3.clickable-title {
   z-index: 1000;
 }
 
-.modal-content {
+/* Ensure custom orders modal styles take precedence */
+.modal-overlay .modal-content {
   background: white;
   border-radius: 8px;
   width: 90%;
   max-width: 600px;
-  max-height: 80vh;
-  overflow-y: auto;
+  max-height: 90vh;
+  overflow-y: auto !important;
   box-shadow: 0 10px 25px rgba(0, 0, 0, 0.2);
+  /* Ensure smooth scrolling */
+  scroll-behavior: smooth;
+  /* Ensure the modal is properly positioned for scrolling */
+  position: relative;
 }
 
 /* Special styling for bulk import modals to ensure buttons are visible */
@@ -972,7 +977,7 @@ h3.clickable-title {
     justify-content: flex-end;
   }
   
-  .modal-content {
+  .modal-overlay .modal-content {
     width: 95%;
     margin: 1rem;
     max-height: 95vh;
@@ -995,6 +1000,11 @@ h3.clickable-title {
   
   .bulk-import-modal .form-actions {
     padding: 1rem;
+  }
+  
+  /* Mobile adjustments - ensure modal takes most of screen */
+  .modal-overlay .modal-content {
+    max-height: 95vh;
   }
   
   .search-result-item {
@@ -1091,12 +1101,14 @@ h3.clickable-title {
 
 /* Book Search Form Styles */
 .book-search-form {
-  margin-bottom: 1.5rem;
+  margin-bottom: 0;
+  padding: 1.5rem;
 }
 
 .book-search-results {
-  margin-top: 1.5rem;
-  max-height: 400px;
+  margin-top: 0;
+  padding: 1.5rem;
+  max-height: 50vh;
   overflow-y: auto;
 }
 
@@ -1173,16 +1185,18 @@ h3.clickable-title {
 
 /* Short Story Form Styles */
 .shortstory-search-form {
-  margin-bottom: 1.5rem;
+  margin-bottom: 0;
+  padding: 1.5rem;
 }
 
 .shortstory-search-results {
-  max-height: 400px;
-  overflow-y: auto;
   border: 1px solid #e9ecef;
   border-radius: 8px;
   padding: 1rem;
   background: #f8f9fa;
+  margin: 0 1.5rem 1.5rem 1.5rem;
+  max-height: 50vh;
+  overflow-y: auto;
 }
 
 .shortstory-search-results h4 {
@@ -1201,15 +1215,21 @@ h3.clickable-title {
 }
 
 /* Comic Selection Modal Styles */
+.comic-search-form {
+  padding: 1.5rem;
+  margin-bottom: 0;
+}
+
 .comic-search-results {
-  margin-top: 1.5rem;
+  margin-top: 0;
+  padding: 1.5rem;
 }
 
 .comic-results-list {
   display: flex;
   flex-direction: column;
   gap: 1rem;
-  max-height: 400px;
+  max-height: 50vh;
   overflow-y: auto;
 }
 

@@ -5782,6 +5782,7 @@ app.get('/api/custom-orders', async (req, res) => {
             }
           }
         },
+        backgroundGallery: true,
         subOrders: {
           include: {
             items: {
@@ -5819,7 +5820,7 @@ app.get('/api/custom-orders', async (req, res) => {
 // Create a new custom order
 app.post('/api/custom-orders', async (req, res) => {
   try {
-    const { name, description, icon, parentOrderId, playlistRatingKey, customPlaylistId } = req.body;
+    const { name, description, icon, parentOrderId, playlistRatingKey, customPlaylistId, backgroundGalleryId } = req.body;
     
     if (!name || name.trim() === '') {
       return res.status(400).json({ error: 'Custom order name is required' });
@@ -5853,6 +5854,16 @@ app.post('/api/custom-orders', async (req, res) => {
         return res.status(400).json({ error: 'Custom playlist not found' });
       }
     }
+
+    // Validate background gallery exists if specified
+    if (backgroundGalleryId) {
+      const gallery = await prisma.backgroundGallery.findUnique({
+        where: { id: parseInt(backgroundGalleryId) }
+      });
+      if (!gallery) {
+        return res.status(400).json({ error: 'Background gallery not found' });
+      }
+    }
     
     const customOrder = await prisma.customOrder.create({
       data: {
@@ -5861,13 +5872,15 @@ app.post('/api/custom-orders', async (req, res) => {
         icon: icon?.trim() || null,
         parentOrderId: parentOrderId ? parseInt(parentOrderId) : null,
         playlistRatingKey: playlistRatingKey?.trim() || null,
-        customPlaylistId: customPlaylistId ? parseInt(customPlaylistId) : null
+        customPlaylistId: customPlaylistId ? parseInt(customPlaylistId) : null,
+        backgroundGalleryId: backgroundGalleryId ? parseInt(backgroundGalleryId) : null
       },
       include: {
         parentOrder: true,
         subOrders: true,
         plexPlaylist: true,
-        customPlaylist: true
+        customPlaylist: true,
+        backgroundGallery: true
       }
     });
     
@@ -5984,7 +5997,8 @@ app.get('/api/custom-orders/:id', async (req, res) => {
           orderBy: { sortOrder: 'asc' }
         },
         plexPlaylist: true,
-        customPlaylist: true
+        customPlaylist: true,
+        backgroundGallery: true
       }
     });
     
@@ -6011,7 +6025,8 @@ app.get('/api/custom-orders/:id', async (req, res) => {
               referencedCustomOrder: true
             },
             orderBy: { sortOrder: 'asc' }
-          }
+          },
+          backgroundGallery: true
         }
       });
       
@@ -6029,7 +6044,7 @@ app.get('/api/custom-orders/:id', async (req, res) => {
 app.put('/api/custom-orders/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    const { name, description, isActive, icon, parentOrderId, playlistRatingKey, customPlaylistId } = req.body;
+    const { name, description, isActive, icon, parentOrderId, playlistRatingKey, customPlaylistId, backgroundGalleryId } = req.body;
     
     // Get current order to check for parent changes
     const currentOrder = await prisma.customOrder.findUnique({
@@ -6078,6 +6093,16 @@ app.put('/api/custom-orders/:id', async (req, res) => {
         return res.status(400).json({ error: 'Custom playlist not found' });
       }
     }
+
+    // Validate background gallery exists if specified
+    if (backgroundGalleryId !== undefined && backgroundGalleryId !== null) {
+      const gallery = await prisma.backgroundGallery.findUnique({
+        where: { id: parseInt(backgroundGalleryId) }
+      });
+      if (!gallery) {
+        return res.status(400).json({ error: 'Background gallery not found' });
+      }
+    }
     
     const updateData = {};
     if (name !== undefined) updateData.name = name.trim();
@@ -6087,6 +6112,7 @@ app.put('/api/custom-orders/:id', async (req, res) => {
     if (parentOrderId !== undefined) updateData.parentOrderId = parentOrderId ? parseInt(parentOrderId) : null;
     if (playlistRatingKey !== undefined) updateData.playlistRatingKey = playlistRatingKey?.trim() || null;
     if (customPlaylistId !== undefined) updateData.customPlaylistId = customPlaylistId ? parseInt(customPlaylistId) : null;
+    if (backgroundGalleryId !== undefined) updateData.backgroundGalleryId = backgroundGalleryId ? parseInt(backgroundGalleryId) : null;
 
     const customOrder = await prisma.customOrder.update({
       where: { id: parseInt(id) },
@@ -6103,6 +6129,7 @@ app.put('/api/custom-orders/:id', async (req, res) => {
         parentOrder: true,
         plexPlaylist: true,
         customPlaylist: true,
+        backgroundGallery: true,
         subOrders: {
           include: {
             items: {
@@ -9031,6 +9058,29 @@ app.get('/api/android/up-next', async (req, res) => {
         episodeRatingKey = upNextData.episodeRatingKey;
         console.log('📱 Using episode-specific rating key for Android:', episodeRatingKey);
       }
+
+      // Fetch additional custom order details including playlist and background gallery
+      let customOrderDetails = null;
+      if (upNextData.customOrderId) {
+        try {
+          customOrderDetails = await prisma.customOrder.findUnique({
+            where: { id: upNextData.customOrderId },
+            include: {
+              plexPlaylist: true,
+              customPlaylist: true,
+              backgroundGallery: true
+            }
+          });
+          console.log('📱 Fetched custom order details for Android:', {
+            id: customOrderDetails?.id,
+            plexPlaylist: customOrderDetails?.plexPlaylist?.title,
+            customPlaylist: customOrderDetails?.customPlaylist?.title,
+            backgroundGallery: customOrderDetails?.backgroundGallery?.name
+          });
+        } catch (error) {
+          console.error('📱 Error fetching custom order details:', error);
+        }
+      }
       
       androidResponse = {
         type: 'PLAY_CUSTOM_ORDER_ITEM',
@@ -9038,7 +9088,7 @@ app.get('/api/android/up-next', async (req, res) => {
           id: upNextData.id,
           title: upNextData.title,
           type: upNextData.type,
-          orderName: upNextData.customOrderName || 'Custom Order', // Use the actual custom order name
+          orderName: upNextData.customOrderName || customOrderDetails?.name || 'Custom Order', // Use the actual custom order name
           summary: upNextData.summary || '',
           duration: upNextData.duration || 0,
           localArtworkPath: upNextData.localArtworkPath || '',
@@ -9048,6 +9098,13 @@ app.get('/api/android/up-next', async (req, res) => {
           plexId: episodeRatingKey || null, // Add plexId field for Plex content
           webUrl: upNextData.webUrl || null, // Add webUrl field for web video content
           customOrderId: upNextData.customOrderId || null,
+          customOrderItemId: upNextData.customOrderItemId || null,
+          // Playlist information
+          playlistName: customOrderDetails?.plexPlaylist?.title || customOrderDetails?.customPlaylist?.title || null,
+          playlistType: customOrderDetails?.plexPlaylist ? 'plex' : customOrderDetails?.customPlaylist ? 'custom' : null,
+          // Background gallery information
+          backgroundGalleryName: customOrderDetails?.backgroundGallery?.name || null,
+          backgroundGalleryId: customOrderDetails?.backgroundGallery?.id || null,
           // Episode-specific fields for custom orders
           ...(upNextData.type === 'episode' && {
             seasonNumber: upNextData.seasonNumber || upNextData.currentSeason || null,
@@ -10605,6 +10662,357 @@ app.post('/api/android/viewing/stop', async (req, res) => {
   }
 });
 
+// Android companion app endpoint - Random Gallery Image
+app.get('/api/android/gallery/:galleryName/random-image', async (req, res) => {
+  console.log('📱 Android app requesting random image from gallery...');
+  
+  try {
+    const { galleryName } = req.params;
+    
+    if (!galleryName) {
+      return res.status(400).json({
+        type: 'RANDOM_IMAGE_ERROR',
+        data: {
+          error: 'Missing gallery name',
+          message: 'Gallery name is required in the URL path',
+          timestamp: new Date().toISOString()
+        }
+      });
+    }
+    
+    // Find the gallery by name (case-insensitive for SQLite compatibility)
+    const gallery = await prisma.backgroundGallery.findFirst({
+      where: {
+        name: galleryName // Exact match first
+      },
+      include: {
+        backgrounds: true
+      }
+    }) || await prisma.backgroundGallery.findFirst({
+      where: {
+        name: {
+          contains: galleryName // Fallback to partial match
+        }
+      },
+      include: {
+        backgrounds: true
+      }
+    });
+    
+    if (!gallery) {
+      return res.status(404).json({
+        type: 'RANDOM_IMAGE_ERROR',
+        data: {
+          error: 'Gallery not found',
+          message: `Gallery "${galleryName}" does not exist`,
+          galleryName: galleryName,
+          timestamp: new Date().toISOString()
+        }
+      });
+    }
+    
+    if (!gallery.backgrounds || gallery.backgrounds.length === 0) {
+      return res.status(404).json({
+        type: 'RANDOM_IMAGE_ERROR',
+        data: {
+          error: 'No images in gallery',
+          message: `Gallery "${galleryName}" contains no images`,
+          galleryName: galleryName,
+          galleryId: gallery.id,
+          timestamp: new Date().toISOString()
+        }
+      });
+    }
+    
+    // Select random image from gallery
+    const randomIndex = Math.floor(Math.random() * gallery.backgrounds.length);
+    const randomImage = gallery.backgrounds[randomIndex];
+    
+    // Generate image URL based on available data
+    let imageUrl = null;
+    const baseUrl = getAndroidApiBaseUrl();
+    
+    if (randomImage.url) {
+      // Direct URL available
+      imageUrl = randomImage.url;
+    } else if (randomImage.path) {
+      // Use path to construct URL (assuming it's relative to uploads/backgrounds)
+      imageUrl = `${baseUrl}/uploads/backgrounds/${randomImage.filename || path.basename(randomImage.path)}`;
+    } else if (randomImage.filename) {
+      // Use filename to construct URL
+      imageUrl = `${baseUrl}/uploads/backgrounds/${randomImage.filename}`;
+    }
+    
+    const androidResponse = {
+      type: 'RANDOM_IMAGE_SUCCESS',
+      data: {
+        success: true,
+        galleryName: gallery.name,
+        galleryId: gallery.id,
+        galleryDescription: gallery.description,
+        image: {
+          id: randomImage.id,
+          filename: randomImage.filename,
+          originalName: randomImage.originalName,
+          url: imageUrl,
+          width: randomImage.width,
+          height: randomImage.height,
+          size: randomImage.size,
+          mimetype: randomImage.mimetype
+        },
+        totalImages: gallery.backgrounds.length,
+        timestamp: new Date().toISOString()
+      }
+    };
+    
+    console.log('📱 Random gallery image response:', JSON.stringify(androidResponse, null, 2));
+    res.json(androidResponse);
+    
+  } catch (error) {
+    console.error('❌ Error in Android random gallery image endpoint:', error);
+    
+    const androidErrorResponse = {
+      type: 'RANDOM_IMAGE_ERROR',
+      data: {
+        success: false,
+        error: 'Internal server error',
+        details: error.message,
+        timestamp: new Date().toISOString()
+      }
+    };
+    
+    res.status(500).json(androidErrorResponse);
+  }
+});
+
+// Android companion app endpoint - Random Playlist Track
+app.get('/api/android/playlist/:playlistName/random-track', async (req, res) => {
+  console.log('📱 Android app requesting random track from playlist...');
+  
+  try {
+    const { playlistName } = req.params;
+    
+    if (!playlistName) {
+      return res.status(400).json({
+        type: 'RANDOM_TRACK_ERROR',
+        data: {
+          error: 'Missing playlist name',
+          message: 'Playlist name is required in the URL path',
+          timestamp: new Date().toISOString()
+        }
+      });
+    }
+    
+    // Search for playlist in both Plex and Custom playlists
+    let playlist = null;
+    let playlistType = null;
+    let tracks = [];
+    
+    // Try Plex playlists first (case-insensitive for SQLite compatibility)
+    const plexPlaylist = await prisma.plexPlaylist.findFirst({
+      where: {
+        title: playlistName // Exact match first
+      },
+      include: {
+        items: true
+      }
+    }) || await prisma.plexPlaylist.findFirst({
+      where: {
+        title: {
+          contains: playlistName // Fallback to partial match
+        }
+      },
+      include: {
+        items: true
+      }
+    });
+    
+    if (plexPlaylist) {
+      playlist = plexPlaylist;
+      playlistType = 'plex';
+      tracks = plexPlaylist.items || [];
+    } else {
+      // Try Custom playlists (case-insensitive for SQLite compatibility)
+      const customPlaylist = await prisma.customPlaylist.findFirst({
+        where: {
+          title: playlistName // Exact match first
+        },
+        include: {
+          tracks: true
+        }
+      }) || await prisma.customPlaylist.findFirst({
+        where: {
+          title: {
+            contains: playlistName // Fallback to partial match
+          }
+        },
+        include: {
+          tracks: true
+        }
+      });
+      
+      if (customPlaylist) {
+        playlist = customPlaylist;
+        playlistType = 'custom';
+        tracks = customPlaylist.tracks || [];
+      }
+    }
+    
+    if (!playlist) {
+      return res.status(404).json({
+        type: 'RANDOM_TRACK_ERROR',
+        data: {
+          error: 'Playlist not found',
+          message: `Playlist "${playlistName}" does not exist in Plex or Custom playlists`,
+          playlistName: playlistName,
+          timestamp: new Date().toISOString()
+        }
+      });
+    }
+    
+    if (!tracks || tracks.length === 0) {
+      return res.status(404).json({
+        type: 'RANDOM_TRACK_ERROR',
+        data: {
+          error: 'No tracks in playlist',
+          message: `Playlist "${playlistName}" contains no tracks`,
+          playlistName: playlistName,
+          playlistType: playlistType,
+          playlistId: playlist.id || playlist.ratingKey,
+          timestamp: new Date().toISOString()
+        }
+      });
+    }
+    
+    // Select random track from playlist
+    const randomIndex = Math.floor(Math.random() * tracks.length);
+    const randomTrack = tracks[randomIndex];
+    
+    // Get full track metadata from Plex for streaming and artwork information
+    const settings = await prisma.settings.findFirst();
+    let plexTrackMetadata = null;
+    let streamUrl = null;
+    let artworkUrl = null;
+    
+    if (settings && settings.plexUrl && settings.plexToken && randomTrack.ratingKey) {
+      try {
+        console.log(`📱 Fetching Plex metadata for track ${randomTrack.ratingKey}...`);
+        const trackResponse = await fetch(`${settings.plexUrl}/library/metadata/${randomTrack.ratingKey}?X-Plex-Token=${settings.plexToken}`, {
+          headers: {
+            'Accept': 'application/json'
+          }
+        });
+        
+        if (trackResponse.ok) {
+          const trackData = await trackResponse.json();
+          plexTrackMetadata = trackData.MediaContainer?.Metadata?.[0];
+          
+          // Get streaming URL
+          const mediaPart = plexTrackMetadata?.Media?.[0]?.Part?.[0];
+          if (mediaPart && mediaPart.key) {
+            streamUrl = `${settings.plexUrl}${mediaPart.key}?X-Plex-Token=${settings.plexToken}`;
+          }
+          
+          // Get artwork URL
+          if (plexTrackMetadata?.thumb) {
+            artworkUrl = `${settings.plexUrl}${plexTrackMetadata.thumb}?X-Plex-Token=${settings.plexToken}`;
+          } else if (plexTrackMetadata?.parentThumb) {
+            // Use album artwork if track artwork not available
+            artworkUrl = `${settings.plexUrl}${plexTrackMetadata.parentThumb}?X-Plex-Token=${settings.plexToken}`;
+          } else if (plexTrackMetadata?.grandparentThumb) {
+            // Use artist artwork as fallback
+            artworkUrl = `${settings.plexUrl}${plexTrackMetadata.grandparentThumb}?X-Plex-Token=${settings.plexToken}`;
+          }
+          
+          console.log(`📱 Plex metadata loaded:`, {
+            title: plexTrackMetadata?.title,
+            hasStreamUrl: !!streamUrl,
+            hasArtwork: !!artworkUrl
+          });
+        } else {
+          console.warn(`⚠️ Failed to fetch Plex metadata for track ${randomTrack.ratingKey}:`, trackResponse.status);
+        }
+      } catch (error) {
+        console.error(`❌ Error fetching Plex metadata for track ${randomTrack.ratingKey}:`, error);
+      }
+    }
+    
+    // Format track data based on playlist type
+    let trackData = {};
+    if (playlistType === 'plex') {
+      trackData = {
+        ratingKey: randomTrack.ratingKey,
+        title: plexTrackMetadata?.title || randomTrack.title,
+        artist: plexTrackMetadata?.originalTitle || plexTrackMetadata?.grandparentTitle || null,
+        album: plexTrackMetadata?.parentTitle || null,
+        duration: plexTrackMetadata?.duration || randomTrack.duration,
+        type: randomTrack.type || 'track',
+        addedAt: randomTrack.addedAt,
+        // Android-specific fields
+        streamUrl: streamUrl,
+        artworkUrl: artworkUrl,
+        plexUrl: settings?.plexUrl,
+        // Additional metadata from Plex
+        year: plexTrackMetadata?.year,
+        index: plexTrackMetadata?.index, // Track number
+        parentIndex: plexTrackMetadata?.parentIndex, // Disc number
+        rating: plexTrackMetadata?.rating
+      };
+    } else {
+      trackData = {
+        ratingKey: randomTrack.ratingKey,
+        title: plexTrackMetadata?.title || randomTrack.title,
+        artist: plexTrackMetadata?.originalTitle || plexTrackMetadata?.grandparentTitle || randomTrack.artist,
+        album: plexTrackMetadata?.parentTitle || randomTrack.album,
+        duration: plexTrackMetadata?.duration || randomTrack.duration,
+        sortOrder: randomTrack.sortOrder,
+        addedAt: randomTrack.addedAt,
+        // Android-specific fields
+        streamUrl: streamUrl,
+        artworkUrl: artworkUrl,
+        plexUrl: settings?.plexUrl,
+        // Additional metadata from Plex
+        year: plexTrackMetadata?.year,
+        index: plexTrackMetadata?.index, // Track number
+        parentIndex: plexTrackMetadata?.parentIndex, // Disc number
+        rating: plexTrackMetadata?.rating
+      };
+    }
+    
+    const androidResponse = {
+      type: 'RANDOM_TRACK_SUCCESS',
+      data: {
+        success: true,
+        playlistName: playlist.title,
+        playlistType: playlistType,
+        playlistId: playlist.id || playlist.ratingKey,
+        playlistDescription: playlist.description || playlist.summary,
+        track: trackData,
+        totalTracks: tracks.length,
+        timestamp: new Date().toISOString()
+      }
+    };
+    
+    console.log('📱 Random playlist track response:', JSON.stringify(androidResponse, null, 2));
+    res.json(androidResponse);
+    
+  } catch (error) {
+    console.error('❌ Error in Android random playlist track endpoint:', error);
+    
+    const androidErrorResponse = {
+      type: 'RANDOM_TRACK_ERROR',
+      data: {
+        success: false,
+        error: 'Internal server error',
+        details: error.message,
+        timestamp: new Date().toISOString()
+      }
+    };
+    
+    res.status(500).json(androidErrorResponse);
+  }
+});
+
 // Serve React app for all other routes in production
 if (process.env.NODE_ENV === 'production') {
   app.get('*', (req, res) => {
@@ -10665,6 +11073,15 @@ const backgroundUpload = multer({
 app.get('/api/backgrounds', async (req, res) => {
   try {
     const backgrounds = await prisma.backgroundImage.findMany({
+      include: {
+        gallery: {
+          select: {
+            id: true,
+            name: true,
+            description: true
+          }
+        }
+      },
       orderBy: { createdAt: 'desc' }
     });
     res.json(backgrounds);
@@ -10693,14 +11110,13 @@ app.post('/api/backgrounds/upload', backgroundUpload.array('backgrounds'), async
 
         const background = await prisma.backgroundImage.create({
           data: {
-            filename: file.originalname,
-            storedFilename: file.filename,
-            filePath: file.path,
-            mimeType: file.mimetype,
-            fileSize: file.size,
+            filename: file.filename, // Use the stored filename
+            originalName: file.originalname, // Use originalName field
+            path: file.path, // Use path field
+            mimetype: file.mimetype, // Use mimetype field (lowercase)
+            size: file.size, // Use size field
             width: metadata.width,
-            height: metadata.height,
-            uploadedAt: new Date()
+            height: metadata.height
           }
         });
 
@@ -10728,63 +11144,704 @@ app.post('/api/backgrounds/upload', backgroundUpload.array('backgrounds'), async
 // Download background from URL
 app.post('/api/backgrounds/download', async (req, res) => {
   try {
+    const { url, galleryId } = req.body;
+    if (!url) {
+      return res.status(400).json({ error: 'URL is required' });
+    }
+
+    // Validate URL format
+    let validUrl;
+    try {
+      validUrl = new URL(url);
+    } catch (error) {
+      return res.status(400).json({ error: 'Invalid URL format' });
+    }
+
+    console.log('Attempting to download image from URL:', url);
+
+    // Detect gallery pages vs direct images
+    const isGalleryPage = isGalleryUrl(url);
+    const isDirectImage = /\.(jpg|jpeg|png|gif|bmp|webp)(\?.*)?$/i.test(validUrl.pathname.toLowerCase());
+    const hasImageKeywords = /\/(image|img|photo|picture|avatar|thumbnail)[\/?]/i.test(url.toLowerCase()) || 
+                             /\.(jpg|jpeg|png|gif|bmp|webp)[\/?]/i.test(url.toLowerCase());
+    
+    // Allow testing URLs
+    const isTestUrl = validUrl.hostname.includes('httpbin.org') || 
+                      validUrl.hostname.includes('picsum.photos') ||
+                      validUrl.hostname.includes('via.placeholder.com') ||
+                      validUrl.hostname.includes('unsplash.com');
+    
+    if (isGalleryPage) {
+      console.log('Detected gallery page, attempting to extract images...');
+      try {
+        const galleryImages = await extractGalleryImages(url);
+        
+        if (galleryImages.length === 0) {
+          return res.status(400).json({ 
+            error: 'No images found in the gallery page. The gallery may be empty or unsupported.' 
+          });
+        }
+        
+        console.log(`Found ${galleryImages.length} images in gallery`);
+        
+        // Return gallery info for user to decide on download/assignment
+        return res.json({
+          isGallery: true,
+          galleryUrl: url,
+          galleryTitle: galleryImages[0]?.galleryTitle || 'Image Gallery',
+          images: galleryImages,
+          totalImages: galleryImages.length
+        });
+        
+      } catch (error) {
+        console.error('Gallery parsing failed:', error);
+        return res.status(400).json({ 
+          error: `Failed to parse gallery page: ${error.message}. Try using a direct image URL instead.` 
+        });
+      }
+    }
+    
+    if (!isDirectImage && !hasImageKeywords && !isTestUrl) {
+      console.log('Warning: URL does not appear to be a direct image link or supported gallery');
+      return res.status(400).json({ 
+        error: 'URL must be a direct link to an image file, an image API endpoint, or a supported gallery page (imgur.com, etc.).' 
+      });
+    }
+
+    // Handle direct image download
+    try {
+      const downloadedImage = await downloadSingleImage(url);
+      
+      // Assign to gallery if specified
+      if (galleryId) {
+        await prisma.backgroundImage.update({
+          where: { id: downloadedImage.id },
+          data: { galleryId: parseInt(galleryId) }
+        });
+        downloadedImage.galleryId = parseInt(galleryId);
+      }
+      
+      return res.json(downloadedImage);
+    } catch (error) {
+      console.error('Download error:', error);
+      return res.status(500).json({ error: error.message || 'Failed to download background' });
+    }
+  } catch (error) {
+    console.error('Download error:', error);
+    res.status(500).json({ error: error.message || 'Failed to download background' });
+  }
+});
+
+// Bulk download from gallery with gallery assignment
+app.post('/api/backgrounds/download-gallery-bulk', async (req, res) => {
+  try {
+    const { url, galleryId, selectedImages } = req.body;
+    
+    if (!url) {
+      return res.status(400).json({ error: 'Gallery URL is required' });
+    }
+
+    // Check if this is a gallery page
+    const isGalleryPage = isGalleryUrl(url);
+    if (!isGalleryPage) {
+      return res.status(400).json({ 
+        error: 'URL must be a supported gallery page (imgur.com, etc.)' 
+      });
+    }
+
+    console.log(`Bulk downloading from gallery: ${url}`);
+
+    try {
+      const galleryImages = await extractGalleryImages(url);
+      
+      if (galleryImages.length === 0) {
+        return res.status(400).json({ 
+          error: 'No images found in the gallery page.' 
+        });
+      }
+
+      // If selectedImages specified, only download those indices
+      const imagesToDownload = selectedImages && selectedImages.length > 0 
+        ? selectedImages.map(index => galleryImages[index]).filter(Boolean)
+        : galleryImages;
+
+      console.log(`Downloading ${imagesToDownload.length} images from gallery`);
+
+      const results = [];
+      let successCount = 0;
+      let errorCount = 0;
+
+      for (let i = 0; i < imagesToDownload.length; i++) {
+        const image = imagesToDownload[i];
+        try {
+          console.log(`Downloading ${i + 1}/${imagesToDownload.length}: ${image.url}`);
+          
+          const downloadedImage = await downloadSingleImage(image.url, image.title || `Gallery Image ${i + 1}`);
+          
+          // Assign to gallery if specified
+          if (galleryId) {
+            await prisma.backgroundImage.update({
+              where: { id: downloadedImage.id },
+              data: { galleryId: parseInt(galleryId) }
+            });
+            downloadedImage.galleryId = parseInt(galleryId);
+          }
+          
+          // Add gallery metadata
+          downloadedImage.isFromGallery = true;
+          downloadedImage.galleryUrl = url;
+          downloadedImage.galleryTitle = image.galleryTitle;
+          downloadedImage.originalIndex = selectedImages ? selectedImages[i] : i;
+          
+          results.push({
+            success: true,
+            image: downloadedImage,
+            originalUrl: image.url,
+            index: i
+          });
+          
+          successCount++;
+          
+          // Add a small delay between downloads to be respectful
+          if (i < imagesToDownload.length - 1) {
+            await new Promise(resolve => setTimeout(resolve, 500));
+          }
+          
+        } catch (error) {
+          console.error(`Failed to download image ${i + 1}:`, error);
+          results.push({
+            success: false,
+            error: error.message,
+            originalUrl: image.url,
+            index: i
+          });
+          errorCount++;
+        }
+      }
+
+      console.log(`Bulk download complete: ${successCount} successful, ${errorCount} failed`);
+
+      res.json({
+        success: true,
+        galleryUrl: url,
+        galleryTitle: imagesToDownload[0]?.galleryTitle || 'Image Gallery',
+        totalRequested: imagesToDownload.length,
+        successCount,
+        errorCount,
+        results,
+        galleryId: galleryId ? parseInt(galleryId) : null
+      });
+
+    } catch (error) {
+      console.error('Gallery bulk download failed:', error);
+      res.status(400).json({ 
+        error: `Failed to download from gallery: ${error.message}` 
+      });
+    }
+  } catch (error) {
+    console.error('Gallery bulk download error:', error);
+    res.status(500).json({ error: error.message || 'Failed to download from gallery' });
+  }
+});
+
+// Helper function to detect if URL is a gallery page
+function isGalleryUrl(url) {
+  const urlObj = new URL(url);
+  const hostname = urlObj.hostname.toLowerCase();
+  const pathname = urlObj.pathname.toLowerCase();
+  
+  // Imgur gallery detection
+  if (hostname.includes('imgur.com')) {
+    return pathname.includes('/gallery/') || pathname.includes('/a/') || pathname.includes('/r/');
+  }
+  
+  // Add more gallery sites here as needed
+  // Reddit image galleries
+  if (hostname.includes('reddit.com')) {
+    return pathname.includes('/gallery/');
+  }
+  
+  return false;
+}
+
+// Helper function to extract images from gallery pages
+async function extractGalleryImages(url) {
+  const urlObj = new URL(url);
+  const hostname = urlObj.hostname.toLowerCase();
+  
+  if (hostname.includes('imgur.com')) {
+    return await extractImgurGalleryImages(url);
+  }
+  
+  // Add more gallery extractors here
+  throw new Error('Unsupported gallery site');
+}
+
+// Imgur gallery image extractor with comprehensive support for all gallery formats
+async function extractImgurGalleryImages(url) {
+  console.log('Extracting images from Imgur gallery:', url);
+  
+  // Extract gallery/album ID from URL
+  let galleryId = '';
+  const urlObj = new URL(url);
+  const pathname = urlObj.pathname;
+  
+  // Handle different Imgur URL formats
+  const galleryMatch = pathname.match(/\/gallery\/([a-zA-Z0-9-]+)/);
+  const albumMatch = pathname.match(/\/a\/([a-zA-Z0-9]+)/);
+  const rMatch = pathname.match(/\/r\/[^/]+\/([a-zA-Z0-9-]+)/);
+  const hashMatch = pathname.match(/#([a-zA-Z0-9]+)/);
+  
+  if (galleryMatch) {
+    galleryId = galleryMatch[1];
+  } else if (albumMatch) {
+    galleryId = albumMatch[1];
+  } else if (rMatch) {
+    galleryId = rMatch[1];
+  } else if (hashMatch) {
+    galleryId = hashMatch[1];
+  } else {
+    throw new Error('Could not extract gallery ID from Imgur URL');
+  }
+  
+  console.log('Extracted gallery ID:', galleryId);
+  
+  try {
+    const images = [];
+    
+    // Method 1: Try Imgur API approach (if we can get all image hashes)
+    try {
+      const apiImages = await extractImgurApiData(url, galleryId);
+      if (apiImages.length > 0) {
+        images.push(...apiImages);
+        console.log(`Found ${images.length} images via API method`);
+        return images;
+      }
+    } catch (apiError) {
+      console.log('API method failed, trying HTML parsing');
+    }
+    
+    // Method 2: Enhanced HTML parsing with multiple extraction methods
+    const response = await fetch(url, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8',
+        'Accept-Language': 'en-US,en;q=0.9',
+        'Accept-Encoding': 'gzip, deflate, br',
+        'Cache-Control': 'no-cache',
+        'Pragma': 'no-cache',
+        'Sec-Fetch-Dest': 'document',
+        'Sec-Fetch-Mode': 'navigate',
+        'Sec-Fetch-Site': 'none',
+        'Upgrade-Insecure-Requests': '1'
+      }
+    });
+    
+    if (!response.ok) {
+      throw new Error(`Failed to fetch gallery page: ${response.status} ${response.statusText}`);
+    }
+    
+    const html = await response.text();
+    console.log('Fetched gallery HTML, length:', html.length);
+    
+    // Method 2a: Extract from window.postDataJSON
+    const postDataMatch = html.match(/window\.postDataJSON\s*=\s*'([^']+)'/);
+    if (postDataMatch) {
+      try {
+        const jsonStr = postDataMatch[1].replace(/\\"/g, '"').replace(/\\\\/g, '\\');
+        const postData = JSON.parse(jsonStr);
+        console.log('Found postDataJSON, media items:', postData.media?.length || 0);
+        
+        if (postData.media && Array.isArray(postData.media)) {
+          for (const item of postData.media) {
+            if (item.type === 'image' && item.url) {
+              images.push({
+                url: item.url.startsWith('//') ? 'https:' + item.url : item.url,
+                title: item.title || item.description || `Image ${images.length + 1}`,
+                galleryTitle: postData.title || 'Imgur Gallery'
+              });
+            }
+          }
+        }
+      } catch (parseError) {
+        console.log('Failed to parse postDataJSON:', parseError.message);
+      }
+    }
+    
+    // Method 2b: Extract image hashes from various HTML patterns
+    if (images.length === 0) {
+      const extractedHashes = new Set();
+      
+      // Pattern 1: Direct image URLs
+      const imgUrlPattern = /https?:\/\/i\.imgur\.com\/([a-zA-Z0-9]+)\.(jpg|jpeg|png|gif|webp)/gi;
+      let match;
+      while ((match = imgUrlPattern.exec(html)) !== null) {
+        extractedHashes.add(match[1]);
+      }
+      
+      // Pattern 2: Image hashes in JavaScript data
+      const hashPattern = /['"]['"]([a-zA-Z0-9]{5,})['"]['"] *: *{[^}]*['"]['"]mimetype['"]['"] *: *['"]['"]image/gi;
+      while ((match = hashPattern.exec(html)) !== null) {
+        extractedHashes.add(match[1]);
+      }
+      
+      // Pattern 3: Image placeholder data attributes
+      const placeholderPattern = /data-src=['"]['"]https?:\/\/i\.imgur\.com\/([a-zA-Z0-9]+)[^'"]['"]['"]['\"]/gi;
+      while ((match = placeholderPattern.exec(html)) !== null) {
+        extractedHashes.add(match[1]);
+      }
+      
+      // Pattern 4: Look for image hashes in JSON-LD or other structured data
+      const structuredDataPattern = /"url" *: *"https?:\/\/i\.imgur\.com\/([a-zA-Z0-9]+)\./gi;
+      while ((match = structuredDataPattern.exec(html)) !== null) {
+        extractedHashes.add(match[1]);
+      }
+      
+      // Pattern 5: Find image hashes in any imgur.com URL patterns
+      const generalPattern = /imgur\.com\/([a-zA-Z0-9]{5,})/gi;
+      while ((match = generalPattern.exec(html)) !== null) {
+        // Filter out obvious non-image hashes (like gallery IDs that are too long)
+        const hash = match[1];
+        if (hash.length >= 5 && hash.length <= 15 && !hash.includes('-')) {
+          extractedHashes.add(hash);
+        }
+      }
+      
+      console.log(`Extracted ${extractedHashes.size} unique image hashes from HTML`);
+      
+      // Convert hashes to full image URLs
+      for (const hash of extractedHashes) {
+        // Try different image formats
+        const formats = ['jpg', 'png', 'gif', 'webp', 'jpeg'];
+        for (const format of formats) {
+          const imageUrl = `https://i.imgur.com/${hash}.${format}`;
+          try {
+            // Quick HEAD request to verify the image exists
+            const headResponse = await fetch(imageUrl, { 
+              method: 'HEAD',
+              timeout: 5000,
+              headers: {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+              }
+            });
+            
+            if (headResponse.ok && headResponse.headers.get('content-type')?.startsWith('image/')) {
+              images.push({
+                url: imageUrl,
+                title: `Image ${images.length + 1}`,
+                galleryTitle: 'Imgur Gallery'
+              });
+              break; // Found a working format, move to next hash
+            }
+          } catch (error) {
+            // Continue to next format
+          }
+        }
+      }
+    }
+    
+    // Method 2c: If still no images, try the gallery ID as an image
+    if (images.length === 0) {
+      const extensions = ['jpg', 'png', 'gif', 'jpeg', 'webp'];
+      for (const ext of extensions) {
+        const testUrl = `https://i.imgur.com/${galleryId}.${ext}`;
+        try {
+          const testResponse = await fetch(testUrl, { method: 'HEAD', timeout: 5000 });
+          if (testResponse.ok) {
+            images.push({
+              url: testUrl,
+              title: `Image from gallery`,
+              galleryTitle: 'Imgur Gallery'
+            });
+            break;
+          }
+        } catch (error) {
+          // Continue trying other extensions
+        }
+      }
+    }
+    
+    console.log(`Found ${images.length} images in Imgur gallery`);
+    
+    if (images.length === 0) {
+      throw new Error('No images found in gallery. The gallery might be private, deleted, or require authentication.');
+    }
+    
+    return images;
+    
+  } catch (error) {
+    throw new Error(`Failed to extract Imgur gallery images: ${error.message}`);
+  }
+}
+
+// Helper function to extract images using API-like approaches
+async function extractImgurApiData(url, galleryId) {
+  const images = [];
+  
+  try {
+    // Try to fetch JSON data that might be available
+    const jsonUrl = `https://imgur.com/ajaxalbums/getimages/${galleryId}/hit.json`;
+    const response = await fetch(jsonUrl, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        'Accept': 'application/json, text/javascript, */*; q=0.01',
+        'X-Requested-With': 'XMLHttpRequest',
+        'Referer': url
+      },
+      timeout: 10000
+    });
+    
+    if (response.ok) {
+      const data = await response.json();
+      if (data.data && data.data.images) {
+        for (const img of data.data.images) {
+          if (img.hash) {
+            const imageUrl = `https://i.imgur.com/${img.hash}${img.ext || '.jpg'}`;
+            images.push({
+              url: imageUrl,
+              title: img.title || img.description || `Image ${images.length + 1}`,
+              galleryTitle: data.data.title || 'Imgur Gallery'
+            });
+          }
+        }
+      }
+    }
+  } catch (error) {
+    console.log('API approach failed:', error.message);
+  }
+  
+  return images;
+}
+
+// Helper function to download a single image
+async function downloadSingleImage(url, customOriginalName = null) {
+  let response;
+  let retryCount = 0;
+  const maxRetries = 3;
+  
+  console.log('Downloading single image from:', url);
+  
+  while (retryCount <= maxRetries) {
+    try {
+      // Download the image using node-fetch with proper headers
+      response = await fetch(url, {
+        method: 'GET',
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+          'Accept': 'image/*,*/*;q=0.8',
+          'Accept-Encoding': 'gzip, deflate, br',
+          'Accept-Language': 'en-US,en;q=0.9',
+          'Cache-Control': 'no-cache',
+          'Pragma': 'no-cache'
+        },
+        timeout: 30000 // 30 second timeout
+      });
+      
+      console.log('Response status:', response.status, response.statusText);
+      
+      // Handle rate limiting
+      if (response.status === 429) {
+        const retryAfter = response.headers.get('retry-after');
+        const waitTime = retryAfter ? parseInt(retryAfter) * 1000 : Math.pow(2, retryCount) * 1000;
+        
+        if (retryCount < maxRetries) {
+          console.log(`Rate limited (429). Retrying in ${waitTime}ms... (attempt ${retryCount + 1}/${maxRetries + 1})`);
+          await new Promise(resolve => setTimeout(resolve, waitTime));
+          retryCount++;
+          continue;
+        } else {
+          throw new Error(`Rate limited by server. Please try again later or use a different image URL.`);
+        }
+      }
+      
+      // Break out of retry loop if successful or non-retryable error
+      break;
+      
+    } catch (fetchError) {
+      // Handle specific network errors
+      if (fetchError.code === 'ENOTFOUND') {
+        throw new Error(`DNS resolution failed for the image URL. Please check your internet connection and verify the URL is correct.`);
+      } else if (fetchError.code === 'ECONNREFUSED') {
+        throw new Error(`Connection refused by the server. The image server may be down or blocking requests.`);
+      } else if (fetchError.code === 'CERT_HAS_EXPIRED' || fetchError.code === 'CERT_AUTHORITY_INVALID') {
+        throw new Error(`SSL certificate error. The image server has an invalid or expired certificate.`);
+      } else if (retryCount < maxRetries && (fetchError.code === 'ECONNRESET' || fetchError.code === 'ETIMEDOUT' || fetchError.code === 'ENETUNREACH')) {
+        console.log(`Network error: ${fetchError.message}. Retrying... (attempt ${retryCount + 1}/${maxRetries + 1})`);
+        retryCount++;
+        await new Promise(resolve => setTimeout(resolve, 1000 * retryCount));
+        continue;
+      }
+      throw fetchError;
+    }
+  }
+  
+  if (!response.ok) {
+    if (response.status === 403) {
+      throw new Error(`Access forbidden (403). The server may be blocking automated requests. Try using a different image URL.`);
+    } else if (response.status === 404) {
+      throw new Error(`Image not found (404). Please check the URL and try again.`);
+    } else {
+      throw new Error(`Failed to download image: ${response.status} ${response.statusText}`);
+    }
+  }
+
+  const buffer = await response.buffer();
+  console.log('Downloaded buffer size:', buffer.length);
+  const contentType = response.headers.get('content-type');
+  console.log('Content type:', contentType);
+
+  // Validate it's an image
+  if (!contentType || !contentType.startsWith('image/')) {
+    throw new Error('URL does not point to an image');
+  }
+
+  // Generate filename from URL
+  const validUrl = new URL(url);
+  const filenamePath = validUrl.pathname;
+  const originalFilename = customOriginalName || path.basename(filenamePath) || 'downloaded-image';
+  const ext = path.extname(originalFilename) || '.jpg';
+  const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
+  const storedFilename = 'bg-' + uniqueSuffix + ext;
+
+  // Save file
+  const uploadDir = path.join(__dirname, 'uploads', 'backgrounds');
+  if (!fs.existsSync(uploadDir)) {
+    fs.mkdirSync(uploadDir, { recursive: true });
+  }
+  const filePath = path.join(uploadDir, storedFilename);
+  fs.writeFileSync(filePath, buffer);
+
+  // Get image metadata
+  const sharp = require('sharp');
+  const metadata = await sharp(filePath).metadata();
+
+  // Save to database
+  const background = await prisma.backgroundImage.create({
+    data: {
+      filename: storedFilename, // Use the stored filename
+      originalName: originalFilename, // Use originalName field
+      path: filePath, // Use path field
+      mimetype: contentType, // Use mimetype field (lowercase)
+      size: buffer.length, // Use size field
+      url: url, // Use url field for source URL
+      width: metadata.width,
+      height: metadata.height
+    }
+  });
+
+  return background;
+}
+
+// Preview gallery contents (without downloading)
+app.post('/api/backgrounds/gallery-preview', async (req, res) => {
+  try {
     const { url } = req.body;
     if (!url) {
       return res.status(400).json({ error: 'URL is required' });
     }
 
-    // Download the image
-    const response = await fetch(url);
-    if (!response.ok) {
-      throw new Error(`Failed to download image: ${response.statusText}`);
+    // Validate URL format
+    let validUrl;
+    try {
+      validUrl = new URL(url);
+    } catch (error) {
+      return res.status(400).json({ error: 'Invalid URL format' });
     }
 
-    const buffer = await response.buffer();
-    const contentType = response.headers.get('content-type');
+    console.log('Previewing gallery:', url);
 
-    // Validate it's an image
-    if (!contentType || !contentType.startsWith('image/')) {
-      throw new Error('URL does not point to an image');
+    // Check if this is a gallery page
+    const isGalleryPage = isGalleryUrl(url);
+    
+    if (!isGalleryPage) {
+      return res.status(400).json({ 
+        error: 'URL is not a supported gallery page. Supported: imgur.com galleries.' 
+      });
     }
 
-    // Generate filename from URL
-    const urlPath = new URL(url).pathname;
-    const originalFilename = path.basename(urlPath) || 'downloaded-image';
-    const ext = path.extname(originalFilename) || '.jpg';
-    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
-    const storedFilename = 'bg-' + uniqueSuffix + ext;
-
-    // Save file
-    const uploadDir = path.join(__dirname, 'uploads', 'backgrounds');
-    if (!fs.existsSync(uploadDir)) {
-      fs.mkdirSync(uploadDir, { recursive: true });
+    try {
+      const galleryImages = await extractGalleryImages(url);
+      
+      res.json({
+        url: url,
+        isGallery: true,
+        totalImages: galleryImages.length,
+        galleryTitle: galleryImages[0]?.galleryTitle || 'Gallery',
+        images: galleryImages.slice(0, 10).map((img, index) => ({ // Return first 10 for preview
+          index: index,
+          url: img.url,
+          title: img.title
+        })),
+        hasMore: galleryImages.length > 10
+      });
+      
+    } catch (error) {
+      console.error('Gallery preview failed:', error);
+      res.status(400).json({ 
+        error: `Failed to preview gallery: ${error.message}` 
+      });
     }
-    const filePath = path.join(uploadDir, storedFilename);
-    fs.writeFileSync(filePath, buffer);
-
-    // Get image metadata
-    const sharp = require('sharp');
-    const metadata = await sharp(filePath).metadata();
-
-    // Save to database
-    const background = await prisma.backgroundImage.create({
-      data: {
-        filename: originalFilename,
-        storedFilename: storedFilename,
-        filePath: filePath,
-        mimeType: contentType,
-        fileSize: buffer.length,
-        width: metadata.width,
-        height: metadata.height,
-        sourceUrl: url,
-        uploadedAt: new Date()
-      }
-    });
-
-    res.json(background);
   } catch (error) {
-    console.error('Download error:', error);
-    res.status(500).json({ error: error.message || 'Failed to download background' });
+    console.error('Gallery preview error:', error);
+    res.status(500).json({ error: error.message || 'Failed to preview gallery' });
+  }
+});
+
+// Download specific image from gallery by index
+app.post('/api/backgrounds/gallery-download-specific', async (req, res) => {
+  try {
+    const { url, imageIndex } = req.body;
+    if (!url) {
+      return res.status(400).json({ error: 'URL is required' });
+    }
+    if (imageIndex === undefined || imageIndex === null) {
+      return res.status(400).json({ error: 'Image index is required' });
+    }
+
+    console.log(`Downloading image ${imageIndex} from gallery:`, url);
+
+    // Check if this is a gallery page
+    const isGalleryPage = isGalleryUrl(url);
+    
+    if (!isGalleryPage) {
+      return res.status(400).json({ 
+        error: 'URL is not a supported gallery page. Supported: imgur.com galleries.' 
+      });
+    }
+
+    try {
+      const galleryImages = await extractGalleryImages(url);
+      
+      if (imageIndex < 0 || imageIndex >= galleryImages.length) {
+        return res.status(400).json({ 
+          error: `Image index ${imageIndex} is out of range. Gallery has ${galleryImages.length} images (0-${galleryImages.length-1}).` 
+        });
+      }
+      
+      const selectedImage = galleryImages[imageIndex];
+      console.log(`Downloading selected image: ${selectedImage.url}`);
+      
+      // Download the selected image
+      const downloadedImage = await downloadSingleImage(selectedImage.url, selectedImage.title);
+      
+      // Add gallery information to the response
+      downloadedImage.isFromGallery = true;
+      downloadedImage.galleryUrl = url;
+      downloadedImage.galleryTitle = selectedImage.galleryTitle;
+      downloadedImage.imageIndex = imageIndex;
+      downloadedImage.totalImages = galleryImages.length;
+      
+      res.json(downloadedImage);
+      
+    } catch (error) {
+      console.error('Gallery download failed:', error);
+      res.status(400).json({ 
+        error: `Failed to download from gallery: ${error.message}` 
+      });
+    }
+  } catch (error) {
+    console.error('Gallery download error:', error);
+    res.status(500).json({ error: error.message || 'Failed to download from gallery' });
   }
 });
 
@@ -10800,13 +11857,13 @@ app.get('/api/backgrounds/:id/image', async (req, res) => {
       return res.status(404).json({ error: 'Background not found' });
     }
 
-    if (!fs.existsSync(background.filePath)) {
+    if (!fs.existsSync(background.path)) {
       return res.status(404).json({ error: 'Background file not found on disk' });
     }
 
-    res.setHeader('Content-Type', background.mimeType);
+    res.setHeader('Content-Type', background.mimetype);
     res.setHeader('Cache-Control', 'public, max-age=31536000'); // 1 year cache
-    res.sendFile(path.resolve(background.filePath));
+    res.sendFile(path.resolve(background.path));
   } catch (error) {
     console.error('Error serving background image:', error);
     res.status(500).json({ error: 'Failed to serve background image' });
@@ -10825,20 +11882,15 @@ app.delete('/api/backgrounds/:id', async (req, res) => {
       return res.status(404).json({ error: 'Background not found' });
     }
 
-    // Remove from galleries first
-    await prisma.galleryBackground.deleteMany({
-      where: { backgroundImageId: parseInt(id) }
-    });
-
-    // Delete from database
+    // Delete from database (the gallery relationship will be handled by onDelete: SetNull)
     await prisma.backgroundImage.delete({
       where: { id: parseInt(id) }
     });
 
     // Delete file from disk
     try {
-      if (fs.existsSync(background.filePath)) {
-        fs.unlinkSync(background.filePath);
+      if (fs.existsSync(background.path)) {
+        fs.unlinkSync(background.path);
       }
     } catch (fileError) {
       console.error('Error deleting background file:', fileError);
@@ -10900,18 +11952,15 @@ app.post('/api/background-galleries', async (req, res) => {
   }
 });
 
-// Get gallery backgrounds
-app.get('/api/background-galleries/:id/backgrounds', async (req, res) => {
+// Get gallery with backgrounds
+app.get('/api/background-galleries/:id', async (req, res) => {
   try {
     const { id } = req.params;
     const gallery = await prisma.backgroundGallery.findUnique({
       where: { id: parseInt(id) },
       include: {
         backgrounds: {
-          include: {
-            backgroundImage: true
-          },
-          orderBy: { addedAt: 'desc' }
+          orderBy: { createdAt: 'desc' }
         }
       }
     });
@@ -10920,8 +11969,56 @@ app.get('/api/background-galleries/:id/backgrounds', async (req, res) => {
       return res.status(404).json({ error: 'Gallery not found' });
     }
 
-    const backgrounds = gallery.backgrounds.map(gb => gb.backgroundImage);
-    res.json(backgrounds);
+    res.json(gallery);
+  } catch (error) {
+    console.error('Error fetching gallery:', error);
+    res.status(500).json({ error: 'Failed to fetch gallery' });
+  }
+});
+
+// Update gallery
+app.put('/api/background-galleries/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { name, description } = req.body;
+
+    if (!name || !name.trim()) {
+      return res.status(400).json({ error: 'Gallery name is required' });
+    }
+
+    const gallery = await prisma.backgroundGallery.update({
+      where: { id: parseInt(id) },
+      data: {
+        name: name.trim(),
+        description: description ? description.trim() : null
+      }
+    });
+
+    res.json(gallery);
+  } catch (error) {
+    console.error('Error updating gallery:', error);
+    res.status(500).json({ error: 'Failed to update gallery' });
+  }
+});
+
+// Get backgrounds for a specific gallery
+app.get('/api/background-galleries/:id/backgrounds', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const gallery = await prisma.backgroundGallery.findUnique({
+      where: { id: parseInt(id) },
+      include: {
+        backgrounds: {
+          orderBy: { createdAt: 'desc' }
+        }
+      }
+    });
+
+    if (!gallery) {
+      return res.status(404).json({ error: 'Gallery not found' });
+    }
+
+    res.json(gallery.backgrounds);
   } catch (error) {
     console.error('Error fetching gallery backgrounds:', error);
     res.status(500).json({ error: 'Failed to fetch gallery backgrounds' });
@@ -10946,29 +12043,49 @@ app.post('/api/background-galleries/:id/add-backgrounds', async (req, res) => {
       return res.status(404).json({ error: 'Gallery not found' });
     }
 
-    // Add backgrounds to gallery (ignore duplicates)
-    const addedRelations = [];
-    for (const backgroundId of backgroundIds) {
-      try {
-        const relation = await prisma.galleryBackground.create({
-          data: {
-            backgroundGalleryId: parseInt(id),
-            backgroundImageId: parseInt(backgroundId)
-          }
-        });
-        addedRelations.push(relation);
-      } catch (error) {
-        // Ignore duplicate key errors (background already in gallery)
-        if (!error.message.includes('Unique constraint')) {
-          throw error;
-        }
+    // Update background images to belong to this gallery
+    const updatedCount = await prisma.backgroundImage.updateMany({
+      where: {
+        id: { in: backgroundIds.map(id => parseInt(id)) },
+        galleryId: null // Only update backgrounds not already in a gallery
+      },
+      data: {
+        galleryId: parseInt(id)
       }
-    }
+    });
 
-    res.json({ success: true, addedCount: addedRelations.length });
+    res.json({ success: true, addedCount: updatedCount.count });
   } catch (error) {
     console.error('Error adding backgrounds to gallery:', error);
     res.status(500).json({ error: 'Failed to add backgrounds to gallery' });
+  }
+});
+
+// Remove backgrounds from gallery
+app.post('/api/background-galleries/:id/remove-backgrounds', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { backgroundIds } = req.body;
+
+    if (!Array.isArray(backgroundIds) || backgroundIds.length === 0) {
+      return res.status(400).json({ error: 'Background IDs array is required' });
+    }
+
+    // Remove backgrounds from gallery by setting galleryId to null
+    const updatedCount = await prisma.backgroundImage.updateMany({
+      where: {
+        id: { in: backgroundIds.map(id => parseInt(id)) },
+        galleryId: parseInt(id)
+      },
+      data: {
+        galleryId: null
+      }
+    });
+
+    res.json({ success: true, removedCount: updatedCount.count });
+  } catch (error) {
+    console.error('Error removing backgrounds from gallery:', error);
+    res.status(500).json({ error: 'Failed to remove backgrounds from gallery' });
   }
 });
 
@@ -10977,12 +12094,13 @@ app.delete('/api/background-galleries/:id', async (req, res) => {
   try {
     const { id } = req.params;
 
-    // Delete gallery relations first
-    await prisma.galleryBackground.deleteMany({
-      where: { backgroundGalleryId: parseInt(id) }
+    // First remove all backgrounds from the gallery
+    await prisma.backgroundImage.updateMany({
+      where: { galleryId: parseInt(id) },
+      data: { galleryId: null }
     });
 
-    // Delete gallery
+    // Then delete the gallery
     await prisma.backgroundGallery.delete({
       where: { id: parseInt(id) }
     });

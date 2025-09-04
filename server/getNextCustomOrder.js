@@ -599,6 +599,7 @@ async function getNextCustomOrder(req = null) {
     fullMediaDetails.customOrderName = finalSourceOrder.name;
     fullMediaDetails.customOrderDescription = finalSourceOrder.description;
     fullMediaDetails.customOrderIcon = finalSourceOrder.icon;
+    fullMediaDetails.customOrderId = finalSourceOrder.id;
     fullMediaDetails.customOrderItemId = nextItem.id;
     
     // Add parent order context if this is from a sub-order
