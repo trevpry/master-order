@@ -32,8 +32,9 @@ services:
       - "DATA_PATH=/app/data"
       # External IP for Android API responses - UPDATE THIS WHEN IP CHANGES
       - "EXTERNAL_IP=192.168.1.114"
-      # Stash server configuration - Use Stash hostname first
-      - "STASH_URL=http://stash.internal:9999"
+      # Stash server configuration - Now managed in database settings
+      # Primary URL should be configured in Eddie settings, fallbacks still available
+      # - "STASH_URL=http://stash.internal:9999"
       - "STASH_URL_FALLBACK_1=http://192.168.1.154:9999"
       - "STASH_URL_FALLBACK_2=http://192.168.1.114:9999"
       - "STASH_URL_FALLBACK_3=http://localhost:9999"

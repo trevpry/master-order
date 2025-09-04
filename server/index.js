@@ -1117,10 +1117,9 @@ app.get('/api/stash/test', async (req, res) => {
     // Get the Stash URL from settings
     const settings = await prisma.settings.findUnique({ where: { id: 1 } });
     
-    // Prioritize environment variables for API response
-    const finalStashUrl = (process.env.STASH_URL || process.env.STASH_URL_FALLBACK_1 || 
-                          process.env.STASH_URL_FALLBACK_2 || process.env.STASH_URL_FALLBACK_3 || 
-                          settings?.stashUrl)?.replace(/\/+$/, '');
+    // Prioritize database settings for API response
+    const finalStashUrl = (settings?.stashUrl || process.env.STASH_URL || process.env.STASH_URL_FALLBACK_1 || 
+                          process.env.STASH_URL_FALLBACK_2 || process.env.STASH_URL_FALLBACK_3)?.replace(/\/+$/, '');
 
     console.log('📋 Stash connection test results:', {
       success: true,
@@ -1821,8 +1820,9 @@ app.post('/api/stash/clips/:id/play', async (req, res) => {
 
     console.log(`▶️ Found clip for scene: ${clip.scene.title}`);
 
-    // Construct streaming URL
-    const stashUrl = process.env.STASH_URL;
+    // Construct streaming URL - prioritize database settings over environment
+    const settings = await prisma.settings.findFirst();
+    const stashUrl = settings?.stashUrl || process.env.STASH_URL;
     let streamUrl = `${stashUrl}/scene/${clip.sceneId}/stream.m3u8`;
     
     console.log(`▶️ Stream URL: ${streamUrl}`);
@@ -2012,9 +2012,8 @@ app.post('/api/stash/clip-play', async (req, res) => {
     
     // Get connection status for stream URL
     const settings = await prisma.settings.findFirst();
-    let stashUrl = process.env.STASH_URL || process.env.STASH_URL_FALLBACK_1 || 
-                   process.env.STASH_URL_FALLBACK_2 || process.env.STASH_URL_FALLBACK_3 || 
-                   settings?.stashUrl;
+    let stashUrl = settings?.stashUrl || process.env.STASH_URL || process.env.STASH_URL_FALLBACK_1 || 
+                   process.env.STASH_URL_FALLBACK_2 || process.env.STASH_URL_FALLBACK_3;
     
     // Normalize URL - remove trailing slashes
     if (stashUrl) {
@@ -2229,9 +2228,8 @@ app.get('/api/stash/clips/next', async (req, res) => {
     
     // Get connection status for stream URL
     const settings = await prisma.settings.findFirst();
-    let stashUrl = process.env.STASH_URL || process.env.STASH_URL_FALLBACK_1 || 
-                   process.env.STASH_URL_FALLBACK_2 || process.env.STASH_URL_FALLBACK_3 || 
-                   settings?.stashUrl;
+    let stashUrl = settings?.stashUrl || process.env.STASH_URL || process.env.STASH_URL_FALLBACK_1 || 
+                   process.env.STASH_URL_FALLBACK_2 || process.env.STASH_URL_FALLBACK_3;
     
     // Normalize URL - remove trailing slashes
     if (stashUrl) {
@@ -2431,10 +2429,9 @@ app.get('/api/debug/stash-service', async (req, res) => {
     console.log('🔍 Debug: Manual Stash service test');
     console.log('   - Settings:', JSON.stringify(settings, null, 2));
     
-    // Prioritize environment variables for debug response
-    const finalStashUrl = (process.env.STASH_URL || process.env.STASH_URL_FALLBACK_1 || 
-                          process.env.STASH_URL_FALLBACK_2 || process.env.STASH_URL_FALLBACK_3 || 
-                          settings?.stashUrl)?.replace(/\/+$/, '');
+    // Prioritize database settings for debug response (consistent with runtime behavior)
+    const finalStashUrl = (settings?.stashUrl || process.env.STASH_URL || process.env.STASH_URL_FALLBACK_1 || 
+                          process.env.STASH_URL_FALLBACK_2 || process.env.STASH_URL_FALLBACK_3)?.replace(/\/+$/, '');
     
     const result = {
       settingsLoaded: !!settings,
