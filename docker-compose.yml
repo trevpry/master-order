@@ -28,6 +28,8 @@ services:
       - "DATABASE_URL=postgresql://master_order_user:secure_password_change_me@192.168.1.114:5432/master_order"
       - "POSTGRES_PASSWORD=secure_password_change_me"
       - PORT=3001
+      # Data directory for persistent uploads and user data
+      - "DATA_PATH=/app/data"
       # External IP for Android API responses - UPDATE THIS WHEN IP CHANGES
       - "EXTERNAL_IP=192.168.1.114"
       # Stash server configuration - Use Stash hostname first

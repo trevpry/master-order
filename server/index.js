@@ -208,6 +208,18 @@ const io = socketIo(server, {
 });
 const PORT = process.env.PORT || 3001;
 
+// Helper function to determine upload directory based on environment
+function getUploadDirectory(subDir = '') {
+  if (process.env.NODE_ENV === 'production') {
+    // In production/Docker, use persistent data directory
+    const dataDir = process.env.DATA_PATH || '/app/data';
+    return path.join(dataDir, 'uploads', subDir);
+  } else {
+    // In development, use local uploads directory
+    return path.join(__dirname, 'uploads', subDir);
+  }
+}
+
 // Set up multer for handling multipart form data (Plex webhooks)
 const upload = multer();
 
@@ -264,6 +276,11 @@ if (process.env.NODE_ENV === 'production') {
   app.use(express.static(clientBuildPath));
   console.log('Serving static files from:', clientBuildPath);
 }
+
+// Serve uploaded files (backgrounds, etc.) from appropriate directory
+const uploadsPath = getUploadDirectory();
+app.use('/uploads', express.static(uploadsPath));
+console.log('Serving uploads from:', uploadsPath);
 
 // Dating API routes
 app.use('/api/dating', datingRoutes);
@@ -11233,7 +11250,7 @@ app.get('/api/android/weather', async (req, res) => {
 // Configure multer for file uploads
 const backgroundStorage = multer.diskStorage({
   destination: (req, file, cb) => {
-    const uploadDir = path.join(__dirname, 'uploads', 'backgrounds');
+    const uploadDir = getUploadDirectory('backgrounds');
     if (!fs.existsSync(uploadDir)) {
       fs.mkdirSync(uploadDir, { recursive: true });
     }
@@ -11456,36 +11473,79 @@ app.post('/api/backgrounds/download', async (req, res) => {
     if (url.includes('imgur.com/a/') || url.includes('imgur.com/gallery/')) {
       console.log('📥 [BACKGROUND DOWNLOAD] Gallery detected, extracting images...');
       
-      // Extract gallery ID from URL
-      const galleryMatch = url.match(/(?:imgur\.com\/(?:a\/|gallery\/))([a-zA-Z0-9]+)/);
-      if (!galleryMatch) {
-        return res.status(400).json({ error: 'Invalid gallery URL format' });
-      }
-      
-      const galleryId = galleryMatch[1];
-      
       try {
-        // Fetch gallery data from imgur API (anonymous access)
-        const imgurResponse = await fetch(`https://api.imgur.com/3/album/${galleryId}`, {
-          headers: {
-            'Authorization': 'Client-ID 546c25a59c58ad7' // Public imgur client ID
+        let galleryId;
+        let images = [];
+        let galleryTitle = '';
+        let galleryDescription = '';
+        
+        if (url.includes('imgur.com/a/')) {
+          // Direct album URL - extract ID and use API
+          const galleryMatch = url.match(/imgur\.com\/a\/([a-zA-Z0-9]+)/);
+          galleryId = galleryMatch ? galleryMatch[1] : null;
+          
+          if (!galleryId) {
+            throw new Error('Invalid album URL format');
           }
-        });
-        
-        if (!imgurResponse.ok) {
-          throw new Error('Failed to fetch gallery data');
+          
+          console.log('📥 [BACKGROUND DOWNLOAD] Using album API for ID:', galleryId);
+          
+          const imgurResponse = await fetch(`https://api.imgur.com/3/album/${galleryId}`, {
+            headers: {
+              'Authorization': 'Client-ID 546c25a59c58ad7'
+            }
+          });
+          
+          if (!imgurResponse.ok) {
+            throw new Error(`Imgur API error: ${imgurResponse.status}`);
+          }
+          
+          const imgurData = await imgurResponse.json();
+          images = imgurData.data.images || [];
+          galleryTitle = imgurData.data.title || 'Untitled Album';
+          galleryDescription = imgurData.data.description || '';
+          
+        } else if (url.includes('imgur.com/gallery/')) {
+          // Gallery URL - extract ID from URL directly
+          console.log('📥 [BACKGROUND DOWNLOAD] Extracting gallery ID from URL...');
+          
+          // Extract gallery ID from URL pattern like /gallery/star-wars-wallpapers-W4lOh
+          // The actual gallery ID is typically the part after the last dash
+          const urlPath = url.split('/gallery/')[1];
+          if (!urlPath) {
+            throw new Error('Invalid imgur gallery URL format');
+          }
+          
+          // For URLs like "star-wars-wallpapers-W4lOh", the ID is "W4lOh"
+          const parts = urlPath.split('-');
+          galleryId = parts[parts.length - 1];
+          
+          console.log('📥 [BACKGROUND DOWNLOAD] Extracted gallery ID:', galleryId);
+          
+          // Try as album first (most common for galleries)
+          const imgurResponse = await fetch(`https://api.imgur.com/3/album/${galleryId}`, {
+            headers: {
+              'Authorization': 'Client-ID 546c25a59c58ad7'
+            }
+          });
+          
+          if (!imgurResponse.ok) {
+            throw new Error(`Imgur API error: ${imgurResponse.status}`);
+          }
+          
+          const imgurData = await imgurResponse.json();
+          images = imgurData.data.images || [];
+          galleryTitle = imgurData.data.title || 'Untitled Gallery';
+          galleryDescription = imgurData.data.description || '';
         }
-        
-        const imgurData = await imgurResponse.json();
-        const images = imgurData.data.images || [];
         
         console.log('📥 [BACKGROUND DOWNLOAD] Found', images.length, 'images in gallery');
         
         return res.json({
           isGallery: true,
           galleryUrl: url,
-          galleryTitle: imgurData.data.title || 'Untitled Gallery',
-          galleryDescription: imgurData.data.description || '',
+          galleryTitle: galleryTitle,
+          galleryDescription: galleryDescription,
           images: images.map((img, index) => ({
             id: img.id,
             url: img.link,
@@ -11497,6 +11557,7 @@ app.post('/api/backgrounds/download', async (req, res) => {
             type: img.type
           }))
         });
+        
       } catch (error) {
         console.error('📥 [BACKGROUND DOWNLOAD] Gallery fetch error:', error);
         return res.status(500).json({ error: 'Failed to fetch gallery data' });
@@ -11522,7 +11583,7 @@ app.post('/api/backgrounds/download', async (req, res) => {
     const extension = contentType.split('/')[1] || 'jpg';
     const filename = `bg-${timestamp}-${randomString}.${extension}`;
     
-    const uploadDir = path.join(__dirname, 'uploads', 'backgrounds');
+    const uploadDir = getUploadDirectory('backgrounds');
     if (!fs.existsSync(uploadDir)) {
       fs.mkdirSync(uploadDir, { recursive: true });
     }
@@ -11576,13 +11637,22 @@ app.post('/api/backgrounds/download-gallery-bulk', async (req, res) => {
     console.log('📥 [BULK DOWNLOAD] Gallery URL:', url);
     console.log('📥 [BULK DOWNLOAD] Selected images:', selectedImages.length);
     
-    // Extract gallery ID from URL
-    const galleryMatch = url.match(/(?:imgur\.com\/(?:a\/|gallery\/))([a-zA-Z0-9]+)/);
-    if (!galleryMatch) {
+    // Extract gallery ID from URL - handle various imgur URL formats
+    let imgurGalleryId;
+    if (url.includes('imgur.com/a/')) {
+      const galleryMatch = url.match(/imgur\.com\/a\/([a-zA-Z0-9\-_]+)/);
+      imgurGalleryId = galleryMatch ? galleryMatch[1] : null;
+    } else if (url.includes('imgur.com/gallery/')) {
+      const galleryMatch = url.match(/imgur\.com\/gallery\/([a-zA-Z0-9\-_]+)/);
+      imgurGalleryId = galleryMatch ? galleryMatch[1] : null;
+    }
+    
+    if (!imgurGalleryId) {
+      console.log('📥 [BULK DOWNLOAD] Failed to extract gallery ID from URL:', url);
       return res.status(400).json({ error: 'Invalid gallery URL format' });
     }
     
-    const imgurGalleryId = galleryMatch[1];
+    console.log('📥 [BULK DOWNLOAD] Extracted gallery ID:', imgurGalleryId);
     
     // Fetch gallery data
     const imgurResponse = await fetch(`https://api.imgur.com/3/album/${imgurGalleryId}`, {
@@ -11629,7 +11699,7 @@ app.post('/api/backgrounds/download-gallery-bulk', async (req, res) => {
           const extension = image.type?.split('/')[1] || 'jpg';
           const filename = `bg-${timestamp}-${randomString}.${extension}`;
           
-          const uploadDir = path.join(__dirname, 'uploads', 'backgrounds');
+          const uploadDir = getUploadDirectory('backgrounds');
           if (!fs.existsSync(uploadDir)) {
             fs.mkdirSync(uploadDir, { recursive: true });
           }
