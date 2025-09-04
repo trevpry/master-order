@@ -11440,6 +11440,255 @@ app.delete('/api/backgrounds/:id', async (req, res) => {
   }
 });
 
+// Download background image from URL
+app.post('/api/backgrounds/download', async (req, res) => {
+  console.log('📥 [BACKGROUND DOWNLOAD] Single image download requested');
+  
+  try {
+    const { url } = req.body;
+    if (!url) {
+      return res.status(400).json({ error: 'URL is required' });
+    }
+
+    console.log('📥 [BACKGROUND DOWNLOAD] URL:', url);
+
+    // First, detect if this is a gallery (e.g., imgur album)
+    if (url.includes('imgur.com/a/') || url.includes('imgur.com/gallery/')) {
+      console.log('📥 [BACKGROUND DOWNLOAD] Gallery detected, extracting images...');
+      
+      // Extract gallery ID from URL
+      const galleryMatch = url.match(/(?:imgur\.com\/(?:a\/|gallery\/))([a-zA-Z0-9]+)/);
+      if (!galleryMatch) {
+        return res.status(400).json({ error: 'Invalid gallery URL format' });
+      }
+      
+      const galleryId = galleryMatch[1];
+      
+      try {
+        // Fetch gallery data from imgur API (anonymous access)
+        const imgurResponse = await fetch(`https://api.imgur.com/3/album/${galleryId}`, {
+          headers: {
+            'Authorization': 'Client-ID 546c25a59c58ad7' // Public imgur client ID
+          }
+        });
+        
+        if (!imgurResponse.ok) {
+          throw new Error('Failed to fetch gallery data');
+        }
+        
+        const imgurData = await imgurResponse.json();
+        const images = imgurData.data.images || [];
+        
+        console.log('📥 [BACKGROUND DOWNLOAD] Found', images.length, 'images in gallery');
+        
+        return res.json({
+          isGallery: true,
+          galleryUrl: url,
+          galleryTitle: imgurData.data.title || 'Untitled Gallery',
+          galleryDescription: imgurData.data.description || '',
+          images: images.map((img, index) => ({
+            id: img.id,
+            url: img.link,
+            title: img.title || `Image ${index + 1}`,
+            description: img.description || '',
+            width: img.width,
+            height: img.height,
+            size: img.size,
+            type: img.type
+          }))
+        });
+      } catch (error) {
+        console.error('📥 [BACKGROUND DOWNLOAD] Gallery fetch error:', error);
+        return res.status(500).json({ error: 'Failed to fetch gallery data' });
+      }
+    }
+    
+    // Single image download
+    console.log('📥 [BACKGROUND DOWNLOAD] Downloading single image...');
+    
+    const response = await fetch(url);
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+    }
+    
+    const contentType = response.headers.get('content-type');
+    if (!contentType?.startsWith('image/')) {
+      throw new Error('URL does not point to an image');
+    }
+    
+    const buffer = await response.arrayBuffer();
+    const timestamp = Date.now();
+    const randomString = Math.random().toString(36).substring(2, 15);
+    const extension = contentType.split('/')[1] || 'jpg';
+    const filename = `bg-${timestamp}-${randomString}.${extension}`;
+    
+    const uploadDir = path.join(__dirname, 'uploads', 'backgrounds');
+    if (!fs.existsSync(uploadDir)) {
+      fs.mkdirSync(uploadDir, { recursive: true });
+    }
+    
+    const filepath = path.join(uploadDir, filename);
+    fs.writeFileSync(filepath, Buffer.from(buffer));
+    
+    // Save to database
+    const background = await prisma.BackgroundImage.create({
+      data: {
+        filename,
+        originalName: path.basename(url),
+        path: filepath,
+        mimetype: contentType,
+        size: buffer.byteLength,
+        url: url
+      }
+    });
+    
+    console.log('📥 [BACKGROUND DOWNLOAD] Successfully downloaded and saved:', filename);
+    
+    res.json({
+      success: true,
+      background: {
+        id: background.id,
+        filename: background.filename,
+        originalName: background.originalName,
+        url: background.url,
+        size: background.size,
+        mimetype: background.mimetype
+      }
+    });
+    
+  } catch (error) {
+    console.error('📥 [BACKGROUND DOWNLOAD] Error:', error);
+    res.status(500).json({ error: error.message || 'Failed to download image' });
+  }
+});
+
+// Bulk download from gallery
+app.post('/api/backgrounds/download-gallery-bulk', async (req, res) => {
+  console.log('📥 [BULK DOWNLOAD] Gallery bulk download requested');
+  
+  try {
+    const { url, galleryId, selectedImages } = req.body;
+    
+    if (!url || !selectedImages || !Array.isArray(selectedImages)) {
+      return res.status(400).json({ error: 'URL and selectedImages array are required' });
+    }
+    
+    console.log('📥 [BULK DOWNLOAD] Gallery URL:', url);
+    console.log('📥 [BULK DOWNLOAD] Selected images:', selectedImages.length);
+    
+    // Extract gallery ID from URL
+    const galleryMatch = url.match(/(?:imgur\.com\/(?:a\/|gallery\/))([a-zA-Z0-9]+)/);
+    if (!galleryMatch) {
+      return res.status(400).json({ error: 'Invalid gallery URL format' });
+    }
+    
+    const imgurGalleryId = galleryMatch[1];
+    
+    // Fetch gallery data
+    const imgurResponse = await fetch(`https://api.imgur.com/3/album/${imgurGalleryId}`, {
+      headers: {
+        'Authorization': 'Client-ID 546c25a59c58ad7'
+      }
+    });
+    
+    if (!imgurResponse.ok) {
+      throw new Error('Failed to fetch gallery data');
+    }
+    
+    const imgurData = await imgurResponse.json();
+    const images = imgurData.data.images || [];
+    
+    let successCount = 0;
+    let failedCount = 0;
+    const results = [];
+    
+    // Create gallery if galleryId is provided
+    let gallery = null;
+    if (galleryId) {
+      gallery = await prisma.BackgroundGallery.findUnique({
+        where: { id: galleryId }
+      });
+    }
+    
+    // Download selected images
+    for (const imageIndex of selectedImages) {
+      if (imageIndex >= 0 && imageIndex < images.length) {
+        const image = images[imageIndex];
+        
+        try {
+          console.log('📥 [BULK DOWNLOAD] Downloading image:', image.link);
+          
+          const response = await fetch(image.link);
+          if (!response.ok) {
+            throw new Error(`HTTP ${response.status}`);
+          }
+          
+          const buffer = await response.arrayBuffer();
+          const timestamp = Date.now();
+          const randomString = Math.random().toString(36).substring(2, 15);
+          const extension = image.type?.split('/')[1] || 'jpg';
+          const filename = `bg-${timestamp}-${randomString}.${extension}`;
+          
+          const uploadDir = path.join(__dirname, 'uploads', 'backgrounds');
+          if (!fs.existsSync(uploadDir)) {
+            fs.mkdirSync(uploadDir, { recursive: true });
+          }
+          
+          const filepath = path.join(uploadDir, filename);
+          fs.writeFileSync(filepath, Buffer.from(buffer));
+          
+          // Save to database
+          const background = await prisma.BackgroundImage.create({
+            data: {
+              filename,
+              originalName: image.title || `Image ${imageIndex + 1}`,
+              path: filepath,
+              mimetype: image.type,
+              size: buffer.byteLength,
+              url: image.link,
+              width: image.width,
+              height: image.height,
+              galleryId: gallery?.id || null
+            }
+          });
+          
+          results.push({
+            success: true,
+            imageIndex,
+            backgroundId: background.id,
+            filename: background.filename
+          });
+          
+          successCount++;
+          
+        } catch (error) {
+          console.error('📥 [BULK DOWNLOAD] Failed to download image:', error);
+          results.push({
+            success: false,
+            imageIndex,
+            error: error.message
+          });
+          failedCount++;
+        }
+      }
+    }
+    
+    console.log('📥 [BULK DOWNLOAD] Completed - Success:', successCount, 'Failed:', failedCount);
+    
+    res.json({
+      success: true,
+      successCount,
+      failedCount,
+      totalRequested: selectedImages.length,
+      results
+    });
+    
+  } catch (error) {
+    console.error('📥 [BULK DOWNLOAD] Error:', error);
+    res.status(500).json({ error: error.message || 'Failed to bulk download images' });
+  }
+});
+
 // Get all galleries
 app.get('/api/background-galleries', async (req, res) => {
   console.log('🖼️  [GALLERIES] API endpoint called');
