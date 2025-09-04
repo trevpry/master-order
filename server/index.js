@@ -11242,7 +11242,30 @@ const backgroundUpload = multer({
 
 // Get all backgrounds
 app.get('/api/backgrounds', async (req, res) => {
+  console.log('📸 [BACKGROUNDS] API endpoint called');
+  console.log('📸 [BACKGROUNDS] Request headers:', JSON.stringify(req.headers, null, 2));
+  console.log('📸 [BACKGROUNDS] DATABASE_URL:', process.env.DATABASE_URL);
+  console.log('📸 [BACKGROUNDS] NODE_ENV:', process.env.NODE_ENV);
+  
   try {
+    console.log('📸 [BACKGROUNDS] Attempting to connect to database...');
+    
+    // Test database connection first
+    await prisma.$connect();
+    console.log('📸 [BACKGROUNDS] Database connection successful');
+    
+    // Check if BackgroundImage table exists
+    console.log('📸 [BACKGROUNDS] Checking if BackgroundImage table exists...');
+    const tableExists = await prisma.$queryRaw`
+      SELECT EXISTS (
+        SELECT FROM information_schema.tables 
+        WHERE table_schema = 'public' 
+        AND table_name = 'BackgroundImage'
+      );
+    `;
+    console.log('📸 [BACKGROUNDS] BackgroundImage table exists:', tableExists);
+    
+    console.log('📸 [BACKGROUNDS] Attempting to query BackgroundImage table...');
     const backgrounds = await prisma.BackgroundImage.findMany({
       include: {
         gallery: {
@@ -11255,10 +11278,24 @@ app.get('/api/backgrounds', async (req, res) => {
       },
       orderBy: { createdAt: 'desc' }
     });
+    
+    console.log('📸 [BACKGROUNDS] Query successful, found', backgrounds.length, 'backgrounds');
+    console.log('📸 [BACKGROUNDS] Sample background:', backgrounds[0] ? JSON.stringify(backgrounds[0], null, 2) : 'None');
+    
     res.json(backgrounds);
   } catch (error) {
-    console.error('Error fetching backgrounds:', error);
-    res.status(500).json({ error: 'Failed to fetch backgrounds' });
+    console.error('❌ [BACKGROUNDS] Error details:', {
+      name: error.name,
+      message: error.message,
+      code: error.code,
+      stack: error.stack,
+      meta: error.meta
+    });
+    res.status(500).json({ 
+      error: 'Failed to fetch backgrounds',
+      details: error.message,
+      code: error.code 
+    });
   }
 });
 
@@ -12079,7 +12116,30 @@ app.delete('/api/backgrounds/:id', async (req, res) => {
 
 // Get all galleries
 app.get('/api/background-galleries', async (req, res) => {
+  console.log('🖼️  [GALLERIES] API endpoint called');
+  console.log('🖼️  [GALLERIES] Request headers:', JSON.stringify(req.headers, null, 2));
+  console.log('🖼️  [GALLERIES] DATABASE_URL:', process.env.DATABASE_URL);
+  console.log('🖼️  [GALLERIES] NODE_ENV:', process.env.NODE_ENV);
+  
   try {
+    console.log('🖼️  [GALLERIES] Attempting to connect to database...');
+    
+    // Test database connection first
+    await prisma.$connect();
+    console.log('🖼️  [GALLERIES] Database connection successful');
+    
+    // Check if BackgroundGallery table exists
+    console.log('🖼️  [GALLERIES] Checking if BackgroundGallery table exists...');
+    const tableExists = await prisma.$queryRaw`
+      SELECT EXISTS (
+        SELECT FROM information_schema.tables 
+        WHERE table_schema = 'public' 
+        AND table_name = 'BackgroundGallery'
+      );
+    `;
+    console.log('🖼️  [GALLERIES] BackgroundGallery table exists:', tableExists);
+    
+    console.log('🖼️  [GALLERIES] Attempting to query BackgroundGallery table...');
     const galleries = await prisma.BackgroundGallery.findMany({
       include: {
         _count: {
@@ -12089,15 +12149,29 @@ app.get('/api/background-galleries', async (req, res) => {
       orderBy: { createdAt: 'desc' }
     });
 
+    console.log('🖼️  [GALLERIES] Query successful, found', galleries.length, 'galleries');
+    console.log('🖼️  [GALLERIES] Sample gallery:', galleries[0] ? JSON.stringify(galleries[0], null, 2) : 'None');
+
     const galleriesWithCount = galleries.map(gallery => ({
       ...gallery,
       backgroundCount: gallery._count.backgrounds
     }));
 
+    console.log('🖼️  [GALLERIES] Returning', galleriesWithCount.length, 'galleries with counts');
     res.json(galleriesWithCount);
   } catch (error) {
-    console.error('Error fetching galleries:', error);
-    res.status(500).json({ error: 'Failed to fetch galleries' });
+    console.error('❌ [GALLERIES] Error details:', {
+      name: error.name,
+      message: error.message,
+      code: error.code,
+      stack: error.stack,
+      meta: error.meta
+    });
+    res.status(500).json({ 
+      error: 'Failed to fetch galleries',
+      details: error.message,
+      code: error.code 
+    });
   }
 });
 
@@ -12294,9 +12368,51 @@ io.on('connection', (socket) => {
 
 // Start the server
 server.listen(PORT, '0.0.0.0', async () => {
-  console.log(`Server running on port ${PORT}`);
-  console.log(`Server accessible at http://192.168.1.252:${PORT}`);
-  console.log(`WebSocket server ready for real-time notifications`);
+  console.log('🚀 =================================');
+  console.log('🚀 MASTER ORDER SERVER STARTING');
+  console.log('🚀 =================================');
+  console.log(`🚀 Server running on port ${PORT}`);
+  console.log(`🚀 Server accessible at http://192.168.1.252:${PORT}`);
+  console.log(`🚀 WebSocket server ready for real-time notifications`);
+  console.log('🚀 Environment Variables:');
+  console.log(`🚀   NODE_ENV: ${process.env.NODE_ENV}`);
+  console.log(`🚀   DATABASE_URL: ${process.env.DATABASE_URL}`);
+  console.log(`🚀   PORT: ${PORT}`);
+  
+  // Test database connection immediately
+  console.log('🚀 Testing database connection...');
+  try {
+    await prisma.$connect();
+    console.log('✅ Database connection successful!');
+    
+    // Check critical tables
+    console.log('🚀 Checking critical tables...');
+    try {
+      const backgroundImageExists = await prisma.$queryRaw`
+        SELECT EXISTS (
+          SELECT FROM information_schema.tables 
+          WHERE table_schema = 'public' 
+          AND table_name = 'BackgroundImage'
+        );
+      `;
+      console.log('✅ BackgroundImage table exists:', backgroundImageExists);
+      
+      const backgroundGalleryExists = await prisma.$queryRaw`
+        SELECT EXISTS (
+          SELECT FROM information_schema.tables 
+          WHERE table_schema = 'public' 
+          AND table_name = 'BackgroundGallery'
+        );
+      `;
+      console.log('✅ BackgroundGallery table exists:', backgroundGalleryExists);
+      
+    } catch (tableError) {
+      console.error('❌ Error checking tables:', tableError);
+    }
+    
+  } catch (dbError) {
+    console.error('❌ Database connection failed:', dbError);
+  }
   
   // Start background sync service
   try {
