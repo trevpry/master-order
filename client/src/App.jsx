@@ -14,6 +14,7 @@ import CustomOrders from './modules/media/pages/custom-orders/index';
 import WatchStats from './modules/media/pages/watch-stats/index';
 import Stash from './modules/media/pages/Stash';
 import Music from './modules/media/pages/music/index';
+import Backgrounds from './modules/media/pages/backgrounds/index';
 
 // Eddie Module Components (placeholders for now)
 import TasksHome from './modules/tasks/pages/TasksHome';
@@ -37,6 +38,7 @@ function App() {
           <Route path="/media/watch-stats" element={<WatchStats />} />
           <Route path="/media/stash" element={<Stash />} />
           <Route path="/media/music" element={<Music />} />
+          <Route path="/media/backgrounds" element={<Backgrounds />} />
           <Route path="/media/books" element={<div><h1>Books</h1><p>Coming Soon</p></div>} />
           <Route path="/media/comics" element={<div><h1>Comics</h1><p>Coming Soon</p></div>} />
           <Route path="/media/settings" element={<Settings />} />
@@ -47,6 +49,7 @@ function App() {
           <Route path="/watch-stats" element={<WatchStats />} />
           <Route path="/stash" element={<Stash />} />
           <Route path="/music" element={<Music />} />
+          <Route path="/backgrounds" element={<Backgrounds />} />
           <Route path="/settings" element={<Settings />} />
           
           {/* Eddie Life Management Module Routes */}

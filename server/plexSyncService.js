@@ -12,6 +12,24 @@ class PlexSyncService {
     this.plexToken = null;
   }
 
+  // Helper function to handle database timeout/connection errors
+  async handleDatabaseError(error, operation, itemName, retryCallback) {
+    const isDatabaseTimeout = error.code === 'P1008' || // SQLite/Database timeout
+                              error.code === 'P1017' || // PostgreSQL connection timeout
+                              error.code === 'P2024' || // Connection timeout
+                              error.message?.includes('timeout') ||
+                              error.message?.includes('connection') ||
+                              error.message?.includes('ECONNRESET');
+    
+    if (isDatabaseTimeout) {
+      console.warn(`Database timeout/connection error for ${operation} ${itemName}, retrying...`);
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      return await retryCallback();
+    } else {
+      throw error;
+    }
+  }
+
   async ensureConfigLoaded() {
     if (!this.plexUrl || !this.plexToken) {
       const settings = await prisma.settings.findUnique({
@@ -802,29 +820,70 @@ class PlexSyncService {
       // Sync artists first
       await this.syncArtists(sectionKey);
       
-      // Then sync albums and tracks
+      // Get all artists in this section and sync their albums with batching
       const artists = await prisma.plexArtist.findMany({
         where: {
           librarySection: {
-            sectionKey: sectionKey
+            sectionKey: String(sectionKey)
           }
-        }
+        },
+        orderBy: { title: 'asc' }
       });
 
-      for (const artist of artists) {
-        await this.syncAlbums(sectionKey, artist.ratingKey);
+      console.log(`🎤 Found ${artists.length} artists. Starting album sync with batching...`);
+      
+      // Process artists in batches to avoid database timeouts
+      const artistBatchSize = 25;
+      for (let i = 0; i < artists.length; i += artistBatchSize) {
+        const batch = artists.slice(i, i + artistBatchSize);
+        console.log(`   Processing artist batch ${Math.floor(i/artistBatchSize) + 1}/${Math.ceil(artists.length/artistBatchSize)} (${batch.length} artists)`);
+        
+        for (const artist of batch) {
+          try {
+            await this.syncAlbums(sectionKey, artist.ratingKey);
+          } catch (error) {
+            console.warn(`Failed to sync albums for artist ${artist.title}:`, error.message);
+            // Continue with next artist on error
+          }
+        }
+        
+        // Small delay between batches
+        if (i + artistBatchSize < artists.length) {
+          await new Promise(resolve => setTimeout(resolve, 100));
+        }
       }
 
+      // Get all albums in this section and sync their tracks with batching
       const albums = await prisma.plexAlbum.findMany({
         where: {
           librarySection: {
-            sectionKey: sectionKey
+            sectionKey: String(sectionKey)
           }
-        }
+        },
+        orderBy: { title: 'asc' }
       });
 
-      for (const album of albums) {
-        await this.syncTracks(sectionKey, album.ratingKey);
+      console.log(`💿 Found ${albums.length} albums. Starting track sync with batching...`);
+      
+      // Process albums in batches to avoid database timeouts
+      const albumBatchSize = 50;
+      for (let i = 0; i < albums.length; i += albumBatchSize) {
+        const batch = albums.slice(i, i + albumBatchSize);
+        console.log(`   Processing album batch ${Math.floor(i/albumBatchSize) + 1}/${Math.ceil(albums.length/albumBatchSize)} (${batch.length} albums)`);
+        
+        for (const album of batch) {
+          try {
+            await this.syncTracks(sectionKey, album.ratingKey);
+          } catch (error) {
+            console.warn(`Failed to sync tracks for album ${album.title}:`, error.message);
+            // Continue with next album on error
+          }
+        }
+        
+        // Small delay between batches
+        if (i + albumBatchSize < albums.length) {
+          await new Promise(resolve => setTimeout(resolve, 100));
+        }
       }
 
       // Finally sync playlists
@@ -843,7 +902,7 @@ class PlexSyncService {
       const artists = data.MediaContainer?.Metadata || [];
       
       const section = await prisma.plexLibrarySection.findUnique({
-        where: { sectionKey: sectionKey }
+        where: { sectionKey: String(sectionKey) }
       });
 
       if (!section) {
@@ -878,11 +937,31 @@ class PlexSyncService {
           collections: detailedArtist.Collection ? JSON.stringify(detailedArtist.Collection.map(c => c.tag || c.title)) : null
         };
 
-        await prisma.plexArtist.upsert({
-          where: { ratingKey: detailedArtist.ratingKey },
-          update: artistData,
-          create: artistData
-        });
+        try {
+          await prisma.plexArtist.upsert({
+            where: { ratingKey: detailedArtist.ratingKey },
+            update: artistData,
+            create: artistData
+          });
+        } catch (error) {
+          await this.handleDatabaseError(
+            error,
+            'artist',
+            detailedArtist.title,
+            async () => {
+              return await prisma.plexArtist.upsert({
+                where: { ratingKey: detailedArtist.ratingKey },
+                update: artistData,
+                create: artistData
+              });
+            }
+          );
+        }
+
+        // Add small delay every 10 artists to prevent overwhelming the database
+        if (artists.indexOf(artist) % 10 === 9) {
+          await new Promise(resolve => setTimeout(resolve, 100));
+        }
       }
 
       console.log(`✅ Synced ${artists.length} artists for section ${sectionKey}`);
@@ -894,11 +973,55 @@ class PlexSyncService {
 
   async syncAlbums(sectionKey, artistRatingKey) {
     try {
-      const data = await this.makeRequest(`/library/metadata/${artistRatingKey}/children`);
-      const albums = data.MediaContainer?.Metadata || [];
+      // 1. Get albums from artist's children endpoint
+      const childrenData = await this.makeRequest(`/library/metadata/${artistRatingKey}/children`);
+      const childrenAlbums = childrenData.MediaContainer?.Metadata || [];
+      if (childrenAlbums.length > 0) {
+        console.log(`ℹ️ Found ${childrenAlbums.length} album(s) via artist children endpoint for artist ${artistRatingKey}.`);
+      }
+
+      // 2. Always perform a section-level scan to find albums by parentRatingKey
+      const pageSize = 500; // Larger page size for efficiency
+      let start = 0;
+      let totalProcessed = 0;
+      const scannedAlbums = [];
+      let totalSize = 0;
+
+      console.log(`ℹ️ Scanning section ${sectionKey} for albums by artist ${artistRatingKey}...`);
+      while (true) {
+        const page = await this.makeRequest(`/library/sections/${sectionKey}/all?type=9&X-Plex-Container-Start=${start}&X-Plex-Container-Size=${pageSize}`);
+        const pageAlbums = page.MediaContainer?.Metadata || [];
+        if (!totalSize) totalSize = page.MediaContainer?.totalSize || 0;
+
+        if (pageAlbums.length === 0) break;
+
+        for (const a of pageAlbums) {
+          if (String(a.parentRatingKey) === String(artistRatingKey)) {
+            scannedAlbums.push(a);
+          }
+        }
+        
+        totalProcessed += pageAlbums.length;
+        if (totalSize > 0 && totalProcessed >= totalSize) {
+          break; // Scanned all albums in the section
+        }
+        
+        start += pageSize;
+      }
+      
+      if (scannedAlbums.length > 0) {
+        console.log(`   🔍 Section scan found ${scannedAlbums.length} album(s) for artist ${artistRatingKey} after checking ${totalProcessed} items.`);
+      }
+
+      // 3. Combine and deduplicate results
+      const allAlbums = new Map();
+      [...childrenAlbums, ...scannedAlbums].forEach(album => {
+        allAlbums.set(album.ratingKey, album);
+      });
+      const albums = Array.from(allAlbums.values());
       
       const section = await prisma.plexLibrarySection.findUnique({
-        where: { sectionKey: sectionKey }
+        where: { sectionKey: String(sectionKey) }
       });
 
       if (!section) {
@@ -937,11 +1060,31 @@ class PlexSyncService {
           collections: detailedAlbum.Collection ? JSON.stringify(detailedAlbum.Collection.map(c => c.tag || c.title)) : null
         };
 
-        await prisma.plexAlbum.upsert({
-          where: { ratingKey: detailedAlbum.ratingKey },
-          update: albumData,
-          create: albumData
-        });
+        try {
+          await prisma.plexAlbum.upsert({
+            where: { ratingKey: detailedAlbum.ratingKey },
+            update: albumData,
+            create: albumData
+          });
+        } catch (error) {
+          await this.handleDatabaseError(
+            error,
+            'album',
+            detailedAlbum.title,
+            async () => {
+              return await prisma.plexAlbum.upsert({
+                where: { ratingKey: detailedAlbum.ratingKey },
+                update: albumData,
+                create: albumData
+              });
+            }
+          );
+        }
+
+        // Add small delay every 5 albums to prevent database overload
+        if (albums.indexOf(album) % 5 === 4) {
+          await new Promise(resolve => setTimeout(resolve, 100));
+        }
       }
 
       console.log(`✅ Synced ${albums.length} albums for artist ${artistRatingKey}`);
@@ -957,7 +1100,7 @@ class PlexSyncService {
       const tracks = data.MediaContainer?.Metadata || [];
       
       const section = await prisma.plexLibrarySection.findUnique({
-        where: { sectionKey: sectionKey }
+        where: { sectionKey: String(sectionKey) }
       });
 
       if (!section) {
@@ -987,11 +1130,26 @@ class PlexSyncService {
           librarySectionID: section.id
         };
 
-        await prisma.plexTrack.upsert({
-          where: { ratingKey: track.ratingKey },
-          update: trackData,
-          create: trackData
-        });
+        try {
+          await prisma.plexTrack.upsert({
+            where: { ratingKey: track.ratingKey },
+            update: trackData,
+            create: trackData
+          });
+        } catch (error) {
+          await this.handleDatabaseError(error, `track ${track.title}`, async () => {
+            await prisma.plexTrack.upsert({
+              where: { ratingKey: track.ratingKey },
+              update: trackData,
+              create: trackData
+            });
+          });
+        }
+
+        // Add small delay every 20 tracks to prevent overwhelming the database
+        if (tracks.indexOf(track) % 20 === 19) {
+          await new Promise(resolve => setTimeout(resolve, 50));
+        }
       }
 
       console.log(`✅ Synced ${tracks.length} tracks for album ${albumRatingKey}`);

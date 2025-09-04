@@ -10628,6 +10628,372 @@ async function shutdown() {
 process.on('SIGTERM', shutdown);
 process.on('SIGINT', shutdown);
 
+// Background Images API Endpoints
+// Configure multer for file uploads
+const backgroundStorage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    const uploadDir = path.join(__dirname, 'uploads', 'backgrounds');
+    if (!fs.existsSync(uploadDir)) {
+      fs.mkdirSync(uploadDir, { recursive: true });
+    }
+    cb(null, uploadDir);
+  },
+  filename: (req, file, cb) => {
+    // Generate unique filename with original extension
+    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
+    const ext = path.extname(file.originalname);
+    cb(null, 'bg-' + uniqueSuffix + ext);
+  }
+});
+
+const backgroundUpload = multer({
+  storage: backgroundStorage,
+  limits: {
+    fileSize: 10 * 1024 * 1024 // 10MB limit
+  },
+  fileFilter: (req, file, cb) => {
+    // Check file type
+    if (file.mimetype.startsWith('image/')) {
+      cb(null, true);
+    } else {
+      cb(new Error('Only image files are allowed'), false);
+    }
+  }
+});
+
+// Get all backgrounds
+app.get('/api/backgrounds', async (req, res) => {
+  try {
+    const backgrounds = await prisma.backgroundImage.findMany({
+      orderBy: { createdAt: 'desc' }
+    });
+    res.json(backgrounds);
+  } catch (error) {
+    console.error('Error fetching backgrounds:', error);
+    res.status(500).json({ error: 'Failed to fetch backgrounds' });
+  }
+});
+
+// Upload backgrounds
+app.post('/api/backgrounds/upload', backgroundUpload.array('backgrounds'), async (req, res) => {
+  try {
+    const files = req.files;
+    if (!files || files.length === 0) {
+      return res.status(400).json({ error: 'No files uploaded' });
+    }
+
+    const uploaded = [];
+    const errors = [];
+
+    for (const file of files) {
+      try {
+        // Get image dimensions
+        const sharp = require('sharp');
+        const metadata = await sharp(file.path).metadata();
+
+        const background = await prisma.backgroundImage.create({
+          data: {
+            filename: file.originalname,
+            storedFilename: file.filename,
+            filePath: file.path,
+            mimeType: file.mimetype,
+            fileSize: file.size,
+            width: metadata.width,
+            height: metadata.height,
+            uploadedAt: new Date()
+          }
+        });
+
+        uploaded.push(background);
+      } catch (error) {
+        console.error('Error processing file:', file.originalname, error);
+        errors.push(`Failed to process ${file.originalname}: ${error.message}`);
+        
+        // Clean up failed file
+        try {
+          fs.unlinkSync(file.path);
+        } catch (unlinkError) {
+          console.error('Error cleaning up file:', unlinkError);
+        }
+      }
+    }
+
+    res.json({ uploaded, errors });
+  } catch (error) {
+    console.error('Upload error:', error);
+    res.status(500).json({ error: 'Failed to upload backgrounds' });
+  }
+});
+
+// Download background from URL
+app.post('/api/backgrounds/download', async (req, res) => {
+  try {
+    const { url } = req.body;
+    if (!url) {
+      return res.status(400).json({ error: 'URL is required' });
+    }
+
+    // Download the image
+    const response = await fetch(url);
+    if (!response.ok) {
+      throw new Error(`Failed to download image: ${response.statusText}`);
+    }
+
+    const buffer = await response.buffer();
+    const contentType = response.headers.get('content-type');
+
+    // Validate it's an image
+    if (!contentType || !contentType.startsWith('image/')) {
+      throw new Error('URL does not point to an image');
+    }
+
+    // Generate filename from URL
+    const urlPath = new URL(url).pathname;
+    const originalFilename = path.basename(urlPath) || 'downloaded-image';
+    const ext = path.extname(originalFilename) || '.jpg';
+    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
+    const storedFilename = 'bg-' + uniqueSuffix + ext;
+
+    // Save file
+    const uploadDir = path.join(__dirname, 'uploads', 'backgrounds');
+    if (!fs.existsSync(uploadDir)) {
+      fs.mkdirSync(uploadDir, { recursive: true });
+    }
+    const filePath = path.join(uploadDir, storedFilename);
+    fs.writeFileSync(filePath, buffer);
+
+    // Get image metadata
+    const sharp = require('sharp');
+    const metadata = await sharp(filePath).metadata();
+
+    // Save to database
+    const background = await prisma.backgroundImage.create({
+      data: {
+        filename: originalFilename,
+        storedFilename: storedFilename,
+        filePath: filePath,
+        mimeType: contentType,
+        fileSize: buffer.length,
+        width: metadata.width,
+        height: metadata.height,
+        sourceUrl: url,
+        uploadedAt: new Date()
+      }
+    });
+
+    res.json(background);
+  } catch (error) {
+    console.error('Download error:', error);
+    res.status(500).json({ error: error.message || 'Failed to download background' });
+  }
+});
+
+// Get background image file
+app.get('/api/backgrounds/:id/image', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const background = await prisma.backgroundImage.findUnique({
+      where: { id: parseInt(id) }
+    });
+
+    if (!background) {
+      return res.status(404).json({ error: 'Background not found' });
+    }
+
+    if (!fs.existsSync(background.filePath)) {
+      return res.status(404).json({ error: 'Background file not found on disk' });
+    }
+
+    res.setHeader('Content-Type', background.mimeType);
+    res.setHeader('Cache-Control', 'public, max-age=31536000'); // 1 year cache
+    res.sendFile(path.resolve(background.filePath));
+  } catch (error) {
+    console.error('Error serving background image:', error);
+    res.status(500).json({ error: 'Failed to serve background image' });
+  }
+});
+
+// Delete background
+app.delete('/api/backgrounds/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const background = await prisma.backgroundImage.findUnique({
+      where: { id: parseInt(id) }
+    });
+
+    if (!background) {
+      return res.status(404).json({ error: 'Background not found' });
+    }
+
+    // Remove from galleries first
+    await prisma.galleryBackground.deleteMany({
+      where: { backgroundImageId: parseInt(id) }
+    });
+
+    // Delete from database
+    await prisma.backgroundImage.delete({
+      where: { id: parseInt(id) }
+    });
+
+    // Delete file from disk
+    try {
+      if (fs.existsSync(background.filePath)) {
+        fs.unlinkSync(background.filePath);
+      }
+    } catch (fileError) {
+      console.error('Error deleting background file:', fileError);
+      // Continue - file might already be deleted
+    }
+
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Error deleting background:', error);
+    res.status(500).json({ error: 'Failed to delete background' });
+  }
+});
+
+// Background Galleries API Endpoints
+
+// Get all galleries
+app.get('/api/background-galleries', async (req, res) => {
+  try {
+    const galleries = await prisma.backgroundGallery.findMany({
+      include: {
+        _count: {
+          select: { backgrounds: true }
+        }
+      },
+      orderBy: { createdAt: 'desc' }
+    });
+
+    const galleriesWithCount = galleries.map(gallery => ({
+      ...gallery,
+      backgroundCount: gallery._count.backgrounds
+    }));
+
+    res.json(galleriesWithCount);
+  } catch (error) {
+    console.error('Error fetching galleries:', error);
+    res.status(500).json({ error: 'Failed to fetch galleries' });
+  }
+});
+
+// Create gallery
+app.post('/api/background-galleries', async (req, res) => {
+  try {
+    const { name, description } = req.body;
+    if (!name || !name.trim()) {
+      return res.status(400).json({ error: 'Gallery name is required' });
+    }
+
+    const gallery = await prisma.backgroundGallery.create({
+      data: {
+        name: name.trim(),
+        description: description ? description.trim() : null
+      }
+    });
+
+    res.json(gallery);
+  } catch (error) {
+    console.error('Error creating gallery:', error);
+    res.status(500).json({ error: 'Failed to create gallery' });
+  }
+});
+
+// Get gallery backgrounds
+app.get('/api/background-galleries/:id/backgrounds', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const gallery = await prisma.backgroundGallery.findUnique({
+      where: { id: parseInt(id) },
+      include: {
+        backgrounds: {
+          include: {
+            backgroundImage: true
+          },
+          orderBy: { addedAt: 'desc' }
+        }
+      }
+    });
+
+    if (!gallery) {
+      return res.status(404).json({ error: 'Gallery not found' });
+    }
+
+    const backgrounds = gallery.backgrounds.map(gb => gb.backgroundImage);
+    res.json(backgrounds);
+  } catch (error) {
+    console.error('Error fetching gallery backgrounds:', error);
+    res.status(500).json({ error: 'Failed to fetch gallery backgrounds' });
+  }
+});
+
+// Add backgrounds to gallery
+app.post('/api/background-galleries/:id/add-backgrounds', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { backgroundIds } = req.body;
+
+    if (!Array.isArray(backgroundIds) || backgroundIds.length === 0) {
+      return res.status(400).json({ error: 'Background IDs array is required' });
+    }
+
+    const gallery = await prisma.backgroundGallery.findUnique({
+      where: { id: parseInt(id) }
+    });
+
+    if (!gallery) {
+      return res.status(404).json({ error: 'Gallery not found' });
+    }
+
+    // Add backgrounds to gallery (ignore duplicates)
+    const addedRelations = [];
+    for (const backgroundId of backgroundIds) {
+      try {
+        const relation = await prisma.galleryBackground.create({
+          data: {
+            backgroundGalleryId: parseInt(id),
+            backgroundImageId: parseInt(backgroundId)
+          }
+        });
+        addedRelations.push(relation);
+      } catch (error) {
+        // Ignore duplicate key errors (background already in gallery)
+        if (!error.message.includes('Unique constraint')) {
+          throw error;
+        }
+      }
+    }
+
+    res.json({ success: true, addedCount: addedRelations.length });
+  } catch (error) {
+    console.error('Error adding backgrounds to gallery:', error);
+    res.status(500).json({ error: 'Failed to add backgrounds to gallery' });
+  }
+});
+
+// Delete gallery
+app.delete('/api/background-galleries/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    // Delete gallery relations first
+    await prisma.galleryBackground.deleteMany({
+      where: { backgroundGalleryId: parseInt(id) }
+    });
+
+    // Delete gallery
+    await prisma.backgroundGallery.delete({
+      where: { id: parseInt(id) }
+    });
+
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Error deleting gallery:', error);
+    res.status(500).json({ error: 'Failed to delete gallery' });
+  }
+});
+
 // Socket.IO connection handling
 io.on('connection', (socket) => {
   console.log('Client connected to WebSocket');

@@ -124,6 +124,13 @@ const SideMenu = ({ isMobile, closeMobileMenu }) => {
       isSubmenu: true
     },
     {
+      path: '/media/backgrounds',
+      icon: '🖼️',
+      label: 'Backgrounds',
+      description: 'Background images',
+      isSubmenu: true
+    },
+    {
       path: '/media/books',
       icon: '📚',
       label: 'Books',

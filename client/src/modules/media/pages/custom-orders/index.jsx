@@ -87,12 +87,19 @@ function CustomOrders() {
   const [availablePlaylists, setAvailablePlaylists] = useState({ plex: [], custom: [] });
   const [playlistsLoading, setPlaylistsLoading] = useState(false);
   
+  // Available backgrounds and galleries for linking
+  const [availableBackgrounds, setAvailableBackgrounds] = useState([]);
+  const [availableGalleries, setAvailableGalleries] = useState([]);
+  const [backgroundsLoading, setBackgroundsLoading] = useState(false);
+
   const [formData, setFormData] = useState({
     name: '',
     description: '',
     icon: '',
     playlistRatingKey: '',
-    customPlaylistId: ''
+    customPlaylistId: '',
+    backgroundImageId: '',
+    backgroundGalleryId: ''
   });
   // Helper function to filter items based on preferences
   const getFilteredItems = (items) => {
@@ -305,6 +312,29 @@ function CustomOrders() {
     }
   };
 
+  const fetchAvailableBackgrounds = async () => {
+    try {
+      setBackgroundsLoading(true);
+      
+      // Fetch background images
+      const backgroundsResponse = await fetch(`${config.apiBaseUrl}/api/backgrounds`);
+      const backgrounds = backgroundsResponse.ok ? await backgroundsResponse.json() : [];
+      
+      // Fetch background galleries
+      const galleriesResponse = await fetch(`${config.apiBaseUrl}/api/background-galleries`);
+      const galleries = galleriesResponse.ok ? await galleriesResponse.json() : [];
+      
+      setAvailableBackgrounds(backgrounds);
+      setAvailableGalleries(galleries);
+    } catch (error) {
+      console.error('Error fetching available backgrounds:', error);
+      setAvailableBackgrounds([]);
+      setAvailableGalleries([]);
+    } finally {
+      setBackgroundsLoading(false);
+    }
+  };
+
   // Helper function to handle viewing an order and updating URL
   const handleViewOrder = async (orderIdOrOrder) => {
     let order;
@@ -371,6 +401,14 @@ function CustomOrders() {
       }
       if (formData.customPlaylistId) {
         requestBody.customPlaylistId = parseInt(formData.customPlaylistId);
+      }
+      
+      // Add background fields if selected
+      if (formData.backgroundImageId) {
+        requestBody.backgroundImageId = parseInt(formData.backgroundImageId);
+      }
+      if (formData.backgroundGalleryId) {
+        requestBody.backgroundGalleryId = parseInt(formData.backgroundGalleryId);
       }
 
       const response = await fetch(`${config.apiBaseUrl}/api/custom-orders`, {
@@ -452,13 +490,18 @@ function CustomOrders() {
       description: order.description || '',
       icon: order.icon || '',
       playlistRatingKey: order.playlistRatingKey || '',
-      customPlaylistId: order.customPlaylistId ? order.customPlaylistId.toString() : ''
+      customPlaylistId: order.customPlaylistId ? order.customPlaylistId.toString() : '',
+      backgroundImageId: order.backgroundImageId ? order.backgroundImageId.toString() : '',
+      backgroundGalleryId: order.backgroundGalleryId ? order.backgroundGalleryId.toString() : ''
     });
     setMessage('');
     
-    // Load playlists when starting to edit
+    // Load playlists and backgrounds when starting to edit
     if (!availablePlaylists.plex.length && !availablePlaylists.custom.length) {
       fetchAvailablePlaylists();
+    }
+    if (!availableBackgrounds.length && !availableGalleries.length) {
+      fetchAvailableBackgrounds();
     }
   };
 
@@ -483,6 +526,14 @@ function CustomOrders() {
       }
       if (formData.customPlaylistId) {
         requestBody.customPlaylistId = parseInt(formData.customPlaylistId);
+      }
+      
+      // Add background fields if selected
+      if (formData.backgroundImageId) {
+        requestBody.backgroundImageId = parseInt(formData.backgroundImageId);
+      }
+      if (formData.backgroundGalleryId) {
+        requestBody.backgroundGalleryId = parseInt(formData.backgroundGalleryId);
       }
 
       const response = await fetch(`${config.apiBaseUrl}/api/custom-orders/${editingOrder.id}`, {
@@ -3451,13 +3502,22 @@ function CustomOrders() {
           <div className="custom-orders-header">            <Button
               onClick={() => {
                 setShowCreateForm(!showCreateForm);
-                setFormData({ name: '', description: '', icon: '', playlistRatingKey: '', customPlaylistId: '' });
+                setFormData({ 
+                  name: '', 
+                  description: '', 
+                  icon: '', 
+                  playlistRatingKey: '', 
+                  customPlaylistId: '',
+                  backgroundImageId: '',
+                  backgroundGalleryId: ''
+                });
                 setEditingOrder(null);
                 setMessage('');
                 setSelectedParentId(null);
                 if (!showCreateForm) {
                   fetchAvailableParents(); // Load available parent orders when opening form
                   fetchAvailablePlaylists(); // Load available playlists when opening form
+                  fetchAvailableBackgrounds(); // Load available backgrounds when opening form
                 }
               }}
             >
@@ -3591,6 +3651,69 @@ function CustomOrders() {
               )}
             </div>
             
+            {/* Background Selection Section */}
+            <div className="form-section">
+              <h4>Background Image Integration (Optional)</h4>
+              <p className="form-help">Link this custom order to a background image or gallery to enhance the visual experience.</p>
+              
+              <div className="form-group">
+                <label htmlFor="backgroundImage">Single Background Image</label>
+                <select
+                  id="backgroundImage"
+                  value={formData.backgroundImageId}
+                  onChange={(e) => {
+                    setFormData({
+                      ...formData, 
+                      backgroundImageId: e.target.value,
+                      backgroundGalleryId: '' // Clear gallery if single image is selected
+                    });
+                  }}
+                  disabled={backgroundsLoading}
+                >
+                  <option value="">-- Select Background Image --</option>
+                  {availableBackgrounds.map(bg => (
+                    <option key={bg.id} value={bg.id.toString()}>
+                      {bg.originalName} ({bg.width}x{bg.height})
+                    </option>
+                  ))}
+                </select>
+                {backgroundsLoading && <small className="form-help">Loading backgrounds...</small>}
+              </div>
+              
+              <div className="form-group">
+                <span className="form-separator">OR</span>
+              </div>
+              
+              <div className="form-group">
+                <label htmlFor="backgroundGallery">Background Gallery</label>
+                <select
+                  id="backgroundGallery"
+                  value={formData.backgroundGalleryId}
+                  onChange={(e) => {
+                    setFormData({
+                      ...formData, 
+                      backgroundGalleryId: e.target.value,
+                      backgroundImageId: '' // Clear single image if gallery is selected
+                    });
+                  }}
+                  disabled={backgroundsLoading}
+                >
+                  <option value="">-- Select Background Gallery --</option>
+                  {availableGalleries.map(gallery => (
+                    <option key={gallery.id} value={gallery.id.toString()}>
+                      {gallery.name} ({gallery.images?.length || 0} images)
+                    </option>
+                  ))}
+                </select>
+              </div>
+              
+              {(formData.backgroundImageId || formData.backgroundGalleryId) && (
+                <div className="form-help">
+                  <strong>Note:</strong> The selected background will be associated with this custom order and accessible via the Android API.
+                </div>
+              )}
+            </div>
+            
             <div className="form-actions">
               <Button type="submit">Create Order</Button>
               <Button 
@@ -3709,6 +3832,69 @@ function CustomOrders() {
               {(formData.playlistRatingKey || formData.customPlaylistId) && (
                 <div className="form-help">
                   <strong>Note:</strong> The selected playlist will be associated with this custom order and can be used for enhanced media experiences.
+                </div>
+              )}
+            </div>
+            
+            {/* Background Selection Section */}
+            <div className="form-section">
+              <h4>Background Image Integration (Optional)</h4>
+              <p className="form-help">Link this custom order to a background image or gallery to enhance the visual experience.</p>
+              
+              <div className="form-group">
+                <label htmlFor="editBackgroundImage">Single Background Image</label>
+                <select
+                  id="editBackgroundImage"
+                  value={formData.backgroundImageId}
+                  onChange={(e) => {
+                    setFormData({
+                      ...formData, 
+                      backgroundImageId: e.target.value,
+                      backgroundGalleryId: '' // Clear gallery if single image is selected
+                    });
+                  }}
+                  disabled={backgroundsLoading}
+                >
+                  <option value="">-- Select Background Image --</option>
+                  {availableBackgrounds.map(bg => (
+                    <option key={bg.id} value={bg.id.toString()}>
+                      {bg.originalName} ({bg.width}x{bg.height})
+                    </option>
+                  ))}
+                </select>
+                {backgroundsLoading && <small className="form-help">Loading backgrounds...</small>}
+              </div>
+              
+              <div className="form-group">
+                <span className="form-separator">OR</span>
+              </div>
+              
+              <div className="form-group">
+                <label htmlFor="editBackgroundGallery">Background Gallery</label>
+                <select
+                  id="editBackgroundGallery"
+                  value={formData.backgroundGalleryId}
+                  onChange={(e) => {
+                    setFormData({
+                      ...formData, 
+                      backgroundGalleryId: e.target.value,
+                      backgroundImageId: '' // Clear single image if gallery is selected
+                    });
+                  }}
+                  disabled={backgroundsLoading}
+                >
+                  <option value="">-- Select Background Gallery --</option>
+                  {availableGalleries.map(gallery => (
+                    <option key={gallery.id} value={gallery.id.toString()}>
+                      {gallery.name} ({gallery.images?.length || 0} images)
+                    </option>
+                  ))}
+                </select>
+              </div>
+              
+              {(formData.backgroundImageId || formData.backgroundGalleryId) && (
+                <div className="form-help">
+                  <strong>Note:</strong> The selected background will be associated with this custom order and accessible via the Android API.
                 </div>
               )}
             </div>
