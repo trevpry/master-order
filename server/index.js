@@ -216,6 +216,48 @@ app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
+// Comprehensive request logging middleware
+app.use((req, res, next) => {
+  const timestamp = new Date().toISOString();
+  const method = req.method;
+  const url = req.url;
+  const userAgent = req.get('User-Agent') || 'Unknown';
+  const origin = req.get('Origin') || 'No Origin';
+  const referer = req.get('Referer') || 'No Referer';
+  
+  console.log(`🌐 [${timestamp}] ${method} ${url}`);
+  console.log(`🌐 [REQUEST] User-Agent: ${userAgent.substring(0, 100)}`);
+  console.log(`🌐 [REQUEST] Origin: ${origin}`);
+  console.log(`🌐 [REQUEST] Referer: ${referer}`);
+  
+  // Log specifically for background API calls
+  if (url.includes('/api/background')) {
+    console.log(`📸🖼️  [BACKGROUND API] === INCOMING REQUEST ===`);
+    console.log(`📸🖼️  [BACKGROUND API] Method: ${method}`);
+    console.log(`📸🖼️  [BACKGROUND API] URL: ${url}`);
+    console.log(`📸🖼️  [BACKGROUND API] Headers:`, JSON.stringify(req.headers, null, 2));
+    console.log(`📸🖼️  [BACKGROUND API] Query:`, JSON.stringify(req.query, null, 2));
+    console.log(`📸🖼️  [BACKGROUND API] Body:`, JSON.stringify(req.body, null, 2));
+  }
+  
+  // Override res.send to log responses
+  const originalSend = res.send;
+  res.send = function(data) {
+    if (url.includes('/api/background')) {
+      console.log(`📸🖼️  [BACKGROUND API] === OUTGOING RESPONSE ===`);
+      console.log(`📸🖼️  [BACKGROUND API] Status: ${res.statusCode}`);
+      console.log(`📸🖼️  [BACKGROUND API] Content-Type: ${res.get('Content-Type')}`);
+      console.log(`📸🖼️  [BACKGROUND API] Response Length: ${data ? data.length : 0}`);
+      if (res.statusCode >= 400) {
+        console.log(`📸🖼️  [BACKGROUND API] Error Response:`, data.substring(0, 500));
+      }
+    }
+    return originalSend.call(this, data);
+  };
+  
+  next();
+});
+
 // Serve static files from client build in production
 if (process.env.NODE_ENV === 'production') {
   const clientBuildPath = path.join(__dirname, '..', 'client', 'dist');
@@ -11187,6 +11229,16 @@ app.get('/api/android/weather', async (req, res) => {
 // Serve React app for all other routes in production
 if (process.env.NODE_ENV === 'production') {
   app.get('*', (req, res) => {
+    console.log(`⚠️  [FALLBACK] Request fell through to React app catch-all: ${req.method} ${req.url}`);
+    console.log(`⚠️  [FALLBACK] This means the API route was not matched!`);
+    console.log(`⚠️  [FALLBACK] User-Agent: ${req.get('User-Agent')}`);
+    console.log(`⚠️  [FALLBACK] Accept: ${req.get('Accept')}`);
+    
+    if (req.url.includes('/api/')) {
+      console.log(`❌ [FALLBACK] ERROR: API route ${req.url} not found - serving HTML instead!`);
+      console.log(`❌ [FALLBACK] This is why you're getting HTML instead of JSON!`);
+    }
+    
     const clientBuildPath = path.join(__dirname, '..', 'client', 'dist');
     res.sendFile(path.join(clientBuildPath, 'index.html'));
   });
