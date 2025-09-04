@@ -11643,8 +11643,20 @@ app.post('/api/backgrounds/download-gallery-bulk', async (req, res) => {
       const galleryMatch = url.match(/imgur\.com\/a\/([a-zA-Z0-9\-_]+)/);
       imgurGalleryId = galleryMatch ? galleryMatch[1] : null;
     } else if (url.includes('imgur.com/gallery/')) {
-      const galleryMatch = url.match(/imgur\.com\/gallery\/([a-zA-Z0-9\-_]+)/);
-      imgurGalleryId = galleryMatch ? galleryMatch[1] : null;
+      // Gallery URL - extract ID from URL directly
+      console.log('📥 [BULK DOWNLOAD] Extracting gallery ID from URL...');
+      
+      // Extract gallery ID from URL pattern like /gallery/star-wars-wallpapers-W4lOh
+      // The actual gallery ID is typically the part after the last dash
+      const urlPath = url.split('/gallery/')[1];
+      if (!urlPath) {
+        console.log('📥 [BULK DOWNLOAD] Failed to extract gallery path from URL:', url);
+        return res.status(400).json({ error: 'Invalid imgur gallery URL format' });
+      }
+      
+      // For URLs like "star-wars-wallpapers-W4lOh", the ID is "W4lOh"
+      const parts = urlPath.split('-');
+      imgurGalleryId = parts[parts.length - 1];
     }
     
     if (!imgurGalleryId) {
