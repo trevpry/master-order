@@ -11276,12 +11276,26 @@ app.get('/api/backgrounds', async (req, res) => {
     await prisma.$connect();
     console.log('📸 [BACKGROUNDS] Database connection successful');
     
-    // Check if BackgroundImage table exists
+    // Check if BackgroundImage table exists (database-agnostic)
     console.log('📸 [BACKGROUNDS] Checking if BackgroundImage table exists...');
-    const tableExists = await prisma.$queryRaw`
-      SELECT name FROM sqlite_master WHERE type='table' AND name='BackgroundImage';
-    `;
-    console.log('📸 [BACKGROUNDS] BackgroundImage table exists:', tableExists.length > 0);
+    const isPostgres = process.env.DATABASE_URL?.includes('postgresql://');
+    let tableExists;
+    
+    if (isPostgres) {
+      tableExists = await prisma.$queryRaw`
+        SELECT EXISTS (
+          SELECT FROM information_schema.tables 
+          WHERE table_schema = 'public' 
+          AND table_name = 'BackgroundImage'
+        );
+      `;
+      console.log('📸 [BACKGROUNDS] BackgroundImage table exists (PostgreSQL):', tableExists[0]?.exists || false);
+    } else {
+      tableExists = await prisma.$queryRaw`
+        SELECT name FROM sqlite_master WHERE type='table' AND name='BackgroundImage';
+      `;
+      console.log('📸 [BACKGROUNDS] BackgroundImage table exists (SQLite):', tableExists.length > 0);
+    }
     
     console.log('📸 [BACKGROUNDS] Attempting to query BackgroundImage table...');
     const backgrounds = await prisma.BackgroundImage.findMany({
@@ -11440,12 +11454,26 @@ app.get('/api/background-galleries', async (req, res) => {
     await prisma.$connect();
     console.log('🖼️  [GALLERIES] Database connection successful');
     
-    // Check if BackgroundGallery table exists
+    // Check if BackgroundGallery table exists (database-agnostic)
     console.log('🖼️  [GALLERIES] Checking if BackgroundGallery table exists...');
-    const tableExists = await prisma.$queryRaw`
-      SELECT name FROM sqlite_master WHERE type='table' AND name='BackgroundGallery';
-    `;
-    console.log('🖼️  [GALLERIES] BackgroundGallery table exists:', tableExists.length > 0);
+    const isPostgres = process.env.DATABASE_URL?.includes('postgresql://');
+    let tableExists;
+    
+    if (isPostgres) {
+      tableExists = await prisma.$queryRaw`
+        SELECT EXISTS (
+          SELECT FROM information_schema.tables 
+          WHERE table_schema = 'public' 
+          AND table_name = 'BackgroundGallery'
+        );
+      `;
+      console.log('🖼️  [GALLERIES] BackgroundGallery table exists (PostgreSQL):', tableExists[0]?.exists || false);
+    } else {
+      tableExists = await prisma.$queryRaw`
+        SELECT name FROM sqlite_master WHERE type='table' AND name='BackgroundGallery';
+      `;
+      console.log('🖼️  [GALLERIES] BackgroundGallery table exists (SQLite):', tableExists.length > 0);
+    }
     
     console.log('🖼️  [GALLERIES] Attempting to query BackgroundGallery table...');
     const galleries = await prisma.BackgroundGallery.findMany({
