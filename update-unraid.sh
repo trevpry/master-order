@@ -125,16 +125,34 @@ if [ $? -ne 0 ]; then
     exit 1
 fi
 
-# Step 6: Start the new container with Unraid-specific settings
+# Step 6: Start the new container with Unraid-specific settings (PostgreSQL)
 echo "🚀 Starting updated container on Unraid..."
 docker run -d \
     --name $CONTAINER_NAME \
     --restart=unless-stopped \
-    -p $HOST_PORT:$CONTAINER_PORT \
-    -v "$REPO_PATH/master_order.db:/app/data/master_order.db" \
+    --network=host \
+    --add-host="stash.internal:192.168.1.154" \
+    --add-host="plex.local:192.168.1.116" \
+    -v "/mnt/user/appdata/master-order/data:/app/data" \
+    -v "/mnt/user/appdata/master-order/artwork-cache:/app/server/artwork-cache" \
+    -v "/mnt/user/appdata/master-order/logs:/app/logs" \
+    -v "/mnt/user/Media/Christmas:/xmas:ro" \
+    -v "/mnt/user/Media/Movies:/movies:ro" \
+    -v "/mnt/user/Media/Music:/music:ro" \
+    -v "/mnt/user/Media/Classical:/classical:ro" \
+    -v "/mnt/user/Media/TV:/tv:ro" \
+    -v "/mnt/user/Media/VideoGames:/video_games:ro" \
+    -v "/mnt/user/Media/PopMusic:/pop_music:ro" \
     -e NODE_ENV=production \
-    -e DATABASE_URL="file:/app/data/master_order.db" \
-    --network=bridge \
+    -e "DATABASE_URL=postgresql://master_order_user:secure_password_change_me@192.168.1.114:5432/master_order" \
+    -e "POSTGRES_PASSWORD=secure_password_change_me" \
+    -e PORT=3001 \
+    -e "EXTERNAL_IP=192.168.1.114" \
+    -e "STASH_URL=http://stash.internal:9999" \
+    -e "STASH_URL_FALLBACK_1=http://192.168.1.154:9999" \
+    -e "STASH_URL_FALLBACK_2=http://192.168.1.114:9999" \
+    -e "STASH_URL_FALLBACK_3=http://localhost:9999" \
+    -e "STASH_URL_FALLBACK_4=http://host.docker.internal:9999" \
     $IMAGE_NAME
 
 if [ $? -ne 0 ]; then
