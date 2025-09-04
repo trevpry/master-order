@@ -5857,7 +5857,7 @@ app.post('/api/custom-orders', async (req, res) => {
 
     // Validate background gallery exists if specified
     if (backgroundGalleryId) {
-      const gallery = await prisma.backgroundGallery.findUnique({
+      const gallery = await prisma.BackgroundGallery.findUnique({
         where: { id: parseInt(backgroundGalleryId) }
       });
       if (!gallery) {
@@ -6096,7 +6096,7 @@ app.put('/api/custom-orders/:id', async (req, res) => {
 
     // Validate background gallery exists if specified
     if (backgroundGalleryId !== undefined && backgroundGalleryId !== null) {
-      const gallery = await prisma.backgroundGallery.findUnique({
+      const gallery = await prisma.BackgroundGallery.findUnique({
         where: { id: parseInt(backgroundGalleryId) }
       });
       if (!gallery) {
@@ -10681,14 +10681,14 @@ app.get('/api/android/gallery/:galleryName/random-image', async (req, res) => {
     }
     
     // Find the gallery by name (case-insensitive for SQLite compatibility)
-    const gallery = await prisma.backgroundGallery.findFirst({
+    const gallery = await prisma.BackgroundGallery.findFirst({
       where: {
         name: galleryName // Exact match first
       },
       include: {
         backgrounds: true
       }
-    }) || await prisma.backgroundGallery.findFirst({
+    }) || await prisma.BackgroundGallery.findFirst({
       where: {
         name: {
           contains: galleryName // Fallback to partial match
@@ -11013,6 +11013,177 @@ app.get('/api/android/playlist/:playlistName/random-track', async (req, res) => 
   }
 });
 
+// Android companion app endpoint - Weather Information
+app.get('/api/android/weather', async (req, res) => {
+  console.log('📱 Android app requesting weather information...');
+  
+  try {
+    // Get Eddie settings for weather configuration
+    const eddieSettings = await prisma.eddieSettings.findFirst();
+    
+    if (!eddieSettings?.weatherEnabled) {
+      return res.status(400).json({
+        type: 'WEATHER_ERROR',
+        data: {
+          error: 'Weather service disabled',
+          message: 'Weather functionality is not enabled in settings',
+          enabled: false,
+          timestamp: new Date().toISOString()
+        }
+      });
+    }
+    
+    if (!eddieSettings?.weatherApiKey) {
+      return res.status(400).json({
+        type: 'WEATHER_ERROR',
+        data: {
+          error: 'Weather API key missing',
+          message: 'Weather API key is not configured in settings',
+          enabled: true,
+          configured: false,
+          timestamp: new Date().toISOString()
+        }
+      });
+    }
+    
+    if (!eddieSettings?.weatherLocation) {
+      return res.status(400).json({
+        type: 'WEATHER_ERROR',
+        data: {
+          error: 'Weather location missing',
+          message: 'Weather location is not configured in settings',
+          enabled: true,
+          configured: false,
+          timestamp: new Date().toISOString()
+        }
+      });
+    }
+    
+    const apiKey = eddieSettings.weatherApiKey;
+    const location = eddieSettings.weatherLocation;
+    const units = eddieSettings.weatherUnits || 'metric';
+    
+    // Check if location is coordinates (lat,lon) or city name
+    let weatherUrl;
+    const coordPattern = /^[-+]?\d*\.?\d+\s*,\s*[-+]?\d*\.?\d+$/;
+    if (coordPattern.test(location.trim())) {
+      // It's coordinates format "lat,lon"
+      const [lat, lon] = location.split(',').map(coord => coord.trim());
+      weatherUrl = `https://api.openweathermap.org/data/2.5/weather?lat=${lat}&lon=${lon}&appid=${apiKey}&units=${units}`;
+    } else {
+      // It's a city name (possibly with state/country)
+      weatherUrl = `https://api.openweathermap.org/data/2.5/weather?q=${encodeURIComponent(location)}&appid=${apiKey}&units=${units}`;
+    }
+    
+    console.log('📱 Fetching weather data from OpenWeatherMap API...');
+    const response = await fetch(weatherUrl);
+    
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({ message: 'Unknown API error' }));
+      console.error('❌ OpenWeatherMap API error:', response.status, errorData.message);
+      
+      return res.status(502).json({
+        type: 'WEATHER_ERROR',
+        data: {
+          error: 'Weather API error',
+          message: `Failed to fetch weather data: ${errorData.message || 'Service unavailable'}`,
+          statusCode: response.status,
+          enabled: true,
+          configured: true,
+          timestamp: new Date().toISOString()
+        }
+      });
+    }
+    
+    const weatherData = await response.json();
+    console.log('📱 Weather data received successfully:', weatherData.name);
+    
+    // Format response for Android app with comprehensive weather information
+    const androidResponse = {
+      type: 'WEATHER_SUCCESS',
+      data: {
+        success: true,
+        location: {
+          name: weatherData.name,
+          country: weatherData.sys?.country,
+          coordinates: {
+            latitude: weatherData.coord?.lat,
+            longitude: weatherData.coord?.lon
+          },
+          timezone: weatherData.timezone,
+          sunrise: weatherData.sys?.sunrise ? new Date(weatherData.sys.sunrise * 1000).toISOString() : null,
+          sunset: weatherData.sys?.sunset ? new Date(weatherData.sys.sunset * 1000).toISOString() : null
+        },
+        current: {
+          temperature: weatherData.main?.temp,
+          feelsLike: weatherData.main?.feels_like,
+          tempMin: weatherData.main?.temp_min,
+          tempMax: weatherData.main?.temp_max,
+          humidity: weatherData.main?.humidity,
+          pressure: weatherData.main?.pressure,
+          visibility: weatherData.visibility ? weatherData.visibility / 1000 : null, // Convert to km
+          uvIndex: null // Not available in current weather API
+        },
+        weather: {
+          condition: weatherData.weather?.[0]?.main,
+          description: weatherData.weather?.[0]?.description,
+          icon: weatherData.weather?.[0]?.icon,
+          iconUrl: weatherData.weather?.[0]?.icon ? `https://openweathermap.org/img/wn/${weatherData.weather[0].icon}@2x.png` : null
+        },
+        wind: {
+          speed: weatherData.wind?.speed,
+          direction: weatherData.wind?.deg,
+          gust: weatherData.wind?.gust
+        },
+        clouds: {
+          cloudiness: weatherData.clouds?.all
+        },
+        rain: {
+          oneHour: weatherData.rain?.['1h'],
+          threeHours: weatherData.rain?.['3h']
+        },
+        snow: {
+          oneHour: weatherData.snow?.['1h'],
+          threeHours: weatherData.snow?.['3h']
+        },
+        units: {
+          system: units,
+          temperature: units === 'metric' ? '°C' : units === 'imperial' ? '°F' : 'K',
+          windSpeed: units === 'metric' ? 'm/s' : units === 'imperial' ? 'mph' : 'm/s',
+          pressure: 'hPa',
+          visibility: 'km'
+        },
+        metadata: {
+          dataTime: new Date(weatherData.dt * 1000).toISOString(),
+          requestTime: new Date().toISOString(),
+          source: 'OpenWeatherMap',
+          apiVersion: '2.5'
+        }
+      }
+    };
+    
+    console.log('📱 Weather response formatted for Android app');
+    res.json(androidResponse);
+    
+  } catch (error) {
+    console.error('❌ Error in Android weather endpoint:', error);
+    
+    const androidErrorResponse = {
+      type: 'WEATHER_ERROR',
+      data: {
+        success: false,
+        error: 'Internal server error',
+        message: 'Failed to process weather request',
+        details: error.message,
+        enabled: true,
+        timestamp: new Date().toISOString()
+      }
+    };
+    
+    res.status(500).json(androidErrorResponse);
+  }
+});
+
 // Serve React app for all other routes in production
 if (process.env.NODE_ENV === 'production') {
   app.get('*', (req, res) => {
@@ -11072,7 +11243,7 @@ const backgroundUpload = multer({
 // Get all backgrounds
 app.get('/api/backgrounds', async (req, res) => {
   try {
-    const backgrounds = await prisma.backgroundImage.findMany({
+    const backgrounds = await prisma.BackgroundImage.findMany({
       include: {
         gallery: {
           select: {
@@ -11108,7 +11279,7 @@ app.post('/api/backgrounds/upload', backgroundUpload.array('backgrounds'), async
         const sharp = require('sharp');
         const metadata = await sharp(file.path).metadata();
 
-        const background = await prisma.backgroundImage.create({
+        const background = await prisma.BackgroundImage.create({
           data: {
             filename: file.filename, // Use the stored filename
             originalName: file.originalname, // Use originalName field
@@ -11214,7 +11385,7 @@ app.post('/api/backgrounds/download', async (req, res) => {
       
       // Assign to gallery if specified
       if (galleryId) {
-        await prisma.backgroundImage.update({
+        await prisma.BackgroundImage.update({
           where: { id: downloadedImage.id },
           data: { galleryId: parseInt(galleryId) }
         });
@@ -11280,7 +11451,7 @@ app.post('/api/backgrounds/download-gallery-bulk', async (req, res) => {
           
           // Assign to gallery if specified
           if (galleryId) {
-            await prisma.backgroundImage.update({
+            await prisma.BackgroundImage.update({
               where: { id: downloadedImage.id },
               data: { galleryId: parseInt(galleryId) }
             });
@@ -11716,7 +11887,7 @@ async function downloadSingleImage(url, customOriginalName = null) {
   const metadata = await sharp(filePath).metadata();
 
   // Save to database
-  const background = await prisma.backgroundImage.create({
+  const background = await prisma.BackgroundImage.create({
     data: {
       filename: storedFilename, // Use the stored filename
       originalName: originalFilename, // Use originalName field
@@ -11849,7 +12020,7 @@ app.post('/api/backgrounds/gallery-download-specific', async (req, res) => {
 app.get('/api/backgrounds/:id/image', async (req, res) => {
   try {
     const { id } = req.params;
-    const background = await prisma.backgroundImage.findUnique({
+    const background = await prisma.BackgroundImage.findUnique({
       where: { id: parseInt(id) }
     });
 
@@ -11874,7 +12045,7 @@ app.get('/api/backgrounds/:id/image', async (req, res) => {
 app.delete('/api/backgrounds/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    const background = await prisma.backgroundImage.findUnique({
+    const background = await prisma.BackgroundImage.findUnique({
       where: { id: parseInt(id) }
     });
 
@@ -11883,7 +12054,7 @@ app.delete('/api/backgrounds/:id', async (req, res) => {
     }
 
     // Delete from database (the gallery relationship will be handled by onDelete: SetNull)
-    await prisma.backgroundImage.delete({
+    await prisma.BackgroundImage.delete({
       where: { id: parseInt(id) }
     });
 
@@ -11909,7 +12080,7 @@ app.delete('/api/backgrounds/:id', async (req, res) => {
 // Get all galleries
 app.get('/api/background-galleries', async (req, res) => {
   try {
-    const galleries = await prisma.backgroundGallery.findMany({
+    const galleries = await prisma.BackgroundGallery.findMany({
       include: {
         _count: {
           select: { backgrounds: true }
@@ -11938,7 +12109,7 @@ app.post('/api/background-galleries', async (req, res) => {
       return res.status(400).json({ error: 'Gallery name is required' });
     }
 
-    const gallery = await prisma.backgroundGallery.create({
+    const gallery = await prisma.BackgroundGallery.create({
       data: {
         name: name.trim(),
         description: description ? description.trim() : null
@@ -11956,7 +12127,7 @@ app.post('/api/background-galleries', async (req, res) => {
 app.get('/api/background-galleries/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    const gallery = await prisma.backgroundGallery.findUnique({
+    const gallery = await prisma.BackgroundGallery.findUnique({
       where: { id: parseInt(id) },
       include: {
         backgrounds: {
@@ -11986,7 +12157,7 @@ app.put('/api/background-galleries/:id', async (req, res) => {
       return res.status(400).json({ error: 'Gallery name is required' });
     }
 
-    const gallery = await prisma.backgroundGallery.update({
+    const gallery = await prisma.BackgroundGallery.update({
       where: { id: parseInt(id) },
       data: {
         name: name.trim(),
@@ -12005,7 +12176,7 @@ app.put('/api/background-galleries/:id', async (req, res) => {
 app.get('/api/background-galleries/:id/backgrounds', async (req, res) => {
   try {
     const { id } = req.params;
-    const gallery = await prisma.backgroundGallery.findUnique({
+    const gallery = await prisma.BackgroundGallery.findUnique({
       where: { id: parseInt(id) },
       include: {
         backgrounds: {
@@ -12035,7 +12206,7 @@ app.post('/api/background-galleries/:id/add-backgrounds', async (req, res) => {
       return res.status(400).json({ error: 'Background IDs array is required' });
     }
 
-    const gallery = await prisma.backgroundGallery.findUnique({
+    const gallery = await prisma.BackgroundGallery.findUnique({
       where: { id: parseInt(id) }
     });
 
@@ -12044,7 +12215,7 @@ app.post('/api/background-galleries/:id/add-backgrounds', async (req, res) => {
     }
 
     // Update background images to belong to this gallery
-    const updatedCount = await prisma.backgroundImage.updateMany({
+    const updatedCount = await prisma.BackgroundImage.updateMany({
       where: {
         id: { in: backgroundIds.map(id => parseInt(id)) },
         galleryId: null // Only update backgrounds not already in a gallery
@@ -12072,7 +12243,7 @@ app.post('/api/background-galleries/:id/remove-backgrounds', async (req, res) =>
     }
 
     // Remove backgrounds from gallery by setting galleryId to null
-    const updatedCount = await prisma.backgroundImage.updateMany({
+    const updatedCount = await prisma.BackgroundImage.updateMany({
       where: {
         id: { in: backgroundIds.map(id => parseInt(id)) },
         galleryId: parseInt(id)
@@ -12095,13 +12266,13 @@ app.delete('/api/background-galleries/:id', async (req, res) => {
     const { id } = req.params;
 
     // First remove all backgrounds from the gallery
-    await prisma.backgroundImage.updateMany({
+    await prisma.BackgroundImage.updateMany({
       where: { galleryId: parseInt(id) },
       data: { galleryId: null }
     });
 
     // Then delete the gallery
-    await prisma.backgroundGallery.delete({
+    await prisma.BackgroundGallery.delete({
       where: { id: parseInt(id) }
     });
 

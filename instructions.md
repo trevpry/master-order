@@ -642,6 +642,49 @@ The Android Companion App API provides structured endpoints specifically designe
   - **Enhanced Metadata**: Includes track number (`index`), disc number (`parentIndex`), year, rating, and full artist/album information from Plex
   - **Fallback Artwork**: Uses track → album → artist artwork hierarchy for best image availability
 
+#### Weather Information Access
+- **GET /api/android/weather**: Get current weather information for configured location
+  - Returns: `{"type":"WEATHER_SUCCESS|WEATHER_ERROR","data":{...}}` with comprehensive weather data
+  - **Success Response** includes:
+    ```json
+    {
+      "type": "WEATHER_SUCCESS",
+      "data": {
+        "success": true,
+        "location": {
+          "name": "New York",
+          "country": "US",
+          "coordinates": {"latitude": 40.7128, "longitude": -74.0060},
+          "sunrise": "2024-09-04T11:45:00.000Z",
+          "sunset": "2024-09-05T00:15:00.000Z"
+        },
+        "current": {
+          "temperature": 22.5,
+          "feelsLike": 24.1,
+          "humidity": 65,
+          "pressure": 1013,
+          "visibility": 10.0
+        },
+        "weather": {
+          "condition": "Clear",
+          "description": "clear sky",
+          "icon": "01d",
+          "iconUrl": "https://openweathermap.org/img/wn/01d@2x.png"
+        },
+        "wind": {"speed": 3.2, "direction": 225, "gust": 4.5},
+        "units": {
+          "system": "metric",
+          "temperature": "°C",
+          "windSpeed": "m/s"
+        }
+      }
+    }
+    ```
+  - **Configuration Required**: Weather must be enabled in Eddie settings with valid OpenWeatherMap API key
+  - **Location Support**: Accepts city names or latitude,longitude coordinates
+  - **Android Ready**: All data formatted for direct Android consumption with proper units and timestamps
+  - **Error Handling**: Comprehensive error responses with configuration status for troubleshooting
+
 ### Episode Selection & Media Discovery
 - **GET /api/up_next**: Get random episode from configured collection
   - Fetches collection name from database

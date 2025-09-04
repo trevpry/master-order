@@ -886,6 +886,144 @@ GET /api/android/playlist/rock%20classics/random-track
 
 ---
 
+## Weather Information Endpoint
+
+### 1. Get Current Weather
+
+**Endpoint**: `GET /api/android/weather`
+
+**Description**: Returns current weather information for the configured location. Provides comprehensive weather data including temperature, conditions, wind, humidity, and extended metadata optimized for Android display.
+
+**Configuration Requirements**:
+- Weather must be enabled in Eddie settings (`weatherEnabled: true`)
+- Valid OpenWeatherMap API key must be configured (`weatherApiKey`)
+- Location must be set (city name or latitude,longitude coordinates)
+
+**Response Format**:
+```json
+{
+  "type": "WEATHER_SUCCESS",
+  "data": {
+    "success": true,
+    "location": {
+      "name": "New York",
+      "country": "US",
+      "coordinates": {
+        "latitude": 40.7128,
+        "longitude": -74.0060
+      },
+      "timezone": -18000,
+      "sunrise": "2024-09-04T11:45:00.000Z",
+      "sunset": "2024-09-05T00:15:00.000Z"
+    },
+    "current": {
+      "temperature": 22.5,
+      "feelsLike": 24.1,
+      "tempMin": 20.2,
+      "tempMax": 25.8,
+      "humidity": 65,
+      "pressure": 1013,
+      "visibility": 10.0
+    },
+    "weather": {
+      "condition": "Clear",
+      "description": "clear sky",
+      "icon": "01d",
+      "iconUrl": "https://openweathermap.org/img/wn/01d@2x.png"
+    },
+    "wind": {
+      "speed": 3.2,
+      "direction": 225,
+      "gust": 4.5
+    },
+    "clouds": {
+      "cloudiness": 0
+    },
+    "units": {
+      "system": "metric",
+      "temperature": "°C",
+      "windSpeed": "m/s",
+      "pressure": "hPa",
+      "visibility": "km"
+    },
+    "metadata": {
+      "dataTime": "2024-09-04T15:30:00.000Z",
+      "requestTime": "2024-09-04T15:35:22.123Z",
+      "source": "OpenWeatherMap",
+      "apiVersion": "2.5"
+    }
+  }
+}
+```
+
+**Error Responses**:
+
+*Weather Disabled*:
+```json
+{
+  "type": "WEATHER_ERROR",
+  "data": {
+    "error": "Weather service disabled",
+    "message": "Weather functionality is not enabled in settings",
+    "enabled": false,
+    "timestamp": "2024-09-04T15:35:22.123Z"
+  }
+}
+```
+
+*Configuration Missing*:
+```json
+{
+  "type": "WEATHER_ERROR",
+  "data": {
+    "error": "Weather API key missing",
+    "message": "Weather API key is not configured in settings",
+    "enabled": true,
+    "configured": false,
+    "timestamp": "2024-09-04T15:35:22.123Z"
+  }
+}
+```
+
+*API Error*:
+```json
+{
+  "type": "WEATHER_ERROR",
+  "data": {
+    "error": "Weather API error",
+    "message": "Failed to fetch weather data: Invalid API key",
+    "statusCode": 401,
+    "enabled": true,
+    "configured": true,
+    "timestamp": "2024-09-04T15:35:22.123Z"
+  }
+}
+```
+
+**Example Request**:
+```
+GET /api/android/weather
+```
+
+**Notes**:
+- Location can be configured as city name (e.g., "New York, NY") or coordinates (e.g., "40.7128,-74.0060")
+- Weather icons are provided as both icon codes and full URLs for easy integration
+- All timestamps are in ISO 8601 format (UTC)
+- Temperature units depend on settings: metric (°C), imperial (°F), or kelvin (K)
+- Visibility is converted from meters to kilometers for better readability
+- Sunrise/sunset times are automatically converted from Unix timestamps to ISO format
+- Rain and snow data included when available (1-hour and 3-hour precipitation)
+- Requires active internet connection and valid OpenWeatherMap API access
+
+**Android Integration**:
+- Icon URLs work directly with image loading libraries (Picasso, Glide, Coil)
+- All numeric values are provided as appropriate data types for easy parsing
+- Error states include detailed configuration status for troubleshooting
+- Comprehensive units information for proper display formatting
+- Timezone offset provided for local time calculations
+
+---
+
 ## Stash Integration Endpoints
 
 ### 1. Get Next Stash Clip
