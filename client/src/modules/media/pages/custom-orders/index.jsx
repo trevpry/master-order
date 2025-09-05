@@ -1915,7 +1915,13 @@ function CustomOrders() {
                   if (scoredCandidates.length > 0) {
                     const bestMatch = scoredCandidates[0];
                     console.log(`TV Series matching: "${item.seriesOrMovie}" -> "${bestMatch.grandparentTitle}" (score: ${bestMatch.matchScore.toFixed(3)})`);
-                    targetMedia = bestMatch;
+                    console.log(`Preserving imported title "${item.title}" instead of Plex title "${bestMatch.title}"`);
+                    
+                    // Use Plex metadata but preserve the imported title
+                    targetMedia = {
+                      ...bestMatch,
+                      title: item.title  // Override with imported title
+                    };
                   }
                 } else {
                   // Fallback: look for any episode that matches the series name
@@ -1944,13 +1950,25 @@ function CustomOrders() {
                 if (item.year && movieCandidates.length > 1) {
                   const exactYearMatch = movieCandidates.find(movie => movie.year === item.year);
                   if (exactYearMatch) {
-                    targetMedia = exactYearMatch;
+                    console.log(`Preserving imported movie title "${item.title}" instead of Plex title "${exactYearMatch.title}"`);
+                    targetMedia = {
+                      ...exactYearMatch,
+                      title: item.title  // Override with imported title
+                    };
                   } else {
-                    // If no exact year match, use the first candidate
-                    targetMedia = movieCandidates[0];
+                    // If no exact year match, use the first candidate but preserve title
+                    console.log(`Preserving imported movie title "${item.title}" instead of Plex title "${movieCandidates[0].title}"`);
+                    targetMedia = {
+                      ...movieCandidates[0],
+                      title: item.title  // Override with imported title
+                    };
                   }
-                } else {
-                  targetMedia = movieCandidates[0];
+                } else if (movieCandidates.length > 0) {
+                  console.log(`Preserving imported movie title "${item.title}" instead of Plex title "${movieCandidates[0].title}"`);
+                  targetMedia = {
+                    ...movieCandidates[0],
+                    title: item.title  // Override with imported title
+                  };
                 }
               }
             }

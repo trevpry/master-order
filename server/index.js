@@ -6681,13 +6681,16 @@ app.post('/api/custom-orders/:id/items', async (req, res) => {
             // Get movie details
             const movieDetails = await TVDBService.getMovieDetails(bestMatch.tvdb_id);
             if (movieDetails) {
-              console.log(`Got TVDB movie details: ${movieDetails.name}`);
-              // Update the item with TVDB metadata
+              console.log(`Found TVDB movie: ${movieDetails.name}, but keeping bulk import title: ${title}`);
+              // Update the item with TVDB metadata but preserve bulk import title
               await prisma.customOrderItem.update({
                 where: { id: item.id },
                 data: {
-                  title: movieDetails.name || title,
-                  // You can add more fields here like overview, release date, etc.
+                  // Keep the title from bulk import data, don't overwrite with TVDB movie name
+                  // Store other TVDB metadata fields if needed
+                  tvdbId: movieDetails.id?.toString(),
+                  tvdbOverview: movieDetails.overview,
+                  // You can add more fields here like genres, release date, etc.
                 }
               });
             }
