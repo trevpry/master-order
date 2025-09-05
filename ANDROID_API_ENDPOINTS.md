@@ -667,7 +667,7 @@ curl -X POST "http://localhost:3001/api/android/mark-watched" \
 
 **Endpoint**: `POST /api/android/reading/stop`
 
-**Description**: Stops the active reading session, equivalent to pressing the "Stop" button, with optional progress tracking.
+**Description**: Stops the active reading session, equivalent to pressing the "Stop" button, with optional progress tracking. When the read percentage reaches 100%, automatically marks the comic or book as read/watched in the custom order.
 
 **Request Body**:
 ```json
@@ -703,12 +703,49 @@ curl -X POST "http://localhost:3001/api/android/mark-watched" \
       "totalPages": 200,
       "readPercentage": 75
     },
+    "markedAsRead": false,
     "message": "Stopped reading session for \"The Great Gatsby\"",
     "completedAt": "2024-01-15T10:40:00.000Z",
     "timestamp": "2024-01-15T10:40:00.000Z"
   }
 }
 ```
+
+**100% Completion Response**:
+```json
+{
+  "type": "READING_SESSION_STOPPED",
+  "data": {
+    "success": true,
+    "sessionId": 456,
+    "title": "Comic Book Title",
+    "mediaType": "comic",
+    "duration": 1200,
+    "totalActiveTime": 1050,
+    "progressUpdated": true,
+    "progress": {
+      "currentPage": 24,
+      "totalPages": 24,
+      "readPercentage": 100
+    },
+    "markedAsRead": true,
+    "message": "Completed reading \"Comic Book Title\" and marked as read",
+    "completedAt": "2024-01-15T10:40:00.000Z",
+    "timestamp": "2024-01-15T10:40:00.000Z"
+  }
+}
+```
+
+**Response Fields**:
+- `markedAsRead`: Boolean indicating if the item was automatically marked as read due to 100% completion
+- `message`: Dynamic message that changes based on completion status
+- All other fields remain the same as previously documented
+
+**Automatic Read Marking**:
+- When `readPercentage` equals 100, the comic/book is automatically marked as read in the custom order
+- The `markedAsRead` field in the response indicates this occurred
+- The response message changes to reflect completion status
+- This functionality works for both comics and books in custom orders
 
 ---
 

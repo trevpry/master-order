@@ -10488,6 +10488,9 @@ app.post('/api/android/reading/stop', async (req, res) => {
   try {
     const { progress } = req.body;
     
+    // Check if this will result in 100% completion for better response handling
+    const willMarkAsRead = progress?.readPercentage === 100;
+    
     // Use existing reading session stop endpoint
     const baseUrl = getAndroidApiBaseUrl();
     const stopResponse = await fetch(`${baseUrl}/api/reading/stop`, {
@@ -10530,11 +10533,18 @@ app.post('/api/android/reading/stop', async (req, res) => {
         totalActiveTime: stopData.totalActiveTime,
         progressUpdated: progress ? true : false,
         progress: progress || null,
-        message: `Stopped reading session for "${stopData.title}"`,
+        markedAsRead: willMarkAsRead, // Indicate if item was marked as read due to 100% completion
+        message: willMarkAsRead 
+          ? `Completed reading "${stopData.title}" and marked as read`
+          : `Stopped reading session for "${stopData.title}"`,
         completedAt: stopData.completedAt,
         timestamp: new Date().toISOString()
       }
     };
+    
+    if (willMarkAsRead) {
+      console.log(`📖 Comic/book marked as read due to 100% completion: ${stopData.title}`);
+    }
     
     console.log('✅ Reading session stop successful:', JSON.stringify(androidResponse, null, 2));
     res.json(androidResponse);
@@ -11758,48 +11768,131 @@ app.post('/api/backgrounds/download-gallery-bulk', async (req, res) => {
         try {
           console.log('📥 [BULK DOWNLOAD] Downloading image:', image.link);
           
-          const response = await fetch(image.link);
-          if (!response.ok) {
-            throw new Error(`HTTP ${response.status}`);
+          // Add delay between requests to avoid rate limiting
+          if (imageIndex > 0) {
+            await new Promise(resolve => setTimeout(resolve, 2000)); // 2 second delay
           }
           
-          const buffer = await response.arrayBuffer();
-          const timestamp = Date.now();
-          const randomString = Math.random().toString(36).substring(2, 15);
-          const extension = image.type?.split('/')[1] || 'jpg';
-          const filename = `bg-${timestamp}-${randomString}.${extension}`;
-          
-          const uploadDir = getUploadDirectory('backgrounds');
-          if (!fs.existsSync(uploadDir)) {
-            fs.mkdirSync(uploadDir, { recursive: true });
-          }
-          
-          const filepath = path.join(uploadDir, filename);
-          fs.writeFileSync(filepath, Buffer.from(buffer));
-          
-          // Save to database
-          const background = await prisma.BackgroundImage.create({
-            data: {
-              filename,
-              originalName: image.title || `Image ${imageIndex + 1}`,
-              path: filepath,
-              mimetype: image.type,
-              size: buffer.byteLength,
-              url: image.link,
-              width: image.width,
-              height: image.height,
-              galleryId: gallery?.id || null
+          // Make request with proper browser-like headers
+          const response = await fetch(image.link, {
+            headers: {
+              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+              'Accept': 'image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8',
+              'Accept-Language': 'en-US,en;q=0.9',
+              'Accept-Encoding': 'gzip, deflate, br',
+              'Referer': url, // Use the gallery URL as referer
+              'Sec-Fetch-Dest': 'image',
+              'Sec-Fetch-Mode': 'no-cors',
+              'Sec-Fetch-Site': 'same-site'
             }
           });
           
-          results.push({
-            success: true,
-            imageIndex,
-            backgroundId: background.id,
-            filename: background.filename
-          });
-          
-          successCount++;
+          if (!response.ok) {
+            if (response.status === 429) {
+              console.log('📥 [BULK DOWNLOAD] Rate limited, waiting 10 seconds and retrying...');
+              await new Promise(resolve => setTimeout(resolve, 10000)); // Wait 10 seconds
+              
+              // Retry once with longer delay
+              const retryResponse = await fetch(image.link, {
+                headers: {
+                  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                  'Accept': 'image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8',
+                  'Accept-Language': 'en-US,en;q=0.9',
+                  'Accept-Encoding': 'gzip, deflate, br',
+                  'Referer': url,
+                  'Sec-Fetch-Dest': 'image',
+                  'Sec-Fetch-Mode': 'no-cors',
+                  'Sec-Fetch-Site': 'same-site'
+                }
+              });
+              
+              if (!retryResponse.ok) {
+                throw new Error(`HTTP ${retryResponse.status} (after retry)`);
+              }
+              
+              // Use retry response for processing
+              const buffer = await retryResponse.arrayBuffer();
+              const timestamp = Date.now();
+              const randomString = Math.random().toString(36).substring(2, 15);
+              const extension = image.type?.split('/')[1] || 'jpg';
+              const filename = `bg-${timestamp}-${randomString}.${extension}`;
+              
+              const uploadDir = getUploadDirectory('backgrounds');
+              if (!fs.existsSync(uploadDir)) {
+                fs.mkdirSync(uploadDir, { recursive: true });
+              }
+              
+              const filepath = path.join(uploadDir, filename);
+              fs.writeFileSync(filepath, Buffer.from(buffer));
+              
+              // Save to database
+              const background = await prisma.BackgroundImage.create({
+                data: {
+                  filename,
+                  originalName: image.title || `Image ${imageIndex + 1}`,
+                  path: filepath,
+                  mimetype: image.type,
+                  size: buffer.byteLength,
+                  url: image.link,
+                  width: image.width,
+                  height: image.height,
+                  galleryId: gallery?.id || null
+                }
+              });
+              
+              results.push({
+                success: true,
+                imageIndex,
+                backgroundId: background.id,
+                filename: background.filename
+              });
+              
+              successCount++;
+              console.log('📥 [BULK DOWNLOAD] Successfully downloaded after retry:', filename);
+            } else {
+              throw new Error(`HTTP ${response.status}`);
+            }
+          } else {
+            // Normal successful response
+            const buffer = await response.arrayBuffer();
+            const timestamp = Date.now();
+            const randomString = Math.random().toString(36).substring(2, 15);
+            const extension = image.type?.split('/')[1] || 'jpg';
+            const filename = `bg-${timestamp}-${randomString}.${extension}`;
+            
+            const uploadDir = getUploadDirectory('backgrounds');
+            if (!fs.existsSync(uploadDir)) {
+              fs.mkdirSync(uploadDir, { recursive: true });
+            }
+            
+            const filepath = path.join(uploadDir, filename);
+            fs.writeFileSync(filepath, Buffer.from(buffer));
+            
+            // Save to database
+            const background = await prisma.BackgroundImage.create({
+              data: {
+                filename,
+                originalName: image.title || `Image ${imageIndex + 1}`,
+                path: filepath,
+                mimetype: image.type,
+                size: buffer.byteLength,
+                url: image.link,
+                width: image.width,
+                height: image.height,
+                galleryId: gallery?.id || null
+              }
+            });
+            
+            results.push({
+              success: true,
+              imageIndex,
+              backgroundId: background.id,
+              filename: background.filename
+            });
+            
+            successCount++;
+            console.log('📥 [BULK DOWNLOAD] Successfully downloaded:', filename);
+          }
           
         } catch (error) {
           console.error('📥 [BULK DOWNLOAD] Failed to download image:', error);
