@@ -144,13 +144,13 @@ docker run -d \
     -v "/mnt/user/Media/VideoGames:/video_games:ro" \
     -v "/mnt/user/Media/PopMusic:/pop_music:ro" \
     -e NODE_ENV=production \
-    -e "DATABASE_URL=postgresql://master_order_user:secure_password_change_me@192.168.1.114:5432/master_order" \
+    -e "DATABASE_URL=postgresql://master_order_user:secure_password_change_me@192.168.1.118:5432/master_order" \
     -e "POSTGRES_PASSWORD=secure_password_change_me" \
     -e PORT=3001 \
-    -e "EXTERNAL_IP=192.168.1.114" \
+    -e "EXTERNAL_IP=192.168.1.118" \
     -e "STASH_URL=http://stash.internal:9999" \
     -e "STASH_URL_FALLBACK_1=http://192.168.1.154:9999" \
-    -e "STASH_URL_FALLBACK_2=http://192.168.1.114:9999" \
+    -e "STASH_URL_FALLBACK_2=http://192.168.1.118:9999" \
     -e "STASH_URL_FALLBACK_3=http://localhost:9999" \
     -e "STASH_URL_FALLBACK_4=http://host.docker.internal:9999" \
     $IMAGE_NAME
