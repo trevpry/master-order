@@ -112,13 +112,16 @@ fi
 echo "🛑 Stopping container: $CONTAINER_NAME"
 docker stop $CONTAINER_NAME
 
-# Step 4: Remove the container (but keep the image for faster rebuilds)
+# Step 4: Remove the container and old image to force clean rebuild
 echo "🗑️ Removing old container..."
 docker rm $CONTAINER_NAME
 
-# Step 5: Rebuild the image with latest code
-echo "🔨 Building updated image..."
-docker build -t $IMAGE_NAME .
+echo "🗑️ Removing old image to force clean rebuild..."
+docker rmi $IMAGE_NAME || echo "⚠️ No existing image to remove"
+
+# Step 5: Rebuild the image with latest code (no cache)
+echo "🔨 Building updated image (no cache)..."
+docker build --no-cache -t $IMAGE_NAME .
 
 if [ $? -ne 0 ]; then
     echo "❌ Failed to build Docker image. Please check the build logs."
