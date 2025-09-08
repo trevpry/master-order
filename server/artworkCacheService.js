@@ -333,7 +333,7 @@ class ArtworkCacheService {
         // Fallback to traditional comic series lookup
         if (item.comicSeries && item.comicYear) {
           const comicString = `${item.comicSeries} (${item.comicYear}) #${item.comicIssue || '1'}`;
-          return `${baseUrl}/api/comicvine-cover?comic=${encodeURIComponent(comicString)}`;
+          return `${baseUrl}/api/comicvine/cover?comic=${encodeURIComponent(comicString)}`;
         }
         break;
       

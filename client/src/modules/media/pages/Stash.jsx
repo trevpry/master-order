@@ -760,7 +760,7 @@ export default function Stash() {
         connected: result.success || false,
         message: result.message || 'Unknown status',
         version: result.version || null,
-        stashUrl: result.stashUrl || null,
+        stashUrl: result.url || null,  // Backend returns 'url', not 'stashUrl'
         apiKey: result.apiKey || null
       });
     } catch (error) {
@@ -982,8 +982,8 @@ export default function Stash() {
       ? connectionStatus.stashUrl.slice(0, -1) 
       : connectionStatus.stashUrl;
     
-    // Use HLS streaming endpoint for best browser compatibility
-    return `${baseUrl}/scene/${sceneId}/stream.m3u8`;
+    // Use streaming endpoint without .m3u8 extension
+    return `${baseUrl}/scene/${sceneId}/stream`;
   };
 
   // Helper function to build the scene image URL
@@ -1111,7 +1111,20 @@ export default function Stash() {
   }, [mixedMode.timeout]);
 
   const getSceneImageUrl = (scene) => {
-    if (!connectionStatus.stashUrl || !scene) return null;
+    if (!scene) return null;
+    
+    // If scene has an image property (from our API), use that first
+    if (scene.image) {
+      // If it's already a full URL, return as-is
+      if (scene.image.startsWith('http')) {
+        return scene.image;
+      }
+      // If it's a relative path, build the full URL with our base
+      return `${config.apiBaseUrl}${scene.image}`;
+    }
+    
+    // If no stash URL available, can't build fallback URLs
+    if (!connectionStatus.stashUrl) return null;
     
     const baseUrl = connectionStatus.stashUrl.endsWith('/') 
       ? connectionStatus.stashUrl.slice(0, -1) 
@@ -1133,46 +1146,69 @@ export default function Stash() {
 
   // Handle play button click
   const handlePlayScene = async (scene) => {
-    const playData = {
-      action: 'play',
-      scene: {
-        id: scene.id,
-        title: getSceneDisplayTitle(scene),
-        streamUrl: getStreamUrl(scene.id),
-        resumeTime: scene.resumeTime || 0,
-        duration: scene.file?.duration || 0,
-        stashUrl: connectionStatus.stashUrl
-      }
-    };
-
-    await sendCommandToAndroidApp(playData, 'Play');
+    console.log('🎬 Playing scene in browser:', scene.title || scene.id);
+    
+    // Create a simple video element and play the HLS stream
+    const streamUrl = getStreamUrl(scene.id);
+    
+    if (!streamUrl) {
+      alert('Unable to get stream URL for this scene');
+      return;
+    }
+    
+    // Create a new window/tab with a video player
+    const videoWindow = window.open('', '_blank', 'width=800,height=600');
+    videoWindow.document.write(`
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <title>Playing: ${getSceneDisplayTitle(scene)}</title>
+          <style>
+            body { margin: 0; padding: 20px; background: #000; font-family: Arial, sans-serif; }
+            h1 { color: white; margin-bottom: 20px; }
+            video { width: 100%; max-width: 100%; height: auto; }
+            .info { color: white; margin-top: 10px; font-size: 14px; }
+          </style>
+        </head>
+        <body>
+          <h1>🎬 ${getSceneDisplayTitle(scene)}</h1>
+          <video controls autoplay>
+            <source src="${streamUrl}" type="application/x-mpegURL">
+            <source src="${streamUrl}" type="video/mp4">
+            Your browser does not support the video tag.
+          </video>
+          <div class="info">
+            <p><strong>Duration:</strong> ${scene.duration ? Math.floor(scene.duration / 60) + ':' + String(Math.floor(scene.duration % 60)).padStart(2, '0') : 'Unknown'}</p>
+            <p><strong>Studio:</strong> ${scene.studio?.name || 'Unknown'}</p>
+            <p><strong>Performers:</strong> ${scene.performers?.map(p => p.name).join(', ') || 'Unknown'}</p>
+          </div>
+          <script>
+            // Try to load HLS.js for better HLS support if available
+            if (Hls.isSupported && Hls.isSupported()) {
+              var video = document.querySelector('video');
+              var hls = new Hls();
+              hls.loadSource('${streamUrl}');
+              hls.attachMedia(video);
+            }
+          </script>
+          <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
+        </body>
+      </html>
+    `);
+    
+    console.log('🎥 Opened video player in new window with stream URL:', streamUrl);
   };
 
   // Handle pause button click
   const handlePauseScene = async (scene) => {
-    const pauseData = {
-      action: 'pause',
-      scene: {
-        id: scene.id,
-        title: getSceneDisplayTitle(scene),
-        currentTime: scene.resumeTime || 0 // This would ideally come from current playback position
-      }
-    };
-
-    await sendCommandToAndroidApp(pauseData, 'Pause');
+    console.log('⏸️ Pause functionality - use video controls in the player window');
+    alert('Use the video controls in the player window to pause/resume the video');
   };
 
   // Handle stop button click
   const handleStopScene = async (scene) => {
-    const stopData = {
-      action: 'stop',
-      scene: {
-        id: scene.id,
-        title: getSceneDisplayTitle(scene)
-      }
-    };
-
-    await sendCommandToAndroidApp(stopData, 'Stop');
+    console.log('⏹️ Stop functionality - close the video player window');
+    alert('Close the video player window to stop playback');
   };
 
   // Close modal

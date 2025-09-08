@@ -1,0 +1,134 @@
+const express = require('express');
+const router = express.Router();
+const { PrismaClient } = require('@prisma/client');
+
+const prisma = new PrismaClient();
+
+/**
+ * EDDIE LIFE MANAGEMENT - SETTINGS ROUTES
+ * 
+ * This module handles TWO DISTINCT settings systems:
+ * 
+ * 1. 🎬 MEDIA SETTINGS (/api/settings)
+ *    - Purpose: Media system configuration (Plex, APIs, sync settings)
+ *    - Frontend: client/src/modules/media/pages/settings/index.jsx
+ *    - Scope: System/infrastructure configuration
+ * 
+ * 2. 🏠 EDDIE SETTINGS (/api/settings/eddie)
+ *    - Purpose: Personal dashboard settings (weather, preferences)
+ *    - Frontend: client/src/modules/eddie/pages/EddieSettings.jsx
+ *    - Scope: Personal/dashboard configuration
+ * 
+ * Both use the same database table but serve different purposes.
+ */
+
+// ============================================================================
+// 🎬 MEDIA SETTINGS ROUTES - System Configuration
+// Frontend: client/src/modules/media/pages/settings/index.jsx
+// ============================================================================
+
+// GET /api/settings - Get all settings (main settings)
+router.get('/', async (req, res) => {
+  try {
+    const settings = await prisma.settings.findUnique({
+      where: { id: 1 }
+    });
+    
+    if (!settings) {
+      return res.status(404).json({ error: 'Settings not found' });
+    }
+
+    // Parse JSON fields if they exist
+    const parsedSettings = {
+      ...settings,
+      ignoredMovieCollections: settings.ignoredMovieCollections ? 
+        (typeof settings.ignoredMovieCollections === 'string' ? 
+          JSON.parse(settings.ignoredMovieCollections) : settings.ignoredMovieCollections) : [],
+      ignoredTVCollections: settings.ignoredTVCollections ? 
+        (typeof settings.ignoredTVCollections === 'string' ? 
+          JSON.parse(settings.ignoredTVCollections) : settings.ignoredTVCollections) : []
+    };
+
+    res.json(parsedSettings);
+  } catch (error) {
+    console.error('Error getting settings:', error);
+    res.status(500).json({ error: 'Failed to get settings' });
+  }
+});
+
+// ============================================================================
+// 🏠 EDDIE SETTINGS ROUTES - Personal Dashboard Configuration  
+// Frontend: client/src/modules/eddie/pages/EddieSettings.jsx
+// ============================================================================
+
+// GET /api/settings/eddie - Get Eddie settings (specific endpoint for Eddie interface)
+router.get('/eddie', async (req, res) => {
+  try {
+    const eddieSettings = await prisma.eddieSettings.findFirst();
+    
+    if (!eddieSettings) {
+      // Return default Eddie settings if none exist
+      return res.json({
+        id: 1,
+        weatherEnabled: false,
+        weatherApiKey: '',
+        weatherLocation: '',
+        weatherUnits: 'metric'
+      });
+    }
+
+    res.json(eddieSettings);
+  } catch (error) {
+    console.error('Error getting Eddie settings:', error);
+    res.status(500).json({ error: 'Failed to get Eddie settings' });
+  }
+});
+
+// PUT /api/settings/eddie - Update Eddie settings
+router.put('/eddie', async (req, res) => {
+  try {
+    const { 
+      weatherEnabled, 
+      weatherApiKey, 
+      weatherLocation, 
+      weatherUnits 
+    } = req.body;
+
+    // Prepare update data - only include defined fields
+    const updateData = {};
+    if (weatherEnabled !== undefined) updateData.weatherEnabled = weatherEnabled;
+    if (weatherApiKey !== undefined) updateData.weatherApiKey = weatherApiKey?.trim() || null;
+    if (weatherLocation !== undefined) updateData.weatherLocation = weatherLocation?.trim() || null;
+    if (weatherUnits !== undefined) updateData.weatherUnits = weatherUnits || 'metric';
+
+    let eddieSettings;
+    
+    // Check if Eddie settings record exists
+    const existingSettings = await prisma.eddieSettings.findFirst();
+
+    if (existingSettings) {
+      // Update existing Eddie settings
+      eddieSettings = await prisma.eddieSettings.update({
+        where: { id: existingSettings.id },
+        data: updateData
+      });
+    } else {
+      // Create new Eddie settings
+      eddieSettings = await prisma.eddieSettings.create({
+        data: {
+          weatherEnabled: false,
+          weatherUnits: 'metric',
+          ...updateData
+        }
+      });
+    }
+
+    console.log('Eddie settings saved successfully:', eddieSettings.id);
+    res.json({ message: 'Eddie settings saved successfully', settings: eddieSettings });
+  } catch (error) {
+    console.error('Failed to save Eddie settings:', error);
+    res.status(500).json({ error: 'Failed to save Eddie settings' });
+  }
+});
+
+module.exports = router;

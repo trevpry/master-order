@@ -25,21 +25,90 @@ const openlibraryRoutes = require('./routes/openlibrary');
 const tvdbRoutes = require('./routes/tvdb');
 const ordersRoutes = require('./routes/orders');
 const webhookRoutes = require('./routes/webhooks');
-const backgroundsRoutes = require('./routes/backgrounds');
-const backgroundGalleriesRoutes = require('./routes/backgroundGalleries');
-const legacyRedirectsRoutes = require('./routes/legacyRedirects');
-const searchDebugRoutes = require('./routes/searchDebug');
-const settingsLegacyRedirectsRoutes = require('./routes/settingsLegacyRedirects');
 
-// Import utility functions
-const { generateOptimizedClips, simpleHash, getUploadDirectory } = require('./utils/utilities');
-
-// ========================================
-// UTILITY FUNCTIONS EXTRACTED
-// ========================================
-// All utility functions have been moved to:
-// - server/utils/utilities.js (generateOptimizedClips, simpleHash, getUploadDirectory)
-
+/**
+ * Generate optimized clips for a scene, merging short final clips with the penultimate clip
+ * @param {string} sceneId - The scene ID
+ * @param {number} sceneDuration - Total scene duration in seconds
+ * @param {number} clipDuration - Desired clip duration (default 60 seconds)
+ * @returns {Array} Array of clip objects ready for database insertion
+ */
+function generateOptimizedClips(sceneId, sceneDuration, clipDuration = 60) {
+  const clipsToCreate = [];
+  const totalFullClips = Math.floor(sceneDuration / clipDuration);
+  const remainingTime = sceneDuration % clipDuration;
+  
+  // If no clips can be created, return empty array
+  if (totalFullClips === 0) {
+    return [];
+  }
+  
+  // If there's no remaining time or remaining time is >= 60 seconds, use standard logic
+  if (remainingTime === 0 || remainingTime >= 60) {
+    for (let i = 0; i < totalFullClips; i++) {
+      const startTime = i * clipDuration;
+      const endTime = Math.min(startTime + clipDuration, sceneDuration);
+      
+      clipsToCreate.push({
+        sceneId: sceneId,
+        clipIndex: i,
+        startTime: startTime,
+        endTime: endTime,
+        duration: endTime - startTime,
+        watched: false
+      });
+    }
+    
+    // Add final partial clip if it's >= 60 seconds
+    if (remainingTime >= 60) {
+      const startTime = totalFullClips * clipDuration;
+      clipsToCreate.push({
+        sceneId: sceneId,
+        clipIndex: totalFullClips,
+        startTime: startTime,
+        endTime: sceneDuration,
+        duration: remainingTime,
+        watched: false
+      });
+    }
+  } else {
+    // Remaining time is < 60 seconds, merge with penultimate clip
+    // Create all clips except the last two
+    for (let i = 0; i < totalFullClips - 1; i++) {
+      const startTime = i * clipDuration;
+      const endTime = (i + 1) * clipDuration;
+      
+      clipsToCreate.push({
+        sceneId: sceneId,
+        clipIndex: i,
+        startTime: startTime,
+        endTime: endTime,
+        duration: clipDuration,
+        watched: false
+      });
+    }
+    
+    // Create the final extended clip that includes the last full clip + remaining time
+    if (totalFullClips >= 1) {
+      const startTime = (totalFullClips - 1) * clipDuration;
+      const endTime = sceneDuration;
+      const extendedDuration = endTime - startTime;
+      
+      clipsToCreate.push({
+        sceneId: sceneId,
+        clipIndex: totalFullClips - 1,
+        startTime: startTime,
+        endTime: endTime,
+        duration: extendedDuration,
+        watched: false
+      });
+      
+      console.log(`🔗 Merged short final clip (${remainingTime}s) with penultimate clip. Final clip duration: ${extendedDuration}s`);
+    }
+  }
+  
+  return clipsToCreate;
+}
 const prisma = require('./prismaClient'); // Import the shared client
 const PlexDatabaseService = require('./plexDatabaseService');
 const PlexSyncService = require('./plexSyncService'); // Added import
@@ -148,10 +217,17 @@ const io = socketIo(server, {
 });
 const PORT = process.env.PORT || 3001;
 
-// ========================================
-// UTILITY FUNCTIONS EXTRACTED
-// ========================================
-// getUploadDirectory function moved to server/utils/utilities.js
+// Helper function to determine upload directory based on environment
+function getUploadDirectory(subDir = '') {
+  if (process.env.NODE_ENV === 'production') {
+    // In production/Docker, use persistent data directory
+    const dataDir = process.env.DATA_PATH || '/app/data';
+    return path.join(dataDir, 'uploads', subDir);
+  } else {
+    // In development, use local uploads directory
+    return path.join(__dirname, 'uploads', subDir);
+  }
+}
 
 // Set up multer for handling multipart form data (Plex webhooks)
 const upload = multer();
@@ -282,63 +358,62 @@ app.use('/api/openlibrary', openlibraryRoutes);
 // TVDB Integration API routes
 app.use('/api/tvdb', tvdbRoutes);
 
-// Watch Tracking API routes
-const watchTrackingRoutesFactory = require('./routes/watchTracking');
-const watchTrackingRoutes = watchTrackingRoutesFactory(io);
-app.use('/api', watchTrackingRoutes);
+// Legacy route redirects for backward compatibility
+app.get('/api/up_next', (req, res) => res.redirect('/api/plex/up-next'));
+app.get('/api/start-new-series', (req, res) => res.redirect('/api/plex/start-new-series'));
+app.get('/api/plex-media/:plexKey', (req, res) => res.redirect(`/api/plex/media/${req.params.plexKey}`));
 
-// Background Management API routes
-app.use('/api/backgrounds', backgroundsRoutes);
+// Legacy Stash route redirects for backward compatibility
+app.get('/api/stash-image-proxy/*', (req, res) => res.redirect(`/api/stash/image-proxy/${req.params[0]}`));
 
-// Background Galleries API routes
-app.use('/api/background-galleries', backgroundGalleriesRoutes);
+// Legacy ComicVine route redirects for backward compatibility
+app.get('/api/comicvine-artwork', (req, res) => res.redirect(`/api/comicvine/artwork?${new URLSearchParams(req.query)}`));
+app.get('/api/comicvine-cover', (req, res) => res.redirect(`/api/comicvine/cover?${new URLSearchParams(req.query)}`));
 
-// Legacy Redirects API routes
-app.use('/api', legacyRedirectsRoutes);
+// Legacy Komga route redirects for backward compatibility
+app.get('/api/komga-test', (req, res) => res.redirect('/api/komga/test'));
+app.get('/api/komga-search', (req, res) => res.redirect(`/api/komga/search?${new URLSearchParams(req.query)}`));
+app.get('/api/komga-search-comic', (req, res) => res.redirect(`/api/komga/search-comic?${new URLSearchParams(req.query)}`));
 
-// Search & Debug API routes
-app.use('/api', searchDebugRoutes);
+// Legacy OpenLibrary route redirects for backward compatibility
+app.get('/api/openlibrary-artwork', (req, res) => res.redirect(`/api/openlibrary/artwork?${new URLSearchParams(req.query)}`));
 
-// Settings Legacy Redirects API routes
-app.use('/api', settingsLegacyRedirectsRoutes);
+// Legacy TVDB route redirects for backward compatibility
+app.get('/api/tvdb-artwork', (req, res) => res.redirect(`/api/tvdb/artwork?${new URLSearchParams(req.query)}`));
 
-// ========================================
-// SETTINGS LEGACY REDIRECTS EXTRACTED
-// ========================================
-// All settings legacy redirect routes have been moved to:
-// - server/routes/settingsLegacyRedirects.js (eddie-settings, android/weather redirects)
-// Routes are mounted at:
-// - /api/eddie-settings -> settingsLegacyRedirectsRoutes (redirects to /api/settings/eddie)
-// - /api/android/weather -> settingsLegacyRedirectsRoutes (redirects to /api/weather/android)
+// Helper function for generating a simple hash (used for web video uniqueness)
+function simpleHash(str) {
+  let hash = 5381;
+  for (let i = 0; i < str.length; i++) {
+    hash = (hash * 33) ^ str.charCodeAt(i);
+  }
+  return hash >>> 0; // Ensure positive integer
+}
 
-// ========================================
-// SEARCH & DEBUG API EXTRACTED
-// ========================================
-// All search and debug routes have been moved to:
-// - server/routes/searchDebug.js (search, debug, test endpoints)
-// Routes are mounted at:
-// - /api/search -> searchDebugRoutes
-// - /api/debug/* -> searchDebugRoutes
-// - /api/test -> searchDebugRoutes
+// API Routes
+// Redirect eddie-settings to the new settings route structure
+app.get('/api/eddie-settings', (req, res) => {
+  res.redirect('/api/settings/eddie');
+});
 
-// ========================================
-// LEGACY REDIRECTS EXTRACTED
-// ========================================
-// All legacy redirect routes (11 endpoints) have been moved to:
-// - server/routes/legacyRedirects.js (backward compatibility redirects)
-// Routes are mounted at:
-// - /api/* -> legacyRedirectsRoutes (for various legacy endpoints)
+app.put('/api/eddie-settings', (req, res) => {
+  res.redirect(307, '/api/settings/eddie'); // 307 preserves the PUT method
+});
 
-// ========================================
-// UTILITY FUNCTIONS EXTRACTED
-// ========================================
-// simpleHash function moved to server/utils/utilities.js
+// Redirect legacy Android weather endpoint to new modular route
+app.get('/api/android/weather', (req, res) => {
+  res.redirect('/api/weather/android');
+});
 
-// ========================================
-// SETTINGS LEGACY REDIRECTS EXTRACTED
-// ========================================
-// All settings redirect routes have been moved to:
-// - server/routes/settingsLegacyRedirects.js (eddie-settings, android/weather)
+
+
+
+
+
+
+
+
+
 
 // Get all clips with pagination and filtering
 
@@ -414,11 +489,15 @@ app.use('/api', settingsLegacyRedirectsRoutes);
 
 // Webhook notification endpoint (moved to modular routes)
 
-// ========================================
-// SEARCH & DEBUG API ROUTES EXTRACTED
-// ========================================
-// Test endpoint has been moved to:
-// - server/routes/searchDebug.js (/api/test)
+app.get('/api/test', async (req, res) => {
+  try {
+    const data = await callPlex(); // Call the imported function
+    res.json(data);
+  } catch (error) {
+    console.error('Failed to fetch data:', error.message);
+    res.status(500).json({ error: 'Something went wrong' });
+  }
+});
 
 // Order routes (moved to modular routes)
 // Legacy redirect for get-next-custom-order
@@ -437,212 +516,4 @@ app.get('/api/get-next-custom-order', (req, res) => {
 
 // Custom Order Items POST route (moved to modular routes)
 // All custom order item CRUD operations moved to server/routes/customOrderItems.js
-
-// ========================================
-// REMAINING CUSTOM ORDERS ROUTES EXTRACTED
-// ========================================
-// All remaining custom order item routes have been moved to:
-// - server/routes/customOrders.js (DELETE/PUT item operations)
-// Routes are mounted at:
-// - /api/custom-orders/* -> customOrdersRoutes
-
-// Mark custom order item as watched from home page
-// *** MOVED TO /server/routes/customOrders.js (item management) ***
-// ==================== MODULARIZED ROUTES - EXTRACTED TO DEDICATED FILES ====================
-// Watch tracking routes moved to server/routes/watchTracking.js
-
-// ========================================
-// SEARCH & DEBUG API ROUTES EXTRACTED
-// ========================================
-// All search and debug endpoints have been moved to:
-// - server/routes/searchDebug.js (/api/search, /api/debug/sections)
-
-// ==================== MODULARIZED ROUTES - EXTRACTED TO DEDICATED FILES ====================
-// Reading/viewing sessions and watch statistics moved to server/routes/watchTracking.js
-
-// ==================== MODULARIZED ROUTES - EXTRACTED TO DEDICATED FILES ====================
-// Music API routes moved to server/routes/music.js
-// Android Companion App API routes moved to server/routes/android.js
-
-// ========================================
-// ANDROID COMPANION APP API ROUTES CONSOLIDATED
-// ========================================
-// All Android companion app routes have been moved to server/routes/android.js
-// This includes 18+ endpoints for:
-// - up-next, stash integration, playback controls, viewing/reading session tracking
-// - gallery/playlist random content, mark watched functionality
-// All routes are mounted at /api/android/* via androidRoutes
-// 
-// Legacy weather redirect preserved below for backward compatibility
-
-// Redirect legacy Android weather endpoint to new modular route
-app.get('/api/android/weather', (req, res) => {
-  res.redirect('/api/weather/android');
-});
-
-// ==========================================
-// BACKGROUND IMAGES API ENDPOINTS
-// ==========================================
-    
-// BACKGROUND IMAGES API ENDPOINTS
-// ==========================================
-
-// Configure multer for file uploads
-const backgroundStorage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    const uploadDir = getUploadDirectory('backgrounds');
-    if (!fs.existsSync(uploadDir)) {
-      fs.mkdirSync(uploadDir, { recursive: true });
-    }
-    cb(null, uploadDir);
-  },
-  filename: (req, file, cb) => {
-    // Generate unique filename with original extension
-    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
-    const ext = path.extname(file.originalname);
-    cb(null, 'bg-' + uniqueSuffix + ext);
-  }
-});
-
-const backgroundUpload = multer({
-  storage: backgroundStorage,
-  limits: {
-    fileSize: 10 * 1024 * 1024 // 10MB limit
-  },
-  fileFilter: (req, file, cb) => {
-    // Check file type
-    if (file.mimetype.startsWith('image/')) {
-      cb(null, true);
-    } else {
-      cb(new Error('Only image files are allowed'), false);
-    }
-  }
-});
-
-// ========================================
-// BACKGROUND MANAGEMENT API ROUTES EXTRACTED
-// ========================================
-// All background management routes (14 endpoints) have been moved to:
-// - server/routes/backgrounds.js (background image CRUD, upload, download, bulk download)
-// - server/routes/backgroundGalleries.js (gallery management and image association)
-// Routes are mounted at:
-// - /api/backgrounds/* -> backgroundsRoutes
-// - /api/background-galleries/* -> backgroundGalleriesRoutes
-
-// Serve React app for all other routes in production
-if (process.env.NODE_ENV === 'production') {
-  app.get('*', (req, res) => {
-    console.log(`⚠️  [FALLBACK] Request fell through to React app catch-all: ${req.method} ${req.url}`);
-    console.log(`⚠️  [FALLBACK] This means the API route was not matched!`);
-    console.log(`⚠️  [FALLBACK] User-Agent: ${req.get('User-Agent')}`);
-    console.log(`⚠️  [FALLBACK] Accept: ${req.get('Accept')}`);
-    
-    if (req.url.includes('/api/')) {
-      console.log(`❌ [FALLBACK] ERROR: API route ${req.url} not found - serving HTML instead!`);
-      console.log(`❌ [FALLBACK] This is why you're getting HTML instead of JSON!`);
-    }
-    
-    const clientBuildPath = path.join(__dirname, '..', 'client', 'dist');
-    res.sendFile(path.join(clientBuildPath, 'index.html'));
-  });
-}
-
-// Graceful shutdown
-async function shutdown() {
-  console.log('Shutting down server...');
-  
-  // Stop background sync service
-  await backgroundSync.stop();
-  
-  await prisma.$disconnect();
-  console.log('Prisma client disconnected.');
-  process.exit(0);
-}
-
-process.on('SIGTERM', shutdown);
-process.on('SIGINT', shutdown);
-
-// Socket.IO connection handling
-io.on('connection', (socket) => {
-  console.log('Client connected to WebSocket');
-  
-  socket.on('disconnect', () => {
-    console.log('Client disconnected from WebSocket');
-  });
-});
-
-// Start the server
-server.listen(PORT, '0.0.0.0', async () => {
-  console.log('🚀 =================================');
-  console.log('🚀 MASTER ORDER SERVER STARTING');
-  console.log('🚀 =================================');
-  console.log(`🚀 Server running on port ${PORT}`);
-  console.log(`🚀 Server accessible at http://192.168.1.252:${PORT}`);
-  console.log(`🚀 WebSocket server ready for real-time notifications`);
-  console.log('🚀 Environment Variables:');
-  console.log(`🚀   NODE_ENV: ${process.env.NODE_ENV}`);
-  console.log(`🚀   DATABASE_URL: ${process.env.DATABASE_URL}`);
-  console.log(`🚀   PORT: ${PORT}`);
-  
-  // Test database connection immediately
-  console.log('🚀 Testing database connection...');
-  try {
-    await prisma.$connect();
-    console.log('✅ Database connection successful!');
-    
-    // Check critical tables
-    console.log('🚀 Checking critical tables...');
-    try {
-      // Use a simple query to check if tables exist instead of database-specific syntax
-      const backgroundImageCount = await prisma.backgroundImage.count();
-      console.log('✅ BackgroundImage table exists, rows:', backgroundImageCount);
-    } catch (error) {
-      console.log('⚠️ BackgroundImage table may not exist or be accessible:', error.message);
-    }
-    
-    try {
-      const backgroundGalleryCount = await prisma.backgroundGallery.count();
-      console.log('✅ BackgroundGallery table exists, rows:', backgroundGalleryCount);
-    } catch (error) {
-      console.log('⚠️ BackgroundGallery table may not exist or be accessible:', error.message);
-    }
-    
-  } catch (dbError) {
-    console.error('❌ Database connection failed:', dbError);
-  }
-  
-  // Start background sync service
-  try {
-    await backgroundSync.start();
-  } catch (error) {
-    console.error('Failed to start background sync service:', error);
-  }
-  
-  // Start Stash background sync service
-  try {
-    await stashBackgroundSync.start();
-  } catch (error) {
-    console.error('Failed to start Stash background sync service:', error);
-  }
-  
-  // Initialize Stash service
-  try {
-    await initializeStashService();
-    console.log('✅ Stash service initialization completed');
-  } catch (error) {
-    console.error('❌ Failed to initialize Stash service:', error);
-  }
-  
-  // Initialize Stash sync service
-  try {
-    await initializeStashSyncService();
-    console.log('✅ Stash sync service initialization completed');
-  } catch (error) {
-    console.error('❌ Failed to initialize Stash sync service:', error);
-  }
-});
-
-
-
-
 

@@ -91,6 +91,12 @@ class PlexDatabaseService {
   // Get TV shows by collection name
   async getTVShowsByCollection(collectionName) {
     try {
+      // If no collection name provided, return empty array
+      if (!collectionName || collectionName.trim() === '') {
+        console.log('No collection name provided, returning empty array');
+        return [];
+      }
+
       return await this.prisma.plexTVShow.findMany({
         where: {
           collections: {

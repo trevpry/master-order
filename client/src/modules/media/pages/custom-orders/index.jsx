@@ -1647,21 +1647,21 @@ function CustomOrders() {
                 if (searchResults.length > 0) {
                   // Backend now handles title matching and sorting, so first result is the best match
                   selectedSeries = searchResults[0];
-                  console.log(`✓ Using backend-sorted best match: "${selectedSeries.name}" with issue title: "${selectedSeries.issueName}"`);
+                  console.log(`✓ Using backend-sorted best match: "${selectedSeries.series.name}" with issue title: "${selectedSeries.issueName}"`);
                     // Create enhanced comic data with ComicVine information
                   targetMedia = {
                     title: normalizedTitle,
                     type: 'comic',
-                    comicSeries: selectedSeries.name, // Use ComicVine series name
-                    comicYear: item.comicYear || selectedSeries.start_year,
+                    comicSeries: selectedSeries.series.name, // Use ComicVine series name
+                    comicYear: item.comicYear || selectedSeries.series.start_year,
                     comicIssue: item.comicIssue,
-                    comicPublisher: selectedSeries.publisher?.name || null,
-                    comicVineId: selectedSeries.api_detail_url,
+                    comicPublisher: selectedSeries.series.publisher?.name || null,
+                    comicVineId: selectedSeries.series.api_detail_url,
                     // Store comprehensive ComicVine data if available
                     comicVineDetailsJson: JSON.stringify(selectedSeries.comprehensiveData || selectedSeries)
                   };
                   
-                  console.log(`✓ Enhanced comic data with ComicVine info: ${selectedSeries.name} (${targetMedia.comicYear}) #${item.comicIssue}`);                } else {
+                  console.log(`✓ Enhanced comic data with ComicVine info: ${selectedSeries.series.name} (${targetMedia.comicYear}) #${item.comicIssue}`);                } else {
                   console.log(`No ComicVine results found, using original data`);
                   // Fallback to original data if no ComicVine results
                   targetMedia = {
@@ -2278,23 +2278,23 @@ function CustomOrders() {
                   if (searchResults.length > 0) {
                     // Backend handles title matching and sorting, so first result is the best match
                     selectedSeries = searchResults[0];
-                    console.log(`✓ Using ComicVine match: "${selectedSeries.name}" with issue: "${selectedSeries.issueName}"`);
+                    console.log(`✓ Using ComicVine match: "${selectedSeries.series.name}" with issue: "${selectedSeries.issueName}"`);
                     
                     // Create enhanced comic data with ComicVine information
                     mediaType = 'comic';
                     requestData = {
                       mediaType: 'comic',
                       title: entry.title,
-                      comicSeries: selectedSeries.name, // Use ComicVine series name
-                      comicYear: entry.publishedDate ? new Date(entry.publishedDate).getFullYear() : selectedSeries.start_year,
+                      comicSeries: selectedSeries.series.name, // Use ComicVine series name
+                      comicYear: entry.publishedDate ? new Date(entry.publishedDate).getFullYear() : selectedSeries.series.start_year,
                       comicIssue: issueNumber,
-                      comicPublisher: selectedSeries.publisher?.name || null,
-                      comicVineId: selectedSeries.api_detail_url,
+                      comicPublisher: selectedSeries.series.publisher?.name || null,
+                      comicVineId: selectedSeries.series.api_detail_url,
                       // Store comprehensive ComicVine data if available
                       comicVineDetailsJson: JSON.stringify(selectedSeries.comprehensiveData || selectedSeries)
                     };
                     
-                    console.log(`✓ Enhanced comic data with ComicVine info: ${selectedSeries.name} (${requestData.comicYear}) #${issueNumber}`);
+                    console.log(`✓ Enhanced comic data with ComicVine info: ${selectedSeries.series.name} (${requestData.comicYear}) #${issueNumber}`);
                   } else {
                     console.log(`No ComicVine results found, using extracted data`);
                     // Fallback to extracted data if no ComicVine results
@@ -2775,19 +2775,19 @@ function CustomOrders() {
 
       // Create the comic string in the expected format
       // Use the series start year from ComicVine if no year is provided
-      const seriesYear = comicFormData.year || selectedSeries.start_year;
+      const seriesYear = comicFormData.year || selectedSeries.series.start_year;
       const comicString = seriesYear 
-        ? `${selectedSeries.name} (${seriesYear}) #${comicFormData.issue}`
-        : `${selectedSeries.name} #${comicFormData.issue}`;
+        ? `${selectedSeries.series.name} (${seriesYear}) #${comicFormData.issue}`
+        : `${selectedSeries.series.name} #${comicFormData.issue}`;
         if (reselectingItem) {        // Update existing item with new comic selection
         const updateData = {
           title: comicString,
-          comicSeries: selectedSeries.name,
+          comicSeries: selectedSeries.series.name,
           comicYear: seriesYear ? parseInt(seriesYear) : null,
           comicIssue: comicFormData.issue,
-          comicPublisher: selectedSeries.publisher?.name || null,
+          comicPublisher: selectedSeries.series.publisher?.name || null,
           customTitle: comicFormData.title.trim() || null,
-          comicVineId: selectedSeries.api_detail_url || null,
+          comicVineId: selectedSeries.series.api_detail_url || null,
           // Store comprehensive ComicVine data if available
           comicVineDetailsJson: JSON.stringify(selectedSeries.comprehensiveData || selectedSeries),
           comicCoverUrl: selectedSeries.coverUrl || null // Include the specific cover URL from the selected series
@@ -2827,12 +2827,12 @@ function CustomOrders() {
         const comicMedia = {
           mediaType: 'comic',
           title: comicString,
-          comicSeries: selectedSeries.name,
+          comicSeries: selectedSeries.series.name,
           comicYear: seriesYear ? parseInt(seriesYear) : null,
           comicIssue: comicFormData.issue,
-          comicPublisher: selectedSeries.publisher?.name || null,
+          comicPublisher: selectedSeries.series.publisher?.name || null,
           customTitle: comicFormData.title.trim() || null,
-          comicVineId: selectedSeries.api_detail_url || null,
+          comicVineId: selectedSeries.series.api_detail_url || null,
           // Store comprehensive ComicVine data if available
           comicVineDetailsJson: JSON.stringify(selectedSeries.comprehensiveData || selectedSeries)
         };const success = await handleAddMediaToOrder(viewingOrderItems.id, comicMedia);
@@ -3279,8 +3279,14 @@ function CustomOrders() {
                           </p>
                           
                           {/* Enhanced ComicVine Data Display - Only show when expanded */}
-                          {expandedItems.has(item.id) && (item.comicIssueName || item.comicDescription || item.comicCreators || item.comicCharacters || item.comicStoryArcs) && (
+                          {expandedItems.has(item.id) && (item.comicIssueName || item.comicDescription || item.comicCreators || item.comicCharacters || item.comicStoryArcs || item.comicCoverDate || item.comicPublisher) && (
                             <div className="comic-vine-details expanded">
+                              {item.comicPublisher && (
+                                <p className="comic-publisher">
+                                  <strong>Publisher:</strong> {item.comicPublisher}
+                                </p>
+                              )}
+                              
                               {item.comicIssueName && (
                                 <p className="comic-issue-name">
                                   <strong>Issue:</strong> {item.comicIssueName}
@@ -4777,7 +4783,7 @@ Writer: Michael Kogge`);
                         )}
                         <div className="comic-details">
                           <h5>
-                            {series.name}
+                            {series.series.name}
                             {series.isFuzzyMatch && (
                               <span className="fuzzy-match-indicator" title={`${Math.round(series.similarity * 100)}% similarity match`}>
                                 ~{Math.round(series.similarity * 100)}%
@@ -4785,13 +4791,13 @@ Writer: Michael Kogge`);
                             )}
                           </h5>
                           <p className="comic-publisher">
-                            Publisher: {series.publisher?.name || 'Unknown'}
+                            Publisher: {series.series.publisher?.name || 'Unknown'}
                           </p>
-                          {series.start_year && (
-                            <p className="comic-year">Started: {series.start_year}</p>
+                          {series.series.start_year && (
+                            <p className="comic-year">Started: {series.series.start_year}</p>
                           )}
-                          {series.issue_count && (
-                            <p className="comic-issues">Total Issues: {series.issue_count}</p>
+                          {series.series.count_of_issues && (
+                            <p className="comic-issues">Total Issues: {series.series.count_of_issues}</p>
                           )}
                           {series.issueName && (
                             <p className="comic-issue-name">Issue #{comicFormData.issue}: {series.issueName}</p>
