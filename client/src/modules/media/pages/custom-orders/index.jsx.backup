@@ -2,108 +2,80 @@ import React, { useState, useEffect } from 'react';
 import Button from '../../../../shared/components/Button';
 import config from '../../../../config';
 import './CustomOrders.css';
-
-// Modular component imports
-import OrderHeader from './components/OrderHeader';
-import EpisodeForm from './components/forms/EpisodeForm';
-import BulkImportModal from './components/modals/BulkImportModal';
-import MovieForm from './components/forms/MovieForm';
-import ErrorModal from './components/modals/ErrorModal';
-import MessageDisplay from './components/MessageDisplay';
-import LoadingPage from './components/LoadingPage';
-import LoadingIndicator from './components/LoadingIndicator';
-import FormSeparator from './components/FormSeparator';
-import HelpText from './components/HelpText';
-import FilterToggle from './components/FilterToggle';
-import EmptyState from './components/EmptyState';
-import StatusIndicator from './components/StatusIndicator';
-import Stat from './components/Stat';
-import InlineIcon from './components/InlineIcon';
-import SubOrdersBadge from './components/SubOrdersBadge';
-import HierarchyIndicator from './components/HierarchyIndicator';
-import DateDisplay from './components/DateDisplay';
-import PlaylistDisplay from './components/PlaylistDisplay';
-import DescriptionDisplay from './components/DescriptionDisplay';
-import PreviewLabel from './components/PreviewLabel';
-import TypeIndicator from './components/TypeIndicator';
-import ReadingProgressDisplay from './components/ReadingProgressDisplay';
-
-// Utility imports
 import {
-  getFilteredItems,
-  getAllNonReferenceItems,
-  getUnwatchedNonReferenceItems,
-  getItemArtworkUrl
-} from './utils/itemUtils';
-import { scrollToTop, scrollToBottom } from './utils/scrollUtils';
+  EpisodeForm,
+  MovieForm,
+  BookForm,
+  ComicForm,
+  ShortStoryForm,
+  WebVideoForm,
+  BulkImportModal,
+  CmroBulkImportModal,
+  ErrorModal,
+  useCustomOrderForms
+} from './components';
 
 function CustomOrders() {  
   const [customOrders, setCustomOrders] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [message, setMessage] = useState('');  const [showCreateForm, setShowCreateForm] = useState(false);
-  const [editingOrder, setEditingOrder] = useState(null);  const [editingItem, setEditingItem] = useState(null);
+  const [message, setMessage] = useState('');
+  const [showCreateForm, setShowCreateForm] = useState(false);
+  const [editingOrder, setEditingOrder] = useState(null);
+  const [editingItem, setEditingItem] = useState(null);
   const [viewingOrderItems, setViewingOrderItems] = useState(null);
-  const [showEpisodeForm, setShowEpisodeForm] = useState(false);
-  const [episodeFormData, setEpisodeFormData] = useState({
-    series: '',
-    season: '',
-    episode: ''
-  });  const [episodeSearchLoading, setEpisodeSearchLoading] = useState(false);  const [showMovieForm, setShowMovieForm] = useState(false);
-  const [movieFormData, setMovieFormData] = useState({
-    title: '',
-    year: ''
-  });
-  const [movieSearchResults, setMovieSearchResults] = useState([]);
-  const [movieSearchLoading, setMovieSearchLoading] = useState(false);  const [showBulkImportModal, setShowBulkImportModal] = useState(false);
-  const [bulkImportData, setBulkImportData] = useState('');
-  const [bulkImportLoading, setBulkImportLoading] = useState(false);
-
-  const [showCmroBulkImportModal, setShowCmroBulkImportModal] = useState(false);
-  const [cmroBulkImportData, setCmroBulkImportData] = useState('');
-  const [cmroBulkImportLoading, setCmroBulkImportLoading] = useState(false);
-
+  const [reselectingItem, setReselectingItem] = useState(null);
+  const [expandedItems, setExpandedItems] = useState(new Set());
+  
   // Error modal state
   const [showErrorModal, setShowErrorModal] = useState(false);
   const [errorDetails, setErrorDetails] = useState({ title: '', message: '', error: null });
 
-  const [reselectingItem, setReselectingItem] = useState(null); // For tracking which item is being re-selected
-  const [showBookForm, setShowBookForm] = useState(false);
-  const [bookFormData, setBookFormData] = useState({
-    title: '',
-    author: '',
-    year: '',
-    isbn: '',
-    pageCount: ''
-  });  const [bookSearchResults, setBookSearchResults] = useState([]);
-  const [bookSearchLoading, setBookSearchLoading] = useState(false);
-  const [showComicForm, setShowComicForm] = useState(false);  const [comicFormData, setComicFormData] = useState({
-    series: '',
-    year: '',
-    issue: '',
-    title: ''
-  });  const [comicSearchResults, setComicSearchResults] = useState([]);
-  const [comicSearchLoading, setComicSearchLoading] = useState(false);
-  
-  // State for tracking expanded comic details
-  const [expandedItems, setExpandedItems] = useState(new Set());
-  
-  const [showShortStoryForm, setShowShortStoryForm] = useState(false);
-  const [shortStoryFormData, setShortStoryFormData] = useState({
-    title: '',
-    author: '',
-    year: '',
-    url: '',
-    containedInBookId: '',
-    coverUrl: ''
-  });  const [shortStorySearchResults, setShortStorySearchResults] = useState([]);
-  
-  // Web Video Form state
-  const [showWebVideoForm, setShowWebVideoForm] = useState(false);
-  const [webVideoFormData, setWebVideoFormData] = useState({
-    title: '',
-    url: '',
-    description: ''
-  });
+  // Use custom hook for form management
+  const {
+    // Form visibility states
+    showEpisodeForm, setShowEpisodeForm,
+    showMovieForm, setShowMovieForm,
+    showBookForm, setShowBookForm,
+    showComicForm, setShowComicForm,
+    showShortStoryForm, setShowShortStoryForm,
+    showWebVideoForm, setShowWebVideoForm,
+    showBulkImportModal, setShowBulkImportModal,
+    showCmroBulkImportModal, setShowCmroBulkImportModal,
+    
+    // Form data states
+    episodeFormData, setEpisodeFormData,
+    movieFormData, setMovieFormData,
+    bookFormData, setBookFormData,
+    comicFormData, setComicFormData,
+    shortStoryFormData, setShortStoryFormData,
+    webVideoFormData, setWebVideoFormData,
+    bulkImportData, setBulkImportData,
+    cmroBulkImportData, setCmroBulkImportData,
+    
+    // Loading states
+    episodeSearchLoading, setEpisodeSearchLoading,
+    movieSearchLoading, setMovieSearchLoading,
+    bookSearchLoading, setBookSearchLoading,
+    comicSearchLoading, setComicSearchLoading,
+    bulkImportLoading, setBulkImportLoading,
+    cmroBulkImportLoading, setCmroBulkImportLoading,
+    
+    // Search results
+    movieSearchResults, setMovieSearchResults,
+    bookSearchResults, setBookSearchResults,
+    comicSearchResults, setComicSearchResults,
+    shortStorySearchResults, setShortStorySearchResults,
+    
+    // Reset functions
+    resetEpisodeForm,
+    resetMovieForm,
+    resetBookForm,
+    resetComicForm,
+    resetShortStoryForm,
+    resetWebVideoForm,
+    resetBulkImportModal,
+    resetCmroBulkImportModal,
+  } = useCustomOrderForms();
   
   // Drag and Drop state
   const [draggedItem, setDraggedItem] = useState(null);
@@ -135,6 +107,135 @@ function CustomOrders() {
     backgroundImageId: '',
     backgroundGalleryId: ''
   });
+  // Helper function to filter items based on preferences
+  const getFilteredItems = (items) => {
+    if (!items || !Array.isArray(items)) {
+      return [];
+    }
+    return items.filter(item => {
+      // Filter out reference books (books that contain short stories)
+      if (item.mediaType === 'book' && item.containedStories && item.containedStories.length > 0) {
+        return false;
+      }
+      
+      // Filter based on watched status toggle
+      if (!showWatchedItems && item.isWatched) {
+        return false;
+      }
+      
+      return true;
+    });
+  };
+  
+  // Helper function to get all items excluding reference books (for stats)
+  const getAllNonReferenceItems = (items) => {
+    if (!items || !Array.isArray(items)) {
+      return [];
+    }
+    return items.filter(item => {
+      // Filter out reference books (books that contain short stories)
+      if (item.mediaType === 'book' && item.containedStories && item.containedStories.length > 0) {
+        return false;
+      }
+      return true;
+    });
+  };
+  
+  // Helper function to get unwatched items excluding reference books (for stats)
+  const getUnwatchedNonReferenceItems = (items) => {
+    if (!items || !Array.isArray(items)) {
+      return [];
+    }
+    return items.filter(item => {
+      // Filter out reference books (books that contain short stories)
+      if (item.mediaType === 'book' && item.containedStories && item.containedStories.length > 0) {
+        return false;
+      }
+      return !item.isWatched;
+    });
+  };
+  // Helper function to generate artwork URLs for custom order items
+  const getItemArtworkUrl = (item) => {
+    // Handle sub-order items - they don't have artwork, use icon fallback
+    if (item.mediaType === 'suborder') {
+      return null;
+    }
+    
+    // Check if we have cached artwork
+    if (item.localArtworkPath) {
+      // Extract just the filename from the full path
+      const filename = item.localArtworkPath.includes('\\') || item.localArtworkPath.includes('/') 
+        ? item.localArtworkPath.split(/[\\\/]/).pop() 
+        : item.localArtworkPath;
+      
+      // Add cache-busting parameter based on artworkLastCached timestamp
+      const cacheBuster = item.artworkLastCached ? `?v=${encodeURIComponent(item.artworkLastCached)}` : '';
+      const artworkUrl = `${config.apiBaseUrl}/api/artwork/${filename}${cacheBuster}`;
+      
+      // Debug logging for comics with same artwork issue
+      if (item.mediaType === 'comic') {
+        console.log(`Comic artwork - ${item.comicSeries} #${item.comicIssue}: ${filename} -> ${artworkUrl}`);
+      }
+      
+      return artworkUrl;
+    }
+    
+    // For items without cached artwork, try to get remote artwork URLs
+    // This matches the logic from the artworkCacheService
+    switch (item.mediaType) {
+      case 'comic':
+        // First, check if we have ComicVine details with a direct cover URL
+        if (item.comicVineDetailsJson) {
+          try {
+            const comicVineDetails = JSON.parse(item.comicVineDetailsJson);
+            if (comicVineDetails.image && comicVineDetails.image.medium_url) {
+              // Use ComicVine's direct cover URL through our proxy
+              return `${config.apiBaseUrl}/api/comicvine-artwork?url=${encodeURIComponent(comicVineDetails.image.medium_url)}`;
+            }
+          } catch (error) {
+            console.warn('Failed to parse ComicVine details JSON:', error);
+          }
+        }
+        
+        // Fallback to the comic string search method
+        if (item.comicSeries && item.comicIssue) {
+          let comicString;
+          if (item.comicYear) {
+            comicString = `${item.comicSeries} (${item.comicYear}) #${item.comicIssue}`;
+          } else {
+            comicString = `${item.comicSeries} #${item.comicIssue}`;
+          }
+          return `${config.apiBaseUrl}/api/comicvine-artwork?url=${encodeURIComponent(`${config.apiBaseUrl}/api/comicvine-cover?comic=${encodeURIComponent(comicString)}`)}`;
+        }
+        break;
+      
+      case 'book':
+        if (item.bookCoverUrl) {
+          return `${config.apiBaseUrl}/api/openlibrary-artwork?url=${encodeURIComponent(item.bookCoverUrl)}`;
+        } else if (item.bookOpenLibraryId) {
+          return `${config.apiBaseUrl}/api/openlibrary-artwork?url=${encodeURIComponent(`https://covers.openlibrary.org/b/olid/${item.bookOpenLibraryId}-M.jpg`)}`;
+        }
+        break;
+      
+      case 'shortstory':
+        if (item.storyCoverUrl) {
+          return `${config.apiBaseUrl}/api/openlibrary-artwork?url=${encodeURIComponent(item.storyCoverUrl)}`;
+        } else if (item.storyContainedInBook?.bookCoverUrl) {
+          return `${config.apiBaseUrl}/api/openlibrary-artwork?url=${encodeURIComponent(item.storyContainedInBook.bookCoverUrl)}`;
+        }
+        break;
+      
+      case 'episode':
+      case 'movie':
+        // For Plex items, we would need the plexKey and settings, which requires backend call
+        // Fall back to null for now - the artwork caching service will handle this
+        break;
+    }
+    
+    // For items without cached artwork, return null to show fallback
+    return null;
+  };
+
   // Function to toggle expanded state for an item
   const toggleItemExpanded = (itemId) => {
     setExpandedItems(prev => {
@@ -992,7 +1093,7 @@ function CustomOrders() {
       return;
     }    try {
       // Get filtered items (same filter as in render)
-      const filteredItems = getFilteredItems(viewingOrderItems?.items || [], showWatchedItems);
+      const filteredItems = getFilteredItems(viewingOrderItems?.items || []);
 
       // Reorder the items array
       const newItems = [...filteredItems];
@@ -2885,8 +2986,31 @@ function CustomOrders() {
     }
   };
 
+  // Scroll helper functions for items list navigation
+  const scrollToTop = () => {
+    const itemsList = document.querySelector('.items-list');
+    if (itemsList) {
+      itemsList.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+  };
+
+  const scrollToBottom = () => {
+    const itemsList = document.querySelector('.items-list');
+    if (itemsList) {
+      const lastItem = itemsList.lastElementChild;
+      if (lastItem) {
+        lastItem.scrollIntoView({ behavior: 'smooth', block: 'end' });
+      }
+    }
+  };
+
   if (loading) {
-    return <LoadingPage />;
+    return (
+      <main>
+        <h2>Custom Orders</h2>
+        <p>Loading custom orders...</p>
+      </main>
+    );
   }
   return (
     <main>
@@ -2907,50 +3031,136 @@ function CustomOrders() {
 
       {/* Item Management View */}
       {viewingOrderItems ? (
-        <div className="order-items-view">
-          <OrderHeader
-            viewingOrderItems={viewingOrderItems}
-            onBackToOrderList={() => setViewingOrderItems(null)}
-            handleViewOrder={handleViewOrder}
-            getAllNonReferenceItems={getAllNonReferenceItems}
-            getUnwatchedNonReferenceItems={getUnwatchedNonReferenceItems}
-            setShowMovieForm={setShowMovieForm}
-            setShowEpisodeForm={setShowEpisodeForm}
-            setShowBookForm={setShowBookForm}
-            setShowComicForm={setShowComicForm}
-            setShowShortStoryForm={setShowShortStoryForm}
-            setShowWebVideoForm={setShowWebVideoForm}
-            setShowBulkImportModal={setShowBulkImportModal}
-            setShowCmroBulkImportModal={setShowCmroBulkImportModal}
-            setMovieFormData={setMovieFormData}
-            setEpisodeFormData={setEpisodeFormData}
-            setBookFormData={setBookFormData}
-            setComicFormData={setComicFormData}
-            setShortStoryFormData={setShortStoryFormData}
-            setWebVideoFormData={setWebVideoFormData}
-            setBulkImportData={setBulkImportData}
-            setCmroBulkImportData={setCmroBulkImportData}
-          />
+        <div className="order-items-view">          <div className="order-items-header">
+            <div className="order-header-content">
+              <div className="order-header-info">
+                <h3>Managing Items: {viewingOrderItems.name}</h3>
+                {viewingOrderItems.description && (
+                  <p className="order-description">{viewingOrderItems.description}</p>
+                )}
+              </div>
+              {viewingOrderItems.icon && (
+                <div 
+                  className="order-header-icon" 
+                  dangerouslySetInnerHTML={{ __html: viewingOrderItems.icon }}
+                />
+              )}
+            </div>            <div className="order-stats">
+              <div className="stat">
+                <span className="stat-label">Total Items:</span>
+                <span className="stat-value">
+                  {viewingOrderItems?.items ? getAllNonReferenceItems(viewingOrderItems.items).length : 0}
+                </span>
+              </div>
+              <div className="stat">
+                <span className="stat-label">Unwatched:</span>
+                <span className="stat-value">
+                  {viewingOrderItems?.items ? getUnwatchedNonReferenceItems(viewingOrderItems.items).length : 0}
+                </span>
+              </div>
+            </div><div className="manage-items-actions">
+              <Button
+                onClick={() => {
+                  setShowMovieForm(true);
+                  setMovieFormData({ title: '', year: '' });
+                }}
+                className="primary"
+              >
+                Add Movie
+              </Button>
+              <Button
+                onClick={() => {
+                  setShowEpisodeForm(true);
+                  setEpisodeFormData({ series: '', season: '', episode: '' });
+                }}
+                className="secondary"
+              >
+                Add TV Episode
+              </Button>
+              <Button
+                onClick={() => {
+                  setShowBookForm(true);
+                  setBookFormData({ title: '', author: '', year: '', isbn: '', pageCount: '' });
+                }}
+                className="secondary"
+              >
+                Add Book
+              </Button>              <Button                onClick={() => {
+                  setShowComicForm(true);
+                  setComicFormData({ series: '', year: '', issue: '', title: '' });
+                }}
+                className="secondary"
+              >
+                Add Comic
+              </Button>              <Button
+                onClick={() => {
+                  setShowShortStoryForm(true);
+                  setShortStoryFormData({ title: '', author: '', year: '', url: '', containedInBookId: '', coverUrl: '' });
+                }}
+                className="secondary"
+              >
+                Add Short Story
+              </Button>
+              <Button
+                onClick={() => {
+                  setShowWebVideoForm(true);
+                  setWebVideoFormData({ title: '', url: '', description: '' });
+                }}
+                className="secondary"
+              >
+                Add Web Video
+              </Button>
+              <Button
+                onClick={() => {
+                  setShowBulkImportModal(true);
+                  setBulkImportData('');
+                }}
+                className="secondary"
+              >
+                Bulk Import
+              </Button>
+              <Button
+                onClick={() => {
+                  setShowCmroBulkImportModal(true);
+                  setCmroBulkImportData('');
+                }}
+                className="secondary"
+              >
+                CMRO Bulk Import
+              </Button>
+            </div>
+          </div>
           
           {/* Filter Controls */}
-          <FilterToggle 
-            checked={showWatchedItems}
-            onChange={(e) => setShowWatchedItems(e.target.checked)}
-          />
+          <div className="filter-controls">
+            <div className="filter-toggle">
+              <label className="toggle-label">
+                <input
+                  type="checkbox"
+                  checked={showWatchedItems}
+                  onChange={(e) => setShowWatchedItems(e.target.checked)}
+                  className="toggle-checkbox"
+                />
+                <span className="toggle-text">
+                  {showWatchedItems ? 'Hide Watched Items' : 'Show Watched Items'}
+                </span>
+              </label>
+            </div>
+          </div>
           {!viewingOrderItems?.items || viewingOrderItems.items.length === 0 ? (
-            <EmptyState 
-              title="No items in this custom order yet."
-              subtitle="Add some movies, TV episodes, or comics to get started!"
-            />
-          ) : getFilteredItems(viewingOrderItems?.items || [], showWatchedItems).length === 0 ? (
-            <EmptyState 
-              title="No items match the current filter."
-              subtitle={showWatchedItems ? 'All items are hidden.' : 'All unwatched items are hidden. Toggle "Show Watched Items" to see watched items.'}
-            />
+            <div className="empty-state">
+              <p>No items in this custom order yet.</p>
+              <p>Add some movies, TV episodes, or comics to get started!</p>
+            </div>
+          ) : getFilteredItems(viewingOrderItems?.items || []).length === 0 ? (
+            <div className="empty-state">
+              <p>No items match the current filter.</p>
+              <p>{showWatchedItems ? 'All items are hidden.' : 'All unwatched items are hidden. Toggle "Show Watched Items" to see watched items.'}</p>
+            </div>
           ) : (
             <>
               {/* Scroll Navigation Buttons - only show when there are more than 5 items */}
-              {getFilteredItems(viewingOrderItems?.items || [], showWatchedItems).length > 5 && (
+              {getFilteredItems(viewingOrderItems?.items || []).length > 5 && (
                 <div className="scroll-navigation">
                   <Button
                     onClick={scrollToBottom}
@@ -2962,7 +3172,7 @@ function CustomOrders() {
                 </div>
               )}
                 <div className="items-list">
-              {getFilteredItems(viewingOrderItems?.items || [], showWatchedItems).map((item, index) => (
+              {getFilteredItems(viewingOrderItems?.items || []).map((item, index) => (
                 <div 
                   key={item.id} 
                   className={`item-card ${item.isWatched ? 'watched' : ''} ${
@@ -3180,7 +3390,13 @@ function CustomOrders() {
                             />
                           </div>
                           <div className="progress-text">
-                            <ReadingProgressDisplay item={item} />
+                            {item.bookCurrentPage && item.bookPageCount ? (
+                              <span>📖 Page {item.bookCurrentPage} of {item.bookPageCount} ({Math.round(item.bookPercentRead || 0)}%)</span>
+                            ) : item.bookPercentRead ? (
+                              <span>📖 {Math.round(item.bookPercentRead)}% complete</span>
+                            ) : item.bookCurrentPage ? (
+                              <span>📖 Page {item.bookCurrentPage}</span>
+                            ) : null}
                           </div>
                         </div>
                       )}
@@ -3296,7 +3512,7 @@ function CustomOrders() {
                 </div>              ))}
             </div>
               {/* Scroll to Top button at bottom - only show when there are more than 5 items */}
-            {getFilteredItems(viewingOrderItems?.items || [], showWatchedItems).length > 5 && (
+            {getFilteredItems(viewingOrderItems?.items || []).length > 5 && (
               <div className="scroll-navigation-bottom">
                 <Button
                   onClick={scrollToTop}
@@ -3393,7 +3609,7 @@ function CustomOrders() {
               />
               {formData.icon && (
                 <div className="icon-preview">
-                  <PreviewLabel />
+                  <span>Preview: </span>
                   <div 
                     className="custom-order-icon" 
                     dangerouslySetInnerHTML={{__html: formData.icon}}
@@ -3405,7 +3621,7 @@ function CustomOrders() {
             {/* Playlist Selection Section */}
             <div className="form-section">
               <h4>Music Playlist Integration (Optional)</h4>
-              <HelpText>Link this custom order to a music playlist to enhance the storytelling experience.</HelpText>
+              <p className="form-help">Link this custom order to a music playlist to enhance the storytelling experience.</p>
               
               <div className="form-group">
                 <label htmlFor="plexPlaylist">Plex Playlist</label>
@@ -3431,7 +3647,9 @@ function CustomOrders() {
                 {playlistsLoading && <small className="form-help">Loading playlists...</small>}
               </div>
               
-              <FormSeparator />
+              <div className="form-group">
+                <span className="form-separator">OR</span>
+              </div>
               
               <div className="form-group">
                 <label htmlFor="customPlaylist">Custom Playlist</label>
@@ -3466,7 +3684,7 @@ function CustomOrders() {
             {/* Background Selection Section */}
             <div className="form-section">
               <h4>Background Image Integration (Optional)</h4>
-              <HelpText>Link this custom order to a background image or gallery to enhance the visual experience.</HelpText>
+              <p className="form-help">Link this custom order to a background image or gallery to enhance the visual experience.</p>
               
               <div className="form-group">
                 <label htmlFor="backgroundImage">Single Background Image</label>
@@ -3492,7 +3710,9 @@ function CustomOrders() {
                 {backgroundsLoading && <small className="form-help">Loading backgrounds...</small>}
               </div>
               
-              <FormSeparator />
+              <div className="form-group">
+                <span className="form-separator">OR</span>
+              </div>
               
               <div className="form-group">
                 <label htmlFor="backgroundGallery">Background Gallery</label>
@@ -3574,7 +3794,7 @@ function CustomOrders() {
                 rows="3"              />
               {formData.icon && (
                 <div className="icon-preview">
-                  <PreviewLabel />
+                  <span>Preview: </span>
                   <div 
                     className="custom-order-icon" 
                     dangerouslySetInnerHTML={{__html: formData.icon}}
@@ -3612,7 +3832,9 @@ function CustomOrders() {
                 {playlistsLoading && <small className="form-help">Loading playlists...</small>}
               </div>
               
-              <FormSeparator />
+              <div className="form-group">
+                <span className="form-separator">OR</span>
+              </div>
               
               <div className="form-group">
                 <label htmlFor="editCustomPlaylist">Custom Playlist</label>
@@ -3673,7 +3895,9 @@ function CustomOrders() {
                 {backgroundsLoading && <small className="form-help">Loading backgrounds...</small>}
               </div>
               
-              <FormSeparator />
+              <div className="form-group">
+                <span className="form-separator">OR</span>
+              </div>
               
               <div className="form-group">
                 <label htmlFor="editBackgroundGallery">Background Gallery</label>
@@ -3726,7 +3950,9 @@ function CustomOrders() {
       {/* Custom Orders List */}
       <div className="orders-list">
         {customOrders.length === 0 ? (
-          <EmptyState title="No custom orders yet. Create your first custom order to get started!" />
+          <div className="empty-state">
+            <p>No custom orders yet. Create your first custom order to get started!</p>
+          </div>
         ) : (
           <div className="orders-grid">
             {customOrders.map(order => (
@@ -3737,26 +3963,56 @@ function CustomOrders() {
                         className="clickable-title"
                         onClick={() => handleViewOrder(order)}
                       >
-                        <InlineIcon icon={order.icon} />
-                        <HierarchyIndicator parentOrderName={order.parentOrder?.name} />
+                        {order.icon && (
+                          <span 
+                            className="custom-order-icon inline-icon" 
+                            dangerouslySetInnerHTML={{__html: order.icon}}
+                          />
+                        )}
+                        {order.parentOrder && (
+                          <span className="hierarchy-indicator" title={`Sub-order of "${order.parentOrder.name}"`}>
+                            ↳
+                          </span>
+                        )}
                         {order.name}
-                        <SubOrdersBadge count={order.subOrders?.length} />
+                        {order.subOrders && order.subOrders.length > 0 && (
+                          <span className="sub-orders-count" title={`Contains ${order.subOrders.length} sub-order${order.subOrders.length > 1 ? 's' : ''}`}>
+                            ({order.subOrders.length} sub)
+                          </span>
+                        )}
                       </h3>
                     </div>
-                    <DescriptionDisplay description={order.description} />
+                    {order.description && <p className="order-description">{order.description}</p>}
                   </div>
-                  <StatusIndicator isActive={order.isActive} />
+                  <div className="order-status">
+                    <span className={`status-indicator ${order.isActive ? 'active' : 'inactive'}`}>
+                      {order.isActive ? 'Active' : 'Inactive'}
+                    </span>
+                  </div>
                 </div>
 
                 <div className="order-stats">
-                  <Stat label="Total Items" value={order.items.length} />
-                  <Stat label="Completed" value={order.items.filter(item => item.isWatched).length} />
+                  <div className="stat">
+                    <span className="stat-label">Total Items:</span>
+                    <span className="stat-value">{order.items.length}</span>
+                  </div>
+                  <div className="stat">
+                    <span className="stat-label">Completed:</span>
+                    <span className="stat-value">{order.items.filter(item => item.isWatched).length}</span>
+                  </div>
                 </div>                
                 
                 <div className="order-meta">
-                  <DateDisplay date={order.createdAt} label="Created" />
+                  <div className="order-created">
+                    Created: {new Date(order.createdAt).toLocaleDateString()}
+                  </div>
                   {(order.plexPlaylist || order.customPlaylist) && (
-                    <PlaylistDisplay order={order} />
+                    <div className="order-playlist">
+                      🎵 Playlist: {order.plexPlaylist ? 
+                        `${order.plexPlaylist.title} (Plex)` : 
+                        `${order.customPlaylist.title} (Custom)`
+                      }
+                    </div>
                   )}
                 </div>
 
@@ -3885,7 +4141,7 @@ function CustomOrders() {
                       <div className="result-info">
                         <h4>{movie.title}</h4>
                         {movie.year && <p>({movie.year})</p>}
-                        <TypeIndicator type="Movie" />
+                        <span className="result-type">Movie</span>
                       </div>
                       <Button
                         onClick={() => handleSelectMovie(movie)}
@@ -3904,332 +4160,64 @@ function CustomOrders() {
       )}
 
       {/* Episode Form Modal */}
-      {showEpisodeForm && (
-        <div className="modal-overlay">
-          <div className="modal-content">            <div className="modal-header">
-              <h3>{editingItem ? 'Edit TV Episode' : 'Add TV Episode'}</h3>
-              <Button
-                onClick={() => {
-                  setShowEpisodeForm(false);
-                  setEpisodeFormData({ series: '', season: '', episode: '' });
-                  setEditingItem(null);
-                }}
-                className="secondary"
-                size="small"
-              >
-                ✕
-              </Button>
-            </div>
-            
-            <form onSubmit={handleSearchTVEpisode} className="episode-form">
-              <div className="form-group">
-                <label htmlFor="series">Series Name *</label>
-                <input
-                  type="text"
-                  id="series"
-                  value={episodeFormData.series}
-                  onChange={(e) => setEpisodeFormData({
-                    ...episodeFormData,
-                    series: e.target.value
-                  })}
-                  placeholder="e.g., Breaking Bad"
-                  required
-                />
-              </div>
-              
-              <div className="form-row">
-                <div className="form-group">
-                  <label htmlFor="season">Season Number *</label>
-                  <input
-                    type="number"
-                    id="season"
-                    min="1"
-                    value={episodeFormData.season}
-                    onChange={(e) => setEpisodeFormData({
-                      ...episodeFormData,
-                      season: e.target.value
-                    })}
-                    placeholder="1"
-                    required
-                  />
-                </div>
-                
-                <div className="form-group">
-                  <label htmlFor="episode">Episode Number *</label>
-                  <input
-                    type="number"
-                    id="episode"
-                    min="1"
-                    value={episodeFormData.episode}
-                    onChange={(e) => setEpisodeFormData({
-                      ...episodeFormData,
-                      episode: e.target.value
-                    })}
-                    placeholder="1"
-                    required
-                  />
-                </div>
-              </div>
-              
-              <div className="form-actions">                <Button 
-                  type="submit" 
-                  disabled={episodeSearchLoading}
-                  className="primary"
-                >
-                  {episodeSearchLoading 
-                    ? (editingItem ? 'Updating...' : 'Searching...') 
-                    : (editingItem ? 'Update Episode' : 'Add Episode')
-                  }
-                </Button>                <Button
-                  type="button"
-                  onClick={() => {
-                    setShowEpisodeForm(false);
-                    setEditingItem(null);
-                    setEpisodeFormData({ series: '', season: '', episode: '' });
-                  }}
-                  className="secondary"
-                >
-                  Cancel
-                </Button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}      {/* Bulk Import Modal */}
-      {showBulkImportModal && (
-        <div className="modal-overlay">
-          <div className="modal-content bulk-import-modal">
-            <div className="modal-header">
-              <h3>Bulk Import Media</h3>
-              <Button
-                onClick={() => {
-                  setShowBulkImportModal(false);
-                  setBulkImportData('');
-                }}
-                className="secondary"
-                size="small"
-              >
-                ✕
-              </Button>
-            </div>
-            
-            <form onSubmit={handleBulkImport} className="bulk-import-form">              <div className="bulk-import-instructions">
-                <h4>Tab-Delimited Import Format</h4>
-                <p>Paste tab-separated data with 4-5 columns in order:</p>
-                <ol>
-                  <li><strong>Series/Movie/Comic/Book Name:</strong> The name of the TV series, movie, comic, or book (for comics use "Series Name (Year) #Issue" format)</li>
-                  <li><strong>Season/Episode/Author:</strong> For episodes: S1E1, S01E01, 1x1, 1,1, or 1-1 format; For books: Author name (optionally with year: "Author Name (Year)"); Leave blank for movies and comics</li>
-                  <li><strong>Title:</strong> The specific episode title, movie title, comic issue title, or book title</li>
-                  <li><strong>Type:</strong> "episode" (or "TV Series") for TV episodes, "movie" for movies, "comic" for comics, "book" for books</li>
-                  <li><strong>Year (Optional):</strong> Release year for more accurate matching (especially useful for movies and TV shows)</li>
-                </ol>
-                
-                <div className="example-data">
-                  <strong>Example:</strong>
-                  <pre>
-Breaking Bad	S1E1	Pilot	episode	2008
-Breaking Bad	S01E02	Cat's in the Bag...	episode	2008
-The Avengers		The Avengers	movie	2012
-Superman		Superman	movie	1978
-Game of Thrones	1x1	Winter Is Coming	episode	2011
-The Amazing Spider-Man (2018) #1		Amazing Spider-Man	comic
-The High Republic Adventures (2022) #7		The Monster of Temple Peak Part 1	comic
-The High Republic: Convergence	Zoraida Córdova (2022)	The High Republic: Convergence	book
-Dune	Frank Herbert (1965)	Dune	book
-                  </pre>
-                </div>
-              </div>
-              
-              <div className="form-group">
-                <label htmlFor="bulkData">Tab-Delimited Data *</label>
-                <textarea
-                  id="bulkData"
-                  value={bulkImportData}
-                  onChange={(e) => setBulkImportData(e.target.value)}
-                  placeholder="Paste your tab-delimited data here..."
-                  rows="10"
-                  className="bulk-import-textarea"
-                  required
-                />
-              </div>
-                <div className="form-actions">
-                <Button 
-                  type="submit" 
-                  disabled={bulkImportLoading}
-                  className="primary"
-                >
-                  {bulkImportLoading ? 'Importing...' : 'Import Items'}
-                </Button>
-                <Button
-                  type="button"
-                  onClick={() => {
-                    setBulkImportData('Batman Adventures (Vol. 1)\tIssue #01\tPenguin\'s Big Score\tComic');
-                  }}
-                  className="secondary"
-                  style={{ marginLeft: '10px' }}
-                >
-                  Test Batman Adventures
-                </Button>
-                <Button
-                  type="button"
-                  onClick={() => {
-                    setShowBulkImportModal(false);
-                    setBulkImportData('');
-                  }}
-                  className="secondary"
-                >
-                  Cancel
-                </Button>
-              </div>
-            </form>
-          </div>
-        </div>      )}
+      <EpisodeForm
+        isOpen={showEpisodeForm}
+        onClose={() => {
+          resetEpisodeForm();
+          setEditingItem(null);
+        }}
+        formData={episodeFormData}
+        setFormData={setEpisodeFormData}
+        onSubmit={handleSearchTVEpisode}
+        isLoading={episodeSearchLoading}
+        editingItem={editingItem}
+      />      
+      <BulkImportModal
+        isOpen={showBulkImportModal}
+        onClose={() => resetBulkImportModal()}
+        formData={bulkImportData}
+        setFormData={setBulkImportData}
+        onSubmit={handleBulkImport}
+        isLoading={bulkImportLoading}
+      />
 
-      {/* CMRO Bulk Import Modal */}
-      {showCmroBulkImportModal && (
-        <div className="modal-overlay">
-          <div className="modal-content bulk-import-modal">
-            <div className="modal-header">
-              <h3>CMRO Bulk Import</h3>
-              <Button
-                onClick={() => {
-                  setShowCmroBulkImportModal(false);
-                  setCmroBulkImportData('');
-                }}
-                className="secondary"
-                size="small"
-              >
-                ✕
-              </Button>
-            </div>
-            
-            <form onSubmit={handleCmroBulkImport} className="bulk-import-form">
-              <div className="bulk-import-instructions">
-                <h4>Complete Marvel Reading Order (CMRO) Format</h4>
-                <p>Paste CMRO-style data with the following format:</p>
-                <ul>
-                  <li><strong>Entry Number:</strong> "41: Title of Story"</li>
-                  <li><strong>Source:</strong> "from Source Publication" (optional)</li>
-                  <li><strong>Synopsis:</strong> Brief description (optional)</li>
-                  <li><strong>Timeline:</strong> "349y BBY" or similar (optional)</li>
-                  <li><strong>Published Date:</strong> "Published: Date"</li>
-                  <li><strong>Publisher:</strong> "Published by: Publisher Name"</li>
-                  <li><strong>Writer:</strong> "Writer: Author Name"</li>
-                  <li><strong>Pages:</strong> "Pages: Number" (optional)</li>
-                </ul>
-                
-                <div className="example-data">
-                  <strong>Example:</strong>
-                  <pre>
-41: Shield of the Jedi
-from The High Republic: Tales of Light and Life
-
-Synopsis Unavailable.
-349y BBY
-View Listing Details
-
-Published: September 5, 2023
-Published by: Disney-Lucasfilm Press
-Writer: George Mann
-Pages: 5
-
-42: What a Jedi Makes
-from Stories of Jedi and Sith
-
-An orphan from Coruscant's lower levels seeks out the Jedi Temple in the hopes of joining the Order.
-260y BBY
-View Listing Details
-
-Published: June 7, 2022
-Published by: Disney-Lucasfilm Press
-Writer: Michael Kogge
-                  </pre>
-                </div>
-              </div>
-              
-              <div className="form-group">
-                <label htmlFor="cmroData">CMRO Data *</label>
-                <textarea
-                  id="cmroData"
-                  value={cmroBulkImportData}
-                  onChange={(e) => setCmroBulkImportData(e.target.value)}
-                  placeholder="Paste your CMRO data here..."
-                  rows="15"
-                  className="bulk-import-textarea"
-                  required
-                />
-              </div>
-              
-              <div className="form-actions">
-                <Button 
-                  type="submit" 
-                  disabled={cmroBulkImportLoading}
-                  className="primary"
-                >
-                  {cmroBulkImportLoading ? 'Importing...' : 'Import CMRO Items'}
-                </Button>
-                <Button
-                  type="button"
-                  onClick={() => {
-                    setCmroBulkImportData(`41: Shield of the Jedi
-from The High Republic: Tales of Light and Life
-
-Synopsis Unavailable.
-349y BBY
-View Listing Details
-
-Published: September 5, 2023
-Published by: Disney-Lucasfilm Press
-Writer: George Mann
-Pages: 5
-
-42: What a Jedi Makes
-from Stories of Jedi and Sith
-
-An orphan from Coruscant's lower levels seeks out the Jedi Temple in the hopes of joining the Order.
-260y BBY
-View Listing Details
-
-Published: June 7, 2022
-Published by: Disney-Lucasfilm Press
-Writer: Michael Kogge`);
-                  }}
-                  className="secondary"
-                  style={{ marginLeft: '10px' }}
-                >
-                  Test Example
-                </Button>
-                <Button
-                  type="button"
-                  onClick={() => {
-                    setShowCmroBulkImportModal(false);
-                    setCmroBulkImportData('');
-                  }}
-                  className="secondary"
-                >
-                  Cancel
-                </Button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
+      <CmroBulkImportModal
+        isOpen={showCmroBulkImportModal}
+        onClose={() => resetCmroBulkImportModal()}
+        formData={cmroBulkImportData}
+        setFormData={setCmroBulkImportData}
+        onSubmit={handleCmroBulkImport}
+        isLoading={cmroBulkImportLoading}
+      />
 
       {/* Book Search Modal */}
-      {showBookForm && (
-        <div className="modal-overlay">
-          <div className="modal-content">            <div className="modal-header">
-              <h3>
-                {editingItem 
-                  ? 'Edit Book'
-                  : reselectingItem && reselectingItem.mediaType === 'shortstory' 
-                    ? 'Select Book for Story Collection'
-                    : reselectingItem 
-                      ? 'Re-select Book' 
-                      : 'Add Book'
-                }
-              </h3>
-              <Button
+      <BookForm
+        isOpen={showBookForm}
+        onClose={resetBookForm}
+        formData={bookFormData}
+        setFormData={setBookFormData}
+        onSubmit={handleSearchBooks}
+        searchResults={bookSearchResults}
+        onSelectBook={handleSelectBook}
+        isLoading={bookSearchLoading}
+        editingItem={editingItem}
+        reselectingItem={reselectingItem}
+      />
+
+      <ComicForm
+        isOpen={showComicForm}
+        onClose={resetComicForm}
+        formData={comicFormData}
+        setFormData={setComicFormData}
+        onSubmit={handleSearchComics}
+        searchResults={comicSearchResults}
+        onSelectComic={handleSelectComic}
+        isLoading={comicSearchLoading}
+        editingItem={editingItem}
+        reselectingItem={reselectingItem}
+      />
+
+      {/* Short Story Search Modal */}
                 onClick={() => {
                   setShowBookForm(false);
                   setReselectingItem(null);
@@ -4798,15 +4786,34 @@ Writer: Michael Kogge`);
       )}
 
       {/* Error Modal */}
-      <ErrorModal
-        isOpen={showErrorModal}
-        onClose={() => setShowErrorModal(false)}
-        title={errorDetails.title}
-        message={errorDetails.message}
-        error={errorDetails.error}
-      />
+      {showErrorModal && (
+        <div className="modal-overlay" onClick={() => setShowErrorModal(false)}>
+          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+            <h3>{errorDetails.title}</h3>
+            <div className="error-details">
+              <p><strong>Message:</strong> {errorDetails.message}</p>
+              {errorDetails.error && (
+                <p><strong>Error:</strong> {errorDetails.error}</p>
+              )}
+            </div>
+            <div className="form-actions">
+              <Button
+                type="button"
+                onClick={() => setShowErrorModal(false)}
+                className="primary"
+              >
+                OK
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
 
-      <MessageDisplay message={message} />
+      {message && (
+        <div className="message">
+          <p>{message}</p>
+        </div>
+      )}
     </main>
   );
 }

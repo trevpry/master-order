@@ -50,6 +50,18 @@ class OpenLibraryService {
       return books;
     } catch (error) {
       console.error('Error searching OpenLibrary:', error.message);
+      
+      // Handle specific HTTP status codes
+      if (error.response?.status === 503) {
+        throw new Error('OpenLibrary service is temporarily unavailable. Please try again later.');
+      } else if (error.response?.status === 429) {
+        throw new Error('OpenLibrary rate limit exceeded. Please try again in a few moments.');
+      } else if (error.response?.status >= 500) {
+        throw new Error('OpenLibrary server error. Please try again later.');
+      } else if (error.code === 'ENOTFOUND' || error.code === 'ECONNREFUSED') {
+        throw new Error('Unable to connect to OpenLibrary. Please check your internet connection.');
+      }
+      
       throw new Error(`OpenLibrary search failed: ${error.message}`);
     }
   }
@@ -114,6 +126,18 @@ class OpenLibraryService {
       };
     } catch (error) {
       console.error(`Error getting book details for ${bookKey}:`, error.message);
+      
+      // Handle specific HTTP status codes
+      if (error.response?.status === 503) {
+        throw new Error('OpenLibrary service is temporarily unavailable. Please try again later.');
+      } else if (error.response?.status === 429) {
+        throw new Error('OpenLibrary rate limit exceeded. Please try again in a few moments.');
+      } else if (error.response?.status >= 500) {
+        throw new Error('OpenLibrary server error. Please try again later.');
+      } else if (error.code === 'ENOTFOUND' || error.code === 'ECONNREFUSED') {
+        throw new Error('Unable to connect to OpenLibrary. Please check your internet connection.');
+      }
+      
       throw new Error(`Failed to get book details: ${error.message}`);
     }
   }

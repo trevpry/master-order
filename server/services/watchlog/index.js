@@ -92,6 +92,10 @@ class WatchLogService {
     return this.activityStats.getActivityTrends(period, count);
   }
   
+  async getAllActivityStats(period = 'all', groupBy = 'day') {
+    return this.activityStats.getAllActivityStats(period, groupBy);
+  }
+  
   // ==================== READING SESSION DELEGATION ====================
   
   async startReading(params) {

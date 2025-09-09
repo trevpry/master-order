@@ -296,6 +296,83 @@ class ActivityStatsService {
       throw error;
     }
   }
+
+  /**
+   * Get all activity stats across all media types
+   * @param {string} period - Time period filter 
+   * @param {string} groupBy - How to group the results
+   * @returns {Promise<Object>} All activity statistics
+   */
+  async getAllActivityStats(period = 'all', groupBy = 'day') {
+    try {
+      const WatchUtilsService = require('./watchUtilsService');
+      const utilsService = new WatchUtilsService(this.prisma);
+      
+      // Build date filter based on period using timezone-aware calculations
+      const whereClause = {};
+      
+      let actualStartDate = null;
+      let actualEndDate = null;
+
+      if (period !== 'all') {
+        const bounds = await utilsService.getTimezoneAwarePeriodBounds(period);
+        actualStartDate = bounds.startDate;
+        actualEndDate = bounds.endDate;
+      }
+
+      // Apply date filter if dates are set
+      if (actualStartDate || actualEndDate) {
+        const dateFilter = {};
+        if (actualStartDate) dateFilter.gte = actualStartDate;
+        if (actualEndDate) dateFilter.lte = actualEndDate;
+        whereClause.startTime = dateFilter;
+      }
+
+      // Get all watch logs across all media types
+      const watchLogs = await this.prisma.watchLog.findMany({
+        where: whereClause,
+        orderBy: { startTime: 'desc' }
+      });
+
+      console.log(`Found ${watchLogs.length} watch logs for period ${period}`);
+
+      // Group by media type for summary
+      const mediaTypeCounts = {};
+      const totalMinutes = {
+        tv: 0,
+        movie: 0,
+        book: 0,
+        comic: 0,
+        shortstory: 0,
+        webvideo: 0
+      };
+
+      watchLogs.forEach(log => {
+        if (!mediaTypeCounts[log.mediaType]) {
+          mediaTypeCounts[log.mediaType] = 0;
+        }
+        mediaTypeCounts[log.mediaType]++;
+        
+        if (log.duration && totalMinutes[log.mediaType] !== undefined) {
+          totalMinutes[log.mediaType] += log.duration;
+        }
+      });
+
+      return {
+        period,
+        groupBy,
+        totalCount: watchLogs.length,
+        logs: watchLogs,
+        mediaTypeCounts,
+        totalMinutes,
+        periodStart: actualStartDate,
+        periodEnd: actualEndDate
+      };
+    } catch (error) {
+      console.error('Error getting all activity stats:', error);
+      throw error;
+    }
+  }
 }
 
 module.exports = ActivityStatsService;

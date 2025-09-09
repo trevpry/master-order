@@ -15,7 +15,33 @@ router.get('/search', async (req, res) => {
     res.json(results);
   } catch (error) {
     console.error('Error searching OpenLibrary:', error);
-    res.status(500).json({ error: 'Failed to search OpenLibrary' });
+    
+    // Handle specific error types
+    if (error.message.includes('temporarily unavailable')) {
+      return res.status(503).json({ 
+        error: 'OpenLibrary service is temporarily unavailable',
+        message: 'The OpenLibrary service is currently down. Please try again in a few minutes.',
+        retry: true
+      });
+    } else if (error.message.includes('rate limit')) {
+      return res.status(429).json({ 
+        error: 'Rate limit exceeded',
+        message: 'Too many requests to OpenLibrary. Please wait a moment and try again.',
+        retry: true
+      });
+    } else if (error.message.includes('Unable to connect')) {
+      return res.status(503).json({ 
+        error: 'Connection failed',
+        message: 'Unable to connect to OpenLibrary. Please check your internet connection.',
+        retry: true
+      });
+    }
+    
+    res.status(500).json({ 
+      error: 'Failed to search OpenLibrary',
+      message: 'An unexpected error occurred while searching for books. Please try again.',
+      retry: true
+    });
   }
 });
 
@@ -37,7 +63,33 @@ router.get('/book/*', async (req, res) => {
     res.json(bookDetails);
   } catch (error) {
     console.error('Error getting book details:', error);
-    res.status(500).json({ error: 'Failed to get book details' });
+    
+    // Handle specific error types
+    if (error.message.includes('temporarily unavailable')) {
+      return res.status(503).json({ 
+        error: 'OpenLibrary service is temporarily unavailable',
+        message: 'The OpenLibrary service is currently down. Please try again in a few minutes.',
+        retry: true
+      });
+    } else if (error.message.includes('rate limit')) {
+      return res.status(429).json({ 
+        error: 'Rate limit exceeded',
+        message: 'Too many requests to OpenLibrary. Please wait a moment and try again.',
+        retry: true
+      });
+    } else if (error.message.includes('Unable to connect')) {
+      return res.status(503).json({ 
+        error: 'Connection failed',
+        message: 'Unable to connect to OpenLibrary. Please check your internet connection.',
+        retry: true
+      });
+    }
+    
+    res.status(500).json({ 
+      error: 'Failed to get book details',
+      message: 'An unexpected error occurred while getting book details. Please try again.',
+      retry: true
+    });
   }
 });
 

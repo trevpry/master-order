@@ -676,6 +676,12 @@ router.get('/watch-stats/recent', watchStatsRoutes.getRecentActivity.bind(watchS
 // Get today's watch statistics
 router.get('/watch-stats/today', watchStatsRoutes.getTodayStats.bind(watchStatsRoutes));
 
+// Get media type specific statistics
+router.get('/watch-stats/media-type/:mediaType', watchStatsRoutes.getMediaTypeStats.bind(watchStatsRoutes));
+
+// Get all activity across all media types
+router.get('/watch-stats/all-activity', watchStatsRoutes.getAllActivity.bind(watchStatsRoutes));
+
 // Manual watch log entry (for items not automatically tracked)
 router.post('/watch-logs', async (req, res) => {
   try {
