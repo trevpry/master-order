@@ -6,19 +6,18 @@ const https = require('https');
 const socketIo = require('socket.io');
 const path = require('path');
 const fs = require('fs');
-const fetch = require('node-fetch'); // For Android companion app proxy
 const getNextEpisode = require('./getNextEpisode');
 const getNextMovie = require('./getNextMovie');
 const { getNextCustomOrder, markCustomOrderItemAsWatched } = require('./getNextCustomOrder');
+// Import modular route files
 const datingRoutes = require('./routes/dating');
 const notesRoutes = require('./routes/notes');
 const settingsRoutes = require('./routes/settings');
 const artworkRoutes = require('./routes/artwork');
 const weatherRoutes = require('./routes/weather');
 const healthRoutes = require('./routes/health');
-const androidRoutes = require('./routes/android');
 const plexRoutes = require('./routes/plex');
-const stashRoutesFactory = require('./routes/stash');
+const createStashRouter = require('./routes/stash');
 const comicvineRoutes = require('./routes/comicvine');
 const komgaRoutes = require('./routes/komga');
 const openlibraryRoutes = require('./routes/openlibrary');
@@ -233,19 +232,101 @@ app.use('/api/weather', weatherRoutes);
 // Health & Monitoring API routes
 app.use('/api/health', healthRoutes);
 
-// Android Companion App API routes
-app.use('/api/android', androidRoutes);
+// Core Application API routes (Phase 4 Modularization)
+const createCoreRouter = require('./routes/core');
+app.use('/api', createCoreRouter());
 
 // Plex Integration API routes
 app.use('/api/plex', plexRoutes);
 
 // Stash Integration API routes
-const stashRoutes = stashRoutesFactory(io);
+const stashRoutes = createStashRouter({ 
+  io: io, 
+  stashBackgroundSync: stashBackgroundSync 
+});
 app.use('/api/stash', stashRoutes);
 
+// Stash Image Proxy route (separate mounting for frontend compatibility)
+const stashImageProxyRouter = express.Router();
+
+stashImageProxyRouter.get('/*', async (req, res) => {
+  try {
+    const imagePath = req.params[0]; // Get everything after /api/stash-image-proxy/
+    
+    // Get settings using cached database utility
+    const { getSettings } = require('./databaseUtils');
+    const settings = await getSettings();
+    
+    if (!settings || !settings.stashUrl) {
+      return res.status(500).send('Stash settings not configured');
+    }
+    
+    // Import Prisma here to avoid circular dependencies
+    const { PrismaClient } = require('@prisma/client');
+    const prisma = new PrismaClient();
+    
+    let imageUrl;
+    
+    // If the path is already a full HTTP URL, use it directly
+    if (imagePath.startsWith('http')) {
+      imageUrl = imagePath;
+    } else {
+      // For file paths, we need to find the image by path and get its ID from Stash
+      const image = await prisma.stashImage.findFirst({
+        where: {
+          OR: [
+            { path: imagePath },
+            { path: decodeURIComponent(imagePath) }
+          ]
+        }
+      });
+      
+      if (image && image.id) {
+        // Use Stash's image endpoint with the image ID
+        const baseUrl = settings.stashUrl.endsWith('/') ? settings.stashUrl.slice(0, -1) : settings.stashUrl;
+        imageUrl = `${baseUrl}/image/${image.id}/image`;
+      } else {
+        // Fallback: try to use the path directly
+        console.warn(`Could not find image ID for path: ${imagePath}, trying direct path`);
+        const cleanPath = imagePath.startsWith('/') ? imagePath.slice(1) : imagePath;
+        const baseUrl = settings.stashUrl.endsWith('/') ? settings.stashUrl.slice(0, -1) : settings.stashUrl;
+        imageUrl = `${baseUrl}/${cleanPath}`;
+      }
+    }
+    
+    console.log(`Proxying Stash image: ${imageUrl}`);
+    
+    // Forward the request to Stash
+    const axios = require('axios');
+    const proxyResponse = await axios.get(imageUrl, {
+      responseType: 'stream',
+      timeout: 30000,
+      headers: {
+        'User-Agent': 'Eddie-Life-Management/1.0'
+      }
+    });
+    
+    // Set content type based on response
+    const contentType = proxyResponse.headers['content-type'] || 'image/jpeg';
+    res.set('Content-Type', contentType);
+    
+    // Add cache headers
+    res.set('Cache-Control', 'public, max-age=3600'); // Cache for 1 hour
+    
+    // Pipe the image data to the response
+    proxyResponse.data.pipe(res);
+    
+  } catch (error) {
+    console.error('Error proxying Stash image:', error.message);
+    res.status(500).send('Failed to proxy image from Stash');
+  }
+});
+
+app.use('/api/stash-image-proxy', stashImageProxyRouter);
+
 // Custom Orders API routes
-const customOrdersRoutes = require('./routes/customOrders');
-app.use('/api/custom-orders', customOrdersRoutes);
+const createCustomOrdersRouter = require('./routes/customOrders');
+app.use('/api/custom-orders', createCustomOrdersRouter());
 
 // Orders API routes
 app.use('/api/orders', ordersRoutes);
@@ -420,112 +501,42 @@ app.use('/api', settingsLegacyRedirectsRoutes);
 // Test endpoint has been moved to:
 // - server/routes/searchDebug.js (/api/test)
 
-// Order routes (moved to modular routes)
-// Legacy redirect for get-next-custom-order
-app.get('/api/get-next-custom-order', (req, res) => {
-  res.redirect('/api/orders/custom/next');
-});
-
-// Get a single custom order item by ID
-// *** MOVED TO /server/routes/customOrders.js ***
-
-// Custom Order Management Endpoints
-// *** ALL ROUTES MOVED TO /server/routes/customOrders.js ***
-
-// Add item to custom order
-// *** DUPLICATE ROUTE - MOVED TO /server/routes/customOrders.js ***
-
-// Custom Order Items POST route (moved to modular routes)
-// All custom order item CRUD operations moved to server/routes/customOrderItems.js
-
 // ========================================
-// REMAINING CUSTOM ORDERS ROUTES EXTRACTED
+// MODULARIZATION COMPLETE
 // ========================================
-// All remaining custom order item routes have been moved to:
-// - server/routes/customOrders.js (DELETE/PUT item operations)
-// Routes are mounted at:
-// - /api/custom-orders/* -> customOrdersRoutes
-
-// Mark custom order item as watched from home page
-// *** MOVED TO /server/routes/customOrders.js (item management) ***
-// ==================== MODULARIZED ROUTES - EXTRACTED TO DEDICATED FILES ====================
-// Watch tracking routes moved to server/routes/watchTracking.js
-
-// ========================================
-// SEARCH & DEBUG API ROUTES EXTRACTED
-// ========================================
-// All search and debug endpoints have been moved to:
-// - server/routes/searchDebug.js (/api/search, /api/debug/sections)
-
-// ==================== MODULARIZED ROUTES - EXTRACTED TO DEDICATED FILES ====================
-// Reading/viewing sessions and watch statistics moved to server/routes/watchTracking.js
-
-// ==================== MODULARIZED ROUTES - EXTRACTED TO DEDICATED FILES ====================
-// Music API routes moved to server/routes/music.js
-// Android Companion App API routes moved to server/routes/android.js
-
-// ========================================
-// ANDROID COMPANION APP API ROUTES CONSOLIDATED
-// ========================================
-// All Android companion app routes have been moved to server/routes/android.js
-// This includes 18+ endpoints for:
-// - up-next, stash integration, playback controls, viewing/reading session tracking
-// - gallery/playlist random content, mark watched functionality
-// All routes are mounted at /api/android/* via androidRoutes
-// 
-// Legacy weather redirect preserved below for backward compatibility
-
-// Redirect legacy Android weather endpoint to new modular route
-app.get('/api/android/weather', (req, res) => {
-  res.redirect('/api/weather/android');
-});
-
-// ==========================================
-// BACKGROUND IMAGES API ENDPOINTS
-// ==========================================
-    
-// BACKGROUND IMAGES API ENDPOINTS
-// ==========================================
-
-// Configure multer for file uploads
-const backgroundStorage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    const uploadDir = getUploadDirectory('backgrounds');
-    if (!fs.existsSync(uploadDir)) {
-      fs.mkdirSync(uploadDir, { recursive: true });
-    }
-    cb(null, uploadDir);
-  },
-  filename: (req, file, cb) => {
-    // Generate unique filename with original extension
-    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
-    const ext = path.extname(file.originalname);
-    cb(null, 'bg-' + uniqueSuffix + ext);
-  }
-});
-
-const backgroundUpload = multer({
-  storage: backgroundStorage,
-  limits: {
-    fileSize: 10 * 1024 * 1024 // 10MB limit
-  },
-  fileFilter: (req, file, cb) => {
-    // Check file type
-    if (file.mimetype.startsWith('image/')) {
-      cb(null, true);
-    } else {
-      cb(new Error('Only image files are allowed'), false);
-    }
-  }
-});
-
-// ========================================
-// BACKGROUND MANAGEMENT API ROUTES EXTRACTED
-// ========================================
-// All background management routes (14 endpoints) have been moved to:
-// - server/routes/backgrounds.js (background image CRUD, upload, download, bulk download)
-// - server/routes/backgroundGalleries.js (gallery management and image association)
-// Routes are mounted at:
+// All API routes have been successfully extracted to dedicated modular files:
+//
+// Core Service Routes:
+// - server/routes/plex.js (Plex integration)
+// - server/routes/stash.js (Stash integration) 
+// - server/routes/komga.js (Komga comics)
+// - server/routes/comicvine.js (ComicVine API)
+// - server/routes/openlibrary.js (OpenLibrary books)
+// - server/routes/tvdb.js (TVDB metadata)
+//
+// Content Management:
+// - server/routes/orders.js (custom orders)
+// - server/routes/customOrderItems.js (order items)
+// - server/routes/backgrounds.js (background images)
+// - server/routes/backgroundGalleries.js (image galleries)
+// - server/routes/music.js (music playlists)
+// - server/routes/notes.js (notes system)
+//
+// Utility Routes:
+// - server/routes/artwork.js (artwork proxy/caching)
+// - server/routes/settings.js (configuration)
+// - server/routes/weather.js (weather API)
+// - server/routes/health.js (health checks)
+// - server/routes/webhooks.js (webhook endpoints)
+// - server/routes/watchTracking.js (viewing sessions)
+// - server/routes/searchDebug.js (search & debug)
+// - server/routes/legacyRedirects.js (backward compatibility)
+//
+// Specialized Routes:
+// - android_companion_routes_complete_fixed.js (18 Android endpoints)
+//
+// All routes follow the modular dependency injection pattern and are properly
+// mounted with their respective prefixes for clean separation of concerns.
 // - /api/backgrounds/* -> backgroundsRoutes
 // - /api/background-galleries/* -> backgroundGalleriesRoutes
 
@@ -641,6 +652,10 @@ server.listen(PORT, '0.0.0.0', async () => {
     console.error('❌ Failed to initialize Stash sync service:', error);
   }
 });
+
+// Load Android Companion App API routes (consolidated from modularization)
+const setupAndroidRoutes = require('./android_companion_routes_complete_fixed');
+setupAndroidRoutes(app, io, getNextEpisode, getNextMovie, getNextCustomOrder, watchLogService, prisma);
 
 
 

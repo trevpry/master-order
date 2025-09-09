@@ -119,6 +119,30 @@ class StashSyncServiceOptimized {
     }
   }
 
+  async testConnection() {
+    try {
+      await this.ensureConfigLoaded();
+      
+      const query = `
+        query {
+          version {
+            version
+            hash
+            build_time
+          }
+        }
+      `;
+
+      const data = await this.makeGraphQLRequest(query);
+      console.log('Stash connection test successful (optimized service):', data.version);
+      return data.version;
+      
+    } catch (error) {
+      console.error('Stash connection test failed (optimized service):', error);
+      throw error;
+    }
+  }
+
   async makeGraphQLRequest(query, variables = {}) {
     await this.ensureConfigLoaded();
     
