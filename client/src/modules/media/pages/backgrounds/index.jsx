@@ -43,7 +43,7 @@ const Backgrounds = () => {
       const response = await fetch(`${config.apiBaseUrl}/api/backgrounds`);
       if (!response.ok) throw new Error('Failed to fetch backgrounds');
       const data = await response.json();
-      setBackgrounds(data);
+      setBackgrounds(data.backgrounds || []);
     } catch (error) {
       console.error('Error fetching backgrounds:', error);
       toast.error('Failed to load backgrounds');
@@ -58,7 +58,7 @@ const Backgrounds = () => {
       const response = await fetch(`${config.apiBaseUrl}/api/background-galleries`);
       if (!response.ok) throw new Error('Failed to fetch galleries');
       const data = await response.json();
-      setGalleries(data);
+      setGalleries(data.galleries || []);
     } catch (error) {
       console.error('Error fetching galleries:', error);
       toast.error('Failed to load galleries');

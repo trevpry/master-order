@@ -65,6 +65,43 @@ function createPrismaClient() {
   
   prismaInstance = new PrismaClient(clientConfig);
 
+  // Add middleware to automatically calculate page/percentage values
+  prismaInstance.$use(async (params, next) => {
+    // Only intercept customOrderItem updates
+    if (params.model === 'CustomOrderItem' && params.action === 'update') {
+      const data = params.args.data;
+      
+      // If we're updating reading progress, calculate the missing value
+      if (data.bookPercentRead !== undefined || data.bookCurrentPage !== undefined) {
+        // Get the current item data to access bookPageCount
+        const currentItem = await prismaInstance.customOrderItem.findUnique({
+          where: params.args.where,
+          select: { bookPageCount: true, bookCurrentPage: true, bookPercentRead: true }
+        });
+        
+        const pageCount = data.bookPageCount !== undefined ? data.bookPageCount : currentItem?.bookPageCount;
+        
+        if (pageCount && pageCount > 0) {
+          // If percentage was updated but not current page, calculate current page
+          if (data.bookPercentRead !== undefined && data.bookCurrentPage === undefined) {
+            const calculatedPage = Math.round((data.bookPercentRead / 100) * pageCount);
+            data.bookCurrentPage = calculatedPage;
+            console.log(`[Prisma Middleware] Calculated bookCurrentPage from ${data.bookPercentRead}%: ${calculatedPage}`);
+          }
+          
+          // If current page was updated but not percentage, calculate percentage
+          if (data.bookCurrentPage !== undefined && data.bookPercentRead === undefined) {
+            const calculatedPercent = Math.min(100, Math.round((data.bookCurrentPage / pageCount) * 100));
+            data.bookPercentRead = calculatedPercent;
+            console.log(`[Prisma Middleware] Calculated bookPercentRead from page ${data.bookCurrentPage}: ${calculatedPercent}%`);
+          }
+        }
+      }
+    }
+    
+    return next(params);
+  });
+
   // Add graceful shutdown handler
   process.on('beforeExit', async () => {
     console.log('🔌 Prisma client disconnecting...');

@@ -160,7 +160,7 @@ router.delete('/custom-playlists/:id', async (req, res) => {
 router.post('/custom-playlists/:id/tracks', async (req, res) => {
   try {
     const { id } = req.params;
-    const { trackRatingKey } = req.body;
+    const { trackRatingKey, title, artist, album, duration } = req.body;
     
     if (!trackRatingKey) {
       return res.status(400).json({ error: 'trackRatingKey is required' });
@@ -178,8 +178,8 @@ router.post('/custom-playlists/:id/tracks', async (req, res) => {
     // Check if track is already in the playlist
     const existingTrack = await prisma.customPlaylistTrack.findFirst({
       where: {
-        customPlaylistId: parseInt(id),
-        trackRatingKey: trackRatingKey
+        playlistId: parseInt(id),
+        ratingKey: trackRatingKey
       }
     });
     
@@ -189,7 +189,7 @@ router.post('/custom-playlists/:id/tracks', async (req, res) => {
     
     // Get the current highest sort order
     const maxSortOrder = await prisma.customPlaylistTrack.aggregate({
-      where: { customPlaylistId: parseInt(id) },
+      where: { playlistId: parseInt(id) },
       _max: { sortOrder: true }
     });
     
@@ -197,12 +197,13 @@ router.post('/custom-playlists/:id/tracks', async (req, res) => {
     
     const playlistTrack = await prisma.customPlaylistTrack.create({
       data: {
-        customPlaylistId: parseInt(id),
-        trackRatingKey: trackRatingKey,
+        playlistId: parseInt(id),
+        ratingKey: trackRatingKey,
+        title: title,
+        artist: artist,
+        album: album,
+        duration: duration,
         sortOrder: nextSortOrder
-      },
-      include: {
-        track: true
       }
     });
     

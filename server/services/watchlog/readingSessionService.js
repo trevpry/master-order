@@ -189,7 +189,7 @@ class ReadingSessionService {
         data: {
           endTime: now,
           totalWatchTime: finalTotalTime,
-          isCompleted: true,
+          isCompleted: false, // Don't automatically mark as completed - let the frontend decide based on progress
           isPaused: false
         }
       });

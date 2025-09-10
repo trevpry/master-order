@@ -14,12 +14,13 @@ function createSessionTrackingRoutes(prisma) {
   const router = express.Router();
   
   // Initialize dependencies
-  const watchLogService = require('../../watchLogService');
+  const WatchLogService = require('../../watchLogService');
+  const watchLogService = new WatchLogService(prisma);
   
   // ==================== READING SESSION ENDPOINTS ====================
   
   // Start a reading session
-  router.post('/api/reading/start', async (req, res) => {
+  router.post('/reading/start', async (req, res) => {
     try {
       const { mediaType, title, seriesTitle, customOrderItemId } = req.body;
       
@@ -158,7 +159,7 @@ function createSessionTrackingRoutes(prisma) {
   });
 
   // Pause/Resume the active reading session
-  router.post('/api/reading/pause', async (req, res) => {
+  router.post('/reading/pause', async (req, res) => {
     try {
       console.log('Attempting to pause/resume reading session...');
       
@@ -181,10 +182,14 @@ function createSessionTrackingRoutes(prisma) {
   });
 
   // Stop the active reading session
-  router.post('/api/reading/stop', async (req, res) => {
+  router.post('/reading/stop', async (req, res) => {
     try {
+      console.log('🎯 HIT OUR SESSIONTRACKING ROUTE! 🎯');
       console.log('Attempting to stop reading session...');
-      const { progress } = req.body;
+      console.log('Request body:', req.body);
+      
+      // Handle both nested progress object and direct progress data
+      const progress = req.body.progress || req.body;
       
       const activeSession = await watchLogService.getActiveReadingSession();
       console.log('Active session found:', activeSession);
@@ -196,37 +201,86 @@ function createSessionTrackingRoutes(prisma) {
 
       console.log('Stopping session with ID:', activeSession.id);
       
-      const completedSession = await watchLogService.stopReading(activeSession.id);
+      let completedSession;
+      try {
+        completedSession = await watchLogService.stopReading(activeSession.id);
+        console.log('✅ stopReading completed, continuing with progress update...');
+      } catch (stopError) {
+        console.error('❌ Error in stopReading:', stopError);
+        throw stopError;
+      }
+      
+      console.log('📋 Completed session result:', completedSession);
+      console.log('📋 Session deleted?', completedSession.deleted);
+      console.log('📋 Has customOrderItemId?', activeSession.customOrderItemId);
+      console.log('📋 Progress data?', progress);
       
       // Update reading progress if provided and session wasn't deleted
+      console.log('🔍 Checking progress update conditions:');
+      console.log('  - Has progress?', !!progress);
+      console.log('  - Session deleted?', completedSession.deleted);
+      console.log('  - Has customOrderItemId?', !!activeSession.customOrderItemId);
+      
       if (progress && !completedSession.deleted && activeSession.customOrderItemId) {
-        console.log('Updating reading progress for item:', activeSession.customOrderItemId, progress);
+        console.log('📝 Updating reading progress for item:', activeSession.customOrderItemId);
+        console.log('📝 Progress data received:', progress);
         
         try {
+          // First get the current item to access bookPageCount
+          const existingItem = await prisma.customOrderItem.findUnique({
+            where: { id: activeSession.customOrderItemId },
+            select: { bookPageCount: true, bookCurrentPage: true, bookPercentRead: true }
+          });
+          
           const updateData = {};
           
-          if (progress.currentPage !== undefined && progress.currentPage > 0) {
-            updateData.bookCurrentPage = progress.currentPage;
-          }
-          
-          if (progress.readPercentage !== undefined && progress.readPercentage >= 0 && progress.readPercentage <= 100) {
-            updateData.bookPercentRead = progress.readPercentage;
-            
-            if (progress.readPercentage === 100) {
-              updateData.isWatched = true;
-              console.log('Marking item as read/watched (100% completion)');
-            }
-          }
-          
+          // Handle page count updates
           if (progress.totalPages !== undefined && progress.totalPages > 0) {
-            const existingItem = await prisma.customOrderItem.findUnique({
-              where: { id: activeSession.customOrderItemId },
-              select: { bookPageCount: true }
-            });
-            
             if (!existingItem?.bookPageCount) {
               updateData.bookPageCount = progress.totalPages;
             }
+          }
+          
+          const pageCount = progress.totalPages || existingItem?.bookPageCount;
+          
+          // Handle reading progress updates - prioritize user-provided values
+          // and ensure consistency between page and percentage
+          
+          // Store user-provided values
+          const userProvidedPage = progress.currentPage !== undefined && progress.currentPage > 0;
+          const userProvidedPercentage = progress.readPercentage !== undefined && progress.readPercentage >= 0 && progress.readPercentage <= 100;
+          
+          console.log('� Processing progress update:');
+          console.log('  - User provided page:', userProvidedPage ? progress.currentPage : 'no');
+          console.log('  - User provided percentage:', userProvidedPercentage ? progress.readPercentage : 'no');
+          
+          if (userProvidedPage && userProvidedPercentage) {
+            // Both values provided - use both as-is (user knows what they want)
+            updateData.bookCurrentPage = progress.currentPage;
+            updateData.bookPercentRead = progress.readPercentage;
+            console.log('� Using both user-provided values: page', progress.currentPage, 'and', progress.readPercentage + '%');
+          } else if (userProvidedPage) {
+            // Only page provided - calculate percentage
+            updateData.bookCurrentPage = progress.currentPage;
+            if (pageCount && pageCount > 0) {
+              const calculatedPercent = Math.min(100, Math.round((progress.currentPage / pageCount) * 100));
+              updateData.bookPercentRead = calculatedPercent;
+              console.log('� Set page to', progress.currentPage, 'and calculated percentage:', calculatedPercent + '%');
+            }
+          } else if (userProvidedPercentage) {
+            // Only percentage provided - calculate page
+            updateData.bookPercentRead = progress.readPercentage;
+            if (pageCount && pageCount > 0) {
+              const calculatedPage = Math.round((progress.readPercentage / 100) * pageCount);
+              updateData.bookCurrentPage = calculatedPage;
+              console.log('� Set percentage to', progress.readPercentage + '% and calculated page:', calculatedPage);
+            }
+          }
+          
+          // Check for 100% completion
+          if (updateData.bookPercentRead === 100) {
+            updateData.isWatched = true;
+            console.log('✅ Marking item as read/watched (100% completion)');
           }
           
           if (Object.keys(updateData).length > 0) {
@@ -236,6 +290,20 @@ function createSessionTrackingRoutes(prisma) {
             });
             
             console.log('Reading progress updated successfully:', updateData);
+          }
+          
+          // Update the watchLog completion status based on reading progress
+          if (progress.readPercentage !== undefined && !completedSession.deleted) {
+            const isBookCompleted = progress.readPercentage >= 100;
+            
+            await prisma.watchLog.update({
+              where: { id: activeSession.id },
+              data: {
+                isCompleted: isBookCompleted
+              }
+            });
+            
+            console.log(`Updated watchLog completion status: ${isBookCompleted} (${progress.readPercentage}% read)`);
           }
         } catch (progressError) {
           console.error('Error updating reading progress:', progressError);
@@ -251,7 +319,7 @@ function createSessionTrackingRoutes(prisma) {
   });
 
   // Get the current active reading session
-  router.get('/api/reading/active', async (req, res) => {
+  router.get('/reading/active', async (req, res) => {
     try {
       console.log('Getting active reading session...');
       const activeSession = await watchLogService.getActiveReadingSession();
@@ -264,7 +332,7 @@ function createSessionTrackingRoutes(prisma) {
   });
 
   // Manual reading log endpoint (for testing)
-  router.post('/api/reading/log', async (req, res) => {
+  router.post('/reading/log', async (req, res) => {
     try {
       const watchLogData = {
         mediaType: req.body.mediaType,
@@ -275,7 +343,7 @@ function createSessionTrackingRoutes(prisma) {
         startTime: req.body.startTime,
         endTime: req.body.endTime,
         totalWatchTime: req.body.totalWatchTime,
-        isCompleted: true
+        isCompleted: req.body.isCompleted // Let the caller specify completion status
       };
 
       const watchLog = await watchLogService.logWatched(watchLogData);
@@ -289,7 +357,7 @@ function createSessionTrackingRoutes(prisma) {
   // ==================== VIEWING SESSION ENDPOINTS ====================
 
   // Start a viewing session for web videos
-  router.post('/api/viewing/start', async (req, res) => {
+  router.post('/viewing/start', async (req, res) => {
     try {
       const { mediaType, title, seriesTitle, customOrderItemId } = req.body;
       
@@ -329,7 +397,7 @@ function createSessionTrackingRoutes(prisma) {
   });
 
   // Pause/Resume the active viewing session
-  router.post('/api/viewing/pause', async (req, res) => {
+  router.post('/viewing/pause', async (req, res) => {
     try {
       console.log('Attempting to pause/resume viewing session...');
       
@@ -352,7 +420,7 @@ function createSessionTrackingRoutes(prisma) {
   });
 
   // Stop the active viewing session
-  router.post('/api/viewing/stop', async (req, res) => {
+  router.post('/viewing/stop', async (req, res) => {
     try {
       console.log('Attempting to stop viewing session...');
       const { progress } = req.body;
@@ -422,7 +490,7 @@ function createSessionTrackingRoutes(prisma) {
   });
 
   // Get the current active viewing session
-  router.get('/api/viewing/active', async (req, res) => {
+  router.get('/viewing/active', async (req, res) => {
     try {
       console.log('Getting active viewing session...');
       const activeSession = await watchLogService.getActiveViewingSession();
@@ -435,7 +503,7 @@ function createSessionTrackingRoutes(prisma) {
   });
 
   // Manual viewing log endpoint
-  router.post('/api/viewing/log', async (req, res) => {
+  router.post('/viewing/log', async (req, res) => {
     try {
       const watchLogData = {
         mediaType: req.body.mediaType,

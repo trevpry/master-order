@@ -61,9 +61,17 @@ function generateOptimizedClips(sceneId, sceneDuration, clipDuration = 60) {
   const totalFullClips = Math.floor(sceneDuration / clipDuration);
   const remainingTime = sceneDuration % clipDuration;
   
-  // If no clips can be created, return empty array
+  // If scene is shorter than clip duration, create one clip with the entire scene
   if (totalFullClips === 0) {
-    return [];
+    clipsToCreate.push({
+      sceneId: sceneId,
+      clipIndex: 0,
+      startTime: 0,
+      endTime: sceneDuration,
+      duration: sceneDuration,
+      watched: false
+    });
+    return clipsToCreate;
   }
   
   // If there's no remaining time or remaining time is >= 60 seconds, use standard logic
@@ -133,12 +141,83 @@ function generateOptimizedClips(sceneId, sceneDuration, clipDuration = 60) {
   return clipsToCreate;
 }
 
+// ===== CONNECTION STATUS =====
+
+// GET /api/stash/status - Check Stash connection status and configuration
+router.get('/status', async (req, res) => {
+  try {
+    console.log('🔍 Checking Stash connection status...');
+    
+    // Get the Stash configuration from settings
+    const settings = await prisma.settings.findUnique({ where: { id: 1 } });
+    
+    // Check if Stash is configured
+    const stashUrl = settings?.stashUrl || process.env.STASH_URL;
+    const apiKey = settings?.stashApiKey;
+    
+    if (!stashUrl) {
+      console.log('⚠️ Stash URL not configured');
+      return res.json({
+        configured: false,
+        connected: false,
+        stashUrl: null,
+        apiKey: null
+      });
+    }
+    
+    // Test connection if configured
+    try {
+      if (!stashSyncService) {
+        console.log('⚠️ StashSyncService not initialized, initializing now...');
+        await initializeStashSyncService();
+      }
+      
+      if (stashSyncService) {
+        console.log('🧪 Testing Stash connection...');
+        const version = await stashSyncService.testConnection();
+        console.log('✅ Stash connection successful:', version);
+        
+        return res.json({
+          configured: true,
+          connected: true,
+          stashUrl: stashUrl,
+          apiKey: apiKey ? '***configured***' : null,
+          version: version
+        });
+      } else {
+        throw new Error('Stash sync service not available');
+      }
+    } catch (connectionError) {
+      console.log('❌ Stash connection failed:', connectionError.message);
+      return res.json({
+        configured: true,
+        connected: false,
+        stashUrl: stashUrl,
+        apiKey: apiKey ? '***configured***' : null,
+        error: connectionError.message
+      });
+    }
+    
+  } catch (error) {
+    console.error('❌ Error checking Stash status:', error);
+    res.status(500).json({
+      configured: false,
+      connected: false,
+      stashUrl: null,
+      apiKey: null,
+      error: error.message
+    });
+  }
+});
+
 // ===== IMAGE PROXY ROUTES =====
 
 // GET /api/stash/image-proxy/* - Proxy images from Stash server  
 router.get('/image-proxy/*', async (req, res) => {
   try {
     const imagePath = req.params[0]; // Get everything after /api/stash/image-proxy/
+    console.log(`[Image Proxy] Raw imagePath: "${imagePath}"`);
+    console.log(`[Image Proxy] Full URL: ${req.originalUrl}`);
     
     // Get settings using cached database utility
     const { getSettings } = require('../databaseUtils');
@@ -148,17 +227,25 @@ router.get('/image-proxy/*', async (req, res) => {
       return res.status(500).send('Stash settings not configured');
     }
     
-    // Stash serves images through specific GraphQL endpoints or image endpoints
-    // We need to extract the image ID from the database and use Stash's image serving API
-    
     let imageUrl;
     
+    // Handle scene screenshot requests
+    if (imagePath.startsWith('scene/') && imagePath.includes('/screenshot')) {
+      const sceneIdMatch = imagePath.match(/scene\/([^\/]+)\/screenshot/);
+      if (sceneIdMatch) {
+        const sceneId = sceneIdMatch[1];
+        const baseUrl = settings.stashUrl.endsWith('/') ? settings.stashUrl.slice(0, -1) : settings.stashUrl;
+        imageUrl = `${baseUrl}/scene/${sceneId}/screenshot`;
+        console.log(`[Image Proxy] Scene screenshot detected - Scene ID: ${sceneId}, URL: ${imageUrl}`);
+      }
+    }
     // If the path is already a full HTTP URL, use it directly
-    if (imagePath.startsWith('http')) {
+    else if (imagePath.startsWith('http')) {
       imageUrl = imagePath;
+      console.log(`[Image Proxy] Full HTTP URL detected: ${imageUrl}`);
     } else {
       // For file paths, we need to find the image by path and get its ID from Stash
-      // Then use Stash's image endpoint: /image/{imageId}/image
+      console.log(`[Image Proxy] Looking for image by path: "${imagePath}"`);
       
       // First, try to find the image ID from our database
       const image = await prisma.stashImage.findFirst({
@@ -175,6 +262,7 @@ router.get('/image-proxy/*', async (req, res) => {
         // Normalize the URL to avoid double slashes
         const baseUrl = settings.stashUrl.endsWith('/') ? settings.stashUrl.slice(0, -1) : settings.stashUrl;
         imageUrl = `${baseUrl}/image/${image.id}/image`;
+        console.log(`[Image Proxy] Found image ID ${image.id} for path, URL: ${imageUrl}`);
       } else {
         // Fallback: try to use the path directly (may not work for all cases)
         console.warn(`Could not find image ID for path: ${imagePath}, trying direct path`);
@@ -183,7 +271,13 @@ router.get('/image-proxy/*', async (req, res) => {
         const cleanPath = imagePath.startsWith('/') ? imagePath.slice(1) : imagePath;
         const baseUrl = settings.stashUrl.endsWith('/') ? settings.stashUrl.slice(0, -1) : settings.stashUrl;
         imageUrl = `${baseUrl}/${cleanPath}`;
+        console.log(`[Image Proxy] Direct path fallback URL: ${imageUrl}`);
       }
+    }
+    
+    if (!imageUrl) {
+      console.error(`[Image Proxy] No image URL generated for path: ${imagePath}`);
+      return res.status(404).send('Image not found');
     }
     
     console.log(`Proxying Stash image: ${imageUrl}`);
@@ -195,7 +289,8 @@ router.get('/image-proxy/*', async (req, res) => {
       responseType: 'stream',
       timeout: 30000,
       headers: {
-        'User-Agent': 'Eddie-Life-Management/1.0'
+        'User-Agent': 'Eddie-Life-Management/1.0',
+        ...(settings.stashApiKey && { 'ApiKey': settings.stashApiKey })
       }
     });
     
@@ -409,6 +504,11 @@ router.get('/scenes', async (req, res) => {
       lastPlayedAt: scene.lastPlayedAt,
       resumeTime: scene.resumeTime,
       playDuration: scene.playDuration,
+      // Image URLs using Stash screenshot API
+      paths: {
+        screenshot: `scene/${scene.id}/screenshot`,
+        image: `scene/${scene.id}/screenshot`
+      },
       performers: scene.performers.map(sp => ({
         id: sp.performer.id,
         name: sp.performer.name
@@ -1031,13 +1131,13 @@ router.get('/clips', async (req, res) => {
     console.log(`📋 Found ${clips.length} clips (page ${page}/${totalPages})`);
     
     res.json({
-      clips,
+      success: true,
+      data: clips,
       pagination: {
-        currentPage: page,
-        totalPages,
-        totalItems: totalClips,
-        itemsPerPage: limit,
-        hasMore: page < totalPages
+        page: page,
+        perPage: limit,
+        total: totalClips,
+        totalPages: totalPages
       }
     });
   } catch (error) {
@@ -1450,10 +1550,11 @@ router.get('/clips/next', async (req, res) => {
       console.log(`🎬 Generating optimized clips for scene: ${selectedScene.title} (${selectedScene.duration}s)`);
       const clipsToCreate = generateOptimizedClips(selectedScene.id, selectedScene.duration, clipDuration);
       
+      // This should never happen now since we create clips for scenes of any length
       if (clipsToCreate.length === 0) {
         return res.status(400).json({ 
-          error: 'Selected scene too short for clip generation',
-          suggestion: 'Scene must be longer than 60 seconds'
+          error: 'Unexpected error: No clips generated for scene',
+          suggestion: 'Please try again or contact support'
         });
       }
       

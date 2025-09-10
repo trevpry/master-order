@@ -1,6 +1,16 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import config from '../../../../config';
+import MusicAudioPlayer from './components/MusicAudioPlayer';
+import MusicBreadcrumb from './components/MusicBreadcrumb';
+import MusicControls from './components/MusicControls';
+import MusicViewNavigation from './components/MusicViewNavigation';
+import MusicArtistsView from './components/MusicArtistsView';
+import MusicAlbumsView from './components/MusicAlbumsView';
+import MusicTracksView from './components/MusicTracksView';
+import MusicCollectionsView from './components/MusicCollectionsView';
+import MusicPlaylistsView from './components/MusicPlaylistsView';
+import LoadingState from '../../../../shared/components/LoadingState';
 import './Music.css';
 
 const Music = () => {
@@ -1135,7 +1145,7 @@ const Music = () => {
       }
 
       console.log('Adding track to playlist:', {
-        ratingKey: track.ratingKey,
+        trackRatingKey: track.ratingKey,
         title: track.title,
         artist: artistName,
         album: albumName,
@@ -1148,7 +1158,7 @@ const Music = () => {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          ratingKey: track.ratingKey,
+          trackRatingKey: track.ratingKey,
           title: track.title,
           artist: artistName,
           album: albumName,
@@ -1229,7 +1239,7 @@ const Music = () => {
               'Content-Type': 'application/json',
             },
             body: JSON.stringify({
-              ratingKey: track.ratingKey,
+              trackRatingKey: track.ratingKey,
               title: track.title,
               artist: artistName,
               album: albumName,
@@ -1299,7 +1309,7 @@ const Music = () => {
     return (
       <div className="music-page">
         <div className="music-loading">
-          <div className="loading-spinner"></div>
+          <LoadingState type="div" />
           <p>Loading your music library...</p>
         </div>
       </div>
@@ -1336,109 +1346,27 @@ const Music = () => {
         </div>
         
         {/* Breadcrumb Navigation */}
-        <div className="breadcrumb-nav">
-          {getBreadcrumbs().map((crumb, index) => (
-            <React.Fragment key={index}>
-              {index > 0 && <span className="breadcrumb-separator">›</span>}
-              <button
-                className={`breadcrumb-item ${index === getBreadcrumbs().length - 1 ? 'current' : ''}`}
-                onClick={crumb.onClick}
-                disabled={index === getBreadcrumbs().length - 1}
-              >
-                {crumb.label}
-              </button>
-            </React.Fragment>
-          ))}
-        </div>
+        <MusicBreadcrumb breadcrumbs={getBreadcrumbs()} />
         
-        <div className="music-controls">
-          <div className="search-section">
-            <input
-              type="text"
-              placeholder="Search artists, albums, or tracks..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              onKeyPress={(e) => e.key === 'Enter' && searchMusic()}
-              className="search-input"
-            />
-            <button onClick={searchMusic} className="search-button">
-              🔍 Search
-            </button>
-          </div>
-          
-          <div className="filter-section">
-            <select 
-              value={selectedSection} 
-              onChange={(e) => filterBySection(e.target.value)}
-              className="section-filter"
-            >
-              <option value="all">All Sections</option>
-              {sections.map(section => (
-                <option key={section.id} value={section.sectionKey}>
-                  {section.title}
-                </option>
-              ))}
-            </select>
-          </div>
-        </div>
+        <MusicControls
+          searchQuery={searchQuery}
+          setSearchQuery={setSearchQuery}
+          onSearch={searchMusic}
+          selectedSection={selectedSection}
+          sections={sections}
+          onFilterBySection={filterBySection}
+        />
 
-        <div className="view-navigation">
-          <button 
-            onClick={() => navigateToView('artists')}
-            className={`nav-button ${activeView === 'artists' ? 'active' : ''}`}
-          >
-            Artists
-          </button>
-          <button 
-            onClick={() => navigateToView('collections')}
-            className={`nav-button ${activeView === 'collections' ? 'active' : ''}`}
-          >
-            Collections
-          </button>
-          <button 
-            onClick={() => navigateToView('playlists')}
-            className={`nav-button ${activeView === 'playlists' ? 'active' : ''}`}
-          >
-            Playlists
-          </button>
-          <button 
-            onClick={async () => {
-              await loadAlbumsView();
-              navigateToView('albums');
-            }}
-            className={`nav-button ${activeView === 'albums' ? 'active' : ''}`}
-          >
-            Albums
-          </button>
-          <button 
-            onClick={async () => {
-              await loadTracksView();
-              navigateToView('tracks');
-            }}
-            className={`nav-button ${activeView === 'tracks' ? 'active' : ''}`}
-          >
-            Tracks
-          </button>
-          {selectedArtist && (
-            <button 
-              onClick={() => navigateToView('albums', { artist: selectedArtist.ratingKey })}
-              className={`nav-button ${activeView === 'albums' && artistRatingKey ? 'active' : ''}`}
-            >
-              Albums ({selectedArtist.title})
-            </button>
-          )}
-          {selectedAlbum && (
-            <button 
-              onClick={() => navigateToView('tracks', { 
-                artist: selectedArtist?.ratingKey || artistRatingKey,
-                album: selectedAlbum.ratingKey 
-              })}
-              className={`nav-button ${activeView === 'tracks' && albumRatingKey ? 'active' : ''}`}
-            >
-              Tracks ({selectedAlbum.title})
-            </button>
-          )}
-        </div>
+        <MusicViewNavigation
+          activeView={activeView}
+          selectedArtist={selectedArtist}
+          selectedAlbum={selectedAlbum}
+          artistRatingKey={artistRatingKey}
+          albumRatingKey={albumRatingKey}
+          onNavigateToView={navigateToView}
+          onLoadAlbumsView={loadAlbumsView}
+          onLoadTracksView={loadTracksView}
+        />
       </div>
 
       {/* Audio Element */}
@@ -1498,506 +1426,78 @@ const Music = () => {
       />
 
       {/* Audio Player Controls */}
-      {currentTrack && (
-        <div className="audio-player">
-          <div className="player-info">
-            <span className="track-title">{currentTrack.title}</span>
-            <span className="track-artist">{currentTrack.grandparentTitle}</span>
-          </div>
-          <div className="player-controls">
-            <button 
-              onClick={() => isPlaying ? stopTrack() : playTrack(currentTrack)}
-              className="play-pause-btn"
-              disabled={isLoading}
-            >
-              {isLoading ? '⏳' : (isPlaying ? '⏸' : '▶')}
-            </button>
-            <div className="progress-container">
-              <input
-                type="range"
-                min="0"
-                max={duration || 0}
-                value={currentTime}
-                onChange={(e) => seekTo(e.target.value)}
-                className="progress-bar"
-              />
-              <div className="time-display">
-                <span>{formatTime(currentTime)}</span>
-                <span>{formatTime(duration)}</span>
-              </div>
-            </div>
-            <div className="volume-container">
-              <span>🔊</span>
-              <input
-                type="range"
-                min="0"
-                max="1"
-                step="0.1"
-                value={volume}
-                onChange={(e) => setVolumeLevel(e.target.value)}
-                className="volume-bar"
-              />
-            </div>
-          </div>
-        </div>
-      )}
+      <MusicAudioPlayer
+        currentTrack={currentTrack}
+        isPlaying={isPlaying}
+        isLoading={loading}
+        currentTime={currentTime}
+        duration={duration}
+        volume={volume}
+        onPlayPause={() => isPlaying ? stopTrack() : playTrack(currentTrack)}
+        onSeek={seekTo}
+        onVolumeChange={setVolumeLevel}
+        formatTime={formatTime}
+      />
 
       <div className="music-content">
         {activeView === 'artists' && (
-          <div className="artists-grid">
-            {artists.length === 0 ? (
-              <div className="empty-state">
-                <p>No artists found. Try adjusting your search or filters.</p>
-              </div>
-            ) : (
-              artists.map(artist => (
-                <div 
-                  key={artist.ratingKey} 
-                  className="artist-card"
-                  onClick={() => selectArtist(artist)}
-                >
-                  {artist.thumb && (
-                    <div className="artist-image">
-                      <img 
-                        src={`${config.plexUrl}${artist.thumb}?X-Plex-Token=${config.plexToken}`}
-                        alt={artist.title}
-                        onError={(e) => {
-                          e.target.style.display = 'none';
-                        }}
-                      />
-                    </div>
-                  )}
-                  <div className="artist-info">
-                    <h3>{artist.title}</h3>
-                  </div>
-                </div>
-              ))
-            )}
-            
-            {/* Load More Button */}
-            {artists.length > 0 && artistsHasMore && (
-              <div className="load-more-container">
-                <button 
-                  className="load-more-button"
-                  onClick={loadMoreArtists}
-                  disabled={artistsLoading}
-                >
-                  {artistsLoading ? 'Loading...' : 'Load More Artists'}
-                </button>
-              </div>
-            )}
-            
-            {/* Loading indicator for pagination */}
-            {artistsLoading && artists.length > 0 && (
-              <div className="pagination-loading">
-                <p>Loading more artists...</p>
-              </div>
-            )}
-          </div>
+          <MusicArtistsView
+            artists={artists}
+            artistsLoading={artistsLoading}
+            artistsHasMore={artistsHasMore}
+            onSelectArtist={selectArtist}
+            onLoadMoreArtists={loadMoreArtists}
+          />
         )}
 
         {activeView === 'albums' && (
-          <div className="albums-section">
-            <div className="section-header">
-              <button 
-                className="back-button" 
-                onClick={goBackToArtists}
-                title="Back to Artists"
-              >
-                ← Back
-              </button>
-              <h2>
-                {selectedArtist ? `Albums by ${selectedArtist.title}` : 'All Albums'}
-              </h2>
-            </div>
-            <div className="albums-grid">
-              {albums.length === 0 ? (
-                <div className="empty-state">
-                  <p>No albums found{selectedArtist ? ' for this artist' : ''}.</p>
-                </div>
-              ) : (
-              albums.map(album => (
-                <div 
-                  key={album.ratingKey} 
-                  className="album-card"
-                >
-                  {album.thumb && (
-                    <div 
-                      className="album-image"
-                      style={{ position: 'relative' }}
-                    >
-                      <img 
-                        src={`${config.plexUrl}${album.thumb}?X-Plex-Token=${config.plexToken}`}
-                        alt={album.title}
-                        onClick={() => selectAlbum(album)}
-                        style={{ cursor: 'pointer', width: '100%', height: '100%' }}
-                        onLoad={() => console.log('Album image loaded:', album.title)}
-                        onError={(e) => {
-                          console.error('Album image failed to load:', {
-                            album: album.title,
-                            thumb: album.thumb,
-                            url: e.target.src,
-                            plexUrl: config.plexUrl,
-                            hasToken: !!config.plexToken
-                          });
-                          e.target.style.display = 'none';
-                        }}
-                      />
-                      
-                      {/* Add to Playlist Button Overlay */}
-                      <div className="album-playlist-overlay">
-                        <div className="album-playlist-dropdown">
-                          <select
-                            onChange={(e) => {
-                              if (e.target.value) {
-                                addAlbumToCustomPlaylist(parseInt(e.target.value), album);
-                                e.target.value = '';
-                              }
-                            }}
-                            defaultValue=""
-                            onClick={(e) => e.stopPropagation()} // Prevent triggering album click
-                          >
-                            <option value="">+ Add Album to...</option>
-                            {playlists
-                              .filter(p => p.type === 'custom')
-                              .map(playlist => (
-                                <option key={playlist.id} value={playlist.id}>
-                                  {playlist.title}
-                                </option>
-                              ))
-                            }
-                          </select>
-                        </div>
-                      </div>
-                    </div>
-                  )}
-                  <div className="album-info">
-                    <h3 onClick={() => selectAlbum(album)} style={{ cursor: 'pointer' }}>
-                      {album.title}
-                    </h3>
-                    {album.year && <span className="album-year">({album.year})</span>}
-                    {album.summary && (
-                      <p className="album-summary">{album.summary}</p>
-                    )}
-                    <div className="album-meta">
-                      {album.genres && album.genres.length > 0 && (
-                        <span className="genres">
-                          {album.genres.slice(0, 2).join(', ')}
-                        </span>
-                      )}
-                      {album.childCount && (
-                        <span className="track-count">
-                          {album.childCount} track{album.childCount !== 1 ? 's' : ''}
-                        </span>
-                      )}
-                    </div>
-                    <div className="album-actions">
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          extractAlbumMetadata(album);
-                        }}
-                        className="extract-metadata-button"
-                        disabled={extractingMetadata.has(album.ratingKey)}
-                      >
-                        {extractingMetadata.has(album.ratingKey) ? (
-                          <>
-                            <span className="spinner">⟳</span>
-                            Extracting...
-                          </>
-                        ) : (
-                          <>
-                            🏷️ Extract Metadata
-                          </>
-                        )}
-                      </button>
-                    </div>
-                    {metadataResults[album.ratingKey] && (
-                      <div className="metadata-results">
-                        <small>
-                          ✅ Metadata extracted: {metadataResults[album.ratingKey].successCount}/
-                          {metadataResults[album.ratingKey].tracksProcessed} tracks
-                        </small>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              ))
-            )}
-            {albumsHasMore && (
-              <div className="pagination-section">
-                <button 
-                  onClick={loadMoreAlbums}
-                  className="load-more-button"
-                  disabled={albumsLoading}
-                >
-                  {albumsLoading ? (
-                    <>
-                      <span className="spinner">⟳</span>
-                      Loading...
-                    </>
-                  ) : (
-                    'Load More Albums'
-                  )}
-                </button>
-              </div>
-            )}
-            </div>
-          </div>
+          <MusicAlbumsView
+            albums={albums}
+            albumsLoading={albumsLoading}
+            albumsHasMore={albumsHasMore}
+            config={config}
+            selectedArtist={selectedArtist}
+            playlists={playlists}
+            extractingMetadata={extractingMetadata}
+            metadataResults={metadataResults}
+            onSelectAlbum={selectAlbum}
+            onLoadMoreAlbums={loadMoreAlbums}
+            onGoBackToArtists={goBackToArtists}
+            onAddAlbumToCustomPlaylist={addAlbumToCustomPlaylist}
+            onExtractAlbumMetadata={extractAlbumMetadata}
+          />
         )}
 
         {activeView === 'tracks' && (
-          <div className="tracks-section">
-            <div className="section-header">
-              <button 
-                className="back-button" 
-                onClick={goBackFromTracks}
-                title={selectedAlbum ? `Back to ${selectedAlbum.title}` : selectedArtist ? `Back to ${selectedArtist.title}` : 'Back to Artists'}
-              >
-                ← Back
-              </button>
-              <h2>
-                {selectedAlbum ? `Tracks from ${selectedAlbum.title}` : 
-                 selectedArtist ? `All tracks by ${selectedArtist.title}` : 
-                 'All Tracks'}
-              </h2>
-            </div>
-            <div className="tracks-list">
-            {!Array.isArray(tracks) || tracks.length === 0 ? (
-              <div className="empty-state">
-                <p>No tracks found{selectedAlbum ? ` for ${selectedAlbum.title}` : ''}.</p>
-              </div>
-            ) : (
-              <div className="tracks-table">
-                <div className="tracks-header">
-                  <span className="track-controls">▶</span>
-                  <span className="track-number">#</span>
-                  <span className="track-title">Title</span>
-                  <span className="track-duration">Duration</span>
-                  <span className="track-size">Size</span>
-                  <span className="track-playlist">Playlist</span>
-                </div>
-                {tracks.map(track => (
-                  <div key={track.ratingKey} className={`track-row ${currentTrack?.ratingKey === track.ratingKey ? 'playing' : ''}`}>
-                    <button 
-                      className={`track-play-button ${currentTrack?.ratingKey === track.ratingKey && isPlaying ? 'playing' : ''}`}
-                      onClick={() => playTrack(track)}
-                      title={currentTrack?.ratingKey === track.ratingKey && isPlaying ? 'Pause' : 'Play'}
-                    >
-                      {currentTrack?.ratingKey === track.ratingKey && isPlaying ? '⏸' : '▶'}
-                    </button>
-                    <span className="track-number">{track.index}</span>
-                    <div className="track-title">
-                      <strong>{track.title}</strong>
-                      {track.originalTitle && track.originalTitle !== track.title && (
-                        <span className="original-title">({track.originalTitle})</span>
-                      )}
-                    </div>
-                    <span className="track-duration">
-                      {formatDuration(track.duration)}
-                    </span>
-                    <span className="track-size">
-                      {formatFileSize(track.media?.[0]?.parts?.[0]?.size)}
-                    </span>
-                    <div className="track-playlist">
-                      <div className="playlist-dropdown">
-                        <select
-                          onChange={(e) => {
-                            if (e.target.value) {
-                              addTrackToCustomPlaylist(parseInt(e.target.value), track);
-                              e.target.value = '';
-                            }
-                          }}
-                          defaultValue=""
-                        >
-                          <option value="">+ Add to...</option>
-                          {playlists
-                            .filter(p => p.type === 'custom')
-                            .map(playlist => (
-                              <option key={playlist.id} value={playlist.id}>
-                                {playlist.title}
-                              </option>
-                            ))
-                          }
-                        </select>
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-            {tracksHasMore && (
-              <div className="pagination-section">
-                <button 
-                  onClick={loadMoreTracks}
-                  className="load-more-button"
-                  disabled={tracksLoading}
-                >
-                  {tracksLoading ? (
-                    <>
-                      <span className="spinner">⟳</span>
-                      Loading...
-                    </>
-                  ) : (
-                    'Load More Tracks'
-                  )}
-                </button>
-              </div>
-            )}
-            </div>
-          </div>
+          <MusicTracksView
+            tracks={tracks}
+            tracksLoading={tracksLoading}
+            tracksHasMore={tracksHasMore}
+            selectedAlbum={selectedAlbum}
+            selectedArtist={selectedArtist}
+            currentTrack={currentTrack}
+            isPlaying={isPlaying}
+            playlists={playlists}
+            onGoBackFromTracks={goBackFromTracks}
+            onPlayTrack={playTrack}
+            onLoadMoreTracks={loadMoreTracks}
+            onAddTrackToCustomPlaylist={addTrackToCustomPlaylist}
+            formatDuration={formatDuration}
+            formatFileSize={formatFileSize}
+          />
         )}
 
         {activeView === 'collections' && (
-          <div className="collections-grid">
-            {collections.length === 0 ? (
-              <div className="empty-state">
-                <p>No collections found.</p>
-              </div>
-            ) : (
-              collections.map(collection => (
-                <div key={collection.value} className="collection-card">
-                  <div className="collection-info">
-                    <h3>{collection.label}</h3>
-                    <div className="collection-meta">
-                      <span className="collection-type">Music Collection</span>
-                    </div>
-                  </div>
-                </div>
-              ))
-            )}
-          </div>
+          <MusicCollectionsView collections={collections} />
         )}
 
         {activeView === 'playlists' && (
-          <div className="playlists-section">
-            <div className="playlists-header">
-              <h2>Playlists</h2>
-              <button 
-                className="create-playlist-button"
-                onClick={() => setShowCreatePlaylistModal(true)}
-              >
-                + Create Custom Playlist
-              </button>
-            </div>
-            
-            <div className="playlists-grid">
-              {playlists.length === 0 ? (
-                <div className="empty-state">
-                  <p>No playlists found.</p>
-                  <p>Create your first custom playlist to get started!</p>
-                </div>
-              ) : (
-                playlists.map(playlist => (
-                  <div key={`${playlist.type}-${playlist.ratingKey || playlist.id}`} className={`playlist-card ${playlist.type}-playlist`}>
-                    <div className="playlist-type-badge">
-                      {playlist.type === 'plex' ? 'Plex' : 'Custom'}
-                    </div>
-                    
-                    {playlist.type === 'custom' && (
-                      <div className="playlist-actions">
-                        <button 
-                          className="delete-playlist-button"
-                          onClick={() => deleteCustomPlaylist(playlist.id)}
-                          title="Delete Playlist"
-                        >
-                          🗑️
-                        </button>
-                      </div>
-                    )}
-                    
-                    {playlist.thumb && playlist.type === 'plex' && (
-                      <div className="playlist-thumbnail">
-                        <img 
-                          src={`${config.plexUrl}${playlist.thumb}?X-Plex-Token=${config.plexToken}`}
-                          alt={playlist.title}
-                          onError={(e) => {
-                            e.target.style.display = 'none';
-                          }}
-                        />
-                      </div>
-                    )}
-                    
-                    <div className="playlist-info">
-                      <h3>{playlist.title}</h3>
-                      {(playlist.summary || playlist.description) && (
-                        <p className="playlist-summary">{playlist.summary || playlist.description}</p>
-                      )}
-                      
-                      <div className="playlist-meta">
-                        <span className="track-count">
-                          {playlist.leafCount || playlist.tracks?.length || 0} track{(playlist.leafCount || playlist.tracks?.length || 0) !== 1 ? 's' : ''}
-                        </span>
-                        
-                        {playlist.duration && (
-                          <span className="playlist-duration">
-                            {Math.floor(playlist.duration / 60000)}:{String(Math.floor((playlist.duration % 60000) / 1000)).padStart(2, '0')}
-                          </span>
-                        )}
-                        
-                        {playlist.smart && (
-                          <span className="smart-playlist">Smart Playlist</span>
-                        )}
-                        
-                        {playlist.type === 'custom' && playlist.isPublic && (
-                          <span className="public-playlist">Public</span>
-                        )}
-                        
-                        {playlist.type === 'custom' && (
-                          <span className="playlist-created">
-                            Created {new Date(playlist.createdAt).toLocaleDateString()}
-                          </span>
-                        )}
-                      </div>
-                      
-                      {/* Show preview tracks for Plex playlists */}
-                      {playlist.items && playlist.items.length > 0 && (
-                        <div className="playlist-preview">
-                          <h4>Tracks:</h4>
-                          <div className="playlist-tracks">
-                            {playlist.items.slice(0, 5).map((item, index) => (
-                              <div key={`${item.ratingKey}-${index}`} className="playlist-track">
-                                <span className="track-index">{item.index}.</span>
-                                <span className="track-title">
-                                  {item.track ? item.track.title : item.album ? item.album.title : 'Unknown'}
-                                </span>
-                              </div>
-                            ))}
-                            {playlist.items.length > 5 && (
-                              <div className="playlist-more">
-                                ...and {playlist.items.length - 5} more tracks
-                              </div>
-                            )}
-                          </div>
-                        </div>
-                      )}
-                      
-                      {/* Show preview tracks for Custom playlists */}
-                      {playlist.tracks && playlist.tracks.length > 0 && (
-                        <div className="playlist-preview">
-                          <h4>Tracks:</h4>
-                          <div className="playlist-tracks">
-                            {playlist.tracks.slice(0, 5).map((track, index) => (
-                              <div key={track.id} className="playlist-track">
-                                <span className="track-index">{index + 1}.</span>
-                                <span className="track-title">{track.title}</span>
-                                {track.artist && <span className="track-artist">by {track.artist}</span>}
-                              </div>
-                            ))}
-                            {playlist.tracks.length > 5 && (
-                              <div className="playlist-more">
-                                ...and {playlist.tracks.length - 5} more tracks
-                              </div>
-                            )}
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                ))
-              )}
-            </div>
-          </div>
+          <MusicPlaylistsView
+            playlists={playlists}
+            config={config}
+            onSetShowCreatePlaylistModal={setShowCreatePlaylistModal}
+            onDeleteCustomPlaylist={deleteCustomPlaylist}
+          />
         )}
       </div>
       
@@ -2076,7 +1576,7 @@ const Music = () => {
               >
                 {creatingPlaylist ? (
                   <>
-                    <span className="spinner">⟳</span>
+                    <LoadingState type="spinner" />
                     Creating...
                   </>
                 ) : (

@@ -53,7 +53,7 @@ router.get('/', async (req, res) => {
   try {
     const backgrounds = await prisma.backgroundImage.findMany({
       orderBy: {
-        uploadedAt: 'desc'
+        updatedAt: 'desc'
       }
     });
 
@@ -108,11 +108,9 @@ router.post('/upload', backgroundUpload.array('backgrounds'), async (req, res) =
           data: {
             filename: file.filename,
             originalName: file.originalname,
-            filePath: file.path,
-            mimeType: file.mimetype,
-            fileSize: file.size,
-            tags: tags || null,
-            uploadedAt: new Date()
+            path: file.path,
+            mimetype: file.mimetype,
+            size: file.size
           }
         });
 
@@ -164,8 +162,8 @@ router.get('/:id/image', async (req, res) => {
     }
 
     // Check if file exists
-    if (!fs.existsSync(background.filePath)) {
-      console.error('📸 [BACKGROUNDS] File not found:', background.filePath);
+    if (!fs.existsSync(background.path)) {
+      console.error('📸 [BACKGROUNDS] File not found:', background.path);
       return res.status(404).json({
         success: false,
         error: 'Background file not found on disk'
@@ -173,11 +171,11 @@ router.get('/:id/image', async (req, res) => {
     }
 
     // Set appropriate headers
-    res.setHeader('Content-Type', background.mimeType);
+    res.setHeader('Content-Type', background.mimetype);
     res.setHeader('Cache-Control', 'public, max-age=31536000'); // Cache for 1 year
 
     // Stream the file
-    const stream = fs.createReadStream(background.filePath);
+    const stream = fs.createReadStream(background.path);
     stream.pipe(res);
   } catch (error) {
     console.error('📸 [BACKGROUNDS] Error serving image:', error);
@@ -209,9 +207,9 @@ router.delete('/:id', async (req, res) => {
 
     // Delete file from filesystem
     try {
-      if (fs.existsSync(background.filePath)) {
-        fs.unlinkSync(background.filePath);
-        console.log('📸 [BACKGROUNDS] Deleted file:', background.filePath);
+      if (fs.existsSync(background.path)) {
+        fs.unlinkSync(background.path);
+        console.log('📸 [BACKGROUNDS] Deleted file:', background.path);
       }
     } catch (fileError) {
       console.warn('📸 [BACKGROUNDS] Failed to delete file:', fileError);
@@ -318,12 +316,9 @@ router.post('/download', async (req, res) => {
       data: {
         filename: generatedFilename,
         originalName: filename || downloadUrl.pathname.split('/').pop() || 'downloaded-image',
-        filePath: filePath,
-        mimeType: contentType,
-        fileSize: buffer.length,
-        tags: tags || null,
-        sourceUrl: url,
-        uploadedAt: new Date()
+        path: filePath,
+        mimetype: contentType,
+        size: buffer.length
       }
     });
 
@@ -466,12 +461,9 @@ router.post('/download-gallery-bulk', async (req, res) => {
           data: {
             filename: generatedFilename,
             originalName: `gallery-image-${i + 1}`,
-            filePath: filePath,
-            mimeType: contentType,
-            fileSize: buffer.length,
-            tags: tags || `gallery:${new URL(galleryUrl).hostname}`,
-            sourceUrl: imageUrl,
-            uploadedAt: new Date()
+            path: filePath,
+            mimetype: contentType,
+            size: buffer.length
           }
         });
 

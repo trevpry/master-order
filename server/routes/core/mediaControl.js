@@ -261,6 +261,25 @@ function createMediaControlRoutes(prisma, services) {
         console.log(`Re-selecting short story for item ${itemId}, clearing cached artwork...`);
         await artworkCache.cleanupArtwork(parseInt(itemId));
       }
+
+      // Check if this update sets reading completion to 100% and auto-mark as watched
+      if (req.body.bookPercentRead === 100 || 
+          (req.body.bookCurrentPage && req.body.bookPageCount && req.body.bookCurrentPage >= req.body.bookPageCount)) {
+        
+        // Get the current item to check media type
+        const currentItem = await prisma.customOrderItem.findUnique({
+          where: { id: parseInt(itemId) }
+        });
+        
+        if (currentItem && (currentItem.mediaType === 'book' || currentItem.mediaType === 'comic' || currentItem.mediaType === 'shortstory')) {
+          updateData.isWatched = true;
+          console.log(`Setting ${currentItem.mediaType} "${currentItem.title}" as watched (100% completion)`);
+        }
+      }
+
+      // Add any additional fields from req.body that weren't explicitly destructured
+      if (req.body.bookPercentRead !== undefined) updateData.bookPercentRead = req.body.bookPercentRead;
+      if (req.body.bookCurrentPage !== undefined) updateData.bookCurrentPage = req.body.bookCurrentPage;
       
       const item = await prisma.customOrderItem.update({
         where: { id: parseInt(itemId) },

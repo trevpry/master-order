@@ -27,6 +27,20 @@ import DescriptionDisplay from './components/DescriptionDisplay';
 import PreviewLabel from './components/PreviewLabel';
 import TypeIndicator from './components/TypeIndicator';
 import ReadingProgressDisplay from './components/ReadingProgressDisplay';
+import MovieSearchResults from './components/MovieSearchResults';
+import BookSearchResults from './components/BookSearchResults';
+import ComicSearchResults from './components/ComicSearchResults';
+import OrderCard from './components/OrderCard';
+import OrderListView from './components/OrderListView';
+import MovieFormModal from './components/modals/MovieFormModal';
+import BookFormModal from './components/modals/BookFormModal';
+import CmroBulkImportModal from './components/modals/CmroBulkImportModal';
+import ComicFormModal from './components/modals/ComicFormModal';
+import ShortStoryFormModal from './components/modals/ShortStoryFormModal';
+import WebVideoFormModal from './components/modals/WebVideoFormModal';
+import EpisodeFormModal from './components/modals/EpisodeFormModal';
+import BulkImportFormModal from './components/modals/BulkImportFormModal';
+import DetailedBookFormModal from './components/modals/DetailedBookFormModal';
 
 // Utility imports
 import {
@@ -223,14 +237,14 @@ function CustomOrders() {
       
       // Fetch background images
       const backgroundsResponse = await fetch(`${config.apiBaseUrl}/api/backgrounds`);
-      const backgrounds = backgroundsResponse.ok ? await backgroundsResponse.json() : [];
+      const backgroundsData = backgroundsResponse.ok ? await backgroundsResponse.json() : { backgrounds: [] };
       
       // Fetch background galleries
       const galleriesResponse = await fetch(`${config.apiBaseUrl}/api/background-galleries`);
-      const galleries = galleriesResponse.ok ? await galleriesResponse.json() : [];
+      const galleriesData = galleriesResponse.ok ? await galleriesResponse.json() : { galleries: [] };
       
-      setAvailableBackgrounds(backgrounds);
-      setAvailableGalleries(galleries);
+      setAvailableBackgrounds(backgroundsData.backgrounds || []);
+      setAvailableGalleries(galleriesData.galleries || []);
     } catch (error) {
       console.error('Error fetching available backgrounds:', error);
       setAvailableBackgrounds([]);
@@ -3311,1491 +3325,160 @@ function CustomOrders() {
           )}
         </div>
       ) : (
-        <>
-          {/* Create New Order Button */}
-          <div className="custom-orders-header">            <Button
-              onClick={() => {
-                setShowCreateForm(!showCreateForm);
-                setFormData({ 
-                  name: '', 
-                  description: '', 
-                  icon: '', 
-                  playlistRatingKey: '', 
-                  customPlaylistId: '',
-                  backgroundImageId: '',
-                  backgroundGalleryId: ''
-                });
-                setEditingOrder(null);
-                setMessage('');
-                setSelectedParentId(null);
-                if (!showCreateForm) {
-                  fetchAvailableParents(); // Load available parent orders when opening form
-                  fetchAvailablePlaylists(); // Load available playlists when opening form
-                  fetchAvailableBackgrounds(); // Load available backgrounds when opening form
-                }
-              }}
-            >
-              {showCreateForm ? 'Cancel' : 'Create New Custom Order'}
-            </Button>
-          </div>
-
-      {/* Create Form */}
-      {showCreateForm && (
-        <div className="create-form">
-          <h3>Create New Custom Order</h3>
-          <form onSubmit={handleCreateOrder}>
-            <div className="form-group">
-              <label htmlFor="orderName">Order Name *</label>
-              <input
-                type="text"
-                id="orderName"
-                value={formData.name}
-                onChange={(e) => setFormData({...formData, name: e.target.value})}
-                placeholder="e.g., Marvel Movies & Shows"
-                required
-              />            </div>
-            <div className="form-group">
-              <label htmlFor="orderDescription">Description</label>
-              <textarea
-                id="orderDescription"
-                value={formData.description}
-                onChange={(e) => setFormData({...formData, description: e.target.value})}
-                placeholder="Optional description of this custom order..."
-                rows="3"
-              />
-            </div>
-            <div className="form-group">
-              <label htmlFor="parentOrder">Parent Order (Optional)</label>
-              <select
-                id="parentOrder"
-                value={selectedParentId || ''}
-                onChange={(e) => setSelectedParentId(e.target.value || null)}
-              >
-                <option value="">-- None (Top-level order) --</option>
-                {availableParents.map(parent => (
-                  <option key={parent.id} value={parent.id}>
-                    {parent.name}
-                  </option>
-                ))}
-              </select>
-              <small className="form-help">
-                If selected, this order will become a sub-order and won't be independently selectable by "Get Up Next"
-              </small>
-            </div>
-            <div className="form-group">
-              <label htmlFor="orderIcon">Icon (SVG)</label>
-              <textarea
-                id="orderIcon"
-                value={formData.icon}
-                onChange={(e) => setFormData({...formData, icon: e.target.value})}
-                placeholder="Paste SVG icon code here (optional)..."
-                rows="3"
-              />
-              {formData.icon && (
-                <div className="icon-preview">
-                  <PreviewLabel />
-                  <div 
-                    className="custom-order-icon" 
-                    dangerouslySetInnerHTML={{__html: formData.icon}}
-                  />
-                </div>
-              )}
-            </div>
-            
-            {/* Playlist Selection Section */}
-            <div className="form-section">
-              <h4>Music Playlist Integration (Optional)</h4>
-              <HelpText>Link this custom order to a music playlist to enhance the storytelling experience.</HelpText>
-              
-              <div className="form-group">
-                <label htmlFor="plexPlaylist">Plex Playlist</label>
-                <select
-                  id="plexPlaylist"
-                  value={formData.playlistRatingKey}
-                  onChange={(e) => {
-                    setFormData({
-                      ...formData, 
-                      playlistRatingKey: e.target.value,
-                      customPlaylistId: '' // Clear custom playlist if Plex is selected
-                    });
-                  }}
-                  disabled={playlistsLoading}
-                >
-                  <option value="">-- Select Plex Playlist --</option>
-                  {(availablePlaylists.plex || []).map(playlist => (
-                    <option key={playlist.ratingKey} value={playlist.ratingKey}>
-                      {playlist.title} ({playlist.leafCount || 0} tracks)
-                    </option>
-                  ))}
-                </select>
-                {playlistsLoading && <small className="form-help">Loading playlists...</small>}
-              </div>
-              
-              <FormSeparator />
-              
-              <div className="form-group">
-                <label htmlFor="customPlaylist">Custom Playlist</label>
-                <select
-                  id="customPlaylist"
-                  value={formData.customPlaylistId}
-                  onChange={(e) => {
-                    setFormData({
-                      ...formData, 
-                      customPlaylistId: e.target.value,
-                      playlistRatingKey: '' // Clear Plex playlist if custom is selected
-                    });
-                  }}
-                  disabled={playlistsLoading}
-                >
-                  <option value="">-- Select Custom Playlist --</option>
-                  {(availablePlaylists.custom || []).map(playlist => (
-                    <option key={playlist.id} value={playlist.id.toString()}>
-                      {playlist.title} ({playlist.trackCount || 0} tracks)
-                    </option>
-                  ))}
-                </select>
-              </div>
-              
-              {(formData.playlistRatingKey || formData.customPlaylistId) && (
-                <div className="form-help">
-                  <strong>Note:</strong> The selected playlist will be associated with this custom order and can be used for enhanced media experiences.
-                </div>
-              )}
-            </div>
-            
-            {/* Background Selection Section */}
-            <div className="form-section">
-              <h4>Background Image Integration (Optional)</h4>
-              <HelpText>Link this custom order to a background image or gallery to enhance the visual experience.</HelpText>
-              
-              <div className="form-group">
-                <label htmlFor="backgroundImage">Single Background Image</label>
-                <select
-                  id="backgroundImage"
-                  value={formData.backgroundImageId}
-                  onChange={(e) => {
-                    setFormData({
-                      ...formData, 
-                      backgroundImageId: e.target.value,
-                      backgroundGalleryId: '' // Clear gallery if single image is selected
-                    });
-                  }}
-                  disabled={backgroundsLoading}
-                >
-                  <option value="">-- Select Background Image --</option>
-                  {availableBackgrounds.map(bg => (
-                    <option key={bg.id} value={bg.id.toString()}>
-                      {bg.originalName} ({bg.width}x{bg.height})
-                    </option>
-                  ))}
-                </select>
-                {backgroundsLoading && <small className="form-help">Loading backgrounds...</small>}
-              </div>
-              
-              <FormSeparator />
-              
-              <div className="form-group">
-                <label htmlFor="backgroundGallery">Background Gallery</label>
-                <select
-                  id="backgroundGallery"
-                  value={formData.backgroundGalleryId}
-                  onChange={(e) => {
-                    setFormData({
-                      ...formData, 
-                      backgroundGalleryId: e.target.value,
-                      backgroundImageId: '' // Clear single image if gallery is selected
-                    });
-                  }}
-                  disabled={backgroundsLoading}
-                >
-                  <option value="">-- Select Background Gallery --</option>
-                  {availableGalleries.map(gallery => (
-                    <option key={gallery.id} value={gallery.id.toString()}>
-                      {gallery.name} ({gallery.images?.length || 0} images)
-                    </option>
-                  ))}
-                </select>
-              </div>
-              
-              {(formData.backgroundImageId || formData.backgroundGalleryId) && (
-                <div className="form-help">
-                  <strong>Note:</strong> The selected background will be associated with this custom order and accessible via the Android API.
-                </div>
-              )}
-            </div>
-            
-            <div className="form-actions">
-              <Button type="submit">Create Order</Button>
-              <Button 
-                type="button" 
-                onClick={() => setShowCreateForm(false)}
-                className="secondary"
-              >
-                Cancel
-              </Button>
-            </div>
-          </form>
-        </div>
-      )}
-
-      {/* Edit Form */}
-      {editingOrder && (
-        <div className="create-form">
-          <h3>Edit Custom Order</h3>
-          <form onSubmit={handleUpdateOrder}>
-            <div className="form-group">
-              <label htmlFor="editOrderName">Order Name *</label>
-              <input
-                type="text"
-                id="editOrderName"
-                value={formData.name}
-                onChange={(e) => setFormData({...formData, name: e.target.value})}
-                placeholder="e.g., Marvel Movies & Shows"
-                required
-              />
-            </div>
-            <div className="form-group">
-              <label htmlFor="editOrderDescription">Description</label>
-              <textarea
-                id="editOrderDescription"
-                value={formData.description}
-                onChange={(e) => setFormData({...formData, description: e.target.value})}
-                placeholder="Optional description of this custom order..."
-                rows="3"
-              />
-            </div>
-            <div className="form-group">
-              <label htmlFor="editOrderIcon">Icon (SVG)</label>
-              <textarea
-                id="editOrderIcon"
-                value={formData.icon}
-                onChange={(e) => setFormData({...formData, icon: e.target.value})}
-                placeholder="Paste SVG icon code here (optional)..."
-                rows="3"              />
-              {formData.icon && (
-                <div className="icon-preview">
-                  <PreviewLabel />
-                  <div 
-                    className="custom-order-icon" 
-                    dangerouslySetInnerHTML={{__html: formData.icon}}
-                  />
-                </div>
-              )}
-            </div>
-            
-            {/* Playlist Selection Section */}
-            <div className="form-section">
-              <h4>Music Playlist Integration (Optional)</h4>
-              <p className="form-help">Link this custom order to a music playlist to enhance the storytelling experience.</p>
-              
-              <div className="form-group">
-                <label htmlFor="editPlexPlaylist">Plex Playlist</label>
-                <select
-                  id="editPlexPlaylist"
-                  value={formData.playlistRatingKey}
-                  onChange={(e) => {
-                    setFormData({
-                      ...formData, 
-                      playlistRatingKey: e.target.value,
-                      customPlaylistId: '' // Clear custom playlist if Plex is selected
-                    });
-                  }}
-                  disabled={playlistsLoading}
-                >
-                  <option value="">-- Select Plex Playlist --</option>
-                  {(availablePlaylists.plex || []).map(playlist => (
-                    <option key={playlist.ratingKey} value={playlist.ratingKey}>
-                      {playlist.title} ({playlist.leafCount || 0} tracks)
-                    </option>
-                  ))}
-                </select>
-                {playlistsLoading && <small className="form-help">Loading playlists...</small>}
-              </div>
-              
-              <FormSeparator />
-              
-              <div className="form-group">
-                <label htmlFor="editCustomPlaylist">Custom Playlist</label>
-                <select
-                  id="editCustomPlaylist"
-                  value={formData.customPlaylistId}
-                  onChange={(e) => {
-                    setFormData({
-                      ...formData, 
-                      customPlaylistId: e.target.value,
-                      playlistRatingKey: '' // Clear Plex playlist if custom is selected
-                    });
-                  }}
-                  disabled={playlistsLoading}
-                >
-                  <option value="">-- Select Custom Playlist --</option>
-                  {(availablePlaylists.custom || []).map(playlist => (
-                    <option key={playlist.id} value={playlist.id.toString()}>
-                      {playlist.title} ({playlist.trackCount || 0} tracks)
-                    </option>
-                  ))}
-                </select>
-              </div>
-              
-              {(formData.playlistRatingKey || formData.customPlaylistId) && (
-                <div className="form-help">
-                  <strong>Note:</strong> The selected playlist will be associated with this custom order and can be used for enhanced media experiences.
-                </div>
-              )}
-            </div>
-            
-            {/* Background Selection Section */}
-            <div className="form-section">
-              <h4>Background Image Integration (Optional)</h4>
-              <p className="form-help">Link this custom order to a background image or gallery to enhance the visual experience.</p>
-              
-              <div className="form-group">
-                <label htmlFor="editBackgroundImage">Single Background Image</label>
-                <select
-                  id="editBackgroundImage"
-                  value={formData.backgroundImageId}
-                  onChange={(e) => {
-                    setFormData({
-                      ...formData, 
-                      backgroundImageId: e.target.value,
-                      backgroundGalleryId: '' // Clear gallery if single image is selected
-                    });
-                  }}
-                  disabled={backgroundsLoading}
-                >
-                  <option value="">-- Select Background Image --</option>
-                  {availableBackgrounds.map(bg => (
-                    <option key={bg.id} value={bg.id.toString()}>
-                      {bg.originalName} ({bg.width}x{bg.height})
-                    </option>
-                  ))}
-                </select>
-                {backgroundsLoading && <small className="form-help">Loading backgrounds...</small>}
-              </div>
-              
-              <FormSeparator />
-              
-              <div className="form-group">
-                <label htmlFor="editBackgroundGallery">Background Gallery</label>
-                <select
-                  id="editBackgroundGallery"
-                  value={formData.backgroundGalleryId}
-                  onChange={(e) => {
-                    setFormData({
-                      ...formData, 
-                      backgroundGalleryId: e.target.value,
-                      backgroundImageId: '' // Clear single image if gallery is selected
-                    });
-                  }}
-                  disabled={backgroundsLoading}
-                >
-                  <option value="">-- Select Background Gallery --</option>
-                  {availableGalleries.map(gallery => (
-                    <option key={gallery.id} value={gallery.id.toString()}>
-                      {gallery.name} ({gallery.images?.length || 0} images)
-                    </option>
-                  ))}
-                </select>
-              </div>
-              
-              {(formData.backgroundImageId || formData.backgroundGalleryId) && (
-                <div className="form-help">
-                  <strong>Note:</strong> The selected background will be associated with this custom order and accessible via the Android API.
-                </div>
-              )}
-            </div>
-            
-            <div className="form-actions">
-              <Button type="submit" className="primary">Update Order</Button>
-              <Button 
-                type="button" 
-                onClick={() => {
-                  setEditingOrder(null);
-                  setFormData({ name: '', description: '', icon: '' });
-                  setMessage('');
-                }}
-                className="secondary"
-              >
-                Cancel
-              </Button>
-            </div>
-          </form>
-        </div>
-      )}
-
-      {/* Custom Orders List */}
-      <div className="orders-list">
-        {customOrders.length === 0 ? (
-          <EmptyState title="No custom orders yet. Create your first custom order to get started!" />
-        ) : (
-          <div className="orders-grid">
-            {customOrders.map(order => (
-              <div key={order.id} className={`order-card ${order.isActive ? 'active' : 'inactive'}`}>                <div className="order-header">
-                  <div className="order-title-section">
-                    <div className="title-with-icon">
-                      <h3 
-                        className="clickable-title"
-                        onClick={() => handleViewOrder(order)}
-                      >
-                        <InlineIcon icon={order.icon} />
-                        <HierarchyIndicator parentOrderName={order.parentOrder?.name} />
-                        {order.name}
-                        <SubOrdersBadge count={order.subOrders?.length} />
-                      </h3>
-                    </div>
-                    <DescriptionDisplay description={order.description} />
-                  </div>
-                  <StatusIndicator isActive={order.isActive} />
-                </div>
-
-                <div className="order-stats">
-                  <Stat label="Total Items" value={order.items.length} />
-                  <Stat label="Completed" value={order.items.filter(item => item.isWatched).length} />
-                </div>                
-                
-                <div className="order-meta">
-                  <DateDisplay date={order.createdAt} label="Created" />
-                  {(order.plexPlaylist || order.customPlaylist) && (
-                    <PlaylistDisplay order={order} />
-                  )}
-                </div>
-
-                <div className="order-actions">
-                  <Button
-                    onClick={() => handleToggleActive(order.id, order.isActive)}
-                    className="secondary"
-                    size="small"
-                  >
-                    {order.isActive ? 'Deactivate' : 'Activate'}
-                  </Button>
-                  <Button
-                    onClick={() => handleViewOrder(order)}
-                    className="primary"
-                    size="small"
-                  >
-                    View Items
-                  </Button>
-                  <Button
-                    onClick={() => handleEditOrder(order)}
-                    className="secondary"
-                    size="small"
-                  >
-                    Edit
-                  </Button>
-                  <Button
-                    onClick={() => handleDeleteOrder(order.id)}
-                    className="danger"
-                    size="small"
-                  >
-                    Delete
-                  </Button>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-
-        </>
+        <OrderListView
+          showCreateForm={showCreateForm}
+          setShowCreateForm={setShowCreateForm}
+          formData={formData}
+          setFormData={setFormData}
+          editingOrder={editingOrder}
+          setEditingOrder={setEditingOrder}
+          setMessage={setMessage}
+          selectedParentId={selectedParentId}
+          setSelectedParentId={setSelectedParentId}
+          customOrders={customOrders}
+          availableParents={availableParents}
+          availablePlaylists={availablePlaylists}
+          availableBackgrounds={availableBackgrounds}
+          availableGalleries={availableGalleries}
+          backgroundsLoading={backgroundsLoading}
+          playlistsLoading={playlistsLoading}
+          fetchAvailableParents={fetchAvailableParents}
+          fetchAvailablePlaylists={fetchAvailablePlaylists}
+          fetchAvailableBackgrounds={fetchAvailableBackgrounds}
+          onCreateOrder={handleCreateOrder}
+          onUpdateOrder={handleUpdateOrder}
+          onViewOrder={handleViewOrder}
+          onToggleActive={handleToggleActive}
+          onEditOrder={handleEditOrder}
+          onDeleteOrder={handleDeleteOrder}
+        />
       )}
 
       {/* Movie Form Modal */}
-      {showMovieForm && (
-        <div className="modal-overlay">
-          <div className="modal-content">
-            <div className="modal-header">
-              <h3>{editingItem ? 'Edit Movie' : 'Add Movie'}</h3>
-              <Button
-                onClick={() => {
-                  setShowMovieForm(false);
-                  setMovieFormData({ title: '', year: '' });
-                  setMovieSearchResults([]);
-                  setEditingItem(null);
-                }}
-                className="secondary"
-                size="small"
-              >
-                ✕
-              </Button>
-            </div>
-            
-            <form onSubmit={handleSearchMovies} className="movie-form">
-              <div className="form-group">
-                <label htmlFor="movieTitle">Movie Title *</label>
-                <input
-                  type="text"
-                  id="movieTitle"
-                  value={movieFormData.title}
-                  onChange={(e) => setMovieFormData({
-                    ...movieFormData,
-                    title: e.target.value
-                  })}
-                  placeholder="e.g., The Avengers"
-                  required
-                />
-              </div>
-              
-              <div className="form-group">
-                <label htmlFor="movieYear">Year (optional)</label>
-                <input
-                  type="number"
-                  id="movieYear"
-                  min="1800"
-                  max="2030"
-                  value={movieFormData.year}
-                  onChange={(e) => setMovieFormData({
-                    ...movieFormData,
-                    year: e.target.value
-                  })}
-                  placeholder="e.g., 2012"
-                />
-                <small>Adding a year helps find the correct movie when multiple versions exist</small>
-              </div>
-              
-              <div className="form-actions">
-                <Button 
-                  type="submit" 
-                  disabled={movieSearchLoading}
-                  className="primary"
-                >
-                  {movieSearchLoading ? 'Searching...' : (editingItem ? 'Update Movie' : 'Search & Add Movie')}
-                </Button>
-                <Button
-                  type="button"
-                  onClick={() => {
-                    setShowMovieForm(false);
-                    setMovieFormData({ title: '', year: '' });
-                    setMovieSearchResults([]);
-                    setEditingItem(null);
-                  }}
-                  className="secondary"
-                >
-                  Cancel
-                </Button>
-              </div>
-            </form>
-            
-            {/* Movie Search Results */}
-            {movieSearchResults.length > 1 && (
-              <div className="search-results-section">
-                <h4>Multiple movies found - Please select one:</h4>
-                <div className="search-results">
-                  {movieSearchResults.map(movie => (
-                    <div key={movie.ratingKey} className="search-result-item">
-                      <div className="result-info">
-                        <h4>{movie.title}</h4>
-                        {movie.year && <p>({movie.year})</p>}
-                        <TypeIndicator type="Movie" />
-                      </div>
-                      <Button
-                        onClick={() => handleSelectMovie(movie)}
-                        className="primary"
-                        size="small"
-                      >
-                        Select
-                      </Button>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
-      )}
+      <MovieFormModal
+        show={showMovieForm}
+        editingItem={editingItem}
+        movieFormData={movieFormData}
+        setMovieFormData={setMovieFormData}
+        movieSearchLoading={movieSearchLoading}
+        movieSearchResults={movieSearchResults}
+        onSubmit={handleSearchMovies}
+        onSelectMovie={handleSelectMovie}
+        onClose={() => {
+          setShowMovieForm(false);
+          setMovieFormData({ title: '', year: '' });
+          setMovieSearchResults([]);
+          setEditingItem(null);
+        }}
+      />
 
       {/* Episode Form Modal */}
-      {showEpisodeForm && (
-        <div className="modal-overlay">
-          <div className="modal-content">            <div className="modal-header">
-              <h3>{editingItem ? 'Edit TV Episode' : 'Add TV Episode'}</h3>
-              <Button
-                onClick={() => {
-                  setShowEpisodeForm(false);
-                  setEpisodeFormData({ series: '', season: '', episode: '' });
-                  setEditingItem(null);
-                }}
-                className="secondary"
-                size="small"
-              >
-                ✕
-              </Button>
-            </div>
-            
-            <form onSubmit={handleSearchTVEpisode} className="episode-form">
-              <div className="form-group">
-                <label htmlFor="series">Series Name *</label>
-                <input
-                  type="text"
-                  id="series"
-                  value={episodeFormData.series}
-                  onChange={(e) => setEpisodeFormData({
-                    ...episodeFormData,
-                    series: e.target.value
-                  })}
-                  placeholder="e.g., Breaking Bad"
-                  required
-                />
-              </div>
-              
-              <div className="form-row">
-                <div className="form-group">
-                  <label htmlFor="season">Season Number *</label>
-                  <input
-                    type="number"
-                    id="season"
-                    min="1"
-                    value={episodeFormData.season}
-                    onChange={(e) => setEpisodeFormData({
-                      ...episodeFormData,
-                      season: e.target.value
-                    })}
-                    placeholder="1"
-                    required
-                  />
-                </div>
-                
-                <div className="form-group">
-                  <label htmlFor="episode">Episode Number *</label>
-                  <input
-                    type="number"
-                    id="episode"
-                    min="1"
-                    value={episodeFormData.episode}
-                    onChange={(e) => setEpisodeFormData({
-                      ...episodeFormData,
-                      episode: e.target.value
-                    })}
-                    placeholder="1"
-                    required
-                  />
-                </div>
-              </div>
-              
-              <div className="form-actions">                <Button 
-                  type="submit" 
-                  disabled={episodeSearchLoading}
-                  className="primary"
-                >
-                  {episodeSearchLoading 
-                    ? (editingItem ? 'Updating...' : 'Searching...') 
-                    : (editingItem ? 'Update Episode' : 'Add Episode')
-                  }
-                </Button>                <Button
-                  type="button"
-                  onClick={() => {
-                    setShowEpisodeForm(false);
-                    setEditingItem(null);
-                    setEpisodeFormData({ series: '', season: '', episode: '' });
-                  }}
-                  className="secondary"
-                >
-                  Cancel
-                </Button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}      {/* Bulk Import Modal */}
-      {showBulkImportModal && (
-        <div className="modal-overlay">
-          <div className="modal-content bulk-import-modal">
-            <div className="modal-header">
-              <h3>Bulk Import Media</h3>
-              <Button
-                onClick={() => {
-                  setShowBulkImportModal(false);
-                  setBulkImportData('');
-                }}
-                className="secondary"
-                size="small"
-              >
-                ✕
-              </Button>
-            </div>
-            
-            <form onSubmit={handleBulkImport} className="bulk-import-form">              <div className="bulk-import-instructions">
-                <h4>Tab-Delimited Import Format</h4>
-                <p>Paste tab-separated data with 4-5 columns in order:</p>
-                <ol>
-                  <li><strong>Series/Movie/Comic/Book Name:</strong> The name of the TV series, movie, comic, or book (for comics use "Series Name (Year) #Issue" format)</li>
-                  <li><strong>Season/Episode/Author:</strong> For episodes: S1E1, S01E01, 1x1, 1,1, or 1-1 format; For books: Author name (optionally with year: "Author Name (Year)"); Leave blank for movies and comics</li>
-                  <li><strong>Title:</strong> The specific episode title, movie title, comic issue title, or book title</li>
-                  <li><strong>Type:</strong> "episode" (or "TV Series") for TV episodes, "movie" for movies, "comic" for comics, "book" for books</li>
-                  <li><strong>Year (Optional):</strong> Release year for more accurate matching (especially useful for movies and TV shows)</li>
-                </ol>
-                
-                <div className="example-data">
-                  <strong>Example:</strong>
-                  <pre>
-Breaking Bad	S1E1	Pilot	episode	2008
-Breaking Bad	S01E02	Cat's in the Bag...	episode	2008
-The Avengers		The Avengers	movie	2012
-Superman		Superman	movie	1978
-Game of Thrones	1x1	Winter Is Coming	episode	2011
-The Amazing Spider-Man (2018) #1		Amazing Spider-Man	comic
-The High Republic Adventures (2022) #7		The Monster of Temple Peak Part 1	comic
-The High Republic: Convergence	Zoraida Córdova (2022)	The High Republic: Convergence	book
-Dune	Frank Herbert (1965)	Dune	book
-                  </pre>
-                </div>
-              </div>
-              
-              <div className="form-group">
-                <label htmlFor="bulkData">Tab-Delimited Data *</label>
-                <textarea
-                  id="bulkData"
-                  value={bulkImportData}
-                  onChange={(e) => setBulkImportData(e.target.value)}
-                  placeholder="Paste your tab-delimited data here..."
-                  rows="10"
-                  className="bulk-import-textarea"
-                  required
-                />
-              </div>
-                <div className="form-actions">
-                <Button 
-                  type="submit" 
-                  disabled={bulkImportLoading}
-                  className="primary"
-                >
-                  {bulkImportLoading ? 'Importing...' : 'Import Items'}
-                </Button>
-                <Button
-                  type="button"
-                  onClick={() => {
-                    setBulkImportData('Batman Adventures (Vol. 1)\tIssue #01\tPenguin\'s Big Score\tComic');
-                  }}
-                  className="secondary"
-                  style={{ marginLeft: '10px' }}
-                >
-                  Test Batman Adventures
-                </Button>
-                <Button
-                  type="button"
-                  onClick={() => {
-                    setShowBulkImportModal(false);
-                    setBulkImportData('');
-                  }}
-                  className="secondary"
-                >
-                  Cancel
-                </Button>
-              </div>
-            </form>
-          </div>
-        </div>      )}
+      <EpisodeFormModal
+        show={showEpisodeForm}
+        editingItem={editingItem}
+        episodeFormData={episodeFormData}
+        setEpisodeFormData={setEpisodeFormData}
+        episodeSearchLoading={episodeSearchLoading}
+        onClose={() => {
+          setShowEpisodeForm(false);
+          setEditingItem(null);
+        }}
+        onSubmit={handleSearchTVEpisode}
+      />      {/* Bulk Import Modal */}
+      <BulkImportFormModal
+        show={showBulkImportModal}
+        bulkImportData={bulkImportData}
+        setBulkImportData={setBulkImportData}
+        bulkImportLoading={bulkImportLoading}
+        onClose={() => {
+          setShowBulkImportModal(false);
+          setBulkImportData('');
+        }}
+        onSubmit={handleBulkImport}
+      />
 
       {/* CMRO Bulk Import Modal */}
-      {showCmroBulkImportModal && (
-        <div className="modal-overlay">
-          <div className="modal-content bulk-import-modal">
-            <div className="modal-header">
-              <h3>CMRO Bulk Import</h3>
-              <Button
-                onClick={() => {
-                  setShowCmroBulkImportModal(false);
-                  setCmroBulkImportData('');
-                }}
-                className="secondary"
-                size="small"
-              >
-                ✕
-              </Button>
-            </div>
-            
-            <form onSubmit={handleCmroBulkImport} className="bulk-import-form">
-              <div className="bulk-import-instructions">
-                <h4>Complete Marvel Reading Order (CMRO) Format</h4>
-                <p>Paste CMRO-style data with the following format:</p>
-                <ul>
-                  <li><strong>Entry Number:</strong> "41: Title of Story"</li>
-                  <li><strong>Source:</strong> "from Source Publication" (optional)</li>
-                  <li><strong>Synopsis:</strong> Brief description (optional)</li>
-                  <li><strong>Timeline:</strong> "349y BBY" or similar (optional)</li>
-                  <li><strong>Published Date:</strong> "Published: Date"</li>
-                  <li><strong>Publisher:</strong> "Published by: Publisher Name"</li>
-                  <li><strong>Writer:</strong> "Writer: Author Name"</li>
-                  <li><strong>Pages:</strong> "Pages: Number" (optional)</li>
-                </ul>
-                
-                <div className="example-data">
-                  <strong>Example:</strong>
-                  <pre>
-41: Shield of the Jedi
-from The High Republic: Tales of Light and Life
-
-Synopsis Unavailable.
-349y BBY
-View Listing Details
-
-Published: September 5, 2023
-Published by: Disney-Lucasfilm Press
-Writer: George Mann
-Pages: 5
-
-42: What a Jedi Makes
-from Stories of Jedi and Sith
-
-An orphan from Coruscant's lower levels seeks out the Jedi Temple in the hopes of joining the Order.
-260y BBY
-View Listing Details
-
-Published: June 7, 2022
-Published by: Disney-Lucasfilm Press
-Writer: Michael Kogge
-                  </pre>
-                </div>
-              </div>
-              
-              <div className="form-group">
-                <label htmlFor="cmroData">CMRO Data *</label>
-                <textarea
-                  id="cmroData"
-                  value={cmroBulkImportData}
-                  onChange={(e) => setCmroBulkImportData(e.target.value)}
-                  placeholder="Paste your CMRO data here..."
-                  rows="15"
-                  className="bulk-import-textarea"
-                  required
-                />
-              </div>
-              
-              <div className="form-actions">
-                <Button 
-                  type="submit" 
-                  disabled={cmroBulkImportLoading}
-                  className="primary"
-                >
-                  {cmroBulkImportLoading ? 'Importing...' : 'Import CMRO Items'}
-                </Button>
-                <Button
-                  type="button"
-                  onClick={() => {
-                    setCmroBulkImportData(`41: Shield of the Jedi
-from The High Republic: Tales of Light and Life
-
-Synopsis Unavailable.
-349y BBY
-View Listing Details
-
-Published: September 5, 2023
-Published by: Disney-Lucasfilm Press
-Writer: George Mann
-Pages: 5
-
-42: What a Jedi Makes
-from Stories of Jedi and Sith
-
-An orphan from Coruscant's lower levels seeks out the Jedi Temple in the hopes of joining the Order.
-260y BBY
-View Listing Details
-
-Published: June 7, 2022
-Published by: Disney-Lucasfilm Press
-Writer: Michael Kogge`);
-                  }}
-                  className="secondary"
-                  style={{ marginLeft: '10px' }}
-                >
-                  Test Example
-                </Button>
-                <Button
-                  type="button"
-                  onClick={() => {
-                    setShowCmroBulkImportModal(false);
-                    setCmroBulkImportData('');
-                  }}
-                  className="secondary"
-                >
-                  Cancel
-                </Button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
+      <CmroBulkImportModal
+        show={showCmroBulkImportModal}
+        cmroBulkImportData={cmroBulkImportData}
+        setCmroBulkImportData={setCmroBulkImportData}
+        cmroBulkImportLoading={cmroBulkImportLoading}
+        onSubmit={handleCmroBulkImport}
+        onClose={() => {
+          setShowCmroBulkImportModal(false);
+          setCmroBulkImportData('');
+        }}
+      />
 
       {/* Book Search Modal */}
-      {showBookForm && (
-        <div className="modal-overlay">
-          <div className="modal-content">            <div className="modal-header">
-              <h3>
-                {editingItem 
-                  ? 'Edit Book'
-                  : reselectingItem && reselectingItem.mediaType === 'shortstory' 
-                    ? 'Select Book for Story Collection'
-                    : reselectingItem 
-                      ? 'Re-select Book' 
-                      : 'Add Book'
-                }
-              </h3>
-              <Button
-                onClick={() => {
-                  setShowBookForm(false);
-                  setReselectingItem(null);
-                  setEditingItem(null);
-                  setBookFormData({ title: '', author: '', year: '', isbn: '', pageCount: '' });
-                  setBookSearchResults([]);
-                }}
-                className="secondary"
-                size="small"
-              >
-                ✕
-              </Button>
-            </div>
-            
-            <form onSubmit={handleSearchBooks} className="book-search-form">
-              <div className="form-group">
-                <label htmlFor="bookTitle">Book Title *</label>
-                <input
-                  type="text"
-                  id="bookTitle"
-                  value={bookFormData.title}
-                  onChange={(e) => setBookFormData({...bookFormData, title: e.target.value})}
-                  placeholder="Enter book title..."
-                  required
-                />
-              </div>
-              
-              <div className="form-group">
-                <label htmlFor="bookAuthor">Author</label>
-                <input
-                  type="text"
-                  id="bookAuthor"
-                  value={bookFormData.author}
-                  onChange={(e) => setBookFormData({...bookFormData, author: e.target.value})}
-                  placeholder="Enter author name (optional)..."
-                />
-              </div>
-              
-              <div className="form-group">
-                <label htmlFor="bookYear">Publication Year</label>
-                <input
-                  type="number"
-                  id="bookYear"
-                  value={bookFormData.year}
-                  onChange={(e) => setBookFormData({...bookFormData, year: e.target.value})}
-                  placeholder="e.g., 2020"
-                  min="1000"
-                  max="2030"
-                />
-              </div>
-              
-              <div className="form-group">
-                <label htmlFor="bookIsbn">ISBN</label>
-                <input
-                  type="text"
-                  id="bookIsbn"
-                  value={bookFormData.isbn}
-                  onChange={(e) => setBookFormData({...bookFormData, isbn: e.target.value})}
-                  placeholder="Enter ISBN (optional)..."
-                />
-              </div>
-              
-              <div className="form-group">
-                <label htmlFor="bookPageCount">Page Count</label>
-                <input
-                  type="number"
-                  id="bookPageCount"
-                  value={bookFormData.pageCount}
-                  onChange={(e) => setBookFormData({...bookFormData, pageCount: e.target.value})}
-                  placeholder="Enter page count (optional)..."
-                  min="1"
-                  max="10000"
-                />
-              </div>
-              
-              <div className="form-actions">                <Button 
-                  type="submit" 
-                  disabled={bookSearchLoading}
-                  className="primary"
-                >
-                  {bookSearchLoading 
-                    ? (editingItem ? 'Updating...' : 'Searching...') 
-                    : (editingItem ? 'Update Book' : 'Search Books')
-                  }
-                </Button>                <Button
-                  type="button"
-                  onClick={() => {
-                    setShowBookForm(false);
-                    setReselectingItem(null);
-                    setEditingItem(null);
-                    setBookFormData({ title: '', author: '', year: '', isbn: '', pageCount: '' });
-                    setBookSearchResults([]);
-                  }}
-                  className="secondary"
-                >
-                  Cancel
-                </Button>
-              </div>
-            </form>
-            
-            {/* Search Results */}
-            {bookSearchResults.length > 0 && (
-              <div className="book-search-results">
-                <h4>Search Results</h4>
-                <div className="book-results-list">
-                  {bookSearchResults.map((book, index) => (
-                    <div key={index} className="book-result-item">
-                      <div className="book-info">
-                        {book.coverUrl && (
-                          <img 
-                            src={book.coverUrl} 
-                            alt={`Cover of ${book.title}`} 
-                            className="book-cover-small"
-                          />
-                        )}
-                        <div className="book-details">
-                          <h5>{book.title}</h5>
-                          <p className="book-author">
-                            {book.authors && book.authors[0] ? book.authors[0] : 'Unknown Author'}
-                          </p>
-                          {book.firstPublishYear && (
-                            <p className="book-year">Published: {book.firstPublishYear}</p>
-                          )}
-                          {book.publishers && book.publishers[0] && (
-                            <p className="book-publisher">Publisher: {book.publishers[0]}</p>
-                          )}
-                        </div>
-                      </div>                      <Button
-                        onClick={() => handleSelectBook(book)}
-                        className="primary"
-                        size="small"
-                      >
-                        {reselectingItem && reselectingItem.mediaType === 'shortstory' 
-                          ? 'Story is in This Book'
-                          : reselectingItem 
-                            ? 'Re-select This Book' 
-                            : 'Add This Book'
-                        }
-                      </Button>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-            
-            {/* Manual Book Creation Option */}
-            {!editingItem && (
-              <div className="manual-book-option">
-                <hr className="form-divider" />
-                <p className="manual-book-text">
-                  Can't find your book? Create it manually with the information above.
-                </p>
-                <Button
-                  onClick={async () => {
-                    if (!bookFormData.title.trim()) {
-                      setMessage('Please enter a book title to create manually');
-                      return;
-                    }
-                    
-                    const manualBookData = {
-                      type: 'book',
-                      title: bookFormData.title.trim(),
-                      bookTitle: bookFormData.title.trim(),
-                      bookAuthor: bookFormData.author.trim() || 'Unknown Author',
-                      bookYear: bookFormData.year ? parseInt(bookFormData.year) : null,
-                      bookIsbn: bookFormData.isbn.trim() || null,
-                      bookPageCount: bookFormData.pageCount ? parseInt(bookFormData.pageCount) : null
-                    };
-                    
-                    const success = await handleAddMediaToOrder(viewingOrderItems.id, manualBookData);
-                    if (success !== false) {
-                      setShowBookForm(false);
-                      setBookFormData({ title: '', author: '', year: '', isbn: '', pageCount: '' });
-                      setBookSearchResults([]);
-                    }
-                  }}
-                  className="secondary"
-                >
-                  Create Book Manually
-                </Button>
-              </div>
-            )}
-          </div>
-        </div>
-      )}
+      <DetailedBookFormModal
+        show={showBookForm}
+        editingItem={editingItem}
+        reselectingItem={reselectingItem}
+        bookFormData={bookFormData}
+        setBookFormData={setBookFormData}
+        bookSearchResults={bookSearchResults}
+        bookSearchLoading={bookSearchLoading}
+        viewingOrderItems={viewingOrderItems}
+        setMessage={setMessage}
+        onClose={() => {
+          setShowBookForm(false);
+          setReselectingItem(null);
+          setEditingItem(null);
+          setBookSearchResults([]);
+        }}
+        onSubmit={handleSearchBooks}
+        onSelectBook={handleSelectBook}
+        onAddMediaToOrder={handleAddMediaToOrder}
+      />
 
       {/* Comic Search Modal */}
-      {showComicForm && (
-        <div className="modal-overlay">
-          <div className="modal-content">            <div className="modal-header">
-              <h3>{editingItem ? 'Edit Comic' : reselectingItem ? 'Re-select Comic' : 'Add Comic'}</h3>              <Button
-                onClick={() => {
-                  setShowComicForm(false);
-                  setReselectingItem(null);
-                  setEditingItem(null);
-                  setComicFormData({ series: '', year: '', issue: '', title: '' });
-                  setComicSearchResults([]);
-                }}
-                className="secondary"
-                size="small"
-              >
-                ✕
-              </Button>
-            </div>
-            
-            <form onSubmit={handleSearchComics} className="comic-search-form">
-              <div className="form-group">
-                <label htmlFor="comicSeries">Comic Series *</label>
-                <input
-                  type="text"
-                  id="comicSeries"
-                  value={comicFormData.series}
-                  onChange={(e) => setComicFormData({...comicFormData, series: e.target.value})}
-                  placeholder="Enter comic series name..."
-                  required
-                />
-              </div>
-                <div className="form-row">
-                <div className="form-group">
-                  <label htmlFor="comicYear">Year</label>
-                  <input
-                    type="number"
-                    id="comicYear"
-                    value={comicFormData.year}
-                    onChange={(e) => setComicFormData({...comicFormData, year: e.target.value})}
-                    placeholder="e.g., 2022 (optional)"
-                    min="1930"
-                    max="2030"
-                  />
-                </div>
-                  <div className="form-group">
-                  <label htmlFor="comicIssue">Issue Number *</label>
-                  <input
-                    type="text"
-                    id="comicIssue"
-                    value={comicFormData.issue}
-                    onChange={(e) => setComicFormData({...comicFormData, issue: e.target.value})}
-                    placeholder="e.g., 1 or 1-2"
-                    required
-                  />
-                </div>
-              </div>
-              
-              <div className="form-group">
-                <label htmlFor="comicTitle">Title (optional)</label>
-                <input
-                  type="text"
-                  id="comicTitle"
-                  value={comicFormData.title}
-                  onChange={(e) => setComicFormData({...comicFormData, title: e.target.value})}
-                  placeholder="Custom title or differentiator..."
-                />
-                <small className="form-help">
-                  Add a custom title to differentiate duplicate comics or provide additional context
-                </small>
-              </div>
-              
-              <div className="form-actions"><Button 
-                  type="submit" 
-                  disabled={comicSearchLoading}
-                  className="primary"
-                >
-                  {comicSearchLoading 
-                    ? (editingItem ? 'Updating...' : 'Searching...') 
-                    : (editingItem ? 'Update Comic' : 'Search Comic Series')
-                  }
-                </Button>                <Button
-                  type="button"
-                  onClick={() => {
-                    setShowComicForm(false);
-                    setEditingItem(null);
-                    setComicFormData({ series: '', year: '', issue: '', title: '' });
-                    setComicSearchResults([]);
-                  }}
-                  className="secondary"
-                >
-                  Cancel
-                </Button>
-              </div>
-            </form>
-              {/* Search Results */}
-            {comicSearchResults.length > 0 && (
-              <div className="comic-search-results">
-                <h4>Select Comic Series</h4>                <p className="search-note">
-                  Found {comicSearchResults.length} series that have issue #{comicFormData.issue}. Select the correct series:
-                </p>                <div className="comic-results-list">
-                  {comicSearchResults.map((series, index) => (
-                    <div key={index} className="comic-result-item">
-                      <div className="comic-info">
-                        {series.coverUrl && (
-                          <div className="comic-cover-container">
-                            <img 
-                              src={series.coverUrl} 
-                              alt={`Cover of ${series.name} #${comicFormData.issue}`} 
-                              className="comic-cover-small"
-                              onError={(e) => {
-                                e.target.style.display = 'none';
-                              }}
-                            />
-                          </div>
-                        )}
-                        <div className="comic-details">
-                          <h5>
-                            {series.series.name}
-                            {series.isFuzzyMatch && (
-                              <span className="fuzzy-match-indicator" title={`${Math.round(series.similarity * 100)}% similarity match`}>
-                                ~{Math.round(series.similarity * 100)}%
-                              </span>
-                            )}
-                          </h5>
-                          <p className="comic-publisher">
-                            Publisher: {series.series.publisher?.name || 'Unknown'}
-                          </p>
-                          {series.series.start_year && (
-                            <p className="comic-year">Started: {series.series.start_year}</p>
-                          )}
-                          {series.series.count_of_issues && (
-                            <p className="comic-issues">Total Issues: {series.series.count_of_issues}</p>
-                          )}
-                          {series.issueName && (
-                            <p className="comic-issue-name">Issue #{comicFormData.issue}: {series.issueName}</p>
-                          )}
-                        </div>
-                      </div>
-                      <Button
-                        onClick={() => handleSelectComic(series)}
-                        className="primary"
-                        size="small"
-                      >
-                        {reselectingItem ? 'Re-select This Comic' : 'Add This Comic'}
-                      </Button>
-                    </div>
-                  ))}                </div>
-              </div>
-            )}
-          </div>
-        </div>
-      )}
+      <ComicFormModal
+        show={showComicForm}
+        editingItem={editingItem}
+        reselectingItem={reselectingItem}
+        comicFormData={comicFormData}
+        setComicFormData={setComicFormData}
+        comicSearchResults={comicSearchResults}
+        comicSearchLoading={comicSearchLoading}
+        onClose={() => {
+          setShowComicForm(false);
+          setReselectingItem(null);
+          setEditingItem(null);
+          setComicSearchResults([]);
+        }}
+        onSubmit={handleSearchComics}
+        onSelectComic={handleSelectComic}
+      />
 
       {/* Short Story Search Modal */}
-      {showShortStoryForm && (
-        <div className="modal-overlay">
-          <div className="modal-content">            <div className="modal-header">
-              <h3>{editingItem ? 'Edit Short Story' : 'Add Short Story'}</h3>
-              <Button
-                onClick={() => {
-                  setShowShortStoryForm(false);
-                  setEditingItem(null);
-                  setShortStoryFormData({ title: '', author: '', year: '', url: '', containedInBookId: '', coverUrl: '' });
-                  setShortStorySearchResults([]);
-                }}
-                className="close-modal"
-              >
-                ×
-              </Button>
-            </div>
-            
-            <form onSubmit={handleSearchShortStoryBooks} className="shortstory-search-form">
-              <div className="form-group">
-                <label htmlFor="shortstory-title">Story Title *</label>
-                <input
-                  type="text"
-                  id="shortstory-title"
-                  value={shortStoryFormData.title}
-                  onChange={(e) => setShortStoryFormData(prev => ({ ...prev, title: e.target.value }))}
-                  placeholder="Enter short story title"
-                  required
-                />
-              </div>
-                <div className="form-group">
-                <label htmlFor="shortstory-author">Author (optional)</label>
-                <input
-                  type="text"
-                  id="shortstory-author"
-                  value={shortStoryFormData.author}
-                  onChange={(e) => setShortStoryFormData(prev => ({ ...prev, author: e.target.value }))}
-                  placeholder="Enter author name (optional)"
-                />
-              </div>
-              
-              <div className="form-group">
-                <label htmlFor="shortstory-year">Year (optional)</label>
-                <input
-                  type="number"
-                  id="shortstory-year"
-                  value={shortStoryFormData.year}
-                  onChange={(e) => setShortStoryFormData(prev => ({ ...prev, year: e.target.value }))}
-                  placeholder="Publication year"
-                  min="1000"
-                  max={new Date().getFullYear() + 5}
-                />
-              </div>
-              
-              <div className="form-group">
-                <label htmlFor="shortstory-url">Story URL (optional)</label>
-                <input
-                  type="url"
-                  id="shortstory-url"
-                  value={shortStoryFormData.url}
-                  onChange={(e) => setShortStoryFormData(prev => ({ ...prev, url: e.target.value }))}
-                  placeholder="https://example.com/story-link"
-                />
-              </div>
-              
-              <div className="form-group">
-                <label htmlFor="shortstory-cover">Cover Image URL (optional)</label>
-                <input
-                  type="url"
-                  id="shortstory-cover"
-                  value={shortStoryFormData.coverUrl}
-                  onChange={(e) => setShortStoryFormData(prev => ({ ...prev, coverUrl: e.target.value }))}
-                  placeholder="https://example.com/cover.jpg"
-                />
-              </div>
-                <div className="form-actions">
-                <Button type="submit" className="primary">
-                  {editingItem ? 'Update Story' : 'Search for Books to Contain This Story'}
-                </Button>
-                {!editingItem && (
-                  <Button
-                    type="button"
-                    onClick={() => handleAddShortStory()}
-                    className="secondary"
-                  >
-                    Add Story Without Container Book
-                  </Button>
-                )}
-                <Button
-                  type="button"
-                  onClick={() => {
-                    setShowShortStoryForm(false);
-                    setEditingItem(null);
-                    setShortStoryFormData({ title: '', author: '', year: '', url: '', containedInBookId: '', coverUrl: '' });
-                    setShortStorySearchResults([]);
-                  }}
-                  className="secondary"
-                >
-                  Cancel
-                </Button>
-              </div>
-            </form>
-            
-            {/* Search Results */}
-            {shortStorySearchResults.length > 0 && (
-              <div className="shortstory-search-results">
-                <h4>Select Container Book</h4>
-                <p className="search-note">
-                  Found {shortStorySearchResults.length} books by {shortStoryFormData.author}. Select which book contains the story "{shortStoryFormData.title}", or add the story without a container book.
-                </p>                <div className="book-results-list">
-                  {shortStorySearchResults.map((book, index) => (
-                    <div key={index} className="book-result-item">
-                      <div className="book-info">
-                        {book.coverUrl && (
-                          <img 
-                            src={book.coverUrl} 
-                            alt={`Cover of ${book.title}`} 
-                            className="book-cover-small"
-                          />
-                        )}
-                        <div className="book-details">
-                          <h5>{book.title}</h5>
-                          <p className="book-author">
-                            {book.authors && book.authors[0] ? book.authors[0] : 'Unknown Author'}
-                          </p>
-                          {book.firstPublishYear && (
-                            <p className="book-year">Published: {book.firstPublishYear}</p>
-                          )}
-                        </div>
-                      </div>
-                      <Button
-                        onClick={() => handleAddShortStory(book)}
-                        className="primary"
-                        size="small"
-                      >
-                        Story is in This Book
-                      </Button>
-                    </div>
-                  ))}
-                </div>
-                <div className="no-book-option">
-                  <Button
-                    onClick={() => handleAddShortStory()}
-                    className="secondary"
-                  >
-                    None of These - Add Story Without Container Book
-                  </Button>
-                </div>
-              </div>
-            )}
-          </div>        </div>
-      )}
+      <ShortStoryFormModal
+        show={showShortStoryForm}
+        editingItem={editingItem}
+        shortStoryFormData={shortStoryFormData}
+        setShortStoryFormData={setShortStoryFormData}
+        shortStorySearchResults={shortStorySearchResults}
+        onClose={() => {
+          setShowShortStoryForm(false);
+          setEditingItem(null);
+          setShortStorySearchResults([]);
+        }}
+        onSubmit={handleSearchShortStoryBooks}
+        onAddShortStory={handleAddShortStory}
+      />
 
       {/* Web Video Form Modal */}
-      {showWebVideoForm && (
-        <div className="modal-overlay">
-          <div className="modal-content">
-            <div className="modal-header">
-              <h3>{editingItem ? 'Edit Web Video' : 'Add Web Video'}</h3>
-              <Button
-                onClick={() => {
-                  setShowWebVideoForm(false);
-                  setEditingItem(null);
-                  setWebVideoFormData({ title: '', url: '', description: '' });
-                }}
-                className="close-modal"
-              >
-                ×
-              </Button>
-            </div>
-            
-            <form onSubmit={(e) => { e.preventDefault(); handleAddWebVideo(); }} className="webvideo-form">
-              <div className="form-group">
-                <label htmlFor="webvideo-title">Video Title *</label>
-                <input
-                  type="text"
-                  id="webvideo-title"
-                  value={webVideoFormData.title}
-                  onChange={(e) => setWebVideoFormData(prev => ({ ...prev, title: e.target.value }))}
-                  placeholder="Enter video title"
-                  required
-                />
-              </div>
-              
-              <div className="form-group">
-                <label htmlFor="webvideo-url">Video URL *</label>
-                <input
-                  type="url"
-                  id="webvideo-url"
-                  value={webVideoFormData.url}
-                  onChange={(e) => setWebVideoFormData(prev => ({ ...prev, url: e.target.value }))}
-                  placeholder="https://youtube.com/watch?v=... or any video URL"
-                  required
-                />
-              </div>
-              
-              <div className="form-group">
-                <label htmlFor="webvideo-description">Description (optional)</label>
-                <textarea
-                  id="webvideo-description"
-                  value={webVideoFormData.description}
-                  onChange={(e) => setWebVideoFormData(prev => ({ ...prev, description: e.target.value }))}
-                  placeholder="Brief description of the video"
-                  rows="3"
-                />
-              </div>
-              
-              <div className="form-actions">
-                <Button type="submit" className="primary">
-                  {editingItem ? 'Update Web Video' : 'Add Web Video'}
-                </Button>
-                <Button
-                  type="button"
-                  onClick={() => {
-                    setShowWebVideoForm(false);
-                    setEditingItem(null);
-                    setWebVideoFormData({ title: '', url: '', description: '' });
-                  }}
-                  className="secondary"
-                >
-                  Cancel
-                </Button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
+      <WebVideoFormModal
+        show={showWebVideoForm}
+        editingItem={editingItem}
+        webVideoFormData={webVideoFormData}
+        setWebVideoFormData={setWebVideoFormData}
+        onClose={() => {
+          setShowWebVideoForm(false);
+          setEditingItem(null);
+        }}
+        onSubmit={handleAddWebVideo}
+      />
 
       {/* Error Modal */}
       <ErrorModal

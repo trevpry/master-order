@@ -62,7 +62,7 @@ router.get('/search-with-issues', async (req, res) => {
               start_year: series.start_year,
               resource_type: series.resource_type
             },
-            // Issue information
+            // Issue information (include ALL ComicVine data)
             issue: {
               id: issue.id,
               issue_number: issue.issue_number,
@@ -73,7 +73,26 @@ router.get('/search-with-issues', async (req, res) => {
               image: issue.image,
               api_detail_url: issue.api_detail_url,
               site_detail_url: issue.site_detail_url,
-              resource_type: issue.resource_type
+              resource_type: issue.resource_type,
+              // Include all the credit information
+              character_credits: issue.character_credits,
+              person_credits: issue.person_credits,
+              story_arc_credits: issue.story_arc_credits,
+              team_credits: issue.team_credits,
+              concept_credits: issue.concept_credits,
+              location_credits: issue.location_credits,
+              object_credits: issue.object_credits,
+              character_died_in: issue.character_died_in,
+              first_appearance_characters: issue.first_appearance_characters,
+              first_appearance_concepts: issue.first_appearance_concepts,
+              first_appearance_locations: issue.first_appearance_locations,
+              first_appearance_objects: issue.first_appearance_objects,
+              first_appearance_storyarcs: issue.first_appearance_storyarcs,
+              first_appearance_teams: issue.first_appearance_teams,
+              deck: issue.deck,
+              date_added: issue.date_added,
+              date_last_updated: issue.date_last_updated,
+              has_staff_review: issue.has_staff_review
             },
             // Cover art information
             coverUrl: coverUrl,

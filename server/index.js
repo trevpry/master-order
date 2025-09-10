@@ -582,6 +582,19 @@ io.on('connection', (socket) => {
   });
 });
 
+// Add error handling middleware (must be last)
+const errorHandler = require('./middleware/errorHandler');
+app.use(errorHandler);
+
+// 404 handler for undefined routes
+app.use((req, res) => {
+  res.status(404).json({
+    success: false,
+    error: `Route ${req.method} ${req.path} not found`,
+    timestamp: new Date().toISOString()
+  });
+});
+
 // Start the server
 server.listen(PORT, '0.0.0.0', async () => {
   console.log('🚀 =================================');

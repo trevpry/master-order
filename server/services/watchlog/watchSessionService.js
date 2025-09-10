@@ -77,12 +77,22 @@ class WatchSessionService {
     try {
       const endTime = new Date();
       
+      // Check media type to determine default completion logic
+      const existingLog = await this.prisma.watchLog.findUnique({
+        where: { id: watchLogId },
+        select: { mediaType: true }
+      });
+      
+      // For reading media types (books, comics, short stories), don't default to completed unless explicitly set
+      const isReadingMedia = ['book', 'comic', 'shortstory'].includes(existingLog?.mediaType);
+      const defaultCompleted = isReadingMedia ? false : true;
+      
       const watchLog = await this.prisma.watchLog.update({
         where: { id: watchLogId },
         data: {
           endTime: endTime,
           totalWatchTime: params.totalWatchTime || null,
-          isCompleted: params.isCompleted !== undefined ? params.isCompleted : true,
+          isCompleted: params.isCompleted !== undefined ? params.isCompleted : defaultCompleted,
           updatedAt: endTime
         }
       });
@@ -117,6 +127,10 @@ class WatchSessionService {
       const now = new Date();
       const startTime = params.startTime || new Date(now.getTime() - (params.duration || 30) * 60000);
       
+      // For reading media types (books, comics, short stories), don't default to completed unless explicitly set
+      const isReadingMedia = ['book', 'comic', 'shortstory'].includes(params.mediaType);
+      const defaultCompleted = isReadingMedia ? false : true;
+      
       const watchLog = await this.prisma.watchLog.create({
         data: {
           mediaType: params.mediaType,
@@ -130,7 +144,7 @@ class WatchSessionService {
           endTime: now,
           duration: params.duration || null,
           totalWatchTime: params.totalWatchTime || params.duration || null,
-          isCompleted: params.isCompleted !== undefined ? params.isCompleted : true
+          isCompleted: params.isCompleted !== undefined ? params.isCompleted : defaultCompleted
         }
       });
 

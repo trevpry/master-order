@@ -56,6 +56,42 @@ router.get('/', async (req, res) => {
   }
 });
 
+// POST /api/settings - Update media settings
+router.post('/', async (req, res) => {
+  try {
+    const settingsData = req.body;
+    
+    // Handle array fields that need to be stringified
+    const processedData = { ...settingsData };
+    if (settingsData.ignoredMovieCollections && Array.isArray(settingsData.ignoredMovieCollections)) {
+      processedData.ignoredMovieCollections = JSON.stringify(settingsData.ignoredMovieCollections);
+    }
+    if (settingsData.ignoredTVCollections && Array.isArray(settingsData.ignoredTVCollections)) {
+      processedData.ignoredTVCollections = JSON.stringify(settingsData.ignoredTVCollections);
+    }
+    
+    // Remove any undefined or null values
+    Object.keys(processedData).forEach(key => {
+      if (processedData[key] === undefined || processedData[key] === null || processedData[key] === '') {
+        delete processedData[key];
+      }
+    });
+
+    // Update or create settings record (ID 1 is the main settings record)
+    const settings = await prisma.settings.upsert({
+      where: { id: 1 },
+      update: processedData,
+      create: { id: 1, ...processedData }
+    });
+
+    console.log('Media settings saved successfully:', settings.id);
+    res.json({ message: 'Settings saved successfully', settings });
+  } catch (error) {
+    console.error('Error saving settings:', error);
+    res.status(500).json({ error: 'Failed to save settings' });
+  }
+});
+
 // ============================================================================
 // 🏠 EDDIE SETTINGS ROUTES - Personal Dashboard Configuration  
 // Frontend: client/src/modules/eddie/pages/EddieSettings.jsx

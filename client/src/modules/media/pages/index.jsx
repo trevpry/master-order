@@ -36,12 +36,103 @@ function MediaHome() {
   // Settings modal
   const [showSettingsModal, setShowSettingsModal] = useState(false);
 
+  // Auto-load data when component mounts (prevent manual button clicking)
+  useEffect(() => {
+    // Check if we have recent data in localStorage to avoid unnecessary API calls
+    const loadRecentData = () => {
+      try {
+        const storedData = localStorage.getItem('upNext_recentMedia');
+        const storedTimestamp = localStorage.getItem('upNext_timestamp');
+        
+        if (storedData && storedTimestamp) {
+          const age = Date.now() - parseInt(storedTimestamp);
+          // Use cached data if it's less than 5 minutes old
+          if (age < 5 * 60 * 1000) {
+            const parsedData = JSON.parse(storedData);
+            setSelectedMedia(parsedData);
+            console.log('Loaded recent Up Next data from cache');
+            return true;
+          }
+        }
+      } catch (error) {
+        console.error('Error loading cached Up Next data:', error);
+      }
+      return false;
+    };
+
+    // Restore reading session if it exists
+    const restoreReadingSession = () => {
+      try {
+        const storedSession = localStorage.getItem('readingSession');
+        const storedTimer = localStorage.getItem('readingSessionTimer');
+        
+        if (storedSession) {
+          const session = JSON.parse(storedSession);
+          setReadingSession(session);
+          
+          if (storedTimer) {
+            setReadingTimer(parseInt(storedTimer));
+          }
+          
+          console.log('Restored reading session from cache');
+          return true;
+        }
+      } catch (error) {
+        console.error('Error restoring reading session:', error);
+      }
+      return false;
+    };
+
+    // Restore viewing session if it exists
+    const restoreViewingSession = () => {
+      try {
+        const storedSession = localStorage.getItem('viewingSession');
+        const storedTimer = localStorage.getItem('viewingSessionTimer');
+        
+        if (storedSession) {
+          const session = JSON.parse(storedSession);
+          setViewingSession(session);
+          
+          if (storedTimer) {
+            setViewingTimer(parseInt(storedTimer));
+          }
+          
+          console.log('Restored viewing session from cache');
+          return true;
+        }
+      } catch (error) {
+        console.error('Error restoring viewing session:', error);
+      }
+      return false;
+    };
+
+    // Restore sessions first
+    restoreReadingSession();
+    restoreViewingSession();
+
+    // Only auto-load if we don't already have selected media and no recent cache
+    if (!selectedMedia && !loading) {
+      if (!loadRecentData()) {
+        callExpressRoute();
+      }
+    }
+  }, []); // Empty dependency array = run once on mount
+
   // Timer effects
   useEffect(() => {
     let interval;
     if (readingSession && !readingSession.isPaused) {
       interval = setInterval(() => {
-        setReadingTimer(prev => prev + 1);
+        setReadingTimer(prev => {
+          const newTimer = prev + 1;
+          // Save timer to localStorage
+          try {
+            localStorage.setItem('readingSessionTimer', newTimer.toString());
+          } catch (error) {
+            console.error('Error saving reading timer:', error);
+          }
+          return newTimer;
+        });
       }, 1000);
     }
     return () => clearInterval(interval);
@@ -51,10 +142,47 @@ function MediaHome() {
     let interval;
     if (viewingSession && !viewingSession.isPaused) {
       interval = setInterval(() => {
-        setViewingTimer(prev => prev + 1);
+        setViewingTimer(prev => {
+          const newTimer = prev + 1;
+          // Save timer to localStorage
+          try {
+            localStorage.setItem('viewingSessionTimer', newTimer.toString());
+          } catch (error) {
+            console.error('Error saving viewing timer:', error);
+          }
+          return newTimer;
+        });
       }, 1000);
     }
     return () => clearInterval(interval);
+  }, [viewingSession]);
+
+  // Save reading session to localStorage whenever it changes
+  useEffect(() => {
+    try {
+      if (readingSession) {
+        localStorage.setItem('readingSession', JSON.stringify(readingSession));
+      } else {
+        localStorage.removeItem('readingSession');
+        localStorage.removeItem('readingSessionTimer');
+      }
+    } catch (error) {
+      console.error('Error saving reading session:', error);
+    }
+  }, [readingSession]);
+
+  // Save viewing session to localStorage whenever it changes
+  useEffect(() => {
+    try {
+      if (viewingSession) {
+        localStorage.setItem('viewingSession', JSON.stringify(viewingSession));
+      } else {
+        localStorage.removeItem('viewingSession');
+        localStorage.removeItem('viewingSessionTimer');
+      }
+    } catch (error) {
+      console.error('Error saving viewing session:', error);
+    }
   }, [viewingSession]);
 
   const formatReadingTime = (seconds) => {
@@ -86,6 +214,14 @@ function MediaHome() {
       setError('');
       // Clear any existing selected media to get a fresh one
       setSelectedMedia(null);
+      
+      // Clear cache for manual refresh
+      try {
+        localStorage.removeItem('upNext_recentMedia');
+        localStorage.removeItem('upNext_timestamp');
+      } catch (error) {
+        console.error('Error clearing Up Next cache:', error);
+      }
 
       try {
         console.log('Mobile Debug - Making API call to:', `${config.apiBaseUrl}/api/up_next`);
@@ -119,6 +255,14 @@ function MediaHome() {
           setError(data.message);
         } else {
           setSelectedMedia(data);
+          
+          // Cache the data for quick reload prevention
+          try {
+            localStorage.setItem('upNext_recentMedia', JSON.stringify(data));
+            localStorage.setItem('upNext_timestamp', Date.now().toString());
+          } catch (error) {
+            console.error('Error caching Up Next data:', error);
+          }
         }
       } catch (error) {
         console.error('Mobile Debug - API Error:', error);
@@ -176,6 +320,15 @@ function MediaHome() {
       if (response.ok) {
         setSelectedMedia(null);
         setError('Item marked as watched! Getting next item...');
+        
+        // Clear cached data since we're getting a new item
+        try {
+          localStorage.removeItem('upNext_recentMedia');
+          localStorage.removeItem('upNext_timestamp');
+        } catch (error) {
+          console.error('Error clearing Up Next cache:', error);
+        }
+        
         // Automatically get the next item
         setTimeout(() => {
           callExpressRoute();
@@ -400,6 +553,12 @@ function MediaHome() {
     try {
       let progressData = {};
 
+      console.log('🔍 Reading Progress Debug:');
+      console.log('- inputType:', readingProgress.inputType);
+      console.log('- currentPage:', readingProgress.currentPage);
+      console.log('- totalPages:', readingProgress.totalPages);
+      console.log('- readPercentage:', readingProgress.readPercentage);
+
       if (readingProgress.inputType === 'page' && readingProgress.currentPage) {
         progressData.currentPage = parseInt(readingProgress.currentPage);
         if (readingProgress.totalPages) {
@@ -408,6 +567,8 @@ function MediaHome() {
       } else if (readingProgress.inputType === 'percentage' && readingProgress.readPercentage) {
         progressData.readPercentage = parseFloat(readingProgress.readPercentage);
       }
+
+      console.log('📤 Sending progressData:', progressData);
 
       const response = await fetch(`${config.apiBaseUrl}/api/reading/stop`, {
         method: 'POST',

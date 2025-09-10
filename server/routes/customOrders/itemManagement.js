@@ -89,6 +89,8 @@ function createItemManagementRoutes(prisma, services) {
         isWatched, 
         title,
         seriesTitle, // For episodes
+        // Book/reading progress fields
+        bookPercentRead, bookCurrentPage,
         // Book fields
         bookTitle, bookAuthor, bookYear, bookIsbn, bookPublisher, bookOpenLibraryId, bookCoverUrl, bookPageCount,
         // Comic fields
@@ -155,6 +157,57 @@ function createItemManagementRoutes(prisma, services) {
           }
           
           console.log(`Setting ${item.mediaType} "${item.title}" to 100% completed`);
+        }
+      }
+      
+      // Handle reading progress updates with automatic calculations
+      if (bookPercentRead !== undefined || bookCurrentPage !== undefined) {
+        // Get current item data to calculate missing values
+        const currentItem = await prisma.customOrderItem.findUnique({
+          where: { id: parseInt(itemId) },
+          select: { bookPageCount: true, bookCurrentPage: true, bookPercentRead: true }
+        });
+        
+        const pageCount = bookPageCount !== undefined ? parseInt(bookPageCount) : currentItem?.bookPageCount;
+        
+        // Update the provided values
+        if (bookPercentRead !== undefined) updateData.bookPercentRead = bookPercentRead;
+        if (bookCurrentPage !== undefined) updateData.bookCurrentPage = bookCurrentPage;
+        
+        // Calculate missing value if we have page count
+        if (pageCount && pageCount > 0) {
+          // If percentage was updated but not current page, calculate current page
+          if (bookPercentRead !== undefined && bookCurrentPage === undefined) {
+            const calculatedPage = Math.round((bookPercentRead / 100) * pageCount);
+            updateData.bookCurrentPage = calculatedPage;
+            console.log(`Calculated bookCurrentPage from ${bookPercentRead}%: ${calculatedPage}`);
+          }
+          
+          // If current page was updated but not percentage, calculate percentage
+          if (bookCurrentPage !== undefined && bookPercentRead === undefined) {
+            const calculatedPercent = Math.min(100, Math.round((bookCurrentPage / pageCount) * 100));
+            updateData.bookPercentRead = calculatedPercent;
+            console.log(`Calculated bookPercentRead from page ${bookCurrentPage}: ${calculatedPercent}%`);
+          }
+        }
+      }
+      
+      // Check if this update sets reading completion to 100% and auto-mark as watched
+      const finalPercentRead = updateData.bookPercentRead !== undefined ? updateData.bookPercentRead : bookPercentRead;
+      const finalCurrentPage = updateData.bookCurrentPage !== undefined ? updateData.bookCurrentPage : bookCurrentPage;
+      const finalPageCount = bookPageCount !== undefined ? parseInt(bookPageCount) : undefined;
+      
+      if (finalPercentRead === 100 || 
+          (finalCurrentPage !== undefined && finalPageCount !== undefined && finalCurrentPage >= finalPageCount)) {
+        
+        // Get the current item to check media type (if not already fetched above)
+        const currentItem = await prisma.customOrderItem.findUnique({
+          where: { id: parseInt(itemId) }
+        });
+        
+        if (currentItem && (currentItem.mediaType === 'book' || currentItem.mediaType === 'comic' || currentItem.mediaType === 'shortstory')) {
+          updateData.isWatched = true;
+          console.log(`Setting ${currentItem.mediaType} "${currentItem.title}" as watched (100% completion)`);
         }
       }
       

@@ -4,7 +4,7 @@ const router = express.Router();
 // Import required services
 const getNextEpisode = require('../getNextEpisode');
 const getNextMovie = require('../getNextMovie');
-const getNextCustomOrder = require('../getNextCustomOrder');
+const { getNextCustomOrder } = require('../getNextCustomOrder');
 
 // Import Plex-specific services
 const prisma = require('../prismaClient');

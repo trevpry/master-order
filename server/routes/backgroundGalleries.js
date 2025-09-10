@@ -13,7 +13,7 @@ router.get('/', async (req, res) => {
       include: {
         _count: {
           select: {
-            images: true
+            backgrounds: true
           }
         }
       },
@@ -27,7 +27,7 @@ router.get('/', async (req, res) => {
     // Add image counts and enhance data
     const galleriesWithCounts = galleries.map(gallery => ({
       ...gallery,
-      imageCount: gallery._count.images,
+      imageCount: gallery._count.backgrounds,
       _count: undefined // Remove the _count object from response
     }));
 
@@ -52,7 +52,7 @@ router.post('/', async (req, res) => {
   console.log('🖼️ [BACKGROUND-GALLERIES] Request body:', req.body);
 
   try {
-    const { name, description, url, tags } = req.body;
+    const { name, description } = req.body;
 
     if (!name) {
       return res.status(400).json({
@@ -64,10 +64,7 @@ router.post('/', async (req, res) => {
     // Check for duplicate names
     const existingGallery = await prisma.backgroundGallery.findFirst({
       where: {
-        name: {
-          equals: name,
-          mode: 'insensitive'
-        }
+        name: name
       }
     });
 
@@ -81,11 +78,7 @@ router.post('/', async (req, res) => {
     const gallery = await prisma.backgroundGallery.create({
       data: {
         name: name.trim(),
-        description: description?.trim() || null,
-        url: url?.trim() || null,
-        tags: tags?.trim() || null,
-        createdAt: new Date(),
-        updatedAt: new Date()
+        description: description?.trim() || null
       }
     });
 
@@ -116,9 +109,9 @@ router.get('/:id', async (req, res) => {
     const gallery = await prisma.backgroundGallery.findUnique({
       where: { id: galleryId },
       include: {
-        images: {
+        backgrounds: {
           orderBy: {
-            uploadedAt: 'desc'
+            updatedAt: 'desc'
           }
         }
       }
@@ -135,14 +128,14 @@ router.get('/:id', async (req, res) => {
     const baseUrl = `${req.protocol}://${req.get('host')}`;
     const galleryWithUrls = {
       ...gallery,
-      images: gallery.images.map(img => ({
+      images: gallery.backgrounds.map(img => ({
         ...img,
         url: `${baseUrl}/api/backgrounds/${img.id}/image`,
         thumbnailUrl: img.thumbnailPath ? `${baseUrl}/api/backgrounds/${img.id}/thumbnail` : null
       }))
     };
 
-    console.log(`🖼️ [BACKGROUND-GALLERIES] Found gallery with ${gallery.images.length} images`);
+    console.log(`🖼️ [BACKGROUND-GALLERIES] Found gallery with ${gallery.backgrounds.length} images`);
 
     res.json({
       success: true,
@@ -165,7 +158,7 @@ router.put('/:id', async (req, res) => {
 
   try {
     const galleryId = parseInt(req.params.id);
-    const { name, description, url, tags } = req.body;
+    const { name, description } = req.body;
 
     // Check if gallery exists
     const existingGallery = await prisma.backgroundGallery.findUnique({
@@ -183,10 +176,7 @@ router.put('/:id', async (req, res) => {
     if (name && name !== existingGallery.name) {
       const duplicateGallery = await prisma.backgroundGallery.findFirst({
         where: {
-          name: {
-            equals: name,
-            mode: 'insensitive'
-          },
+          name: name,
           id: {
             not: galleryId
           }
@@ -208,8 +198,6 @@ router.put('/:id', async (req, res) => {
 
     if (name !== undefined) updateData.name = name.trim();
     if (description !== undefined) updateData.description = description?.trim() || null;
-    if (url !== undefined) updateData.url = url?.trim() || null;
-    if (tags !== undefined) updateData.tags = tags?.trim() || null;
 
     const updatedGallery = await prisma.backgroundGallery.update({
       where: { id: galleryId },
@@ -246,7 +234,7 @@ router.delete('/:id', async (req, res) => {
       include: {
         _count: {
           select: {
-            images: true
+            backgrounds: true
           }
         }
       }
@@ -260,11 +248,11 @@ router.delete('/:id', async (req, res) => {
     }
 
     // Check if gallery has images
-    if (gallery._count.images > 0) {
+    if (gallery._count.backgrounds > 0) {
       return res.status(400).json({
         success: false,
-        error: `Cannot delete gallery with ${gallery._count.images} images. Remove all images first.`,
-        imageCount: gallery._count.images
+        error: `Cannot delete gallery with ${gallery._count.backgrounds} images. Remove all images first.`,
+        imageCount: gallery._count.backgrounds
       });
     }
 

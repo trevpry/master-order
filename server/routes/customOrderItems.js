@@ -252,6 +252,21 @@ router.put('/:id/items/:itemId', async (req, res) => {
         updateData[field] = parseInt(updateData[field]);
       }
     });
+
+    // Check if this update sets reading completion to 100% and auto-mark as watched
+    if (updateData.bookPercentRead === 100 || 
+        (updateData.bookCurrentPage && updateData.bookPageCount && updateData.bookCurrentPage >= updateData.bookPageCount)) {
+      
+      // Get the current item to check media type
+      const currentItem = await prisma.customOrderItem.findUnique({
+        where: { id: parseInt(itemId) }
+      });
+      
+      if (currentItem && (currentItem.mediaType === 'book' || currentItem.mediaType === 'comic' || currentItem.mediaType === 'shortstory')) {
+        updateData.isWatched = true;
+        console.log(`Setting ${currentItem.mediaType} "${currentItem.title}" as watched (100% completion)`);
+      }
+    }
     
     const updatedItem = await prisma.customOrderItem.update({
       where: {
