@@ -1,9 +1,8 @@
 const express = require('express');
 const router = express.Router();
-const { PrismaClient } = require('@prisma/client');
 const { initializeStashSyncService, getActiveStashService, getActiveSyncService, getSyncServiceType } = require('./shared');
 
-const prisma = new PrismaClient();
+const prisma = require('../prismaClient'); // Use shared singleton instance
 
 // POST /sync - Manual full sync endpoint
 router.post('/', async (req, res) => {

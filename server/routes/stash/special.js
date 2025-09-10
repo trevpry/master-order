@@ -6,10 +6,9 @@
  */
 
 const express = require('express');
-const { PrismaClient } = require('@prisma/client');
 const { generateOptimizedClips } = require('./shared');
 
-const prisma = new PrismaClient();
+const prisma = require('../prismaClient'); // Use shared singleton instance
 
 function createSpecialRoutes(dependencies) {
   const router = express.Router();

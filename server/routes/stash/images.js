@@ -1,10 +1,9 @@
 const express = require('express');
 const router = express.Router();
 const axios = require('axios');
-const { PrismaClient } = require('@prisma/client');
 const { initializeStashSyncService, getActiveStashService } = require('./shared');
 
-const prisma = new PrismaClient();
+const prisma = require('../prismaClient'); // Use shared singleton instance
 
 // GET /image-proxy/* - Proxy images from Stash server  
 router.get('/image-proxy/*', async (req, res) => {

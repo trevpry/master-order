@@ -15,6 +15,20 @@ console.log('  Working directory:', process.cwd());
 // Singleton pattern to ensure only one Prisma client instance
 let prismaInstance = null;
 
+// Function to get database URL with optimizations
+function getDatabaseUrl() {
+  const isProduction = process.env.NODE_ENV === 'production';
+  
+  if (isProduction) {
+    // Production optimizations with connection pooling
+    return 'file:/app/data/db/master_order.db?connection_limit=5&pool_timeout=30&socket_timeout=30';
+  } else {
+    // Development fallback - look for database in parent directory
+    const dbPath = path.join(__dirname, '..', 'master_order.db');
+    return `file:${dbPath}?connection_limit=3&pool_timeout=20`;
+  }
+}
+
 function createPrismaClient() {
   if (prismaInstance) {
     return prismaInstance;
@@ -22,45 +36,30 @@ function createPrismaClient() {
 
   console.log('🔗 Creating new Prisma client instance...');
   
-  // Build Prisma client configuration
+  // Build Prisma client configuration with optimizations
   const clientConfig = {
-    log: ['info', 'warn', 'error'], // Enable more detailed logging
+    log: process.env.NODE_ENV === 'development' ? ['info', 'warn', 'error'] : ['warn', 'error'], // Reduce logging in production
+    
+    // Add connection pooling and timeout settings for better performance
+    datasources: {
+      db: {
+        url: process.env.DATABASE_URL || getDatabaseUrl()
+      }
+    }
   };
+  
   
   // Determine database URL
   let databaseUrl = process.env.DATABASE_URL;
   
   if (!databaseUrl) {
-    // Fallback to default based on environment
-    const isProduction = process.env.NODE_ENV === 'production';
-    
-    if (isProduction) {
-      databaseUrl = 'file:/app/data/db/master_order.db?connection_limit=1&pool_timeout=20&socket_timeout=20';
-    } else {
-      // Development fallback - look for database in parent directory
-      const dbPath = path.join(__dirname, '..', 'master_order.db');
-      databaseUrl = `file:${dbPath}`;
-    }
-    
+    databaseUrl = getDatabaseUrl();
     console.log('⚠️ DATABASE_URL not found in environment, using fallback:', databaseUrl);
     
     // Override the datasources with our fallback
-    clientConfig.datasources = {
-      db: {
-        url: databaseUrl
-      }
-    };
+    clientConfig.datasources.db.url = databaseUrl;
   } else {
     console.log('🔧 Using DATABASE_URL from environment:', databaseUrl);
-    
-    // Only override datasources if we want to customize the URL
-    if (databaseUrl !== process.env.DATABASE_URL) {
-      clientConfig.datasources = {
-        db: {
-          url: databaseUrl
-        }
-      };
-    }
   }
   
   prismaInstance = new PrismaClient(clientConfig);

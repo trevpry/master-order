@@ -7,6 +7,8 @@ const express = require('express');
 const fs = require('fs');
 const path = require('path');
 const multer = require('multer');
+const { asyncHandler } = require('../../utils/responses');
+const { validateRequiredFields } = require('../../middleware/validation');
 
 // Configure multer for background uploads
 const getUploadDirectory = (type) => {
@@ -51,23 +53,22 @@ function createBackgroundRoutes(prisma) {
   const router = express.Router();
 
   // Get all backgrounds
-  router.get('/', async (req, res) => {
+  router.get('/', asyncHandler(async (req, res) => {
     console.log('📸 [BACKGROUNDS] API endpoint called');
     console.log('📸 [BACKGROUNDS] Request headers:', JSON.stringify(req.headers, null, 2));
     console.log('📸 [BACKGROUNDS] DATABASE_URL:', process.env.DATABASE_URL);
     console.log('📸 [BACKGROUNDS] NODE_ENV:', process.env.NODE_ENV);
     
-    try {
-      console.log('📸 [BACKGROUNDS] Attempting to connect to database...');
-      
-      // Test database connection first
-      await prisma.$connect();
-      console.log('📸 [BACKGROUNDS] Database connection successful');
-      
-      // Check if BackgroundImage table exists (database-agnostic)
-      console.log('📸 [BACKGROUNDS] Checking if BackgroundImage table exists...');
-      const isPostgres = process.env.DATABASE_URL?.includes('postgresql://');
-      let tableExists;
+    console.log('📸 [BACKGROUNDS] Attempting to connect to database...');
+    
+    // Test database connection first
+    await prisma.$connect();
+    console.log('📸 [BACKGROUNDS] Database connection successful');
+    
+    // Check if BackgroundImage table exists (database-agnostic)
+    console.log('📸 [BACKGROUNDS] Checking if BackgroundImage table exists...');
+    const isPostgres = process.env.DATABASE_URL?.includes('postgresql://');
+    let tableExists;
       
       if (isPostgres) {
         tableExists = await prisma.$queryRaw`
@@ -103,21 +104,7 @@ function createBackgroundRoutes(prisma) {
       console.log('📸 [BACKGROUNDS] Sample background:', backgrounds[0] ? JSON.stringify(backgrounds[0], null, 2) : 'None');
       
       res.json(backgrounds);
-    } catch (error) {
-      console.error('❌ [BACKGROUNDS] Error details:', {
-        name: error.name,
-        message: error.message,
-        code: error.code,
-        stack: error.stack,
-        meta: error.meta
-      });
-      res.status(500).json({ 
-        error: 'Failed to fetch backgrounds',
-        details: error.message,
-        code: error.code 
-      });
-    }
-  });
+  }));
 
   // Upload backgrounds
   router.post('/upload', backgroundUpload.array('backgrounds'), async (req, res) => {

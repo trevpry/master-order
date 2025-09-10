@@ -17,24 +17,17 @@ function createSessionTrackingRoutes(prisma) {
   const WatchLogService = require('../../watchLogService');
   const watchLogService = new WatchLogService(prisma);
   
+  // Import validation and response utilities
+  const { validateReadingOperation, validateViewingOperation } = require('../../middleware/validation');
+  const { sendBadRequest, sendSuccess, sendServerError, asyncHandler, logError } = require('../../utils/responses');
+  
   // ==================== READING SESSION ENDPOINTS ====================
   
   // Start a reading session
-  router.post('/reading/start', async (req, res) => {
-    try {
-      const { mediaType, title, seriesTitle, customOrderItemId } = req.body;
-      
-      console.log('Reading session start request:', { mediaType, title, seriesTitle, customOrderItemId });
-      
-      if (!mediaType || !title) {
-        console.log('Missing required fields - mediaType or title');
-        return res.status(400).json({ error: 'Missing required fields: mediaType and title are required' });
-      }
-
-      if (!['book', 'comic', 'shortstory'].includes(mediaType)) {
-        console.log('Invalid media type:', mediaType);
-        return res.status(400).json({ error: 'Invalid media type for reading' });
-      }
+  router.post('/reading/start', validateReadingOperation, asyncHandler(async (req, res) => {
+    const { mediaType, title, seriesTitle, customOrderItemId } = req.body;
+    
+    console.log('Reading session start request:', { mediaType, title, seriesTitle, customOrderItemId });
 
       // Validate customOrderItemId if provided
       let finalCustomOrderItemId = null;
@@ -144,76 +137,66 @@ function createSessionTrackingRoutes(prisma) {
           mediaTitle: title,
           mediaType: mediaType,
           note: 'Standalone reading session - not part of a custom order',
-          timestamp: new Date().toISOString()
-        };
-        
-        console.log('📱 Emitting Android companion app message (standalone):', JSON.stringify(androidMessage, null, 2));
-        global.io?.emit('androidCompanion', androidMessage);
-      }
+        timestamp: new Date().toISOString()
+      };
       
-      res.json(readingSession);
-    } catch (error) {
-      console.error('Error starting reading session:', error);
-      res.status(500).json({ error: error.message });
+      console.log('📱 Emitting Android companion app message (standalone):', JSON.stringify(androidMessage, null, 2));
+      global.io?.emit('androidCompanion', androidMessage);
     }
-  });
+    
+    res.json(readingSession);
+  }));
 
   // Pause/Resume the active reading session
-  router.post('/reading/pause', async (req, res) => {
-    try {
-      console.log('Attempting to pause/resume reading session...');
-      
-      const activeSession = await watchLogService.getActiveReadingSession();
-      console.log('Active session found:', activeSession);
-      
-      if (!activeSession) {
-        console.log('No active reading session found');
-        return res.status(404).json({ error: 'No active reading session found' });
-      }
-
-      console.log('Pausing/resuming session with ID:', activeSession.id);
-      const updatedSession = await watchLogService.pauseReading(activeSession.id);
-      console.log('Session paused/resumed successfully');
-      res.json(updatedSession);
-    } catch (error) {
-      console.error('Error pausing reading session:', error);
-      res.status(500).json({ error: error.message });
+  router.post('/reading/pause', asyncHandler(async (req, res) => {
+    console.log('Attempting to pause/resume reading session...');
+    
+    const activeSession = await watchLogService.getActiveReadingSession();
+    console.log('Active session found:', activeSession);
+    
+    if (!activeSession) {
+      console.log('No active reading session found');
+      return res.status(404).json({ error: 'No active reading session found' });
     }
-  });
+
+    console.log('Pausing/resuming session with ID:', activeSession.id);
+    const updatedSession = await watchLogService.pauseReading(activeSession.id);
+    console.log('Session paused/resumed successfully');
+    res.json(updatedSession);
+  }));
 
   // Stop the active reading session
-  router.post('/reading/stop', async (req, res) => {
-    try {
-      console.log('🎯 HIT OUR SESSIONTRACKING ROUTE! 🎯');
-      console.log('Attempting to stop reading session...');
-      console.log('Request body:', req.body);
-      
-      // Handle both nested progress object and direct progress data
-      const progress = req.body.progress || req.body;
-      
-      const activeSession = await watchLogService.getActiveReadingSession();
-      console.log('Active session found:', activeSession);
-      
-      if (!activeSession) {
-        console.log('No active reading session found');
-        return res.status(404).json({ error: 'No active reading session found' });
-      }
+  router.post('/reading/stop', asyncHandler(async (req, res) => {
+    console.log('🎯 HIT OUR SESSIONTRACKING ROUTE! 🎯');
+    console.log('Attempting to stop reading session...');
+    console.log('Request body:', req.body);
+    
+    // Handle both nested progress object and direct progress data
+    const progress = req.body.progress || req.body;
+    
+    const activeSession = await watchLogService.getActiveReadingSession();
+    console.log('Active session found:', activeSession);
+    
+    if (!activeSession) {
+      console.log('No active reading session found');
+      return res.status(404).json({ error: 'No active reading session found' });
+    }
 
-      console.log('Stopping session with ID:', activeSession.id);
-      
-      let completedSession;
-      try {
-        completedSession = await watchLogService.stopReading(activeSession.id);
-        console.log('✅ stopReading completed, continuing with progress update...');
-      } catch (stopError) {
-        console.error('❌ Error in stopReading:', stopError);
-        throw stopError;
-      }
-      
-      console.log('📋 Completed session result:', completedSession);
-      console.log('📋 Session deleted?', completedSession.deleted);
-      console.log('📋 Has customOrderItemId?', activeSession.customOrderItemId);
-      console.log('📋 Progress data?', progress);
+    console.log('Stopping session with ID:', activeSession.id);
+    
+    let completedSession;
+    try {
+      completedSession = await watchLogService.stopReading(activeSession.id);
+      console.log('✅ stopReading completed, continuing with progress update...');
+    } catch (stopError) {
+      console.error('❌ Error in stopReading:', stopError);
+      throw stopError;
+    }
+    
+    console.log('📋 Completed session result:', completedSession);
+    console.log('📋 Session deleted?', completedSession.deleted);
+    console.log('📋 Has customOrderItemId?', activeSession.customOrderItemId);
+    console.log('📋 Progress data?', progress);
       
       // Update reading progress if provided and session wasn't deleted
       console.log('🔍 Checking progress update conditions:');
@@ -312,218 +295,174 @@ function createSessionTrackingRoutes(prisma) {
       
       console.log('Session stopped successfully');
       res.json(completedSession);
-    } catch (error) {
-      console.error('Error stopping reading session:', error);
-      res.status(500).json({ error: error.message });
-    }
-  });
+  }));
 
   // Get the current active reading session
-  router.get('/reading/active', async (req, res) => {
-    try {
-      console.log('Getting active reading session...');
-      const activeSession = await watchLogService.getActiveReadingSession();
-      console.log('Active session:', activeSession);
-      res.json(activeSession);
-    } catch (error) {
-      console.error('Error getting active reading session:', error);
-      res.status(500).json({ error: error.message });
-    }
-  });
+  router.get('/reading/active', asyncHandler(async (req, res) => {
+    console.log('Getting active reading session...');
+    const activeSession = await watchLogService.getActiveReadingSession();
+    console.log('Active session:', activeSession);
+    res.json(activeSession);
+  }));
 
   // Manual reading log endpoint (for testing)
-  router.post('/reading/log', async (req, res) => {
-    try {
-      const watchLogData = {
-        mediaType: req.body.mediaType,
-        activityType: 'read',
-        title: req.body.title,
-        seriesTitle: req.body.seriesTitle,
-        customOrderItemId: req.body.customOrderItemId,
-        startTime: req.body.startTime,
-        endTime: req.body.endTime,
-        totalWatchTime: req.body.totalWatchTime,
-        isCompleted: req.body.isCompleted // Let the caller specify completion status
-      };
+  router.post('/reading/log', asyncHandler(async (req, res) => {
+    const watchLogData = {
+      mediaType: req.body.mediaType,
+      activityType: 'read',
+      title: req.body.title,
+      seriesTitle: req.body.seriesTitle,
+      customOrderItemId: req.body.customOrderItemId,
+      startTime: req.body.startTime,
+      endTime: req.body.endTime,
+      totalWatchTime: req.body.totalWatchTime,
+      isCompleted: req.body.isCompleted // Let the caller specify completion status
+    };
 
-      const watchLog = await watchLogService.logWatched(watchLogData);
-      res.json({ success: true, watchLog });
-    } catch (error) {
-      console.error('Error logging reading session:', error);
-      res.status(500).json({ error: error.message });
-    }
-  });
+    const watchLog = await watchLogService.logWatched(watchLogData);
+    res.json({ success: true, watchLog });
+  }));
 
   // ==================== VIEWING SESSION ENDPOINTS ====================
 
   // Start a viewing session for web videos
-  router.post('/viewing/start', async (req, res) => {
-    try {
-      const { mediaType, title, seriesTitle, customOrderItemId } = req.body;
-      
-      console.log('Viewing session start request:', { mediaType, title, seriesTitle, customOrderItemId });
-      
-      if (!mediaType || !title) {
-        console.log('Missing required fields - mediaType or title');
-        return res.status(400).json({ error: 'Missing required fields: mediaType and title are required' });
-      }
+  router.post('/viewing/start', validateViewingOperation, asyncHandler(async (req, res) => {
+    const { mediaType, title, seriesTitle, customOrderItemId } = req.body;
+    
+    console.log('Viewing session start request:', { mediaType, title, seriesTitle, customOrderItemId });
 
-      if (!customOrderItemId) {
-        console.log('No customOrderItemId provided - this viewing session will not be linked to a custom order');
-      }
+    if (!customOrderItemId) {
+      console.log('No customOrderItemId provided - this viewing session will not be linked to a custom order');
+    }
 
-      if (!['webvideo'].includes(mediaType)) {
-        console.log('Invalid media type:', mediaType);
-        return res.status(400).json({ error: 'Invalid media type for viewing' });
-      }
+    if (!['webvideo'].includes(mediaType)) {
+      console.log('Invalid media type:', mediaType);
+      return sendBadRequest(res, 'Invalid media type for viewing');
+    }
 
-      const finalCustomOrderItemId = customOrderItemId && Number.isInteger(parseInt(customOrderItemId)) 
-        ? parseInt(customOrderItemId) 
+    const finalCustomOrderItemId = customOrderItemId && Number.isInteger(parseInt(customOrderItemId)) 
+      ? parseInt(customOrderItemId) 
         : null;
       
       const viewingSession = await watchLogService.startViewing({
         mediaType,
         title,
-        seriesTitle,
-        customOrderItemId: finalCustomOrderItemId
-      });
+      seriesTitle,
+      customOrderItemId: finalCustomOrderItemId
+    });
 
-      console.log('Viewing session started successfully:', viewingSession.id);
-      res.json(viewingSession);
-    } catch (error) {
-      console.error('Error starting viewing session:', error);
-      res.status(500).json({ error: error.message });
-    }
-  });
+    console.log('Viewing session started successfully:', viewingSession.id);
+    res.json(viewingSession);
+  }));
 
   // Pause/Resume the active viewing session
-  router.post('/viewing/pause', async (req, res) => {
-    try {
-      console.log('Attempting to pause/resume viewing session...');
-      
-      const activeSession = await watchLogService.getActiveViewingSession();
-      console.log('Active session found:', activeSession);
-      
-      if (!activeSession) {
-        console.log('No active viewing session found');
-        return res.status(404).json({ error: 'No active viewing session found' });
-      }
-
-      console.log('Pausing/resuming session with ID:', activeSession.id);
-      const updatedSession = await watchLogService.pauseViewing(activeSession.id);
-      console.log('Session paused/resumed successfully');
-      res.json(updatedSession);
-    } catch (error) {
-      console.error('Error pausing viewing session:', error);
-      res.status(500).json({ error: error.message });
+  router.post('/viewing/pause', asyncHandler(async (req, res) => {
+    console.log('Attempting to pause/resume viewing session...');
+    
+    const activeSession = await watchLogService.getActiveViewingSession();
+    console.log('Active session found:', activeSession);
+    
+    if (!activeSession) {
+      console.log('No active viewing session found');
+      return res.status(404).json({ error: 'No active viewing session found' });
     }
-  });
+
+    console.log('Pausing/resuming session with ID:', activeSession.id);
+    const updatedSession = await watchLogService.pauseViewing(activeSession.id);
+    console.log('Session paused/resumed successfully');
+    res.json(updatedSession);
+  }));
 
   // Stop the active viewing session
-  router.post('/viewing/stop', async (req, res) => {
-    try {
-      console.log('Attempting to stop viewing session...');
-      const { progress } = req.body;
-      
-      const activeSession = await watchLogService.getActiveViewingSession();
-      console.log('Active session found:', activeSession);
-      
-      if (!activeSession) {
-        console.log('No active viewing session found');
-        return res.status(404).json({ error: 'No active viewing session found' });
-      }
-
-      console.log('Stopping session with ID:', activeSession.id);
-      
-      const completedSession = await watchLogService.stopViewing(activeSession.customOrderItemId);
-      
-      // Update viewing progress if provided and session wasn't deleted
-      if (progress && !completedSession.deleted && activeSession.customOrderItemId) {
-        console.log('Updating viewing progress for item:', activeSession.customOrderItemId, progress);
-        
-        try {
-          const updateData = {};
-          
-          if (progress.watchedPercentage !== undefined && progress.watchedPercentage >= 0 && progress.watchedPercentage <= 100) {
-            updateData.webvideoPercentWatched = progress.watchedPercentage;
-            
-            if (progress.watchedPercentage === 100) {
-              updateData.isWatched = true;
-              console.log('Marking item as watched (100% completion)');
-            }
-          }
-          
-          if (progress.currentTime !== undefined && progress.currentTime >= 0) {
-            updateData.webvideoCurrentTime = progress.currentTime;
-          }
-          
-          if (progress.totalDuration !== undefined && progress.totalDuration > 0) {
-            const existingItem = await prisma.customOrderItem.findUnique({
-              where: { id: activeSession.customOrderItemId },
-              select: { webvideoDuration: true }
-            });
-            
-            if (!existingItem?.webvideoDuration) {
-              updateData.webvideoDuration = progress.totalDuration;
-            }
-          }
-          
-          if (Object.keys(updateData).length > 0) {
-            await prisma.customOrderItem.update({
-              where: { id: activeSession.customOrderItemId },
-              data: updateData
-            });
-            
-            console.log('Viewing progress updated successfully:', updateData);
-          }
-        } catch (progressError) {
-          console.error('Error updating viewing progress:', progressError);
-        }
-      }
-      
-      console.log('Session stopped successfully');
-      res.json(completedSession);
-    } catch (error) {
-      console.error('Error stopping viewing session:', error);
-      res.status(500).json({ error: error.message });
+  router.post('/viewing/stop', asyncHandler(async (req, res) => {
+    console.log('Attempting to stop viewing session...');
+    const { progress } = req.body;
+    
+    const activeSession = await watchLogService.getActiveViewingSession();
+    console.log('Active session found:', activeSession);
+    
+    if (!activeSession) {
+      console.log('No active viewing session found');
+      return res.status(404).json({ error: 'No active viewing session found' });
     }
-  });
+
+    console.log('Stopping session with ID:', activeSession.id);
+    
+    const completedSession = await watchLogService.stopViewing(activeSession.customOrderItemId);
+    
+    // Update viewing progress if provided and session wasn't deleted
+    if (progress && !completedSession.deleted && activeSession.customOrderItemId) {
+      console.log('Updating viewing progress for item:', activeSession.customOrderItemId, progress);
+      
+      try {
+        const updateData = {};
+        
+        if (progress.watchedPercentage !== undefined && progress.watchedPercentage >= 0 && progress.watchedPercentage <= 100) {
+          updateData.webvideoPercentWatched = progress.watchedPercentage;
+          
+          if (progress.watchedPercentage === 100) {
+            updateData.isWatched = true;
+            console.log('Marking item as watched (100% completion)');
+          }
+        }
+        
+        if (progress.currentTime !== undefined && progress.currentTime >= 0) {
+          updateData.webvideoCurrentTime = progress.currentTime;
+        }
+        
+        if (progress.totalDuration !== undefined && progress.totalDuration > 0) {
+          const existingItem = await prisma.customOrderItem.findUnique({
+            where: { id: activeSession.customOrderItemId },
+            select: { webvideoDuration: true }
+          });
+          
+          if (!existingItem?.webvideoDuration) {
+            updateData.webvideoDuration = progress.totalDuration;
+          }
+        }
+        
+        if (Object.keys(updateData).length > 0) {
+          await prisma.customOrderItem.update({
+            where: { id: activeSession.customOrderItemId },
+            data: updateData
+          });
+          
+          console.log('Viewing progress updated successfully:', updateData);
+        }
+      } catch (progressError) {
+        console.error('Error updating viewing progress:', progressError);
+      }
+    }
+    
+    console.log('Session stopped successfully');
+    res.json(completedSession);
+  }));
 
   // Get the current active viewing session
-  router.get('/viewing/active', async (req, res) => {
-    try {
-      console.log('Getting active viewing session...');
-      const activeSession = await watchLogService.getActiveViewingSession();
-      console.log('Active session:', activeSession);
-      res.json(activeSession);
-    } catch (error) {
-      console.error('Error getting active viewing session:', error);
-      res.status(500).json({ error: error.message });
-    }
-  });
+  router.get('/viewing/active', asyncHandler(async (req, res) => {
+    console.log('Getting active viewing session...');
+    const activeSession = await watchLogService.getActiveViewingSession();
+    console.log('Active session:', activeSession);
+    res.json(activeSession);
+  }));
 
   // Manual viewing log endpoint
-  router.post('/viewing/log', async (req, res) => {
-    try {
-      const watchLogData = {
-        mediaType: req.body.mediaType,
-        activityType: 'watch',
-        title: req.body.title,
-        seriesTitle: req.body.seriesTitle,
-        customOrderItemId: req.body.customOrderItemId,
-        startTime: req.body.startTime,
-        endTime: req.body.endTime,
-        totalWatchTime: req.body.totalWatchTime,
-        isCompleted: true
-      };
+  router.post('/viewing/log', asyncHandler(async (req, res) => {
+    const watchLogData = {
+      mediaType: req.body.mediaType,
+      activityType: 'watch',
+      title: req.body.title,
+      seriesTitle: req.body.seriesTitle,
+      customOrderItemId: req.body.customOrderItemId,
+      startTime: req.body.startTime,
+      endTime: req.body.endTime,
+      totalWatchTime: req.body.totalWatchTime,
+      isCompleted: true
+    };
 
-      const watchLog = await watchLogService.logWatched(watchLogData);
-      res.json({ success: true, watchLog });
-    } catch (error) {
-      console.error('Error logging viewing session:', error);
-      res.status(500).json({ error: error.message });
-    }
-  });
+    const watchLog = await watchLogService.logWatched(watchLogData);
+    res.json({ success: true, watchLog });
+  }));
 
   return router;
 }

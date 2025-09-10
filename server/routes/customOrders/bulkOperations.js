@@ -15,96 +15,68 @@ const { extractComicVineMetadata } = require('./utilities/metadataExtractor');
 function createBulkOperationsRoutes(prisma, services) {
   const router = express.Router();
   const { artworkCache } = services;
+  
+  // Import validation and response utilities
+  const { validateCustomOrderItem, validateMediaTypeAndTitle } = require('../../middleware/validation');
+  const { sendBadRequest, sendSuccess, sendServerError, asyncHandler, logError } = require('../../utils/responses');
 
   // Add item to custom order (comprehensive bulk import)
-  router.post('/:id/items', async (req, res) => {
-    try {
-      const { id } = req.params;
-      const {
-        mediaType,
-        plexKey,
-        title,
-        seasonNumber,
-        episodeNumber,
-        seriesTitle,
-        comicSeries,
-        comicYear,
-        comicIssue,
-        comicVolume,
-        comicPublisher,
-        customTitle,
-        comicVineId,
-        comicVineDetailsJson,
-        comicCoverUrl,
-        bookTitle,
-        bookAuthor,
-        bookYear,
-        bookIsbn,
-        bookPublisher,
-        bookOpenLibraryId,
-        bookCoverUrl,
-        bookPageCount,
-        storyTitle,
-        storyAuthor,
-        storyYear,
-        storyUrl,
-        storyContainedInBookId,
-        storyCoverUrl,
-        webTitle,
-        webUrl,
-        webDescription
-      } = req.body;
+  router.post('/:id/items', validateCustomOrderItem, asyncHandler(async (req, res) => {
+    const { id } = req.params;
+    const {
+      mediaType,
+      plexKey,
+      title,
+      seasonNumber,
+      episodeNumber,
+      seriesTitle,
+      comicSeries,
+      comicYear,
+      comicIssue,
+      comicVolume,
+      comicPublisher,
+      customTitle,
+      comicVineId,
+      comicVineDetailsJson,
+      comicCoverUrl,
+      bookTitle,
+      bookAuthor,
+      bookYear,
+      bookIsbn,
+      bookPublisher,
+      bookOpenLibraryId,
+      bookCoverUrl,
+      bookPageCount,
+      storyTitle,
+      storyAuthor,
+      storyYear,
+      storyUrl,
+      storyContainedInBookId,
+      storyCoverUrl,
+      webTitle,
+      webUrl,
+      webDescription
+    } = req.body;
 
-      console.log(mediaType);
-      
-      if (!mediaType || !title) {
-        return res.status(400).json({ error: 'mediaType and title are required' });
+    console.log(mediaType);
+    
+    // Additional media-specific validation (beyond basic middleware)
+    if (mediaType === 'episode') {
+      // For TV episodes, either plexKey OR (seriesTitle + seasonNumber + episodeNumber) required
+      if (!plexKey && (!seriesTitle || seasonNumber === undefined || episodeNumber === undefined)) {
+        return sendBadRequest(res, 'For episodes: either plexKey (for existing Plex episodes) OR seriesTitle, seasonNumber, and episodeNumber (for episodes not yet in Plex) are required');
       }
-      
-      // Validate media-specific requirements
-      if (mediaType === 'comic') {
-        if (!comicSeries || !comicIssue) {
-          return res.status(400).json({ error: 'For comics: comicSeries and comicIssue are required' });
-        }
-      } else if (mediaType === 'book') {
-        if (!bookTitle || !bookAuthor) {
-          return res.status(400).json({ error: 'For books: bookTitle and bookAuthor are required' });
-        }
-      } else if (mediaType === 'shortstory') {
-        console.log(req.body);
-        if (!storyTitle) {
-          return res.status(400).json({ error: 'For short stories: storyTitle is required' });
-        }
-      } else if (mediaType === 'webvideo') {
-        if (!webTitle || !webUrl) {
-          return res.status(400).json({ error: 'For web videos: webTitle and webUrl are required' });
-        }
-        // Validate URL format
-        try {
-          new URL(webUrl);
-        } catch (err) {
-          return res.status(400).json({ error: 'Invalid webUrl format' });
-        }
-      } else if (mediaType === 'episode') {
-        // For TV episodes, either plexKey OR (seriesTitle + seasonNumber + episodeNumber) required
-        if (!plexKey && (!seriesTitle || seasonNumber === undefined || episodeNumber === undefined)) {
-          return res.status(400).json({ 
-            error: 'For episodes: either plexKey (for existing Plex episodes) OR seriesTitle, seasonNumber, and episodeNumber (for episodes not yet in Plex) are required' 
-          });
-        }
-      } else if (mediaType === 'movie') {
-        // For movies, either plexKey OR title is required (title alone allows for movies not yet in Plex)
-        if (!plexKey && !title) {
-          return res.status(400).json({ 
-            error: 'For movies: either plexKey (for existing Plex movies) OR title (for movies not yet in Plex) is required' 
-          });
-        }
-      } else {
-        // For other media types, plexKey is still required
-        if (!plexKey) {
-          return res.status(400).json({ error: 'plexKey is required for this media type' });
-        }
+    } else if (mediaType === 'movie') {
+      // For movies, either plexKey OR title is required (title alone allows for movies not yet in Plex)
+      if (!plexKey && !title) {
+        return sendBadRequest(res, 'For movies: either plexKey (for existing Plex movies) OR title (for movies not yet in Plex) is required');
       }
+    } else {
+      // For other media types, plexKey is still required
+      if (!plexKey) {
+        return sendBadRequest(res, 'plexKey is required for this media type');
+      }
+    }
 
       // Check for duplicate items
       let existingItem;
@@ -292,49 +264,38 @@ function createBulkOperationsRoutes(prisma, services) {
       // Try to cache artwork for the new item (async, don't wait for completion)
       if (artworkCache) {
         artworkCache.ensureArtworkCached(item).catch(error => {
-          console.warn(`Failed to cache artwork for item ${item.id}:`, error.message);
-        });
-      }
-      
-      res.status(201).json(item);
-    } catch (error) {
-      console.error('Error adding item to custom order:', error);
-      res.status(500).json({ error: 'Failed to add item to custom order' });
+        console.warn(`Failed to cache artwork for item ${item.id}:`, error.message);
+      });
     }
-  });
+    
+    res.status(201).json(item);
+  }));
 
   // Add TVDB-only item to custom order (doesn't exist in Plex yet)
-  router.post('/:id/items/tvdb-only', async (req, res) => {
-    try {
-      const { id } = req.params;
-      const { 
-        mediaType, 
-        title, 
-        seasonNumber, 
-        episodeNumber, 
-        seriesTitle,
-        tvdbSeriesId,
-        tvdbSeasonId,
-        tvdbEpisodeId,
-        description,
-        airDate,
-        // Movie fields
-        year,
-        movieTvdbId
-      } = req.body;
+  router.post('/:id/items/tvdb-only', validateMediaTypeAndTitle, asyncHandler(async (req, res) => {
+    const { id } = req.params;
+    const { 
+      mediaType, 
+      title, 
+      seasonNumber, 
+      episodeNumber, 
+      seriesTitle,
+      tvdbSeriesId,
+      tvdbSeasonId,
+      tvdbEpisodeId,
+      description,
+      airDate,
+      // Movie fields
+      year,
+      movieTvdbId
+    } = req.body;
 
-      console.log(`Adding TVDB-only ${mediaType} to custom order ${id}:`, { title, seriesTitle, seasonNumber, episodeNumber });
+    console.log(`Adding TVDB-only ${mediaType} to custom order ${id}:`, { title, seriesTitle, seasonNumber, episodeNumber });
 
-      if (!mediaType || !title) {
-        return res.status(400).json({ error: 'mediaType and title are required' });
-      }
-
-      // For episodes, we need series info
-      if (mediaType === 'episode' && (!seriesTitle || seasonNumber === undefined || episodeNumber === undefined)) {
-        return res.status(400).json({ 
-          error: 'For TVDB episodes: seriesTitle, seasonNumber, and episodeNumber are required' 
-        });
-      }
+    // For episodes, we need series info
+    if (mediaType === 'episode' && (!seriesTitle || seasonNumber === undefined || episodeNumber === undefined)) {
+      return sendBadRequest(res, 'For TVDB episodes: seriesTitle, seasonNumber, and episodeNumber are required');
+    }
 
       // Generate a unique plexKey for TVDB-only items (they don't have real Plex keys)
       const finalPlexKey = `tvdb-${mediaType}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
@@ -372,14 +333,9 @@ function createBulkOperationsRoutes(prisma, services) {
         }
       });
 
-      console.log(`Successfully added TVDB-only ${mediaType}: ${title}`);
-      res.status(201).json(item);
-
-    } catch (error) {
-      console.error('Error adding TVDB-only item to custom order:', error.message);
-      res.status(500).json({ error: 'Internal server error' });
-    }
-  });
+    console.log(`Successfully added TVDB-only ${mediaType}: ${title}`);
+    res.status(201).json(item);
+  }));
 
   return router;
 }

@@ -163,7 +163,7 @@ class ActivityStatsService {
         }
       });
 
-      // For TV shows and movies, also get the actor data from Plex
+      // For TV shows and movies, also get the actor data from Plex (optimized query)
       let episodeActorData = {};
       let movieActorData = {};
       
@@ -173,29 +173,36 @@ class ActivityStatsService {
           .map(log => log.plexKey);
         
         if (plexKeys.length > 0) {
-          const episodesWithRoles = await this.prisma.plexEpisode.findMany({
-            where: {
-              ratingKey: { in: plexKeys }
-            },
-            include: {
-              roles: {
-                select: {
-                  tag: true,
-                  role: true
+          // Use chunked queries to prevent memory issues with large datasets
+          const CHUNK_SIZE = 100;
+          for (let i = 0; i < plexKeys.length; i += CHUNK_SIZE) {
+            const chunk = plexKeys.slice(i, i + CHUNK_SIZE);
+            
+            const episodesWithRoles = await this.prisma.plexEpisode.findMany({
+              where: {
+                ratingKey: { in: chunk }
+              },
+              include: {
+                roles: {
+                  select: {
+                    tag: true,
+                    role: true
+                  },
+                  take: 10 // Limit to prevent excessive memory usage
                 }
               }
-            }
-          });
-          
-          // Create a map of plexKey to actors
-          episodesWithRoles.forEach(episode => {
-            if (episode.roles && episode.roles.length > 0) {
-              episodeActorData[episode.ratingKey] = episode.roles.map(role => ({
-                name: role.tag,
-                role: role.role
-              }));
-            }
-          });
+            });
+            
+            // Create a map of plexKey to actors
+            episodesWithRoles.forEach(episode => {
+              if (episode.roles && episode.roles.length > 0) {
+                episodeActorData[episode.ratingKey] = episode.roles.map(role => ({
+                  name: role.tag,
+                  role: role.role
+                }));
+              }
+            });
+          }
         }
       } else if (mediaType === 'movie') {
         const plexKeys = watchLogs

@@ -1,9 +1,10 @@
 const express = require('express');
 const router = express.Router();
-const { PrismaClient } = require('@prisma/client');
 const { generateOptimizedClips } = require('./shared');
+const { validateRequiredFields } = require('../../middleware/validation');
+const { sendBadRequest, sendSuccess, sendServerError, asyncHandler } = require('../../utils/responses');
 
-const prisma = new PrismaClient();
+const prisma = require('../prismaClient'); // Use shared singleton instance
 
 // GET /clips - Get all clips with pagination and filtering
 router.get('/', async (req, res) => {

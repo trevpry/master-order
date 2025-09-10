@@ -1,25 +1,24 @@
 const express = require('express');
-const { PrismaClient } = require('@prisma/client');
-
 const router = express.Router();
-const prisma = new PrismaClient();
+const { validateRequiredFields } = require('../middleware/validation');
+const { sendBadRequest, sendSuccess, sendServerError, asyncHandler } = require('../utils/responses');
+const prisma = require('../prismaClient'); // Use shared singleton instance
 
 // Get available playlists for linking to custom orders
-router.get('/available', async (req, res) => {
-  try {
-    const [plexPlaylists, customPlaylists] = await Promise.all([
-      prisma.plexPlaylist.findMany({
-        select: {
-          ratingKey: true,
-          title: true,
-          playlistType: true,
-          leafCount: true,
-          duration: true
-        },
-        orderBy: { title: 'asc' }
-      }),
-      prisma.customPlaylist.findMany({
-        select: {
+router.get('/available', asyncHandler(async (req, res) => {
+  const [plexPlaylists, customPlaylists] = await Promise.all([
+    prisma.plexPlaylist.findMany({
+      select: {
+        ratingKey: true,
+        title: true,
+        playlistType: true,
+        leafCount: true,
+        duration: true
+      },
+      orderBy: { title: 'asc' }
+    }),
+    prisma.customPlaylist.findMany({
+      select: {
           id: true,
           title: true,
           description: true,
@@ -40,10 +39,6 @@ router.get('/available', async (req, res) => {
         trackCount: playlist._count.tracks
       }))
     });
-  } catch (error) {
-    console.error('Error fetching available playlists:', error);
-    res.status(500).json({ error: 'Failed to fetch available playlists' });
-  }
-});
+}));
 
 module.exports = router;

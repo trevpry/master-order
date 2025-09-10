@@ -1,8 +1,8 @@
 const express = require('express');
 const router = express.Router();
-const { PrismaClient } = require('@prisma/client');
-
-const prisma = new PrismaClient();
+const prisma = require('../prismaClient'); // Use shared singleton instance
+const { validateMediaTypeAndTitle, validateCustomOrderItem } = require('../middleware/validation');
+const { sendBadRequest, sendSuccess, sendServerError, asyncHandler, logError } = require('../utils/responses');
 
 // Utility functions
 const simpleHash = (str) => {
@@ -26,83 +26,78 @@ const markCustomOrderItemAsWatched = async (itemId) => {
 };
 
 // POST /api/custom-orders/:id/items - Add item to custom order
-router.post('/:id/items', async (req, res) => {
-  try {
-    const { id } = req.params;
-    const {
-      mediaType,
-      plexKey,
-      title,
-      seasonNumber,
-      episodeNumber,
-      seriesTitle,
-      comicSeries,
-      comicYear,
-      comicIssue,
-      comicVolume,
-      comicPublisher,
-      customTitle,
-      comicVineId,
-      comicVineDetailsJson,
-      bookTitle,
-      bookAuthor,
-      bookYear,
-      bookIsbn,
-      bookPublisher,
-      bookOpenLibraryId,
-      bookCoverUrl,
-      bookPageCount,
-      storyTitle,
-      storyAuthor,
-      storyYear,
-      storyUrl,
-      storyContainedInBookId,
-      storyCoverUrl,
-      webTitle,
-      webUrl,
-      webDescription
-    } = req.body;
+router.post('/:id/items', validateMediaTypeAndTitle, asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  const {
+    mediaType,
+    plexKey,
+    title,
+    seasonNumber,
+    episodeNumber,
+    seriesTitle,
+    comicSeries,
+    comicYear,
+    comicIssue,
+    comicVolume,
+    comicPublisher,
+    customTitle,
+    comicVineId,
+    comicVineDetailsJson,
+    bookTitle,
+    bookAuthor,
+    bookYear,
+    bookIsbn,
+    bookPublisher,
+    bookOpenLibraryId,
+    bookCoverUrl,
+    bookPageCount,
+    storyTitle,
+    storyAuthor,
+    storyYear,
+    storyUrl,
+    storyContainedInBookId,
+    storyCoverUrl,
+    webTitle,
+    webUrl,
+    webDescription
+  } = req.body;
 
-    console.log(mediaType);
+  console.log(mediaType);
+
+  // Check for duplicates based on media type
+  let existingItem;
+  if (mediaType === 'episode') {
+    // For episodes, check by series, season, and episode
+    const whereCondition = {
+      customOrderId: parseInt(id),
+      mediaType: 'episode',
+      seriesTitle: seriesTitle,
+      seasonNumber: parseInt(seasonNumber),
+      episodeNumber: parseInt(episodeNumber)
+    };
     
-    if (!mediaType || !title) {
-      return res.status(400).json({ error: 'mediaType and title are required' });
-    }
-
-    // Check for duplicates based on media type
-    let existingItem;
-    if (mediaType === 'episode') {
-      // For episodes, check by series, season, and episode
-      const whereCondition = {
+    existingItem = await prisma.customOrderItem.findFirst({
+      where: whereCondition
+    });
+  } else {
+    // For other media with plexKey, check by plexKey
+    existingItem = await prisma.customOrderItem.findFirst({
+      where: {
         customOrderId: parseInt(id),
-        mediaType: 'episode',
-        seriesTitle: seriesTitle,
-        seasonNumber: parseInt(seasonNumber),
-        episodeNumber: parseInt(episodeNumber)
-      };
-      
-      existingItem = await prisma.customOrderItem.findFirst({
-        where: whereCondition
-      });
-    } else {
-      // For other media with plexKey, check by plexKey
-      existingItem = await prisma.customOrderItem.findFirst({
-        where: {
-          customOrderId: parseInt(id),
-          plexKey: plexKey
-        }
-      });
-    }
-    
-    if (existingItem) {
-      return res.status(409).json({ 
-        error: 'This item is already in the custom order',
-        existingItem: {
-          title: existingItem.title,
-          mediaType: existingItem.mediaType
-        }
-      });
-    }
+        plexKey: plexKey
+      }
+    });
+  }
+  
+  if (existingItem) {
+    return res.status(409).json({ 
+      error: 'This item is already in the custom order',
+      existingItem: {
+        title: existingItem.title,
+        mediaType: existingItem.mediaType
+      }
+    });
+  }
     
     // Get the highest sort order for this custom order
     const lastItem = await prisma.customOrderItem.findFirst({
@@ -201,90 +196,76 @@ router.post('/:id/items', async (req, res) => {
       }
     });
 
-    console.log(`✅ Added ${mediaType} "${customOrderItem.title}" to custom order "${customOrderItem.customOrder.name}"`);
-    res.status(201).json(customOrderItem);
-  } catch (error) {
-    console.error('Error adding item to custom order:', error);
-    res.status(500).json({ error: 'Failed to add item to custom order' });
-  }
-});
+  console.log(`✅ Added ${mediaType} "${customOrderItem.title}" to custom order "${customOrderItem.customOrder.name}"`);
+  res.status(201).json(customOrderItem);
+}));
 
 // DELETE /api/custom-orders/:id/items/:itemId - Remove item from custom order
-router.delete('/:id/items/:itemId', async (req, res) => {
-  try {
-    const { id, itemId } = req.params;
-    
-    await prisma.customOrderItem.delete({
-      where: {
-        id: parseInt(itemId),
-        customOrderId: parseInt(id)
-      }
-    });
-    
-    res.status(204).send();
-  } catch (error) {
-    console.error('Error removing item from custom order:', error);
-    res.status(500).json({ error: 'Failed to remove item from custom order' });
-  }
-});
+router.delete('/:id/items/:itemId', asyncHandler(async (req, res) => {
+  const { id, itemId } = req.params;
+  
+  await prisma.customOrderItem.delete({
+    where: {
+      id: parseInt(itemId),
+      customOrderId: parseInt(id)
+    }
+  });
+  
+  res.status(204).send();
+}));
 
 // PUT /api/custom-orders/:id/items/:itemId - Update custom order item
-router.put('/:id/items/:itemId', async (req, res) => {
-  try {
-    const { id, itemId } = req.params;
-    const updateData = req.body;
-    
-    // Handle nested JSON data parsing
-    if (updateData.comicVineDetailsJson && typeof updateData.comicVineDetailsJson === 'string') {
-      try {
-        const parsedDetails = JSON.parse(updateData.comicVineDetailsJson);
-        updateData.comicVineDetailsJson = JSON.stringify(parsedDetails);
-      } catch (parseError) {
-        console.warn('Failed to parse ComicVine details JSON in update:', parseError);
-        updateData.comicVineDetailsJson = null;
-      }
+router.put('/:id/items/:itemId', asyncHandler(async (req, res) => {
+  const { id, itemId } = req.params;
+  const updateData = req.body;
+  
+  // Handle nested JSON data parsing
+  if (updateData.comicVineDetailsJson && typeof updateData.comicVineDetailsJson === 'string') {
+    try {
+      const parsedDetails = JSON.parse(updateData.comicVineDetailsJson);
+      updateData.comicVineDetailsJson = JSON.stringify(parsedDetails);
+    } catch (parseError) {
+      console.warn('Failed to parse ComicVine details JSON in update:', parseError);
+      updateData.comicVineDetailsJson = null;
     }
-    
-    // Convert string numbers to integers for specific fields
-    const intFields = ['seasonNumber', 'episodeNumber', 'comicYear', 'bookYear', 'storyYear', 'bookPageCount', 'storyContainedInBookId'];
-    intFields.forEach(field => {
-      if (updateData[field] && typeof updateData[field] === 'string') {
-        updateData[field] = parseInt(updateData[field]);
-      }
-    });
-
-    // Check if this update sets reading completion to 100% and auto-mark as watched
-    if (updateData.bookPercentRead === 100 || 
-        (updateData.bookCurrentPage && updateData.bookPageCount && updateData.bookCurrentPage >= updateData.bookPageCount)) {
-      
-      // Get the current item to check media type
-      const currentItem = await prisma.customOrderItem.findUnique({
-        where: { id: parseInt(itemId) }
-      });
-      
-      if (currentItem && (currentItem.mediaType === 'book' || currentItem.mediaType === 'comic' || currentItem.mediaType === 'shortstory')) {
-        updateData.isWatched = true;
-        console.log(`Setting ${currentItem.mediaType} "${currentItem.title}" as watched (100% completion)`);
-      }
-    }
-    
-    const updatedItem = await prisma.customOrderItem.update({
-      where: {
-        id: parseInt(itemId),
-        customOrderId: parseInt(id)
-      },
-      data: updateData,
-      include: {
-        customOrder: true
-      }
-    });
-    
-    console.log(`✅ Updated custom order item "${updatedItem.title}"`);
-    res.json(updatedItem);
-  } catch (error) {
-    console.error('Error updating custom order item:', error);
-    res.status(500).json({ error: 'Failed to update custom order item' });
   }
-});
+  
+  // Convert string numbers to integers for specific fields
+  const intFields = ['seasonNumber', 'episodeNumber', 'comicYear', 'bookYear', 'storyYear', 'bookPageCount', 'storyContainedInBookId'];
+  intFields.forEach(field => {
+    if (updateData[field] && typeof updateData[field] === 'string') {
+      updateData[field] = parseInt(updateData[field]);
+    }
+  });
+
+  // Check if this update sets reading completion to 100% and auto-mark as watched
+  if (updateData.bookPercentRead === 100 || 
+      (updateData.bookCurrentPage && updateData.bookPageCount && updateData.bookCurrentPage >= updateData.bookPageCount)) {
+    
+    // Get the current item to check media type
+    const currentItem = await prisma.customOrderItem.findUnique({
+      where: { id: parseInt(itemId) }
+    });
+    
+    if (currentItem && (currentItem.mediaType === 'book' || currentItem.mediaType === 'comic' || currentItem.mediaType === 'shortstory')) {
+      updateData.isWatched = true;
+      console.log(`Setting ${currentItem.mediaType} "${currentItem.title}" as watched (100% completion)`);
+    }
+  }
+  
+  const updatedItem = await prisma.customOrderItem.update({
+    where: {
+      id: parseInt(itemId),
+      customOrderId: parseInt(id)
+    },
+    data: updateData,
+    include: {
+      customOrder: true
+    }
+  });
+  
+  console.log(`✅ Updated custom order item "${updatedItem.title}"`);
+  res.json(updatedItem);
+}));
 
 module.exports = router;

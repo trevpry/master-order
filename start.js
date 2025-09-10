@@ -38,7 +38,7 @@ console.log(`Changed working directory to: ${process.cwd()}`);
 // Setup database schema for production
 console.log('🔧 Setting up database schema...');
 try {
-    const { setupSchema } = require('./setup-schema.js');
+    const { setupSchema } = require('./server/setup-schema.js');
     const dbType = process.env.DATABASE_URL?.startsWith('postgresql') ? 'postgresql' : 'sqlite';
     console.log(`Detected database type: ${dbType}`);
     

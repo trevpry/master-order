@@ -21,8 +21,8 @@ const createStatsAndUtilsRoutes = require('./statsAndUtils');
 function createCustomOrdersRouter(options = {}) {
   const router = express.Router();
   
-  // Initialize database client
-  const prisma = new PrismaClient();
+  // Use shared database client singleton
+  const prisma = require('../../prismaClient');
   
   // Initialize optional services with graceful degradation
   let artworkCache = null;
@@ -35,7 +35,7 @@ function createCustomOrdersRouter(options = {}) {
     const subOrderServiceModule = require('../../subOrderService');
     
     artworkCache = new ArtworkCacheService();
-    watchLogService = new WatchLogService(new PrismaClient());
+    watchLogService = new WatchLogService(prisma); // Reuse shared prisma instance
     subOrderService = subOrderServiceModule;
     
     console.log('Custom orders: All services loaded successfully');

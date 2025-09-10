@@ -570,6 +570,22 @@ async function shutdown() {
   process.exit(0);
 }
 
+// Global error handlers for unhandled rejections and exceptions
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('🚨 Unhandled Promise Rejection:', reason);
+  console.error('🚨 Promise:', promise);
+  // Don't exit in production to maintain uptime
+  if (process.env.NODE_ENV !== 'production') {
+    process.exit(1);
+  }
+});
+
+process.on('uncaughtException', (error) => {
+  console.error('🚨 Uncaught Exception:', error);
+  // Always exit on uncaught exceptions
+  shutdown();
+});
+
 process.on('SIGTERM', shutdown);
 process.on('SIGINT', shutdown);
 
