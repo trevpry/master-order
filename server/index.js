@@ -240,10 +240,6 @@ app.use('/api/weather', weatherRoutes);
 // Health & Monitoring API routes
 app.use('/api/health', healthRoutes);
 
-// Core Application API routes (Phase 4 Modularization)
-const createCoreRouter = require('./routes/core');
-app.use('/api', createCoreRouter());
-
 // Plex Integration API routes
 app.use('/api/plex', plexRoutes);
 
@@ -390,6 +386,10 @@ app.use('/api', searchDebugRoutes);
 
 // Settings Legacy Redirects API routes
 app.use('/api', settingsLegacyRedirectsRoutes);
+
+// Core Application API routes (Phase 4 Modularization) - MOUNTED LAST as catch-all
+const createCoreRouter = require('./routes/core');
+app.use('/api', createCoreRouter());
 
 // ========================================
 // SETTINGS LEGACY REDIRECTS EXTRACTED
