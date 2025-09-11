@@ -101,6 +101,35 @@ router.post('/background-sync/force-now', asyncHandler(async (req, res) => {
   res.json({ message: 'Plex background sync completed', result });
 }));
 
+// POST /api/plex/cleanup - Manual Plex cleanup
+router.post('/cleanup', asyncHandler(async (req, res) => {
+  if (!plexSyncService) {
+    await initializePlexServices();
+  }
+  
+  if (!plexSyncService) {
+    return res.status(400).json({ 
+      error: 'Plex sync service not configured',
+      message: 'Please configure Plex URL and token in settings'
+    });
+  }
+  
+  console.log('Starting manual Plex cleanup...');
+  const startTime = Date.now();
+  
+  const cleanupResults = await plexSyncService.cleanupOrphanedEntities();
+  
+  const duration = (Date.now() - startTime) / 1000;
+  console.log(`Manual Plex cleanup completed in ${duration}s`);
+  
+  res.json({
+    success: true,
+    message: `Plex cleanup completed successfully in ${duration}s`,
+    duration: duration,
+    results: cleanupResults
+  });
+}));
+
 // ===== CONTENT MANAGEMENT =====
 
 // GET /api/plex/collections - Get Plex collections

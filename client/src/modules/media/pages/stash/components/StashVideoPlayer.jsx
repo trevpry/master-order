@@ -18,6 +18,24 @@ const StashVideoPlayer = ({
   mixedMode,
   MAX_AUTO_SKIP_RETRIES
 }) => {
+  // Helper function to mark a clip as watched
+  const markClipAsWatched = async (clipId) => {
+    try {
+      console.log(`✅ Marking clip ${clipId} as watched...`);
+      const response = await fetch(`${config.apiBaseUrl}/api/stash/clips/${clipId}/watched`, {
+        method: 'POST'
+      });
+      
+      if (response.ok) {
+        console.log(`✅ Clip ${clipId} successfully marked as watched`);
+      } else {
+        console.error(`❌ Failed to mark clip ${clipId} as watched`);
+      }
+    } catch (error) {
+      console.error(`❌ Error marking clip ${clipId} as watched:`, error);
+    }
+  };
+
   // Helper function to toggle fullscreen
   const toggleVideoFullscreen = async () => {
     const container = document.querySelector('.video-player-container');
@@ -97,6 +115,11 @@ const StashVideoPlayer = ({
 
   const handleManualNextClip = async () => {
     try {
+      // Mark current clip as watched before moving to next
+      if (videoPlayer.clip?.id) {
+        await markClipAsWatched(videoPlayer.clip.id);
+      }
+      
       console.log('🔄 Manually fetching next clip from API...');
       const response = await fetch(`${config.apiBaseUrl}/api/stash/clips/next`);
       const result = await response.json();
@@ -153,12 +176,17 @@ const StashVideoPlayer = ({
     
     // Check if we've reached the end of the clip (within 1 second tolerance)
     if (currentTime >= clipEndTime - 1) {
-      console.log('⏱️ Reached end of clip via timeUpdate - loading next clip...');
+      console.log('⏱️ Reached end of clip via timeUpdate - marking as watched and loading next clip...');
       
       // Clear existing timer first
       if (e.target.clipTimer) {
         clearTimeout(e.target.clipTimer);
         e.target.clipTimer = null;
+      }
+      
+      // Mark current clip as watched before moving to next
+      if (videoPlayer.clip?.id) {
+        await markClipAsWatched(videoPlayer.clip.id);
       }
       
       // Automatically load next clip
@@ -425,7 +453,12 @@ const StashVideoPlayer = ({
                   console.log(`⏱️ Setting backup timer for ${clipDurationMs}ms`);
                   
                   const clipTimer = setTimeout(async () => {
-                    console.log('⏰ Backup timer triggered - loading next clip...');
+                    console.log('⏰ Backup timer triggered - marking as watched and loading next clip...');
+                    
+                    // Mark current clip as watched before moving to next
+                    if (videoPlayer.clip?.id) {
+                      await markClipAsWatched(videoPlayer.clip.id);
+                    }
                     
                     try {
                       const response = await fetch(`${config.apiBaseUrl}/api/stash/clips/next`);
@@ -472,12 +505,17 @@ const StashVideoPlayer = ({
               console.log('⏸️ Video paused');
             }}
             onEnded={async () => {
-              console.log('🏁 Video ended - loading next clip...');
+              console.log('🏁 Video ended - marking as watched and loading next clip...');
               // Clear timer if video ends naturally
               const video = document.querySelector('.clip-video-player');
               if (video && video.clipTimer) {
                 clearTimeout(video.clipTimer);
                 video.clipTimer = null;
+              }
+              
+              // Mark current clip as watched before moving to next
+              if (videoPlayer.clip?.id) {
+                await markClipAsWatched(videoPlayer.clip.id);
               }
               
               // Automatically load next clip

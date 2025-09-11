@@ -236,16 +236,8 @@ router.get('/next', async (req, res) => {
     // Build stream URL (stashUrl is already normalized)  
     const streamUrl = `${stashUrl}/scene/${selectedClip.scene.id}/stream`;
     
-    // Mark clip as watched immediately
-    await prisma.stashClip.update({
-      where: { id: selectedClip.id },
-      data: { 
-        watched: true,
-        watchedAt: new Date()
-      }
-    });
-    
-    console.log(`✅ Next clip ${selectedClip.id} marked as watched`);
+    // DON'T mark clip as watched immediately - let it be marked when actually played through
+    console.log(`🎬 Next clip ${selectedClip.id} ready for playback (not marked as watched yet)`);
     
     // Get current count of unwatched clips across all scenes
     const totalUnwatchedClips = await prisma.stashClip.count({
