@@ -5,6 +5,7 @@ const TaskCard = ({
   onEdit, 
   onDelete, 
   onToggleStatus, 
+  onToggleCompletion,
   onStartTimer,
   showProject = true,
   compact = false 
@@ -39,6 +40,26 @@ const TaskCard = ({
     }
   };
 
+  const getCardBackground = (priority, status) => {
+    // If completed, use muted background
+    if (status === 'completed') {
+      return 'bg-gray-50 border-gray-200';
+    }
+    
+    switch (priority) {
+      case 'urgent':
+        return 'bg-red-50 border-red-200';
+      case 'high':
+        return 'bg-orange-50 border-orange-200';
+      case 'medium':
+        return 'bg-yellow-50 border-yellow-200';
+      case 'low':
+        return 'bg-green-50 border-green-200';
+      default:
+        return 'bg-white border-gray-200';
+    }
+  };
+
   const formatDueDate = (dueDate) => {
     if (!dueDate) return null;
     
@@ -63,18 +84,44 @@ const TaskCard = ({
   const dueInfo = task.dueDate ? formatDueDate(task.dueDate) : null;
 
   return (
-    <div className={`bg-white rounded-lg shadow-sm border border-gray-200 hover:shadow-md transition-shadow ${compact ? 'p-3' : 'p-4'}`}>
+    <div className={`rounded-lg shadow-sm border hover:shadow-md transition-shadow ${compact ? 'p-3' : 'p-4'} ${
+      getCardBackground(task.priority, task.status)
+    } ${task.status === 'completed' ? 'opacity-75' : ''}`}>
       <div className="flex items-start justify-between mb-3">
-        <div className="flex-1 min-w-0">
-          <h3 className={`font-semibold text-gray-900 ${compact ? 'text-sm' : 'text-base'} truncate`}>
-            {task.title}
-          </h3>
-          {task.description && !compact && (
-            <p className="text-sm text-gray-600 mt-1 line-clamp-2">
-              {task.description}
-            </p>
-          )}
+        <div className="flex items-start space-x-3 flex-1 min-w-0">
+          {/* Completion Checkbox */}
+          <button
+            onClick={() => onToggleCompletion && onToggleCompletion(task.id, task.status !== 'completed')}
+            className={`flex-shrink-0 mt-1 w-5 h-5 rounded border-2 flex items-center justify-center transition-colors ${
+              task.status === 'completed'
+                ? 'bg-green-500 border-green-500 text-white hover:bg-green-600'
+                : 'border-gray-300 hover:border-green-400 hover:bg-green-50'
+            }`}
+            title={task.status === 'completed' ? 'Mark as incomplete' : 'Mark as complete'}
+          >
+            {task.status === 'completed' && (
+              <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
+                <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+              </svg>
+            )}
+          </button>
+          
+          <div className="flex-1 min-w-0">
+            <h3 className={`font-semibold text-gray-900 ${compact ? 'text-sm' : 'text-base'} truncate ${
+              task.status === 'completed' ? 'line-through text-gray-500' : ''
+            }`}>
+              {task.title}
+            </h3>
+            {task.description && !compact && (
+              <p className={`text-sm text-gray-600 mt-1 line-clamp-2 ${
+                task.status === 'completed' ? 'text-gray-400' : ''
+              }`}>
+                {task.description}
+              </p>
+            )}
+          </div>
         </div>
+        
         <div className="flex items-center space-x-2 ml-3">
           <span className={`px-2 py-1 text-xs font-medium rounded-full ${getStatusColor(task.status)}`}>
             {task.status.replace('_', ' ')}
@@ -137,6 +184,14 @@ const TaskCard = ({
                 className="text-xs px-3 py-1 bg-green-100 text-green-700 hover:bg-green-200 rounded transition-colors"
               >
                 Complete
+              </button>
+            )}
+            {task.status === 'completed' && onToggleCompletion && (
+              <button
+                onClick={() => onToggleCompletion(task.id, false)}
+                className="text-xs px-3 py-1 bg-yellow-100 text-yellow-700 hover:bg-yellow-200 rounded transition-colors"
+              >
+                Reopen
               </button>
             )}
             {task.status !== 'completed' && onStartTimer && (

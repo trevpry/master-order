@@ -6,6 +6,8 @@ import ProjectCard from '../components/ProjectCard';
 import TimerWidget from '../components/TimerWidget';
 import TaskForm from '../components/TaskForm';
 import ProjectForm from '../components/ProjectForm';
+import CategoryForm from '../components/CategoryForm';
+import CategoryList from '../components/CategoryList';
 import KanbanBoard from '../components/KanbanBoard';
 import TaskSearchAndFilter from '../components/TaskSearchAndFilter';
 import TaskAnalytics from '../components/TaskAnalytics';
@@ -13,20 +15,24 @@ import BulkOperations from '../components/BulkOperations';
 import { useDashboardStats, useTasks, useProjects, useCategories, useTimeTracking } from '../hooks/useTasks';
 
 function TasksHome() {
-  const [currentView, setCurrentView] = useState('dashboard'); // dashboard, tasks, projects, kanban, analytics
+  const [currentView, setCurrentView] = useState('dashboard'); // dashboard, tasks, projects, kanban, analytics, categories
   const [showTaskForm, setShowTaskForm] = useState(false);
   const [showProjectForm, setShowProjectForm] = useState(false);
+  const [showCategoryForm, setShowCategoryForm] = useState(false);
   const [editingTask, setEditingTask] = useState(null);
   const [editingProject, setEditingProject] = useState(null);
+  const [editingCategory, setEditingCategory] = useState(null);
   const [taskFilters, setTaskFilters] = useState({});
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedTasks, setSelectedTasks] = useState([]);
+  const [showCompletedTasks, setShowCompletedTasks] = useState(false);
+  const [selectedProject, setSelectedProject] = useState(null); // For filtering tasks by project
 
   // Hooks
   const { stats, loading: statsLoading, error: statsError, refetch: refetchStats } = useDashboardStats();
   const { tasks, loading: tasksLoading, error: tasksError, refetch: refetchTasks, createTask, updateTask, deleteTask } = useTasks(taskFilters);
   const { projects, loading: projectsLoading, createProject, updateProject, deleteProject } = useProjects();
-  const { categories } = useCategories();
+  const { categories, createCategory, updateCategory, deleteCategory } = useCategories();
   const { activeEntry, startTimer, stopTimer, fetchActiveEntry } = useTimeTracking();
 
   // Task handlers
@@ -72,12 +78,26 @@ function TasksHome() {
 
   const handleToggleTaskStatus = async (taskId, newStatus) => {
     try {
-      await updateTask(taskId, { status: newStatus });
+      const updateData = { status: newStatus };
+      
+      // Set completedAt when marking as completed, clear it when uncompleting
+      if (newStatus === 'completed') {
+        updateData.completedAt = new Date().toISOString();
+      } else if (newStatus !== 'completed') {
+        updateData.completedAt = null;
+      }
+      
+      await updateTask(taskId, updateData);
       refetchStats();
       refetchTasks();
     } catch (error) {
       console.error('Failed to update task status:', error);
     }
+  };
+
+  const handleToggleTaskCompletion = async (taskId, isCompleted) => {
+    const newStatus = isCompleted ? 'completed' : 'todo';
+    await handleToggleTaskStatus(taskId, newStatus);
   };
 
   const handleStartTimer = async (task) => {
@@ -146,6 +166,45 @@ function TasksHome() {
     } catch (error) {
       console.error('Failed to update project status:', error);
     }
+  };
+
+  // Category handlers
+  const handleCreateCategory = async (categoryData) => {
+    try {
+      await createCategory(categoryData);
+      setShowCategoryForm(false);
+    } catch (error) {
+      console.error('Failed to create category:', error);
+    }
+  };
+
+  const handleUpdateCategory = async (categoryData) => {
+    try {
+      await updateCategory(editingCategory.id, categoryData);
+      setEditingCategory(null);
+      setShowCategoryForm(false);
+    } catch (error) {
+      console.error('Failed to update category:', error);
+    }
+  };
+
+  const handleEditCategory = (category) => {
+    setEditingCategory(category);
+    setShowCategoryForm(true);
+  };
+
+  // Project task viewing handler
+  const handleViewProjectTasks = (project) => {
+    setSelectedProject(project);
+    setCurrentView('tasks');
+  };
+
+  // View change handler to clear project filter when switching views
+  const handleViewChange = (view) => {
+    if (view !== 'tasks') {
+      setSelectedProject(null);
+    }
+    setCurrentView(view);
   };
 
   // Filter handlers
@@ -233,6 +292,54 @@ function TasksHome() {
     });
   };
 
+  const getFilteredTasks = () => {
+    const filteredTasks = tasks.filter(task => {
+      if (!showCompletedTasks && task.status === 'completed') {
+        return false;
+      }
+      
+      // Filter by selected project if one is chosen
+      if (selectedProject && task.projectId !== selectedProject.id) {
+        return false;
+      }
+      
+      return true;
+    });
+
+    // Sort by urgency: urgent > high > medium > low
+    const urgencyOrder = {
+      'urgent': 4,
+      'high': 3,
+      'medium': 2,
+      'low': 1,
+      '': 0, // Handle tasks with no priority
+      null: 0,
+      undefined: 0
+    };
+
+    return filteredTasks.sort((a, b) => {
+      const aPriority = urgencyOrder[a.priority] || 0;
+      const bPriority = urgencyOrder[b.priority] || 0;
+      
+      // Sort by priority first (higher priority first)
+      if (aPriority !== bPriority) {
+        return bPriority - aPriority;
+      }
+      
+      // If same priority, sort by due date (earlier dates first)
+      if (a.dueDate && b.dueDate) {
+        return new Date(a.dueDate) - new Date(b.dueDate);
+      }
+      
+      // Tasks with due dates come before tasks without
+      if (a.dueDate && !b.dueDate) return -1;
+      if (!a.dueDate && b.dueDate) return 1;
+      
+      // Finally sort by creation date (newer first)
+      return new Date(b.createdAt) - new Date(a.createdAt);
+    });
+  };
+
   const getOverdueTasks = () => {
     return tasks.filter(task => {
       if (!task.dueDate || task.status === 'completed') return false;
@@ -276,6 +383,23 @@ function TasksHome() {
     );
   }
 
+  if (showCategoryForm) {
+    return (
+      <div className="p-6">
+        <div className="max-w-2xl mx-auto">
+          <CategoryForm
+            category={editingCategory}
+            onSubmit={editingCategory ? handleUpdateCategory : handleCreateCategory}
+            onCancel={() => {
+              setShowCategoryForm(false);
+              setEditingCategory(null);
+            }}
+          />
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="p-6">
       <div className="max-w-7xl mx-auto">
@@ -285,7 +409,7 @@ function TasksHome() {
           <div className="flex items-center space-x-4">
             <div className="flex bg-gray-100 rounded-lg p-1">
               <button
-                onClick={() => setCurrentView('dashboard')}
+                onClick={() => handleViewChange('dashboard')}
                 className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${
                   currentView === 'dashboard' 
                     ? 'bg-white text-gray-900 shadow-sm' 
@@ -295,7 +419,7 @@ function TasksHome() {
                 Dashboard
               </button>
               <button
-                onClick={() => setCurrentView('tasks')}
+                onClick={() => handleViewChange('tasks')}
                 className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${
                   currentView === 'tasks' 
                     ? 'bg-white text-gray-900 shadow-sm' 
@@ -305,7 +429,7 @@ function TasksHome() {
                 Tasks
               </button>
               <button
-                onClick={() => setCurrentView('projects')}
+                onClick={() => handleViewChange('projects')}
                 className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${
                   currentView === 'projects' 
                     ? 'bg-white text-gray-900 shadow-sm' 
@@ -315,7 +439,7 @@ function TasksHome() {
                 Projects
               </button>
               <button
-                onClick={() => setCurrentView('kanban')}
+                onClick={() => handleViewChange('kanban')}
                 className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${
                   currentView === 'kanban' 
                     ? 'bg-white text-gray-900 shadow-sm' 
@@ -325,7 +449,7 @@ function TasksHome() {
                 Kanban
               </button>
               <button
-                onClick={() => setCurrentView('analytics')}
+                onClick={() => handleViewChange('analytics')}
                 className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${
                   currentView === 'analytics' 
                     ? 'bg-white text-gray-900 shadow-sm' 
@@ -334,12 +458,28 @@ function TasksHome() {
               >
                 Analytics
               </button>
+              <button
+                onClick={() => handleViewChange('categories')}
+                className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${
+                  currentView === 'categories' 
+                    ? 'bg-white text-gray-900 shadow-sm' 
+                    : 'text-gray-600 hover:text-gray-900'
+                }`}
+              >
+                Categories
+              </button>
             </div>
             <Button 
-              onClick={() => setShowTaskForm(true)}
+              onClick={() => {
+                if (selectedProject) {
+                  // Pre-fill the task form with the selected project
+                  setEditingTask({ projectId: selectedProject.id });
+                }
+                setShowTaskForm(true);
+              }}
               className="primary"
             >
-              + New Task
+              + New Task {selectedProject && `in ${selectedProject.name}`}
             </Button>
           </div>
         </div>
@@ -446,7 +586,7 @@ function TasksHome() {
                       project={project}
                       onEdit={handleEditProject}
                       onDelete={handleDeleteProject}
-                      onView={() => setCurrentView('projects')}
+                      onView={handleViewProjectTasks}
                       onToggleStatus={handleToggleProjectStatus}
                       compact={true}
                     />
@@ -461,7 +601,31 @@ function TasksHome() {
         {currentView === 'tasks' && (
           <div>
             <div className="flex items-center justify-between mb-6">
-              <h2 className="text-xl font-semibold text-gray-900">All Tasks</h2>
+              <div>
+                <h2 className="text-xl font-semibold text-gray-900">
+                  {selectedProject ? `Tasks: ${selectedProject.name}` : 'All Tasks'}
+                </h2>
+                {selectedProject && (
+                  <div className="flex items-center mt-2">
+                    <span className="text-sm text-gray-600 mr-2">Filtered by project:</span>
+                    <span 
+                      className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium"
+                      style={{ 
+                        backgroundColor: selectedProject.color + '20', 
+                        color: selectedProject.color || '#6B7280' 
+                      }}
+                    >
+                      {selectedProject.name}
+                    </span>
+                    <button
+                      onClick={() => setSelectedProject(null)}
+                      className="ml-2 text-xs text-gray-500 hover:text-gray-700 underline"
+                    >
+                      Clear filter
+                    </button>
+                  </div>
+                )}
+              </div>
               <div className="flex items-center space-x-4">
                 <TaskSearchAndFilter
                   onFilter={handleTaskFilter}
@@ -469,6 +633,29 @@ function TasksHome() {
                   projects={projects}
                   categories={categories}
                 />
+                
+                {/* Show/Hide Completed Tasks Toggle */}
+                <div className="flex items-center space-x-2">
+                  <label className="flex items-center cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={showCompletedTasks}
+                      onChange={(e) => setShowCompletedTasks(e.target.checked)}
+                      className="sr-only"
+                    />
+                    <div className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                      showCompletedTasks ? 'bg-green-600' : 'bg-gray-300'
+                    }`}>
+                      <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                        showCompletedTasks ? 'translate-x-6' : 'translate-x-1'
+                      }`} />
+                    </div>
+                    <span className="ml-2 text-sm text-gray-700">
+                      Show completed ({tasks.filter(t => t.status === 'completed').length})
+                    </span>
+                  </label>
+                </div>
+                
                 <Button 
                   onClick={() => setShowTaskForm(true)}
                   className="primary"
@@ -493,20 +680,23 @@ function TasksHome() {
               </div>
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                {tasks.map(task => (
+                {getFilteredTasks().map(task => (
                   <TaskCard
                     key={task.id}
                     task={task}
                     onEdit={handleEditTask}
                     onDelete={handleDeleteTask}
                     onToggleStatus={handleToggleTaskStatus}
+                    onToggleCompletion={handleToggleTaskCompletion}
                     onStartTimer={handleStartTimer}
                     showProject={true}
                   />
                 ))}
-                {tasks.length === 0 && (
+                {getFilteredTasks().length === 0 && (
                   <div className="col-span-full text-center py-12">
-                    <p className="text-gray-500 text-lg">No tasks found</p>
+                    <p className="text-gray-500 text-lg">
+                      {showCompletedTasks ? 'No tasks found' : 'No active tasks found'}
+                    </p>
                     <Button 
                       onClick={() => setShowTaskForm(true)}
                       className="primary mt-4"
@@ -554,7 +744,7 @@ function TasksHome() {
                     project={project}
                     onEdit={handleEditProject}
                     onDelete={handleDeleteProject}
-                    onView={() => {}}
+                    onView={handleViewProjectTasks}
                     onToggleStatus={handleToggleProjectStatus}
                   />
                 ))}
@@ -599,6 +789,14 @@ function TasksHome() {
             timeEntries={[]} // We'll need to fetch this data
             projects={projects}
             dateRange="month"
+          />
+        )}
+
+        {/* Categories View */}
+        {currentView === 'categories' && (
+          <CategoryList
+            onEdit={handleEditCategory}
+            onCreateNew={() => setShowCategoryForm(true)}
           />
         )}
 
