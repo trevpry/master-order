@@ -1,0 +1,6 @@
+{
+  "title": "Test Note",
+  "content": "This is a test note to verify the API is working",
+  "userId": 1,
+  "type": "note"
+}

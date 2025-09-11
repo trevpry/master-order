@@ -3,7 +3,7 @@ generator client {
 }
 
 datasource db {
-  provider = "sqlite"
+  provider = "postgresql"
   url      = env("DATABASE_URL")
 }
 
@@ -1443,6 +1443,7 @@ model Note {
   folder      NoteFolder? @relation(fields: [folderId], references: [id])
   fromLinks   NoteCrossLink[] @relation("FromNote")
   toLinks     NoteCrossLink[] @relation("ToNote")
+  dailyNote   DailyNote?
   
   @@index([userId])
   @@index([type])
@@ -1491,6 +1492,42 @@ model NoteCrossLink {
   @@unique([fromNoteId, toNoteId])
   @@index([fromNoteId])
   @@index([toNoteId])
+}
+
+model NoteTemplate {
+  id          Int      @id @default(autoincrement())
+  name        String
+  description String?
+  content     String   @default("")
+  type        String   @default("daily") // daily, weekly, project, etc.
+  variables   String   @default("[]")  // JSON array of variable placeholders
+  userId      Int      @default(1)
+  isDefault   Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  @@index([userId])
+  @@index([type])
+  @@index([isDefault])
+}
+
+model DailyNote {
+  id        Int      @id @default(autoincrement())
+  date      DateTime @unique // Date for this daily note (normalized to start of day)
+  noteId    Int      @unique
+  userId    Int      @default(1)
+  mood      String?  // morning, evening mood
+  weather   String?
+  goals     String   @default("[]")  // JSON array of daily goals
+  habits    String   @default("[]")  // JSON array of habit completions
+  gratitude String   @default("[]")  // JSON array of gratitude entries
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  
+  note      Note     @relation(fields: [noteId], references: [id], onDelete: Cascade)
+  
+  @@index([userId])
+  @@index([date])
 }
 
 model BackgroundImage {

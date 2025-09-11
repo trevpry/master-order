@@ -313,6 +313,14 @@ DATABASE_TEST_RESULT=$(node -e "
 
 echo "$DATABASE_TEST_RESULT"
 
+# Create default note templates if they don't exist
+echo "[INFO] Setting up default note templates..."
+if node server/scripts/setup-note-templates.js 2>&1; then
+    echo "[SUCCESS] Note templates setup completed"
+else
+    echo "[WARN] Failed to setup note templates, continuing anyway..."
+fi
+
 echo "[INFO] Database setup completed successfully!"
 echo "[INFO] Starting the application..."
 

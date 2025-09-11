@@ -75,20 +75,34 @@ const Notes = () => {
     try {
       const response = await fetch(`${API_BASE}?userId=${userId}`);
       if (response.ok) {
-        const data = await response.json();
-        setNotes(data);
+        const result = await response.json();
+        const data = result.data || result; // Handle wrapped response
+        
+        console.log('Loading notes - received data:', data);
+        
+        setNotes(Array.isArray(data) ? data : []);
         
         // Filter recent and favorite notes
-        const recent = data
-          .sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt))
-          .slice(0, 10);
-        setRecentNotes(recent);
-        
-        const favorites = data.filter(note => note.isFavorite);
-        setFavoriteNotes(favorites);
+        if (Array.isArray(data)) {
+          const recent = data
+            .sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt))
+            .slice(0, 10);
+          setRecentNotes(recent);
+          
+          const favorites = data.filter(note => note.isFavorite);
+          setFavoriteNotes(favorites);
+        }
+      } else {
+        console.error('Failed to load notes:', response.status, response.statusText);
+        setNotes([]);
+        setRecentNotes([]);
+        setFavoriteNotes([]);
       }
     } catch (error) {
       console.error('Error loading notes:', error);
+      setNotes([]);
+      setRecentNotes([]);
+      setFavoriteNotes([]);
     }
   };
 
@@ -96,11 +110,19 @@ const Notes = () => {
     try {
       const response = await fetch(`${API_BASE}/folders?userId=${userId}`);
       if (response.ok) {
-        const data = await response.json();
-        setFolders(data);
+        const result = await response.json();
+        const data = result.data || result; // Handle wrapped response
+        
+        console.log('Loading folders - received data:', data);
+        
+        setFolders(Array.isArray(data) ? data : []);
+      } else {
+        console.error('Failed to load folders:', response.status, response.statusText);
+        setFolders([]);
       }
     } catch (error) {
       console.error('Error loading folders:', error);
+      setFolders([]);
     }
   };
 
@@ -108,11 +130,13 @@ const Notes = () => {
     try {
       const response = await fetch(`${API_BASE}/tags?userId=${userId}`);
       if (response.ok) {
-        const data = await response.json();
-        setTags(data);
+        const result = await response.json();
+        const data = result.data || result; // Handle wrapped response
+        setTags(Array.isArray(data) ? data : []);
       }
     } catch (error) {
       console.error('Error loading tags:', error);
+      setTags([]);
     }
   };
 
@@ -120,11 +144,13 @@ const Notes = () => {
     try {
       const response = await fetch(`${API_BASE}/stats?userId=${userId}`);
       if (response.ok) {
-        const data = await response.json();
-        setStats(data);
+        const result = await response.json();
+        const data = result.data || result; // Handle wrapped response
+        setStats(data || {});
       }
     } catch (error) {
       console.error('Error loading stats:', error);
+      setStats({});
     }
   };
 
@@ -357,7 +383,7 @@ const Notes = () => {
                   </div>
                 ) : (
                   <NoteFolders
-                    folders={folders}
+                    folders={Array.isArray(folders) ? folders : []}
                     selectedFolder={selectedFolder}
                     onFolderSelect={setSelectedFolder}
                   />
@@ -464,8 +490,8 @@ const Notes = () => {
       {showEditor && (
         <NoteEditor
           note={editingNote}
-          folders={folders}
-          tags={tags}
+          folders={Array.isArray(folders) ? folders : []}
+          tags={Array.isArray(tags) ? tags : []}
           onSave={editingNote ? handleNoteUpdated : handleNoteCreated}
           onClose={() => setShowEditor(false)}
           userId={userId}

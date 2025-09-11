@@ -97,12 +97,23 @@ const NoteFolders = ({ folders, selectedFolder, onFolderSelect }) => {
   };
 
   const buildFolderTree = (folders, parentId = null) => {
+    // Ensure folders is an array
+    if (!Array.isArray(folders)) {
+      console.warn('buildFolderTree received non-array:', folders);
+      return [];
+    }
+    
     return folders
       .filter(folder => folder.parentId === parentId)
       .sort((a, b) => a.name.localeCompare(b.name));
   };
 
   const renderFolder = (folder, depth = 0) => {
+    // Ensure folders is an array before using array methods
+    if (!Array.isArray(folders)) {
+      return null;
+    }
+    
     const hasChildren = folders.some(f => f.parentId === folder.id);
     const isExpanded = expandedFolders.has(folder.id);
     const isSelected = selectedFolder?.id === folder.id;
@@ -199,6 +210,18 @@ const NoteFolders = ({ folders, selectedFolder, onFolderSelect }) => {
   };
 
   const rootFolders = buildFolderTree(folders);
+
+  // Add safety check for when folders prop is not an array
+  if (!Array.isArray(folders)) {
+    console.error('NoteFolders received non-array folders prop:', folders);
+    return (
+      <div className="space-y-1">
+        <div className="text-red-500 text-sm p-2">
+          Error: Invalid folders data
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-1">

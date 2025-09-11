@@ -18,7 +18,7 @@ import Backgrounds from './modules/media/pages/backgrounds/index';
 
 // Eddie Module Components (placeholders for now)
 import TasksHome from './modules/tasks/pages/TasksHome';
-import Notes from './pages/Notes';
+import Notes from './modules/notes/pages/NotesHome';
 import EddieSettings from './modules/eddie/pages/EddieSettings';
 import Dating from './pages/Dating';
 

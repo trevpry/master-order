@@ -13,6 +13,13 @@ A comprehensive media management application that intelligently curates your nex
 - **Advanced Statistics**: Publisher breakdowns, author statistics, and comprehensive watch analytics
 - **Real-time Artwork**: Dynamic artwork fetching and caching from TVDB
 
+### Notes & Daily Journaling
+- **Daily Notes System**: Structured daily journaling with mood tracking, goals, habits, and gratitude
+- **Calendar Integration**: Visual calendar navigation for daily notes with indicators
+- **Template Management**: Customizable note templates (daily, weekly, meeting, project)
+- **Quick Capture**: Fast note creation with tags and folder organization
+- **Full-Featured Editor**: Rich text editing with tag management and search
+
 ### Technical Stack
 - **Frontend**: React with Vite, TailwindCSS
 - **Backend**: Express.js with comprehensive API
