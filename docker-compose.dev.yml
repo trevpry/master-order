@@ -22,6 +22,9 @@ services:
       - node_modules_server:/app/server/node_modules
     environment:
       - NODE_ENV=development
+      - PORT=3001
+      # External IP for Android API responses - UPDATE THIS FOR YOUR NETWORK
+      - "EXTERNAL_IP=192.168.1.118"
       - CHOKIDAR_USEPOLLING=true  # For better file watching in containers
     restart: unless-stopped
     command: npm run dev

@@ -57,6 +57,7 @@ services:
     environment:
       - NODE_ENV=production
       - DATABASE_URL=postgresql://user:pass@postgres:5432/master_order
+      - EXTERNAL_IP=192.168.1.118  # Required for Android companion app
       - PLEX_TOKEN=your-plex-token
       - PLEX_URL=http://your-plex-server:32400
     depends_on:
@@ -74,6 +75,7 @@ Volume Mappings:
 Environment Variables:
   - NODE_ENV=production
   - DATABASE_URL=postgresql://user:pass@host:5432/master_order
+  - EXTERNAL_IP=192.168.1.118  # Required for Android companion app
   - PLEX_TOKEN=your-plex-token
   - PLEX_URL=http://your-plex-server:32400
 ```
@@ -81,14 +83,38 @@ Environment Variables:
 ### 🚀 **DEPLOYMENT STEPS**
 
 1. **Backup existing PostgreSQL database** (recommended safety measure)
-2. **Build Docker image**:
+2. **Configure EXTERNAL_IP** in environment variables for Android companion app
+3. **Build Docker image**:
    ```bash
    docker build -t master-order:latest .
    ```
-3. **Deploy with docker-compose** or Unraid template
-4. **Monitor startup logs** for successful database connection
-5. **Verify existing data** is preserved and accessible
-6. **Test key functionality** (reading sessions, custom orders, etc.)
+4. **Deploy with docker-compose** or Unraid template
+5. **Monitor startup logs** for successful database connection
+6. **Verify existing data** is preserved and accessible
+7. **Test key functionality** (reading sessions, custom orders, Android endpoints)
+
+### 📱 **ANDROID COMPANION APP CONFIGURATION**
+
+For the Android companion app to work correctly, you **must** set the `EXTERNAL_IP` environment variable to your server's network IP address:
+
+```yaml
+environment:
+  - EXTERNAL_IP=192.168.1.118  # Replace with your actual server IP
+```
+
+**Why this is required:**
+- Android endpoints return artwork URLs and stream URLs using this IP
+- Without it, the app will return `localhost` URLs that won't work from other devices
+- All Android API responses depend on this for proper network accessibility
+
+**How to find your server IP:**
+```bash
+# On Linux/Unix systems:
+ip addr show | grep "inet " | grep -v 127.0.0.1
+
+# On Windows:
+ipconfig | findstr IPv4
+```
 
 ### 🔍 **POST-DEPLOYMENT VERIFICATION**
 

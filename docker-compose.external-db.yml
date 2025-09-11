@@ -16,6 +16,8 @@ services:
       - NODE_ENV=production
       - DATABASE_URL=postgresql://username:password@your-postgres-host:5432/master_order
       - PORT=3001
+      # External IP for Android API responses - UPDATE THIS FOR YOUR NETWORK
+      - "EXTERNAL_IP=192.168.1.118"
       - PLEX_URL=${PLEX_URL}
       - PLEX_TOKEN=${PLEX_TOKEN}
       - TVDB_API_KEY=${TVDB_API_KEY}
