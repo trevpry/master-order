@@ -128,18 +128,67 @@ function createStashIntegrationRoutes(prisma) {
       const nextClipData = await nextClipResponse.json();
       
       if (!nextClipData || !nextClipData.clip) {
-        return res.json(createAndroidResponse('STASH_NEXT_CONTENT', {
-          hasContent: false,
-          message: 'No clips available'
-        }));
+        return res.status(404).json({ 
+          error: 'No clips available',
+          message: 'No unwatched clips found.' 
+        });
       }
       
-      const androidResponse = createAndroidResponse('STASH_NEXT_CONTENT', {
-        hasContent: true,
-        clip: nextClipData.clip
-      });
+      const clip = nextClipData.clip;
+      const scene = clip.scene;
       
-      console.log('📱 Next Stash content sent to Android app');
+      // Get Stash URL for stream URL
+      const settings = await prisma.settings.findFirst();
+      let stashUrl = settings?.stashUrl || process.env.STASH_URL;
+      if (stashUrl) {
+        stashUrl = stashUrl.replace(/\/+$/, '');
+      }
+      
+      // Get scene performers and studio
+      let performers = '';
+      let studio = '';
+      
+      if (scene?.id) {
+        const sceneDetails = await prisma.stashScene.findUnique({
+          where: { id: scene.id },
+          include: {
+            performers: {
+              include: {
+                performer: {
+                  select: { name: true }
+                }
+              }
+            },
+            studioObject: {
+              select: { name: true }
+            }
+          }
+        });
+        
+        if (sceneDetails) {
+          performers = sceneDetails.performers?.map(p => p.performer.name).join(', ') || '';
+          studio = sceneDetails.studioObject?.name || '';
+        }
+      }
+      
+      // Create Android response in expected PLAY_CLIP format
+      const androidResponse = {
+        type: 'PLAY_CLIP',
+        data: {
+          url: stashUrl ? `${stashUrl}/scene/${scene.id}/stream` : '',
+          title: scene?.title || 'Unknown Scene',
+          performers: performers,
+          studio: studio,
+          duration: clip.duration || 60,
+          startTime: clip.startTime || 0,
+          endTime: clip.endTime || 60,
+          clipId: clip.id,
+          sceneId: scene?.id || '',
+          clipIndex: clip.clipIndex || 0
+        }
+      };
+      
+      console.log('📱 Next Stash clip sent to Android app:', JSON.stringify(androidResponse, null, 2));
       res.json(androidResponse);
       
     } catch (error) {
@@ -175,18 +224,103 @@ function createStashIntegrationRoutes(prisma) {
       const nextSceneData = await nextSceneResponse.json();
       
       if (!nextSceneData || !nextSceneData.scene) {
-        return res.json(createAndroidResponse('STASH_NEXT_SCENE', {
-          hasContent: false,
-          message: 'No scenes available'
-        }));
+        return res.status(404).json({ 
+          error: 'No unwatched scenes available',
+          message: 'No scenes available' 
+        });
       }
       
-      const androidResponse = createAndroidResponse('STASH_NEXT_SCENE', {
-        hasContent: true,
-        scene: nextSceneData.scene
+      const scene = nextSceneData.scene;
+      
+      // Get Stash URL for stream URL  
+      const settings = await prisma.settings.findFirst();
+      let stashUrl = settings?.stashUrl || process.env.STASH_URL;
+      if (stashUrl) {
+        stashUrl = stashUrl.replace(/\/+$/, '');
+      }
+      
+      // Get scene details with performers and studio
+      const sceneDetails = await prisma.stashScene.findUnique({
+        where: { id: scene.id },
+        include: {
+          performers: {
+            include: {
+              performer: {
+                select: { name: true }
+              }
+            }
+          },
+          studioObject: {
+            select: { name: true }
+          }
+        }
       });
       
-      console.log('📱 Next Stash scene sent to Android app');
+      const performers = sceneDetails?.performers?.map(p => p.performer.name).join(', ') || '';
+      const studio = sceneDetails?.studioObject?.name || '';
+      
+      // Extract title from path if no title exists
+      let title = scene.title;
+      if (!title || title.trim() === '') {
+        title = scene.path ? scene.path.split('/').pop().replace(/\.[^/.]+$/, '') : 'Unknown Scene';
+      }
+      
+      // Get Stash artwork (if available)
+      let artwork = null;
+      if (stashUrl && scene.id) {
+        try {
+          const stashQuery = `
+            query FindScene($id: ID!) {
+              findScene(id: $id) {
+                id
+                paths {
+                  screenshot
+                  preview  
+                  stream
+                  webp
+                }
+              }
+            }
+          `;
+          
+          const stashResponse = await fetch(`${stashUrl}/graphql`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'ApiKey': settings?.stashApiKey || ''
+            },
+            body: JSON.stringify({
+              query: stashQuery,
+              variables: { id: scene.id }
+            })
+          });
+          
+          if (stashResponse.ok) {
+            const stashData = await stashResponse.json();
+            artwork = stashData.data?.findScene?.paths || null;
+          }
+        } catch (error) {
+          console.warn('Failed to get Stash artwork:', error.message);
+        }
+      }
+      
+      // Create Android response in expected PLAY_SCENE format
+      const androidResponse = {
+        type: 'PLAY_SCENE',
+        data: {
+          url: stashUrl ? `${stashUrl}/scene/${scene.id}/stream` : '',
+          title: title,
+          performers: performers,
+          studio: studio,
+          duration: scene.duration || 0,
+          sceneId: scene.id,
+          rating: scene.rating || 0,
+          totalUnwatched: nextSceneData.totalUnwatched || 0,
+          artwork: artwork
+        }
+      };
+      
+      console.log('📱 Next Stash scene sent to Android app:', JSON.stringify(androidResponse, null, 2));
       res.json(androidResponse);
       
     } catch (error) {

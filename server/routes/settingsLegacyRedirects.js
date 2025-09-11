@@ -29,16 +29,4 @@ router.put('/eddie-settings', (req, res) => {
   res.redirect(307, '/api/settings/eddie'); // 307 preserves the PUT method
 });
 
-// ============================================================================
-// 🔄 ANDROID WEATHER LEGACY REDIRECT
-// ============================================================================
-
-// Legacy redirect for Android weather endpoint
-// OLD: /api/android/weather  
-// NEW: /api/weather/android
-router.get('/android/weather', (req, res) => {
-  console.log('🔄 [LEGACY REDIRECT] GET /api/android/weather -> /api/weather/android');
-  res.redirect('/api/weather/android');
-});
-
 module.exports = router;

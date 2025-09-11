@@ -15,7 +15,7 @@ function createContentDiscoveryRoutes(services) {
   const router = express.Router();
   const { getNextEpisode, getNextMovie, getNextCustomOrder } = services;
 
-  // Get up next content for Android app
+  // Android companion app endpoint - Get Up Next
   router.get('/up-next', async (req, res) => {
     console.log('📱 Android app requesting up next content...');
     
@@ -50,26 +50,133 @@ function createContentDiscoveryRoutes(services) {
       console.log('📱 Up next data received:', JSON.stringify(upNextData, null, 2));
       
       if (!upNextData || upNextData.error) {
-        return res.status(404).json({ 
-          error: 'No content available',
-          message: upNextData?.error || 'No content found for up next.' 
-        });
+        return res.status(404).json(createAndroidErrorResponse(
+          'NO_CONTENT',
+          'No content available',
+          upNextData?.error || 'No content found for up next.'
+        ));
       }
       
-      // Add artwork URL to the response
-      if (upNextData) {
-        upNextData.artworkUrl = getAndroidArtworkUrl(upNextData, baseUrl);
+      // Determine content type and build appropriate response according to documentation
+      let androidResponse;
+      
+      if (upNextData.orderType === 'MOVIES_GENERAL') {
+        // Movie response - use PLAY_MOVIE type
+        const artworkUrl = getAndroidArtworkUrl(upNextData, baseUrl);
+        androidResponse = {
+          type: 'PLAY_MOVIE',
+          data: {
+            ratingKey: upNextData.ratingKey,
+            plexId: upNextData.ratingKey,
+            title: upNextData.title,
+            year: upNextData.year,
+            duration: upNextData.duration || 0,
+            summary: upNextData.summary || '',
+            studio: upNextData.studio || 'Unknown Studio',
+            rating: upNextData.rating || 0,
+            thumb: upNextData.thumb || '',
+            art: upNextData.art || '',
+            artworkUrl: artworkUrl || '',
+            streamUrl: upNextData.streamUrl || '',
+            otherCollections: upNextData.otherCollections || []
+          }
+        };
+      } else if (upNextData.orderType === 'CUSTOM_ORDER') {
+        // Custom order response - use PLAY_CUSTOM_ORDER_ITEM type
+        const artworkUrl = getAndroidArtworkUrl(upNextData, baseUrl);
+        
+        // For episodes in custom orders, make sure we use the episode rating key
+        let episodeRatingKey = upNextData.ratingKey;
+        if (upNextData.type === 'episode' && upNextData.episodeRatingKey) {
+          episodeRatingKey = upNextData.episodeRatingKey;
+          console.log('📱 Using episode-specific rating key for Android:', episodeRatingKey);
+        }
+
+        androidResponse = {
+          type: 'PLAY_CUSTOM_ORDER_ITEM',
+          data: {
+            id: upNextData.id,
+            title: upNextData.title,
+            type: upNextData.type,
+            orderName: upNextData.customOrderName || 'Custom Order',
+            summary: upNextData.summary || '',
+            duration: upNextData.duration || 0,
+            localArtworkPath: upNextData.localArtworkPath || '',
+            artworkUrl: artworkUrl || '',
+            streamUrl: upNextData.streamUrl || '',
+            ratingKey: episodeRatingKey || null,
+            plexId: episodeRatingKey || null,
+            webUrl: upNextData.webUrl || null,
+            customOrderId: upNextData.customOrderId || null,
+            customOrderItemId: upNextData.customOrderItemId || null,
+            // Episode-specific fields for custom orders
+            ...(upNextData.type === 'episode' && {
+              seasonNumber: upNextData.seasonNumber || upNextData.currentSeason || null,
+              episodeNumber: upNextData.episodeNumber || upNextData.currentEpisode || null,
+              episodeTitle: upNextData.episodeTitle || upNextData.nextEpisodeTitle || null,
+              seriesTitle: upNextData.seriesTitle || upNextData.grandparentTitle || null
+            })
+          }
+        };
+      } else {
+        // TV Show response (default) - use PLAY_TV_EPISODE type
+        const artworkUrl = getAndroidArtworkUrl(upNextData, baseUrl);
+        
+        // For TV episodes from Plex, make sure we use the episode rating key
+        let episodeRatingKey = upNextData.ratingKey; // Default to series rating key
+        let seriesRatingKey = upNextData.ratingKey; // Keep series rating key for reference
+        
+        // Priority order for finding episode-specific rating key
+        if (upNextData.episodeRatingKey) {
+          episodeRatingKey = upNextData.episodeRatingKey;
+          console.log('📱 Using episodeRatingKey for Android:', episodeRatingKey);
+        } else if (upNextData.currentEpisodeRatingKey) {
+          episodeRatingKey = upNextData.currentEpisodeRatingKey;
+          console.log('📱 Using currentEpisodeRatingKey for Android:', episodeRatingKey);
+        } else if (upNextData.nextEpisodeRatingKey) {
+          episodeRatingKey = upNextData.nextEpisodeRatingKey;
+          console.log('📱 Using nextEpisodeRatingKey for Android:', episodeRatingKey);
+        } else {
+          console.log('📱 No episode-specific rating key found, using series rating key:', episodeRatingKey);
+        }
+        
+        androidResponse = {
+          type: 'PLAY_TV_EPISODE',
+          data: {
+            ratingKey: episodeRatingKey,
+            episodeRatingKey: episodeRatingKey,
+            seriesRatingKey: seriesRatingKey,
+            plexId: episodeRatingKey,
+            title: upNextData.title,
+            episodeTitle: upNextData.episodeTitle || upNextData.nextEpisodeTitle || null,
+            summary: upNextData.summary || '',
+            episodeSummary: upNextData.episodeSummary || null,
+            leafCount: upNextData.leafCount || 0,
+            viewedLeafCount: upNextData.viewedLeafCount || 0,
+            // Season and episode information for TV shows
+            seasonNumber: upNextData.currentSeason || upNextData.seasonNumber || null,
+            episodeNumber: upNextData.currentEpisode || upNextData.episodeNumber || null,
+            isFinalSeason: upNextData.isCurrentSeasonFinal || false,
+            // Artwork URLs
+            thumb: upNextData.thumb || '',
+            art: upNextData.art || '',
+            artworkUrl: artworkUrl || '',
+            streamUrl: upNextData.streamUrl || '',
+            otherCollections: upNextData.otherCollections || []
+          }
+        };
       }
       
-      console.log('📱 Final up next response for Android:', JSON.stringify(upNextData, null, 2));
-      res.json(upNextData);
+      console.log('📱 Sending Android companion up next response:', JSON.stringify(androidResponse, null, 2));
+      res.json(androidResponse);
       
     } catch (error) {
-      console.error('❌ Error in Android up-next endpoint:', error);
-      res.status(500).json({
-        error: 'Failed to get up next content',
-        message: error.message
-      });
+      console.error('❌ Error in Android up next endpoint:', error);
+      res.status(500).json(createAndroidErrorResponse(
+        'INTERNAL_ERROR',
+        'Internal server error',
+        error.message
+      ));
     }
   });
 

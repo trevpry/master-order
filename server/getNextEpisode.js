@@ -301,15 +301,28 @@ async function getAllTVShows() {
   }
 }
 
-async function selectInitialSeries(series) {  // Check if series is an array and has items
+async function selectInitialSeries(series, checkedSeries = new Set()) {
+  // Check if series is an array and has items
   if (Array.isArray(series) && series.length > 0) {
-    // Pick an initial series (will be replaced by earliest-date selection if collections found)
-    const initialSeries = series[Math.floor(Math.random() * series.length)];
+    // Filter out already checked series to prevent infinite loops
+    const uncheckededSeries = series.filter(s => !checkedSeries.has(s.ratingKey));
+    
+    if (uncheckededSeries.length === 0) {
+      // All series have been checked and are watched, return the first one anyway
+      console.log('All series have been checked and are watched, returning first available series');
+      return series[0];
+    }
+    
+    // Pick an initial series from unchecked series
+    const initialSeries = uncheckededSeries[Math.floor(Math.random() * uncheckededSeries.length)];
     console.log('Selected initial series for collection check:', initialSeries?.title || 'Unknown');
+    
+    // Mark this series as checked
+    checkedSeries.add(initialSeries.ratingKey);
 
     const watched = await determineIfWatched(initialSeries);
     if (watched) {
-      const newInitialSeries = await selectInitialSeries(series);
+      const newInitialSeries = await selectInitialSeries(series, checkedSeries);
       return newInitialSeries;
     } else {
       return initialSeries;

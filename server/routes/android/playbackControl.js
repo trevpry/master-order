@@ -81,11 +81,13 @@ function createPlaybackControlRoutes() {
       const { ratingKey, mediaType = 'unknown', title = 'Unknown Media' } = req.body;
       
       if (!ratingKey) {
-        return res.status(400).json(createAndroidErrorResponse(
-          'PLAY_ERROR',
-          'Rating key is required',
-          'Unable to play: missing media identifier'
-        ));
+        return res.status(400).json({
+          type: 'PLAY_ERROR',
+          data: {
+            error: 'Rating key is required',
+            message: 'Unable to play: missing media identifier'
+          }
+        });
       }
       
       console.log(`📱 Android play request - ratingKey: ${ratingKey}, mediaType: ${mediaType}, title: ${title}`);
@@ -94,40 +96,87 @@ function createPlaybackControlRoutes() {
       try {
         console.log('Sending webhook notification with ratingKey:', ratingKey);
         const baseUrl = getAndroidApiBaseUrl();
-        
-        const webhookUrl = `${baseUrl}/api/plex/webhook-notification`;
-        
-        const response = await fetch(webhookUrl, {
+        const webhookResponse = await fetch(`${baseUrl}/api/webhook/notify`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: {
+            'Content-Type': 'application/json',
+          },
           body: JSON.stringify({
             ratingKey: ratingKey,
-            mediaType: mediaType,
+            action: 'play_on_plex',
             title: title,
+            type: mediaType,
+            timestamp: new Date().toISOString(),
             source: 'android_app'
-          })
+          }),
         });
         
-        if (response.ok) {
-          console.log('✅ Webhook notification sent successfully from Android app');
+        if (webhookResponse.ok) {
+          console.log('✅ Webhook notification sent successfully');
+        } else {
+          console.warn('⚠️ Webhook notification failed:', await webhookResponse.text());
         }
       } catch (webhookError) {
-        console.error('❌ Failed to send webhook notification:', webhookError.message);
+        console.warn('⚠️ Failed to send webhook notification:', webhookError);
+        // Don't stop the Plex playback if webhook fails
       }
       
-      const androidResponse = createAndroidResponse('PLAY_SUCCESS', {
-        success: true,
-        action: 'play',
-        media: {
-          ratingKey: ratingKey,
-          mediaType: mediaType,
-          title: title
+      // Use existing Plex play endpoint
+      const baseUrl = getAndroidApiBaseUrl();
+      const playResponse = await fetch(`${baseUrl}/api/plex/play`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
         },
-        message: 'Playback initiated successfully'
+        body: JSON.stringify({
+          ratingKey: ratingKey
+        }),
       });
       
-      console.log('📱 Plex play command processed for Android app');
-      res.json(androidResponse);
+      const playData = await playResponse.json();
+      
+      if (playResponse.ok) {
+        // Success response in Android format
+        const androidResponse = {
+          type: 'PLAY_SUCCESS',
+          data: {
+            success: true,
+            ratingKey: ratingKey,
+            title: title,
+            mediaType: mediaType,
+            player: playData.player || 'Unknown Player',
+            message: `Playing "${title}" on ${playData.player || 'Plex'}`,
+            timestamp: new Date().toISOString()
+          }
+        };
+        
+        console.log('✅ Playback started successfully:', JSON.stringify(androidResponse, null, 2));
+        res.json(androidResponse);
+      } else {
+        // Error response in Android format
+        let errorMessage = playData.error || 'Failed to start playback';
+        
+        // Provide helpful error messages for common issues
+        if (errorMessage.includes('No player specified') || errorMessage.includes('not found')) {
+          errorMessage = 'No Plex player available. Please ensure a Plex client is connected and configured.';
+        }
+        
+        const androidErrorResponse = {
+          type: 'PLAY_ERROR',
+          data: {
+            success: false,
+            ratingKey: ratingKey,
+            title: title,
+            mediaType: mediaType,
+            error: playData.error || 'Failed to start playback',
+            message: errorMessage,
+            timestamp: new Date().toISOString()
+          }
+        };
+        
+        console.log('❌ Playback failed:', JSON.stringify(androidErrorResponse, null, 2));
+        res.status(playResponse.status).json(androidErrorResponse);
+      }
       
     } catch (error) {
       console.error('❌ Error in Android Plex play endpoint:', error);
@@ -142,60 +191,395 @@ function createPlaybackControlRoutes() {
 
   // Episode-specific playback control
   router.post('/play-episode', async (req, res) => {
-    console.log('📱 Android app requesting episode playback...');
+    console.log('📱 Android app requesting custom order media playback...');
     
     try {
-      const { episodeKey, position = 0 } = req.body;
+      const { 
+        seriesTitle, 
+        seasonNumber, 
+        episodeNumber, 
+        movieTitle, // Support direct movie title for movie playback
+        webUrl, // Support web video URL for web video playback
+        mediaType: requestedMediaType, // Support explicit media type
+        customOrderItemId, 
+        title = 'Unknown Media' 
+      } = req.body;
       
-      if (!episodeKey) {
-        return res.status(400).json(createAndroidErrorResponse(
-          'EPISODE_PLAY_ERROR',
-          'Episode key is required',
-          'Unable to play: missing episode identifier'
-        ));
+      // Determine media type and request type
+      const isEpisodeRequest = seriesTitle && seasonNumber !== undefined && episodeNumber !== undefined;
+      const isMovieRequest = movieTitle || (!isEpisodeRequest && !webUrl && title);
+      const isWebVideoRequest = webUrl || requestedMediaType === 'webvideo';
+      
+      if (!isEpisodeRequest && !isMovieRequest && !isWebVideoRequest) {
+        return res.status(400).json({ 
+          type: 'PLAY_ERROR',
+          data: {
+            error: 'Missing media identification',
+            message: 'Provide (seriesTitle, seasonNumber, episodeNumber) for episodes, movieTitle for movies, or webUrl/mediaType for web videos',
+            received: { seriesTitle, seasonNumber, episodeNumber, movieTitle, webUrl, requestedMediaType, title }
+          }
+        });
       }
       
-      const baseUrl = getAndroidApiBaseUrl();
+      const mediaTitle = isEpisodeRequest ? seriesTitle : (movieTitle || title);
+      const mediaType = isEpisodeRequest ? 'episode' : isWebVideoRequest ? 'webvideo' : 'movie';
       
-      // Start viewing session
-      const viewingSessionResponse = await fetch(`${baseUrl}/api/android/viewing/start`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          mediaType: 'episode',
-          mediaKey: episodeKey,
-          position: position
-        })
-      });
+      console.log(`📱 Android ${mediaType} request - ${mediaTitle}${isEpisodeRequest ? ` S${seasonNumber}E${episodeNumber}` : isWebVideoRequest ? ` (webURL: ${webUrl})` : ''} (customOrderItemId: ${customOrderItemId})`);
       
-      if (!viewingSessionResponse.ok) {
-        const errorText = await viewingSessionResponse.text();
-        console.error('Failed to start viewing session:', errorText);
-      }
-      
-      // Get episode details from Plex
-      const episodeResponse = await fetch(`${baseUrl}/api/plex/media/${episodeKey}`);
-      
-      if (!episodeResponse.ok) {
-        return res.status(404).json(createAndroidErrorResponse(
-          'EPISODE_PLAY_ERROR',
-          'Episode not found',
-          'The requested episode could not be found'
-        ));
-      }
-      
-      const episodeData = await episodeResponse.json();
-      
-      const androidResponse = createAndroidResponse('EPISODE_PLAY_SUCCESS', {
-        success: true,
-        episode: episodeData,
-        playback: {
-          startPosition: position
+      // Handle web video playback
+      if (isWebVideoRequest) {
+        console.log('📱 Processing web video playback request...');
+        
+        // For web videos, automatically start a viewing session
+        try {
+          const baseUrl = getAndroidApiBaseUrl();
+          const viewingSessionResponse = await fetch(`${baseUrl}/api/android/viewing/start`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+              mediaType: 'webvideo',
+              title: mediaTitle,
+              seriesTitle: seriesTitle,
+              customOrderItemId: customOrderItemId
+            })
+          });
+          
+          const viewingSessionData = await viewingSessionResponse.json();
+          
+          if (viewingSessionResponse.ok) {
+            console.log('✅ Viewing session started for web video:', viewingSessionData);
+            
+            // Success response for web video with viewing session info
+            const androidResponse = {
+              type: 'PLAY_WEB_VIDEO_SUCCESS',
+              data: {
+                success: true,
+                webUrl: webUrl,
+                title: mediaTitle,
+                customOrderItemId: customOrderItemId,
+                viewingSession: {
+                  sessionId: viewingSessionData.data?.sessionId,
+                  startedAt: viewingSessionData.data?.startedAt,
+                  isPaused: false
+                },
+                message: `Started viewing session for "${mediaTitle}"`,
+                timestamp: new Date().toISOString()
+              }
+            };
+            
+            console.log('✅ Web video playback successful with viewing session:', JSON.stringify(androidResponse, null, 2));
+            res.json(androidResponse);
+            return;
+          } else {
+            console.warn('⚠️ Failed to start viewing session, proceeding without it:', viewingSessionData);
+            // Continue with regular web video response
+          }
+        } catch (viewingError) {
+          console.warn('⚠️ Error starting viewing session, proceeding without it:', viewingError);
+          // Continue with regular web video response
         }
+        
+        // Regular web video response (fallback if viewing session fails)
+        const androidResponse = {
+          type: 'PLAY_WEB_VIDEO_SUCCESS',
+          data: {
+            success: true,
+            webUrl: webUrl,
+            title: mediaTitle,
+            customOrderItemId: customOrderItemId,
+            message: `Playing web video "${mediaTitle}"`,
+            timestamp: new Date().toISOString()
+          }
+        };
+        
+        console.log('✅ Web video playback successful:', JSON.stringify(androidResponse, null, 2));
+        res.json(androidResponse);
+        return;
+      }
+      
+      // For episodes and movies, search Plex to find rating keys
+      const prisma = require('../../prismaClient');
+      let episodeRatingKey = null;
+      let movieRatingKey = null;
+      let foundMediaMetadata = null;
+      
+      try {
+        // Get Plex settings
+        const settings = await prisma.settings.findFirst();
+        if (!settings?.plexUrl || !settings?.plexToken) {
+          return res.status(500).json({
+            type: 'PLAY_ERROR',
+            data: {
+              error: 'Plex not configured',
+              message: 'Plex server URL and token are required'
+            }
+          });
+        }
+        
+        // Search for the media in Plex
+        const searchUrl = `${settings.plexUrl}/search?query=${encodeURIComponent(mediaTitle)}&X-Plex-Token=${settings.plexToken}`;
+        const searchResponse = await fetch(searchUrl);
+        
+        if (searchResponse.ok) {
+          const searchData = await searchResponse.text();
+          const xml2js = require('xml2js');
+          const parser = new xml2js.Parser();
+          const result = await parser.parseStringPromise(searchData);
+          
+          if (isEpisodeRequest) {
+            // Look for TV series first for episode requests
+            const tvResults = result?.MediaContainer?.Directory?.filter(item => 
+              item.$.type === 'show' && 
+              item.$.title.toLowerCase() === seriesTitle.toLowerCase()
+            ) || [];
+            
+            if (tvResults.length > 0) {
+              // Found TV series, now get episodes
+              const seriesRatingKey = tvResults[0].$.ratingKey;
+              const episodesUrl = `${settings.plexUrl}/library/metadata/${seriesRatingKey}/allLeaves?X-Plex-Token=${settings.plexToken}`;
+              const episodesResponse = await fetch(episodesUrl);
+              
+              if (episodesResponse.ok) {
+                const episodesData = await episodesResponse.text();
+                const episodesResult = await parser.parseStringPromise(episodesData);
+                
+                // Find the specific episode
+                const episodes = episodesResult?.MediaContainer?.Video || [];
+                const targetEpisode = episodes.find(ep => 
+                  parseInt(ep.$.parentIndex) === seasonNumber && 
+                  parseInt(ep.$.index) === episodeNumber
+                );
+                
+                if (targetEpisode) {
+                  episodeRatingKey = targetEpisode.$.ratingKey;
+                  foundMediaMetadata = {
+                    type: 'episode',
+                    ratingKey: targetEpisode.$.ratingKey,
+                    title: targetEpisode.$.title,
+                    seriesTitle: tvResults[0].$.title,
+                    seasonNumber: parseInt(targetEpisode.$.parentIndex),
+                    episodeNumber: parseInt(targetEpisode.$.index),
+                    summary: targetEpisode.$.summary || '',
+                    duration: parseInt(targetEpisode.$.duration) || 0,
+                    thumb: targetEpisode.$.thumb || '',
+                    art: targetEpisode.$.art || tvResults[0].$.art || '',
+                    seriesRatingKey: seriesRatingKey
+                  };
+                  console.log(`✅ Found episode rating key: ${episodeRatingKey}`);
+                }
+              }
+            }
+          }
+          
+          // Look for movies (either for movie requests or as fallback for episode requests)
+          if (!episodeRatingKey) {
+            const movieResults = result?.MediaContainer?.Video?.filter(item => 
+              item.$.type === 'movie' && 
+              (item.$.title.toLowerCase() === mediaTitle.toLowerCase() ||
+               item.$.title.toLowerCase().includes(mediaTitle.toLowerCase()))
+            ) || [];
+            
+            if (movieResults.length > 0) {
+              const movie = movieResults[0];
+              movieRatingKey = movie.$.ratingKey;
+              foundMediaMetadata = {
+                type: 'movie',
+                ratingKey: movie.$.ratingKey,
+                title: movie.$.title,
+                year: parseInt(movie.$.year) || null,
+                duration: parseInt(movie.$.duration) || 0,
+                summary: movie.$.summary || '',
+                studio: movie.$.studio || '',
+                rating: parseFloat(movie.$.rating) || 0,
+                thumb: movie.$.thumb || '',
+                art: movie.$.art || '',
+                originallyAvailableAt: movie.$.originallyAvailableAt || null
+              };
+              console.log(`✅ Found movie rating key: ${movieRatingKey}`);
+            }
+          }
+        }
+      } catch (plexError) {
+        console.warn('⚠️ Failed to search Plex for media:', plexError.message);
+      }
+      
+      // Use the found rating key or return error
+      const ratingKeyToUse = episodeRatingKey || movieRatingKey;
+      
+      if (!ratingKeyToUse) {
+        return res.status(404).json({
+          type: 'PLAY_ERROR',
+          data: {
+            error: 'Media not found',
+            message: `Could not find ${mediaTitle}${isEpisodeRequest ? ` S${seasonNumber}E${episodeNumber}` : ''} in Plex library`,
+            mediaTitle,
+            mediaType,
+            ...(isEpisodeRequest && { seasonNumber, episodeNumber })
+          }
+        });
+      }
+      
+      // Send webhook notification
+      try {
+        console.log('Sending webhook notification for media:', title);
+        const baseUrl = getAndroidApiBaseUrl();
+        const webhookResponse = await fetch(`${baseUrl}/api/webhook/notify`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            ratingKey: ratingKeyToUse,
+            action: 'play_on_plex',
+            title: foundMediaMetadata?.title || mediaTitle,
+            type: mediaType,
+            ...(isEpisodeRequest && { 
+              seriesTitle,
+              seasonNumber,
+              episodeNumber 
+            }),
+            ...(isMovieRequest && {
+              movieTitle: mediaTitle
+            }),
+            customOrderItemId,
+            timestamp: new Date().toISOString(),
+            source: 'android_app'
+          }),
+        });
+        
+        if (webhookResponse.ok) {
+          console.log('✅ Webhook notification sent successfully');
+        } else {
+          console.warn('⚠️ Webhook notification failed:', await webhookResponse.text());
+        }
+      } catch (webhookError) {
+        console.warn('⚠️ Failed to send webhook notification:', webhookError);
+      }
+      
+      // Use existing Plex play endpoint
+      const baseUrl = getAndroidApiBaseUrl();
+      const playResponse = await fetch(`${baseUrl}/api/plex/play`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          ratingKey: ratingKeyToUse
+        }),
       });
       
-      console.log('📱 Episode playback initiated for Android app');
-      res.json(androidResponse);
+      const playData = await playResponse.json();
+      
+      if (playResponse.ok) {
+        // Helper function to get proper artwork URL
+        const getAndroidArtworkUrl = (metadata) => {
+          if (!metadata) return null;
+          
+          const baseUrl = getAndroidApiBaseUrl();
+          const thumb = metadata.thumb;
+          
+          if (!thumb) return null;
+          
+          // Check if thumb is already a full URL (starts with http)
+          if (thumb.startsWith('http')) {
+            console.log('📱 Using full artwork URL:', thumb);
+            return thumb;
+          }
+          
+          // Otherwise, it's a relative path, so add the base URL
+          console.log('📱 Using Plex artwork:', thumb);
+          return `${baseUrl}/api/artwork${thumb}`;
+        };
+        
+        // Success response in Android format based on media type
+        let androidResponse;
+        
+        if (foundMediaMetadata?.type === 'episode') {
+          // Episode response format
+          androidResponse = {
+            type: 'PLAY_EPISODE_SUCCESS',
+            data: {
+              success: true,
+              ratingKey: ratingKeyToUse,
+              episodeRatingKey: episodeRatingKey,
+              seriesRatingKey: foundMediaMetadata.seriesRatingKey,
+              title: foundMediaMetadata.seriesTitle,
+              episodeTitle: foundMediaMetadata.title,
+              seasonNumber: foundMediaMetadata.seasonNumber,
+              episodeNumber: foundMediaMetadata.episodeNumber,
+              duration: foundMediaMetadata.duration,
+              summary: foundMediaMetadata.summary,
+              artworkUrl: getAndroidArtworkUrl(foundMediaMetadata),
+              customOrderItemId: customOrderItemId || null,
+              player: playData.player || 'Unknown Player',
+              message: `Playing "${foundMediaMetadata.title}" on ${playData.player || 'Plex'}`,
+              timestamp: new Date().toISOString()
+            }
+          };
+        } else if (foundMediaMetadata?.type === 'movie') {
+          // Movie response format
+          androidResponse = {
+            type: 'PLAY_MOVIE_SUCCESS',
+            data: {
+              success: true,
+              ratingKey: ratingKeyToUse,
+              title: foundMediaMetadata.title,
+              year: foundMediaMetadata.year,
+              duration: foundMediaMetadata.duration,
+              summary: foundMediaMetadata.summary,
+              studio: foundMediaMetadata.studio,
+              rating: foundMediaMetadata.rating,
+              artworkUrl: getAndroidArtworkUrl(foundMediaMetadata),
+              customOrderItemId: customOrderItemId || null,
+              player: playData.player || 'Unknown Player',
+              message: `Playing "${foundMediaMetadata.title}" on ${playData.player || 'Plex'}`,
+              timestamp: new Date().toISOString()
+            }
+          };
+        } else {
+          // Fallback response format - should use PLAY_ERROR for unknown media
+          androidResponse = {
+            type: 'PLAY_ERROR',
+            data: {
+              success: false,
+              error: 'Unknown media type',
+              message: `Unable to determine media type for "${mediaTitle}"`,
+              ratingKey: ratingKeyToUse,
+              title: mediaTitle,
+              customOrderItemId: customOrderItemId,
+              timestamp: new Date().toISOString()
+            }
+          };
+        }
+        
+        console.log('✅ Media playback successful:', JSON.stringify(androidResponse, null, 2));
+        res.json(androidResponse);
+      } else {
+        // Error response in Android format
+        const androidErrorResponse = {
+          type: 'PLAY_ERROR',
+          data: {
+            success: false,
+            ratingKey: ratingKeyToUse,
+            title: foundMediaMetadata?.title || mediaTitle,
+            mediaType: mediaType,
+            ...(isEpisodeRequest && {
+              seriesTitle,
+              seasonNumber,
+              episodeNumber
+            }),
+            customOrderItemId,
+            error: playData.error || 'Failed to start playback',
+            message: playData.error || `Failed to play ${mediaTitle}`,
+            timestamp: new Date().toISOString()
+          }
+        };
+        
+        console.log('❌ Media playback failed:', JSON.stringify(androidErrorResponse, null, 2));
+        res.status(playResponse.status).json(androidErrorResponse);
+      }
       
     } catch (error) {
       console.error('❌ Error in Android episode play endpoint:', error);

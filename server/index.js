@@ -607,6 +607,11 @@ io.on('connection', (socket) => {
 });
 
 // Add error handling middleware (must be last)
+// Load Android Companion App API routes (modular architecture)
+const createAndroidRouter = require('./routes/android');
+const androidRouter = createAndroidRouter();
+app.use('/api/android', androidRouter);
+
 const errorHandler = require('./middleware/errorHandler');
 app.use(errorHandler);
 
@@ -689,10 +694,6 @@ server.listen(PORT, '0.0.0.0', async () => {
     console.error('❌ Failed to initialize Stash sync service:', error);
   }
 });
-
-// Load Android Companion App API routes (consolidated from modularization)
-const setupAndroidRoutes = require('./android_companion_routes_complete_fixed');
-setupAndroidRoutes(app, io, getNextEpisode, getNextMovie, getNextCustomOrder, watchLogService, prisma);
 
 
 
