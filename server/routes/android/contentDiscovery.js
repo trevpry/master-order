@@ -109,6 +109,17 @@ function createContentDiscoveryRoutes(services) {
             webUrl: upNextData.webUrl || null,
             customOrderId: upNextData.customOrderId || null,
             customOrderItemId: upNextData.customOrderItemId || null,
+            // Playlist information
+            ...(upNextData.playlistName && {
+              playlistName: upNextData.playlistName,
+              playlistType: upNextData.playlistType,
+              playlistId: upNextData.playlistId
+            }),
+            // Background gallery information
+            ...(upNextData.backgroundGalleryName && {
+              backgroundGalleryName: upNextData.backgroundGalleryName,
+              backgroundGalleryId: upNextData.backgroundGalleryId
+            }),
             // Episode-specific fields for custom orders
             ...(upNextData.type === 'episode' && {
               seasonNumber: upNextData.seasonNumber || upNextData.currentSeason || null,

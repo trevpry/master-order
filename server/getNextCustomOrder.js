@@ -65,7 +65,11 @@ async function getActiveCustomOrders() {
               orderBy: { sortOrder: 'asc' }
             }
           }
-        }
+        },
+        // Include playlist and gallery relationships
+        plexPlaylist: true,
+        customPlaylist: true,
+        backgroundGallery: true
       }
     });
 
@@ -274,14 +278,25 @@ async function fetchMediaDetailsFromPlex(plexKey, mediaType, customOrderItem, ba
           console.log(`Could not fetch OpenLibrary details for ${customOrderItem.bookOpenLibraryId}:`, error.message);
         }
       }
+      
+      // Get the cached artwork URL for this book
+      const artworkUrl = await artworkCache.getArtworkUrl(customOrderItem, baseUrl);
+      console.log(`Book item details:`, {
+        id: customOrderItem.id,
+        localArtworkPath: customOrderItem.localArtworkPath,
+        originalArtworkUrl: customOrderItem.originalArtworkUrl,
+        bookOpenLibraryId: customOrderItem.bookOpenLibraryId
+      });
+      console.log(`Using cached artwork URL for book "${customOrderItem.title}": ${artworkUrl}`);
+      
         const mockMetadata = {
         ratingKey: plexKey,
         title: customOrderItem.title,
         type: 'book',
         year: customOrderItem.bookYear,
         summary: bookDetails?.description || '',
-        thumb: null, // Books don't have Plex thumbs
-        art: null,
+        thumb: artworkUrl, // Use cached artwork URL
+        art: artworkUrl,   // Use cached artwork URL for both thumb and art
         bookDetails: bookDetails, // Store OpenLibrary details
         bookTitle: customOrderItem.bookTitle,
         bookAuthor: customOrderItem.bookAuthor,
@@ -601,6 +616,23 @@ async function getNextCustomOrder(req = null) {
     fullMediaDetails.customOrderIcon = finalSourceOrder.icon;
     fullMediaDetails.customOrderId = finalSourceOrder.id;
     fullMediaDetails.customOrderItemId = nextItem.id;
+    
+    // Add playlist information if available
+    if (finalSourceOrder.plexPlaylist) {
+      fullMediaDetails.playlistName = finalSourceOrder.plexPlaylist.title;
+      fullMediaDetails.playlistType = 'plex';
+      fullMediaDetails.playlistId = finalSourceOrder.plexPlaylist.ratingKey;
+    } else if (finalSourceOrder.customPlaylist) {
+      fullMediaDetails.playlistName = finalSourceOrder.customPlaylist.title;
+      fullMediaDetails.playlistType = 'custom';
+      fullMediaDetails.playlistId = finalSourceOrder.customPlaylist.id;
+    }
+    
+    // Add background gallery information if available
+    if (finalSourceOrder.backgroundGallery) {
+      fullMediaDetails.backgroundGalleryName = finalSourceOrder.backgroundGallery.name;
+      fullMediaDetails.backgroundGalleryId = finalSourceOrder.backgroundGallery.id;
+    }
     
     // Add parent order context if this is from a sub-order
     if (isFromSubOrder && finalParentOrder) {
