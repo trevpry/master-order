@@ -91,7 +91,7 @@ function createGalleryPlaylistRoutes(prisma) {
             size: randomImage.size || null,
             mimetype: randomImage.mimetype || 'image/jpeg'
           },
-          totalImages: gallery.images.length,
+          totalImages: gallery.backgrounds.length,
           timestamp: new Date().toISOString()
         }
       };
@@ -152,7 +152,35 @@ function createGalleryPlaylistRoutes(prisma) {
       if (plexPlaylist) {
         playlist = plexPlaylist;
         playlistType = 'plex';
-        tracks = plexPlaylist.items;
+        
+        // Get the actual track records based on playlist item ratingKeys
+        if (plexPlaylist.items && plexPlaylist.items.length > 0) {
+          const trackRatingKeys = plexPlaylist.items.map(item => item.ratingKey);
+          tracks = await prisma.plexTrack.findMany({
+            where: {
+              ratingKey: {
+                in: trackRatingKeys
+              }
+            },
+            include: {
+              album: {
+                include: {
+                  artist: true
+                }
+              }
+            }
+          });
+          
+          // Add playlist-specific metadata (like addedAt from playlist item)
+          tracks = tracks.map(track => {
+            const playlistItem = plexPlaylist.items.find(item => item.ratingKey === track.ratingKey);
+            return {
+              ...track,
+              addedAt: playlistItem?.addedAt || track.addedAt
+            };
+          });
+        }
+        
         console.log(`📱 Found Plex playlist with ${tracks.length} tracks`);
       } else {
         // Try custom playlist
@@ -161,18 +189,42 @@ function createGalleryPlaylistRoutes(prisma) {
             title: playlistName
           },
           include: {
-            customPlaylistItems: {
-              include: {
-                plexMusicTrack: true
-              }
-            }
+            tracks: true
           }
         });
         
         if (customPlaylist) {
           playlist = customPlaylist;
           playlistType = 'custom';
-          tracks = customPlaylist.customPlaylistItems.map(item => item.plexMusicTrack).filter(Boolean);
+          
+          // Get the actual track records based on custom playlist track ratingKeys
+          if (customPlaylist.tracks && customPlaylist.tracks.length > 0) {
+            const trackRatingKeys = customPlaylist.tracks.map(track => track.ratingKey);
+            tracks = await prisma.plexTrack.findMany({
+              where: {
+                ratingKey: {
+                  in: trackRatingKeys
+                }
+              },
+              include: {
+                album: {
+                  include: {
+                    artist: true
+                  }
+                }
+              }
+            });
+            
+            // Add custom playlist-specific metadata
+            tracks = tracks.map(track => {
+              const customTrack = customPlaylist.tracks.find(t => t.ratingKey === track.ratingKey);
+              return {
+                ...track,
+                addedAt: customTrack?.addedAt || track.addedAt
+              };
+            });
+          }
+          
           console.log(`📱 Found custom playlist with ${tracks.length} tracks`);
         }
       }
@@ -216,7 +268,8 @@ function createGalleryPlaylistRoutes(prisma) {
       
       // Generate stream URL if we have Plex configuration
       if (settings?.plexUrl && settings?.plexToken && randomTrack.ratingKey) {
-        streamUrl = `${settings.plexUrl}/library/parts/${randomTrack.ratingKey}/stream?X-Plex-Token=${settings.plexToken}`;
+        // Use the standard Plex media streaming endpoint
+        streamUrl = `${settings.plexUrl}/library/metadata/${randomTrack.ratingKey}/stream?X-Plex-Token=${settings.plexToken}`;
         
         // Generate artwork URL with fallback hierarchy
         if (randomTrack.thumb) {
@@ -245,16 +298,16 @@ function createGalleryPlaylistRoutes(prisma) {
           track: {
             ratingKey: randomTrack.ratingKey,
             title: randomTrack.title,
-            artist: randomTrack.grandparentTitle || randomTrack.originalTitle || 'Unknown Artist',
-            album: randomTrack.parentTitle || 'Unknown Album',
+            artist: randomTrack.album?.artist?.title || randomTrack.originalTitle || 'Unknown Artist',
+            album: randomTrack.album?.title || 'Unknown Album',
             duration: randomTrack.duration || 0,
             type: randomTrack.type || 'track',
             streamUrl: streamUrl,
             artworkUrl: artworkUrl,
             plexUrl: plexUrl,
-            year: randomTrack.year ? parseInt(randomTrack.year) : null,
+            year: randomTrack.album?.year ? parseInt(randomTrack.album.year) : null,
             index: randomTrack.index ? parseInt(randomTrack.index) : null,
-            parentIndex: randomTrack.parentIndex ? parseInt(randomTrack.parentIndex) : null,
+            parentIndex: randomTrack.album?.index ? parseInt(randomTrack.album.index) : null,
             rating: randomTrack.rating ? parseFloat(randomTrack.rating) : null,
             addedAt: randomTrack.addedAt ? randomTrack.addedAt.toISOString() : null
           },
@@ -270,155 +323,6 @@ function createGalleryPlaylistRoutes(prisma) {
       console.error('❌ Error in Android playlist random track endpoint:', error);
       const androidErrorResponse = {
         type: 'RANDOM_TRACK_ERROR',
-        data: {
-          success: false,
-          error: 'Internal server error',
-          details: error.message,
-          timestamp: new Date().toISOString()
-        }
-      };
-      res.status(500).json(androidErrorResponse);
-    }
-  });
-
-  // Android Weather Endpoint - Get Current Weather
-  router.get('/weather', async (req, res) => {
-    console.log('📱 Android app requesting current weather...');
-    
-    try {
-      // Get settings to check weather configuration
-      const settings = await prisma.settings.findFirst();
-      
-      if (!settings?.weatherEnabled) {
-        return res.json({
-          type: 'WEATHER_ERROR',
-          data: {
-            error: 'Weather service disabled',
-            message: 'Weather functionality is not enabled in settings',
-            enabled: false,
-            timestamp: new Date().toISOString()
-          }
-        });
-      }
-      
-      if (!settings?.weatherApiKey) {
-        return res.json({
-          type: 'WEATHER_ERROR',
-          data: {
-            error: 'Weather API key missing',
-            message: 'Weather API key is not configured in settings',
-            enabled: true,
-            configured: false,
-            timestamp: new Date().toISOString()
-          }
-        });
-      }
-      
-      if (!settings?.weatherLocation) {
-        return res.json({
-          type: 'WEATHER_ERROR',
-          data: {
-            error: 'Weather location missing',
-            message: 'Weather location is not configured in settings',
-            enabled: true,
-            configured: false,
-            timestamp: new Date().toISOString()
-          }
-        });
-      }
-      
-      // Use existing weather endpoint to get data
-      const baseUrl = getAndroidApiBaseUrl();
-      const weatherResponse = await fetch(`${baseUrl}/api/weather/current`);
-      
-      if (!weatherResponse.ok) {
-        const errorText = await weatherResponse.text();
-        return res.json({
-          type: 'WEATHER_ERROR',
-          data: {
-            error: 'Weather API error',
-            message: `Failed to fetch weather data: ${errorText}`,
-            statusCode: weatherResponse.status,
-            enabled: true,
-            configured: true,
-            timestamp: new Date().toISOString()
-          }
-        });
-      }
-      
-      const weatherData = await weatherResponse.json();
-      
-      // Transform to Android format
-      const androidResponse = {
-        type: 'WEATHER_SUCCESS',
-        data: {
-          success: true,
-          location: {
-            name: weatherData.name || settings.weatherLocation,
-            country: weatherData.sys?.country || 'Unknown',
-            coordinates: {
-              latitude: weatherData.coord?.lat || null,
-              longitude: weatherData.coord?.lon || null
-            },
-            timezone: weatherData.timezone || null,
-            sunrise: weatherData.sys?.sunrise ? new Date(weatherData.sys.sunrise * 1000).toISOString() : null,
-            sunset: weatherData.sys?.sunset ? new Date(weatherData.sys.sunset * 1000).toISOString() : null
-          },
-          current: {
-            temperature: weatherData.main?.temp || null,
-            feelsLike: weatherData.main?.feels_like || null,
-            tempMin: weatherData.main?.temp_min || null,
-            tempMax: weatherData.main?.temp_max || null,
-            humidity: weatherData.main?.humidity || null,
-            pressure: weatherData.main?.pressure || null,
-            visibility: weatherData.visibility ? weatherData.visibility / 1000 : null, // Convert to km
-            uvIndex: weatherData.uvi || null
-          },
-          weather: {
-            condition: weatherData.weather?.[0]?.main || 'Unknown',
-            description: weatherData.weather?.[0]?.description || 'No description',
-            icon: weatherData.weather?.[0]?.icon || null,
-            iconUrl: weatherData.weather?.[0]?.icon ? `https://openweathermap.org/img/wn/${weatherData.weather[0].icon}@2x.png` : null
-          },
-          wind: {
-            speed: weatherData.wind?.speed || null,
-            direction: weatherData.wind?.deg || null,
-            gust: weatherData.wind?.gust || null
-          },
-          clouds: {
-            cloudiness: weatherData.clouds?.all || null
-          },
-          rain: {
-            oneHour: weatherData.rain?.['1h'] || null,
-            threeHours: weatherData.rain?.['3h'] || null
-          },
-          snow: {
-            oneHour: weatherData.snow?.['1h'] || null,
-            threeHours: weatherData.snow?.['3h'] || null
-          },
-          units: {
-            system: settings.weatherUnits || 'metric',
-            temperature: settings.weatherUnits === 'imperial' ? '°F' : settings.weatherUnits === 'kelvin' ? 'K' : '°C',
-            windSpeed: settings.weatherUnits === 'imperial' ? 'mph' : 'm/s',
-            pressure: 'hPa',
-            visibility: 'km'
-          },
-          metadata: {
-            dataTime: weatherData.dt ? new Date(weatherData.dt * 1000).toISOString() : null,
-            requestTime: new Date().toISOString(),
-            source: 'OpenWeatherMap',
-            apiVersion: '2.5'
-          }
-        }
-      };
-      
-      console.log('✅ Weather data retrieved successfully');
-      res.json(androidResponse);
-      
-    } catch (error) {
-      console.error('❌ Error in Android weather endpoint:', error);
-      const androidErrorResponse = {
-        type: 'WEATHER_ERROR',
         data: {
           success: false,
           error: 'Internal server error',

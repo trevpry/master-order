@@ -16,7 +16,6 @@ const tasksRoutes = require('./routes/tasks');
 const locationsRoutes = require('./routes/locations');
 const settingsRoutes = require('./routes/settings');
 const artworkRoutes = require('./routes/artwork');
-const weatherRoutes = require('./routes/weather');
 const healthRoutes = require('./routes/health');
 const plexRoutes = require('./routes/plex');
 const createStashRouter = require('./routes/stash');
@@ -238,9 +237,6 @@ app.use('/api/settings', settingsRoutes);
 
 // Artwork API routes
 app.use('/api/artwork', artworkRoutes);
-
-// Weather API routes
-app.use('/api/weather', weatherRoutes);
 
 // Health & Monitoring API routes
 app.use('/api/health', healthRoutes);

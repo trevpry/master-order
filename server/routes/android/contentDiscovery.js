@@ -140,6 +140,25 @@ function createContentDiscoveryRoutes(services) {
           console.log('📱 No episode-specific rating key found, using series rating key:', episodeRatingKey);
         }
         
+        // For TV episodes, construct episode-specific artwork paths
+        let episodeThumb = upNextData.thumb || '';
+        let episodeArt = upNextData.art || '';
+        
+        // If we have an episode rating key, construct episode-specific artwork paths
+        if (episodeRatingKey && episodeRatingKey !== seriesRatingKey) {
+          // Extract timestamp from existing thumb/art if available
+          const thumbMatch = upNextData.thumb?.match(/\/(\d+)$/);
+          const artMatch = upNextData.art?.match(/\/(\d+)$/);
+          const thumbTimestamp = thumbMatch ? thumbMatch[1] : Date.now();
+          const artTimestamp = artMatch ? artMatch[1] : Date.now();
+          
+          episodeThumb = `/library/metadata/${episodeRatingKey}/thumb/${thumbTimestamp}`;
+          episodeArt = `/library/metadata/${episodeRatingKey}/art/${artTimestamp}`;
+          console.log('📱 Using episode-specific artwork paths:', { episodeThumb, episodeArt });
+        } else {
+          console.log('📱 Using series artwork paths for episode');
+        }
+        
         androidResponse = {
           type: 'PLAY_TV_EPISODE',
           data: {
@@ -157,9 +176,9 @@ function createContentDiscoveryRoutes(services) {
             seasonNumber: upNextData.currentSeason || upNextData.seasonNumber || null,
             episodeNumber: upNextData.currentEpisode || upNextData.episodeNumber || null,
             isFinalSeason: upNextData.isCurrentSeasonFinal || false,
-            // Artwork URLs
-            thumb: upNextData.thumb || '',
-            art: upNextData.art || '',
+            // Episode-specific artwork URLs
+            thumb: episodeThumb,
+            art: episodeArt,
             artworkUrl: artworkUrl || '',
             streamUrl: upNextData.streamUrl || '',
             otherCollections: upNextData.otherCollections || []

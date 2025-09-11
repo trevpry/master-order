@@ -15,94 +15,121 @@ const { getAndroidApiBaseUrl, createAndroidResponse, createAndroidErrorResponse 
 function createStashIntegrationRoutes(prisma) {
   const router = express.Router();
 
-  // Get Stash images with pagination
+  // Get Random Stash Images
   router.get('/stash/images', async (req, res) => {
-    console.log('📱 Android app requesting Stash images...');
+    console.log('📱 Android app requesting random Stash images...');
     
     try {
-      const { page = 1, perPage = 50 } = req.query;
+      // Parse and validate count parameter
+      let count = parseInt(req.query.count) || 1;
+      count = Math.max(1, Math.min(50, count)); // Enforce min: 1, max: 50
       
-      const images = await prisma.stashImage.findMany({
-        skip: (parseInt(page) - 1) * parseInt(perPage),
-        take: parseInt(perPage),
-        orderBy: { createdAt: 'desc' },
-        include: {
-          gallery: {
-            select: {
-              id: true,
-              title: true,
-              studio: true
-            }
-          },
-          performers: {
-            include: {
-              performer: {
-                select: {
-                  id: true,
-                  name: true
+      // Get total count of images
+      const totalAvailable = await prisma.stashImage.count();
+      
+      if (totalAvailable === 0) {
+        return res.json({
+          type: 'NO_IMAGES',
+          data: {
+            message: 'No images found in Stash library',
+            images: []
+          }
+        });
+      }
+      
+      // Get random images by using random skip values
+      const randomImages = [];
+      const usedIndices = new Set();
+      
+      for (let i = 0; i < Math.min(count, totalAvailable); i++) {
+        let randomIndex;
+        do {
+          randomIndex = Math.floor(Math.random() * totalAvailable);
+        } while (usedIndices.has(randomIndex) && usedIndices.size < totalAvailable);
+        
+        usedIndices.add(randomIndex);
+        
+        const image = await prisma.stashImage.findFirst({
+          skip: randomIndex,
+          include: {
+            gallery: {
+              select: {
+                id: true,
+                title: true
+              }
+            },
+            performers: {
+              include: {
+                performer: {
+                  select: {
+                    id: true,
+                    name: true,
+                    image: true
+                  }
                 }
               }
-            }
-          },
-          tags: {
-            include: {
-              tag: {
-                select: {
-                  id: true,
-                  name: true
-                }
+            },
+            studioObject: {
+              select: {
+                id: true,
+                name: true,
+                image: true
               }
             }
           }
+        });
+        
+        if (image) {
+          randomImages.push(image);
         }
-      });
-
+      }
+      
       const baseUrl = getAndroidApiBaseUrl();
       
-      const androidResponse = createAndroidResponse('STASH_IMAGES_SUCCESS', {
-        success: true,
-        images: images.map(image => ({
-          id: image.id,
-          title: image.title || 'Untitled',
-          path: image.path,
-          url: `${baseUrl}/api/stash-image-proxy/${image.path}`,
-          width: image.width,
-          height: image.height,
-          filesize: image.filesize,
-          gallery: image.gallery ? {
-            id: image.gallery.id,
-            title: image.gallery.title,
-            studio: image.gallery.studio
-          } : null,
-          performers: image.performers?.map(p => ({
-            id: p.performer.id,
-            name: p.performer.name
-          })) || [],
-          tags: image.tags?.map(t => ({
-            id: t.tag.id,
-            name: t.tag.name
-          })) || [],
-          createdAt: image.createdAt,
-          updatedAt: image.updatedAt
-        })),
-        pagination: {
-          page: parseInt(page),
-          perPage: parseInt(perPage),
-          hasMore: images.length === parseInt(perPage)
+      // Format response according to documentation
+      const androidResponse = {
+        type: 'RANDOM_IMAGES',
+        data: {
+          images: randomImages.map(image => ({
+            id: image.id,
+            title: image.title || 'Untitled',
+            path: image.path,
+            url: `${baseUrl}/api/stash-image-proxy/${encodeURIComponent(image.path)}`,
+            photographer: image.photographer || null,
+            performers: image.performers?.map(p => ({
+              id: p.performer.id,
+              name: p.performer.name,
+              image: p.performer.image || null
+            })) || [],
+            studio: image.studioObject ? {
+              name: image.studioObject.name,
+              image: image.studioObject.image || null
+            } : null,
+            gallery: image.gallery ? {
+              title: image.gallery.title
+            } : null,
+            rating: image.rating || null,
+            organized: image.organized || false
+          })),
+          count: randomImages.length,
+          totalAvailable: totalAvailable
         }
-      });
+      };
 
-      console.log(`📱 Returning ${images.length} Stash images for Android app`);
+      console.log(`📱 Returning ${randomImages.length} random Stash images for Android app`);
       res.json(androidResponse);
       
     } catch (error) {
-      console.error('❌ Error in Android Stash images endpoint:', error);
+      console.error('❌ Error in Android Stash random images endpoint:', error);
       
-      res.status(500).json(createAndroidErrorResponse(
-        'STASH_IMAGES_ERROR',
-        'Failed to fetch Stash images',
-        error.message
-      ));
+      res.status(500).json({
+        type: 'NO_IMAGES',
+        data: {
+          message: 'Failed to fetch random Stash images',
+          images: [],
+          error: error.message
+        }
+      });
     }
   });
 
@@ -171,12 +198,26 @@ function createStashIntegrationRoutes(prisma) {
         }
       }
       
+      // Handle title with filename fallback logic (as per documentation)
+      let title = scene?.title;
+      if (!title || title.trim() === '') {
+        // Extract filename from path and remove extension
+        if (scene?.path) {
+          const pathParts = scene.path.split(/[/\\]/);
+          const filename = pathParts[pathParts.length - 1];
+          const lastDot = filename.lastIndexOf('.');
+          title = lastDot > 0 ? filename.substring(0, lastDot) : filename;
+        } else {
+          title = 'Unknown Scene';
+        }
+      }
+
       // Create Android response in expected PLAY_CLIP format
       const androidResponse = {
         type: 'PLAY_CLIP',
         data: {
           url: stashUrl ? `${stashUrl}/scene/${scene.id}/stream` : '',
-          title: scene?.title || 'Unknown Scene',
+          title: title,
           performers: performers,
           studio: studio,
           duration: clip.duration || 60,
@@ -297,7 +338,16 @@ function createStashIntegrationRoutes(prisma) {
           
           if (stashResponse.ok) {
             const stashData = await stashResponse.json();
-            artwork = stashData.data?.findScene?.paths || null;
+            const paths = stashData.data?.findScene?.paths;
+            if (paths) {
+              // Convert to relative paths as per documentation
+              artwork = {
+                screenshot: `/screenshot/${scene.id}.webp`,
+                preview: `/scene/${scene.id}/preview`,
+                stream: `/scene/${scene.id}/stream`,
+                webp: `/scene/${scene.id}/webp`
+              };
+            }
           }
         } catch (error) {
           console.warn('Failed to get Stash artwork:', error.message);
@@ -339,7 +389,7 @@ function createStashIntegrationRoutes(prisma) {
     console.log('📱 Android app marking Stash scene as watched:', req.params.id);
     
     try {
-      const sceneId = parseInt(req.params.id);
+      const sceneId = req.params.id; // Keep as string to match documentation
       const baseUrl = getAndroidApiBaseUrl();
       
       // Mark scene as watched using existing logic
@@ -354,19 +404,39 @@ function createStashIntegrationRoutes(prisma) {
       if (!watchedResponse.ok) {
         const errorText = await watchedResponse.text();
         console.error('Failed to mark scene as watched:', errorText);
-        return res.status(500).json({ 
-          error: 'Failed to mark scene as watched',
-          details: errorText 
-        });
+        
+        if (watchedResponse.status === 400) {
+          return res.status(400).json({ 
+            error: 'Invalid scene ID',
+            message: 'The provided scene ID is invalid'
+          });
+        } else if (watchedResponse.status === 404) {
+          return res.status(404).json({ 
+            error: 'Scene not found',
+            message: 'The requested scene does not exist'
+          });
+        } else {
+          return res.status(500).json({ 
+            error: 'Failed to mark scene as watched',
+            details: errorText 
+          });
+        }
       }
       
       const watchedData = await watchedResponse.json();
       
-      const androidResponse = createAndroidResponse('STASH_SCENE_WATCHED', {
-        success: true,
-        sceneId: sceneId,
-        result: watchedData
-      });
+      // Format response according to documentation
+      const androidResponse = {
+        type: 'SCENE_MARKED_WATCHED',
+        data: {
+          success: true,
+          sceneId: sceneId,
+          playCount: watchedData.scene.playCount,
+          lastPlayedAt: watchedData.scene.lastPlayedAt,
+          stashUpdated: watchedData.stashUpdate?.success || false,
+          message: 'Scene marked as watched successfully'
+        }
+      };
       
       console.log('📱 Stash scene marked as watched for Android app');
       res.json(androidResponse);
@@ -374,11 +444,10 @@ function createStashIntegrationRoutes(prisma) {
     } catch (error) {
       console.error('❌ Error in Android Stash scene watched endpoint:', error);
       
-      res.status(500).json(createAndroidErrorResponse(
-        'STASH_SCENE_WATCHED_ERROR',
-        'Failed to mark scene as watched',
-        error.message
-      ));
+      res.status(500).json({
+        error: 'Failed to mark scene as watched',
+        message: error.message
+      });
     }
   });
 
@@ -387,30 +456,55 @@ function createStashIntegrationRoutes(prisma) {
     console.log('📱 Android app deleting Stash scene:', req.params.id);
     
     try {
-      const sceneId = parseInt(req.params.id);
+      const sceneId = req.params.id; // Keep as string to match documentation
+      const { deleteFile } = req.query; // Pass through query parameter
       const baseUrl = getAndroidApiBaseUrl();
       
+      // Build query string if deleteFile parameter is provided
+      const queryString = deleteFile ? `?deleteFile=${deleteFile}` : '';
+      
       // Delete scene using existing logic
-      const deleteResponse = await fetch(`${baseUrl}/api/stash/scenes/${sceneId}`, {
+      const deleteResponse = await fetch(`${baseUrl}/api/stash/scenes/${sceneId}${queryString}`, {
         method: 'DELETE'
       });
       
       if (!deleteResponse.ok) {
         const errorText = await deleteResponse.text();
         console.error('Failed to delete scene:', errorText);
-        return res.status(500).json({ 
-          error: 'Failed to delete scene',
-          details: errorText 
-        });
+        
+        if (deleteResponse.status === 400) {
+          return res.status(400).json({ 
+            error: 'Invalid scene ID',
+            message: 'The provided scene ID is invalid'
+          });
+        } else if (deleteResponse.status === 404) {
+          return res.status(404).json({ 
+            error: 'Scene not found',
+            message: 'The requested scene does not exist'
+          });
+        } else {
+          return res.status(500).json({ 
+            error: 'Failed to delete scene',
+            details: errorText 
+          });
+        }
       }
       
       const deleteData = await deleteResponse.json();
       
-      const androidResponse = createAndroidResponse('STASH_SCENE_DELETED', {
-        success: true,
-        sceneId: sceneId,
-        result: deleteData
-      });
+      // Format response according to documentation
+      const androidResponse = {
+        type: 'SCENE_DELETED',
+        data: {
+          success: true,
+          sceneId: sceneId,
+          localDeleted: deleteData.localDeleted,
+          clipsDeleted: deleteData.clipsDeleted,
+          stashDeleted: deleteData.stashDeleted,
+          fileDeleted: deleteFile === 'true',
+          message: 'Scene deleted successfully'
+        }
+      };
       
       console.log('📱 Stash scene deleted for Android app');
       res.json(androidResponse);
@@ -418,11 +512,10 @@ function createStashIntegrationRoutes(prisma) {
     } catch (error) {
       console.error('❌ Error in Android Stash scene delete endpoint:', error);
       
-      res.status(500).json(createAndroidErrorResponse(
-        'STASH_SCENE_DELETE_ERROR',
-        'Failed to delete scene',
-        error.message
-      ));
+      res.status(500).json({
+        error: 'Failed to delete scene',
+        message: error.message
+      });
     }
   });
 

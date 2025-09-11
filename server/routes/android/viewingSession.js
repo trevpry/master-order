@@ -1,11 +1,10 @@
 /**
  * Android Viewing Session Routes
- * Handles viewing session management for TV shows, movies and media tracking
+ * Handles viewing session management for web videos
  */
 
 const express = require('express');
-const fetch = require('node-fetch');
-const { getAndroidApiBaseUrl, createAndroidResponse, createAndroidErrorResponse } = require('./utilities/androidHelpers');
+const ViewingSessionService = require('../../services/watchlog/viewingSessionService');
 
 /**
  * Create viewing session routes for Android app
@@ -14,113 +13,138 @@ const { getAndroidApiBaseUrl, createAndroidResponse, createAndroidErrorResponse 
  */
 function createViewingSessionRoutes(prisma) {
   const router = express.Router();
+  const viewingSessionService = new ViewingSessionService(prisma);
 
   // Start viewing session
   router.post('/viewing/start', async (req, res) => {
     console.log('📱 Android app starting viewing session...');
     
     try {
-      const { mediaType, mediaKey, position = 0, title, season, episode } = req.body;
+      const { mediaType, title, seriesTitle, customOrderItemId } = req.body;
       
-      if (!mediaType || !mediaKey) {
-        return res.status(400).json(createAndroidErrorResponse(
-          'VIEWING_SESSION_ERROR',
-          'Media type and key are required',
-          'Missing required fields'
-        ));
-      }
-      
-      // Create new viewing session
-      const session = await prisma.viewingSession.create({
-        data: {
-          mediaType: mediaType,
-          mediaKey: mediaKey,
-          startTime: new Date(),
-          position: parseInt(position) || 0,
-          platform: 'android',
-          title: title || 'Unknown Title',
-          season: season ? parseInt(season) : null,
-          episode: episode ? parseInt(episode) : null,
-          isCompleted: false
-        }
-      });
-      
-      const androidResponse = createAndroidResponse('VIEWING_SESSION_STARTED', {
-        success: true,
-        sessionId: session.id,
-        mediaType: mediaType,
-        mediaKey: mediaKey,
-        startPosition: position,
-        timestamp: new Date().toISOString()
-      });
-      
-      console.log('📱 Viewing session started for Android app:', session.id);
-      res.json(androidResponse);
-      
-    } catch (error) {
-      console.error('❌ Error in Android viewing start endpoint:', error);
-      
-      res.status(500).json(createAndroidErrorResponse(
-        'VIEWING_SESSION_ERROR',
-        'Failed to start viewing session',
-        error.message
-      ));
-    }
-  });
-
-  // Pause viewing session
-  router.post('/viewing/pause', async (req, res) => {
-    console.log('📱 Android app pausing viewing session...');
-    
-    try {
-      const { mediaKey, position } = req.body;
-      
-      if (!mediaKey) {
-        return res.status(400).json(createAndroidErrorResponse(
-          'VIEWING_SESSION_ERROR',
-          'Media key is required',
-          'Missing required field'
-        ));
-      }
-      
-      // Find and update most recent active session
-      const session = await prisma.viewingSession.findFirst({
-        where: {
-          mediaKey: mediaKey,
-          isCompleted: false,
-          platform: 'android'
-        },
-        orderBy: { startTime: 'desc' }
-      });
-      
-      if (session) {
-        await prisma.viewingSession.update({
-          where: { id: session.id },
+      if (!mediaType || !title) {
+        return res.status(400).json({
+          type: 'VIEWING_SESSION_ERROR',
           data: {
-            position: parseInt(position) || session.position,
-            lastPauseTime: new Date()
+            success: false,
+            error: 'Media type and title are required',
+            details: 'Missing required fields',
+            timestamp: new Date().toISOString()
           }
         });
       }
       
-      const androidResponse = createAndroidResponse('VIEWING_SESSION_PAUSED', {
-        success: true,
-        sessionId: session?.id,
-        position: position,
-        timestamp: new Date().toISOString()
+      if (mediaType !== 'webvideo') {
+        return res.status(400).json({
+          type: 'VIEWING_SESSION_ERROR',
+          data: {
+            success: false,
+            error: 'Invalid media type',
+            details: 'Viewing sessions only support webvideo media type',
+            timestamp: new Date().toISOString()
+          }
+        });
+      }
+      
+      // Start viewing session using service
+      const session = await viewingSessionService.startViewing({
+        mediaType: mediaType,
+        title: title,
+        seriesTitle: seriesTitle || null,
+        customOrderItemId: customOrderItemId || null
       });
       
-      console.log('📱 Viewing session paused for Android app');
-      res.json(androidResponse);
+      const response = {
+        type: 'VIEWING_SESSION_STARTED',
+        data: {
+          success: true,
+          sessionId: session.id,
+          mediaType: mediaType,
+          title: title,
+          seriesTitle: seriesTitle || null,
+          customOrderItemId: customOrderItemId || null,
+          startedAt: session.startTime.toISOString(),
+          isPaused: false,
+          message: `Started viewing session for "${title}"`,
+          timestamp: new Date().toISOString()
+        }
+      };
+      
+      console.log('📱 Viewing session started for Android app:', session.id);
+      res.json(response);
+      
+    } catch (error) {
+      console.error('❌ Error in Android viewing start endpoint:', error);
+      
+      res.status(500).json({
+        type: 'VIEWING_SESSION_ERROR',
+        data: {
+          success: false,
+          error: 'Failed to start viewing session',
+          details: error.message,
+          timestamp: new Date().toISOString()
+        }
+      });
+    }
+  });
+
+  // Pause/Resume viewing session
+  router.post('/viewing/pause', async (req, res) => {
+    console.log('📱 Android app pausing/resuming viewing session...');
+    
+    try {
+      // Get active viewing session
+      const activeSession = await viewingSessionService.getActiveViewingSession();
+      
+      if (!activeSession) {
+        return res.status(404).json({
+          type: 'VIEWING_SESSION_ERROR',
+          data: {
+            success: false,
+            error: 'No active viewing session found',
+            details: 'Start a viewing session first',
+            timestamp: new Date().toISOString()
+          }
+        });
+      }
+      
+      // Pause or resume the session
+      const updatedSession = await viewingSessionService.pauseViewing(activeSession.id);
+      
+      const isPaused = updatedSession.isPaused;
+      const action = isPaused ? 'Paused' : 'Resumed';
+      const totalActiveTime = Math.round((updatedSession.totalWatchTime || 0) * 60); // Convert minutes to seconds
+      
+      const response = {
+        type: 'VIEWING_SESSION_PAUSED',
+        data: {
+          success: true,
+          sessionId: updatedSession.id,
+          isPaused: isPaused,
+          title: updatedSession.title,
+          mediaType: updatedSession.mediaType,
+          message: `${action} viewing session for "${updatedSession.title}"`,
+          pausedAt: isPaused ? updatedSession.endTime.toISOString() : null,
+          totalActiveTime: totalActiveTime,
+          timestamp: new Date().toISOString()
+        }
+      };
+      
+      console.log(`📱 Viewing session ${action.toLowerCase()} for Android app`);
+      res.json(response);
       
     } catch (error) {
       console.error('❌ Error in Android viewing pause endpoint:', error);
       
-      res.status(500).json(createAndroidErrorResponse(
-        'VIEWING_SESSION_ERROR',
-        'Failed to pause viewing session',
-        error.message
-      ));
+      res.status(500).json({
+        type: 'VIEWING_SESSION_ERROR',
+        data: {
+          success: false,
+          error: 'Failed to pause viewing session',
+          details: error.message,
+          timestamp: new Date().toISOString()
+        }
+      });
     }
   });
 
@@ -129,126 +153,61 @@ function createViewingSessionRoutes(prisma) {
     console.log('📱 Android app stopping viewing session...');
     
     try {
-      const { mediaKey, position, completed = false } = req.body;
+      const { progress } = req.body;
       
-      if (!mediaKey) {
-        return res.status(400).json(createAndroidErrorResponse(
-          'VIEWING_SESSION_ERROR',
-          'Media key is required',
-          'Missing required field'
-        ));
-      }
+      // Get active viewing session
+      const activeSession = await viewingSessionService.getActiveViewingSession();
       
-      // Find and complete most recent active session
-      const session = await prisma.viewingSession.findFirst({
-        where: {
-          mediaKey: mediaKey,
-          isCompleted: false,
-          platform: 'android'
-        },
-        orderBy: { startTime: 'desc' }
-      });
-      
-      if (session) {
-        await prisma.viewingSession.update({
-          where: { id: session.id },
+      if (!activeSession) {
+        return res.status(404).json({
+          type: 'VIEWING_SESSION_ERROR',
           data: {
-            position: parseInt(position) || session.position,
-            endTime: new Date(),
-            isCompleted: completed,
-            finalPosition: parseInt(position) || session.position
+            success: false,
+            error: 'No active viewing session found',
+            details: 'No active session to stop',
+            timestamp: new Date().toISOString()
           }
         });
       }
       
-      const androidResponse = createAndroidResponse('VIEWING_SESSION_STOPPED', {
-        success: true,
-        sessionId: session?.id,
-        finalPosition: position,
-        completed: completed,
-        timestamp: new Date().toISOString()
-      });
+      // Stop the viewing session
+      const completedSession = await viewingSessionService.stopViewing(activeSession.customOrderItemId);
+      
+      const duration = Math.round((completedSession.endTime - completedSession.startTime) / 1000); // Total session duration in seconds
+      const totalActiveTime = Math.round((completedSession.totalWatchTime || 0) * 60); // Active watch time in seconds
+      
+      const response = {
+        type: 'VIEWING_SESSION_STOPPED',
+        data: {
+          success: true,
+          sessionId: completedSession.id,
+          title: completedSession.title,
+          mediaType: completedSession.mediaType,
+          duration: duration,
+          totalActiveTime: totalActiveTime,
+          progressUpdated: !!progress,
+          progress: progress || null,
+          message: `Stopped viewing session for "${completedSession.title}"`,
+          completedAt: completedSession.endTime.toISOString(),
+          timestamp: new Date().toISOString()
+        }
+      };
       
       console.log('📱 Viewing session stopped for Android app');
-      res.json(androidResponse);
+      res.json(response);
       
     } catch (error) {
       console.error('❌ Error in Android viewing stop endpoint:', error);
       
-      res.status(500).json(createAndroidErrorResponse(
-        'VIEWING_SESSION_ERROR',
-        'Failed to stop viewing session',
-        error.message
-      ));
-    }
-  });
-
-  // Play episode with session tracking
-  router.post('/play-episode', async (req, res) => {
-    console.log('📱 Android app requesting episode playback...');
-    
-    try {
-      const { episodeKey, position = 0 } = req.body;
-      
-      if (!episodeKey) {
-        return res.status(400).json(createAndroidErrorResponse(
-          'EPISODE_PLAY_ERROR',
-          'Episode key is required',
-          'Missing required field'
-        ));
-      }
-      
-      const baseUrl = getAndroidApiBaseUrl();
-      
-      // Start viewing session
-      const viewingSessionResponse = await fetch(`${baseUrl}/api/android/viewing/start`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          mediaType: 'episode',
-          mediaKey: episodeKey,
-          position: position
-        })
-      });
-      
-      if (!viewingSessionResponse.ok) {
-        const errorText = await viewingSessionResponse.text();
-        console.error('Failed to start viewing session:', errorText);
-      }
-      
-      // Get episode details from Plex
-      const episodeResponse = await fetch(`${baseUrl}/api/plex/media/${episodeKey}`);
-      
-      if (!episodeResponse.ok) {
-        return res.status(404).json(createAndroidErrorResponse(
-          'EPISODE_PLAY_ERROR',
-          'Episode not found',
-          'Episode not available'
-        ));
-      }
-      
-      const episodeData = await episodeResponse.json();
-      
-      const androidResponse = createAndroidResponse('EPISODE_PLAY_SUCCESS', {
-        success: true,
-        episode: episodeData,
-        playback: {
-          startPosition: position,
+      res.status(500).json({
+        type: 'VIEWING_SESSION_ERROR',
+        data: {
+          success: false,
+          error: 'Failed to stop viewing session',
+          details: error.message,
           timestamp: new Date().toISOString()
         }
       });
-      
-      console.log('📱 Episode playback initiated for Android app');
-      res.json(androidResponse);
-      
-    } catch (error) {
-      console.error('❌ Error in Android episode play endpoint:', error);
-      
-      res.status(500).json(createAndroidErrorResponse(
-        'EPISODE_PLAY_ERROR',
-        'Failed to play episode',
-        error.message
-      ));
     }
   });
 

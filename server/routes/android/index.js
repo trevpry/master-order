@@ -1,6 +1,12 @@
 /**
  * Android Routes Router Factory
- * Modular router that combines all Android companion app domains
+ * Modular router that c  // Gallery and playlist services
+  router.use('/', createGalleryPlaylistRoutes(prisma));
+  
+  // Weather services
+  router.use('/', createWeatherRoutes());
+  
+  console.log('Android router: All 8 modules mounted successfully');nes all Android companion app domains
  * Phase 3 Modularization: Extracted from monolithic android.js (1,340 lines → 8 modules)
  */
 
@@ -14,6 +20,7 @@ const createReadingSessionRoutes = require('./readingSession');
 const createStashIntegrationRoutes = require('./stashIntegration');
 const createViewingSessionRoutes = require('./viewingSession');
 const createGalleryPlaylistRoutes = require('./galleryPlaylist');
+const createWeatherRoutes = require('./weather');
 
 /**
  * Create complete Android router with core modules
@@ -62,6 +69,9 @@ function createAndroidRouter(options = {}) {
   
   // Gallery and playlist services
   router.use('/', createGalleryPlaylistRoutes(prisma));
+  
+  // Weather services
+  router.use('/', createWeatherRoutes());
   
   console.log('Android router: All 8 modules mounted successfully');
   

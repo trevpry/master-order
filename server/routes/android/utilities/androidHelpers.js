@@ -30,8 +30,29 @@ function getAndroidArtworkUrl(media, baseUrl) {
     return `${baseUrl}/api/artwork/${filename}`;
   }
   
-  // Second priority: Use Plex artwork proxy for Plex content
-  if (media?.thumb && (media?.type === 'episode' || media?.type === 'movie')) {
+  // Second priority: For episodes, use episode-specific artwork if available
+  if (media?.type === 'episode') {
+    // Try episode-specific thumb first
+    if (media?.episodeThumb) {
+      console.log('📱 Using episode-specific artwork proxy:', media.episodeThumb);
+      return `${baseUrl}/api/artwork${media.episodeThumb}`;
+    }
+    // Check if we have episode rating key to construct episode artwork
+    if (media?.episodeRatingKey || media?.currentEpisodeRatingKey || media?.nextEpisodeRatingKey) {
+      const episodeKey = media.episodeRatingKey || media.currentEpisodeRatingKey || media.nextEpisodeRatingKey;
+      const episodeThumb = `/library/metadata/${episodeKey}/thumb`;
+      console.log('📱 Using constructed episode artwork proxy:', episodeThumb);
+      return `${baseUrl}/api/artwork${episodeThumb}`;
+    }
+    // Fallback to series thumb for episodes
+    if (media?.thumb) {
+      console.log('📱 Using series artwork proxy for episode (fallback):', media.thumb);
+      return `${baseUrl}/api/artwork${media.thumb}`;
+    }
+  }
+  
+  // Third priority: Use Plex artwork proxy for other Plex content (movies, etc.)
+  if (media?.thumb && (media?.type === 'movie' || !media?.type)) {
     console.log('📱 Using Plex artwork proxy:', media.thumb);
     return `${baseUrl}/api/artwork${media.thumb}`;
   }
