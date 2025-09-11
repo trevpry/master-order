@@ -72,7 +72,7 @@ export const getItemArtworkUrl = (item) => {
     return null;
   }
   
-  // Check if we have cached artwork
+  // Check if we have cached artwork first
   if (item.localArtworkPath) {
     // Extract just the filename from the full path
     const filename = item.localArtworkPath.includes('\\') || item.localArtworkPath.includes('/') 
@@ -91,58 +91,38 @@ export const getItemArtworkUrl = (item) => {
     return artworkUrl;
   }
   
-  // For items without cached artwork, try to get remote artwork URLs
-  // This matches the logic from the artworkCacheService
-  switch (item.mediaType) {
-    case 'comic':
-      // First, check if we have ComicVine details with a direct cover URL
-      if (item.comicVineDetailsJson) {
-        try {
-          const comicVineDetails = JSON.parse(item.comicVineDetailsJson);
-          if (comicVineDetails.image && comicVineDetails.image.medium_url) {
-            // Use ComicVine's direct cover URL through our proxy
-            return `${config.apiBaseUrl}/api/comicvine-artwork?url=${encodeURIComponent(comicVineDetails.image.medium_url)}`;
-          }
-        } catch (error) {
-          console.warn('Failed to parse ComicVine details JSON:', error);
+  // If no cached artwork, check if we have a direct original artwork URL stored
+  // This avoids making API calls to ComicVine/OpenLibrary every time
+  if (item.originalArtworkUrl) {
+    switch (item.mediaType) {
+      case 'comic':
+        return `${config.apiBaseUrl}/api/comicvine/artwork?url=${encodeURIComponent(item.originalArtworkUrl)}`;
+      case 'book':
+        return `${config.apiBaseUrl}/api/openlibrary/artwork?url=${encodeURIComponent(item.originalArtworkUrl)}`;
+      case 'shortstory':
+        if (item.originalArtworkUrl.startsWith('http')) {
+          return `${config.apiBaseUrl}/api/openlibrary/artwork?url=${encodeURIComponent(item.originalArtworkUrl)}`;
         }
-      }
-      
-      // Fallback to the comic string search method
-      if (item.comicSeries && item.comicIssue) {
-        let comicString;
-        if (item.comicYear) {
-          comicString = `${item.comicSeries} (${item.comicYear}) #${item.comicIssue}`;
-        } else {
-          comicString = `${item.comicSeries} #${item.comicIssue}`;
-        }
-        return `${config.apiBaseUrl}/api/comicvine-artwork?url=${encodeURIComponent(`${config.apiBaseUrl}/api/comicvine-cover?comic=${encodeURIComponent(comicString)}`)}`;
-      }
-      break;
-    
-    case 'book':
-      if (item.bookCoverUrl) {
-        return `${config.apiBaseUrl}/api/openlibrary-artwork?url=${encodeURIComponent(item.bookCoverUrl)}`;
-      } else if (item.bookOpenLibraryId) {
-        return `${config.apiBaseUrl}/api/openlibrary-artwork?url=${encodeURIComponent(`https://covers.openlibrary.org/b/olid/${item.bookOpenLibraryId}-M.jpg`)}`;
-      }
-      break;
-    
-    case 'shortstory':
-      if (item.storyCoverUrl) {
-        return `${config.apiBaseUrl}/api/openlibrary-artwork?url=${encodeURIComponent(item.storyCoverUrl)}`;
-      } else if (item.storyContainedInBook?.bookCoverUrl) {
-        return `${config.apiBaseUrl}/api/openlibrary-artwork?url=${encodeURIComponent(item.storyContainedInBook.bookCoverUrl)}`;
-      }
-      break;
-    
-    case 'episode':
-    case 'movie':
-      // For Plex items, we would need the plexKey and settings, which requires backend call
-      // Fall back to null for now - the artwork caching service will handle this
-      break;
+        return item.originalArtworkUrl;
+      default:
+        return item.originalArtworkUrl;
+    }
   }
   
-  // For items without cached artwork, return null to show fallback
+  // Only as a last resort for comics, try to construct artwork from ComicVine details
+  // This should rarely be used if artwork caching is working properly
+  if (item.mediaType === 'comic' && item.comicVineDetailsJson) {
+    try {
+      const comicVineDetails = JSON.parse(item.comicVineDetailsJson);
+      if (comicVineDetails.image && comicVineDetails.image.medium_url) {
+        console.warn(`Comic ${item.comicSeries} #${item.comicIssue}: Using ComicVine API fallback (cached artwork not available)`);
+        return `${config.apiBaseUrl}/api/comicvine/artwork?url=${encodeURIComponent(comicVineDetails.image.medium_url)}`;
+      }
+    } catch (error) {
+      console.warn('Failed to parse ComicVine details JSON:', error);
+    }
+  }
+  
+  // No artwork available
   return null;
 };

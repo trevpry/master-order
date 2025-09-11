@@ -159,8 +159,8 @@ const upload = multer();
 
 // Middleware
 app.use(cors());
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+app.use(express.json({ limit: '10mb' })); // Increased limit for ComicVine metadata
+app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
 // Comprehensive request logging middleware
 app.use((req, res, next) => {

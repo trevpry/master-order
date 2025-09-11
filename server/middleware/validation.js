@@ -9,12 +9,26 @@
 /**
  * Validates that mediaType and title are present in request body
  * Returns 400 error if validation fails
+ * Note: For comics, title is optional if comicSeries and comicIssue are present
  */
 const validateMediaTypeAndTitle = (req, res, next) => {
-  const { mediaType, title } = req.body;
+  const { mediaType, title, comicSeries, comicIssue } = req.body;
   
-  if (!mediaType || !title) {
-    return res.status(400).json({ error: 'mediaType and title are required' });
+  if (!mediaType) {
+    return res.status(400).json({ error: 'mediaType is required' });
+  }
+  
+  // For comics, title is optional if we have comicSeries and comicIssue
+  if (mediaType === 'comic') {
+    if (!comicSeries || !comicIssue) {
+      return res.status(400).json({ error: 'For comics: comicSeries and comicIssue are required' });
+    }
+    // Title is optional for comics, so we don't need to validate it
+  } else {
+    // For all other media types, title is required
+    if (!title) {
+      return res.status(400).json({ error: 'title is required' });
+    }
   }
   
   next();

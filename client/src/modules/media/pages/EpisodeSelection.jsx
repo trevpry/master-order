@@ -1013,8 +1013,8 @@ function Home() {
     
     // For comics, fallback to ComicVine artwork if no cached artwork
     if (media?.type === 'comic' && media?.comicDetails?.coverUrl) {
-      console.log('Using ComicVine artwork (fallback):', media.comicDetails.coverUrl);
-      return `${config.apiBaseUrl}/api/comicvine-artwork?url=${encodeURIComponent(media.comicDetails.coverUrl)}`;
+      console.warn('Comic artwork: Using ComicVine API fallback (cached artwork not available)');
+      return `${config.apiBaseUrl}/api/comicvine/artwork?url=${encodeURIComponent(media.comicDetails.coverUrl)}`;
     }
     
     // For books, use OpenLibrary artwork

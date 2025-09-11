@@ -1080,14 +1080,17 @@ function CustomOrders() {
     try {
       const requestBody = {
         mediaType: mediaItem.mediaType || mediaItem.type,
-        title: mediaItem.title
+        title: (mediaItem.title && mediaItem.title !== 'undefined') ? mediaItem.title : ''
       };      // Add fields based on media type
       const mediaType = mediaItem.mediaType || mediaItem.type;      if (mediaType === 'comic') {
         requestBody.comicSeries = mediaItem.comicSeries;
         requestBody.comicYear = mediaItem.comicYear;
         requestBody.comicIssue = mediaItem.comicIssue;
         requestBody.comicPublisher = mediaItem.comicPublisher;
-        requestBody.customTitle = mediaItem.customTitle;} else if (mediaType === 'book') {
+        requestBody.customTitle = mediaItem.customTitle;
+        requestBody.comicVineId = mediaItem.comicVineId;
+        requestBody.comicVineDetailsJson = mediaItem.comicVineDetailsJson;
+      } else if (mediaType === 'book') {
         requestBody.bookTitle = mediaItem.bookTitle;
         requestBody.bookAuthor = mediaItem.bookAuthor;
         requestBody.bookYear = mediaItem.bookYear;
@@ -1127,7 +1130,12 @@ function CustomOrders() {
         requestBody.seasonNumber = mediaItem.parentIndex;
         requestBody.episodeNumber = mediaItem.index;
         requestBody.seriesTitle = mediaItem.grandparentTitle;
-      }const response = await fetch(`${config.apiBaseUrl}/api/custom-orders/${orderId}/items`, {
+      }
+
+      // Debug the final request body before sending
+      console.log(`🔍 Final requestBody being sent for ${mediaItem.mediaType}:`, JSON.stringify(requestBody, null, 2));
+
+      const response = await fetch(`${config.apiBaseUrl}/api/custom-orders/${orderId}/items`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -1398,7 +1406,8 @@ function CustomOrders() {
           } else {
             errors.push(`Line ${i + 1}: Invalid season/episode format. Use S1E1, S01E01, 1x1, 1,1, or 1-1`);
             continue;
-          }        } else if (mediaType === 'comic') {
+          }
+        } else if (mediaType === 'comic') {
           // Check if using new format: separate columns for series, issue, and title
           if (seasonEpisode && seasonEpisode.toLowerCase().includes('issue')) {
             // New format: Column 1 = Series, Column 2 = Issue, Column 3 = Title
@@ -1580,7 +1589,8 @@ function CustomOrders() {
                     comicVineDetailsJson: JSON.stringify(selectedSeries.comprehensiveData || selectedSeries)
                   };
                   
-                  console.log(`✓ Enhanced comic data with ComicVine info: ${selectedSeries.series.name} (${targetMedia.comicYear}) #${item.comicIssue}`);                } else {
+                  console.log(`✓ Enhanced comic data with ComicVine info: ${selectedSeries.series.name} (${targetMedia.comicYear}) #${item.comicIssue}`);
+                  console.log(`🔍 Complete targetMedia object:`, JSON.stringify(targetMedia, null, 2));                } else {
                   console.log(`No ComicVine results found, using original data`);
                   // Fallback to original data if no ComicVine results
                   targetMedia = {
@@ -2018,7 +2028,49 @@ function CustomOrders() {
         // Skip empty lines
         if (!line) continue;
         
-        // Look for entry number pattern (e.g., "41: Shield of the Jedi")
+        // Check for new CMRO format: "111/1961 Fantastic Four (1961) #1-Fantastic Four (1961) #1"
+        const newCmroMatch = line.match(/^(\d+)\/(\d{4})\s+(.+?)-(.+)$/);
+        if (newCmroMatch) {
+          const entryNumber = parseInt(newCmroMatch[1]);
+          const entryYear = parseInt(newCmroMatch[2]);
+          const seriesInfo = newCmroMatch[3].trim();
+          const fullTitle = newCmroMatch[4].trim();
+          
+          // Parse series info: "Tales to Astonish (1958) #29 [A Story]"
+          const seriesMatch = seriesInfo.match(/^(.+?)\s*\((\d{4})\)\s*#(\d+)(.*)$/);
+          if (seriesMatch) {
+            const seriesName = seriesMatch[1].trim();
+            const seriesYear = parseInt(seriesMatch[2]);
+            const issueNumber = seriesMatch[3];
+            const issueTitle = seriesMatch[4].trim();
+            
+            // Create entry for new CMRO format
+            const entry = {
+              number: entryNumber,
+              title: fullTitle,
+              source: null,
+              year: entryYear,
+              seriesName: seriesName,
+              seriesYear: seriesYear,
+              issueNumber: issueNumber,
+              issueTitle: issueTitle,
+              writer: null,
+              director: null,
+              productionNumber: null,
+              releasedDate: null,
+              pages: null,
+              publisher: null,
+              publishedDate: null,
+              synopsis: null
+            };
+            
+            entries.push(entry);
+            console.log(`Parsed new CMRO format: ${entry.title} (${seriesName} #${issueNumber})`);
+            continue;
+          }
+        }
+        
+        // Look for original entry number pattern (e.g., "41: Shield of the Jedi")
         const entryMatch = line.match(/^(\d+):\s*(.+)$/);
         if (entryMatch) {
           // Save previous entry if exists
@@ -2146,6 +2198,96 @@ function CustomOrders() {
       
       for (const entry of entries) {
         try {
+          // Check if this is a new CMRO format entry (has seriesName, seriesYear, issueNumber)
+          if (entry.seriesName && entry.seriesYear && entry.issueNumber) {
+            // New CMRO format - already parsed as comic
+            console.log(`Processing new CMRO format comic: ${entry.seriesName} (${entry.seriesYear}) #${entry.issueNumber}`);
+            
+            try {
+              // Use ComicVine search to find the correct series and issue
+              console.log(`Searching ComicVine for series: "${entry.seriesName}" issue #${entry.issueNumber}`);
+              const response = await fetch(`${config.apiBaseUrl}/api/comicvine/search-with-issues?query=${encodeURIComponent(entry.seriesName)}&issueNumber=${encodeURIComponent(entry.issueNumber)}&issueTitle=${encodeURIComponent(entry.issueTitle || '')}`);
+              
+              if (response.ok) {
+                const searchResults = await response.json();
+                console.log(`Found ${searchResults.length} comic series with issue #${entry.issueNumber}`);
+                
+                let selectedSeries = null;
+                if (searchResults.length > 0) {
+                  // Look for series with matching year first
+                  selectedSeries = searchResults.find(series => series.series.start_year === entry.seriesYear) || searchResults[0];
+                  console.log(`✓ Using ComicVine match: "${selectedSeries.series.name}" with issue: "${selectedSeries.issueName}"`);
+                  
+                  // Create enhanced comic data with ComicVine information
+                  const requestData = {
+                    mediaType: 'comic',
+                    title: entry.title,
+                    comicSeries: selectedSeries.series.name,
+                    comicYear: entry.seriesYear,
+                    comicIssue: entry.issueNumber,
+                    comicPublisher: selectedSeries.series.publisher?.name || null,
+                    customTitle: null,
+                    comicVineId: selectedSeries.series.api_detail_url || null,
+                    // Store complete ComicVine data including series and issue details
+                    comicVineDetailsJson: JSON.stringify({
+                      series: selectedSeries.series,
+                      issue: selectedSeries.issue || null,
+                      volume: selectedSeries.series,
+                      search_results: searchResults
+                    })
+                  };
+                  
+                  console.log(`✓ Using backend-sorted best match for "${entry.title}"`);
+                  const success = await handleAddMediaToOrder(viewingOrderItems.id, requestData, true);
+                  if (success) {
+                    successCount++;
+                    console.log(`✅ Successfully added: ${entry.title}`);
+                  } else {
+                    failCount++;
+                    failedItems.push(`${entry.title}: Failed to add item`);
+                    console.log(`❌ Failed to add: ${entry.title}`);
+                  }
+                  continue;
+                } else {
+                  console.log(`No ComicVine results found for: ${entry.seriesName} #${entry.issueNumber}`);
+                  // Fall through to create without ComicVine data
+                }
+              } else {
+                console.log(`ComicVine search failed for: ${entry.seriesName} #${entry.issueNumber}`);
+                // Fall through to create without ComicVine data
+              }
+            } catch (error) {
+              console.log(`ComicVine search error for: ${entry.seriesName} #${entry.issueNumber}`, error);
+              // Fall through to create without ComicVine data
+            }
+            
+            // Create comic without ComicVine data if search failed
+            const requestData = {
+              mediaType: 'comic',
+              title: entry.title,
+              comicSeries: entry.seriesName,
+              comicYear: entry.seriesYear,
+              comicIssue: entry.issueNumber,
+              comicPublisher: null,
+              customTitle: null,
+              comicVineId: null,
+              comicVineDetailsJson: null
+            };
+            
+            console.log(`Creating comic without ComicVine data: ${entry.title}`);
+            const success = await handleAddMediaToOrder(viewingOrderItems.id, requestData, true);
+            if (success) {
+              successCount++;
+              console.log(`✅ Successfully added: ${entry.title}`);
+            } else {
+              failCount++;
+              failedItems.push(`${entry.title}: Failed to add item`);
+              console.log(`❌ Failed to add: ${entry.title}`);
+            }
+            continue;
+          }
+          
+          // Original CMRO format processing...
           // First check if it's a TV episode based on source pattern (e.g., "Buffy the Vampire Slayer (S4E01)")
           let episodeMatch = null;
           if (entry.source) {
@@ -2209,8 +2351,14 @@ function CustomOrders() {
                       comicIssue: issueNumber,
                       comicPublisher: selectedSeries.series.publisher?.name || null,
                       comicVineId: selectedSeries.series.api_detail_url,
-                      // Store comprehensive ComicVine data if available
-                      comicVineDetailsJson: JSON.stringify(selectedSeries.comprehensiveData || selectedSeries)
+                      // Store comprehensive ComicVine data for metadata extraction
+                      comicVineDetailsJson: JSON.stringify({
+                        series: selectedSeries.series,
+                        issue: selectedSeries.issue || null,
+                        volume: selectedSeries.series,
+                        search_results: searchResults,
+                        comprehensiveData: selectedSeries.comprehensiveData || selectedSeries
+                      })
                     };
                     
                     console.log(`✓ Enhanced comic data with ComicVine info: ${selectedSeries.series.name} (${requestData.comicYear}) #${issueNumber}`);
@@ -3118,44 +3266,23 @@ function CustomOrders() {
                                 </p>
                               )}
                               
-                              {item.comicCreators && (() => {
-                                try {
-                                  const creators = JSON.parse(item.comicCreators);
-                                  return (
-                                    <p className="comic-creators">
-                                      <strong>Creative Team:</strong> {creators.map(creator => `${creator.name} (${creator.role})`).join(', ')}
-                                    </p>
-                                  );
-                                } catch (e) {
-                                  return null;
-                                }
-                              })()}
+                              {item.comicCreators && (
+                                <p className="comic-creators">
+                                  <strong>Creative Team:</strong> {item.comicCreators}
+                                </p>
+                              )}
                               
-                              {item.comicCharacters && (() => {
-                                try {
-                                  const characters = JSON.parse(item.comicCharacters);
-                                  return (
-                                    <p className="comic-characters">
-                                      <strong>Characters:</strong> {characters.map(char => char.name).join(', ')}
-                                    </p>
-                                  );
-                                } catch (e) {
-                                  return null;
-                                }
-                              })()}
+                              {item.comicCharacters && (
+                                <p className="comic-characters">
+                                  <strong>Characters:</strong> {item.comicCharacters}
+                                </p>
+                              )}
                               
-                              {item.comicStoryArcs && (() => {
-                                try {
-                                  const storyArcs = JSON.parse(item.comicStoryArcs);
-                                  return (
-                                    <p className="comic-story-arcs">
-                                      <strong>Story Arc:</strong> {storyArcs.map(arc => arc.name).join(', ')}
-                                    </p>
-                                  );
-                                } catch (e) {
-                                  return null;
-                                }
-                              })()}
+                              {item.comicStoryArcs && (
+                                <p className="comic-story-arcs">
+                                  <strong>Story Arcs:</strong> {item.comicStoryArcs}
+                                </p>
+                              )}
                             </div>
                           )}
                         </div>
@@ -3399,10 +3526,10 @@ function CustomOrders() {
 
       {/* CMRO Bulk Import Modal */}
       <CmroBulkImportModal
-        show={showCmroBulkImportModal}
-        cmroBulkImportData={cmroBulkImportData}
-        setCmroBulkImportData={setCmroBulkImportData}
-        cmroBulkImportLoading={cmroBulkImportLoading}
+        isOpen={showCmroBulkImportModal}
+        importData={cmroBulkImportData}
+        setImportData={setCmroBulkImportData}
+        isLoading={cmroBulkImportLoading}
         onSubmit={handleCmroBulkImport}
         onClose={() => {
           setShowCmroBulkImportModal(false);

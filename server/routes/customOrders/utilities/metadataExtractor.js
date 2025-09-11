@@ -28,6 +28,54 @@ function extractComicVineMetadata(comicVineDetailsJson) {
       if (data.issue.description) extracted.comicDescription = data.issue.description;
       if (data.issue.cover_date) extracted.comicCoverDate = data.issue.cover_date;
       if (data.issue.store_date) extracted.comicStoreDate = data.issue.store_date;
+      
+      // Extract character credits
+      if (data.issue.character_credits && Array.isArray(data.issue.character_credits)) {
+        extracted.comicCharacters = data.issue.character_credits.map(char => char.name).join(', ');
+      }
+      
+      // Extract person credits (writers, artists, etc.)
+      if (data.issue.person_credits && Array.isArray(data.issue.person_credits)) {
+        const credits = {};
+        data.issue.person_credits.forEach(person => {
+          if (!credits[person.role]) credits[person.role] = [];
+          credits[person.role].push(person.name);
+        });
+        
+        // Store specific roles
+        if (credits.writer) extracted.comicWriter = credits.writer.join(', ');
+        if (credits.penciler) extracted.comicPenciler = credits.penciler.join(', ');
+        if (credits.inker) extracted.comicInker = credits.inker.join(', ');
+        if (credits.colorist) extracted.comicColorist = credits.colorist.join(', ');
+        if (credits.cover) extracted.comicCoverArtist = credits.cover.join(', ');
+        
+        // Store all credits as JSON for comprehensive data
+        extracted.comicPersonCredits = JSON.stringify(credits);
+      }
+      
+      // Extract team credits
+      if (data.issue.team_credits && Array.isArray(data.issue.team_credits)) {
+        extracted.comicTeams = data.issue.team_credits.map(team => team.name).join(', ');
+      }
+      
+      // Extract location credits
+      if (data.issue.location_credits && Array.isArray(data.issue.location_credits)) {
+        extracted.comicLocations = data.issue.location_credits.map(loc => loc.name).join(', ');
+      }
+      
+      // Extract concept credits
+      if (data.issue.concept_credits && Array.isArray(data.issue.concept_credits)) {
+        extracted.comicConcepts = data.issue.concept_credits.map(concept => concept.name).join(', ');
+      }
+    }
+    
+    // Extract cover URL from ComicVine data
+    if (data.coverUrl) {
+      extracted.comicCoverUrl = data.coverUrl;
+    } else if (data.issue?.image?.original_url) {
+      extracted.comicCoverUrl = data.issue.image.original_url;
+    } else if (data.series?.image?.original_url) {
+      extracted.comicCoverUrl = data.series.image.original_url;
     }
     
     console.log('Extracted ComicVine metadata:', extracted);

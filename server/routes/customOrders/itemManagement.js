@@ -448,28 +448,37 @@ function createItemManagementRoutes(prisma, services) {
         }
       }
       
-      // If this is a book re-selection, cache new artwork in background
+      // If this is a book re-selection, cache new artwork synchronously
       if (isBookReselect && artworkCache) {
         console.log(`Re-caching artwork for re-selected book: ${item.title}`);
-        artworkCache.ensureArtworkCached(item).catch(error => {
+        try {
+          await artworkCache.ensureArtworkCached(item);
+          console.log(`Successfully cached artwork for re-selected book ${item.id}`);
+        } catch (error) {
           console.warn(`Failed to cache artwork for re-selected book ${item.id}:`, error.message);
-        });
+        }
       }
       
-      // If this is a comic re-selection, cache new artwork in background
+      // If this is a comic re-selection, cache new artwork synchronously
       if (isComicReselect && artworkCache) {
         console.log(`Re-caching artwork for re-selected comic: ${item.title || item.comicSeries + ' #' + item.comicIssue}`);
-        artworkCache.ensureArtworkCached(item).catch(error => {
+        try {
+          await artworkCache.ensureArtworkCached(item);
+          console.log(`Successfully cached artwork for re-selected comic ${item.id}`);
+        } catch (error) {
           console.warn(`Failed to cache artwork for re-selected comic ${item.id}:`, error.message);
-        });
+        }
       }
       
-      // If this is a short story re-selection, cache new artwork in background
+      // If this is a short story re-selection, cache new artwork synchronously
       if (isStoryReselect && artworkCache) {
         console.log(`Re-caching artwork for re-selected short story: ${item.storyTitle || item.title}`);
-        artworkCache.ensureArtworkCached(item).catch(error => {
+        try {
+          await artworkCache.ensureArtworkCached(item);
+          console.log(`Successfully cached artwork for re-selected short story ${item.id}`);
+        } catch (error) {
           console.warn(`Failed to cache artwork for re-selected short story ${item.id}:`, error.message);
-        });
+        }
       }
       
       res.json(item);

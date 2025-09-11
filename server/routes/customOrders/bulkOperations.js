@@ -71,6 +71,9 @@ function createBulkOperationsRoutes(prisma, services) {
       if (!plexKey && !title) {
         return sendBadRequest(res, 'For movies: either plexKey (for existing Plex movies) OR title (for movies not yet in Plex) is required');
       }
+    } else if (mediaType === 'comic' || mediaType === 'book' || mediaType === 'shortstory' || mediaType === 'webvideo') {
+      // Comics, books, short stories, and web videos don't require plexKey
+      console.log(`Processing ${mediaType} without plexKey requirement`);
     } else {
       // For other media types, plexKey is still required
       if (!plexKey) {
@@ -168,9 +171,9 @@ function createBulkOperationsRoutes(prisma, services) {
           comicVolume: comicVolume || null,
           comicPublisher: comicPublisher || comicVineMetadata.comicPublisher || null,
           customTitle: customTitle || null,
-          comicVineId: comicVineId ? parseInt(comicVineId) : null,
+          comicVineId: comicVineId || null,  // Store as string (URL), not integer
           comicVineDetailsJson: comicVineDetailsJson || null,
-          originalArtworkUrl: comicCoverUrl || null,
+          originalArtworkUrl: comicCoverUrl || comicVineMetadata.comicCoverUrl || null,
           // ComicVine extracted metadata
           comicVineSeriesId: comicVineMetadata.comicVineSeriesId || null,
           comicVineIssueId: comicVineMetadata.comicVineIssueId || null,
@@ -178,6 +181,9 @@ function createBulkOperationsRoutes(prisma, services) {
           comicDescription: comicVineMetadata.comicDescription || null,
           comicCoverDate: comicVineMetadata.comicCoverDate || null,
           comicStoreDate: comicVineMetadata.comicStoreDate || null,
+          comicCreators: comicVineMetadata.comicPersonCredits || null,  // JSON string with all creator roles
+          comicCharacters: comicVineMetadata.comicCharacters || null,   // Character names
+          comicStoryArcs: comicVineMetadata.comicConcepts || null,      // Concepts/story arcs
           // Book fields
           bookTitle: bookTitle || null,
           bookAuthor: bookAuthor || null,
@@ -200,6 +206,10 @@ function createBulkOperationsRoutes(prisma, services) {
           webDescription: webDescription || null
         }
       });
+
+      if (mediaType === 'comic') {
+        console.log('Comic item created successfully with ComicVine metadata');
+      }
 
       // After creation, try to update with TVDB data if applicable
       if (mediaType === 'episode' || mediaType === 'movie') {
@@ -261,12 +271,16 @@ function createBulkOperationsRoutes(prisma, services) {
         }
       }
       
-      // Try to cache artwork for the new item (async, don't wait for completion)
+      // Cache artwork for the new item (synchronous to ensure it's ready before response)
       if (artworkCache) {
-        artworkCache.ensureArtworkCached(item).catch(error => {
-        console.warn(`Failed to cache artwork for item ${item.id}:`, error.message);
-      });
-    }
+        try {
+          await artworkCache.ensureArtworkCached(item);
+          console.log(`Successfully cached artwork for item ${item.id}`);
+        } catch (error) {
+          console.warn(`Failed to cache artwork for item ${item.id}:`, error.message);
+          // Don't fail the request if artwork caching fails
+        }
+      }
     
     res.status(201).json(item);
   }));

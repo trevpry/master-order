@@ -913,6 +913,24 @@ h3.clickable-title {
   color: #495057;
 }
 
+.format-section {
+  margin: 1rem 0;
+  padding: 1rem;
+  background: #f8f9fa;
+  border-radius: 4px;
+  border: 1px solid #e9ecef;
+}
+
+.format-section h5 {
+  margin: 0 0 0.5rem 0;
+  color: #007bff;
+  font-weight: 600;
+}
+
+.format-section ul {
+  margin: 0.5rem 0 0 0;
+}
+
 .example-data {
   margin-top: 1rem;
   padding-top: 1rem;

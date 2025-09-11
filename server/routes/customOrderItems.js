@@ -27,7 +27,11 @@ const markCustomOrderItemAsWatched = async (itemId) => {
 
 // POST /api/custom-orders/:id/items - Add item to custom order
 router.post('/:id/items', validateMediaTypeAndTitle, asyncHandler(async (req, res) => {
+  console.log('🔍 Route handler started');
+  
   const { id } = req.params;
+  console.log('🔍 ID extracted:', id);
+  
   const {
     mediaType,
     plexKey,
@@ -62,7 +66,13 @@ router.post('/:id/items', validateMediaTypeAndTitle, asyncHandler(async (req, re
     webDescription
   } = req.body;
 
-  console.log(mediaType);
+  console.log('🔍 Destructuring completed');
+
+  console.log('🔍 Full request body:', JSON.stringify(req.body, null, 2));
+  console.log('🔍 MediaType:', mediaType);
+  console.log('🔍 Title:', title);
+  console.log('🔍 ComicSeries:', comicSeries);
+  console.log('🔍 ComicIssue:', comicIssue);
 
   // Check for duplicates based on media type
   let existingItem;
