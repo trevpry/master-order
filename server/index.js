@@ -13,6 +13,7 @@ const { getNextCustomOrder, markCustomOrderItemAsWatched } = require('./getNextC
 const datingRoutes = require('./routes/dating');
 const notesRoutes = require('./routes/notes');
 const tasksRoutes = require('./routes/tasks');
+const locationsRoutes = require('./routes/locations');
 const settingsRoutes = require('./routes/settings');
 const artworkRoutes = require('./routes/artwork');
 const weatherRoutes = require('./routes/weather');
@@ -223,6 +224,9 @@ app.use('/api/notes', notesRoutes);
 
 // Tasks API routes
 app.use('/api/tasks', tasksRoutes);
+
+// Locations API routes
+app.use('/api/locations', locationsRoutes);
 
 // Settings API routes
 app.use('/api/settings', settingsRoutes);

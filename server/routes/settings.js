@@ -28,12 +28,25 @@ const { sendNotFound, sendSuccess, sendServerError, asyncHandler, logError } = r
 
 // GET /api/settings - Get all settings (main settings)
 router.get('/', asyncHandler(async (req, res) => {
-  const settings = await prisma.settings.findUnique({
+  let settings = await prisma.settings.findUnique({
     where: { id: 1 }
   });
   
+  // If no settings exist, create default settings
   if (!settings) {
-    return sendNotFound(res, 'Settings not found');
+    settings = await prisma.settings.create({
+      data: { 
+        id: 1,
+        timezone: 'UTC',
+        tvGeneralPercent: 50,
+        moviesGeneralPercent: 50,
+        customOrderPercent: 0,
+        partiallyWatchedCollectionPercent: 75,
+        christmasFilterEnabled: false,
+        plexSyncInterval: 12,
+        stashSyncInterval: 24
+      }
+    });
   }
 
   // Parse JSON fields if they exist
@@ -88,16 +101,17 @@ router.post('/', asyncHandler(async (req, res) => {
 
 // GET /api/settings/eddie - Get Eddie settings (specific endpoint for Eddie interface)
 router.get('/eddie', asyncHandler(async (req, res) => {
-  const eddieSettings = await prisma.eddieSettings.findFirst();
+  let eddieSettings = await prisma.eddieSettings.findFirst();
   
   if (!eddieSettings) {
-    // Return default Eddie settings if none exist
-    return res.json({
-      id: 1,
-      weatherEnabled: false,
-      weatherApiKey: '',
-      weatherLocation: '',
-      weatherUnits: 'metric'
+    // Create default Eddie settings if none exist
+    eddieSettings = await prisma.eddieSettings.create({
+      data: {
+        weatherEnabled: false,
+        weatherApiKey: '',
+        weatherLocation: '',
+        weatherUnits: 'metric'
+      }
     });
   }
 

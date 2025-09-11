@@ -1444,6 +1444,7 @@ model Note {
   fromLinks   NoteCrossLink[] @relation("FromNote")
   toLinks     NoteCrossLink[] @relation("ToNote")
   dailyNote   DailyNote?
+  locations   Location[]
   
   @@index([userId])
   @@index([type])
@@ -1684,4 +1685,49 @@ model TaskDependency {
   @@unique([dependentTaskId, dependsOnTaskId])
   @@index([dependentTaskId])
   @@index([dependsOnTaskId])
+}
+
+model Location {
+  id          Int      @id @default(autoincrement())
+  name        String
+  description String?
+  type        String   @default("place") // place, business, travel, event, personal
+  
+  // Geographic coordinates
+  latitude    Float
+  longitude   Float
+  address     String?
+  city        String?
+  state       String?
+  country     String?
+  postalCode  String?
+  
+  // Additional metadata
+  category    String?  // restaurant, hotel, landmark, etc.
+  rating      Float?   // 1-5 star rating
+  tags        String   @default("[]")  // JSON array of tags
+  website     String?
+  phone       String?
+  notes       String?
+  
+  // Privacy and organization
+  isPrivate   Boolean  @default(false)
+  isFavorite  Boolean  @default(false)
+  userId      Int      @default(1)
+  
+  // Relationships
+  noteId      Int?     // Optional connection to a note
+  
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  note        Note?    @relation(fields: [noteId], references: [id], onDelete: SetNull)
+  
+  @@index([userId])
+  @@index([type])
+  @@index([category])
+  @@index([isFavorite])
+  @@index([latitude, longitude])
+  @@index([city])
+  @@index([country])
 }

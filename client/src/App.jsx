@@ -19,6 +19,7 @@ import Backgrounds from './modules/media/pages/backgrounds/index';
 // Eddie Module Components (placeholders for now)
 import TasksHome from './modules/tasks/pages/TasksHome';
 import Notes from './modules/notes/pages/NotesHome';
+import Locations from './modules/locations/pages/Locations';
 import EddieSettings from './modules/eddie/pages/EddieSettings';
 import Dating from './pages/Dating';
 
@@ -55,6 +56,7 @@ function App() {
           {/* Eddie Life Management Module Routes */}
           <Route path="/tasks" element={<TasksHome />} />
           <Route path="/notes" element={<Notes />} />
+          <Route path="/locations" element={<Locations />} />
           <Route path="/dating" element={<Dating />} />
           <Route path="/eddie-settings" element={<EddieSettings />} />
         </Routes>

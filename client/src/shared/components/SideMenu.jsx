@@ -68,6 +68,12 @@ const SideMenu = ({ isMobile, closeMobileMenu }) => {
       description: 'Knowledge & ideas'
     },
     {
+      path: '/locations',
+      icon: '🗺️',
+      label: 'Locations',
+      description: 'Places & maps'
+    },
+    {
       path: '/dating',
       icon: '💕',
       label: 'Dating',
