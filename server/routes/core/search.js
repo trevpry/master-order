@@ -4,7 +4,6 @@
  */
 
 const express = require('express');
-const { asyncHandler } = require('../../utils/responses');
 
 /**
  * Create search routes

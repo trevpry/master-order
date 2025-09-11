@@ -5,7 +5,6 @@
  */
 
 const express = require('express');
-const { asyncHandler } = require('../../utils/responses');
 
 /**
  * Create item management routes for custom orders
@@ -18,61 +17,72 @@ function createItemManagementRoutes(prisma, services) {
   const { artworkCache, watchLogService, subOrderService } = services;
 
   // Get a single custom order item by ID
-  router.get('/item/:itemId', asyncHandler(async (req, res) => {
-    const { itemId } = req.params;
-    
-    const customOrderItem = await prisma.customOrderItem.findUnique({
-      where: { id: parseInt(itemId) },
-      include: {
-        storyContainedInBook: true,
-        containedStories: true,
-        referencedCustomOrder: true,
-        customOrder: {
-          include: {
-            plexPlaylist: true,
-            customPlaylist: {
-              include: {
-                _count: {
-                  select: { tracks: true }
+  router.get('/item/:itemId', async (req, res) => {
+    try {
+      const { itemId } = req.params;
+      
+      const customOrderItem = await prisma.customOrderItem.findUnique({
+        where: { id: parseInt(itemId) },
+        include: {
+          storyContainedInBook: true,
+          containedStories: true,
+          referencedCustomOrder: true,
+          customOrder: {
+            include: {
+              plexPlaylist: true,
+              customPlaylist: {
+                include: {
+                  _count: {
+                    select: { tracks: true }
+                  }
                 }
               }
             }
           }
         }
+      });
+      
+      if (!customOrderItem) {
+        return res.status(404).json({ error: 'Custom order item not found' });
       }
-    });
-    
-    if (!customOrderItem) {
-      return res.status(404).json({ error: 'Custom order item not found' });
+      
+      // Transform the response to include trackCount for custom playlists
+      if (customOrderItem.customOrder?.customPlaylist) {
+        customOrderItem.customOrder.customPlaylist.trackCount = 
+          customOrderItem.customOrder.customPlaylist._count?.tracks || 0;
+      }
+      
+      res.json(customOrderItem);
+    } catch (error) {
+      console.error('Error fetching custom order item:', error);
+      res.status(500).json({ error: error.message });
     }
-    
-    // Transform the response to include trackCount for custom playlists
-    if (customOrderItem.customOrder?.customPlaylist) {
-      customOrderItem.customOrder.customPlaylist.trackCount = 
-        customOrderItem.customOrder.customPlaylist._count?.tracks || 0;
-    }
-    
-    res.json(customOrderItem);
-  }));
+  });
 
   // Delete item from custom order
-  router.delete('/:id/items/:itemId', asyncHandler(async (req, res) => {
-    const { itemId } = req.params;
-    
-    // Clean up cached artwork for this item
-    if (artworkCache) {
-      await artworkCache.cleanupArtwork(parseInt(itemId));
+  router.delete('/:id/items/:itemId', async (req, res) => {
+    try {
+      const { itemId } = req.params;
+      
+      // Clean up cached artwork for this item
+      if (artworkCache) {
+        await artworkCache.cleanupArtwork(parseInt(itemId));
+      }
+      
+      await prisma.customOrderItem.delete({
+        where: { id: parseInt(itemId) }
+      });
+      res.json({ message: 'Item removed from custom order successfully' });
+    } catch (error) {
+      console.error('Error removing item from custom order:', error);
+      res.status(500).json({ error: 'Failed to remove item from custom order' });
     }
-    
-    await prisma.customOrderItem.delete({
-      where: { id: parseInt(itemId) }
-    });
-    res.json({ message: 'Item removed from custom order successfully' });
-  }));
+  });
 
   // Update custom order item (comprehensive update with re-selection support)
-  router.put('/:id/items/:itemId', asyncHandler(async (req, res) => {
-    const { itemId } = req.params;
+  router.put('/:id/items/:itemId', async (req, res) => {
+    try {
+      const { itemId } = req.params;
       
       const { 
         sortOrder, 
@@ -461,9 +471,13 @@ function createItemManagementRoutes(prisma, services) {
           console.warn(`Failed to cache artwork for re-selected short story ${item.id}:`, error.message);
         });
       }
-    
-    res.json(item);
-  }));
+      
+      res.json(item);
+    } catch (error) {
+      console.error('Error updating custom order item:', error);
+      res.status(500).json({ error: 'Failed to update custom order item' });
+    }
+  });
 
   return router;
 }

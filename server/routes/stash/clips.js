@@ -1,8 +1,6 @@
 const express = require('express');
 const router = express.Router();
 const { generateOptimizedClips } = require('./shared');
-const { validateRequiredFields } = require('../../middleware/validation');
-const { sendBadRequest, sendSuccess, sendServerError, asyncHandler } = require('../../utils/responses');
 
 const prisma = require('../prismaClient'); // Use shared singleton instance
 

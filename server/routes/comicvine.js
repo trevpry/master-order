@@ -107,70 +107,88 @@ router.get('/search-with-issues', asyncHandler(async (req, res) => {
 }));
 
 // ComicVine cover artwork endpoint
-router.get('/cover', asyncHandler(async (req, res) => {
-  const { comic } = req.query;
-  if (!comic) {
-    return res.status(400).send('Missing comic parameter');
-  }
+router.get('/cover', async (req, res) => {
+  try {
+    const { comic } = req.query;
+    if (!comic) {
+      return res.status(400).send('Missing comic parameter');
+    }
 
-  const comicDetails = await comicVineService.getComicCoverArt(comic);
-  
-  if (comicDetails && comicDetails.coverUrl) {
-    // Return the cover image by proxying it
-    const response = await axios.get(comicDetails.coverUrl, {
+    const comicDetails = await comicVineService.getComicCoverArt(comic);
+    
+    if (comicDetails && comicDetails.coverUrl) {
+      // Return the cover image by proxying it
+      const response = await axios.get(comicDetails.coverUrl, {
+        responseType: 'stream',
+        timeout: 10000,
+        headers: {
+          'User-Agent': 'MasterOrder/1.0'
+        }
+      });
+      
+      // Set appropriate headers
+      res.set({
+        'Content-Type': response.headers['content-type'] || 'image/jpeg',
+        'Cache-Control': 'public, max-age=86400' // Cache for 24 hours
+      });
+      
+      // Pipe the image data
+      response.data.pipe(res);
+    } else {
+      // Return a 404 if no cover found
+      res.status(404).send('Comic cover not found');
+    }
+  } catch (error) {
+    console.error('Error getting ComicVine cover:', error);
+    res.status(500).send('Error loading comic cover');
+  }
+});
+
+// Proxy endpoint for ComicVine artwork
+router.get('/artwork', async (req, res) => {
+  try {
+    const artworkUrl = req.query.url;
+    if (!artworkUrl) {
+      return res.status(400).send('Missing artwork URL');
+    }
+    
+    // Use longer timeout for mobile devices and better User-Agent
+    const timeout = req.get('User-Agent')?.includes('Mobile') ? 20000 : 10000;
+    const userAgent = req.get('User-Agent') || 'MasterOrder/1.0';
+    
+    console.log(`Loading ComicVine artwork: ${artworkUrl} (timeout: ${timeout}ms, UA: ${userAgent})`);
+    
+    const response = await axios.get(artworkUrl, {
       responseType: 'stream',
-      timeout: 10000,
+      timeout: timeout,
       headers: {
-        'User-Agent': 'MasterOrder/1.0'
+        'User-Agent': userAgent, // Use original user agent to avoid blocking
+        'Accept': 'image/webp,image/avif,image/apng,image/svg+xml,image/*,*/*;q=0.8',
+        'Accept-Encoding': 'gzip, deflate, br'
       }
     });
     
     // Set appropriate headers
     res.set({
       'Content-Type': response.headers['content-type'] || 'image/jpeg',
-      'Cache-Control': 'public, max-age=86400' // Cache for 24 hours
+      'Cache-Control': 'public, max-age=86400', // Cache for 24 hours
+      'Access-Control-Allow-Origin': '*' // Allow cross-origin access
     });
     
     // Pipe the image data
     response.data.pipe(res);
-  } else {
-    // Return a 404 if no cover found
-    res.status(404).send('Comic cover not found');
-  }
-}));
-
-// Proxy endpoint for ComicVine artwork
-router.get('/artwork', asyncHandler(async (req, res) => {
-  const artworkUrl = req.query.url;
-  if (!artworkUrl) {
-    return res.status(400).send('Missing artwork URL');
-  }
-  
-  // Use longer timeout for mobile devices and better User-Agent
-  const timeout = req.get('User-Agent')?.includes('Mobile') ? 20000 : 10000;
-  const userAgent = req.get('User-Agent') || 'MasterOrder/1.0';
-  
-  console.log(`Loading ComicVine artwork: ${artworkUrl} (timeout: ${timeout}ms, UA: ${userAgent})`);
-  
-  const response = await axios.get(artworkUrl, {
-    responseType: 'stream',
-    timeout: timeout,
-    headers: {
-      'User-Agent': userAgent, // Use original user agent to avoid blocking
-      'Accept': 'image/webp,image/avif,image/apng,image/svg+xml,image/*,*/*;q=0.8',
-      'Accept-Encoding': 'gzip, deflate, br'
+  } catch (error) {
+    console.error('Error proxying ComicVine artwork:', error.message);
+    if (error.code === 'ECONNABORTED') {
+      console.error('ComicVine artwork request timed out');
+      res.status(408).send('ComicVine artwork request timed out');
+    } else if (error.response) {
+      console.error('ComicVine returned:', error.response.status, error.response.statusText);
+      res.status(error.response.status).send(`ComicVine error: ${error.response.statusText}`);
+    } else {
+      res.status(500).send('Error loading ComicVine artwork');
     }
-  });
-  
-  // Set appropriate headers
-  res.set({
-    'Content-Type': response.headers['content-type'] || 'image/jpeg',
-    'Cache-Control': 'public, max-age=86400', // Cache for 24 hours
-    'Access-Control-Allow-Origin': '*' // Allow cross-origin access
-  });
-  
-  // Pipe the image data
-  response.data.pipe(res);
-}));
+  }
+});
 
 module.exports = router;

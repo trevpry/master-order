@@ -2,7 +2,6 @@ const express = require('express');
 const router = express.Router();
 const multer = require('multer');
 const http = require('http');
-const { asyncHandler } = require('../utils/responses');
 
 // Configure multer for file uploads (for Plex webhook thumbnails)
 const upload = multer({
@@ -22,22 +21,23 @@ const upload = multer({
  */
 
 // POST /webhook - Main Plex webhook endpoint with thumbnail upload support
-router.post('/', upload.single('thumb'), asyncHandler(async (req, res) => {
-  console.log('\n🎬 =================================');
-  console.log('🎬 PLEX WEBHOOK RECEIVED');
-  console.log('🎬 =================================');
-  console.log('📅 Timestamp:', new Date().toISOString());
-  console.log('🔗 Headers:', JSON.stringify(req.headers, null, 2));
-  
-  // Parse the JSON payload
-  let payload;
-  if (req.body.payload) {
-    payload = JSON.parse(req.body.payload);
-    console.log('📦 Raw payload found in req.body.payload');
-  } else {
-    payload = req.body;
-    console.log('📦 Using req.body directly');
-  }
+router.post('/', upload.single('thumb'), async (req, res) => {
+  try {
+    console.log('\n🎬 =================================');
+    console.log('🎬 PLEX WEBHOOK RECEIVED');
+    console.log('🎬 =================================');
+    console.log('📅 Timestamp:', new Date().toISOString());
+    console.log('🔗 Headers:', JSON.stringify(req.headers, null, 2));
+    
+    // Parse the JSON payload
+    let payload;
+    if (req.body.payload) {
+      payload = JSON.parse(req.body.payload);
+      console.log('📦 Raw payload found in req.body.payload');
+    } else {
+      payload = req.body;
+      console.log('📦 Using req.body directly');
+    }
 
     console.log('🎯 Event Type:', payload.event);
     console.log('👤 User:', payload.Account?.title || 'Unknown User');
@@ -108,23 +108,40 @@ router.post('/', upload.single('thumb'), asyncHandler(async (req, res) => {
       }
     }
 
-  console.log('✅ Plex webhook processed successfully');
-  res.status(200).send('OK');
-}));// POST /api/webhook/notify - Node-RED notification webhook
-router.post('/notify', asyncHandler(async (req, res) => {
-  const { ratingKey, action, title, type, timestamp } = req.body;
-  
-  console.log('Sending webhook notification to Node-RED:', {
-    ratingKey,
-    action,
-    title,
-    type,
-    timestamp
-  });
+    console.log('✅ Plex webhook processed successfully');
+    res.status(200).send('OK');
+    
+  } catch (error) {
+    console.error('❌ Error processing webhook:', error);
+    res.status(500).send('Error processing webhook');
+  }
+});
 
-  await sendNodeRedNotification({ ratingKey, action, title, type, timestamp });
-  res.json({ success: true, message: 'Webhook notification sent' });
-}));
+// POST /api/webhook/notify - Node-RED notification webhook
+router.post('/notify', async (req, res) => {
+  try {
+    const { ratingKey, action, title, type, timestamp } = req.body;
+    
+    console.log('Sending webhook notification to Node-RED:', {
+      ratingKey,
+      action,
+      title,
+      type,
+      timestamp
+    });
+
+    await sendNodeRedNotification({ ratingKey, action, title, type, timestamp });
+    res.json({ success: true, message: 'Webhook notification sent' });
+    
+  } catch (error) {
+    console.error('Failed to send webhook notification:', error);
+    res.status(500).json({ 
+      success: false, 
+      error: 'Failed to send webhook notification',
+      details: error.message 
+    });
+  }
+});
 
 /**
  * Helper function to send notifications to Node-RED

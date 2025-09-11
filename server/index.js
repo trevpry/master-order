@@ -12,6 +12,7 @@ const { getNextCustomOrder, markCustomOrderItemAsWatched } = require('./getNextC
 // Import modular route files
 const datingRoutes = require('./routes/dating');
 const notesRoutes = require('./routes/notes');
+const tasksRoutes = require('./routes/tasks');
 const settingsRoutes = require('./routes/settings');
 const artworkRoutes = require('./routes/artwork');
 const weatherRoutes = require('./routes/weather');
@@ -219,6 +220,9 @@ app.use('/api/dating', datingRoutes);
 
 // Notes API routes
 app.use('/api/notes', notesRoutes);
+
+// Tasks API routes
+app.use('/api/tasks', tasksRoutes);
 
 // Settings API routes
 app.use('/api/settings', settingsRoutes);

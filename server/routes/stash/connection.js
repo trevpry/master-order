@@ -7,36 +7,36 @@
 
 const express = require('express');
 const { prisma, getActiveSyncService, initializeStashSyncService } = require('./shared');
-const { asyncHandler } = require('../../utils/responses');
 
 const router = express.Router();
 
 // GET /test - Test Stash connection and configuration
-router.get('/test', asyncHandler(async (req, res) => {
-  console.log('🧪 Testing Stash connection...');
-  
-  let stashSyncService = getActiveSyncService();
-  if (!stashSyncService) {
-    console.log('⚠️ StashSyncService not initialized, initializing now...');
-    await initializeStashSyncService();
-    stashSyncService = getActiveSyncService();
-  }
-  
-  if (!stashSyncService) {
-    console.log('❌ StashSyncService still not available after initialization');
-    return res.status(400).json({ 
-      success: false, 
-      message: 'Stash sync service not configured',
-      configured: false
-    });
-  }
+router.get('/test', async (req, res) => {
+  try {
+    console.log('🧪 Testing Stash connection...');
+    
+    let stashSyncService = getActiveSyncService();
+    if (!stashSyncService) {
+      console.log('⚠️ StashSyncService not initialized, initializing now...');
+      await initializeStashSyncService();
+      stashSyncService = getActiveSyncService();
+    }
+    
+    if (!stashSyncService) {
+      console.log('❌ StashSyncService still not available after initialization');
+      return res.status(400).json({ 
+        success: false, 
+        message: 'Stash sync service not configured',
+        configured: false
+      });
+    }
 
-  console.log('🔍 Calling stashSyncService.testConnection()...');
-  const version = await stashSyncService.testConnection();
-  console.log('✅ Stash connection test successful:', version);
-  
-  // Get the Stash URL from settings
-  const settings = await prisma.settings.findUnique({ where: { id: 1 } });
+    console.log('🔍 Calling stashSyncService.testConnection()...');
+    const version = await stashSyncService.testConnection();
+    console.log('✅ Stash connection test successful:', version);
+    
+    // Get the Stash URL from settings
+    const settings = await prisma.settings.findUnique({ where: { id: 1 } });
     
     // Prioritize database settings for API response
     const finalStashUrl = (settings?.stashUrl || process.env.STASH_URL || process.env.STASH_URL_FALLBACK_1 || 
@@ -54,7 +54,18 @@ router.get('/test', asyncHandler(async (req, res) => {
       message: 'Stash connection successful',
       configured: true,
       version: version,
-    url: finalStashUrl,
-    hasApiKey: !!(settings?.stashApiKey)
-  });
-}));module.exports = router;
+      url: finalStashUrl,
+      hasApiKey: !!(settings?.stashApiKey)
+    });
+    
+  } catch (error) {
+    console.error('❌ Stash connection test failed:', error);
+    res.status(400).json({ 
+      success: false, 
+      message: error.message || 'Stash connection failed',
+      configured: false
+    });
+  }
+});
+
+module.exports = router;

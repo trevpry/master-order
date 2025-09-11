@@ -1522,3 +1522,129 @@ model BackgroundGallery {
   backgrounds BackgroundImage[]
   customOrders CustomOrder[]
 }
+
+// ========================================
+// TASKS & PRODUCTIVITY MODELS
+// ========================================
+
+model Project {
+  id          Int      @id @default(autoincrement())
+  name        String
+  description String?
+  color       String?  @default("#3B82F6") // Hex color for UI
+  status      String   @default("active") // active, completed, archived, on_hold
+  priority    String   @default("medium") // low, medium, high, urgent
+  dueDate     DateTime?
+  completedAt DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  tasks       Task[]
+  timeEntries TimeEntry[]
+  goals       Goal[]
+}
+
+model TaskCategory {
+  id        Int      @id @default(autoincrement())
+  name      String   @unique
+  color     String?  @default("#6B7280") // Hex color for UI
+  icon      String?  // Icon name or emoji
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  
+  tasks     Task[]
+}
+
+model Task {
+  id          Int      @id @default(autoincrement())
+  title       String
+  description String?
+  status      String   @default("todo") // todo, in_progress, completed, cancelled
+  priority    String   @default("medium") // low, medium, high, urgent
+  dueDate     DateTime?
+  completedAt DateTime?
+  estimatedMinutes Int? // Estimated time to complete
+  actualMinutes    Int? // Actual time spent (calculated from time entries)
+  
+  // Relationships
+  projectId   Int?
+  categoryId  Int?
+  
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  project     Project?      @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  category    TaskCategory? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  timeEntries TimeEntry[]
+  
+  // Task Dependencies
+  dependencies     TaskDependency[] @relation("DependentTask")
+  dependentTasks   TaskDependency[] @relation("DependsOnTask")
+  
+  @@index([projectId])
+  @@index([categoryId])
+  @@index([status])
+  @@index([dueDate])
+}
+
+model TimeEntry {
+  id          Int      @id @default(autoincrement())
+  description String?
+  startTime   DateTime
+  endTime     DateTime?
+  minutes     Int?     // Calculated duration in minutes
+  
+  // Relationships
+  taskId      Int?
+  projectId   Int?
+  
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  task        Task?    @relation(fields: [taskId], references: [id], onDelete: SetNull)
+  project     Project? @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  
+  @@index([taskId])
+  @@index([projectId])
+  @@index([startTime])
+}
+
+model Goal {
+  id          Int      @id @default(autoincrement())
+  title       String
+  description String?
+  type        String   @default("project") // project, daily, weekly, monthly, yearly
+  targetValue Int?     // For measurable goals
+  currentValue Int?    @default(0)
+  unit        String?  // hours, tasks, etc.
+  deadline    DateTime?
+  status      String   @default("active") // active, completed, paused, cancelled
+  
+  // Relationships
+  projectId   Int?
+  
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  project     Project? @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  
+  @@index([projectId])
+  @@index([type])
+  @@index([status])
+}
+
+model TaskDependency {
+  id              Int      @id @default(autoincrement())
+  dependentTaskId Int      // Task that depends on another task
+  dependsOnTaskId Int      // Task that must be completed first
+  type            String   @default("FINISH_TO_START") // FINISH_TO_START, START_TO_START, FINISH_TO_FINISH, START_TO_FINISH
+  
+  createdAt       DateTime @default(now())
+  
+  dependentTask   Task     @relation("DependentTask", fields: [dependentTaskId], references: [id], onDelete: Cascade)
+  dependsOnTask   Task     @relation("DependsOnTask", fields: [dependsOnTaskId], references: [id], onDelete: Cascade)
+  
+  @@unique([dependentTaskId, dependsOnTaskId])
+  @@index([dependentTaskId])
+  @@index([dependsOnTaskId])
+}

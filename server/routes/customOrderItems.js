@@ -201,71 +201,81 @@ router.post('/:id/items', validateMediaTypeAndTitle, asyncHandler(async (req, re
 }));
 
 // DELETE /api/custom-orders/:id/items/:itemId - Remove item from custom order
-router.delete('/:id/items/:itemId', asyncHandler(async (req, res) => {
-  const { id, itemId } = req.params;
-  
-  await prisma.customOrderItem.delete({
-    where: {
-      id: parseInt(itemId),
-      customOrderId: parseInt(id)
-    }
-  });
-  
-  res.status(204).send();
-}));
-
-// PUT /api/custom-orders/:id/items/:itemId - Update custom order item
-router.put('/:id/items/:itemId', asyncHandler(async (req, res) => {
-  const { id, itemId } = req.params;
-  const updateData = req.body;
-  
-  // Handle nested JSON data parsing
-  if (updateData.comicVineDetailsJson && typeof updateData.comicVineDetailsJson === 'string') {
-    try {
-      const parsedDetails = JSON.parse(updateData.comicVineDetailsJson);
-      updateData.comicVineDetailsJson = JSON.stringify(parsedDetails);
-    } catch (parseError) {
-      console.warn('Failed to parse ComicVine details JSON in update:', parseError);
-      updateData.comicVineDetailsJson = null;
-    }
-  }
-  
-  // Convert string numbers to integers for specific fields
-  const intFields = ['seasonNumber', 'episodeNumber', 'comicYear', 'bookYear', 'storyYear', 'bookPageCount', 'storyContainedInBookId'];
-  intFields.forEach(field => {
-    if (updateData[field] && typeof updateData[field] === 'string') {
-      updateData[field] = parseInt(updateData[field]);
-    }
-  });
-
-  // Check if this update sets reading completion to 100% and auto-mark as watched
-  if (updateData.bookPercentRead === 100 || 
-      (updateData.bookCurrentPage && updateData.bookPageCount && updateData.bookCurrentPage >= updateData.bookPageCount)) {
+router.delete('/:id/items/:itemId', async (req, res) => {
+  try {
+    const { id, itemId } = req.params;
     
-    // Get the current item to check media type
-    const currentItem = await prisma.customOrderItem.findUnique({
-      where: { id: parseInt(itemId) }
+    await prisma.customOrderItem.delete({
+      where: {
+        id: parseInt(itemId),
+        customOrderId: parseInt(id)
+      }
     });
     
-    if (currentItem && (currentItem.mediaType === 'book' || currentItem.mediaType === 'comic' || currentItem.mediaType === 'shortstory')) {
-      updateData.isWatched = true;
-      console.log(`Setting ${currentItem.mediaType} "${currentItem.title}" as watched (100% completion)`);
-    }
+    res.status(204).send();
+  } catch (error) {
+    console.error('Error removing item from custom order:', error);
+    res.status(500).json({ error: 'Failed to remove item from custom order' });
   }
-  
-  const updatedItem = await prisma.customOrderItem.update({
-    where: {
-      id: parseInt(itemId),
-      customOrderId: parseInt(id)
-    },
-    data: updateData,
-    include: {
-      customOrder: true
+});
+
+// PUT /api/custom-orders/:id/items/:itemId - Update custom order item
+router.put('/:id/items/:itemId', async (req, res) => {
+  try {
+    const { id, itemId } = req.params;
+    const updateData = req.body;
+    
+    // Handle nested JSON data parsing
+    if (updateData.comicVineDetailsJson && typeof updateData.comicVineDetailsJson === 'string') {
+      try {
+        const parsedDetails = JSON.parse(updateData.comicVineDetailsJson);
+        updateData.comicVineDetailsJson = JSON.stringify(parsedDetails);
+      } catch (parseError) {
+        console.warn('Failed to parse ComicVine details JSON in update:', parseError);
+        updateData.comicVineDetailsJson = null;
+      }
     }
-  });
-  
-  console.log(`✅ Updated custom order item "${updatedItem.title}"`);
-  res.json(updatedItem);
-}));
+    
+    // Convert string numbers to integers for specific fields
+    const intFields = ['seasonNumber', 'episodeNumber', 'comicYear', 'bookYear', 'storyYear', 'bookPageCount', 'storyContainedInBookId'];
+    intFields.forEach(field => {
+      if (updateData[field] && typeof updateData[field] === 'string') {
+        updateData[field] = parseInt(updateData[field]);
+      }
+    });
+
+    // Check if this update sets reading completion to 100% and auto-mark as watched
+    if (updateData.bookPercentRead === 100 || 
+        (updateData.bookCurrentPage && updateData.bookPageCount && updateData.bookCurrentPage >= updateData.bookPageCount)) {
+      
+      // Get the current item to check media type
+      const currentItem = await prisma.customOrderItem.findUnique({
+        where: { id: parseInt(itemId) }
+      });
+      
+      if (currentItem && (currentItem.mediaType === 'book' || currentItem.mediaType === 'comic' || currentItem.mediaType === 'shortstory')) {
+        updateData.isWatched = true;
+        console.log(`Setting ${currentItem.mediaType} "${currentItem.title}" as watched (100% completion)`);
+      }
+    }
+    
+    const updatedItem = await prisma.customOrderItem.update({
+      where: {
+        id: parseInt(itemId),
+        customOrderId: parseInt(id)
+      },
+      data: updateData,
+      include: {
+        customOrder: true
+      }
+    });
+    
+    console.log(`✅ Updated custom order item "${updatedItem.title}"`);
+    res.json(updatedItem);
+  } catch (error) {
+    console.error('Error updating custom order item:', error);
+    res.status(500).json({ error: 'Failed to update custom order item' });
+  }
+});
 
 module.exports = router;

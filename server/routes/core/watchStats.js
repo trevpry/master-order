@@ -4,7 +4,6 @@
  */
 
 const express = require('express');
-const { asyncHandler } = require('../../utils/responses');
 
 /**
  * Create watch stats routes
@@ -42,18 +41,32 @@ function createWatchStatsRoutes(prisma, services) {
   // ==================== WATCH LOG ENDPOINTS ====================
 
   // Manual watch log entry (for items not automatically tracked)
-  router.post('/api/watch-logs', asyncHandler(async (req, res) => {
-    const watchLogData = req.body;
-    const watchLog = await watchLogService.logWatched(watchLogData);
-    res.json(watchLog);
-  }));
+  router.post('/api/watch-logs', async (req, res) => {
+    try {
+      const watchLogData = req.body;
+      const watchLog = await watchLogService.logWatched(watchLogData);
+      res.json(watchLog);
+    } catch (error) {
+      console.error('Error creating watch log:', error);
+      res.status(500).json({ error: 'Failed to create watch log' });
+    }
+  });
 
   // Delete a watch log entry
-  router.delete('/api/watch-logs/:id', asyncHandler(async (req, res) => {
-    const { id } = req.params;
-    const deletedLog = await watchLogService.deleteWatchLog(id);
-    res.json({ success: true, deletedLog, message: 'Watch log entry deleted successfully' });
-  }));
+  router.delete('/api/watch-logs/:id', async (req, res) => {
+    try {
+      const { id } = req.params;
+      const deletedLog = await watchLogService.deleteWatchLog(id);
+      res.json({ success: true, deletedLog, message: 'Watch log entry deleted successfully' });
+    } catch (error) {
+      console.error('Error deleting watch log:', error);
+      if (error.code === 'P2025') {
+        res.status(404).json({ error: 'Watch log entry not found' });
+      } else {
+        res.status(500).json({ error: 'Failed to delete watch log entry' });
+      }
+    }
+  });
 
   return router;
 }
