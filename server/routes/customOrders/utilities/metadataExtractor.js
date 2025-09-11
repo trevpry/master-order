@@ -31,7 +31,10 @@ function extractComicVineMetadata(comicVineDetailsJson) {
       
       // Extract character credits
       if (data.issue.character_credits && Array.isArray(data.issue.character_credits)) {
-        extracted.comicCharacters = data.issue.character_credits.map(char => char.name).join(', ');
+        // Store as comma-separated string for display
+        extracted.comicCharacters = JSON.stringify(data.issue.character_credits);
+        // Also store as display-friendly string
+        extracted.comicCharactersDisplay = data.issue.character_credits.map(char => char.name).join(', ');
       }
       
       // Extract person credits (writers, artists, etc.)
@@ -42,7 +45,7 @@ function extractComicVineMetadata(comicVineDetailsJson) {
           credits[person.role].push(person.name);
         });
         
-        // Store specific roles
+        // Store specific roles as display-friendly strings
         if (credits.writer) extracted.comicWriter = credits.writer.join(', ');
         if (credits.penciler) extracted.comicPenciler = credits.penciler.join(', ');
         if (credits.inker) extracted.comicInker = credits.inker.join(', ');
@@ -51,6 +54,17 @@ function extractComicVineMetadata(comicVineDetailsJson) {
         
         // Store all credits as JSON for comprehensive data
         extracted.comicPersonCredits = JSON.stringify(credits);
+        
+        // Store creative team data for frontend display and bulk operations
+        extracted.comicCreators = JSON.stringify(data.issue.person_credits);
+        
+        // Also create a display-friendly creative team string
+        const mainRoles = ['writer', 'penciler', 'inker', 'colorist', 'cover'];
+        const displayCredits = mainRoles
+          .filter(role => credits[role])
+          .map(role => `${role.charAt(0).toUpperCase() + role.slice(1)}: ${credits[role].join(', ')}`)
+          .join(' • ');
+        extracted.comicCreatorsDisplay = displayCredits;
       }
       
       // Extract team credits

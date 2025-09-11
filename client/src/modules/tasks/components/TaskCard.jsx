@@ -7,6 +7,7 @@ const TaskCard = ({
   onToggleStatus, 
   onToggleCompletion,
   onStartTimer,
+  onViewDetails,
   showProject = true,
   compact = false 
 }) => {
@@ -107,9 +108,13 @@ const TaskCard = ({
           </button>
           
           <div className="flex-1 min-w-0">
-            <h3 className={`font-semibold text-gray-900 ${compact ? 'text-sm' : 'text-base'} truncate ${
-              task.status === 'completed' ? 'line-through text-gray-500' : ''
-            }`}>
+            <h3 
+              className={`font-semibold ${compact ? 'text-sm' : 'text-base'} truncate ${
+                task.status === 'completed' ? 'line-through text-gray-500' : 'text-gray-900'
+              } ${onViewDetails ? 'cursor-pointer hover:text-blue-600 transition-colors' : ''}`}
+              onClick={onViewDetails ? () => onViewDetails(task) : undefined}
+              title={onViewDetails ? 'Click to view details' : undefined}
+            >
               {task.title}
             </h3>
             {task.description && !compact && (

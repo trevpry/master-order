@@ -460,6 +460,381 @@ class StashSyncService {
     }
   }
 
+  // ================================
+  // COMPREHENSIVE CLEANUP METHODS
+  // ================================
+
+  /**
+   * Get all current entity IDs from Stash for cleanup comparison
+   */
+  async getAllStashEntityIds(entityType) {
+    console.log(`🔍 Fetching all ${entityType} IDs from Stash for cleanup...`);
+    
+    const queries = {
+      scenes: `
+        query GetAllSceneIds($filter: FindFilterType!) {
+          findScenes(filter: $filter) {
+            count
+            scenes { id }
+          }
+        }
+      `,
+      performers: `
+        query GetAllPerformerIds($filter: FindFilterType!) {
+          findPerformers(filter: $filter) {
+            count
+            performers { id }
+          }
+        }
+      `,
+      studios: `
+        query GetAllStudioIds($filter: FindFilterType!) {
+          findStudios(filter: $filter) {
+            count
+            studios { id }
+          }
+        }
+      `,
+      tags: `
+        query GetAllTagIds($filter: FindFilterType!) {
+          findTags(filter: $filter) {
+            count
+            tags { id }
+          }
+        }
+      `,
+      galleries: `
+        query GetAllGalleryIds($filter: FindFilterType!) {
+          findGalleries(filter: $filter) {
+            count
+            galleries { id }
+          }
+        }
+      `,
+      images: `
+        query GetAllImageIds($filter: FindFilterType!) {
+          findImages(filter: $filter) {
+            count
+            images { id }
+          }
+        }
+      `,
+      movies: `
+        query GetAllMovieIds($filter: FindFilterType!) {
+          findMovies(filter: $filter) {
+            count
+            movies { id }
+          }
+        }
+      `
+    };
+
+    const query = queries[entityType];
+    if (!query) {
+      throw new Error(`Unknown entity type for cleanup: ${entityType}`);
+    }
+
+    try {
+      const allIds = new Set();
+      let page = 1;
+      let hasMore = true;
+
+      while (hasMore) {
+        const variables = {
+          filter: {
+            page: page,
+            per_page: 1000 // Large batch for ID-only queries
+          }
+        };
+
+        const data = await this.makeGraphQLRequest(query, variables);
+        
+        let entities = [];
+        let count = 0;
+
+        switch (entityType) {
+          case 'scenes':
+            entities = data.findScenes?.scenes || [];
+            count = data.findScenes?.count || 0;
+            break;
+          case 'performers':
+            entities = data.findPerformers?.performers || [];
+            count = data.findPerformers?.count || 0;
+            break;
+          case 'studios':
+            entities = data.findStudios?.studios || [];
+            count = data.findStudios?.count || 0;
+            break;
+          case 'tags':
+            entities = data.findTags?.tags || [];
+            count = data.findTags?.count || 0;
+            break;
+          case 'galleries':
+            entities = data.findGalleries?.galleries || [];
+            count = data.findGalleries?.count || 0;
+            break;
+          case 'images':
+            entities = data.findImages?.images || [];
+            count = data.findImages?.count || 0;
+            break;
+          case 'movies':
+            entities = data.findMovies?.movies || [];
+            count = data.findMovies?.count || 0;
+            break;
+        }
+
+        entities.forEach(entity => allIds.add(entity.id));
+        
+        hasMore = entities.length === 1000 && allIds.size < count;
+        page++;
+      }
+
+      console.log(`📊 Found ${allIds.size} current ${entityType} in Stash`);
+      return allIds;
+
+    } catch (error) {
+      console.error(`Error fetching ${entityType} IDs from Stash:`, error);
+      throw error;
+    }
+  }
+
+  /**
+   * Clean up entities that no longer exist in Stash
+   */
+  async cleanupOrphanedEntities(enableCleanup = true) {
+    if (!enableCleanup) {
+      console.log('🔇 Comprehensive cleanup disabled, skipping...');
+      return {
+        scenes: 0, performers: 0, studios: 0, tags: 0, 
+        galleries: 0, images: 0, movies: 0,
+        sceneFiles: 0, sceneMarkers: 0, junctionTables: 0
+      };
+    }
+
+    console.log('🧹 Starting comprehensive cleanup of orphaned entities...');
+    const startTime = Date.now();
+    const results = {
+      scenes: 0, performers: 0, studios: 0, tags: 0, 
+      galleries: 0, images: 0, movies: 0,
+      sceneMarkers: 0, junctionTables: 0
+    };
+
+    try {
+      // Step 1: Clean up junction tables first (referential integrity)
+      console.log('🧹 Step 1: Cleaning junction tables...');
+      results.junctionTables += await this.cleanupJunctionTables();
+
+      // Step 2: Clean up dependent entities
+      console.log('🧹 Step 2: Cleaning dependent entities...');
+      
+      // Scene markers (depend on scenes)
+      const stashSceneIds = await this.getAllStashEntityIds('scenes');
+      results.sceneMarkers += await this.cleanupSceneMarkers(stashSceneIds);
+
+      // Images (depend on galleries)
+      const stashGalleryIds = await this.getAllStashEntityIds('galleries');
+      results.images += await this.cleanupOrphanedImages(stashGalleryIds);
+
+      // Step 3: Clean up main entities
+      console.log('🧹 Step 3: Cleaning main entities...');
+      results.scenes += await this.cleanupOrphanedScenes(stashSceneIds);
+      results.galleries += await this.cleanupOrphanedGalleries(stashGalleryIds);
+      
+      // Movies (if supported)
+      try {
+        const stashMovieIds = await this.getAllStashEntityIds('movies');
+        results.movies += await this.cleanupOrphanedMovies(stashMovieIds);
+      } catch (error) {
+        console.log('ℹ️ Movies not supported in this Stash version, skipping movie cleanup');
+      }
+
+      // Step 4: Clean up reference entities (only if no dependents)
+      console.log('🧹 Step 4: Cleaning reference entities...');
+      const stashPerformerIds = await this.getAllStashEntityIds('performers');
+      const stashStudioIds = await this.getAllStashEntityIds('studios');
+      const stashTagIds = await this.getAllStashEntityIds('tags');
+      
+      results.performers += await this.cleanupOrphanedPerformers(stashPerformerIds);
+      results.studios += await this.cleanupOrphanedStudios(stashStudioIds);
+      results.tags += await this.cleanupOrphanedTags(stashTagIds);
+
+      const duration = (Date.now() - startTime) / 1000;
+      const totalCleaned = Object.values(results).reduce((sum, count) => sum + count, 0);
+      
+      console.log(`✅ Comprehensive cleanup completed in ${duration}s. Removed ${totalCleaned} orphaned entities:`, results);
+      return results;
+
+    } catch (error) {
+      console.error('Error during comprehensive cleanup:', error);
+      throw error;
+    }
+  }
+
+  async cleanupJunctionTables() {
+    // Junction tables are automatically cleaned up by Prisma CASCADE deletes
+    // when parent entities (scenes, performers, tags) are removed.
+    // This method is kept for consistency but CASCADE handles the cleanup.
+    console.log('✅ Junction table cleanup handled automatically by CASCADE deletes');
+    return 0;
+  }
+
+  async cleanupSceneMarkers(validSceneIds) {
+    const localSceneMarkers = await prisma.stashMarker.findMany({
+      select: { id: true, sceneId: true }
+    });
+
+    let removed = 0;
+    for (const marker of localSceneMarkers) {
+      if (!validSceneIds.has(marker.sceneId)) {
+        await prisma.stashMarker.delete({ where: { id: marker.id } });
+        removed++;
+      }
+    }
+
+    if (removed > 0) {
+      console.log(`🗑️ Removed ${removed} orphaned scene markers`);
+    }
+    return removed;
+  }
+
+  async cleanupOrphanedImages(validGalleryIds) {
+    const localImages = await prisma.stashImage.findMany({
+      select: { id: true, galleryId: true }
+    });
+
+    let removed = 0;
+    for (const image of localImages) {
+      // Remove images whose gallery no longer exists in Stash
+      if (image.galleryId && !validGalleryIds.has(image.galleryId)) {
+        await prisma.stashImage.delete({ where: { id: image.id } });
+        removed++;
+      }
+    }
+
+    if (removed > 0) {
+      console.log(`🗑️ Removed ${removed} orphaned images`);
+    }
+    return removed;
+  }
+
+  async cleanupOrphanedScenes(validSceneIds) {
+    const localScenes = await prisma.stashScene.findMany({
+      select: { id: true }
+    });
+
+    let removed = 0;
+    for (const scene of localScenes) {
+      if (!validSceneIds.has(scene.id)) {
+        await prisma.stashScene.delete({ where: { id: scene.id } });
+        removed++;
+      }
+    }
+
+    if (removed > 0) {
+      console.log(`🗑️ Removed ${removed} orphaned scenes`);
+    }
+    return removed;
+  }
+
+  async cleanupOrphanedGalleries(validGalleryIds) {
+    const localGalleries = await prisma.stashGallery.findMany({
+      select: { id: true }
+    });
+
+    let removed = 0;
+    for (const gallery of localGalleries) {
+      if (!validGalleryIds.has(gallery.id)) {
+        await prisma.stashGallery.delete({ where: { id: gallery.id } });
+        removed++;
+      }
+    }
+
+    if (removed > 0) {
+      console.log(`🗑️ Removed ${removed} orphaned galleries`);
+    }
+    return removed;
+  }
+
+  async cleanupOrphanedMovies(validMovieIds) {
+    const localMovies = await prisma.stashMovie.findMany({
+      select: { id: true }
+    });
+
+    let removed = 0;
+    for (const movie of localMovies) {
+      if (!validMovieIds.has(movie.id)) {
+        await prisma.stashMovie.delete({ where: { id: movie.id } });
+        removed++;
+      }
+    }
+
+    if (removed > 0) {
+      console.log(`🗑️ Removed ${removed} orphaned movies`);
+    }
+    return removed;
+  }
+
+  async cleanupOrphanedPerformers(validPerformerIds) {
+    const localPerformers = await prisma.stashPerformer.findMany({
+      select: { id: true }
+    });
+
+    let removed = 0;
+    for (const performer of localPerformers) {
+      if (!validPerformerIds.has(performer.id)) {
+        await prisma.stashPerformer.delete({ where: { id: performer.id } });
+        removed++;
+      }
+    }
+
+    if (removed > 0) {
+      console.log(`🗑️ Removed ${removed} orphaned performers`);
+    }
+    return removed;
+  }
+
+  async cleanupOrphanedStudios(validStudioIds) {
+    const localStudios = await prisma.stashStudio.findMany({
+      select: { id: true }
+    });
+
+    let removed = 0;
+    for (const studio of localStudios) {
+      if (!validStudioIds.has(studio.id)) {
+        await prisma.stashStudio.delete({ where: { id: studio.id } });
+        removed++;
+      }
+    }
+
+    if (removed > 0) {
+      console.log(`🗑️ Removed ${removed} orphaned studios`);
+    }
+    return removed;
+  }
+
+  async cleanupOrphanedTags(validTagIds) {
+    const localTags = await prisma.stashTag.findMany({
+      select: { id: true }
+    });
+
+    let removed = 0;
+    for (const tag of localTags) {
+      if (!validTagIds.has(tag.id)) {
+        await prisma.stashTag.delete({ where: { id: tag.id } });
+        removed++;
+      }
+    }
+
+    if (removed > 0) {
+      console.log(`🗑️ Removed ${removed} orphaned tags`);
+    }
+    return removed;
+  }
+
+  // ================================
+  // END COMPREHENSIVE CLEANUP METHODS
+  // ================================
+
   async syncPerformers(page = 1, perPage = 250) {
     console.log(`Syncing performers (page ${page})...`);
     
@@ -840,6 +1215,11 @@ class StashSyncService {
       console.log('🧹 Cleaning up studios with 0 scenes...');
       const studiosRemoved = await this.cleanupStudiosWithZeroScenes();
       console.log(`✅ Removed ${studiosRemoved} studios with 0 scenes`);
+
+      // Comprehensive cleanup: Remove orphaned entities
+      console.log('🧹 Starting comprehensive cleanup of orphaned entities...');
+      const cleanupResults = await this.cleanupOrphanedEntities(true);
+      console.log(`✅ Comprehensive cleanup completed:`, cleanupResults);
 
       const duration = (Date.now() - startTime) / 1000;
       console.log(`🎉 Full Stash sync completed in ${duration}s:`, totalSynced);

@@ -977,6 +977,11 @@ class StashSyncServiceOptimized {
 
       // Note: zzHide cleanup is disabled in optimized service for performance
 
+      // Comprehensive cleanup: Remove orphaned entities (optimized)
+      console.log('🧹 Starting OPTIMIZED comprehensive cleanup of orphaned entities...');
+      const cleanupResults = await this.cleanupOrphanedEntitiesOptimized(true);
+      console.log(`✅ OPTIMIZED comprehensive cleanup completed:`, cleanupResults);
+
       const totalTime = Date.now() - startTime;
       const improvement = this.calculatePerformanceImprovement(totalTime);
       
@@ -1713,6 +1718,418 @@ class StashSyncServiceOptimized {
       throw error;
     }
   }
+
+  // ================================
+  // COMPREHENSIVE CLEANUP METHODS - OPTIMIZED
+  // ================================
+
+  /**
+   * Get all current entity IDs from Stash for cleanup comparison (optimized)
+   */
+  async getAllStashEntityIds(entityType) {
+    console.log(`🔍 Fetching all ${entityType} IDs from Stash for cleanup (optimized)...`);
+    
+    const queries = {
+      scenes: `
+        query GetAllSceneIds($filter: FindFilterType!) {
+          findScenes(filter: $filter) {
+            count
+            scenes { id }
+          }
+        }
+      `,
+      performers: `
+        query GetAllPerformerIds($filter: FindFilterType!) {
+          findPerformers(filter: $filter) {
+            count
+            performers { id }
+          }
+        }
+      `,
+      studios: `
+        query GetAllStudioIds($filter: FindFilterType!) {
+          findStudios(filter: $filter) {
+            count
+            studios { id }
+          }
+        }
+      `,
+      tags: `
+        query GetAllTagIds($filter: FindFilterType!) {
+          findTags(filter: $filter) {
+            count
+            tags { id }
+          }
+        }
+      `,
+      galleries: `
+        query GetAllGalleryIds($filter: FindFilterType!) {
+          findGalleries(filter: $filter) {
+            count
+            galleries { id }
+          }
+        }
+      `,
+      images: `
+        query GetAllImageIds($filter: FindFilterType!) {
+          findImages(filter: $filter) {
+            count
+            images { id }
+          }
+        }
+      `,
+      movies: `
+        query GetAllMovieIds($filter: FindFilterType!) {
+          findMovies(filter: $filter) {
+            count
+            movies { id }
+          }
+        }
+      `
+    };
+
+    const query = queries[entityType];
+    if (!query) {
+      throw new Error(`Unknown entity type for cleanup: ${entityType}`);
+    }
+
+    try {
+      const allIds = new Set();
+      let page = 1;
+      let hasMore = true;
+
+      while (hasMore) {
+        const variables = {
+          filter: {
+            page: page,
+            per_page: 1000 // Large batch for ID-only queries
+          }
+        };
+
+        const data = await this.makeGraphQLRequest(query, variables);
+        
+        let entities = [];
+        let count = 0;
+
+        switch (entityType) {
+          case 'scenes':
+            entities = data.findScenes?.scenes || [];
+            count = data.findScenes?.count || 0;
+            break;
+          case 'performers':
+            entities = data.findPerformers?.performers || [];
+            count = data.findPerformers?.count || 0;
+            break;
+          case 'studios':
+            entities = data.findStudios?.studios || [];
+            count = data.findStudios?.count || 0;
+            break;
+          case 'tags':
+            entities = data.findTags?.tags || [];
+            count = data.findTags?.count || 0;
+            break;
+          case 'galleries':
+            entities = data.findGalleries?.galleries || [];
+            count = data.findGalleries?.count || 0;
+            break;
+          case 'images':
+            entities = data.findImages?.images || [];
+            count = data.findImages?.count || 0;
+            break;
+          case 'movies':
+            entities = data.findMovies?.movies || [];
+            count = data.findMovies?.count || 0;
+            break;
+        }
+
+        entities.forEach(entity => allIds.add(entity.id));
+        
+        hasMore = entities.length === 1000 && allIds.size < count;
+        page++;
+      }
+
+      console.log(`📊 Found ${allIds.size} current ${entityType} in Stash`);
+      return allIds;
+
+    } catch (error) {
+      console.error(`Error fetching ${entityType} IDs from Stash:`, error);
+      throw error;
+    }
+  }
+
+  /**
+   * Clean up entities that no longer exist in Stash (optimized)
+   */
+  async cleanupOrphanedEntitiesOptimized(enableCleanup = true) {
+    if (!enableCleanup) {
+      console.log('🔇 Comprehensive cleanup disabled, skipping...');
+      return {
+        scenes: 0, performers: 0, studios: 0, tags: 0, 
+        galleries: 0, images: 0, movies: 0,
+        sceneFiles: 0, sceneMarkers: 0, junctionTables: 0
+      };
+    }
+
+    console.log('🧹 Starting OPTIMIZED comprehensive cleanup of orphaned entities...');
+    const startTime = Date.now();
+    const results = {
+      scenes: 0, performers: 0, studios: 0, tags: 0, 
+      galleries: 0, images: 0, movies: 0,
+      sceneMarkers: 0, junctionTables: 0
+    };
+
+    try {
+      // Use optimized batch sizes for cleanup
+      const cleanupBatchSize = this.batchConfig.maxBatchSize;
+
+      // Step 1: Clean up junction tables first (referential integrity)
+      console.log('🧹 Step 1: Cleaning junction tables (optimized)...');
+      results.junctionTables += await this.cleanupJunctionTablesOptimized();
+
+      // Step 2: Clean up dependent entities
+      console.log('🧹 Step 2: Cleaning dependent entities (optimized)...');
+      
+      // Scene markers (depend on scenes)
+      const stashSceneIds = await this.getAllStashEntityIds('scenes');
+      results.sceneMarkers += await this.cleanupSceneMarkersOptimized(stashSceneIds, cleanupBatchSize);
+
+      // Images (depend on galleries)
+      const stashGalleryIds = await this.getAllStashEntityIds('galleries');
+      results.images += await this.cleanupOrphanedImagesOptimized(stashGalleryIds, cleanupBatchSize);
+
+      // Step 3: Clean up main entities
+      console.log('🧹 Step 3: Cleaning main entities (optimized)...');
+      results.scenes += await this.cleanupOrphanedScenesOptimized(stashSceneIds, cleanupBatchSize);
+      results.galleries += await this.cleanupOrphanedGalleriesOptimized(stashGalleryIds, cleanupBatchSize);
+      
+      // Movies (if supported)
+      try {
+        const stashMovieIds = await this.getAllStashEntityIds('movies');
+        results.movies += await this.cleanupOrphanedMoviesOptimized(stashMovieIds, cleanupBatchSize);
+      } catch (error) {
+        console.log('ℹ️ Movies not supported in this Stash version, skipping movie cleanup');
+      }
+
+      // Step 4: Clean up reference entities (only if no dependents)
+      console.log('🧹 Step 4: Cleaning reference entities (optimized)...');
+      const stashPerformerIds = await this.getAllStashEntityIds('performers');
+      const stashStudioIds = await this.getAllStashEntityIds('studios');
+      const stashTagIds = await this.getAllStashEntityIds('tags');
+      
+      results.performers += await this.cleanupOrphanedPerformersOptimized(stashPerformerIds, cleanupBatchSize);
+      results.studios += await this.cleanupOrphanedStudiosOptimized(stashStudioIds, cleanupBatchSize);
+      results.tags += await this.cleanupOrphanedTagsOptimized(stashTagIds, cleanupBatchSize);
+
+      const duration = (Date.now() - startTime) / 1000;
+      const totalCleaned = Object.values(results).reduce((sum, count) => sum + count, 0);
+      
+      console.log(`✅ OPTIMIZED comprehensive cleanup completed in ${duration}s. Removed ${totalCleaned} orphaned entities:`, results);
+      return results;
+
+    } catch (error) {
+      console.error('Error during optimized comprehensive cleanup:', error);
+      throw error;
+    }
+  }
+
+  async cleanupJunctionTablesOptimized() {
+    // Junction tables are automatically cleaned up by Prisma CASCADE deletes
+    // when parent entities (scenes, performers, tags) are removed.
+    // This method is kept for consistency but CASCADE handles the cleanup.
+    console.log('✅ Junction table cleanup handled automatically by CASCADE deletes');
+    return 0;
+  }
+
+  // Helper method to chunk arrays for batch processing
+  chunkArray(array, chunkSize) {
+    const chunks = [];
+    for (let i = 0; i < array.length; i += chunkSize) {
+      chunks.push(array.slice(i, i + chunkSize));
+    }
+    return chunks;
+  }
+
+  async cleanupSceneMarkersOptimized(validSceneIds, batchSize) {
+    const localSceneMarkers = await prisma.stashMarker.findMany({
+      select: { id: true, sceneId: true }
+    });
+
+    const toDelete = localSceneMarkers.filter(marker => !validSceneIds.has(marker.sceneId));
+    
+    if (toDelete.length === 0) return 0;
+
+    const batches = this.chunkArray(toDelete, batchSize);
+    for (const batch of batches) {
+      await prisma.stashMarker.deleteMany({
+        where: {
+          id: { in: batch.map(item => item.id) }
+        }
+      });
+    }
+
+    console.log(`🗑️ Removed ${toDelete.length} orphaned scene markers`);
+    return toDelete.length;
+  }
+
+  async cleanupOrphanedImagesOptimized(validGalleryIds, batchSize) {
+    const localImages = await prisma.stashImage.findMany({
+      select: { id: true, galleryId: true }
+    });
+
+    const toDelete = localImages.filter(image => 
+      image.galleryId && !validGalleryIds.has(image.galleryId)
+    );
+    
+    if (toDelete.length === 0) return 0;
+
+    const batches = this.chunkArray(toDelete, batchSize);
+    for (const batch of batches) {
+      await prisma.stashImage.deleteMany({
+        where: {
+          id: { in: batch.map(item => item.id) }
+        }
+      });
+    }
+
+    console.log(`🗑️ Removed ${toDelete.length} orphaned images`);
+    return toDelete.length;
+  }
+
+  async cleanupOrphanedScenesOptimized(validSceneIds, batchSize) {
+    const localScenes = await prisma.stashScene.findMany({
+      select: { id: true }
+    });
+
+    const toDelete = localScenes.filter(scene => !validSceneIds.has(scene.id));
+    
+    if (toDelete.length === 0) return 0;
+
+    const batches = this.chunkArray(toDelete, batchSize);
+    for (const batch of batches) {
+      await prisma.stashScene.deleteMany({
+        where: {
+          id: { in: batch.map(item => item.id) }
+        }
+      });
+    }
+
+    console.log(`🗑️ Removed ${toDelete.length} orphaned scenes`);
+    return toDelete.length;
+  }
+
+  async cleanupOrphanedGalleriesOptimized(validGalleryIds, batchSize) {
+    const localGalleries = await prisma.stashGallery.findMany({
+      select: { id: true }
+    });
+
+    const toDelete = localGalleries.filter(gallery => !validGalleryIds.has(gallery.id));
+    
+    if (toDelete.length === 0) return 0;
+
+    const batches = this.chunkArray(toDelete, batchSize);
+    for (const batch of batches) {
+      await prisma.stashGallery.deleteMany({
+        where: {
+          id: { in: batch.map(item => item.id) }
+        }
+      });
+    }
+
+    console.log(`🗑️ Removed ${toDelete.length} orphaned galleries`);
+    return toDelete.length;
+  }
+
+  async cleanupOrphanedMoviesOptimized(validMovieIds, batchSize) {
+    const localMovies = await prisma.stashMovie.findMany({
+      select: { id: true }
+    });
+
+    const toDelete = localMovies.filter(movie => !validMovieIds.has(movie.id));
+    
+    if (toDelete.length === 0) return 0;
+
+    const batches = this.chunkArray(toDelete, batchSize);
+    for (const batch of batches) {
+      await prisma.stashMovie.deleteMany({
+        where: {
+          id: { in: batch.map(item => item.id) }
+        }
+      });
+    }
+
+    console.log(`🗑️ Removed ${toDelete.length} orphaned movies`);
+    return toDelete.length;
+  }
+
+  async cleanupOrphanedPerformersOptimized(validPerformerIds, batchSize) {
+    const localPerformers = await prisma.stashPerformer.findMany({
+      select: { id: true }
+    });
+
+    const toDelete = localPerformers.filter(performer => !validPerformerIds.has(performer.id));
+    
+    if (toDelete.length === 0) return 0;
+
+    const batches = this.chunkArray(toDelete, batchSize);
+    for (const batch of batches) {
+      await prisma.stashPerformer.deleteMany({
+        where: {
+          id: { in: batch.map(item => item.id) }
+        }
+      });
+    }
+
+    console.log(`🗑️ Removed ${toDelete.length} orphaned performers`);
+    return toDelete.length;
+  }
+
+  async cleanupOrphanedStudiosOptimized(validStudioIds, batchSize) {
+    const localStudios = await prisma.stashStudio.findMany({
+      select: { id: true }
+    });
+
+    const toDelete = localStudios.filter(studio => !validStudioIds.has(studio.id));
+    
+    if (toDelete.length === 0) return 0;
+
+    const batches = this.chunkArray(toDelete, batchSize);
+    for (const batch of batches) {
+      await prisma.stashStudio.deleteMany({
+        where: {
+          id: { in: batch.map(item => item.id) }
+        }
+      });
+    }
+
+    console.log(`🗑️ Removed ${toDelete.length} orphaned studios`);
+    return toDelete.length;
+  }
+
+  async cleanupOrphanedTagsOptimized(validTagIds, batchSize) {
+    const localTags = await prisma.stashTag.findMany({
+      select: { id: true }
+    });
+
+    const toDelete = localTags.filter(tag => !validTagIds.has(tag.id));
+    
+    if (toDelete.length === 0) return 0;
+
+    const batches = this.chunkArray(toDelete, batchSize);
+    for (const batch of batches) {
+      await prisma.stashTag.deleteMany({
+        where: {
+          id: { in: batch.map(item => item.id) }
+        }
+      });
+    }
+
+    console.log(`🗑️ Removed ${toDelete.length} orphaned tags`);
+    return toDelete.length;
+  }
+
+  // ================================
+  // END COMPREHENSIVE CLEANUP METHODS - OPTIMIZED
+  // ================================
 
   // Legacy method for backward compatibility - NO LONGER REMOVES zzHide SCENES
   async cleanupHiddenScenes() {

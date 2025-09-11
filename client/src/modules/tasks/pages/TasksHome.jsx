@@ -12,6 +12,7 @@ import KanbanBoard from '../components/KanbanBoard';
 import TaskSearchAndFilter from '../components/TaskSearchAndFilter';
 import TaskAnalytics from '../components/TaskAnalytics';
 import BulkOperations from '../components/BulkOperations';
+import TaskDetailsModal from '../components/TaskDetailsModal';
 import { useDashboardStats, useTasks, useProjects, useCategories, useTimeTracking } from '../hooks/useTasks';
 
 function TasksHome() {
@@ -27,6 +28,8 @@ function TasksHome() {
   const [selectedTasks, setSelectedTasks] = useState([]);
   const [showCompletedTasks, setShowCompletedTasks] = useState(false);
   const [selectedProject, setSelectedProject] = useState(null); // For filtering tasks by project
+  const [showTaskDetails, setShowTaskDetails] = useState(false);
+  const [selectedTaskForDetails, setSelectedTaskForDetails] = useState(null);
 
   // Hooks
   const { stats, loading: statsLoading, error: statsError, refetch: refetchStats } = useDashboardStats();
@@ -119,6 +122,11 @@ function TasksHome() {
     } catch (error) {
       console.error('Failed to stop timer:', error);
     }
+  };
+
+  const handleViewTaskDetails = (task) => {
+    setSelectedTaskForDetails(task);
+    setShowTaskDetails(true);
   };
 
   // Project handlers
@@ -544,6 +552,7 @@ function TasksHome() {
                       onDelete={handleDeleteTask}
                       onToggleStatus={handleToggleTaskStatus}
                       onStartTimer={handleStartTimer}
+                      onViewDetails={handleViewTaskDetails}
                       compact={true}
                     />
                   ))}
@@ -568,6 +577,7 @@ function TasksHome() {
                       onDelete={handleDeleteTask}
                       onToggleStatus={handleToggleTaskStatus}
                       onStartTimer={handleStartTimer}
+                      onViewDetails={handleViewTaskDetails}
                       compact={true}
                     />
                   ))}
@@ -689,6 +699,7 @@ function TasksHome() {
                     onToggleStatus={handleToggleTaskStatus}
                     onToggleCompletion={handleToggleTaskCompletion}
                     onStartTimer={handleStartTimer}
+                    onViewDetails={handleViewTaskDetails}
                     showProject={true}
                   />
                 ))}
@@ -777,6 +788,7 @@ function TasksHome() {
               onEdit={handleEditTask}
               onDelete={handleDeleteTask}
               onStartTimer={handleStartTimer}
+              onViewDetails={handleViewTaskDetails}
               loading={tasksLoading}
             />
           </div>
@@ -810,6 +822,21 @@ function TasksHome() {
           onBulkDelete={handleBulkDelete}
           onBulkDuplicate={handleBulkDuplicate}
           onClearSelection={handleClearSelection}
+        />
+
+        {/* Task Details Modal */}
+        <TaskDetailsModal
+          task={selectedTaskForDetails}
+          isOpen={showTaskDetails}
+          onClose={() => {
+            setShowTaskDetails(false);
+            setSelectedTaskForDetails(null);
+          }}
+          onEdit={handleEditTask}
+          onDelete={handleDeleteTask}
+          onToggleStatus={handleToggleTaskStatus}
+          onToggleCompletion={handleToggleTaskCompletion}
+          onStartTimer={handleStartTimer}
         />
       </div>
     </div>

@@ -202,21 +202,29 @@ function Home() {
 
     setReadingActionLoading('start');
     try {
+      const requestBody = {
+        mediaType: selectedMedia.type,
+        title: selectedMedia.type === 'book' ? selectedMedia.title :
+               selectedMedia.type === 'comic' ? `${selectedMedia.comicSeries} #${selectedMedia.comicIssue}` :
+               selectedMedia.storyTitle || selectedMedia.title,
+        seriesTitle: selectedMedia.type === 'comic' ? selectedMedia.comicSeries :
+                    selectedMedia.type === 'book' ? selectedMedia.bookAuthor :
+                    selectedMedia.storyAuthor,
+        customOrderItemId: selectedMedia.customOrderItemId || selectedMedia.id || selectedMedia.plexRatingKey
+      };
+
+      // Add comic-specific fields for validation
+      if (selectedMedia.type === 'comic') {
+        requestBody.comicSeries = selectedMedia.comicSeries;
+        requestBody.comicIssue = selectedMedia.comicIssue;
+      }
+
       const response = await fetch(`${config.apiBaseUrl}/api/reading/start`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({
-          mediaType: selectedMedia.type,
-          title: selectedMedia.type === 'book' ? selectedMedia.title :
-                 selectedMedia.type === 'comic' ? `${selectedMedia.comicSeries} #${selectedMedia.comicIssue}` :
-                 selectedMedia.storyTitle || selectedMedia.title,
-          seriesTitle: selectedMedia.type === 'comic' ? selectedMedia.comicSeries :
-                      selectedMedia.type === 'book' ? selectedMedia.bookAuthor :
-                      selectedMedia.storyAuthor,
-          customOrderItemId: selectedMedia.customOrderItemId || selectedMedia.id || selectedMedia.plexRatingKey
-        })
+        body: JSON.stringify(requestBody)
       });
 
       if (response.ok) {

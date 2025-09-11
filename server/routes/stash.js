@@ -2846,6 +2846,81 @@ router.post('/background-sync/force-now', asyncHandler(async (req, res) => {
   res.json({ message: 'Stash background sync completed', result });
 }));
 
+// Comprehensive cleanup: Remove orphaned entities
+router.post('/cleanup/orphaned-entities', asyncHandler(async (req, res) => {
+  try {
+    // Ensure sync service is initialized
+    if (!stashSyncService && !stashSyncServiceOptimized) {
+      console.log('⚠️ Stash sync services not initialized, initializing now...');
+      await initializeStashSyncService();
+    }
+
+    const activeSyncService = getActiveSyncService();
+    if (!activeSyncService) {
+      return sendServerError(res, 'Stash sync service not available');
+    }
+
+    console.log(`🧹 Starting comprehensive cleanup via ${SYNC_SERVICE_TYPE} sync service...`);
+    
+    let cleanupResults;
+    if (SYNC_SERVICE_TYPE === 'optimized') {
+      cleanupResults = await activeSyncService.cleanupOrphanedEntitiesOptimized(true);
+    } else {
+      cleanupResults = await activeSyncService.cleanupOrphanedEntities(true);
+    }
+
+    const totalCleaned = Object.values(cleanupResults).reduce((sum, count) => sum + count, 0);
+    
+    sendSuccess(res, {
+      message: `Comprehensive cleanup completed using ${SYNC_SERVICE_TYPE} service`,
+      totalEntitiesRemoved: totalCleaned,
+      details: cleanupResults,
+      serviceType: SYNC_SERVICE_TYPE
+    });
+
+  } catch (error) {
+    logError('Error during comprehensive cleanup:', error);
+    sendServerError(res, `Comprehensive cleanup failed: ${error.message}`);
+  }
+}));
+
+// Test cleanup (dry run) - Check what would be cleaned up without doing it
+router.post('/cleanup/test', asyncHandler(async (req, res) => {
+  try {
+    // Ensure sync service is initialized
+    if (!stashSyncService && !stashSyncServiceOptimized) {
+      console.log('⚠️ Stash sync services not initialized, initializing now...');
+      await initializeStashSyncService();
+    }
+
+    const activeSyncService = getActiveSyncService();
+    if (!activeSyncService) {
+      return sendServerError(res, 'Stash sync service not available');
+    }
+
+    console.log(`🔍 Testing cleanup to see what would be removed (dry run)...`);
+    
+    // Run cleanup with enableCleanup=false to see what would be cleaned
+    let cleanupResults;
+    if (SYNC_SERVICE_TYPE === 'optimized') {
+      cleanupResults = await activeSyncService.cleanupOrphanedEntitiesOptimized(false);
+    } else {
+      cleanupResults = await activeSyncService.cleanupOrphanedEntities(false);
+    }
+
+    sendSuccess(res, {
+      message: `Cleanup test completed using ${SYNC_SERVICE_TYPE} service (no entities were actually removed)`,
+      wouldBeRemoved: cleanupResults,
+      serviceType: SYNC_SERVICE_TYPE,
+      dryRun: true
+    });
+
+  } catch (error) {
+    logError('Error during cleanup test:', error);
+    sendServerError(res, `Cleanup test failed: ${error.message}`);
+  }
+}));
+
 // Get clips with pagination and filtering
 router.get('/clips', asyncHandler(async (req, res) => {
   console.log('📋 Getting all clips with pagination...');

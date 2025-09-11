@@ -1,0 +1,11 @@
+{
+  "mediaType": "comic",
+  "title": "Amazing Spider-Man #1",
+  "comicSeries": "Amazing Spider-Man",
+  "comicYear": 2018,
+  "comicIssue": "1",
+  "comicVolume": "5",
+  "comicPublisher": "Marvel Comics",
+  "comicVineId": "12345",
+  "comicVineDetailsJson": "{\"series\":{\"id\":12345,\"name\":\"Amazing Spider-Man\",\"publisher\":{\"name\":\"Marvel Comics\"}},\"issue\":{\"id\":67890,\"name\":\"Re-Genesis\",\"description\":\"Peter Parker returns to the Amazing Spider-Man series!\",\"cover_date\":\"2018-07-01\",\"store_date\":\"2018-07-11\",\"character_credits\":[{\"id\":1443,\"name\":\"Spider-Man\"},{\"id\":1458,\"name\":\"Aunt May\"},{\"id\":2067,\"name\":\"J. Jonah Jameson\"}],\"person_credits\":[{\"name\":\"Nick Spencer\",\"role\":\"writer\"},{\"name\":\"Ryan Ottley\",\"role\":\"penciler\"},{\"name\":\"Cliff Rathburn\",\"role\":\"inker\"}]}}"
+}

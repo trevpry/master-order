@@ -162,6 +162,56 @@ function CustomOrders() {
     });
   };
 
+  // Helper functions to parse and format comic metadata
+  const parseComicCharacters = (charactersJson) => {
+    if (!charactersJson) return [];
+    try {
+      return typeof charactersJson === 'string' ? JSON.parse(charactersJson) : charactersJson;
+    } catch (e) {
+      console.warn('Failed to parse comic characters:', e);
+      return [];
+    }
+  };
+
+  const parseComicCreators = (creatorsJson) => {
+    if (!creatorsJson) return [];
+    try {
+      const parsed = typeof creatorsJson === 'string' ? JSON.parse(creatorsJson) : creatorsJson;
+      
+      // Handle both the old format (object with role keys) and new format (array of objects)
+      if (Array.isArray(parsed)) {
+        return parsed; // New format: [{"name": "Nick Spencer", "role": "writer"}, ...]
+      } else if (typeof parsed === 'object') {
+        // Old format: {"writer": ["Nick Spencer"], "penciler": ["Ryan Ottley"], ...}
+        const creators = [];
+        Object.entries(parsed).forEach(([role, names]) => {
+          if (Array.isArray(names)) {
+            names.forEach(name => creators.push({ name, role }));
+          }
+        });
+        return creators;
+      }
+      return [];
+    } catch (e) {
+      console.warn('Failed to parse comic creators:', e);
+      return [];
+    }
+  };
+
+  const formatCreatorsDisplay = (creatorsData) => {
+    const creators = parseComicCreators(creatorsData);
+    if (creators.length === 0) return '';
+    
+    return creators.map(creator => `${creator.name} (${creator.role})`).join(', ');
+  };
+
+  const formatCharactersDisplay = (charactersData) => {
+    const characters = parseComicCharacters(charactersData);
+    if (characters.length === 0) return '';
+    
+    return characters.map(char => char.name || char).join(', ');
+  };
+
   // Fetch custom orders when component mounts
   useEffect(() => {
     fetchCustomOrders();
@@ -922,8 +972,8 @@ function CustomOrders() {
         comicDescription: item.comicDescription,
         comicCoverDate: item.comicCoverDate,
         comicStoreDate: item.comicStoreDate,
-        comicCreators: item.comicCreators,
-        comicCharacters: item.comicCharacters,
+        comicCreators: parseComicCreators(item.comicCreators), // Parse JSON to array for OrderItemsView
+        comicCharacters: parseComicCharacters(item.comicCharacters), // Parse JSON to array for OrderItemsView
         comicStoryArcs: item.comicStoryArcs,
         comicVineDetailsJson: item.comicVineDetailsJson,
         comicDetails: item.comicVineDetailsJson ? (() => {
@@ -3268,13 +3318,13 @@ function CustomOrders() {
                               
                               {item.comicCreators && (
                                 <p className="comic-creators">
-                                  <strong>Creative Team:</strong> {item.comicCreators}
+                                  <strong>Creative Team:</strong> {formatCreatorsDisplay(item.comicCreators)}
                                 </p>
                               )}
                               
                               {item.comicCharacters && (
                                 <p className="comic-characters">
-                                  <strong>Characters:</strong> {item.comicCharacters}
+                                  <strong>Characters:</strong> {formatCharactersDisplay(item.comicCharacters)}
                                 </p>
                               )}
                               

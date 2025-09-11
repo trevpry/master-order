@@ -7,6 +7,7 @@ const KanbanBoard = ({
   onEdit, 
   onDelete, 
   onStartTimer,
+  onViewDetails,
   loading 
 }) => {
   const [draggedTask, setDraggedTask] = useState(null);
@@ -116,6 +117,7 @@ const KanbanBoard = ({
                   onDelete={onDelete}
                   onToggleStatus={() => {}} // Handled by drag & drop
                   onStartTimer={onStartTimer}
+                  onViewDetails={onViewDetails}
                   compact={true}
                   showProject={true}
                 />

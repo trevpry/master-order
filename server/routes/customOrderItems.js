@@ -3,6 +3,7 @@ const router = express.Router();
 const prisma = require('../prismaClient'); // Use shared singleton instance
 const { validateMediaTypeAndTitle, validateCustomOrderItem } = require('../middleware/validation');
 const { sendBadRequest, sendSuccess, sendServerError, asyncHandler, logError } = require('../utils/responses');
+const { extractComicVineMetadata } = require('./customOrders/utilities/metadataExtractor');
 
 // Utility functions
 const simpleHash = (str) => {
@@ -159,9 +160,16 @@ router.post('/:id/items', validateMediaTypeAndTitle, asyncHandler(async (req, re
 
     // Parse ComicVine details if provided
     let comicVineDetails = null;
+    let extractedMetadata = {};
     if (comicVineDetailsJson) {
       try {
         comicVineDetails = JSON.parse(comicVineDetailsJson);
+        
+        // Extract metadata from ComicVine details for comics
+        if (mediaType === 'comic') {
+          extractedMetadata = extractComicVineMetadata(comicVineDetailsJson);
+          console.log('📚 Extracted ComicVine metadata:', extractedMetadata);
+        }
       } catch (parseError) {
         console.warn('Failed to parse ComicVine details JSON:', parseError);
       }
@@ -187,6 +195,8 @@ router.post('/:id/items', validateMediaTypeAndTitle, asyncHandler(async (req, re
         comicPublisher: comicPublisher,
         comicVineId: comicVineId,
         comicVineDetailsJson: comicVineDetails ? JSON.stringify(comicVineDetails) : null,
+        // Add extracted ComicVine metadata fields
+        ...extractedMetadata,
         // Book specific fields  
         ...finalBookData,
         // Short story specific fields
@@ -240,6 +250,13 @@ router.put('/:id/items/:itemId', async (req, res) => {
       try {
         const parsedDetails = JSON.parse(updateData.comicVineDetailsJson);
         updateData.comicVineDetailsJson = JSON.stringify(parsedDetails);
+        
+        // Extract metadata from ComicVine details for comics
+        const extractedMetadata = extractComicVineMetadata(updateData.comicVineDetailsJson);
+        console.log('📚 Extracted ComicVine metadata during update:', extractedMetadata);
+        
+        // Merge extracted metadata into update data
+        Object.assign(updateData, extractedMetadata);
       } catch (parseError) {
         console.warn('Failed to parse ComicVine details JSON in update:', parseError);
         updateData.comicVineDetailsJson = null;

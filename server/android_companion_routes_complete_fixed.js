@@ -1388,6 +1388,34 @@ router.post('/reading/start', async (req, res) => {
     
     console.log(`📱 Start reading session - mediaType: ${mediaType}, title: ${title}, customOrderItemId: ${customOrderItemId}`);
     
+    // Prepare request body for reading session start
+    const requestBody = {
+      mediaType,
+      title,
+      seriesTitle,
+      customOrderItemId
+    };
+
+    // For comics, parse title to extract comicSeries and comicIssue for validation
+    if (mediaType === 'comic' && title) {
+      // Try to parse format like "Series Name (Year) #Issue" or "Series Name #Issue"
+      let comicMatch = title.match(/^(.+?)\s*(?:\(\d{4}\))?\s*#(\d+)$/);
+      if (comicMatch) {
+        requestBody.comicSeries = comicMatch[1].trim();
+        requestBody.comicIssue = comicMatch[2];
+      } else {
+        // If we can't parse the format, use seriesTitle if available
+        if (seriesTitle) {
+          requestBody.comicSeries = seriesTitle;
+          // Try to extract issue number from title
+          const issueMatch = title.match(/#(\d+)/);
+          if (issueMatch) {
+            requestBody.comicIssue = issueMatch[1];
+          }
+        }
+      }
+    }
+    
     // Use existing reading session start endpoint
     const baseUrl = getAndroidApiBaseUrl();
     const sessionResponse = await fetch(`${baseUrl}/api/reading/start`, {
@@ -1395,12 +1423,7 @@ router.post('/reading/start', async (req, res) => {
       headers: {
         'Content-Type': 'application/json'
       },
-      body: JSON.stringify({
-        mediaType,
-        title,
-        seriesTitle,
-        customOrderItemId
-      })
+      body: JSON.stringify(requestBody)
     });
     
     const sessionData = await sessionResponse.json();
