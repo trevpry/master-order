@@ -32,6 +32,7 @@ const searchDebugRoutes = require('./routes/searchDebug');
 const settingsLegacyRedirectsRoutes = require('./routes/settingsLegacyRedirects');
 const weatherRoutes = require('./routes/weather');
 const historyPlusRoutes = require('./routes/historyPlus');
+const importDataRoutes = require('./routes/importData');
 
 // Import utility functions
 const { generateOptimizedClips, simpleHash, getUploadDirectory } = require('./utils/utilities');
@@ -395,6 +396,9 @@ app.use('/api/weather', weatherRoutes);
 
 // History Plus API routes
 app.use('/api/history-plus', historyPlusRoutes);
+
+// Import Data API routes
+app.use('/api/import', importDataRoutes);
 
 // Core Application API routes (Phase 4 Modularization) - MOUNTED LAST as catch-all
 const createCoreRouter = require('./routes/core');

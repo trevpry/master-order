@@ -20,6 +20,8 @@ const EventDetail = ({ event, onBack, onEventUpdate }) => {
   const tabs = [
     { id: 'overview', label: '📊 Overview', icon: '📊' },
     { id: 'books', label: '📚 Books', icon: '📚', count: event.books?.length || 0 },
+    { id: 'chapters', label: '📖 Chapters', icon: '📖', count: event.chapters?.length || 0 },
+    { id: 'sections', label: '📄 Sections', icon: '📄', count: event.sections?.length || 0 },
     { id: 'videos', label: '🎬 Videos', icon: '🎬', count: event.videos?.length || 0 }
   ];
 
@@ -75,6 +77,16 @@ const EventDetail = ({ event, onBack, onEventUpdate }) => {
                 <h3>📚 Books</h3>
                 <div className="summary-number">{event.books?.length || 0}</div>
                 <p>Historical books and texts</p>
+              </div>
+              <div className="summary-card">
+                <h3>📖 Chapters</h3>
+                <div className="summary-number">{event.chapters?.length || 0}</div>
+                <p>Book chapters</p>
+              </div>
+              <div className="summary-card">
+                <h3>📄 Sections</h3>
+                <div className="summary-number">{event.sections?.length || 0}</div>
+                <p>Chapter sections</p>
               </div>
               <div className="summary-card">
                 <h3>🎬 Videos</h3>
@@ -214,6 +226,108 @@ const EventDetail = ({ event, onBack, onEventUpdate }) => {
                 <button className="add-first-button">
                   ➕ Add First Video
                 </button>
+              </div>
+            )}
+          </div>
+        )}
+
+        {activeTab === 'chapters' && (
+          <div className="chapters-tab">
+            <div className="tab-header">
+              <h2>📖 Chapters ({event.chapters?.length || 0})</h2>
+            </div>
+            
+            {event.chapters && event.chapters.length > 0 ? (
+              <div className="content-grid">
+                {event.chapters.map(chapter => (
+                  <div key={chapter.id} className="content-card">
+                    <div className="content-header">
+                      <h4>{chapter.title}</h4>
+                      {chapter.user_chapter_reads?.read && (
+                        <span className="read-badge">✅ Read</span>
+                      )}
+                    </div>
+                    <div className="chapter-meta">
+                      <span className="book-title">📚 {chapter.book?.title}</span>
+                      <span className="chapter-number">Chapter {chapter.chapterNumber}</span>
+                    </div>
+                    {chapter.description && (
+                      <p className="content-description">
+                        {chapter.description.length > 150 
+                          ? `${chapter.description.substring(0, 150)}...` 
+                          : chapter.description
+                        }
+                      </p>
+                    )}
+                    <div className="content-actions">
+                      {!chapter.user_chapter_reads?.read && (
+                        <button className="mark-read-button">
+                          📖 Mark as Read
+                        </button>
+                      )}
+                      <button className="view-button">
+                        👁️ View Details
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="empty-content">
+                <div className="empty-icon">📖</div>
+                <h3>No Chapters Linked</h3>
+                <p>No chapters are directly linked to this historical event.</p>
+              </div>
+            )}
+          </div>
+        )}
+
+        {activeTab === 'sections' && (
+          <div className="sections-tab">
+            <div className="tab-header">
+              <h2>📄 Sections ({event.sections?.length || 0})</h2>
+            </div>
+            
+            {event.sections && event.sections.length > 0 ? (
+              <div className="content-grid">
+                {event.sections.map(section => (
+                  <div key={section.id} className="content-card">
+                    <div className="content-header">
+                      <h4>{section.title}</h4>
+                      {section.user_section_reads?.read && (
+                        <span className="read-badge">✅ Read</span>
+                      )}
+                    </div>
+                    <div className="section-meta">
+                      <span className="book-title">📚 {section.chapter?.book?.title}</span>
+                      <span className="chapter-title">📖 {section.chapter?.title}</span>
+                    </div>
+                    {section.description && (
+                      <p className="content-description">
+                        {section.description.length > 150 
+                          ? `${section.description.substring(0, 150)}...` 
+                          : section.description
+                        }
+                      </p>
+                    )}
+                    <div className="content-actions">
+                      {!section.user_section_reads?.read && (
+                        <button className="mark-read-button">
+                          📄 Mark as Read
+                        </button>
+                      )}
+                      <button className="view-button">
+                        👁️ View Details
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="empty-content">
+                <div className="empty-icon">📄</div>
+                <h3>No Sections Linked</h3>
+                <p>No sections are directly linked to this historical event.</p>
               </div>
             )}
           </div>

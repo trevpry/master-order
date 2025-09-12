@@ -12,8 +12,15 @@ const historyPlusService = new HistoryPlusService();
 
 // GET /api/history-plus/events
 router.get('/events', asyncHandler(async (req, res) => {
-  const events = await historyPlusService.getAllEvents();
-  sendSuccess(res, events);
+  const { bookId, chapterId, sectionId } = req.query;
+  
+  if (bookId || chapterId || sectionId) {
+    const events = await historyPlusService.getEventsByContent(req.query);
+    sendSuccess(res, { events });
+  } else {
+    const events = await historyPlusService.getAllEvents();
+    sendSuccess(res, events);
+  }
 }));
 
 // GET /api/history-plus/events/:id

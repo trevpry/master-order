@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { Plus, Book, FileText, List, CheckCircle, Circle, Edit, Calendar, ExternalLink, Search } from 'lucide-react';
+import { Plus, Book, FileText, List, CheckCircle, Circle, Edit, Calendar, ExternalLink, Search, BarChart3, Clock, Target } from 'lucide-react';
+import EventsList from '../components/EventsList';
 import '../styles/Books.css';
 
 const Books = () => {
@@ -28,13 +29,13 @@ const Books = () => {
     fetchBooks();
   }, []);
 
-  // Fetch all books
+  // Fetch all books with statistics
   const fetchBooks = async () => {
     try {
       setLoading(true);
       const response = await fetch('/api/history-plus/books');
       const data = await response.json();
-      const booksData = data.books || [];
+      const booksData = data.data?.books || [];
       setBooks(booksData);
       
       // Fetch event counts for all books
@@ -54,12 +55,12 @@ const Books = () => {
     try {
       const response = await fetch(`/api/history-plus/books/${bookId}`);
       const data = await response.json();
-      setSelectedBook(data);
+      setSelectedBook(data.data);
       setSelectedChapter(null); // Reset chapter selection
       
       // Fetch event counts for chapters
-      if (data.chapters) {
-        data.chapters.forEach(chapter => {
+      if (data.data?.chapters) {
+        data.data.chapters.forEach(chapter => {
           fetchEventCount('chapter', chapter.id);
         });
       }
@@ -73,11 +74,11 @@ const Books = () => {
     try {
       const response = await fetch(`/api/history-plus/chapters/${chapterId}`);
       const data = await response.json();
-      setSelectedChapter(data);
+      setSelectedChapter(data.data);
       
       // Fetch event counts for sections
-      if (data.sections) {
-        data.sections.forEach(section => {
+      if (data.data?.sections) {
+        data.data.sections.forEach(section => {
           fetchEventCount('section', section.id);
         });
       }
@@ -93,7 +94,7 @@ const Books = () => {
       const data = await response.json();
       setEventCounts(prev => ({
         ...prev,
-        [`${type}_${id}`]: data.events ? data.events.length : 0
+        [`${type}_${id}`]: data.data?.events ? data.data.events.length : 0
       }));
     } catch (err) {
       console.error('Error fetching event count:', err);
@@ -139,7 +140,7 @@ const Books = () => {
         const data = await response.json();
         setLinkedEvents(prev => ({
           ...prev,
-          [key]: data.events || []
+          [key]: data.data?.events || []
         }));
       } catch (err) {
         console.error('Error fetching linked events:', err);
@@ -313,10 +314,8 @@ const Books = () => {
                       
                       {showLinkedEvents[`book_${book.id}`] && (
                         <div className="linked-events-content">
-                          <LinkedEvents 
+                          <EventsList 
                             events={linkedEvents[`book_${book.id}`]} 
-                            type="book" 
-                            id={book.id} 
                           />
                         </div>
                       )}
@@ -412,10 +411,8 @@ const Books = () => {
                         
                         {showLinkedEvents[`chapter_${chapter.id}`] && (
                           <div className="linked-events-content">
-                            <LinkedEvents 
+                            <EventsList 
                               events={linkedEvents[`chapter_${chapter.id}`]} 
-                              type="chapter" 
-                              id={chapter.id} 
                             />
                           </div>
                         )}
@@ -503,10 +500,8 @@ const Books = () => {
                         
                         {showLinkedEvents[`section_${section.id}`] && (
                           <div className="linked-events-content">
-                            <LinkedEvents 
+                            <EventsList 
                               events={linkedEvents[`section_${section.id}`]} 
-                              type="section" 
-                              id={section.id} 
                             />
                           </div>
                         )}

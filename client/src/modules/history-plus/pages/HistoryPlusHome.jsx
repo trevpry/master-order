@@ -40,8 +40,18 @@ const HistoryPlusHome = () => {
   };
 
   const handleEventSelect = async (event) => {
-    setSelectedEvent(event);
-    setCurrentView('event-detail');
+    try {
+      setLoading(true);
+      // Fetch the full event details with books, chapters, sections, etc.
+      const eventDetails = await historyPlusApi.getEventById(event.id);
+      setSelectedEvent(eventDetails.data || eventDetails);
+      setCurrentView('event-detail');
+    } catch (err) {
+      setError('Failed to load event details');
+      console.error('Error loading event details:', err);
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleBackToEvents = () => {

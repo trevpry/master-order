@@ -14,31 +14,57 @@ class HistoryPlusService {
   // ==========================================
 
   async getAllEvents() {
-    return await this.prisma.historicalEvent.findMany({
+    const events = await this.prisma.historicalEvent.findMany({
       where: { hidden: false },
       include: {
         books: {
           include: {
             chapters: {
               include: {
-                sections: true
+                sections: true,
+                user_chapter_reads: true
               }
-            }
+            },
+            user_book_reads: true
+          }
+        },
+        chapters: {
+          include: {
+            book: true,
+            sections: true,
+            user_chapter_reads: true
+          }
+        },
+        sections: {
+          include: {
+            chapter: {
+              include: {
+                book: true
+              }
+            },
+            user_section_reads: true
           }
         },
         videos: {
           include: {
-            channel: true
+            channel: true,
+            user_video_watches: true
           }
         },
         user_event_reviews: true
       },
       orderBy: { startDate: 'asc' }
     });
+
+    // Map user_event_reviews to reviewed property for frontend compatibility
+    return events.map(event => ({
+      ...event,
+      reviewed: event.user_event_reviews?.reviewed || false
+    }));
   }
 
   async getEventById(id) {
-    return await this.prisma.historicalEvent.findUnique({
+    const event = await this.prisma.historicalEvent.findUnique({
       where: { id: parseInt(id) },
       include: {
         books: {
@@ -52,6 +78,23 @@ class HistoryPlusService {
             user_book_reads: true
           }
         },
+        chapters: {
+          include: {
+            book: true,
+            sections: true,
+            user_chapter_reads: true
+          }
+        },
+        sections: {
+          include: {
+            chapter: {
+              include: {
+                book: true
+              }
+            },
+            user_section_reads: true
+          }
+        },
         videos: {
           include: {
             channel: true,
@@ -61,6 +104,14 @@ class HistoryPlusService {
         user_event_reviews: true
       }
     });
+
+    if (!event) return null;
+
+    // Map user_event_reviews to reviewed property for frontend compatibility
+    return {
+      ...event,
+      reviewed: event.user_event_reviews?.reviewed || false
+    };
   }
 
   async createEvent(eventData) {
@@ -80,6 +131,95 @@ class HistoryPlusService {
     return await this.prisma.historicalEvent.delete({
       where: { id: parseInt(id) }
     });
+  }
+
+  async getEventsByContent(filters) {
+    const { bookId, chapterId, sectionId } = filters;
+    
+    let events = [];
+    
+    if (sectionId) {
+      // Find events linked to this specific section
+      const section = await this.prisma.historySection.findUnique({
+        where: { id: parseInt(sectionId) },
+        include: { event: true }
+      });
+      if (section?.event) {
+        events.push(section.event);
+      }
+    } else if (chapterId) {
+      // Find events linked to this specific chapter and its sections
+      const chapter = await this.prisma.historyChapter.findUnique({
+        where: { id: parseInt(chapterId) },
+        include: { 
+          event: true,
+          sections: {
+            include: { event: true }
+          }
+        }
+      });
+      
+      if (chapter?.event) {
+        events.push(chapter.event);
+      }
+      
+      chapter?.sections?.forEach(section => {
+        if (section.event && !events.find(e => e.id === section.event.id)) {
+          events.push(section.event);
+        }
+      });
+    } else if (bookId) {
+      // Find events linked to this specific book and its chapters/sections
+      const book = await this.prisma.historyBook.findUnique({
+        where: { id: parseInt(bookId) },
+        include: { 
+          event: true,
+          chapters: {
+            include: {
+              event: true,
+              sections: {
+                include: { event: true }
+              }
+            }
+          }
+        }
+      });
+      
+      if (book?.event) {
+        events.push(book.event);
+      }
+      
+      book?.chapters?.forEach(chapter => {
+        if (chapter.event && !events.find(e => e.id === chapter.event.id)) {
+          events.push(chapter.event);
+        }
+        
+        chapter.sections?.forEach(section => {
+          if (section.event && !events.find(e => e.id === section.event.id)) {
+            events.push(section.event);
+          }
+        });
+      });
+    }
+
+    // Filter out null/undefined events and add user reviews
+    const validEvents = events.filter(event => event != null);
+    
+    // Get user reviews for these events
+    const eventsWithReviews = await Promise.all(
+      validEvents.map(async (event) => {
+        const userReview = await this.prisma.user_event_reviews.findUnique({
+          where: { eventId: event.id }
+        });
+        
+        return {
+          ...event,
+          reviewed: userReview?.reviewed || false
+        };
+      })
+    );
+
+    return eventsWithReviews;
   }
 
   // ==========================================
@@ -107,20 +247,25 @@ class HistoryPlusService {
 
     // Calculate statistics for each book
     const booksWithStats = books.map(book => {
-      const chaptersTotal = book.chapters.length;
-      const chaptersRead = book.chapters.filter(chapter => 
-        chapter.user_chapter_reads.length > 0 && chapter.user_chapter_reads[0].read
+      const chapters = book.chapters || [];
+      const chaptersTotal = chapters.length;
+      const chaptersRead = chapters.filter(chapter => 
+        chapter.user_chapter_reads && chapter.user_chapter_reads.read
       ).length;
       
-      const sectionsTotal = book.chapters.reduce((sum, chapter) => sum + chapter.sections.length, 0);
-      const sectionsRead = book.chapters.reduce((sum, chapter) => 
-        sum + chapter.sections.filter(section => 
-          section.user_section_reads.length > 0 && section.user_section_reads[0].read
-        ).length, 0
-      );
+      const sectionsTotal = chapters.reduce((sum, chapter) => {
+        const sections = chapter.sections || [];
+        return sum + sections.length;
+      }, 0);
+      const sectionsRead = chapters.reduce((sum, chapter) => {
+        const sections = chapter.sections || [];
+        return sum + sections.filter(section => 
+          section.user_section_reads && section.user_section_reads.read
+        ).length;
+      }, 0);
 
       const progressPercentage = sectionsTotal > 0 ? Math.round((sectionsRead / sectionsTotal) * 100) : 0;
-      const read = book.user_book_reads.length > 0 && book.user_book_reads[0].read;
+      const read = book.user_book_reads && book.user_book_reads.read;
 
       return {
         ...book,
@@ -154,7 +299,7 @@ class HistoryPlusService {
   }
 
   async getBookById(id) {
-    return await this.prisma.historyBook.findUnique({
+    const book = await this.prisma.historyBook.findUnique({
       where: { id: parseInt(id) },
       include: {
         chapters: {
@@ -171,6 +316,32 @@ class HistoryPlusService {
         event: true
       }
     });
+
+    if (!book) return null;
+
+    // Map user tracking data to read status for chapters and sections
+    const chapters = book.chapters || [];
+    const chaptersWithReadStatus = chapters.map(chapter => {
+      const sections = chapter.sections || [];
+      const sectionsWithReadStatus = sections.map(section => ({
+        ...section,
+        read: section.user_section_reads && section.user_section_reads.read
+      }));
+
+      return {
+        ...chapter,
+        read: chapter.user_chapter_reads && chapter.user_chapter_reads.read,
+        sections: sectionsWithReadStatus,
+        _count: { sections: sectionsWithReadStatus.length }
+      };
+    });
+
+    // Map book read status
+    return {
+      ...book,
+      read: book.user_book_reads && book.user_book_reads.read,
+      chapters: chaptersWithReadStatus
+    };
   }
 
   async createBook(bookData) {
@@ -249,7 +420,7 @@ class HistoryPlusService {
   }
 
   async getChapterById(id) {
-    return await this.prisma.historyChapter.findUnique({
+    const chapter = await this.prisma.historyChapter.findUnique({
       where: { id: parseInt(id) },
       include: {
         sections: {
@@ -262,6 +433,22 @@ class HistoryPlusService {
         event: true
       }
     });
+
+    if (!chapter) return null;
+
+    // Map user tracking data to read status for sections
+    const sections = chapter.sections || [];
+    const sectionsWithReadStatus = sections.map(section => ({
+      ...section,
+      read: section.user_section_reads && section.user_section_reads.read
+    }));
+
+    // Map chapter read status
+    return {
+      ...chapter,
+      read: chapter.user_chapter_reads && chapter.user_chapter_reads.read,
+      sections: sectionsWithReadStatus
+    };
   }
 
   // ==========================================

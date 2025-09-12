@@ -351,6 +351,76 @@ const TimelineItem = ({
               </div>
             </div>
           )}
+
+          {event.chapters?.length > 0 && (
+            <div className="mb-4">
+              <h4 className="mb-3 text-sm font-semibold text-gray-700">
+                📖 Related Chapters ({event.chapters.length})
+              </h4>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                {event.chapters.slice(0, 4).map((chapter) => (
+                  <div
+                    key={chapter.id}
+                    className={`flex items-center justify-start gap-2 p-3 text-xs border-green-200 h-auto min-h-[2.5rem] rounded ${
+                      chapter.user_chapter_reads?.read 
+                        ? 'text-green-800 bg-green-100' 
+                        : 'text-green-700 bg-green-50'
+                    }`}
+                    title={`${chapter.title} from ${chapter.book?.title}${chapter.user_chapter_reads?.read ? ' (Read)' : ' (Unread)'}`}
+                  >
+                    <span className="flex-shrink-0">📝</span>
+                    <div className="flex-1 text-left leading-tight">
+                      <div className="font-medium">{chapter.title}</div>
+                      <div className="text-gray-600 text-xs">{chapter.book?.title}</div>
+                    </div>
+                    <div className="flex items-center gap-1">
+                      {chapter.user_chapter_reads?.read && <span className="flex-shrink-0 text-green-600">✓</span>}
+                    </div>
+                  </div>
+                ))}
+                {event.chapters.length > 4 && (
+                  <div className="flex items-center justify-center p-3 text-xs text-gray-500 border border-dashed border-gray-300 rounded min-h-[2.5rem]">
+                    +{event.chapters.length - 4} more chapters
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {event.sections?.length > 0 && (
+            <div className="mb-4">
+              <h4 className="mb-3 text-sm font-semibold text-gray-700">
+                📄 Related Sections ({event.sections.length})
+              </h4>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                {event.sections.slice(0, 4).map((section) => (
+                  <div
+                    key={section.id}
+                    className={`flex items-center justify-start gap-2 p-3 text-xs border-purple-200 h-auto min-h-[2.5rem] rounded ${
+                      section.user_section_reads?.read 
+                        ? 'text-purple-800 bg-purple-100' 
+                        : 'text-purple-700 bg-purple-50'
+                    }`}
+                    title={`${section.title} from ${section.chapter?.book?.title}${section.user_section_reads?.read ? ' (Read)' : ' (Unread)'}`}
+                  >
+                    <span className="flex-shrink-0">📄</span>
+                    <div className="flex-1 text-left leading-tight">
+                      <div className="font-medium">{section.title}</div>
+                      <div className="text-gray-600 text-xs">{section.chapter?.title} - {section.chapter?.book?.title}</div>
+                    </div>
+                    <div className="flex items-center gap-1">
+                      {section.user_section_reads?.read && <span className="flex-shrink-0 text-green-600">✓</span>}
+                    </div>
+                  </div>
+                ))}
+                {event.sections.length > 4 && (
+                  <div className="flex items-center justify-center p-3 text-xs text-gray-500 border border-dashed border-gray-300 rounded min-h-[2.5rem]">
+                    +{event.sections.length - 4} more sections
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
         </div>
       )}
 

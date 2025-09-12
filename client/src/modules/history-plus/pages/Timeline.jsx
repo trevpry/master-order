@@ -162,7 +162,7 @@ const Timeline = () => {
 
   const handleToggleReviewed = async (eventId, reviewed) => {
     try {
-      await historyPlusApi.updateEvent(eventId, { reviewed });
+      await historyPlusApi.markEventReviewed(eventId, { reviewed });
       await loadData(); // Reload data
     } catch (err) {
       console.error('Error updating event review status:', err);
