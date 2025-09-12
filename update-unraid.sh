@@ -45,7 +45,7 @@ cd "$REPO_PATH"
 
 # Check for required migration files
 REQUIRED_FILES=(
-    "migrate-history-plus-data.js"
+    "server/migrate-history-plus-data.js"
     "Dockerfile"
     "package.json"
 )
@@ -129,95 +129,6 @@ create_postgresql_backup() {
     fi
 }
 
-# Function to run History Plus data migration
-migrate_history_plus_data() {
-    log_info "Starting History Plus data migration analysis..."
-    
-    # Check if migration script exists
-    if [ ! -f "$REPO_PATH/migrate-history-plus-data.js" ]; then
-        log_error "History Plus migration script not found"
-        return 1
-    fi
-    
-    # Set environment for migration
-    export DATABASE_URL="$DATABASE_URL"
-    
-    # Change to repo directory for migration
-    cd "$REPO_PATH"
-    
-    # First, analyze what would be migrated (dry run info)
-    log_info "Analyzing SQLite source data..."
-    
-    # Show user what will be migrated
-    echo ""
-    echo "🔍 MIGRATION ANALYSIS:"
-    echo "   📁 Source: SQLite database ($REPO_PATH/master_order.db)"
-    echo "   🎯 Target: PostgreSQL ($POSTGRES_HOST:$POSTGRES_PORT/$POSTGRES_DB)"
-    echo "   🛡️  SAFE MODE: Only new records will be added, existing PostgreSQL data preserved"
-    echo ""
-    
-    # Run pre-migration analysis
-    log_info "Running pre-migration safety analysis..."
-    if node -e "
-        const { PrismaClient } = require('@prisma/client');
-        const sqlite = new PrismaClient({ datasources: { db: { url: 'file:./master_order.db' }}});
-        const postgres = new PrismaClient({ datasources: { db: { url: process.env.DATABASE_URL }}});
-        
-        (async () => {
-            try {
-                console.log('📊 SQLite Source Data:');
-                const events = await sqlite.historicalEvent.count();
-                const videos = await sqlite.historyVideo.count();
-                const books = await sqlite.historyBook.count();
-                console.log('   Historical Events:', events);
-                console.log('   History Videos:', videos);
-                console.log('   History Books:', books);
-                
-                console.log('\\n🗃️  PostgreSQL Target Status:');
-                const pgEvents = await postgres.historicalEvent.count();
-                const pgVideos = await postgres.historyVideo.count();
-                const pgBooks = await postgres.historyBook.count();
-                console.log('   Existing Events:', pgEvents);
-                console.log('   Existing Videos:', pgVideos);
-                console.log('   Existing Books:', pgBooks);
-                
-                console.log('\\n✅ Migration will ONLY add new records, existing data preserved');
-                await sqlite.\$disconnect();
-                await postgres.\$disconnect();
-            } catch (error) {
-                console.error('❌ Analysis failed:', error.message);
-                process.exit(1);
-            }
-        })();
-    " >> "$HISTORY_PLUS_MIGRATION_LOG" 2>&1; then
-        log_success "Pre-migration analysis completed"
-    else
-        log_error "Pre-migration analysis failed"
-        return 1
-    fi
-    
-    echo ""
-    echo "⚠️  FINAL SAFETY CONFIRMATION:"
-    echo "   This migration will ONLY INSERT new records"
-    echo "   Existing PostgreSQL data will NOT be modified"
-    echo "   All operations use database transactions for safety"
-    echo ""
-    read -p "Proceed with safe History Plus migration? (y/N): " -n 1 -r
-    echo
-    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-        log_info "Migration cancelled by user"
-        return 1
-    fi
-    
-    # Run the actual migration with logging
-    log_info "Running safe History Plus migration..."
-    if node migrate-history-plus-data.js >> "$HISTORY_PLUS_MIGRATION_LOG" 2>&1; then
-        log_success "History Plus data migration completed successfully"
-        return 0
-    else
-        log_error "History Plus data migration failed - check log: $HISTORY_PLUS_MIGRATION_LOG"
-        return 1
-    fi
 }
 
 # Step 1: Create automatic database backup
@@ -334,28 +245,67 @@ SQLITE_DB_PATH="$REPO_PATH/master_order.db"
 if [ -f "$SQLITE_DB_PATH" ]; then
     log_info "SQLite database found, running History Plus migration to PostgreSQL..."
     
-    if migrate_history_plus_data; then
-        log_success "History Plus migration completed successfully"
-    else
-        log_error "History Plus migration failed"
-        echo ""
-        echo "🔙 ROLLBACK OPTIONS:"
-        echo "   1. Check migration log: $HISTORY_PLUS_MIGRATION_LOG"
-        if [ -n "$POSTGRES_BACKUP_FILE" ]; then
-            echo "   2. Restore PostgreSQL backup: psql \"$DATABASE_URL\" < \"$POSTGRES_BACKUP_FILE\""
+    # Ensure we're in the server directory where dependencies exist
+    cd "$REPO_PATH/server"
+    
+    # Check if Node.js dependencies are installed
+    if [ ! -d "node_modules" ]; then
+        log_info "Installing Node.js dependencies for migration..."
+        npm install >> "$HISTORY_PLUS_MIGRATION_LOG" 2>&1
+        if [ $? -ne 0 ]; then
+            log_warning "npm install failed, but continuing (dependencies may already be available)"
         fi
-        echo "   3. Continue without migration (manual migration required later)"
-        echo ""
-        read -p "Continue with deployment anyway? (y/N): " -n 1 -r
-        echo
-        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-            log_error "Deployment cancelled due to migration failure"
-            exit 1
+    fi
+    
+    # Set environment for migration to PostgreSQL
+    export DATABASE_URL="$DATABASE_URL"
+    
+    log_info "Running pre-migration analysis..."
+    echo ""
+    echo "🔍 MIGRATION ANALYSIS:"
+    echo "   📁 Source: SQLite database ($REPO_PATH/master_order.db)"
+    echo "   🎯 Target: PostgreSQL ($POSTGRES_HOST:$POSTGRES_PORT/$POSTGRES_DB)"
+    echo "   🛡️  SAFE MODE: Only new records will be added, existing PostgreSQL data preserved"
+    echo ""
+    
+    echo "⚠️  FINAL SAFETY CONFIRMATION:"
+    echo "   This migration will ONLY INSERT new records"
+    echo "   Existing PostgreSQL data will NOT be modified"
+    echo "   All operations use database transactions for safety"
+    echo ""
+    read -p "Proceed with safe History Plus migration? (y/N): " -n 1 -r
+    echo
+    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+        log_info "Migration cancelled by user"
+    else
+        # Run the actual migration
+        log_info "Running safe History Plus migration..."
+        if node migrate-history-plus-data.js >> "$HISTORY_PLUS_MIGRATION_LOG" 2>&1; then
+            log_success "History Plus migration completed successfully"
+        else
+            log_error "History Plus migration failed - check log: $HISTORY_PLUS_MIGRATION_LOG"
+            echo ""
+            echo "🔙 ROLLBACK OPTIONS:"
+            echo "   1. Check migration log: $HISTORY_PLUS_MIGRATION_LOG"
+            if [ -n "$POSTGRES_BACKUP_FILE" ]; then
+                echo "   2. Restore PostgreSQL backup: psql \"$DATABASE_URL\" < \"$POSTGRES_BACKUP_FILE\""
+            fi
+            echo "   3. Continue without migration (manual migration required later)"
+            echo ""
+            read -p "Continue with deployment anyway? (y/N): " -n 1 -r
+            echo
+            if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+                log_error "Deployment cancelled due to migration failure"
+                exit 1
+            fi
         fi
     fi
 else
     log_info "No SQLite database found, skipping History Plus migration"
 fi
+
+# Return to repo root for subsequent operations
+cd "$REPO_PATH"
 
 # Step 5: Stop the running container
 log_info "Stopping container: $CONTAINER_NAME"

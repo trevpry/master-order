@@ -19,11 +19,38 @@ class HistoryPlusDataMigrator {
   async initialize() {
     console.log('🚀 Initializing History Plus Data Migration...');
     
-    // Source: SQLite database
+    // Source: SQLite database (check multiple possible locations)
+    const sqlitePaths = [
+      'file:../master_order.db',        // Parent directory (from server/)
+      'file:./master_order.db',         // Current directory
+      'file:../data/master_order.db',   // Docker volume mount location
+      'file:/app/data/master_order.db'  // Absolute Docker path
+    ];
+    
+    let sqliteUrl = null;
+    for (const path of sqlitePaths) {
+      try {
+        const testPrisma = new PrismaClient({
+          datasources: { db: { url: path } }
+        });
+        await testPrisma.$executeRaw`SELECT 1`;
+        await testPrisma.$disconnect();
+        sqliteUrl = path;
+        console.log(`✅ Found SQLite database at: ${path}`);
+        break;
+      } catch (error) {
+        // Try next path
+      }
+    }
+    
+    if (!sqliteUrl) {
+      throw new Error('❌ SQLite database not found in any expected location');
+    }
+    
     this.sourcePrisma = new PrismaClient({
       datasources: {
         db: {
-          url: 'file:./master_order.db'
+          url: sqliteUrl
         }
       }
     });
