@@ -38,13 +38,13 @@ model Settings {
 }
 
 model EddieSettings {
-  id             Int     @id @default(autoincrement())
-  weatherEnabled Boolean @default(false)
-  weatherUnits   String  @default("metric")
-  weatherApiKey  String?
+  id              Int      @id @default(autoincrement())
+  weatherApiKey   String?
   weatherLocation String?
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  weatherUnits    String   @default("metric")
+  weatherEnabled  Boolean  @default(false)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
 }
 
 model Order {
@@ -57,126 +57,107 @@ model Order {
 }
 
 model CustomOrder {
-  id          Int               @id @default(autoincrement())
-  name        String
-  description String?
-  isActive    Boolean           @default(true)
-  createdAt   DateTime          @default(now())
-  updatedAt   DateTime          @updatedAt
-  icon        String?
-  parentOrderId Int?            // Foreign key for parent custom order
-  
-  // Music playlist fields
-  playlistRatingKey String?     // For Plex playlists
-  customPlaylistId  Int?        // For custom playlists
-  
-  // Background gallery fields
-  backgroundGalleryId Int?      // For background galleries
-  
-  items       CustomOrderItem[]
-  referencingItems CustomOrderItem[] @relation("SubOrderReference") // Items that reference this order as a sub-order
-  
-  // Self-referencing relationships for hierarchical orders
-  parentOrder CustomOrder?      @relation("OrderHierarchy", fields: [parentOrderId], references: [id])
-  subOrders   CustomOrder[]     @relation("OrderHierarchy")
-  
-  // Playlist relationships
-  plexPlaylist    PlexPlaylist?  @relation(fields: [playlistRatingKey], references: [ratingKey])
-  customPlaylist  CustomPlaylist? @relation(fields: [customPlaylistId], references: [id])
-  
-  // Background gallery relationship
-  backgroundGallery BackgroundGallery? @relation(fields: [backgroundGalleryId], references: [id])
+  id                  Int                @id @default(autoincrement())
+  name                String
+  description         String?
+  isActive            Boolean            @default(true)
+  createdAt           DateTime           @default(now())
+  updatedAt           DateTime           @updatedAt
+  icon                String?
+  parentOrderId       Int?
+  playlistRatingKey   String?
+  customPlaylistId    Int?
+  backgroundGalleryId Int?
+  backgroundGallery   BackgroundGallery? @relation(fields: [backgroundGalleryId], references: [id])
+  customPlaylist      CustomPlaylist?    @relation(fields: [customPlaylistId], references: [id])
+  plexPlaylist        PlexPlaylist?      @relation(fields: [playlistRatingKey], references: [ratingKey])
+  parentOrder         CustomOrder?       @relation("OrderHierarchy", fields: [parentOrderId], references: [id])
+  subOrders           CustomOrder[]      @relation("OrderHierarchy")
+  items               CustomOrderItem[]
+  referencingItems    CustomOrderItem[]  @relation("SubOrderReference")
 }
 
 model CustomOrderItem {
-  id                     Int               @id @default(autoincrement())
-  customOrderId          Int
-  mediaType              String
-  plexKey                String?
-  title                  String
-  seasonNumber           Int?
-  episodeNumber          Int?
-  seriesTitle            String?
-  comicSeries            String?
-  comicYear              Int?
-  comicIssue             String?
-  comicVolume            String?
-  comicPublisher         String?
-  comicVineId            String?
-  comicVineDetailsJson   String?
-  
-  // NEW: Comprehensive ComicVine fields
-  comicVineSeriesId      Int?
-  comicVineIssueId       Int?
-  comicIssueName         String?
-  comicDescription       String?
-  comicCoverDate         String?
-  comicStoreDate         String?
-  comicCreators          String?
-  comicCharacters        String?
-  comicStoryArcs         String?
-  
-  customTitle            String?
-  bookTitle              String?
-  bookAuthor             String?
-  bookYear               Int?
-  bookIsbn               String?
-  bookPublisher          String?
-  bookOpenLibraryId      String?
-  bookCoverUrl           String?
-  bookPageCount          Int?
-  bookCurrentPage        Int?
-  bookPercentRead        Float?
-  storyTitle             String?
-  storyAuthor            String?
-  storyYear              Int?
-  storyUrl               String?
-  storyContainedInBookId Int?
-  storyCoverUrl          String?
-  sortOrder              Int               @default(0)
-  isWatched              Boolean           @default(false)
-  isFromTvdbOnly         Boolean           @default(false)
-  createdAt              DateTime          @default(now())
-  updatedAt              DateTime          @updatedAt
-  artworkLastCached      DateTime?
-  artworkMimeType        String?
-  localArtworkPath       String?
-  originalArtworkUrl     String?
-  webTitle               String?
-  webUrl                 String?
-  webDescription         String?
-  tvdbId                 String?
-  tvdbYear               Int?
-  tvdbOverview           String?
-  tvdbGenres             String?
-  tvdbDirector           String?
-  tvdbStudio             String?
-  tvdbArtworkUrl         String?
-  referencedCustomOrderId Int?              // For sub-order items, references the CustomOrder id
-  
-  // Komga integration fields
-  komgaUrl               String?
-  komgaSeriesId          String?
-  komgaBookId            String?
-  komgaSeriesUrl         String?
-  komgaMetadata          String?
-  
-  storyContainedInBook   CustomOrderItem?  @relation("StoryInBook", fields: [storyContainedInBookId], references: [id])
-  containedStories       CustomOrderItem[] @relation("StoryInBook")
-  referencedCustomOrder  CustomOrder?      @relation("SubOrderReference", fields: [referencedCustomOrderId], references: [id])
-  customOrder            CustomOrder       @relation(fields: [customOrderId], references: [id], onDelete: Cascade)
-  
-  // Watch logs for this item
-  watchLogs              WatchLog[]
+  id                      Int               @id @default(autoincrement())
+  customOrderId           Int
+  mediaType               String
+  plexKey                 String?
+  title                   String
+  seasonNumber            Int?
+  episodeNumber           Int?
+  seriesTitle             String?
+  comicSeries             String?
+  comicYear               Int?
+  comicIssue              String?
+  comicVolume             String?
+  comicPublisher          String?
+  comicVineId             String?
+  comicVineDetailsJson    String?
+  comicVineSeriesId       Int?
+  comicVineIssueId        Int?
+  comicIssueName          String?
+  comicDescription        String?
+  comicCoverDate          String?
+  comicStoreDate          String?
+  comicCreators           String?
+  comicCharacters         String?
+  comicStoryArcs          String?
+  customTitle             String?
+  bookTitle               String?
+  bookAuthor              String?
+  bookYear                Int?
+  bookIsbn                String?
+  bookPublisher           String?
+  bookOpenLibraryId       String?
+  bookCoverUrl            String?
+  bookPageCount           Int?
+  bookCurrentPage         Int?
+  bookPercentRead         Float?
+  storyTitle              String?
+  storyAuthor             String?
+  storyYear               Int?
+  storyUrl                String?
+  storyContainedInBookId  Int?
+  storyCoverUrl           String?
+  sortOrder               Int               @default(0)
+  isWatched               Boolean           @default(false)
+  isFromTvdbOnly          Boolean           @default(false)
+  createdAt               DateTime          @default(now())
+  updatedAt               DateTime          @updatedAt
+  artworkLastCached       DateTime?
+  artworkMimeType         String?
+  localArtworkPath        String?
+  originalArtworkUrl      String?
+  webTitle                String?
+  webUrl                  String?
+  webDescription          String?
+  tvdbId                  String?
+  tvdbYear                Int?
+  tvdbOverview            String?
+  tvdbGenres              String?
+  tvdbDirector            String?
+  tvdbStudio              String?
+  tvdbArtworkUrl          String?
+  referencedCustomOrderId Int?
+  komgaBookId             String?
+  komgaMetadata           String?
+  komgaSeriesId           String?
+  komgaSeriesUrl          String?
+  komgaUrl                String?
+  customOrder             CustomOrder       @relation(fields: [customOrderId], references: [id], onDelete: Cascade)
+  referencedCustomOrder   CustomOrder?      @relation("SubOrderReference", fields: [referencedCustomOrderId], references: [id])
+  storyContainedInBook    CustomOrderItem?  @relation("StoryInBook", fields: [storyContainedInBookId], references: [id])
+  containedStories        CustomOrderItem[] @relation("StoryInBook")
+  watchLogs               WatchLog[]
 }
 
 model PlexLibrarySection {
-  id               Int          @id @default(autoincrement())
-  sectionKey       String       @unique
+  id               Int            @id @default(autoincrement())
+  sectionKey       String         @unique
   title            String
   type             String
-  createdAt        DateTime     @default(now())
-  updatedAt        DateTime     @updatedAt
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
   agent            String?
   allowSync        Int?
   art              String?
@@ -194,12 +175,12 @@ model PlexLibrarySection {
   thumb            String?
   updatedAt_plex   Int?
   uuid             String?
-  movies           PlexMovie[]
-  tvShows          PlexTVShow[]
-  artists          PlexArtist[]
   albums           PlexAlbum[]
-  tracks           PlexTrack[]
+  artists          PlexArtist[]
+  movies           PlexMovie[]
   playlists        PlexPlaylist[]
+  tvShows          PlexTVShow[]
+  tracks           PlexTrack[]
 }
 
 model PlexTVShow {
@@ -642,350 +623,290 @@ model PlexLabel {
 }
 
 model WatchLog {
-  id              Int      @id @default(autoincrement())
-  mediaType       String   // 'tv', 'movie', 'book', 'comic', 'shortstory'
-  activityType    String   @default("watch") // 'watch' or 'read'
-  title           String
-  seriesTitle     String?  // For TV episodes, the series name
-  seasonNumber    Int?     // For TV episodes
-  episodeNumber   Int?     // For TV episodes
-  plexKey         String?  // If available
-  customOrderItemId Int?   // Link to custom order item if applicable
-  startTime       DateTime
-  endTime         DateTime?
-  duration        Int?     // Duration in minutes
-  totalWatchTime  Int?     // Actual watch/read time in minutes (for pause tracking)
-  isCompleted     Boolean  @default(true) // Whether the full content was watched/read
-  isPaused        Boolean  @default(false) // Current pause state for active sessions
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
-  
-  // Optional relation to custom order item
-  customOrderItem CustomOrderItem? @relation(fields: [customOrderItemId], references: [id])
+  id                Int              @id @default(autoincrement())
+  mediaType         String
+  activityType      String           @default("watch")
+  title             String
+  seriesTitle       String?
+  seasonNumber      Int?
+  episodeNumber     Int?
+  plexKey           String?
+  customOrderItemId Int?
+  startTime         DateTime
+  endTime           DateTime?
+  duration          Int?
+  totalWatchTime    Int?
+  isCompleted       Boolean          @default(true)
+  isPaused          Boolean          @default(false)
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
+  customOrderItem   CustomOrderItem? @relation(fields: [customOrderItemId], references: [id])
 }
 
-// Music models for Plex music library support
 model PlexArtist {
-  id                Int      @id @default(autoincrement())
-  ratingKey         String   @unique
-  key               String
-  guid              String?
-  type              String   @default("artist")
-  title             String
-  titleSort         String?
-  summary           String?
-  index             Int?
-  thumb             String?
-  art               String?
-  addedAt           DateTime?
-  updatedAt         DateTime?
-  librarySectionID  Int?
-  
-  // Collections field for Plex Collections
-  collections       String?
-  
-  // Relations
-  librarySection    PlexLibrarySection? @relation(fields: [librarySectionID], references: [id])
-  albums            PlexAlbum[]
-  
+  id               Int                 @id @default(autoincrement())
+  ratingKey        String              @unique
+  key              String
+  guid             String?
+  type             String              @default("artist")
+  title            String
+  titleSort        String?
+  summary          String?
+  index            Int?
+  thumb            String?
+  art              String?
+  addedAt          DateTime?
+  updatedAt        DateTime?
+  librarySectionID Int?
+  collections      String?
+  albums           PlexAlbum[]
+  librarySection   PlexLibrarySection? @relation(fields: [librarySectionID], references: [id])
+
   @@map("PlexArtist")
 }
 
 model PlexAlbum {
-  id                Int      @id @default(autoincrement())
-  ratingKey         String   @unique
-  key               String
-  parentRatingKey   String?  // Artist ratingKey
-  guid              String?
-  type              String   @default("album")
-  title             String
-  titleSort         String?
-  summary           String?
-  index             Int?
-  year              Int?
-  thumb             String?
-  art               String?
-  parentThumb       String?
+  id                    Int                 @id @default(autoincrement())
+  ratingKey             String              @unique
+  key                   String
+  parentRatingKey       String?
+  guid                  String?
+  type                  String              @default("album")
+  title                 String
+  titleSort             String?
+  summary               String?
+  index                 Int?
+  year                  Int?
+  thumb                 String?
+  art                   String?
+  parentThumb           String?
   originallyAvailableAt DateTime?
-  addedAt           DateTime?
-  updatedAt         DateTime?
-  librarySectionID  Int?
-  
-  // Collections field for Plex Collections
-  collections       String?
-  
-  // Relations
-  librarySection    PlexLibrarySection? @relation(fields: [librarySectionID], references: [id])
-  artist            PlexArtist? @relation(fields: [parentRatingKey], references: [ratingKey])
-  tracks            PlexTrack[]
-  
+  addedAt               DateTime?
+  updatedAt             DateTime?
+  librarySectionID      Int?
+  collections           String?
+  artist                PlexArtist?         @relation(fields: [parentRatingKey], references: [ratingKey])
+  librarySection        PlexLibrarySection? @relation(fields: [librarySectionID], references: [id])
+  tracks                PlexTrack[]
+
   @@map("PlexAlbum")
 }
 
 model PlexTrack {
-  id                Int      @id @default(autoincrement())
-  ratingKey         String   @unique
-  key               String
-  parentRatingKey   String?  // Album ratingKey
-  grandparentRatingKey String? // Artist ratingKey
-  guid              String?
-  type              String   @default("track")
-  title             String
-  titleSort         String?
-  originalTitle     String?  // Original title if different
-  summary           String?
-  index             Int?
-  duration          Int?     // Duration in milliseconds
-  thumb             String?
-  art               String?
-  parentThumb       String?
-  grandparentThumb  String?
-  addedAt           DateTime?
-  updatedAt         DateTime?
-  librarySectionID  Int?
-  
-  // Rating and play data
-  rating            Float?    // Overall rating
-  userRating        Float?    // User's personal rating
-  viewCount         Int?      // Number of times played
-  skipCount         Int?      // Number of times skipped
-  lastViewedAt      DateTime? // Last time this track was played
-  
-  // MusicBrainz and external IDs
-  musicBrainzTrackId String?  // MusicBrainz Track ID
-  lastFmId          String?   // Last.fm ID
-  plexMusicId       String?   // Plex Music ID
-  
-  // Media technical information
-  bitrate           Int?      // Audio bitrate
-  container         String?   // File container (mp3, flac, etc.)
-  audioCodec        String?   // Audio codec
-  audioChannels     Int?      // Number of audio channels
-  
-  // File information
-  file              String?   // Full file path
-  size              Int?      // File size in bytes
-  
-  // Relations
-  librarySection    PlexLibrarySection? @relation(fields: [librarySectionID], references: [id])
-  album             PlexAlbum? @relation(fields: [parentRatingKey], references: [ratingKey])
-  
+  id                   Int                 @id @default(autoincrement())
+  ratingKey            String              @unique
+  key                  String
+  parentRatingKey      String?
+  grandparentRatingKey String?
+  guid                 String?
+  type                 String              @default("track")
+  title                String
+  titleSort            String?
+  summary              String?
+  index                Int?
+  duration             Int?
+  thumb                String?
+  art                  String?
+  parentThumb          String?
+  grandparentThumb     String?
+  addedAt              DateTime?
+  updatedAt            DateTime?
+  librarySectionID     Int?
+  audioChannels        Int?
+  audioCodec           String?
+  bitrate              Int?
+  container            String?
+  file                 String?
+  lastFmId             String?
+  lastViewedAt         DateTime?
+  musicBrainzTrackId   String?
+  originalTitle        String?
+  plexMusicId          String?
+  rating               Float?
+  size                 Int?
+  skipCount            Int?
+  userRating           Float?
+  viewCount            Int?
+  album                PlexAlbum?          @relation(fields: [parentRatingKey], references: [ratingKey])
+  librarySection       PlexLibrarySection? @relation(fields: [librarySectionID], references: [id])
+
   @@map("PlexTrack")
 }
 
-// Stash models
 model StashScene {
-  id               String   @id
-  title            String
-  details          String?
-  url              String?
-  date             String?
-  rating           Int?
-  organized        Boolean  @default(false)
-  osHash           String?
-  checksum         String?
-  phash            String?
-  oCounter         Int?
-  path             String?
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
-  lastSyncedAt     DateTime @default(now())
-  fileModTime      DateTime?
-  
-  // Scene specific fields
-  studio           String?      // Studio name for display
-  studioId         String?      // Studio ID for relationship
-  code             String?
-  director         String?
-  synopsis         String?
-  
-  // Play status fields
-  lastPlayedAt     DateTime?
-  resumeTime       Float?
-  playDuration     Float?
-  playCount        Int?
-  duration         Float?      // Video duration in seconds
-  
-  // Phase 2: Enhanced technical metadata
-  fileSize         Int?                    // File size in bytes
-  bitrate          Float?                  // Video bitrate
-  resolution       String?                 // Resolution (1080p, 4K, etc.)
-  width            Int?                    // Video width in pixels
-  height           Int?                    // Video height in pixels
-  frameRate        Float?                  // Frames per second
-  codec            String?                 // Video codec
-  
-  // Phase 2: Enhanced user interaction
-  userRating       Float?                  // User's personal rating (0-10)
-  favorite         Boolean  @default(false) // User favorite flag
-  watchedComplete  Boolean  @default(false) // Scene watched to completion
-  skipCount        Int      @default(0)     // Times user skipped scene
-  avgWatchTime     Float?                  // Average watch time percentage
-  totalWatchTime   Float    @default(0.0)  // Total accumulated watch time
-  
-  // Phase 2: Performance and discovery metrics
-  popularityScore  Float    @default(0.0)  // Calculated popularity score
-  qualityScore     Float?                  // Content quality assessment
-  trendingScore    Float    @default(0.0)  // Recent popularity trend
-  discoveryScore   Float    @default(0.0)  // Discovery algorithm score
-  
-  // Phase 2: Content analysis and classification
-  sceneDominantColors String?             // JSON array of dominant colors
-  sceneKeywords    String?                // JSON array of auto-extracted keywords
-  contentFlags     String?                // JSON array of content flags
-  aiGeneratedTags  String?                // JSON array of AI-suggested tags
-  moodScore        Float?                 // Mood/tone score (0-10)
-  actionIntensity  Float?                 // Action intensity level (0-10)
-  
-  // Relationships
-  performers       StashScenePerformer[]
-  tags             StashSceneTag[]
-  studioObject     StashStudio? @relation(fields: [studioId], references: [id])
-  clips            StashClip[]
-  markers          StashMarker[]
-  watchHistory     StashSceneWatchHistory[]
-  
+  id                  String                   @id
+  title               String
+  details             String?
+  url                 String?
+  date                String?
+  rating              Int?
+  organized           Boolean                  @default(false)
+  osHash              String?
+  checksum            String?
+  phash               String?
+  oCounter            Int?
+  path                String?
+  createdAt           DateTime                 @default(now())
+  updatedAt           DateTime                 @updatedAt
+  lastSyncedAt        DateTime                 @default(now())
+  fileModTime         DateTime?
+  studio              String?
+  studioId            String?
+  code                String?
+  director            String?
+  synopsis            String?
+  lastPlayedAt        DateTime?
+  resumeTime          Float?
+  playDuration        Float?
+  playCount           Int?
+  duration            Float?
+  fileSize            Int?
+  bitrate             Float?
+  resolution          String?
+  width               Int?
+  height              Int?
+  frameRate           Float?
+  codec               String?
+  userRating          Float?
+  favorite            Boolean                  @default(false)
+  watchedComplete     Boolean                  @default(false)
+  skipCount           Int                      @default(0)
+  avgWatchTime        Float?
+  totalWatchTime      Float                    @default(0.0)
+  popularityScore     Float                    @default(0.0)
+  qualityScore        Float?
+  trendingScore       Float                    @default(0.0)
+  discoveryScore      Float                    @default(0.0)
+  sceneDominantColors String?
+  sceneKeywords       String?
+  contentFlags        String?
+  aiGeneratedTags     String?
+  moodScore           Float?
+  actionIntensity     Float?
+  clips               StashClip[]
+  markers             StashMarker[]
+  studioObject        StashStudio?             @relation(fields: [studioId], references: [id])
+  performers          StashScenePerformer[]
+  tags                StashSceneTag[]
+  watchHistory        StashSceneWatchHistory[]
+
   @@map("StashScene")
 }
 
 model StashSceneWatchHistory {
-  id         Int      @id @default(autoincrement())
-  sceneId    String
-  watchedAt  DateTime @default(now())
-  platform   String?  // e.g., "web", "android", "ios"
-  progress   Float?   // Watch progress (0-1)
-  
-  // Relationship
-  scene      StashScene @relation(fields: [sceneId], references: [id], onDelete: Cascade)
-  
+  id        Int        @id @default(autoincrement())
+  sceneId   String
+  watchedAt DateTime   @default(now())
+  platform  String?
+  progress  Float?
+  scene     StashScene @relation(fields: [sceneId], references: [id], onDelete: Cascade)
+
   @@map("StashSceneWatchHistory")
 }
 
 model StashClip {
-  id               Int      @id @default(autoincrement())
-  sceneId          String
-  clipIndex        Int      // 0-based index (clip 1, clip 2, etc.)
-  startTime        Float    // Start time in seconds
-  endTime          Float    // End time in seconds
-  duration         Float    // Duration in seconds
-  watched          Boolean  @default(false)
-  watchedAt        DateTime?
-  createdAt        DateTime @default(now())
-  title            String?  // Optional title (from marker or auto-generated)
-  markerBased      Boolean  @default(false) // True if created from markers, false if time-based
-  
-  // Relationship
-  scene            StashScene @relation(fields: [sceneId], references: [id], onDelete: Cascade)
-  
+  id          Int        @id @default(autoincrement())
+  sceneId     String
+  clipIndex   Int
+  startTime   Float
+  endTime     Float
+  duration    Float
+  watched     Boolean    @default(false)
+  watchedAt   DateTime?
+  createdAt   DateTime   @default(now())
+  title       String?
+  markerBased Boolean    @default(false)
+  scene       StashScene @relation(fields: [sceneId], references: [id], onDelete: Cascade)
+
   @@unique([sceneId, clipIndex])
   @@map("StashClip")
 }
 
 model StashMarker {
-  id               Int      @id @default(autoincrement())
-  stashId          String   @unique  // Stash's internal marker ID
-  sceneId          String   // Foreign key to StashScene
-  title            String
-  seconds          Float    // Marker position in seconds
-  primaryTag       String?  // Primary tag name
-  primaryTagId     String?  // Primary tag ID
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
-  lastSyncedAt     DateTime @default(now())
-  
-  // Relationships
-  scene            StashScene @relation(fields: [sceneId], references: [id], onDelete: Cascade)
-  
+  id           Int        @id @default(autoincrement())
+  stashId      String     @unique
+  sceneId      String
+  title        String
+  seconds      Float
+  primaryTag   String?
+  primaryTagId String?
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+  lastSyncedAt DateTime   @default(now())
+  scene        StashScene @relation(fields: [sceneId], references: [id], onDelete: Cascade)
+
   @@map("StashMarker")
 }
 
 model StashPerformer {
-  id            String   @id
-  name          String
-  disambiguation String?
-  alias         String?
-  favorite      Boolean  @default(false)
-  ignore_auto_tag Boolean @default(false)
-  
-  // Physical characteristics
-  birthdate     String?
-  ethnicity     String?
-  country       String?
-  eye_color     String?
-  height        String?
-  measurements  String?
-  fake_tits     String?
-  career_length String?
-  tattoos       String?
-  piercings     String?
-  
-  // Images and URLs
-  image         String?
-  instagram     String?
-  twitter       String?
-  url           String?
-  
-  // Timestamps
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
-  lastSyncedAt  DateTime @default(now())
-  
-  // Relationships
-  scenes        StashScenePerformer[]
-  tags          StashPerformerTag[]
-  galleries     StashGalleryPerformer[]
-  images        StashImagePerformer[]     // Added for standalone images
-  
+  id              String                  @id
+  name            String
+  disambiguation  String?
+  alias           String?
+  favorite        Boolean                 @default(false)
+  ignore_auto_tag Boolean                 @default(false)
+  birthdate       String?
+  ethnicity       String?
+  country         String?
+  eye_color       String?
+  height          String?
+  measurements    String?
+  fake_tits       String?
+  career_length   String?
+  tattoos         String?
+  piercings       String?
+  image           String?
+  instagram       String?
+  twitter         String?
+  url             String?
+  createdAt       DateTime                @default(now())
+  updatedAt       DateTime                @updatedAt
+  lastSyncedAt    DateTime                @default(now())
+  galleries       StashGalleryPerformer[]
+  images          StashImagePerformer[]
+  tags            StashPerformerTag[]
+  scenes          StashScenePerformer[]
+
   @@map("StashPerformer")
 }
 
 model StashStudio {
-  id           String   @id
-  name         String   @unique
+  id           String         @id
+  name         String         @unique
   url          String?
   image        String?
-  
-  // Timestamps
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
-  lastSyncedAt DateTime @default(now())
-  
-  // Relationships
-  scenes       StashScene[]
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+  lastSyncedAt DateTime       @default(now())
   galleries    StashGallery[]
-  images       StashImage[]             // Added for standalone images
-  
+  images       StashImage[]
+  scenes       StashScene[]
+
   @@map("StashStudio")
 }
 
 model StashTag {
-  id           String   @id
-  name         String   @unique
+  id           String              @id
+  name         String              @unique
   description  String?
   image        String?
-  
-  // Timestamps
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
-  lastSyncedAt DateTime @default(now())
-  
-  // Relationships
-  scenes       StashSceneTag[]
+  createdAt    DateTime            @default(now())
+  updatedAt    DateTime            @updatedAt
+  lastSyncedAt DateTime            @default(now())
+  galleries    StashGalleryTag[]
+  images       StashImageTag[]
   performers   StashPerformerTag[]
-  galleries    StashGalleryTag[]         // Added for galleries
-  images       StashImageTag[]           // Added for standalone images
-  
+  scenes       StashSceneTag[]
+
   @@map("StashTag")
 }
 
-// Junction tables for many-to-many relationships
 model StashScenePerformer {
   sceneId     String
   performerId String
-  
-  scene       StashScene      @relation(fields: [sceneId], references: [id], onDelete: Cascade)
-  performer   StashPerformer  @relation(fields: [performerId], references: [id], onDelete: Cascade)
-  
+  performer   StashPerformer @relation(fields: [performerId], references: [id], onDelete: Cascade)
+  scene       StashScene     @relation(fields: [sceneId], references: [id], onDelete: Cascade)
+
   @@id([sceneId, performerId])
   @@map("StashScenePerformer")
 }
@@ -993,10 +914,9 @@ model StashScenePerformer {
 model StashSceneTag {
   sceneId String
   tagId   String
-  
-  scene   StashScene @relation(fields: [sceneId], references: [id], onDelete: Cascade)
   tag     StashTag   @relation(fields: [tagId], references: [id], onDelete: Cascade)
-  
+  scene   StashScene @relation(fields: [sceneId], references: [id], onDelete: Cascade)
+
   @@id([sceneId, tagId])
   @@map("StashSceneTag")
 }
@@ -1004,85 +924,71 @@ model StashSceneTag {
 model StashPerformerTag {
   performerId String
   tagId       String
-  
-  performer   StashPerformer @relation(fields: [performerId], references: [id], onDelete: Cascade)
   tag         StashTag       @relation(fields: [tagId], references: [id], onDelete: Cascade)
-  
+  performer   StashPerformer @relation(fields: [performerId], references: [id], onDelete: Cascade)
+
   @@id([performerId, tagId])
   @@map("StashPerformerTag")
 }
 
-// Stash Gallery and Image models
 model StashGallery {
-  id           String   @id
+  id           String                  @id
   title        String?
   code         String?
   date         String?
   details      String?
   photographer String?
   url          String?
-  rating       Int?     // 1-5 stars
-  organized    Boolean  @default(false)
+  rating       Int?
+  organized    Boolean                 @default(false)
   studio       String?
   studioId     String?
-  
-  // File paths for gallery
   path         String?
   checksum     String?
-  
-  // Timestamps
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
-  lastSyncedAt DateTime @default(now())
-  
-  // Relationships
-  images       StashImage[]
+  createdAt    DateTime                @default(now())
+  updatedAt    DateTime                @updatedAt
+  lastSyncedAt DateTime                @default(now())
+  studioObject StashStudio?            @relation(fields: [studioId], references: [id])
   performers   StashGalleryPerformer[]
   tags         StashGalleryTag[]
-  studioObject StashStudio? @relation(fields: [studioId], references: [id])
-  
+  images       StashImage[]
+
   @@map("StashGallery")
 }
 
 model StashImage {
-  id           String   @id
-  galleryId    String?  // Made optional to support standalone images
+  id           String                @id
+  galleryId    String?
   title        String?
-  code         String?  // Added missing fields
+  code         String?
   date         String?
   details      String?
   photographer String?
   url          String?
   rating       Int?
-  organized    Boolean  @default(false)
+  organized    Boolean               @default(false)
   studio       String?
   studioId     String?
   path         String?
   checksum     String?
   fileModTime  DateTime?
-  
-  // Timestamps
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
-  lastSyncedAt DateTime @default(now())
-  
-  // Relationships
-  gallery      StashGallery?           @relation(fields: [galleryId], references: [id], onDelete: Cascade) // Made optional
-  performers   StashImagePerformer[]   // Added for standalone images
-  tags         StashImageTag[]         // Added for standalone images
-  studioObject StashStudio?            @relation(fields: [studioId], references: [id]) // Added studio relationship
-  
+  createdAt    DateTime              @default(now())
+  updatedAt    DateTime              @updatedAt
+  lastSyncedAt DateTime              @default(now())
+  studioObject StashStudio?          @relation(fields: [studioId], references: [id])
+  gallery      StashGallery?         @relation(fields: [galleryId], references: [id], onDelete: Cascade)
+  performers   StashImagePerformer[]
+  tags         StashImageTag[]
+
   @@map("StashImage")
 }
 
-// Junction tables for gallery relationships
 model StashGalleryPerformer {
   galleryId   String
   performerId String
-  
-  gallery     StashGallery    @relation(fields: [galleryId], references: [id], onDelete: Cascade)
-  performer   StashPerformer  @relation(fields: [performerId], references: [id], onDelete: Cascade)
-  
+  performer   StashPerformer @relation(fields: [performerId], references: [id], onDelete: Cascade)
+  gallery     StashGallery   @relation(fields: [galleryId], references: [id], onDelete: Cascade)
+
   @@id([galleryId, performerId])
   @@map("StashGalleryPerformer")
 }
@@ -1090,22 +996,19 @@ model StashGalleryPerformer {
 model StashGalleryTag {
   galleryId String
   tagId     String
-  
-  gallery   StashGallery @relation(fields: [galleryId], references: [id], onDelete: Cascade)
   tag       StashTag     @relation(fields: [tagId], references: [id], onDelete: Cascade)
-  
+  gallery   StashGallery @relation(fields: [galleryId], references: [id], onDelete: Cascade)
+
   @@id([galleryId, tagId])
   @@map("StashGalleryTag")
 }
 
-// Junction tables for standalone image relationships
 model StashImagePerformer {
   imageId     String
   performerId String
-  
-  image       StashImage     @relation(fields: [imageId], references: [id], onDelete: Cascade)
   performer   StashPerformer @relation(fields: [performerId], references: [id], onDelete: Cascade)
-  
+  image       StashImage     @relation(fields: [imageId], references: [id], onDelete: Cascade)
+
   @@id([imageId, performerId])
   @@map("StashImagePerformer")
 }
@@ -1113,339 +1016,246 @@ model StashImagePerformer {
 model StashImageTag {
   imageId String
   tagId   String
-  
-  image   StashImage @relation(fields: [imageId], references: [id], onDelete: Cascade)
   tag     StashTag   @relation(fields: [tagId], references: [id], onDelete: Cascade)
-  
+  image   StashImage @relation(fields: [imageId], references: [id], onDelete: Cascade)
+
   @@id([imageId, tagId])
   @@map("StashImageTag")
 }
 
-// Plex Playlist models for music playlists
 model PlexPlaylist {
-  id                Int      @id @default(autoincrement())
-  ratingKey         String   @unique
-  key               String
-  guid              String?
-  type              String   @default("playlist")
-  title             String
-  titleSort         String?
-  summary           String?
-  smart             Boolean  @default(false) // Smart playlist vs manual playlist
-  playlistType      String?  // audio, video, photo
-  thumb             String?
-  composite         String?
-  duration          Int?     // Total duration in milliseconds
-  leafCount         Int?     // Number of items in playlist
-  addedAt           DateTime?
-  updatedAt         DateTime?
-  librarySectionID  Int?
-  
-  // Relations
-  librarySection    PlexLibrarySection? @relation(fields: [librarySectionID], references: [id])
-  items             PlexPlaylistItem[]
-  customOrders      CustomOrder[]       // Custom orders that reference this playlist
-  
+  id               Int                 @id @default(autoincrement())
+  ratingKey        String              @unique
+  key              String
+  guid             String?
+  type             String              @default("playlist")
+  title            String
+  titleSort        String?
+  summary          String?
+  smart            Boolean             @default(false)
+  playlistType     String?
+  thumb            String?
+  composite        String?
+  duration         Int?
+  leafCount        Int?
+  addedAt          DateTime?
+  updatedAt        DateTime?
+  librarySectionID Int?
+  customOrders     CustomOrder[]
+  librarySection   PlexLibrarySection? @relation(fields: [librarySectionID], references: [id])
+  items            PlexPlaylistItem[]
+
   @@map("PlexPlaylist")
 }
 
 model PlexPlaylistItem {
-  id                Int      @id @default(autoincrement())
-  playlistRatingKey String   // Playlist ratingKey
-  ratingKey         String   // Item ratingKey (track, album, etc.)
-  type              String   // track, album, artist
+  id                Int          @id @default(autoincrement())
+  playlistRatingKey String
+  ratingKey         String
+  type              String
   title             String?
-  duration          Int?     // Duration in milliseconds
+  duration          Int?
   addedAt           DateTime?
-  
-  // Relations
   playlist          PlexPlaylist @relation(fields: [playlistRatingKey], references: [ratingKey], onDelete: Cascade)
-  
+
   @@map("PlexPlaylistItem")
 }
 
-// Custom Playlist models (separate from Plex)
 model CustomPlaylist {
-  id          Int       @id @default(autoincrement())
-  title       String
-  description String?
-  isPublic    Boolean   @default(false)
-  createdBy   String?   // User identifier (could be username or ID)
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
-  
-  // Relations
-  tracks      CustomPlaylistTrack[]
-  customOrders CustomOrder[]         // Custom orders that reference this playlist
-  
+  id           Int                   @id @default(autoincrement())
+  title        String
+  description  String?
+  isPublic     Boolean               @default(false)
+  createdBy    String?
+  createdAt    DateTime              @default(now())
+  updatedAt    DateTime              @updatedAt
+  customOrders CustomOrder[]
+  tracks       CustomPlaylistTrack[]
+
   @@map("CustomPlaylist")
 }
 
 model CustomPlaylistTrack {
-  id           Int             @id @default(autoincrement())
-  playlistId   Int
-  ratingKey    String          // Plex track ratingKey
-  title        String?         // Track title for quick reference
-  artist       String?         // Artist name for quick reference
-  album        String?         // Album name for quick reference
-  duration     Int?            // Duration in milliseconds
-  sortOrder    Int             @default(0) // Order within playlist
-  addedAt      DateTime        @default(now())
-  
-  // Relations
-  playlist     CustomPlaylist  @relation(fields: [playlistId], references: [id], onDelete: Cascade)
-  
+  id         Int            @id @default(autoincrement())
+  playlistId Int
+  ratingKey  String
+  title      String?
+  artist     String?
+  album      String?
+  duration   Int?
+  sortOrder  Int            @default(0)
+  addedAt    DateTime       @default(now())
+  playlist   CustomPlaylist @relation(fields: [playlistId], references: [id], onDelete: Cascade)
+
   @@map("CustomPlaylistTrack")
 }
 
-// Dating Management Models
 model DatingApp {
   id          Int          @id @default(autoincrement())
   name        String       @unique
   description String?
   createdAt   DateTime     @default(now())
   connections Connection[]
-  
+
   @@map("DatingApp")
 }
 
 model Connection {
-  id          Int       @id @default(autoincrement())
-  appId       Int
-  
-  // Basic guy details
-  guyName     String
-  age         Int?
-  location    String?
-  profileUrl  String?
-  bio         String?
-  photos      String?   // JSON string of photo URLs
-  
-  // Physical attributes (common across apps)
-  height      String?
-  weight      String?
-  bodyType    String?
-  bodyHair    String?   // Body hair amount/type
-  ethnicity   String?
-  hair        String?   // Hair color/type
-  
-  // App-specific fields (Scruff, Grindr, etc.)
-  tribe       String?   // Scruff: Bear, Otter, Wolf, etc.
-  position    String?   // Top, Bottom, Versatile, etc.
-  hivStatus   String?   // Negative, Positive, Undetectable, etc.
-  lastTested  String?   // Recent test date
-  lookingFor  String?   // Chat, Dates, Friends, etc.
-  relationshipStatus String? // Single, Partnered, etc.
-  sexPractices String?  // Sexual practices preferences
-  
-  // Scruff-specific detailed fields
-  verification     String?  // Verified badge type
-  globalPosition   String?  // Global grid position
-  travelMode       Boolean  @default(false)
-  privatePhotos    Int      @default(0) // Count of private photos
-  woofCount        Int      @default(0) // Number of woofs received
-  viewCount        Int      @default(0) // Profile view count
-  
-  // "What interests me" section
-  interests        String?  // JSON string of interests
-  
-  // "They are" preferences
-  theyAre          String?  // JSON string of preferences for partner
-  theyAreInto      String?  // JSON string of what partner should be into
-  
-  // Identity fields
-  pronouns         String?  // Pronoun preferences
-  genderIdentity   String?  // Gender identity
-  
-  // "Open to" preferences
-  openTo           String?  // JSON string of what they're open to
-  
-  // Sexual health details
-  sexualHealth     String?  // JSON string of sexual health info
-  
-  // Distance and activity
-  distance         String?  // "2.3 mi", "1.5 km"
-  
-  // Conversation tracking
-  firstContact DateTime @default(now())
-  lastContact  DateTime @default(now())
-  status       ConnectionStatus @default(ACTIVE)
-  notes        String?
-  
-  // Stats
-  messagesExchanged Int @default(0)
-  responseRate     Float @default(0.0) // Percentage
-  avgResponseTime  Int?  // Minutes
-  
-  // Import tracking
-  source               String?  // "manual", "screenshot_import", etc.
-  extractionConfidence Float?   // 0.0 - 1.0 confidence score
-  
-  // Relations
-  app         DatingApp  @relation(fields: [appId], references: [id])
-  dates       Date[]
-  encounters  Encounter[]
-  messages    Message[]
-  screenshots Screenshot[]
-  
-  createdAt   DateTime   @default(now())
-  updatedAt   DateTime   @updatedAt
-  
+  id                   Int          @id @default(autoincrement())
+  appId                Int
+  guyName              String
+  age                  Int?
+  location             String?
+  profileUrl           String?
+  bio                  String?
+  photos               String?
+  height               String?
+  weight               String?
+  bodyType             String?
+  bodyHair             String?
+  ethnicity            String?
+  hair                 String?
+  tribe                String?
+  position             String?
+  hivStatus            String?
+  lastTested           String?
+  lookingFor           String?
+  relationshipStatus   String?
+  sexPractices         String?
+  verification         String?
+  globalPosition       String?
+  travelMode           Boolean      @default(false)
+  privatePhotos        Int          @default(0)
+  woofCount            Int          @default(0)
+  viewCount            Int          @default(0)
+  interests            String?
+  theyAre              String?
+  theyAreInto          String?
+  pronouns             String?
+  genderIdentity       String?
+  openTo               String?
+  sexualHealth         String?
+  distance             String?
+  firstContact         DateTime     @default(now())
+  lastContact          DateTime     @default(now())
+  status               String       @default("ACTIVE")
+  notes                String?
+  messagesExchanged    Int          @default(0)
+  responseRate         Float        @default(0.0)
+  avgResponseTime      Int?
+  source               String?
+  extractionConfidence Float?
+  createdAt            DateTime     @default(now())
+  updatedAt            DateTime     @updatedAt
+  app                  DatingApp    @relation(fields: [appId], references: [id])
+  dates                Date[]
+  encounters           Encounter[]
+  messages             Message[]
+  screenshots          Screenshot[]
+
   @@unique([appId, guyName])
   @@map("Connection")
 }
 
 model Date {
-  id           Int       @id @default(autoincrement())
+  id           Int         @id @default(autoincrement())
   connectionId Int?
-  
-  // Date details
   guyName      String
   dateTime     DateTime
   location     String
   activity     String
-  duration     Int?      // Minutes
-  cost         Float?    // How much spent
-  
-  // Rating and notes
-  rating       Int?      // 1-5 stars
-  chemistry    Int?      // 1-5 rating
-  conversation Int?      // 1-5 rating
-  attraction   Int?      // 1-5 rating
+  duration     Int?
+  cost         Float?
+  rating       Int?
+  chemistry    Int?
+  conversation Int?
+  attraction   Int?
   notes        String?
-  
-  // Outcome
-  outcome      DateOutcome @default(NEUTRAL)
+  outcome      String      @default("NEUTRAL")
   secondDate   Boolean     @default(false)
-  
-  connection   Connection? @relation(fields: [connectionId], references: [id])
-  encounters   Encounter[]
-  
   createdAt    DateTime    @default(now())
   updatedAt    DateTime    @updatedAt
-  
+  connection   Connection? @relation(fields: [connectionId], references: [id])
+  encounters   Encounter[]
+
   @@map("Date")
 }
 
 model Encounter {
-  id           Int       @id @default(autoincrement())
+  id           Int         @id @default(autoincrement())
   connectionId Int?
   dateId       Int?
-  
-  // Encounter details
   guyName      String
   dateTime     DateTime
   location     String?
-  type         EncounterType
-  duration     Int?      // Minutes
-  
-  // Ratings
-  satisfaction Int?      // 1-5 rating
-  performance  Int?      // 1-5 rating
-  chemistry    Int?      // 1-5 rating
+  type         String
+  duration     Int?
+  satisfaction Int?
+  performance  Int?
+  chemistry    Int?
   notes        String?
-  
-  // Safety and health
-  protection   Boolean   @default(false)
-  tested       Boolean   @default(false)
+  protection   Boolean     @default(false)
+  tested       Boolean     @default(false)
   testDate     DateTime?
-  
-  connection   Connection? @relation(fields: [connectionId], references: [id])
-  date         Date?       @relation(fields: [dateId], references: [id])
-  
   createdAt    DateTime    @default(now())
   updatedAt    DateTime    @updatedAt
-  
+  date         Date?       @relation(fields: [dateId], references: [id])
+  connection   Connection? @relation(fields: [connectionId], references: [id])
+
   @@map("Encounter")
 }
 
 model Message {
-  id           Int       @id @default(autoincrement())
+  id           Int        @id @default(autoincrement())
   connectionId Int
-  connection   Connection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
-  
-  // Message content
   content      String
   timestamp    DateTime
-  sender       String    // "me" or participant name
-  
-  // OCR metadata
-  confidence   Float?    // OCR confidence score
-  screenshotId String?   // Reference to original screenshot
-  
-  createdAt    DateTime  @default(now())
-  updatedAt    DateTime  @updatedAt
-  
+  sender       String
+  confidence   Float?
+  screenshotId String?
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+  connection   Connection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
+
   @@map("Message")
 }
 
 model Screenshot {
-  id           String    @id @default(cuid())
-  connectionId Int
-  connection   Connection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
-  
-  // File info
-  filename     String
-  originalName String
-  size         Int
-  
-  // Processing status
-  processed    Boolean   @default(false)
-  ocrText      String?   // Raw OCR output
-  messagesExtracted Int @default(0)
-  
-  createdAt    DateTime  @default(now())
-  updatedAt    DateTime  @updatedAt
-  
+  id                String     @id @default(cuid())
+  connectionId      Int
+  filename          String
+  originalName      String
+  size              Int
+  processed         Boolean    @default(false)
+  ocrText           String?
+  messagesExtracted Int        @default(0)
+  createdAt         DateTime   @default(now())
+  updatedAt         DateTime   @updatedAt
+  connection        Connection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
+
   @@map("Screenshot")
 }
 
-enum ConnectionStatus {
-  ACTIVE
-  PAUSED
-  BLOCKED
-  UNMATCHED
-  MET
-  RELATIONSHIP
-}
-
-enum DateOutcome {
-  GREAT
-  GOOD
-  NEUTRAL
-  POOR
-  TERRIBLE
-}
-
-enum EncounterType {
-  HOOKUP
-  FWB
-  RELATIONSHIP
-  ONE_TIME
-}
-
-// Notes Management Models
 model Note {
-  id          Int      @id @default(autoincrement())
+  id          Int             @id @default(autoincrement())
   title       String
-  content     String   @default("")
-  type        String   @default("note")
-  tags        String   @default("[]")  // JSON array of tags
+  content     String          @default("")
+  type        String          @default("note")
+  tags        String          @default("[]")
   folderId    Int?
-  userId      Int      @default(1)
-  isFavorite  Boolean  @default(false)
-  isPublic    Boolean  @default(false)
-  attachments String   @default("[]")  // JSON array of attachments
-  links       String   @default("[]")  // JSON array of links
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-  
-  folder      NoteFolder? @relation(fields: [folderId], references: [id])
-  fromLinks   NoteCrossLink[] @relation("FromNote")
-  toLinks     NoteCrossLink[] @relation("ToNote")
+  userId      Int             @default(1)
+  isFavorite  Boolean         @default(false)
+  isPublic    Boolean         @default(false)
+  attachments String          @default("[]")
+  links       String          @default("[]")
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
   dailyNote   DailyNote?
   locations   Location[]
-  
+  folder      NoteFolder?     @relation(fields: [folderId], references: [id])
+  toLinks     NoteCrossLink[] @relation("ToNote")
+  fromLinks   NoteCrossLink[] @relation("FromNote")
+
   @@index([userId])
   @@index([type])
   @@index([folderId])
@@ -1455,17 +1265,16 @@ model Note {
 }
 
 model NoteFolder {
-  id        Int      @id @default(autoincrement())
+  id        Int          @id @default(autoincrement())
   name      String
   parentId  Int?
-  userId    Int      @default(1)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  
-  parent   NoteFolder?  @relation("FolderHierarchy", fields: [parentId], references: [id])
-  children NoteFolder[] @relation("FolderHierarchy")
-  notes    Note[]
-  
+  userId    Int          @default(1)
+  createdAt DateTime     @default(now())
+  updatedAt DateTime     @updatedAt
+  notes     Note[]
+  parent    NoteFolder?  @relation("FolderHierarchy", fields: [parentId], references: [id])
+  children  NoteFolder[] @relation("FolderHierarchy")
+
   @@index([userId])
   @@index([parentId])
 }
@@ -1476,7 +1285,7 @@ model NoteTag {
   userId    Int      @default(1)
   count     Int      @default(1)
   createdAt DateTime @default(now())
-  
+
   @@index([userId])
   @@index([count])
 }
@@ -1486,10 +1295,9 @@ model NoteCrossLink {
   fromNoteId Int
   toNoteId   Int
   createdAt  DateTime @default(now())
-  
-  fromNote Note @relation("FromNote", fields: [fromNoteId], references: [id], onDelete: Cascade)
-  toNote   Note @relation("ToNote", fields: [toNoteId], references: [id], onDelete: Cascade)
-  
+  toNote     Note     @relation("ToNote", fields: [toNoteId], references: [id], onDelete: Cascade)
+  fromNote   Note     @relation("FromNote", fields: [fromNoteId], references: [id], onDelete: Cascade)
+
   @@unique([fromNoteId, toNoteId])
   @@index([fromNoteId])
   @@index([toNoteId])
@@ -1500,13 +1308,13 @@ model NoteTemplate {
   name        String
   description String?
   content     String   @default("")
-  type        String   @default("daily") // daily, weekly, project, etc.
-  variables   String   @default("[]")  // JSON array of variable placeholders
+  type        String   @default("daily")
+  variables   String   @default("[]")
   userId      Int      @default(1)
   isDefault   Boolean  @default(false)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
-  
+
   @@index([userId])
   @@index([type])
   @@index([isDefault])
@@ -1514,112 +1322,97 @@ model NoteTemplate {
 
 model DailyNote {
   id        Int      @id @default(autoincrement())
-  date      DateTime @unique // Date for this daily note (normalized to start of day)
+  date      DateTime @unique
   noteId    Int      @unique
   userId    Int      @default(1)
-  mood      String?  // morning, evening mood
+  mood      String?
   weather   String?
-  goals     String   @default("[]")  // JSON array of daily goals
-  habits    String   @default("[]")  // JSON array of habit completions
-  gratitude String   @default("[]")  // JSON array of gratitude entries
+  goals     String   @default("[]")
+  habits    String   @default("[]")
+  gratitude String   @default("[]")
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
-  
   note      Note     @relation(fields: [noteId], references: [id], onDelete: Cascade)
-  
+
   @@index([userId])
   @@index([date])
 }
 
 model BackgroundImage {
-  id          Int      @id @default(autoincrement())
-  filename    String
+  id           Int                @id @default(autoincrement())
+  filename     String
   originalName String?
-  path        String
-  url         String?
-  size        Int?
-  mimetype    String?
-  width       Int?
-  height      Int?
-  galleryId   Int?
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  path         String
+  url          String?
+  size         Int?
+  mimetype     String?
+  galleryId    Int?
+  createdAt    DateTime           @default(now())
+  updatedAt    DateTime           @updatedAt
+  height       Int?
+  width        Int?
+  gallery      BackgroundGallery? @relation(fields: [galleryId], references: [id])
 
-  gallery BackgroundGallery? @relation(fields: [galleryId], references: [id], onDelete: SetNull)
-  
   @@index([galleryId])
 }
 
 model BackgroundGallery {
-  id          Int      @id @default(autoincrement())
-  name        String
-  description String?
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-
-  backgrounds BackgroundImage[]
+  id           Int               @id @default(autoincrement())
+  name         String
+  description  String?
+  createdAt    DateTime          @default(now())
+  updatedAt    DateTime          @updatedAt
+  backgrounds  BackgroundImage[]
   customOrders CustomOrder[]
 }
 
-// ========================================
-// TASKS & PRODUCTIVITY MODELS
-// ========================================
-
 model Project {
-  id          Int      @id @default(autoincrement())
+  id          Int         @id @default(autoincrement())
   name        String
   description String?
-  color       String?  @default("#3B82F6") // Hex color for UI
-  status      String   @default("active") // active, completed, archived, on_hold
-  priority    String   @default("medium") // low, medium, high, urgent
+  color       String?     @default("#3B82F6")
+  status      String      @default("active")
+  priority    String      @default("medium")
   dueDate     DateTime?
   completedAt DateTime?
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-  
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+  goals       Goal[]
   tasks       Task[]
   timeEntries TimeEntry[]
-  goals       Goal[]
 }
 
 model TaskCategory {
   id          Int      @id @default(autoincrement())
   name        String   @unique
-  description String?  // Optional description for the category
-  color       String?  @default("#6B7280") // Hex color for UI
-  icon        String?  // Icon name or emoji
+  color       String?  @default("#6B7280")
+  icon        String?
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
-  
+  description String?
   tasks       Task[]
 }
 
 model Task {
-  id          Int      @id @default(autoincrement())
-  title       String
-  description String?
-  status      String   @default("todo") // todo, in_progress, completed, cancelled
-  priority    String   @default("medium") // low, medium, high, urgent
-  dueDate     DateTime?
-  completedAt DateTime?
-  estimatedMinutes Int? // Estimated time to complete
-  actualMinutes    Int? // Actual time spent (calculated from time entries)
-  
-  // Relationships
-  projectId   Int?
-  categoryId  Int?
-  
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-  
-  project     Project?      @relation(fields: [projectId], references: [id], onDelete: SetNull)
-  category    TaskCategory? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
-  timeEntries TimeEntry[]
-  
-  // Task Dependencies
-  dependencies     TaskDependency[] @relation("DependentTask")
+  id               Int              @id @default(autoincrement())
+  title            String
+  description      String?
+  status           String           @default("todo")
+  priority         String           @default("medium")
+  dueDate          DateTime?
+  completedAt      DateTime?
+  estimatedMinutes Int?
+  actualMinutes    Int?
+  projectId        Int?
+  categoryId       Int?
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
+  category         TaskCategory?    @relation(fields: [categoryId], references: [id])
+  project          Project?         @relation(fields: [projectId], references: [id])
   dependentTasks   TaskDependency[] @relation("DependsOnTask")
-  
+  dependencies     TaskDependency[] @relation("DependentTask")
+  timeEntries      TimeEntry[]
+
   @@index([projectId])
   @@index([categoryId])
   @@index([status])
@@ -1627,46 +1420,38 @@ model Task {
 }
 
 model TimeEntry {
-  id          Int      @id @default(autoincrement())
+  id          Int       @id @default(autoincrement())
   description String?
   startTime   DateTime
   endTime     DateTime?
-  minutes     Int?     // Calculated duration in minutes
-  
-  // Relationships
+  minutes     Int?
   taskId      Int?
   projectId   Int?
-  
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-  
-  task        Task?    @relation(fields: [taskId], references: [id], onDelete: SetNull)
-  project     Project? @relation(fields: [projectId], references: [id], onDelete: SetNull)
-  
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  project     Project?  @relation(fields: [projectId], references: [id])
+  task        Task?     @relation(fields: [taskId], references: [id])
+
   @@index([taskId])
   @@index([projectId])
   @@index([startTime])
 }
 
 model Goal {
-  id          Int      @id @default(autoincrement())
-  title       String
-  description String?
-  type        String   @default("project") // project, daily, weekly, monthly, yearly
-  targetValue Int?     // For measurable goals
-  currentValue Int?    @default(0)
-  unit        String?  // hours, tasks, etc.
-  deadline    DateTime?
-  status      String   @default("active") // active, completed, paused, cancelled
-  
-  // Relationships
-  projectId   Int?
-  
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-  
-  project     Project? @relation(fields: [projectId], references: [id], onDelete: SetNull)
-  
+  id           Int       @id @default(autoincrement())
+  title        String
+  description  String?
+  type         String    @default("project")
+  targetValue  Int?
+  currentValue Int?      @default(0)
+  unit         String?
+  deadline     DateTime?
+  status       String    @default("active")
+  projectId    Int?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  project      Project?  @relation(fields: [projectId], references: [id])
+
   @@index([projectId])
   @@index([type])
   @@index([status])
@@ -1674,15 +1459,13 @@ model Goal {
 
 model TaskDependency {
   id              Int      @id @default(autoincrement())
-  dependentTaskId Int      // Task that depends on another task
-  dependsOnTaskId Int      // Task that must be completed first
-  type            String   @default("FINISH_TO_START") // FINISH_TO_START, START_TO_START, FINISH_TO_FINISH, START_TO_FINISH
-  
+  dependentTaskId Int
+  dependsOnTaskId Int
+  type            String   @default("FINISH_TO_START")
   createdAt       DateTime @default(now())
-  
-  dependentTask   Task     @relation("DependentTask", fields: [dependentTaskId], references: [id], onDelete: Cascade)
   dependsOnTask   Task     @relation("DependsOnTask", fields: [dependsOnTaskId], references: [id], onDelete: Cascade)
-  
+  dependentTask   Task     @relation("DependentTask", fields: [dependentTaskId], references: [id], onDelete: Cascade)
+
   @@unique([dependentTaskId, dependsOnTaskId])
   @@index([dependentTaskId])
   @@index([dependsOnTaskId])
@@ -1692,9 +1475,7 @@ model Location {
   id          Int      @id @default(autoincrement())
   name        String
   description String?
-  type        String   @default("place") // place, business, travel, event, personal
-  
-  // Geographic coordinates
+  type        String   @default("place")
   latitude    Float
   longitude   Float
   address     String?
@@ -1702,28 +1483,20 @@ model Location {
   state       String?
   country     String?
   postalCode  String?
-  
-  // Additional metadata
-  category    String?  // restaurant, hotel, landmark, etc.
-  rating      Float?   // 1-5 star rating
-  tags        String   @default("[]")  // JSON array of tags
+  category    String?
+  rating      Float?
+  tags        String   @default("[]")
   website     String?
   phone       String?
   notes       String?
-  
-  // Privacy and organization
   isPrivate   Boolean  @default(false)
   isFavorite  Boolean  @default(false)
   userId      Int      @default(1)
-  
-  // Relationships
-  noteId      Int?     // Optional connection to a note
-  
+  noteId      Int?
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
-  
-  note        Note?    @relation(fields: [noteId], references: [id], onDelete: SetNull)
-  
+  note        Note?    @relation(fields: [noteId], references: [id])
+
   @@index([userId])
   @@index([type])
   @@index([category])
@@ -1731,4 +1504,206 @@ model Location {
   @@index([latitude, longitude])
   @@index([city])
   @@index([country])
+}
+
+model HistoricalEvent {
+  id                 Int                 @id @default(autoincrement())
+  title              String
+  startDate          String
+  endDate            String?
+  details            String?
+  category           String
+  reviewed           Boolean             @default(false)
+  hidden             Boolean             @default(false)
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
+  books              HistoryBook[]
+  chapters           HistoryChapter[]
+  sections           HistorySection[]
+  videos             HistoryVideo[]
+  readingLists       ReadingList[]
+  user_event_reviews user_event_reviews?
+}
+
+model HistoryVideo {
+  id                 Int                 @id @default(autoincrement())
+  title              String?
+  url                String              @unique
+  type               String
+  duration           String?
+  description        String?
+  thumbnailUrl       String?
+  courseTitle        String?
+  lectureNumber      Int?
+  publishedAt        DateTime?
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
+  eventId            Int?
+  channelId          Int?
+  assignLater        Boolean             @default(false)
+  status             String?
+  event              HistoricalEvent?    @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  channel            HistoryChannel?     @relation(fields: [channelId], references: [id])
+  user_video_watches user_video_watches?
+}
+
+model HistoryChannel {
+  id              Int            @id @default(autoincrement())
+  name            String
+  handle          String?
+  channelUrl      String         @unique
+  description     String?
+  subscriberCount String?
+  verified        Boolean        @default(false)
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+  videos          HistoryVideo[]
+}
+
+model HistoryBook {
+  id              Int              @id @default(autoincrement())
+  title           String
+  author          String?
+  isbn            String?
+  publisher       String?
+  publishYear     Int?
+  description     String?
+  coverUrl        String?
+  pageCount       Int?
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+  eventId         Int?
+  event           HistoricalEvent? @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  chapters        HistoryChapter[]
+  user_book_reads user_book_reads?
+}
+
+model HistoryChapter {
+  id                 Int                 @id @default(autoincrement())
+  title              String
+  chapterNumber      Int
+  description        String?
+  pageStart          Int?
+  pageEnd            Int?
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
+  bookId             Int
+  eventId            Int?
+  book               HistoryBook         @relation(fields: [bookId], references: [id], onDelete: Cascade)
+  event              HistoricalEvent?    @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  sections           HistorySection[]
+  user_chapter_reads user_chapter_reads?
+
+  @@unique([bookId, chapterNumber])
+}
+
+model HistorySection {
+  id                 Int                 @id @default(autoincrement())
+  title              String
+  sectionNumber      Int
+  description        String?
+  pageStart          Int?
+  pageEnd            Int?
+  content            String?
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
+  chapterId          Int
+  eventId            Int?
+  chapter            HistoryChapter      @relation(fields: [chapterId], references: [id], onDelete: Cascade)
+  event              HistoricalEvent?    @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  user_section_reads user_section_reads?
+
+  @@unique([chapterId, sectionNumber])
+}
+
+model ReadingList {
+  id      Int             @id @default(autoincrement())
+  name    String
+  order   Int?
+  eventId Int
+  event   HistoricalEvent @relation(fields: [eventId], references: [id], onDelete: Cascade)
+}
+
+model HistoryCategory {
+  id          Int     @id @default(autoincrement())
+  name        String  @unique
+  description String?
+  color       String?
+}
+
+model HistoryCourse {
+  id          Int                  @id @default(autoincrement())
+  title       String
+  category    String
+  url         String               @unique
+  instructor  String?
+  thumbnail   String?
+  description String?
+  completed   Boolean              @default(false)
+  createdAt   DateTime             @default(now())
+  updatedAt   DateTime             @updatedAt
+  videos      HistoryCourseVideo[]
+}
+
+model HistoryCourseVideo {
+  id          Int           @id @default(autoincrement())
+  title       String
+  url         String        @unique
+  description String?
+  watched     Boolean       @default(false)
+  order       Int?
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+  courseId    Int
+  course      HistoryCourse @relation(fields: [courseId], references: [id], onDelete: Cascade)
+}
+
+model user_event_reviews {
+  id              String          @id @default(uuid())
+  eventId         Int             @unique
+  reviewed        Boolean         @default(false)
+  reviewedAt      DateTime?
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+  HistoricalEvent HistoricalEvent @relation(fields: [eventId], references: [id], onDelete: Cascade)
+}
+
+model user_video_watches {
+  id        String       @id @default(uuid())
+  videoId   Int          @unique
+  watched   Boolean      @default(false)
+  watchedAt DateTime?
+  createdAt DateTime     @default(now())
+  updatedAt DateTime     @updatedAt
+  video     HistoryVideo @relation(fields: [videoId], references: [id], onDelete: Cascade)
+}
+
+model user_book_reads {
+  id        String      @id @default(uuid())
+  bookId    Int         @unique
+  read      Boolean     @default(false)
+  readAt    DateTime?
+  createdAt DateTime    @default(now())
+  updatedAt DateTime    @updatedAt
+  book      HistoryBook @relation(fields: [bookId], references: [id], onDelete: Cascade)
+}
+
+model user_chapter_reads {
+  id        String         @id @default(uuid())
+  chapterId Int            @unique
+  read      Boolean        @default(false)
+  readAt    DateTime?
+  createdAt DateTime       @default(now())
+  updatedAt DateTime       @updatedAt
+  chapter   HistoryChapter @relation(fields: [chapterId], references: [id], onDelete: Cascade)
+}
+
+model user_section_reads {
+  id        String         @id @default(uuid())
+  sectionId Int            @unique
+  read      Boolean        @default(false)
+  readAt    DateTime?
+  createdAt DateTime       @default(now())
+  updatedAt DateTime       @updatedAt
+  section   HistorySection @relation(fields: [sectionId], references: [id], onDelete: Cascade)
 }

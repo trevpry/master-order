@@ -22,6 +22,11 @@ import Notes from './modules/notes/pages/NotesHome';
 import Locations from './modules/locations/pages/Locations';
 import EddieSettings from './modules/eddie/pages/EddieSettings';
 import Dating from './pages/Dating';
+import HistoryPlusHome from './modules/history-plus/pages/HistoryPlusHome';
+import Timeline from './modules/history-plus/pages/Timeline';
+import Books from './modules/history-plus/pages/Books';
+import Videos from './modules/history-plus/pages/Videos';
+import Channels from './modules/history-plus/pages/Channels';
 
 function App() {
   return (
@@ -58,6 +63,11 @@ function App() {
           <Route path="/notes" element={<Notes />} />
           <Route path="/locations" element={<Locations />} />
           <Route path="/dating" element={<Dating />} />
+          <Route path="/history-plus" element={<HistoryPlusHome />} />
+          <Route path="/history-plus/timeline" element={<Timeline />} />
+          <Route path="/history-plus/books" element={<Books />} />
+          <Route path="/history-plus/videos" element={<Videos />} />
+          <Route path="/history-plus/channels" element={<Channels />} />
           <Route path="/eddie-settings" element={<EddieSettings />} />
         </Routes>
       </Layout>

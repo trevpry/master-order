@@ -6,6 +6,7 @@ import logoImage from '../../assets/logo.png';
 const SideMenu = ({ isMobile, closeMobileMenu }) => {
   const [isCollapsed, setIsCollapsed] = useState(false);
   const [isMediaCollapsed, setIsMediaCollapsed] = useState(false);
+  const [isHistoryCollapsed, setIsHistoryCollapsed] = useState(false);
   const location = useLocation();
   const navigate = useNavigate();
 
@@ -16,6 +17,11 @@ const SideMenu = ({ isMobile, closeMobileMenu }) => {
   const toggleMediaMenu = (e) => {
     e.preventDefault();
     setIsMediaCollapsed(!isMediaCollapsed);
+  };
+
+  const toggleHistoryMenu = (e) => {
+    e.preventDefault();
+    setIsHistoryCollapsed(!isHistoryCollapsed);
   };
 
   // Handle menu item click - close mobile menu if on mobile
@@ -78,6 +84,41 @@ const SideMenu = ({ isMobile, closeMobileMenu }) => {
       icon: '💕',
       label: 'Dating',
       description: 'Connections & dates'
+    },
+    {
+      path: '/history-plus',
+      icon: '📚',
+      label: 'History Plus',
+      description: 'Historical content management',
+      isHistoryHeader: true
+    },
+    {
+      path: '/history-plus/timeline',
+      icon: '📅',
+      label: 'Timeline',
+      description: 'Historical events timeline',
+      isSubmenu: true
+    },
+    {
+      path: '/history-plus/books',
+      icon: '📖',
+      label: 'Books',
+      description: 'Reading progress',
+      isSubmenu: true
+    },
+    {
+      path: '/history-plus/videos',
+      icon: '🎥',
+      label: 'Videos',
+      description: 'Video library',
+      isSubmenu: true
+    },
+    {
+      path: '/history-plus/channels',
+      icon: '📺',
+      label: 'Channels',
+      description: 'Channel management',
+      isSubmenu: true
     },
     {
       path: '/eddie-settings',
@@ -251,9 +292,49 @@ const SideMenu = ({ isMobile, closeMobileMenu }) => {
               );
             }
             
-            // Handle media submenu items - hide them when collapsed
+            // Handle history header differently
+            if (item.isHistoryHeader) {
+              return (
+                <li key={item.path} className="menu-item history-header">
+                  {isCollapsed ? (
+                    // When collapsed, make it a link to /history-plus
+                    <Link 
+                      to={item.path} 
+                      className={`menu-link history-header-link ${
+                        location.pathname.startsWith('/history-plus') ? 'active' : ''
+                      }`}
+                      title={item.label}
+                      onClick={handleMenuItemClick()}
+                    >
+                      <span className="menu-icon">{item.icon}</span>
+                    </Link>
+                  ) : (
+                    // When expanded, make it a toggle button
+                    <div 
+                      className={`menu-link history-header-link ${
+                        location.pathname.startsWith('/history-plus') ? 'active' : ''
+                      }`}
+                      title={item.label}
+                      onClick={toggleHistoryMenu}
+                      style={{ cursor: 'pointer' }}
+                    >
+                      <span className="menu-icon">{item.icon}</span>
+                      <div className="menu-text">
+                        <span className="menu-label">{item.label}</span>
+                        <span className="menu-description">{item.description}</span>
+                      </div>
+                      <span className="collapse-arrow">
+                        {isHistoryCollapsed ? '▼' : '▲'}
+                      </span>
+                    </div>
+                  )}
+                </li>
+              );
+            }
+            
+            // Handle submenu items - hide them when collapsed
             if (item.isSubmenu) {
-              if (isCollapsed || isMediaCollapsed) {
+              if (isCollapsed || isMediaCollapsed || isHistoryCollapsed) {
                 return null;
               }
             }

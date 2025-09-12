@@ -132,6 +132,37 @@
   font-weight: 500;
 }
 
+/* History Header Styles */
+.menu-item.history-header {
+  margin-top: 20px;
+  margin-bottom: 8px;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  padding-top: 15px;
+}
+
+.history-header-link {
+  background: rgba(155, 89, 182, 0.15) !important;
+  border-left: 3px solid #9b59b6 !important;
+  font-weight: 600 !important;
+  cursor: pointer;
+  justify-content: space-between;
+}
+
+.history-header-link:hover {
+  background: rgba(155, 89, 182, 0.25) !important;
+}
+
+.history-header .menu-label {
+  font-weight: 600;
+  color: #9b59b6;
+  font-size: 15px;
+}
+
+.history-header .menu-description {
+  color: #bb8fce;
+  font-weight: 500;
+}
+
 .collapse-arrow {
   font-size: 12px;
   color: #3498db;

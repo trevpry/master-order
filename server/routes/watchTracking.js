@@ -20,8 +20,13 @@ function createWatchTrackingRoutes(io) {
   const watchStatsRoutes = new WatchStatsRoutes(watchLogService, statisticsService);
 
 // Mark a custom order item as watched
-router.post('/mark-custom-order-item-watched/:itemId', validateRequiredFields('itemId', 'Item ID is required'), asyncHandler(async (req, res) => {
+router.post('/mark-custom-order-item-watched/:itemId', asyncHandler(async (req, res) => {
   const { itemId } = req.params;
+
+  // Validate required parameter
+  if (!itemId) {
+    return sendBadRequest(res, 'Item ID is required');
+  }
 
   // Get the custom order item details first to check what type of media it is
   const customOrderItem = await prisma.customOrderItem.findUnique({
