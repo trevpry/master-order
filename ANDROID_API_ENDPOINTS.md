@@ -97,6 +97,7 @@ Currently, no authentication is required for these endpoints. They are designed 
     "customOrderItemId": 789,
     "playlistName": "My Playlist",
     "playlistType": "plex",
+    "playlistId": "playlist-123",
     "backgroundGalleryName": "Background Gallery",
     "backgroundGalleryId": 321,
     "seasonNumber": 2,

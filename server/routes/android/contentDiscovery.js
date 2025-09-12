@@ -95,7 +95,7 @@ function createContentDiscoveryRoutes(services) {
         androidResponse = {
           type: 'PLAY_CUSTOM_ORDER_ITEM',
           data: {
-            id: upNextData.id,
+            id: upNextData.customOrderItemId || upNextData.id,
             title: upNextData.title,
             type: upNextData.type,
             orderName: upNextData.customOrderName || 'Custom Order',
@@ -112,8 +112,7 @@ function createContentDiscoveryRoutes(services) {
             // Playlist information
             ...(upNextData.playlistName && {
               playlistName: upNextData.playlistName,
-              playlistType: upNextData.playlistType,
-              playlistId: upNextData.playlistId
+              playlistType: upNextData.playlistType
             }),
             // Background gallery information
             ...(upNextData.backgroundGalleryName && {

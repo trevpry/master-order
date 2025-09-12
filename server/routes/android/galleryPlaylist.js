@@ -268,8 +268,8 @@ function createGalleryPlaylistRoutes(prisma) {
       
       // Generate stream URL if we have Plex configuration
       if (settings?.plexUrl && settings?.plexToken && randomTrack.ratingKey) {
-        // Use the standard Plex media streaming endpoint
-        streamUrl = `${settings.plexUrl}/library/metadata/${randomTrack.ratingKey}/stream?X-Plex-Token=${settings.plexToken}`;
+        // Use the correct Plex audio streaming endpoint format
+        streamUrl = `${settings.plexUrl}/library/parts/${randomTrack.ratingKey}/stream?X-Plex-Token=${settings.plexToken}`;
         
         // Generate artwork URL with fallback hierarchy
         if (randomTrack.thumb) {
