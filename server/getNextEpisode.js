@@ -5,9 +5,11 @@ if (process.env.NODE_ENV !== 'production') {
 const prisma = require('./prismaClient'); // Use the shared Prisma client
 const tvdbService = require('./tvdbCachedService');
 const PlexDatabaseService = require('./plexDatabaseService');
+const HistoryPlusService = require('./services/historyPlusService');
 
 // Initialize Database Service
 const plexDb = new PlexDatabaseService(prisma);
+const historyPlusService = new HistoryPlusService();
 
 function getCollectionName() {
   return prisma.Settings.findUnique({
@@ -35,14 +37,16 @@ async function getOrderTypeSettings() {
       return {
         tvGeneralPercent: settings.tvGeneralPercent ?? 50,
         moviesGeneralPercent: settings.moviesGeneralPercent ?? 50,
-        customOrderPercent: settings.customOrderPercent ?? 0
+        customOrderPercent: settings.customOrderPercent ?? 0,
+        historyPlusPercent: settings.historyPlusPercent ?? 0
       };
     } else {
       console.log('No order type settings found, using defaults');
       return {
         tvGeneralPercent: 50,
         moviesGeneralPercent: 50,
-        customOrderPercent: 0
+        customOrderPercent: 0,
+        historyPlusPercent: 0
       };
     }
   } catch (error) {
@@ -50,14 +54,15 @@ async function getOrderTypeSettings() {
     return {
       tvGeneralPercent: 50,
       moviesGeneralPercent: 50,
-      customOrderPercent: 0
+      customOrderPercent: 0,
+      historyPlusPercent: 0
     };
   }
 }
 
 async function selectOrderType() {
   const settings = await getOrderTypeSettings();
-  console.log(`Order type percentages - TV General: ${settings.tvGeneralPercent}%, Movies General: ${settings.moviesGeneralPercent}%, Custom Order: ${settings.customOrderPercent}%`);
+  console.log(`Order type percentages - TV General: ${settings.tvGeneralPercent}%, Movies General: ${settings.moviesGeneralPercent}%, Custom Order: ${settings.customOrderPercent}%, History Plus: ${settings.historyPlusPercent}%`);
   
   // Generate random number between 0-100
   const randomPercent = Math.floor(Math.random() * 100) + 1;
@@ -70,9 +75,12 @@ async function selectOrderType() {
   } else if (randomPercent <= settings.tvGeneralPercent + settings.moviesGeneralPercent) {
     console.log('Selected order type: Movies General');
     return 'MOVIES_GENERAL';
-  } else {
+  } else if (randomPercent <= settings.tvGeneralPercent + settings.moviesGeneralPercent + settings.customOrderPercent) {
     console.log('Selected order type: Custom Order');
     return 'CUSTOM_ORDER';
+  } else {
+    console.log('Selected order type: History Plus');
+    return 'HISTORY_PLUS';
   }
 }
 
@@ -750,6 +758,50 @@ async function getNextEpisode() {
       return {
         orderType: 'CUSTOM_ORDER'
       };
+    }
+    
+    if (orderType === 'HISTORY_PLUS') {
+      try {
+        console.log('🏛️ History Plus order type selected - finding next unreviewed event');
+        
+        // Get the next unreviewed event
+        const nextEvent = await historyPlusService.getNextUnreviewedEvent();
+        
+        if (!nextEvent) {
+          console.log('No unreviewed events found');
+          return {
+            message: 'No History Plus content available',
+            orderType: 'HISTORY_PLUS'
+          };
+        }
+        
+        console.log(`📚 Found unreviewed event: ${nextEvent.title}`);
+        
+        // Get random content from the event
+        const randomContent = await historyPlusService.getRandomContentFromEvent(nextEvent);
+        
+        if (!randomContent) {
+          console.log('No content found in event');
+          return {
+            message: 'No content available in selected event',
+            orderType: 'HISTORY_PLUS'
+          };
+        }
+        
+        console.log(`🎲 Randomly selected ${randomContent.type}: ${randomContent.title}`);
+        
+        return {
+          orderType: 'HISTORY_PLUS',
+          ...randomContent
+        };
+        
+      } catch (error) {
+        console.error('Error in History Plus selection:', error);
+        return {
+          message: `Error in History Plus selection: ${error.message}`,
+          orderType: 'HISTORY_PLUS'
+        };
+      }
     }
       // Continue with TV General (original logic)
     const collection = await getCollectionName();

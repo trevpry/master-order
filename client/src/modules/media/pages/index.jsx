@@ -312,6 +312,40 @@ function MediaHome() {
             episodeRatingKey: selectedMedia.episodeRatingKey
           }),
         });
+      } else if (selectedMedia.orderType === 'HISTORY_PLUS') {
+        // Use the History Plus completion endpoint for all History Plus content
+        if (selectedMedia.type === 'webvideo' && selectedMedia.content?.id) {
+          response = await fetch(`${config.apiBaseUrl}/api/history-plus/videos/${selectedMedia.content.id}/complete`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+          });
+        } else if (selectedMedia.type === 'book' && selectedMedia.content?.id) {
+          response = await fetch(`${config.apiBaseUrl}/api/history-plus/books/${selectedMedia.content.id}/complete`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+          });
+        } else if (selectedMedia.type === 'chapter' && selectedMedia.content?.id) {
+          response = await fetch(`${config.apiBaseUrl}/api/history-plus/chapters/${selectedMedia.content.id}/complete`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+          });
+        } else if (selectedMedia.type === 'section' && selectedMedia.content?.id) {
+          response = await fetch(`${config.apiBaseUrl}/api/history-plus/sections/${selectedMedia.content.id}/complete`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+          });
+        } else {
+          setError('Unable to mark as watched: History Plus content not properly identified');
+          return;
+        }
       } else {
         setError('Unable to mark as watched: unsupported order type');
         return;
@@ -1157,6 +1191,8 @@ function MediaHome() {
                         <span>
                           {selectedMedia.type === 'comic' ? '📚' :
                            selectedMedia.type === 'book' ? '📖' :
+                           selectedMedia.type === 'chapter' ? '📄' :
+                           selectedMedia.type === 'section' ? '📝' :
                            selectedMedia.type === 'shortstory' ? '📖' :
                            selectedMedia.type === 'webvideo' ? '🌐' :
                            selectedMedia.orderType === 'MOVIES_GENERAL' ? '🎬' : '📺'}
@@ -1175,10 +1211,22 @@ function MediaHome() {
                         }
                       </span>
                     </div>
-                  ) : selectedMedia.type === 'book' ? (
+                  ) : (selectedMedia.type === 'book' || selectedMedia.type === 'chapter' || selectedMedia.type === 'section') ? (
                     <div className="episode-overlay">
                       <span className="episode-info">
+                        {/* Display book author and year */}
                         {selectedMedia.bookAuthor ? `by ${selectedMedia.bookAuthor}` : 'Unknown Author'}{selectedMedia.bookYear ? ` (${selectedMedia.bookYear})` : ''}
+                        {/* Show chapter/section details for History Plus content */}
+                        {selectedMedia.type === 'chapter' && selectedMedia.chapterNumber && (
+                          <div style={{marginTop: '4px', fontSize: '12px', opacity: '0.9'}}>
+                            Chapter {selectedMedia.chapterNumber}: {selectedMedia.chapterTitle || 'Untitled Chapter'}
+                          </div>
+                        )}
+                        {selectedMedia.type === 'section' && selectedMedia.sectionNumber && (
+                          <div style={{marginTop: '4px', fontSize: '12px', opacity: '0.9'}}>
+                            Chapter {selectedMedia.chapterNumber || ''}{selectedMedia.chapterTitle ? `: ${selectedMedia.chapterTitle}` : ''} - Section {selectedMedia.sectionNumber}: {selectedMedia.sectionTitle || 'Untitled Section'}
+                          </div>
+                        )}
                       </span>
                     </div>
                   ) : selectedMedia.type === 'shortstory' ? (

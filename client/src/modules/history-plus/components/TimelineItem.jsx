@@ -68,6 +68,19 @@ const TimelineItem = ({
     setSelectedVideo(null);
   };
 
+  // Handle watch status change for videos
+  const handleWatchStatusChanged = (videoId, newWatchedStatus) => {
+    // Update the local event state
+    setLocalEvent(prevEvent => ({
+      ...prevEvent,
+      videos: prevEvent.videos?.map(video => 
+        video.id === videoId 
+          ? { ...video, watched: newWatchedStatus }
+          : video
+      ) || []
+    }));
+  };
+
   // Helper function to format dates for display (without leading zeros on years)
   const formatHistoricalDate = (dateString) => {
     if (!dateString) return '';
@@ -127,62 +140,62 @@ const TimelineItem = ({
           {/* Title and Category */}
           <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-3 mb-3">
             <h3 className="text-lg sm:text-xl font-semibold text-gray-800 leading-tight">
-              {event.title}
+              {localEvent.title}
             </h3>
             
             <div className="flex flex-wrap gap-2">
-              {event.category && (
+              {localEvent.category && (
                 <span 
                   className="px-2 py-1 text-xs rounded-full whitespace-nowrap"
                   style={{
-                    backgroundColor: getLighterColor(getCategoryColor(event.category)),
-                    color: getCategoryColor(event.category),
-                    border: `1px solid ${getCategoryColor(event.category)}`
+                    backgroundColor: getLighterColor(getCategoryColor(localEvent.category)),
+                    color: getCategoryColor(localEvent.category),
+                    border: `1px solid ${getCategoryColor(localEvent.category)}`
                   }}
                 >
-                  {event.category}
+                  {localEvent.category}
                 </span>
               )}
               <span className={`px-2 py-1 text-xs rounded-full whitespace-nowrap ${
-                event.reviewed 
+                localEvent.reviewed 
                   ? 'bg-green-100 text-green-800' 
                   : 'bg-yellow-100 text-yellow-800'
               }`}>
-                {event.reviewed ? '✓ Reviewed' : '◯ Unreviewed'}
+                {localEvent.reviewed ? '✓ Reviewed' : '◯ Unreviewed'}
               </span>
             </div>
           </div>
           
           {/* Date */}
           <div className="mb-3 text-base sm:text-lg font-medium text-blue-600">
-            📅 {formatDateRange(event.startDate, event.endDate)}
+            📅 {formatDateRange(localEvent.startDate, localEvent.endDate)}
           </div>
           
           {/* Details */}
-          {event.details && (
-            <p className="mb-4 text-sm sm:text-base text-gray-600 leading-relaxed">{event.details}</p>
+          {localEvent.details && (
+            <p className="mb-4 text-sm sm:text-base text-gray-600 leading-relaxed">{localEvent.details}</p>
           )}
 
           {/* Content counts */}
           <div className="flex flex-wrap gap-2 text-sm">
-            {event.videos && event.videos.length > 0 && (
+            {localEvent.videos && localEvent.videos.length > 0 && (
               <span className="flex items-center gap-1 px-2 py-1 text-red-700 rounded bg-red-50">
-                🎬 {event.videos.length} video{event.videos.length !== 1 ? 's' : ''}
+                🎬 {localEvent.videos.length} video{localEvent.videos.length !== 1 ? 's' : ''}
               </span>
             )}
-            {event.books && event.books.length > 0 && (
+            {localEvent.books && localEvent.books.length > 0 && (
               <span className="flex items-center gap-1 px-2 py-1 text-blue-700 rounded bg-blue-50">
-                📚 {event.books.length} book{event.books.length !== 1 ? 's' : ''}
+                📚 {localEvent.books.length} book{localEvent.books.length !== 1 ? 's' : ''}
               </span>
             )}
-            {event.chapters && event.chapters.length > 0 && (
+            {localEvent.chapters && localEvent.chapters.length > 0 && (
               <span className="flex items-center gap-1 px-2 py-1 text-purple-700 rounded bg-purple-50">
-                📝 {event.chapters.length} chapter{event.chapters.length !== 1 ? 's' : ''}
+                📝 {localEvent.chapters.length} chapter{localEvent.chapters.length !== 1 ? 's' : ''}
               </span>
             )}
-            {event.sections && event.sections.length > 0 && (
+            {localEvent.sections && localEvent.sections.length > 0 && (
               <span className="flex items-center gap-1 px-2 py-1 text-green-700 rounded bg-green-50">
-                📄 {event.sections.length} section{event.sections.length !== 1 ? 's' : ''}
+                📄 {localEvent.sections.length} section{localEvent.sections.length !== 1 ? 's' : ''}
               </span>
             )}
           </div>
@@ -193,14 +206,14 @@ const TimelineItem = ({
           {/* Mark Reviewed button */}
           {onToggleReviewed && (
             <button
-              onClick={() => onToggleReviewed(event.id, !event.reviewed)}
+              onClick={() => onToggleReviewed(event.id, !localEvent.reviewed)}
               className={`px-4 py-2 text-sm rounded font-medium transition-colors w-full sm:w-auto ${
-                event.reviewed 
+                localEvent.reviewed 
                   ? "text-yellow-600 border border-yellow-300 hover:text-yellow-700 hover:border-yellow-400" 
                   : "bg-green-600 hover:bg-green-700 text-white"
               }`}
             >
-              {event.reviewed ? 'Mark Unreviewed' : 'Mark Reviewed'}
+              {localEvent.reviewed ? 'Mark Unreviewed' : 'Mark Reviewed'}
             </button>
           )}
           
@@ -430,6 +443,7 @@ const TimelineItem = ({
           video={selectedVideo}
           isOpen={showVideoModal}
           onClose={handleCloseVideoModal}
+          onWatchStatusChanged={handleWatchStatusChanged}
         />
       )}
     </div>

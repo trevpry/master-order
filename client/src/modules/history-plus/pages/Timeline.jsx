@@ -16,7 +16,7 @@ const Timeline = () => {
   // Search and filter state
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('');
-  const [reviewedFilter, setReviewedFilter] = useState('all');
+  const [reviewedFilter, setReviewedFilter] = useState('unreviewed');
   const [contentTypeFilter, setContentTypeFilter] = useState('all');
   const [startDateFilter, setStartDateFilter] = useState('');
   const [endDateFilter, setEndDateFilter] = useState('');

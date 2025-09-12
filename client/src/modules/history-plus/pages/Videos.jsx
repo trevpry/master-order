@@ -99,10 +99,10 @@ const Videos = () => {
     }
 
     // Main status filter
-    if (filter === 'watched' && !(video.user_video_watches && video.user_video_watches.length > 0)) {
+    if (filter === 'watched' && !(video.user_video_watches && video.user_video_watches.watched)) {
       return false;
     }
-    if (filter === 'unwatched' && (video.user_video_watches && video.user_video_watches.length > 0)) {
+    if (filter === 'unwatched' && (video.user_video_watches && video.user_video_watches.watched)) {
       return false;
     }
     if (filter === 'assignLater' && !video.assignLater) {

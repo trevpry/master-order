@@ -39,6 +39,37 @@ function createContentDiscoveryRoutes(services) {
       } else if (data.orderType === 'CUSTOM_ORDER') {
         console.log('📱 Custom order type selected, using getNextCustomOrder function');
         upNextData = await getNextCustomOrder(req);
+      } else if (data.orderType === 'HISTORY_PLUS') {
+        console.log('📱 History Plus order type selected, treating video as webvideo');
+        
+        // Transform History Plus video to webvideo format (same as custom order webvideos)
+        if (data.type === 'video' && data.content) {
+          const video = data.content;
+          
+          upNextData = {
+            ratingKey: `history-plus-video-${video.id}`,
+            title: data.title,
+            type: 'webvideo',
+            year: null,
+            summary: data.description || '',
+            thumb: data.thumbnail,
+            art: null,
+            webTitle: data.title,
+            webUrl: video.url,
+            webDescription: data.description || '',
+            localArtworkPath: null,
+            orderType: 'HISTORY_PLUS',
+            customOrderMediaType: 'webvideo',
+            // Include History Plus context
+            eventId: data.eventId,
+            eventTitle: data.eventTitle,
+            eventDate: data.eventDate,
+            channel: data.channel
+          };
+        } else {
+          // Non-video History Plus content (books, chapters, sections)
+          upNextData = data;
+        }
       } else {
         // TV General selection
         upNextData = data;
@@ -128,6 +159,82 @@ function createContentDiscoveryRoutes(services) {
             })
           }
         };
+      } else if (upNextData.orderType === 'HISTORY_PLUS') {
+        // History Plus response - treat webvideos like custom order webvideos
+        const artworkUrl = getAndroidArtworkUrl(upNextData, baseUrl);
+        
+        if (upNextData.type === 'webvideo') {
+          // Handle History Plus webvideos exactly like custom order webvideos
+          androidResponse = {
+            type: 'PLAY_CUSTOM_ORDER_ITEM',
+            data: {
+              id: upNextData.ratingKey,
+              title: upNextData.title,
+              type: upNextData.type,
+              orderName: `History Plus: ${upNextData.eventTitle}`,
+              summary: upNextData.summary || '',
+              duration: 0, // Webvideos don't have duration
+              localArtworkPath: upNextData.localArtworkPath || '',
+              artworkUrl: artworkUrl || '',
+              streamUrl: '',
+              ratingKey: upNextData.ratingKey,
+              plexId: upNextData.ratingKey,
+              webUrl: upNextData.webUrl || null,
+              webTitle: upNextData.webTitle,
+              webDescription: upNextData.webDescription,
+              customOrderId: null,
+              customOrderItemId: null,
+              // History Plus specific context
+              eventId: upNextData.eventId,
+              eventTitle: upNextData.eventTitle,
+              eventDate: upNextData.eventDate,
+              channel: upNextData.channel
+            }
+          };
+        } else {
+          // Non-webvideo History Plus content (books, chapters, sections)
+          // Format book/chapter/section content for reading interface
+          androidResponse = {
+            type: 'HISTORY_PLUS_CONTENT',
+            data: {
+              orderType: upNextData.orderType,
+              type: upNextData.type,
+              content: upNextData.content,
+              title: upNextData.title,
+              description: upNextData.description || '',
+              // Book information fields
+              bookTitle: upNextData.bookTitle,
+              bookAuthor: upNextData.bookAuthor,
+              bookYear: upNextData.bookYear,
+              bookIsbn: upNextData.bookIsbn,
+              bookPublisher: upNextData.bookPublisher,
+              bookPageCount: upNextData.bookPageCount,
+              bookCoverUrl: upNextData.bookCoverUrl,
+              bookDescription: upNextData.bookDescription,
+              // Chapter information (for chapters and sections)
+              ...(upNextData.chapterNumber && {
+                chapterNumber: upNextData.chapterNumber,
+                chapterTitle: upNextData.chapterTitle,
+                chapterDescription: upNextData.chapterDescription
+              }),
+              // Section information (for sections only)
+              ...(upNextData.sectionNumber && {
+                sectionNumber: upNextData.sectionNumber,
+                sectionTitle: upNextData.sectionTitle,
+                sectionDescription: upNextData.sectionDescription
+              }),
+              // Page information
+              ...(upNextData.pageStart && {
+                pageStart: upNextData.pageStart,
+                pageEnd: upNextData.pageEnd
+              }),
+              // History Plus specific context
+              eventId: upNextData.eventId,
+              eventTitle: upNextData.eventTitle,
+              eventDate: upNextData.eventDate
+            }
+          };
+        }
       } else {
         // TV Show response (default) - use PLAY_TV_EPISODE type
         const artworkUrl = getAndroidArtworkUrl(upNextData, baseUrl);

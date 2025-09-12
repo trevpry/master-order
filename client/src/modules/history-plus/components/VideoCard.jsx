@@ -17,7 +17,7 @@ const VideoCard = ({
   if (!video) return null;
 
   const handleToggleWatch = () => {
-    const isWatched = video.user_video_watches && video.user_video_watches.length > 0;
+    const isWatched = video.user_video_watches && video.user_video_watches.watched;
     onToggleWatch(video.id, isWatched);
   };
 
@@ -58,7 +58,7 @@ const VideoCard = ({
               {video.title}
             </h3>
             <div className="flex gap-1 flex-shrink-0">
-              {video.user_video_watches && video.user_video_watches.length > 0 && (
+              {video.user_video_watches && video.user_video_watches.watched && (
                 <span className="px-2 py-1 bg-green-100 text-green-800 text-xs rounded-full">
                   ✓ Watched
                 </span>
@@ -116,12 +116,12 @@ const VideoCard = ({
             <button
               onClick={handleToggleWatch}
               className={`px-3 py-1 text-sm rounded transition-colors ${
-                video.user_video_watches && video.user_video_watches.length > 0 
+                video.user_video_watches && video.user_video_watches.watched 
                   ? 'bg-green-100 text-green-800 hover:bg-green-200' 
                   : 'bg-gray-100 text-gray-800 hover:bg-gray-200'
               }`}
             >
-              {video.user_video_watches && video.user_video_watches.length > 0 ? '✓ Watched' : 'Mark Watched'}
+              {video.user_video_watches && video.user_video_watches.watched ? '✓ Watched' : 'Mark Watched'}
             </button>
 
             <button

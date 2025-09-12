@@ -19,7 +19,7 @@ function createActivityTrackingRoutes(prisma) {
     console.log('📱 Android app requesting to mark content as watched...');
     
     try {
-      const { mediaType, ratingKey, customOrderItemId, title } = req.body;
+      const { mediaType, ratingKey, customOrderItemId, title, orderType, videoId, bookId, chapterId, sectionId } = req.body;
       
       if (!mediaType) {
         return res.status(400).json(createAndroidErrorResponse(
@@ -31,7 +31,32 @@ function createActivityTrackingRoutes(prisma) {
       
       let result = null;
       
-      if (mediaType === 'episode' || mediaType === 'movie') {
+      if (orderType === 'HISTORY_PLUS') {
+        // Handle History Plus content completion
+        const HistoryPlusService = require('../../services/historyPlusService');
+        const historyPlusService = new HistoryPlusService();
+        
+        if (mediaType === 'webvideo' && videoId) {
+          console.log('📱 Android app marking History Plus video as watched:', videoId);
+          result = await historyPlusService.completeVideo(videoId);
+        } else if (mediaType === 'book' && bookId) {
+          console.log('📱 Android app marking History Plus book as read:', bookId);
+          result = await historyPlusService.completeBook(bookId);
+        } else if (mediaType === 'chapter' && chapterId) {
+          console.log('📱 Android app marking History Plus chapter as read:', chapterId);
+          result = await historyPlusService.completeChapter(chapterId);
+        } else if (mediaType === 'section' && sectionId) {
+          console.log('📱 Android app marking History Plus section as read:', sectionId);
+          result = await historyPlusService.completeSection(sectionId);
+        } else {
+          return res.status(400).json(createAndroidErrorResponse(
+            'MARK_WATCHED_ERROR',
+            'Invalid History Plus content',
+            'Unable to mark as watched: missing required ID for History Plus content'
+          ));
+        }
+        
+      } else if (mediaType === 'episode' || mediaType === 'movie') {
         if (!ratingKey) {
           return res.status(400).json(createAndroidErrorResponse(
             'MARK_WATCHED_ERROR',

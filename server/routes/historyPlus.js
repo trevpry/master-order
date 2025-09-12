@@ -287,6 +287,34 @@ router.post('/videos/:id/toggle-watched', asyncHandler(async (req, res) => {
   sendSuccess(res, watch);
 }));
 
+// POST /api/history-plus/videos/:id/complete
+// Called when History Plus videos are completed in Up Next (web/Android)
+router.post('/videos/:id/complete', asyncHandler(async (req, res) => {
+  const result = await historyPlusService.completeVideo(req.params.id);
+  sendSuccess(res, result);
+}));
+
+// POST /api/history-plus/books/:id/complete
+// Called when History Plus books are completed in Up Next (web/Android)
+router.post('/books/:id/complete', asyncHandler(async (req, res) => {
+  const result = await historyPlusService.completeBook(req.params.id);
+  sendSuccess(res, result);
+}));
+
+// POST /api/history-plus/chapters/:id/complete
+// Called when History Plus chapters are completed in Up Next (web/Android)
+router.post('/chapters/:id/complete', asyncHandler(async (req, res) => {
+  const result = await historyPlusService.completeChapter(req.params.id);
+  sendSuccess(res, result);
+}));
+
+// POST /api/history-plus/sections/:id/complete
+// Called when History Plus sections are completed in Up Next (web/Android)
+router.post('/sections/:id/complete', asyncHandler(async (req, res) => {
+  const result = await historyPlusService.completeSection(req.params.id);
+  sendSuccess(res, result);
+}));
+
 // POST /api/history-plus/books/:id/read (legacy endpoint)
 router.post('/books/:id/read', asyncHandler(async (req, res) => {
   const read = await historyPlusService.markBookRead(req.params.id);

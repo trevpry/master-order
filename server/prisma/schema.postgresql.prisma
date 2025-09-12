@@ -23,6 +23,7 @@ model Settings {
   tvGeneralPercent                  Int       @default(50)
   moviesGeneralPercent              Int       @default(50)
   customOrderPercent                Int       @default(0)
+  historyPlusPercent                Int       @default(0)
   partiallyWatchedCollectionPercent Int       @default(75)
   ignoredMovieCollections           String?
   ignoredTVCollections              String?

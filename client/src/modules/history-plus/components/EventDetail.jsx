@@ -187,7 +187,7 @@ const EventDetail = ({ event, onBack, onEventUpdate }) => {
                   <div key={video.id} className="content-card">
                     <div className="content-header">
                       <h4>{video.title || 'Untitled Video'}</h4>
-                      {video.user_video_watches?.[0]?.watched && (
+                      {video.user_video_watches?.watched && (
                         <span className="watched-badge">✅ Watched</span>
                       )}
                     </div>
@@ -209,7 +209,7 @@ const EventDetail = ({ event, onBack, onEventUpdate }) => {
                           ▶️ Watch
                         </a>
                       )}
-                      {!video.user_video_watches?.[0]?.watched && (
+                      {!video.user_video_watches?.watched && (
                         <button className="mark-watched-button">
                           ✅ Mark as Watched
                         </button>

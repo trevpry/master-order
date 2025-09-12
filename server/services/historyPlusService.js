@@ -59,7 +59,23 @@ class HistoryPlusService {
     // Map user_event_reviews to reviewed property for frontend compatibility
     return events.map(event => ({
       ...event,
-      reviewed: event.user_event_reviews?.reviewed || false
+      reviewed: event.user_event_reviews?.reviewed || false,
+      videos: event.videos?.map(video => ({
+        ...video,
+        watched: video.user_video_watches?.watched || false
+      })) || [],
+      books: event.books?.map(book => ({
+        ...book,
+        read: book.user_book_reads?.read || false
+      })) || [],
+      chapters: event.chapters?.map(chapter => ({
+        ...chapter,
+        read: chapter.user_chapter_reads?.read || false
+      })) || [],
+      sections: event.sections?.map(section => ({
+        ...section,
+        read: section.user_section_reads?.read || false
+      })) || []
     }));
   }
 
@@ -110,7 +126,23 @@ class HistoryPlusService {
     // Map user_event_reviews to reviewed property for frontend compatibility
     return {
       ...event,
-      reviewed: event.user_event_reviews?.reviewed || false
+      reviewed: event.user_event_reviews?.reviewed || false,
+      videos: event.videos?.map(video => ({
+        ...video,
+        watched: video.user_video_watches?.watched || false
+      })) || [],
+      books: event.books?.map(book => ({
+        ...book,
+        read: book.user_book_reads?.read || false
+      })) || [],
+      chapters: event.chapters?.map(chapter => ({
+        ...chapter,
+        read: chapter.user_chapter_reads?.read || false
+      })) || [],
+      sections: event.sections?.map(section => ({
+        ...section,
+        read: section.user_section_reads?.read || false
+      })) || []
     };
   }
 
@@ -695,6 +727,237 @@ class HistoryPlusService {
     }
   }
 
+  /**
+   * Complete a History Plus video and check if event should be marked as reviewed
+   * Called when videos are completed in Up Next
+   */
+  async completeVideo(videoId) {
+    try {
+      // First, mark the video as watched
+      const watchResult = await this.markVideoWatched(videoId);
+      
+      // Get the video to find its event
+      const video = await this.prisma.historyVideo.findUnique({
+        where: { id: parseInt(videoId) },
+        include: { event: true }
+      });
+      
+      if (!video || !video.event) {
+        console.log(`⚠️ Video ${videoId} not found or not linked to an event`);
+        return { watchResult, eventCompleted: false };
+      }
+      
+      console.log(`📺 Completed video "${video.title}" in event "${video.event.title}"`);
+      
+      // Check if the event is now complete (all content watched/read)
+      const eventCompleted = await this.checkAndMarkEventAsReviewed(video.event.id);
+      
+      return {
+        watchResult,
+        eventCompleted,
+        eventId: video.event.id,
+        eventTitle: video.event.title
+      };
+    } catch (error) {
+      console.error('Error completing video:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Complete a History Plus book and check if event should be marked as reviewed
+   * Called when books are completed in Up Next
+   */
+  async completeBook(bookId) {
+    try {
+      // First, mark the book as read
+      const readResult = await this.markBookRead(bookId);
+      
+      // Get the book to find its event
+      const book = await this.prisma.historyBook.findUnique({
+        where: { id: parseInt(bookId) },
+        include: { event: true }
+      });
+      
+      if (!book || !book.event) {
+        console.log(`⚠️ Book ${bookId} not found or not linked to an event`);
+        return { readResult, eventCompleted: false };
+      }
+      
+      console.log(`📖 Completed book "${book.title}" in event "${book.event.title}"`);
+      
+      // Check if the event is now complete (all content watched/read)
+      const eventCompleted = await this.checkAndMarkEventAsReviewed(book.event.id);
+      
+      return {
+        readResult,
+        eventCompleted,
+        eventId: book.event.id,
+        eventTitle: book.event.title
+      };
+    } catch (error) {
+      console.error('Error completing book:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Complete a History Plus chapter and check if event should be marked as reviewed
+   * Called when chapters are completed in Up Next
+   */
+  async completeChapter(chapterId) {
+    try {
+      // First, mark the chapter as read
+      const readResult = await this.markChapterRead(chapterId);
+      
+      // Get the chapter to find its event
+      const chapter = await this.prisma.historyChapter.findUnique({
+        where: { id: parseInt(chapterId) },
+        include: { 
+          event: true,
+          book: true
+        }
+      });
+      
+      if (!chapter || !chapter.event) {
+        console.log(`⚠️ Chapter ${chapterId} not found or not linked to an event`);
+        return { readResult, eventCompleted: false };
+      }
+      
+      console.log(`📄 Completed chapter "${chapter.title}" from "${chapter.book?.title || 'Unknown Book'}" in event "${chapter.event.title}"`);
+      
+      // Check if the event is now complete (all content watched/read)
+      const eventCompleted = await this.checkAndMarkEventAsReviewed(chapter.event.id);
+      
+      return {
+        readResult,
+        eventCompleted,
+        eventId: chapter.event.id,
+        eventTitle: chapter.event.title
+      };
+    } catch (error) {
+      console.error('Error completing chapter:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Complete a History Plus section and check if event should be marked as reviewed
+   * Called when sections are completed in Up Next
+   */
+  async completeSection(sectionId) {
+    try {
+      // First, mark the section as read
+      const readResult = await this.markSectionRead(sectionId);
+      
+      // Get the section to find its event
+      const section = await this.prisma.historySection.findUnique({
+        where: { id: parseInt(sectionId) },
+        include: { 
+          event: true,
+          chapter: {
+            include: { book: true }
+          }
+        }
+      });
+      
+      if (!section || !section.event) {
+        console.log(`⚠️ Section ${sectionId} not found or not linked to an event`);
+        return { readResult, eventCompleted: false };
+      }
+      
+      console.log(`📝 Completed section "${section.title}" from chapter "${section.chapter?.title || 'Unknown Chapter'}" of "${section.chapter?.book?.title || 'Unknown Book'}" in event "${section.event.title}"`);
+      
+      // Check if the event is now complete (all content watched/read)
+      const eventCompleted = await this.checkAndMarkEventAsReviewed(section.event.id);
+      
+      return {
+        readResult,
+        eventCompleted,
+        eventId: section.event.id,
+        eventTitle: section.event.title
+      };
+    } catch (error) {
+      console.error('Error completing section:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Check if an event has any remaining unwatched/unread content
+   * If not, mark the event as reviewed
+   */
+  async checkAndMarkEventAsReviewed(eventId) {
+    try {
+      const event = await this.prisma.historicalEvent.findUnique({
+        where: { id: parseInt(eventId) },
+        include: {
+          videos: {
+            include: { user_video_watches: true }
+          },
+          books: {
+            include: { user_book_reads: true }
+          },
+          chapters: {
+            include: { user_chapter_reads: true }
+          },
+          sections: {
+            include: { user_section_reads: true }
+          },
+          user_event_reviews: true
+        }
+      });
+      
+      if (!event) {
+        console.log(`⚠️ Event ${eventId} not found`);
+        return false;
+      }
+      
+      // Check for any unwatched videos
+      const unwatchedVideos = event.videos.filter(video => 
+        !video.user_video_watches || !video.user_video_watches.watched
+      );
+      
+      // Check for any unread books
+      const unreadBooks = event.books.filter(book =>
+        !book.user_book_reads || !book.user_book_reads.read
+      );
+      
+      // Check for any unread chapters
+      const unreadChapters = event.chapters.filter(chapter =>
+        !chapter.user_chapter_reads || !chapter.user_chapter_reads.read
+      );
+      
+      // Check for any unread sections
+      const unreadSections = event.sections.filter(section =>
+        !section.user_section_reads || !section.user_section_reads.read
+      );
+      
+      const totalUnconsumed = unwatchedVideos.length + unreadBooks.length + unreadChapters.length + unreadSections.length;
+      
+      console.log(`📊 Event "${event.title}" status:`, {
+        unwatchedVideos: unwatchedVideos.length,
+        unreadBooks: unreadBooks.length, 
+        unreadChapters: unreadChapters.length,
+        unreadSections: unreadSections.length,
+        totalUnconsumed
+      });
+      
+      if (totalUnconsumed === 0) {
+        // All content consumed - mark event as reviewed
+        await this.markEventReviewed(eventId, true);
+        console.log(`✅ Event "${event.title}" marked as reviewed - all content consumed`);
+        return true;
+      } else {
+        console.log(`📝 Event "${event.title}" still has ${totalUnconsumed} unconsumed items`);
+        return false;
+      }
+    } catch (error) {
+      console.error('Error checking event completion:', error);
+      throw error;
+    }
+  }
+
   async markBookRead(bookId) {
     return await this.prisma.user_book_reads.upsert({
       where: { bookId: parseInt(bookId) },
@@ -975,6 +1238,374 @@ class HistoryPlusService {
       ];
     } catch (error) {
       console.error('Error getting categories:', error);
+      throw error;
+    }
+  }
+
+  // ==========================================
+  // UP NEXT INTEGRATION
+  // ==========================================
+
+  /**
+   * Find the next unreviewed historical event
+   * An event is considered "unreviewed" if it has at least one piece of content 
+   * (video, book, chapter, or section) that hasn't been marked as read/watched
+   */
+  async getNextUnreviewedEvent() {
+    try {
+      const events = await this.prisma.historicalEvent.findMany({
+        where: { hidden: false },
+        include: {
+          books: {
+            include: {
+              chapters: {
+                include: {
+                  sections: {
+                    include: {
+                      user_section_reads: true
+                    }
+                  },
+                  user_chapter_reads: true
+                }
+              },
+              user_book_reads: true
+            }
+          },
+          chapters: {
+            include: {
+              sections: {
+                include: {
+                  user_section_reads: true
+                }
+              },
+              user_chapter_reads: true,
+              book: true
+            }
+          },
+          sections: {
+            include: {
+              user_section_reads: true,
+              chapter: {
+                include: {
+                  book: true
+                }
+              }
+            }
+          },
+          videos: {
+            include: {
+              user_video_watches: true,
+              channel: true
+            }
+          },
+          user_event_reviews: true
+        }
+      });
+
+      // Sort events chronologically by converting string dates to Date objects
+      const sortedEvents = events.sort((a, b) => {
+        const dateA = this.parseHistoricalDate(a.startDate);
+        const dateB = this.parseHistoricalDate(b.startDate);
+        return dateA.getTime() - dateB.getTime();
+      });
+
+      console.log(`🔍 Checking ${sortedEvents.length} events for unreviewed content...`);
+      
+      console.log(`� Checking ${sortedEvents.length} events for unreviewed content...`);
+      
+      // Find the first event with actual unreviewed content
+      for (const event of sortedEvents) {
+        const isEventReviewed = event.user_event_reviews && event.user_event_reviews.reviewed;
+        console.log(`📅 Event: "${event.title}" (${event.startDate}) - Marked as reviewed: ${isEventReviewed}`);
+        
+        if (!isEventReviewed) {
+          // Check if this event actually has unwatched/unread content
+          const hasUnwatchedContent = await this.checkEventHasUnwatchedContent(event);
+          
+          if (hasUnwatchedContent) {
+            console.log(`✅ Selected event with unwatched content: "${event.title}"`);
+            return event;
+          } else {
+            // Event has no unwatched content but isn't marked as reviewed - mark it as reviewed
+            console.log(`🔄 Event "${event.title}" has no unwatched content, marking as reviewed and continuing...`);
+            await this.markEventReviewed(event.id, true);
+            // Continue to next event
+          }
+        }
+      }
+
+      // If no unreviewed events, return the first event (or null if no events)
+      console.log('⚠️ No unreviewed events found, returning first event');
+      return sortedEvents.length > 0 ? sortedEvents[0] : null;
+    } catch (error) {
+      console.error('Error finding next unreviewed event:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Check if an event has any unwatched/unread content
+   * Returns true if there is content to consume, false if all content is consumed
+   */
+  async checkEventHasUnwatchedContent(event) {
+    try {
+      // Check for any unwatched videos
+      const unwatchedVideos = event.videos.filter(video => 
+        !video.user_video_watches || !video.user_video_watches.watched
+      );
+      
+      // Check for any unread books
+      const unreadBooks = event.books.filter(book =>
+        !book.user_book_reads || !book.user_book_reads.read
+      );
+      
+      // Check for any unread chapters (direct event chapters)
+      const unreadChapters = event.chapters.filter(chapter =>
+        !chapter.user_chapter_reads || !chapter.user_chapter_reads.read
+      );
+      
+      // Check for any unread sections (direct event sections)
+      const unreadSections = event.sections.filter(section =>
+        !section.user_section_reads || !section.user_section_reads.read
+      );
+      
+      // Also check for unread chapters within books and sections within chapters
+      const unreadBookChapters = event.books.flatMap(book => 
+        book.chapters?.filter(chapter => !chapter.user_chapter_reads || !chapter.user_chapter_reads.read) || []
+      );
+      
+      const unreadChapterSections = event.chapters.flatMap(chapter =>
+        chapter.sections?.filter(section => !section.user_section_reads || !section.user_section_reads.read) || []
+      );
+      
+      const unreadBookChapterSections = event.books.flatMap(book =>
+        book.chapters?.flatMap(chapter =>
+          chapter.sections?.filter(section => !section.user_section_reads || !section.user_section_reads.read) || []
+        ) || []
+      );
+      
+      const totalUnwatched = unwatchedVideos.length + unreadBooks.length + unreadChapters.length + 
+                            unreadSections.length + unreadBookChapters.length + unreadChapterSections.length + 
+                            unreadBookChapterSections.length;
+      
+      console.log(`📊 Event "${event.title}" unwatched content:`, {
+        videos: unwatchedVideos.length,
+        books: unreadBooks.length,
+        chapters: unreadChapters.length,
+        sections: unreadSections.length,
+        bookChapters: unreadBookChapters.length,
+        chapterSections: unreadChapterSections.length,
+        bookChapterSections: unreadBookChapterSections.length,
+        total: totalUnwatched
+      });
+      
+      return totalUnwatched > 0;
+    } catch (error) {
+      console.error('Error checking event unwatched content:', error);
+      return true; // Assume there's content if we can't check
+    }
+  }
+
+  /**
+   * Parse historical date string (e.g., "-2334-01-01") to Date object
+   */
+  parseHistoricalDate(dateString) {
+    if (!dateString) return new Date(0);
+    
+    // Handle BCE dates (negative years)
+    if (dateString.startsWith('-')) {
+      const withoutMinus = dateString.substring(1);
+      const [year, month, day] = withoutMinus.split('-').map(num => parseInt(num, 10));
+      // For BCE dates, we use negative years and adjust for JavaScript Date behavior
+      return new Date(-year + 1, (month || 1) - 1, day || 1);
+    } else {
+      // CE dates
+      return new Date(dateString);
+    }
+  }
+
+  /**
+   * Check if an event has any unreviewed content
+   */
+  async hasUnreviewedContent(event) {
+    console.log(`  🔍 Checking event "${event.title}" for unreviewed content:`);
+    console.log(`    📺 Videos: ${event.videos.length}, 📚 Books: ${event.books.length}, 📖 Chapters: ${event.chapters.length}, 📄 Sections: ${event.sections.length}`);
+    
+    // Check videos
+    for (const video of event.videos) {
+      const watchRecord = video.user_video_watches;
+      console.log(`    📺 Video "${video.title}":`, {
+        hasWatchRecord: !!watchRecord,
+        isArray: Array.isArray(watchRecord),
+        length: watchRecord?.length,
+        watched: watchRecord?.[0]?.watched
+      });
+      
+      const unreviewed = !watchRecord || watchRecord.length === 0 || !watchRecord[0]?.watched;
+      console.log(`    📺 Video "${video.title}": ${unreviewed ? 'UNREVIEWED' : 'reviewed'}`);
+      if (unreviewed) {
+        return true;
+      }
+    }
+
+    // Check books
+    for (const book of event.books) {
+      const readRecord = book.user_book_reads;
+      const unreviewed = !readRecord || readRecord.length === 0 || !readRecord[0]?.read;
+      console.log(`    📚 Book "${book.title}": ${unreviewed ? 'UNREVIEWED' : 'reviewed'}`);
+      if (unreviewed) {
+        return true;
+      }
+    }
+
+    // Check chapters
+    for (const chapter of event.chapters) {
+      const readRecord = chapter.user_chapter_reads;
+      const unreviewed = !readRecord || readRecord.length === 0 || !readRecord[0]?.read;
+      console.log(`    📖 Chapter "${chapter.title}": ${unreviewed ? 'UNREVIEWED' : 'reviewed'}`);
+      if (unreviewed) {
+        return true;
+      }
+    }
+
+    // Check sections
+    for (const section of event.sections) {
+      const readRecord = section.user_section_reads;
+      const unreviewed = !readRecord || readRecord.length === 0 || !readRecord[0]?.read;
+      console.log(`    📄 Section "${section.title}": ${unreviewed ? 'UNREVIEWED' : 'reviewed'}`);
+      if (unreviewed) {
+        return true;
+      }
+    }
+
+    console.log(`    ✅ All content reviewed for "${event.title}"`);
+    return false;
+  }
+
+  /**
+   * Randomly select a piece of content from an event
+   * Returns an object with type and content data suitable for Up Next display
+   */
+  async getRandomContentFromEvent(event) {
+    try {
+      const availableContent = [];
+
+      // Collect only UNREVIEWED content
+      event.videos?.forEach(video => {
+        const isWatched = video.user_video_watches && video.user_video_watches.watched;
+        if (!isWatched) {
+          availableContent.push({
+            type: 'video',
+            content: video,
+            title: video.title,
+            description: video.description || '',
+            duration: video.duration,
+            thumbnail: video.thumbnail,
+            channel: video.channel?.name || 'Unknown Channel'
+          });
+        }
+      });
+
+      event.books?.forEach(book => {
+        const isRead = book.user_book_reads && book.user_book_reads.read;
+        if (!isRead) {
+          availableContent.push({
+            type: 'book',
+            content: book,
+            title: book.title,
+            description: book.description || '',
+            // Book-specific fields to match custom order format
+            bookTitle: book.title,
+            bookAuthor: book.author || 'Unknown Author',
+            bookYear: book.publishYear,
+            bookIsbn: book.isbn,
+            bookPublisher: book.publisher,
+            bookPageCount: book.pageCount,
+            bookCoverUrl: book.coverUrl,
+            bookDescription: book.description
+          });
+        }
+      });
+
+      event.chapters?.forEach(chapter => {
+        const isRead = chapter.user_chapter_reads && chapter.user_chapter_reads.read;
+        if (!isRead) {
+          availableContent.push({
+            type: 'chapter',
+            content: chapter,
+            title: `${chapter.book?.title || 'Unknown Book'} - Chapter ${chapter.chapterNumber || ''}: ${chapter.title}`,
+            description: chapter.description || '',
+            // Book-specific fields with chapter details
+            bookTitle: chapter.book?.title || 'Unknown Book',
+            bookAuthor: chapter.book?.author || 'Unknown Author',
+            bookYear: chapter.book?.publishYear,
+            bookIsbn: chapter.book?.isbn,
+            bookPublisher: chapter.book?.publisher,
+            bookPageCount: chapter.book?.pageCount,
+            bookCoverUrl: chapter.book?.coverUrl,
+            bookDescription: chapter.book?.description,
+            // Chapter-specific details
+            chapterNumber: chapter.chapterNumber || 0,
+            chapterTitle: chapter.title,
+            chapterDescription: chapter.description,
+            pageStart: chapter.pageStart,
+            pageEnd: chapter.pageEnd
+          });
+        }
+      });
+
+      event.sections?.forEach(section => {
+        const isRead = section.user_section_reads && section.user_section_reads.read;
+        if (!isRead) {
+          availableContent.push({
+            type: 'section',
+            content: section,
+            title: `${section.chapter?.book?.title || 'Unknown Book'} - Chapter ${section.chapter?.chapterNumber || ''}: ${section.chapter?.title || 'Unknown Chapter'} - Section ${section.sectionNumber || ''}: ${section.title}`,
+            description: section.description || '',
+            // Book-specific fields with section details
+            bookTitle: section.chapter?.book?.title || 'Unknown Book',
+            bookAuthor: section.chapter?.book?.author || 'Unknown Author',
+            bookYear: section.chapter?.book?.publishYear,
+            bookIsbn: section.chapter?.book?.isbn,
+            bookPublisher: section.chapter?.book?.publisher,
+            bookPageCount: section.chapter?.book?.pageCount,
+            bookCoverUrl: section.chapter?.book?.coverUrl,
+            bookDescription: section.chapter?.book?.description,
+            // Chapter details
+            chapterNumber: section.chapter?.chapterNumber || 0,
+            chapterTitle: section.chapter?.title || 'Unknown Chapter',
+            chapterDescription: section.chapter?.description,
+            // Section-specific details
+            sectionNumber: section.sectionNumber || 0,
+            sectionTitle: section.title,
+            sectionDescription: section.description,
+            pageStart: section.pageStart,
+            pageEnd: section.pageEnd
+          });
+        }
+      });
+
+      console.log(`🎲 Found ${availableContent.length} unreviewed items in event "${event.title}"`);
+      
+      if (availableContent.length === 0) {
+        console.log('⚠️ No unreviewed content found in event');
+        return null;
+      }
+
+      // Randomly select one piece of unreviewed content
+      const randomIndex = Math.floor(Math.random() * availableContent.length);
+      const selectedContent = availableContent[randomIndex];
+
+      console.log(`🎲 Randomly selected ${selectedContent.type}: ${selectedContent.title}`);
+
+      // Add event information
+      selectedContent.eventId = event.id;
+      selectedContent.eventTitle = event.title;
+      selectedContent.eventDate = event.startDate;
+
+      return selectedContent;
+    } catch (error) {
+      console.error('Error selecting random content from event:', error);
       throw error;
     }
   }

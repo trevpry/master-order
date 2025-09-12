@@ -25,6 +25,7 @@ function Settings() {
   const [tvGeneralPercent, setTvGeneralPercent] = useState(50);
   const [moviesGeneralPercent, setMoviesGeneralPercent] = useState(50);
   const [customOrderPercent, setCustomOrderPercent] = useState(0);
+  const [historyPlusPercent, setHistoryPlusPercent] = useState(0);
   const [partiallyWatchedCollectionPercent, setPartiallyWatchedCollectionPercent] = useState(75);
   const [plexSyncInterval, setPlexSyncInterval] = useState(12);
   const [stashSyncInterval, setStashSyncInterval] = useState(24);
@@ -81,7 +82,7 @@ function Settings() {
 
   const validatePercentages = () => {
     const effectiveCustomOrderPercent = customOrdersCount > 0 ? customOrderPercent : 0;
-    const total = tvGeneralPercent + moviesGeneralPercent + effectiveCustomOrderPercent;
+    const total = tvGeneralPercent + moviesGeneralPercent + effectiveCustomOrderPercent + historyPlusPercent;
     return total === 100;
   };
 
@@ -139,6 +140,7 @@ function Settings() {
           setTvGeneralPercent(settings.tvGeneralPercent ?? 50);
           setMoviesGeneralPercent(settings.moviesGeneralPercent ?? 50);
           setCustomOrderPercent(settings.customOrderPercent ?? 0);
+          setHistoryPlusPercent(settings.historyPlusPercent ?? 0);
           setPartiallyWatchedCollectionPercent(settings.partiallyWatchedCollectionPercent ?? 75);
           setPlexSyncInterval(settings.plexSyncInterval ?? 12);
           setStashSyncInterval(settings.stashSyncInterval ?? 24);
@@ -313,24 +315,38 @@ function Settings() {
     const remainingPercent = 100 - value;
     
     if (customOrdersCount === 0) {
-      // If no custom orders, only adjust movies
-      setMoviesGeneralPercent(remainingPercent);
+      // If no custom orders, adjust movies and history plus
+      const currentOtherTotal = moviesGeneralPercent + historyPlusPercent;
+      
+      if (currentOtherTotal === 0) {
+        setMoviesGeneralPercent(remainingPercent);
+        setHistoryPlusPercent(0);
+      } else {
+        const moviesRatio = moviesGeneralPercent / currentOtherTotal;
+        const historyPlusRatio = historyPlusPercent / currentOtherTotal;
+        
+        setMoviesGeneralPercent(Math.round(remainingPercent * moviesRatio));
+        setHistoryPlusPercent(Math.round(remainingPercent * historyPlusRatio));
+      }
       setCustomOrderPercent(0);
     } else {
       // Original logic when custom orders are available
-      const currentOtherTotal = moviesGeneralPercent + customOrderPercent;
+      const currentOtherTotal = moviesGeneralPercent + customOrderPercent + historyPlusPercent;
       
       if (currentOtherTotal === 0) {
         // If others are 0, set movies to the remaining
         setMoviesGeneralPercent(remainingPercent);
         setCustomOrderPercent(0);
+        setHistoryPlusPercent(0);
       } else {
         // Proportionally distribute the remaining percentage
         const moviesRatio = moviesGeneralPercent / currentOtherTotal;
         const customRatio = customOrderPercent / currentOtherTotal;
+        const historyPlusRatio = historyPlusPercent / currentOtherTotal;
         
         setMoviesGeneralPercent(Math.round(remainingPercent * moviesRatio));
         setCustomOrderPercent(Math.round(remainingPercent * customRatio));
+        setHistoryPlusPercent(Math.round(remainingPercent * historyPlusRatio));
       }
     }
   };
@@ -342,24 +358,38 @@ function Settings() {
     const remainingPercent = 100 - value;
     
     if (customOrdersCount === 0) {
-      // If no custom orders, only adjust TV
-      setTvGeneralPercent(remainingPercent);
+      // If no custom orders, adjust TV and history plus
+      const currentOtherTotal = tvGeneralPercent + historyPlusPercent;
+      
+      if (currentOtherTotal === 0) {
+        setTvGeneralPercent(remainingPercent);
+        setHistoryPlusPercent(0);
+      } else {
+        const tvRatio = tvGeneralPercent / currentOtherTotal;
+        const historyPlusRatio = historyPlusPercent / currentOtherTotal;
+        
+        setTvGeneralPercent(Math.round(remainingPercent * tvRatio));
+        setHistoryPlusPercent(Math.round(remainingPercent * historyPlusRatio));
+      }
       setCustomOrderPercent(0);
     } else {
       // Original logic when custom orders are available
-      const currentOtherTotal = tvGeneralPercent + customOrderPercent;
+      const currentOtherTotal = tvGeneralPercent + customOrderPercent + historyPlusPercent;
       
       if (currentOtherTotal === 0) {
         // If others are 0, set TV to the remaining
         setTvGeneralPercent(remainingPercent);
         setCustomOrderPercent(0);
+        setHistoryPlusPercent(0);
       } else {
         // Proportionally distribute the remaining percentage
         const tvRatio = tvGeneralPercent / currentOtherTotal;
         const customRatio = customOrderPercent / currentOtherTotal;
+        const historyPlusRatio = historyPlusPercent / currentOtherTotal;
         
         setTvGeneralPercent(Math.round(remainingPercent * tvRatio));
         setCustomOrderPercent(Math.round(remainingPercent * customRatio));
+        setHistoryPlusPercent(Math.round(remainingPercent * historyPlusRatio));
       }
     }
   };
@@ -368,19 +398,49 @@ function Settings() {
     setCustomOrderPercent(value);
     // Auto-adjust other percentages proportionally to maintain 100%
     const remainingPercent = 100 - value;
-    const currentOtherTotal = tvGeneralPercent + moviesGeneralPercent;
+    const currentOtherTotal = tvGeneralPercent + moviesGeneralPercent + historyPlusPercent;
     
     if (currentOtherTotal === 0) {
       // If others are 0, set TV to the remaining
       setTvGeneralPercent(remainingPercent);
       setMoviesGeneralPercent(0);
+      setHistoryPlusPercent(0);
     } else {
       // Proportionally distribute the remaining percentage
       const tvRatio = tvGeneralPercent / currentOtherTotal;
       const moviesRatio = moviesGeneralPercent / currentOtherTotal;
+      const historyPlusRatio = historyPlusPercent / currentOtherTotal;
       
       setTvGeneralPercent(Math.round(remainingPercent * tvRatio));
       setMoviesGeneralPercent(Math.round(remainingPercent * moviesRatio));
+      setHistoryPlusPercent(Math.round(remainingPercent * historyPlusRatio));
+    }
+  };
+
+  const handleHistoryPlusPercentChange = (e) => {
+    const value = parseInt(e.target.value);
+    setHistoryPlusPercent(value);
+    // Auto-adjust other percentages proportionally to maintain 100%
+    const remainingPercent = 100 - value;
+    const effectiveCustomOrderPercent = customOrdersCount > 0 ? customOrderPercent : 0;
+    const currentOtherTotal = tvGeneralPercent + moviesGeneralPercent + effectiveCustomOrderPercent;
+    
+    if (currentOtherTotal === 0) {
+      // If others are 0, set TV to the remaining
+      setTvGeneralPercent(remainingPercent);
+      setMoviesGeneralPercent(0);
+      setCustomOrderPercent(0);
+    } else {
+      // Proportionally distribute the remaining percentage
+      const tvRatio = tvGeneralPercent / currentOtherTotal;
+      const moviesRatio = moviesGeneralPercent / currentOtherTotal;
+      const customRatio = effectiveCustomOrderPercent / currentOtherTotal;
+      
+      setTvGeneralPercent(Math.round(remainingPercent * tvRatio));
+      setMoviesGeneralPercent(Math.round(remainingPercent * moviesRatio));
+      if (customOrdersCount > 0) {
+        setCustomOrderPercent(Math.round(remainingPercent * customRatio));
+      }
     }
   };
 
@@ -405,7 +465,7 @@ function Settings() {
   const handleSubmit = async () => {
     if (!validatePercentages()) {
       const effectiveCustomOrderPercent = customOrdersCount > 0 ? customOrderPercent : 0;
-      const totalPercent = tvGeneralPercent + moviesGeneralPercent + effectiveCustomOrderPercent;
+      const totalPercent = tvGeneralPercent + moviesGeneralPercent + effectiveCustomOrderPercent + historyPlusPercent;
       showMessage(`Error: Order type percentages must add up to exactly 100%. Current total: ${totalPercent}%`, true);
       return;
     }
@@ -441,6 +501,7 @@ function Settings() {
           tvGeneralPercent, 
           moviesGeneralPercent,
           customOrderPercent,
+          historyPlusPercent,
           partiallyWatchedCollectionPercent,
           plexSyncInterval,
           stashSyncInterval,
@@ -1191,10 +1252,24 @@ function Settings() {
                   />
                 </div>              )}
 
+              <div className="order-type-control compact">
+                <label htmlFor="history_plus_percent">🏛️ History Plus: {historyPlusPercent}%</label>
+                <input 
+                  type="range" 
+                  id="history_plus_percent"
+                  name="history_plus_percent"
+                  min="0"
+                  max="100"
+                  value={historyPlusPercent}
+                  onChange={handleHistoryPlusPercentChange}
+                  className="percentage-slider history-plus-slider"
+                />
+              </div>
+
               <div className="percentage-display compact">
                 {(() => {
                   const effectiveCustomOrderPercent = customOrdersCount > 0 ? customOrderPercent : 0;
-                  const total = tvGeneralPercent + moviesGeneralPercent + effectiveCustomOrderPercent;
+                  const total = tvGeneralPercent + moviesGeneralPercent + effectiveCustomOrderPercent + historyPlusPercent;
                   const isValid = total === 100;
                   
                   return (

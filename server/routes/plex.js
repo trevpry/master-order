@@ -414,6 +414,40 @@ router.get('/up-next', asyncHandler(async (req, res) => {
     console.log('Custom order type selected, using getNextCustomOrder function');
     const customOrderData = await getNextCustomOrder(req);
     res.json(customOrderData);
+  } else if (data.orderType === 'HISTORY_PLUS') {
+    console.log('History Plus order type selected, treating video as webvideo');
+    
+    // Transform History Plus video to webvideo format (same as custom order webvideos)
+    if (data.type === 'video' && data.content) {
+      const video = data.content;
+      const baseUrl = `${req.protocol}://${req.get('host')}`;
+      
+      const webvideoData = {
+        ratingKey: `history-plus-video-${video.id}`,
+        title: data.title,
+        type: 'webvideo',
+        year: null,
+        summary: data.description || '',
+        thumb: data.thumbnail,
+        art: null,
+        webTitle: data.title,
+        webUrl: video.url,
+        webDescription: data.description || '',
+        localArtworkPath: null,
+        orderType: 'HISTORY_PLUS',
+        customOrderMediaType: 'webvideo',
+        // Include History Plus context
+        eventId: data.eventId,
+        eventTitle: data.eventTitle,
+        eventDate: data.eventDate,
+        channel: data.channel
+      };
+      
+      res.json(webvideoData);
+    } else {
+      // Non-video History Plus content (books, chapters, sections)
+      res.json(data);
+    }
   } else {
     // TV General selection
     res.json(data);

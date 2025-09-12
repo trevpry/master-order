@@ -430,6 +430,7 @@ export const historyPlusApi = {
   deleteVideo: HistoryPlusApiService.deleteVideo,
   markVideoWatched: HistoryPlusApiService.markVideoWatched,
   toggleVideoWatched: HistoryPlusApiService.toggleVideoWatched,
+  markEventReviewed: HistoryPlusApiService.markEventReviewed,
   getAllChannels: HistoryPlusApiService.getAllChannels,
   getChannels: HistoryPlusApiService.getAllChannels, // Alias for Videos component
   getChannelById: HistoryPlusApiService.getChannelById,

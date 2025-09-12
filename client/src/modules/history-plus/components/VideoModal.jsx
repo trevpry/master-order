@@ -1,7 +1,7 @@
 import React from 'react';
 import { historyPlusApi } from '../services/historyPlusApi';
 
-const VideoModal = ({ video, isOpen, onClose }) => {
+const VideoModal = ({ video, isOpen, onClose, onWatchStatusChanged }) => {
   if (!isOpen || !video) return null;
 
   // Helper function to extract YouTube video ID from URL
@@ -39,10 +39,12 @@ const VideoModal = ({ video, isOpen, onClose }) => {
 
   const handleToggleWatched = async () => {
     try {
-      await historyPlusApi.markVideoWatched(video.id, !video.watched);
-      // Update the video object
-      video.watched = !video.watched;
-      // Force a re-render by closing and reopening
+      const response = await historyPlusApi.toggleVideoWatched(video.id);
+      // Notify parent component about the status change if callback provided
+      if (onWatchStatusChanged) {
+        onWatchStatusChanged(video.id, !video.watched);
+      }
+      // Close the modal
       onClose();
     } catch (error) {
       console.error('Error updating watch status:', error);
