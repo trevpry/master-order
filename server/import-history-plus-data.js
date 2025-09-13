@@ -396,7 +396,6 @@ class HistoryPlusDataImporter {
     // Transform records to match PostgreSQL schema
     const transformedRecords = records.map(record => ({
       id: record.id,
-      userId: this.defaultUserId, // Use default user for all migrated records
       eventId: parseInt(record.eventId),
       reviewed: record.reviewed === 'true',
       reviewedAt: record.reviewDate ? new Date(record.reviewDate) : null,
@@ -437,7 +436,6 @@ class HistoryPlusDataImporter {
     // Transform records to match PostgreSQL schema
     const transformedRecords = records.map(record => ({
       id: record.id,
-      userId: this.defaultUserId, // Use default user for all migrated records
       videoId: parseInt(record.videoId),
       watched: record.watched === 'true',
       watchedAt: record.watchDate ? new Date(record.watchDate) : null,
@@ -478,10 +476,9 @@ class HistoryPlusDataImporter {
     // Transform records to match PostgreSQL schema
     const transformedRecords = records.map(record => ({
       id: record.id,
-      userId: this.defaultUserId, // Use default user for all migrated records
       bookId: parseInt(record.bookId),
       read: record.read === 'true',
-      readDate: record.readDate ? new Date(record.readDate) : null,
+      readAt: record.readDate ? new Date(record.readDate) : null,
       createdAt: new Date(record.createdAt),
       updatedAt: new Date(record.updatedAt)
     }));
@@ -519,10 +516,9 @@ class HistoryPlusDataImporter {
     // Transform records to match PostgreSQL schema
     const transformedRecords = records.map(record => ({
       id: record.id,
-      userId: this.defaultUserId, // Use default user for all migrated records
       chapterId: parseInt(record.chapterId),
       read: record.read === 'true',
-      readDate: record.readDate ? new Date(record.readDate) : null,
+      readAt: record.readDate ? new Date(record.readDate) : null,
       createdAt: new Date(record.createdAt),
       updatedAt: new Date(record.updatedAt)
     }));
@@ -560,10 +556,9 @@ class HistoryPlusDataImporter {
     // Transform records to match PostgreSQL schema
     const transformedRecords = records.map(record => ({
       id: record.id,
-      userId: this.defaultUserId, // Use default user for all migrated records
       sectionId: parseInt(record.sectionId),
       read: record.read === 'true',
-      readDate: record.readDate ? new Date(record.readDate) : null,
+      readAt: record.readDate ? new Date(record.readDate) : null,
       createdAt: new Date(record.createdAt),
       updatedAt: new Date(record.updatedAt)
     }));
@@ -609,9 +604,7 @@ class HistoryPlusDataImporter {
       await this.importHistorySections();
       await this.importHistoryChannels();
       
-      // Ensure default user exists before importing user-related data
-      await this.ensureDefaultUser();
-      
+      // Import user tracking data (no user ID required - tables link directly to content)
       await this.importUserEventReviews();
       await this.importUserVideoWatches();
       await this.importUserBookReads();
@@ -633,38 +626,9 @@ class HistoryPlusDataImporter {
     }
   }
 
-  async ensureDefaultUser() {
-    console.log('👤 Ensuring default user exists...');
-
-    // Check if any users exist
-    const existingUsers = await this.targetPrisma.user.findMany({ take: 1 });
-
-    if (existingUsers.length > 0) {
-      console.log('   Default user already exists');
-      this.defaultUserId = existingUsers[0].id;
-      return;
-    }
-
-    // Create a default user
-    const defaultUser = {
-      id: 'default-user-id',
-      email: 'migrated-user@example.com',
-      firstName: 'Migrated',
-      lastName: 'User',
-      password: '$2b$10$dummy.hash.for.migration.purposes.only', // This will need to be reset
-      apiKey: null,
-      role: 'USER'
-    };
-
-    try {
-      await this.targetPrisma.user.create({
-        data: defaultUser
-      });
-      console.log('   Created default user for migration');
-      this.defaultUserId = defaultUser.id;
-    } catch (error) {
-      console.error('❌ Error creating default user:', error.message);
-      throw error;
+  async cleanup() {
+    if (this.targetPrisma) {
+      await this.targetPrisma.$disconnect();
     }
   }
 }
