@@ -113,7 +113,7 @@ log_error() {
 # Check for required files (now using updated repository)
 log_info "Checking for required files in updated repository..."
 REQUIRED_FILES=(
-    "import-history-plus-data.js"
+    "server/import-history-plus-data.js"
     "Dockerfile"
     "package.json"
 )
