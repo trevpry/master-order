@@ -393,15 +393,18 @@ class HistoryPlusDataImporter {
     const records = await this.loadCSVFile('user_event_reviews.csv');
     if (records.length === 0) return;
 
-    // Transform records to match PostgreSQL schema
-    const transformedRecords = records.map(record => ({
-      id: record.id,
-      eventId: parseInt(record.eventId),
-      reviewed: record.reviewed === 'true',
-      reviewedAt: record.reviewDate ? new Date(record.reviewDate) : null,
-      createdAt: new Date(record.createdAt),
-      updatedAt: new Date(record.updatedAt)
-    }));
+    // Transform records to match PostgreSQL schema (remove userId field)
+    const transformedRecords = records.map(record => {
+      const { userId, ...cleanRecord } = record; // Remove userId field
+      return {
+        id: cleanRecord.id,
+        eventId: parseInt(cleanRecord.eventId),
+        reviewed: cleanRecord.reviewed === 'true',
+        reviewedAt: cleanRecord.reviewDate ? new Date(cleanRecord.reviewDate) : null,
+        createdAt: new Date(cleanRecord.createdAt),
+        updatedAt: new Date(cleanRecord.updatedAt)
+      };
+    });
 
     const { existing, new: newRecords } = await this.checkExistingRecords('user_event_reviews', transformedRecords);
 
@@ -433,15 +436,18 @@ class HistoryPlusDataImporter {
     const records = await this.loadCSVFile('user_video_watches.csv');
     if (records.length === 0) return;
 
-    // Transform records to match PostgreSQL schema
-    const transformedRecords = records.map(record => ({
-      id: record.id,
-      videoId: parseInt(record.videoId),
-      watched: record.watched === 'true',
-      watchedAt: record.watchDate ? new Date(record.watchDate) : null,
-      createdAt: new Date(record.createdAt),
-      updatedAt: new Date(record.updatedAt)
-    }));
+    // Transform records to match PostgreSQL schema (remove userId field)
+    const transformedRecords = records.map(record => {
+      const { userId, ...cleanRecord } = record; // Remove userId field
+      return {
+        id: cleanRecord.id,
+        videoId: parseInt(cleanRecord.videoId),
+        watched: cleanRecord.watched === 'true',
+        watchedAt: cleanRecord.watchDate ? new Date(cleanRecord.watchDate) : null,
+        createdAt: new Date(cleanRecord.createdAt),
+        updatedAt: new Date(cleanRecord.updatedAt)
+      };
+    });
 
     const { existing, new: newRecords } = await this.checkExistingRecords('user_video_watches', transformedRecords);
 
@@ -473,15 +479,18 @@ class HistoryPlusDataImporter {
     const records = await this.loadCSVFile('user_book_reads.csv');
     if (records.length === 0) return;
 
-    // Transform records to match PostgreSQL schema
-    const transformedRecords = records.map(record => ({
-      id: record.id,
-      bookId: parseInt(record.bookId),
-      read: record.read === 'true',
-      readAt: record.readDate ? new Date(record.readDate) : null,
-      createdAt: new Date(record.createdAt),
-      updatedAt: new Date(record.updatedAt)
-    }));
+    // Transform records to match PostgreSQL schema (remove userId field)
+    const transformedRecords = records.map(record => {
+      const { userId, ...cleanRecord } = record; // Remove userId field
+      return {
+        id: cleanRecord.id,
+        bookId: parseInt(cleanRecord.bookId),
+        read: cleanRecord.read === 'true',
+        readAt: cleanRecord.readDate ? new Date(cleanRecord.readDate) : null,
+        createdAt: new Date(cleanRecord.createdAt),
+        updatedAt: new Date(cleanRecord.updatedAt)
+      };
+    });
 
     const { existing, new: newRecords } = await this.checkExistingRecords('user_book_reads', transformedRecords);
 
@@ -513,15 +522,18 @@ class HistoryPlusDataImporter {
     const records = await this.loadCSVFile('user_chapter_reads.csv');
     if (records.length === 0) return;
 
-    // Transform records to match PostgreSQL schema
-    const transformedRecords = records.map(record => ({
-      id: record.id,
-      chapterId: parseInt(record.chapterId),
-      read: record.read === 'true',
-      readAt: record.readDate ? new Date(record.readDate) : null,
-      createdAt: new Date(record.createdAt),
-      updatedAt: new Date(record.updatedAt)
-    }));
+    // Transform records to match PostgreSQL schema (remove userId field)
+    const transformedRecords = records.map(record => {
+      const { userId, ...cleanRecord } = record; // Remove userId field
+      return {
+        id: cleanRecord.id,
+        chapterId: parseInt(cleanRecord.chapterId),
+        read: cleanRecord.read === 'true',
+        readAt: cleanRecord.readDate ? new Date(cleanRecord.readDate) : null,
+        createdAt: new Date(cleanRecord.createdAt),
+        updatedAt: new Date(cleanRecord.updatedAt)
+      };
+    });
 
     const { existing, new: newRecords } = await this.checkExistingRecords('user_chapter_reads', transformedRecords);
 
@@ -553,15 +565,18 @@ class HistoryPlusDataImporter {
     const records = await this.loadCSVFile('user_section_reads.csv');
     if (records.length === 0) return;
 
-    // Transform records to match PostgreSQL schema
-    const transformedRecords = records.map(record => ({
-      id: record.id,
-      sectionId: parseInt(record.sectionId),
-      read: record.read === 'true',
-      readAt: record.readDate ? new Date(record.readDate) : null,
-      createdAt: new Date(record.createdAt),
-      updatedAt: new Date(record.updatedAt)
-    }));
+    // Transform records to match PostgreSQL schema (remove userId field)
+    const transformedRecords = records.map(record => {
+      const { userId, ...cleanRecord } = record; // Remove userId field
+      return {
+        id: cleanRecord.id,
+        sectionId: parseInt(cleanRecord.sectionId),
+        read: cleanRecord.read === 'true',
+        readAt: cleanRecord.readDate ? new Date(cleanRecord.readDate) : null,
+        createdAt: new Date(cleanRecord.createdAt),
+        updatedAt: new Date(cleanRecord.updatedAt)
+      };
+    });
 
     const { existing, new: newRecords } = await this.checkExistingRecords('user_section_reads', transformedRecords);
 
@@ -663,34 +678,39 @@ async function main() {
       output: process.stdout
     });
     
-    rl.question('Proceed with import? (y/N): ', async (answer) => {
-      rl.close();
-      
-      if (answer.toLowerCase() !== 'y' && answer.toLowerCase() !== 'yes') {
-        console.log('❌ Import cancelled by user');
-        process.exit(0);
-      }
-      
-      console.log('');
-      const result = await importer.importAll();
-      
-      if (result.success) {
-        console.log('');
-        console.log('🎉 History Plus data import completed successfully!');
-        console.log('🌐 You can now access the migrated data in your application');
-        process.exit(0);
-      } else {
-        console.error('💥 Import failed:', result.error);
-        console.log('📊 Partial results:', result.stats);
-        process.exit(1);
-      }
+    const answer = await new Promise((resolve) => {
+      rl.question('Proceed with import? (y/N): ', (answer) => {
+        rl.close();
+        resolve(answer);
+      });
     });
+    
+    if (answer.toLowerCase() !== 'y' && answer.toLowerCase() !== 'yes') {
+      console.log('❌ Import cancelled by user');
+      await importer.cleanup();
+      process.exit(0);
+    }
+    
+    console.log('');
+    const result = await importer.importAll();
+    
+    if (result.success) {
+      console.log('');
+      console.log('🎉 History Plus data import completed successfully!');
+      console.log('🌐 You can now access the migrated data in your application');
+      await importer.cleanup();
+      process.exit(0);
+    } else {
+      console.error('💥 Import failed:', result.error);
+      console.log('📊 Partial results:', result.stats);
+      await importer.cleanup();
+      process.exit(1);
+    }
     
   } catch (error) {
     console.error('💥 Fatal error:', error.message);
-    process.exit(1);
-  } finally {
     await importer.cleanup();
+    process.exit(1);
   }
 }
 
