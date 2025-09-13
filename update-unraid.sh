@@ -276,14 +276,40 @@ if [ -d "$EXPORT_DIR" ]; then
         # Ensure we're in the server directory where dependencies exist
         cd "$REPO_PATH/server"
         
-        # Check if Node.js dependencies are installed
-        if [ ! -d "node_modules" ]; then
-            log_info "Installing Node.js dependencies for migration..."
-            npm install >> "$HISTORY_PLUS_MIGRATION_LOG" 2>&1
-            if [ $? -ne 0 ]; then
-                log_warning "npm install failed, but continuing (dependencies may already be available)"
+        # Check if Node.js dependencies are installed and install them properly
+        log_info "Ensuring Node.js dependencies are properly installed..."
+        
+        # Always run npm install to ensure dependencies are up to date
+        if npm install --production >> "$HISTORY_PLUS_MIGRATION_LOG" 2>&1; then
+            log_success "Node.js dependencies installed successfully"
+        else
+            log_error "npm install failed"
+            cat "$HISTORY_PLUS_MIGRATION_LOG" | tail -20
+            echo ""
+            echo "🔙 TROUBLESHOOTING OPTIONS:"
+            echo "   1. Check if Node.js is installed: node --version"
+            echo "   2. Check if npm is available: npm --version"
+            echo "   3. Try manual installation: cd $REPO_PATH/server && npm install"
+            echo "   4. Check package.json exists: ls -la package.json"
+            echo ""
+            read -p "Continue anyway (dependencies might be pre-installed)? (y/N): " -n 1 -r
+            echo
+            if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+                log_error "Migration cancelled due to dependency installation failure"
+                cd "$REPO_PATH"
+                return 1
             fi
         fi
+        
+        # Verify Prisma is available
+        if ! node -e "require('@prisma/client')" 2>/dev/null; then
+            log_error "Prisma client not available - migration cannot proceed"
+            echo "Please ensure @prisma/client is installed: npm install @prisma/client"
+            cd "$REPO_PATH"
+            return 1
+        fi
+        
+        log_success "All dependencies verified and ready"
         
         echo ""
         echo "🔍 IMPORT PROCESS:"
@@ -304,20 +330,35 @@ if [ -d "$EXPORT_DIR" ]; then
         else
             # Import from CSV to PostgreSQL
             log_info "Importing History Plus data to PostgreSQL..."
+            log_info "Current directory: $(pwd)"
+            log_info "Database URL: ${DATABASE_URL:0:20}..." # Log partial URL for debugging
+            log_info "Export directory: $EXPORT_DIR"
+            
             export DATABASE_URL="$DATABASE_URL"
             
-            if echo "y" | node import-history-plus-data.js "$EXPORT_DIR" >> "$HISTORY_PLUS_MIGRATION_LOG" 2>&1; then
+            # Run with more detailed logging
+            log_info "Running: node import-history-plus-data.js $EXPORT_DIR"
+            if echo "y" | node import-history-plus-data.js "$EXPORT_DIR" 2>&1 | tee -a "$HISTORY_PLUS_MIGRATION_LOG"; then
                 log_success "History Plus migration completed successfully"
             else
                 log_error "History Plus import failed - check log: $HISTORY_PLUS_MIGRATION_LOG"
                 echo ""
-                echo "🔙 ROLLBACK OPTIONS:"
+                echo "� RECENT LOG OUTPUT:"
+                tail -20 "$HISTORY_PLUS_MIGRATION_LOG"
+                echo ""
+                echo "�🔙 ROLLBACK OPTIONS:"
                 echo "   1. Check migration log: $HISTORY_PLUS_MIGRATION_LOG"
                 if [ -n "$POSTGRES_BACKUP_FILE" ]; then
                     echo "   2. Restore PostgreSQL backup using Docker PostgreSQL container"
                 fi
                 echo "   3. Retry import manually: cd server && node import-history-plus-data.js ../history-plus-export"
                 echo "   4. Continue without migration"
+                echo ""
+                echo "🔧 DEBUGGING COMMANDS:"
+                echo "   - Test Node.js: node --version"
+                echo "   - Test Prisma: node -e \"require('@prisma/client')\""
+                echo "   - Test database connection: node -e \"console.log(process.env.DATABASE_URL)\""
+                echo "   - List CSV files: ls -la ../history-plus-export/"
                 echo ""
                 read -p "Continue with deployment anyway? (y/N): " -n 1 -r
                 echo
