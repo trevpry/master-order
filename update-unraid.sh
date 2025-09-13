@@ -240,68 +240,78 @@ if [ $? -ne 0 ]; then
     fi
 fi
 
-# Step 4: Run History Plus data migration if SQLite database exists
-SQLITE_DB_PATH="$REPO_PATH/master_order.db"
-if [ -f "$SQLITE_DB_PATH" ]; then
-    log_info "SQLite database found, running History Plus migration to PostgreSQL..."
+# Step 4: Import History Plus data from pre-exported CSV files
+EXPORT_DIR="$REPO_PATH/history-plus-export"
+
+if [ -d "$EXPORT_DIR" ]; then
+    log_info "History Plus CSV files found, starting import process..."
     
-    # Ensure we're in the server directory where dependencies exist
-    cd "$REPO_PATH/server"
-    
-    # Check if Node.js dependencies are installed
-    if [ ! -d "node_modules" ]; then
-        log_info "Installing Node.js dependencies for migration..."
-        npm install >> "$HISTORY_PLUS_MIGRATION_LOG" 2>&1
-        if [ $? -ne 0 ]; then
-            log_warning "npm install failed, but continuing (dependencies may already be available)"
+    # Check if CSV files exist
+    CSV_COUNT=$(find "$EXPORT_DIR" -name "*.csv" | wc -l)
+    if [ $CSV_COUNT -gt 0 ]; then
+        log_info "Found $CSV_COUNT CSV files ready for import"
+        
+        # Ensure we're in the server directory where dependencies exist
+        cd "$REPO_PATH/server"
+        
+        # Check if Node.js dependencies are installed
+        if [ ! -d "node_modules" ]; then
+            log_info "Installing Node.js dependencies for migration..."
+            npm install >> "$HISTORY_PLUS_MIGRATION_LOG" 2>&1
+            if [ $? -ne 0 ]; then
+                log_warning "npm install failed, but continuing (dependencies may already be available)"
+            fi
         fi
-    fi
-    
-    # Set environment for migration to PostgreSQL
-    export DATABASE_URL="$DATABASE_URL"
-    
-    log_info "Running pre-migration analysis..."
-    echo ""
-    echo "🔍 MIGRATION ANALYSIS:"
-    echo "   📁 Source: SQLite database ($REPO_PATH/master_order.db)"
-    echo "   🎯 Target: PostgreSQL ($POSTGRES_HOST:$POSTGRES_PORT/$POSTGRES_DB)"
-    echo "   🛡️  SAFE MODE: Only new records will be added, existing PostgreSQL data preserved"
-    echo ""
-    
-    echo "⚠️  FINAL SAFETY CONFIRMATION:"
-    echo "   This migration will ONLY INSERT new records"
-    echo "   Existing PostgreSQL data will NOT be modified"
-    echo "   All operations use database transactions for safety"
-    echo ""
-    read -p "Proceed with safe History Plus migration? (y/N): " -n 1 -r
-    echo
-    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-        log_info "Migration cancelled by user"
-    else
-        # Run the actual migration
-        log_info "Running safe History Plus migration..."
-        if node migrate-history-plus-data.js >> "$HISTORY_PLUS_MIGRATION_LOG" 2>&1; then
-            log_success "History Plus migration completed successfully"
+        
+        echo ""
+        echo "🔍 IMPORT PROCESS:"
+        echo "   � Source: Pre-exported CSV files in history-plus-export/"
+        echo "   🎯 Target: PostgreSQL ($POSTGRES_HOST:$POSTGRES_PORT/$POSTGRES_DB)"
+        echo "   🛡️  SAFE MODE: Only new records will be added, existing PostgreSQL data preserved"
+        echo ""
+        
+        echo "⚠️  FINAL SAFETY CONFIRMATION:"
+        echo "   This import will ONLY INSERT new records"
+        echo "   Existing PostgreSQL data will NOT be modified"
+        echo "   CSV files contain History Plus data ready for import"
+        echo ""
+        read -p "Proceed with History Plus import to PostgreSQL? (y/N): " -n 1 -r
+        echo
+        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+            log_info "Import cancelled by user (CSV files available for manual import)"
         else
-            log_error "History Plus migration failed - check log: $HISTORY_PLUS_MIGRATION_LOG"
-            echo ""
-            echo "🔙 ROLLBACK OPTIONS:"
-            echo "   1. Check migration log: $HISTORY_PLUS_MIGRATION_LOG"
-            if [ -n "$POSTGRES_BACKUP_FILE" ]; then
-                echo "   2. Restore PostgreSQL backup: psql \"$DATABASE_URL\" < \"$POSTGRES_BACKUP_FILE\""
-            fi
-            echo "   3. Continue without migration (manual migration required later)"
-            echo ""
-            read -p "Continue with deployment anyway? (y/N): " -n 1 -r
-            echo
-            if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-                log_error "Deployment cancelled due to migration failure"
-                exit 1
+            # Import from CSV to PostgreSQL
+            log_info "Importing History Plus data to PostgreSQL..."
+            export DATABASE_URL="$DATABASE_URL"
+            
+            if echo "y" | node import-history-plus-data.js "$EXPORT_DIR" >> "$HISTORY_PLUS_MIGRATION_LOG" 2>&1; then
+                log_success "History Plus migration completed successfully"
+            else
+                log_error "History Plus import failed - check log: $HISTORY_PLUS_MIGRATION_LOG"
+                echo ""
+                echo "🔙 ROLLBACK OPTIONS:"
+                echo "   1. Check migration log: $HISTORY_PLUS_MIGRATION_LOG"
+                if [ -n "$POSTGRES_BACKUP_FILE" ]; then
+                    echo "   2. Restore PostgreSQL backup using Docker PostgreSQL container"
+                fi
+                echo "   3. Retry import manually: cd server && node import-history-plus-data.js ../history-plus-export"
+                echo "   4. Continue without migration"
+                echo ""
+                read -p "Continue with deployment anyway? (y/N): " -n 1 -r
+                echo
+                if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+                    log_error "Deployment cancelled due to migration failure"
+                    exit 1
+                fi
             fi
         fi
+    else
+        log_warning "No CSV files found in export directory"
+        log_info "Skipping History Plus migration"
     fi
 else
-    log_info "No SQLite database found, skipping History Plus migration"
+    log_info "No History Plus export directory found"
+    log_info "Skipping History Plus migration"
 fi
 
 # Return to repo root for subsequent operations
@@ -387,7 +397,7 @@ else
     exit 1
 fi
 
-log_success "Master Order updated successfully on Unraid with History Plus migration!"
+log_success "Master Order updated successfully on Unraid with History Plus export/import!"
 echo "🌐 Application should be available at: http://192.168.1.252:$HOST_PORT"
 echo "🗃️  Using PostgreSQL database: $POSTGRES_HOST:$POSTGRES_PORT/$POSTGRES_DB"
 echo "💾 Database backups stored at: $BACKUP_DIR"
@@ -412,9 +422,14 @@ echo "   ✅ Test Up Next integration with History Plus content"
 echo "   ✅ Verify Android API endpoints respond correctly"
 echo "   ✅ Test video/book completion workflows"
 echo ""
-echo "🔙 ROLLBACK INSTRUCTIONS (if needed):"
+echo "� MANUAL MIGRATION OPTIONS (if needed):"
+echo "   1. Export from SQLite: cd server && node export-history-plus-data.js"
+echo "   2. Copy CSV files to target system"
+echo "   3. Import to PostgreSQL: cd server && node import-history-plus-data.js /path/to/csv/directory"
+echo ""
+echo "�🔙 ROLLBACK INSTRUCTIONS (if needed):"
 echo "   1. Stop container: docker stop $CONTAINER_NAME"
 if [ -n "$POSTGRES_BACKUP_FILE" ]; then
-    echo "   2. Restore PostgreSQL: psql \"$DATABASE_URL\" < \"$POSTGRES_BACKUP_FILE\""
+    echo "   2. Restore PostgreSQL backup: psql \"$DATABASE_URL\" < \"$POSTGRES_BACKUP_FILE\""
 fi
 echo "   3. Restart container: docker start $CONTAINER_NAME"
