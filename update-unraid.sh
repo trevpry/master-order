@@ -129,8 +129,6 @@ create_postgresql_backup() {
     fi
 }
 
-}
-
 # Step 1: Create automatic database backup
 BACKUP_TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
 BACKUP_FILE="$BACKUP_DIR/master_order_backup_$BACKUP_TIMESTAMP.db"
