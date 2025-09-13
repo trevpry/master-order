@@ -4,7 +4,7 @@
 # Run this script on your Unraid server to update the container
 # Now includes comprehensive History Plus data migration to PostgreSQL
 #
-# ???  DATA SAFETY GUARANTEE:
+# 🛡️  DATA SAFETY GUARANTEE:
 # - Migration ONLY INSERTS new records, never updates existing PostgreSQL data
 # - All existing PostgreSQL data is preserved completely unchanged
 # - Database transactions ensure atomicity and rollback capability
@@ -27,16 +27,16 @@ POSTGRES_USER="master_order_user"
 POSTGRES_PASSWORD="secure_password_change_me"
 DATABASE_URL="postgresql://$POSTGRES_USER:$POSTGRES_PASSWORD@$POSTGRES_HOST:$POSTGRES_PORT/$POSTGRES_DB"
 
-echo "?? Starting Master Order update with History Plus migration on Unraid..."
-echo "???  Target PostgreSQL: $POSTGRES_HOST:$POSTGRES_PORT/$POSTGRES_DB"
+echo "🔄 Starting Master Order update with History Plus migration on Unraid..."
+echo "🗃️  Target PostgreSQL: $POSTGRES_HOST:$POSTGRES_PORT/$POSTGRES_DB"
 
 # Pre-flight checks
 echo ""
-echo "?? Pre-flight checks..."
+echo "🔍 Pre-flight checks..."
 
 # Check if repository exists
 if [ ! -d "$REPO_PATH" ]; then
-    echo "? Repository path not found: $REPO_PATH"
+    echo "❌ Repository path not found: $REPO_PATH"
     echo "Please update the REPO_PATH variable in this script"
     exit 1
 fi
@@ -58,7 +58,7 @@ for file in "${REQUIRED_FILES[@]}"; do
 done
 
 if [ ${#MISSING_FILES[@]} -ne 0 ]; then
-    echo "? Missing required files:"
+    echo "❌ Missing required files:"
     for file in "${MISSING_FILES[@]}"; do
         echo "   - $file"
     done
@@ -66,26 +66,26 @@ if [ ${#MISSING_FILES[@]} -ne 0 ]; then
     exit 1
 fi
 
-echo "? All required files present"
+echo "✅ All required files present"
 
 # Create backup directory if it doesn't exist
 mkdir -p "$BACKUP_DIR"
 
 # Function to log messages
 log_info() {
-    echo "??  $1" | tee -a "$HISTORY_PLUS_MIGRATION_LOG"
+    echo "ℹ️  $1" | tee -a "$HISTORY_PLUS_MIGRATION_LOG"
 }
 
 log_success() {
-    echo "? $1" | tee -a "$HISTORY_PLUS_MIGRATION_LOG"
+    echo "✅ $1" | tee -a "$HISTORY_PLUS_MIGRATION_LOG"
 }
 
 log_warning() {
-    echo "??  $1" | tee -a "$HISTORY_PLUS_MIGRATION_LOG"
+    echo "⚠️  $1" | tee -a "$HISTORY_PLUS_MIGRATION_LOG"
 }
 
 log_error() {
-    echo "? $1" | tee -a "$HISTORY_PLUS_MIGRATION_LOG"
+    echo "❌ $1" | tee -a "$HISTORY_PLUS_MIGRATION_LOG"
 }
 
 # Function to test PostgreSQL connectivity
@@ -135,7 +135,7 @@ BACKUP_FILE="$BACKUP_DIR/master_order_backup_$BACKUP_TIMESTAMP.db"
 
 # First try to backup from running container
 if docker ps | grep -q "$CONTAINER_NAME"; then
-    echo "?? Backing up database from running container..."
+    echo "💾 Backing up database from running container..."
     
     # First check if the database file exists in the container
     if docker exec "$CONTAINER_NAME" test -f /app/data/master_order.db; then
@@ -143,28 +143,28 @@ if docker ps | grep -q "$CONTAINER_NAME"; then
         docker cp "$CONTAINER_NAME:/app/data/master_order.db" "$BACKUP_FILE"
         
         if [ $? -eq 0 ] && [ -f "$BACKUP_FILE" ]; then
-            echo "? Container database backup created successfully: $(basename "$BACKUP_FILE")"
+            echo "✅ Container database backup created successfully: $(basename "$BACKUP_FILE")"
             BACKUP_SUCCESS=true
         else
-            echo "??  Container backup command succeeded but file not found, trying host filesystem..."
+            echo "⚠️  Container backup command succeeded but file not found, trying host filesystem..."
             BACKUP_SUCCESS=false
         fi
     else
-        echo "??  Database file not found in container at /app/data/master_order.db, trying host filesystem..."
+        echo "⚠️  Database file not found in container at /app/data/master_order.db, trying host filesystem..."
         BACKUP_SUCCESS=false
     fi
 else
-    echo "??  Container not running, trying host filesystem..."
+    echo "⚠️  Container not running, trying host filesystem..."
     BACKUP_SUCCESS=false
 fi
 
 # If container backup failed, try host filesystem
 if [ "$BACKUP_SUCCESS" != "true" ] && [ -f "$REPO_PATH/master_order.db" ]; then
-    echo "?? Backing up database from host filesystem..."
+    echo "💾 Backing up database from host filesystem..."
     cp "$REPO_PATH/master_order.db" "$BACKUP_FILE"
     
     if [ $? -eq 0 ]; then
-        echo "? Host database backup created successfully: $(basename "$BACKUP_FILE")"
+        echo "✅ Host database backup created successfully: $(basename "$BACKUP_FILE")"
         BACKUP_SUCCESS=true
     fi
 fi
@@ -174,13 +174,13 @@ if [ "$BACKUP_SUCCESS" = "true" ]; then
     # Keep only the last 10 backups to save space
     cd "$BACKUP_DIR"
     ls -t master_order_backup_*.db | tail -n +11 | xargs -r rm
-    echo "?? Cleaned old backups, keeping latest 10"
+    echo "📁 Cleaned old backups, keeping latest 10"
     
     # Show backup file size for verification
     BACKUP_SIZE=$(ls -lh "$BACKUP_FILE" | awk '{print $5}')
-    echo "?? Backup file size: $BACKUP_SIZE"
+    echo "📊 Backup file size: $BACKUP_SIZE"
 else
-    echo "??  No database found to backup"
+    echo "⚠️  No database found to backup"
     echo "   Checked: Container at /app/data/master_order.db"
     echo "   Checked: Host at $REPO_PATH/master_order.db"
     echo "   Continuing with update (this might be first run)..."
@@ -262,13 +262,13 @@ if [ -d "$EXPORT_DIR" ]; then
         fi
         
         echo ""
-        echo "?? IMPORT PROCESS:"
-        echo "   ? Source: Pre-exported CSV files in history-plus-export/"
-        echo "   ?? Target: PostgreSQL ($POSTGRES_HOST:$POSTGRES_PORT/$POSTGRES_DB)"
-        echo "   ???  SAFE MODE: Only new records will be added, existing PostgreSQL data preserved"
+        echo "🔍 IMPORT PROCESS:"
+        echo "   � Source: Pre-exported CSV files in history-plus-export/"
+        echo "   🎯 Target: PostgreSQL ($POSTGRES_HOST:$POSTGRES_PORT/$POSTGRES_DB)"
+        echo "   🛡️  SAFE MODE: Only new records will be added, existing PostgreSQL data preserved"
         echo ""
         
-        echo "??  FINAL SAFETY CONFIRMATION:"
+        echo "⚠️  FINAL SAFETY CONFIRMATION:"
         echo "   This import will ONLY INSERT new records"
         echo "   Existing PostgreSQL data will NOT be modified"
         echo "   CSV files contain History Plus data ready for import"
@@ -287,7 +287,7 @@ if [ -d "$EXPORT_DIR" ]; then
             else
                 log_error "History Plus import failed - check log: $HISTORY_PLUS_MIGRATION_LOG"
                 echo ""
-                echo "?? ROLLBACK OPTIONS:"
+                echo "🔙 ROLLBACK OPTIONS:"
                 echo "   1. Check migration log: $HISTORY_PLUS_MIGRATION_LOG"
                 if [ -n "$POSTGRES_BACKUP_FILE" ]; then
                     echo "   2. Restore PostgreSQL backup using Docker PostgreSQL container"
@@ -396,36 +396,36 @@ else
 fi
 
 log_success "Master Order updated successfully on Unraid with History Plus export/import!"
-echo "?? Application should be available at: http://192.168.1.252:$HOST_PORT"
-echo "???  Using PostgreSQL database: $POSTGRES_HOST:$POSTGRES_PORT/$POSTGRES_DB"
-echo "?? Database backups stored at: $BACKUP_DIR"
+echo "🌐 Application should be available at: http://192.168.1.252:$HOST_PORT"
+echo "🗃️  Using PostgreSQL database: $POSTGRES_HOST:$POSTGRES_PORT/$POSTGRES_DB"
+echo "💾 Database backups stored at: $BACKUP_DIR"
 if [ -n "$POSTGRES_BACKUP_FILE" ]; then
-    echo "?? PostgreSQL backup: $(basename "$POSTGRES_BACKUP_FILE")"
+    echo "🔙 PostgreSQL backup: $(basename "$POSTGRES_BACKUP_FILE")"
 fi
-echo "?? Migration log: $HISTORY_PLUS_MIGRATION_LOG"
+echo "📋 Migration log: $HISTORY_PLUS_MIGRATION_LOG"
 echo ""
-echo "?? Container status:"
+echo "📊 Container status:"
 docker ps | grep $CONTAINER_NAME
 
 echo ""
-echo "?? To check logs: docker logs $CONTAINER_NAME"
-echo "?? To access container: docker exec -it $CONTAINER_NAME /bin/sh"
-echo "?? Database backups location: $BACKUP_DIR"
-echo "?? History Plus migration log: $HISTORY_PLUS_MIGRATION_LOG"
+echo "📝 To check logs: docker logs $CONTAINER_NAME"
+echo "📝 To access container: docker exec -it $CONTAINER_NAME /bin/sh"
+echo "📁 Database backups location: $BACKUP_DIR"
+echo "📋 History Plus migration log: $HISTORY_PLUS_MIGRATION_LOG"
 echo ""
-echo "?? DEPLOYMENT VALIDATION CHECKLIST:"
-echo "   ? Verify web interface loads at http://192.168.1.252:$HOST_PORT"
-echo "   ? Check History Plus timeline shows migrated events"
-echo "   ? Test Up Next integration with History Plus content"
-echo "   ? Verify Android API endpoints respond correctly"
-echo "   ? Test video/book completion workflows"
+echo "🎯 DEPLOYMENT VALIDATION CHECKLIST:"
+echo "   ✅ Verify web interface loads at http://192.168.1.252:$HOST_PORT"
+echo "   ✅ Check History Plus timeline shows migrated events"
+echo "   ✅ Test Up Next integration with History Plus content"
+echo "   ✅ Verify Android API endpoints respond correctly"
+echo "   ✅ Test video/book completion workflows"
 echo ""
-echo "? MANUAL MIGRATION OPTIONS (if needed):"
+echo "� MANUAL MIGRATION OPTIONS (if needed):"
 echo "   1. Export from SQLite: cd server && node export-history-plus-data.js"
 echo "   2. Copy CSV files to target system"
 echo "   3. Import to PostgreSQL: cd server && node import-history-plus-data.js /path/to/csv/directory"
 echo ""
-echo "??? ROLLBACK INSTRUCTIONS (if needed):"
+echo "�🔙 ROLLBACK INSTRUCTIONS (if needed):"
 echo "   1. Stop container: docker stop $CONTAINER_NAME"
 if [ -n "$POSTGRES_BACKUP_FILE" ]; then
     echo "   2. Restore PostgreSQL backup: psql \"$DATABASE_URL\" < \"$POSTGRES_BACKUP_FILE\""
