@@ -202,24 +202,37 @@ class HistoryPlusDataImporter {
 
   async importHistoricalEvents() {
     console.log('📥 Importing Historical Events...');
-    
+
     const records = await this.loadCSVFile('historical_events.csv');
     if (records.length === 0) return;
-    
-    const { existing, new: newRecords } = await this.checkExistingRecords('historicalEvent', records);
-    
+
+    // Transform records to match PostgreSQL schema
+    const transformedRecords = records.map(record => ({
+      id: parseInt(record.id),
+      title: record.title,
+      startDate: record.startDate,
+      endDate: record.endDate || null,
+      details: record.details || null,
+      category: record.category,
+      hidden: record.hidden === 'true',
+      createdAt: new Date(record.createdAt),
+      updatedAt: new Date(record.updatedAt)
+    }));
+
+    const { existing, new: newRecords } = await this.checkExistingRecords('historicalEvent', transformedRecords);
+
     if (newRecords.length === 0) {
       console.log('   All records already exist, skipping');
       this.stats.skipped += existing.length;
       return;
     }
-    
+
     try {
       const result = await this.targetPrisma.historicalEvent.createMany({
         data: newRecords,
         skipDuplicates: true
       });
-      
+
       console.log(`✅ Imported ${result.count} historical events`);
       this.stats.imported += result.count;
       this.stats.skipped += existing.length;
@@ -376,145 +389,205 @@ class HistoryPlusDataImporter {
 
   async importUserEventReviews() {
     console.log('📥 Importing User Event Reviews...');
-    
+
     const records = await this.loadCSVFile('user_event_reviews.csv');
     if (records.length === 0) return;
-    
-    const { existing, new: newRecords } = await this.checkExistingRecords('user_event_reviews', records);
-    
+
+    // Transform records to match PostgreSQL schema
+    const transformedRecords = records.map(record => ({
+      id: record.id,
+      userId: this.defaultUserId, // Use default user for all migrated records
+      eventId: parseInt(record.eventId),
+      reviewed: record.reviewed === 'true',
+      reviewedAt: record.reviewDate ? new Date(record.reviewDate) : null,
+      createdAt: new Date(record.createdAt),
+      updatedAt: new Date(record.updatedAt)
+    }));
+
+    const { existing, new: newRecords } = await this.checkExistingRecords('user_event_reviews', transformedRecords);
+
     if (newRecords.length === 0) {
       console.log('   All records already exist, skipping');
       this.stats.skipped += existing.length;
       return;
     }
-    
+
     try {
       const result = await this.targetPrisma.user_event_reviews.createMany({
         data: newRecords,
         skipDuplicates: true
       });
-      
+
       console.log(`✅ Imported ${result.count} user event reviews`);
       this.stats.imported += result.count;
       this.stats.skipped += existing.length;
     } catch (error) {
       console.error('❌ Error importing user event reviews:', error.message);
+      console.error('   First record sample:', JSON.stringify(newRecords[0], null, 2));
       this.stats.errors += newRecords.length;
     }
   }
 
   async importUserVideoWatches() {
     console.log('📥 Importing User Video Watches...');
-    
+
     const records = await this.loadCSVFile('user_video_watches.csv');
     if (records.length === 0) return;
-    
-    const { existing, new: newRecords } = await this.checkExistingRecords('user_video_watches', records);
-    
+
+    // Transform records to match PostgreSQL schema
+    const transformedRecords = records.map(record => ({
+      id: record.id,
+      userId: this.defaultUserId, // Use default user for all migrated records
+      videoId: parseInt(record.videoId),
+      watched: record.watched === 'true',
+      watchedAt: record.watchDate ? new Date(record.watchDate) : null,
+      createdAt: new Date(record.createdAt),
+      updatedAt: new Date(record.updatedAt)
+    }));
+
+    const { existing, new: newRecords } = await this.checkExistingRecords('user_video_watches', transformedRecords);
+
     if (newRecords.length === 0) {
       console.log('   All records already exist, skipping');
       this.stats.skipped += existing.length;
       return;
     }
-    
+
     try {
       const result = await this.targetPrisma.user_video_watches.createMany({
         data: newRecords,
         skipDuplicates: true
       });
-      
+
       console.log(`✅ Imported ${result.count} user video watches`);
       this.stats.imported += result.count;
       this.stats.skipped += existing.length;
     } catch (error) {
       console.error('❌ Error importing user video watches:', error.message);
+      console.error('   First record sample:', JSON.stringify(newRecords[0], null, 2));
       this.stats.errors += newRecords.length;
     }
   }
 
   async importUserBookReads() {
     console.log('📥 Importing User Book Reads...');
-    
+
     const records = await this.loadCSVFile('user_book_reads.csv');
     if (records.length === 0) return;
-    
-    const { existing, new: newRecords } = await this.checkExistingRecords('user_book_reads', records);
-    
+
+    // Transform records to match PostgreSQL schema
+    const transformedRecords = records.map(record => ({
+      id: record.id,
+      userId: this.defaultUserId, // Use default user for all migrated records
+      bookId: parseInt(record.bookId),
+      read: record.read === 'true',
+      readDate: record.readDate ? new Date(record.readDate) : null,
+      createdAt: new Date(record.createdAt),
+      updatedAt: new Date(record.updatedAt)
+    }));
+
+    const { existing, new: newRecords } = await this.checkExistingRecords('user_book_reads', transformedRecords);
+
     if (newRecords.length === 0) {
       console.log('   All records already exist, skipping');
       this.stats.skipped += existing.length;
       return;
     }
-    
+
     try {
       const result = await this.targetPrisma.user_book_reads.createMany({
         data: newRecords,
         skipDuplicates: true
       });
-      
+
       console.log(`✅ Imported ${result.count} user book reads`);
       this.stats.imported += result.count;
       this.stats.skipped += existing.length;
     } catch (error) {
       console.error('❌ Error importing user book reads:', error.message);
+      console.error('   First record sample:', JSON.stringify(newRecords[0], null, 2));
       this.stats.errors += newRecords.length;
     }
   }
 
   async importUserChapterReads() {
     console.log('📥 Importing User Chapter Reads...');
-    
+
     const records = await this.loadCSVFile('user_chapter_reads.csv');
     if (records.length === 0) return;
-    
-    const { existing, new: newRecords } = await this.checkExistingRecords('user_chapter_reads', records);
-    
+
+    // Transform records to match PostgreSQL schema
+    const transformedRecords = records.map(record => ({
+      id: record.id,
+      userId: this.defaultUserId, // Use default user for all migrated records
+      chapterId: parseInt(record.chapterId),
+      read: record.read === 'true',
+      readDate: record.readDate ? new Date(record.readDate) : null,
+      createdAt: new Date(record.createdAt),
+      updatedAt: new Date(record.updatedAt)
+    }));
+
+    const { existing, new: newRecords } = await this.checkExistingRecords('user_chapter_reads', transformedRecords);
+
     if (newRecords.length === 0) {
       console.log('   All records already exist, skipping');
       this.stats.skipped += existing.length;
       return;
     }
-    
+
     try {
       const result = await this.targetPrisma.user_chapter_reads.createMany({
         data: newRecords,
         skipDuplicates: true
       });
-      
+
       console.log(`✅ Imported ${result.count} user chapter reads`);
       this.stats.imported += result.count;
       this.stats.skipped += existing.length;
     } catch (error) {
       console.error('❌ Error importing user chapter reads:', error.message);
+      console.error('   First record sample:', JSON.stringify(newRecords[0], null, 2));
       this.stats.errors += newRecords.length;
     }
   }
 
   async importUserSectionReads() {
     console.log('📥 Importing User Section Reads...');
-    
+
     const records = await this.loadCSVFile('user_section_reads.csv');
     if (records.length === 0) return;
-    
-    const { existing, new: newRecords } = await this.checkExistingRecords('user_section_reads', records);
-    
+
+    // Transform records to match PostgreSQL schema
+    const transformedRecords = records.map(record => ({
+      id: record.id,
+      userId: this.defaultUserId, // Use default user for all migrated records
+      sectionId: parseInt(record.sectionId),
+      read: record.read === 'true',
+      readDate: record.readDate ? new Date(record.readDate) : null,
+      createdAt: new Date(record.createdAt),
+      updatedAt: new Date(record.updatedAt)
+    }));
+
+    const { existing, new: newRecords } = await this.checkExistingRecords('user_section_reads', transformedRecords);
+
     if (newRecords.length === 0) {
       console.log('   All records already exist, skipping');
       this.stats.skipped += existing.length;
       return;
     }
-    
+
     try {
       const result = await this.targetPrisma.user_section_reads.createMany({
         data: newRecords,
         skipDuplicates: true
       });
-      
+
       console.log(`✅ Imported ${result.count} user section reads`);
       this.stats.imported += result.count;
       this.stats.skipped += existing.length;
     } catch (error) {
       console.error('❌ Error importing user section reads:', error.message);
+      console.error('   First record sample:', JSON.stringify(newRecords[0], null, 2));
       this.stats.errors += newRecords.length;
     }
   }
@@ -535,6 +608,10 @@ class HistoryPlusDataImporter {
       await this.importHistoryChapters();
       await this.importHistorySections();
       await this.importHistoryChannels();
+      
+      // Ensure default user exists before importing user-related data
+      await this.ensureDefaultUser();
+      
       await this.importUserEventReviews();
       await this.importUserVideoWatches();
       await this.importUserBookReads();
@@ -556,9 +633,38 @@ class HistoryPlusDataImporter {
     }
   }
 
-  async cleanup() {
-    if (this.targetPrisma) {
-      await this.targetPrisma.$disconnect();
+  async ensureDefaultUser() {
+    console.log('👤 Ensuring default user exists...');
+
+    // Check if any users exist
+    const existingUsers = await this.targetPrisma.user.findMany({ take: 1 });
+
+    if (existingUsers.length > 0) {
+      console.log('   Default user already exists');
+      this.defaultUserId = existingUsers[0].id;
+      return;
+    }
+
+    // Create a default user
+    const defaultUser = {
+      id: 'default-user-id',
+      email: 'migrated-user@example.com',
+      firstName: 'Migrated',
+      lastName: 'User',
+      password: '$2b$10$dummy.hash.for.migration.purposes.only', // This will need to be reset
+      apiKey: null,
+      role: 'USER'
+    };
+
+    try {
+      await this.targetPrisma.user.create({
+        data: defaultUser
+      });
+      console.log('   Created default user for migration');
+      this.defaultUserId = defaultUser.id;
+    } catch (error) {
+      console.error('❌ Error creating default user:', error.message);
+      throw error;
     }
   }
 }
