@@ -1,0 +1,30 @@
+{
+  "exportDate": "2025-09-13T00:02:02.113Z",
+  "sourceAnalysis": {
+    "historicalEvents": 466,
+    "historyVideos": 4755,
+    "historyBooks": 9,
+    "historyChapters": 77,
+    "historySections": 136,
+    "historyChannels": 78,
+    "userEventReviews": 445,
+    "userVideoWatches": 595,
+    "userBookReads": 2,
+    "userChapterReads": 50,
+    "userSectionReads": 135
+  },
+  "exportedFiles": [
+    "historical_events.csv",
+    "history_videos.csv",
+    "history_books.csv",
+    "history_chapters.csv",
+    "history_sections.csv",
+    "history_channels.csv",
+    "user_event_reviews.csv",
+    "user_video_watches.csv",
+    "user_book_reads.csv",
+    "user_chapter_reads.csv",
+    "user_section_reads.csv"
+  ],
+  "exportDirectory": "C:\\Users\\Trevor\\Sites\\master-order\\history-plus-export"
+}
