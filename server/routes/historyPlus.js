@@ -484,7 +484,7 @@ router.get('/categories', asyncHandler(async (req, res) => {
 router.post('/import-data', asyncHandler(async (req, res) => {
   console.log('🔄 Starting History Plus data import via API...');
   
-  const { force = false, useUploaded = false } = req.body;
+  const { force = false, useUploaded = false, clearExisting = false } = req.body;
   
   let exportDir;
   let importArgs;
@@ -555,6 +555,10 @@ router.post('/import-data', asyncHandler(async (req, res) => {
     console.log('🔄 Force mode enabled: Will update existing records');
     importArgs.push('--force');
   }
+  if (clearExisting) {
+    console.log('🗑️  Clear existing data enabled: Will delete all existing History Plus data first');
+    importArgs.push('--clear-existing');
+  }
   
   try {
     // Start the import process
@@ -592,6 +596,7 @@ router.post('/import-data', asyncHandler(async (req, res) => {
           const updatedMatch = output.match(/Records updated: (\d+)/);
           const skippedMatch = output.match(/Records skipped.*: (\d+)/);
           const errorsMatch = output.match(/Errors: (\d+)/);
+          const deletedMatch = output.match(/Deleted (\d+) existing records/);
           
           // Clean up uploaded files if this was an upload-based import
           if (useUploaded) {
@@ -623,11 +628,13 @@ router.post('/import-data', asyncHandler(async (req, res) => {
             message: 'History Plus data imported successfully',
             csvFiles: csvFiles.length,
             force: force,
+            clearExisting: clearExisting,
             source: useUploaded ? 'uploaded' : 'mounted',
             statistics: {
               imported: importedMatch ? parseInt(importedMatch[1], 10) : 0,
               updated: updatedMatch ? parseInt(updatedMatch[1], 10) : 0,
               skipped: skippedMatch ? parseInt(skippedMatch[1], 10) : 0,
+              deleted: deletedMatch ? parseInt(deletedMatch[1], 10) : 0,
               errors: errorsMatch ? parseInt(errorsMatch[1], 10) : 0
             },
             output: output
@@ -655,37 +662,42 @@ router.post('/import-data', asyncHandler(async (req, res) => {
 
 // GET /api/history-plus/import-status
 router.get('/import-status', asyncHandler(async (req, res) => {
-  const exportDir = path.join(__dirname, '..', '..', 'history-plus-export');
-  console.log('🔍 Checking import status for directory:', exportDir);
-  console.log('📁 Directory exists:', fs.existsSync(exportDir));
-  
-  // Check if we have existing History Plus data
-  const historicalEventCount = await prisma.historicalEvent.count();
-  const historyVideoCount = await prisma.historyVideo.count();
-  const historyBookCount = await prisma.historyBook.count();
-  
-  const totalRecords = historicalEventCount + historyVideoCount + historyBookCount;
-  const hasData = totalRecords > 0;
-  
-  const status = {
-    exportDirExists: fs.existsSync(exportDir),
-    csvFiles: [],
-    ready: false,
-    hasData: hasData,
-    existingRecords: {
-      historicalEvents: historicalEventCount,
-      historyVideos: historyVideoCount,
-      historyBooks: historyBookCount,
-      total: totalRecords
+  try {
+    const exportDir = path.join(__dirname, '..', '..', 'history-plus-export');
+    console.log('🔍 Checking import status for directory:', exportDir);
+    console.log('📁 Directory exists:', fs.existsSync(exportDir));
+    
+    // Check if we have existing History Plus data
+    const historicalEventCount = await prisma.historicalEvent.count();
+    const historyVideoCount = await prisma.historyVideo.count();
+    const historyBookCount = await prisma.historyBook.count();
+    
+    const totalRecords = historicalEventCount + historyVideoCount + historyBookCount;
+    const hasData = totalRecords > 0;
+    
+    const status = {
+      exportDirExists: fs.existsSync(exportDir),
+      csvFiles: [],
+      ready: false,
+      hasData: hasData,
+      existingRecords: {
+        historicalEvents: historicalEventCount,
+        historyVideos: historyVideoCount,
+        historyBooks: historyBookCount,
+        total: totalRecords
+      }
+    };
+    
+    if (status.exportDirExists) {
+      status.csvFiles = fs.readdirSync(exportDir).filter(file => file.endsWith('.csv'));
+      status.ready = status.csvFiles.length > 0;
     }
-  };
-  
-  if (status.exportDirExists) {
-    status.csvFiles = fs.readdirSync(exportDir).filter(file => file.endsWith('.csv'));
-    status.ready = status.csvFiles.length > 0;
+    
+    sendSuccess(res, status);
+  } catch (error) {
+    console.error('❌ Error in import-status endpoint:', error);
+    sendServerError(res, 'Failed to check import status');
   }
-  
-  sendSuccess(res, status);
 }));
 
 module.exports = router;

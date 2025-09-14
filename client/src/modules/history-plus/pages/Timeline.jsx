@@ -243,7 +243,7 @@ const Timeline = () => {
       const statusCheck = await checkImportStatus();
       
       if (statusCheck && statusCheck.hasData) {
-        if (!window.confirm('History Plus data already exists. This will import additional data from uploaded CSV files. Are you sure?')) {
+        if (!window.confirm('⚠️ WARNING: This will DELETE ALL existing History Plus data and import fresh data from uploaded CSV files. This cannot be undone. Are you sure?')) {
           return;
         }
         force = window.confirm('Force update existing records? (Select "OK" to update existing, "Cancel" to skip duplicates)');
@@ -254,7 +254,7 @@ const Timeline = () => {
       }
     } catch (error) {
       console.error('Error checking import status:', error);
-      if (!window.confirm('This will import all History Plus data from uploaded CSV files. Are you sure?')) {
+      if (!window.confirm('⚠️ WARNING: This will DELETE ALL existing History Plus data and import fresh data from uploaded CSV files. This cannot be undone. Are you sure?')) {
         return;
       }
     }
@@ -270,7 +270,8 @@ const Timeline = () => {
         },
         body: JSON.stringify({ 
           force,
-          useUploaded: true // Flag to use uploaded files instead of mounted directory
+          useUploaded: true, // Flag to use uploaded files instead of mounted directory
+          clearExisting: true // Clear all existing History Plus data before import
         }),
       });
 
@@ -280,6 +281,9 @@ const Timeline = () => {
         const stats = result.data?.statistics;
         let message = 'Import completed successfully! ';
         if (stats) {
+          if (stats.deleted > 0) {
+            message += `Deleted: ${stats.deleted}, `;
+          }
           message += `Imported: ${stats.imported || 0}, Updated: ${stats.updated || 0}, Skipped: ${stats.skipped || 0}, Errors: ${stats.errors || 0}`;
         }
         setImportStatus({ 
@@ -378,8 +382,14 @@ const Timeline = () => {
   const checkImportStatus = async () => {
     try {
       const response = await fetch('/api/history-plus/import-status');
+      
+      if (!response.ok) {
+        console.error('Import status request failed:', response.status, response.statusText);
+        return { ready: false, csvFiles: [] };
+      }
+      
       const result = await response.json();
-      return result.data;
+      return result.data || { ready: false, csvFiles: [] };
     } catch (err) {
       console.error('Error checking import status:', err);
       return { ready: false, csvFiles: [] };

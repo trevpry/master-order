@@ -1,12 +1,14 @@
 /**
  * Android Reading Session Routes
  * Handles reading session management for books, comics, and short stories
- * Delegates to main API endpoints for consistency with web interface
+ * Uses direct service calls for consistency with web interface
  */
 
 const express = require('express');
-const fetch = require('node-fetch');
-const { getAndroidApiBaseUrl } = require('./utilities/androidHelpers');
+const { asyncHandler, sendSuccess, sendBadRequest, sendServerError } = require('../../utils/responses');
+const { validateRequiredFields } = require('../../middleware/validation');
+const WatchLogService = require('../../watchLogService');
+const prisma = require('../../prismaClient');
 
 /**
  * Create reading session routes for Android app
@@ -15,271 +17,237 @@ const { getAndroidApiBaseUrl } = require('./utilities/androidHelpers');
  */
 function createReadingSessionRoutes(prisma) {
   const router = express.Router();
+  const watchLogService = new WatchLogService(prisma);
 
   // Start reading session
-  router.post('/reading/start', async (req, res) => {
+  router.post('/reading/start', asyncHandler(async (req, res) => {
     console.log('📱 Android app requesting to start reading session...');
     
-    try {
-      const { mediaType, title, seriesTitle, customOrderItemId } = req.body;
+    const { mediaType, title, seriesTitle, customOrderItemId } = req.body;
 
-      if (!mediaType || !title) {
-        return res.status(400).json({
-          type: 'READING_SESSION_ERROR',
-          data: {
-            error: 'Missing required fields',
-            message: 'mediaType and title are required'
-          }
-        });
-      }
-
-      if (!['book', 'comic', 'shortstory'].includes(mediaType)) {
-        return res.status(400).json({
-          type: 'READING_SESSION_ERROR',
-          data: {
-            error: 'Invalid media type',
-            message: 'Reading sessions are only supported for books, comics, and stories'
-          }
-        });
-      }
-
-      console.log(`📱 Start reading session - mediaType: ${mediaType}, title: ${title}, customOrderItemId: ${customOrderItemId}`);
-
-      // Use existing reading session start endpoint
-      const baseUrl = getAndroidApiBaseUrl();
-      const sessionResponse = await fetch(`${baseUrl}/api/reading/start`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          mediaType,
-          title,
-          seriesTitle,
-          customOrderItemId
-        })
-      });
-
-      const sessionData = await sessionResponse.json();
-
-      if (!sessionResponse.ok) {
-        console.error('Failed to start reading session:', sessionData);
-
-        const androidErrorResponse = {
-          type: 'READING_SESSION_ERROR',
-          data: {
-            success: false,
-            mediaType: mediaType,
-            title: title,
-            error: sessionData.error || 'Failed to start reading session',
-            details: sessionData.details || 'Check server logs for more information',
-            timestamp: new Date().toISOString()
-          }
-        };
-
-        return res.status(sessionResponse.status).json(androidErrorResponse);
-      }
-
-      console.log('✅ Reading session started successfully:', JSON.stringify(sessionData, null, 2));
-
-      // Success response in Android format
-      const androidResponse = {
-        type: 'READING_SESSION_STARTED',
-        data: {
-          success: true,
-          sessionId: sessionData.id,
-          mediaType: mediaType,
-          title: title,
-          seriesTitle: seriesTitle,
-          customOrderItemId: customOrderItemId,
-          startedAt: sessionData.startedAt,
-          isPaused: sessionData.isPaused || false,
-          message: `Started reading session for "${title}"`,
-          timestamp: new Date().toISOString()
-        }
-      };
-
-      console.log('✅ Reading session start successful:', JSON.stringify(androidResponse, null, 2));
-      res.json(androidResponse);
-
-    } catch (error) {
-      console.error('❌ Error in Android reading session start endpoint:', error);
-
-      const androidErrorResponse = {
-        type: 'READING_SESSION_ERROR',
-        data: {
-          success: false,
-          error: 'Internal server error',
-          details: error.message,
-          timestamp: new Date().toISOString()
-        }
-      };
-
-      res.status(500).json(androidErrorResponse);
+    // Validate required fields
+    if (!mediaType || !title) {
+      return sendBadRequest(res, 'mediaType and title are required');
     }
-  });
+
+    // Validate media type
+    if (!['book', 'comic', 'shortstory'].includes(mediaType)) {
+      return sendBadRequest(res, 'Reading sessions are only supported for books, comics, and stories');
+    }
+
+    console.log(`📱 Start reading session - mediaType: ${mediaType}, title: ${title}, customOrderItemId: ${customOrderItemId}`);
+
+    // Validate customOrderItemId if provided
+    let finalCustomOrderItemId = null;
+    if (customOrderItemId) {
+      const parsedId = parseInt(customOrderItemId);
+      if (Number.isInteger(parsedId)) {
+        const existingItem = await prisma.customOrderItem.findUnique({
+          where: { id: parsedId }
+        });
+        
+        if (existingItem) {
+          finalCustomOrderItemId = parsedId;
+          console.log(`✅ Validated customOrderItemId: ${finalCustomOrderItemId}`);
+        } else {
+          console.log(`⚠️  CustomOrderItem ${parsedId} not found - proceeding without link`);
+        }
+      } else {
+        console.log('⚠️  Invalid customOrderItemId format - proceeding without link');
+      }
+    }
+
+    // Start reading session using the service directly
+    const readingSession = await watchLogService.startReading({
+      mediaType,
+      title,
+      seriesTitle,
+      customOrderItemId: finalCustomOrderItemId
+    });
+
+    console.log('✅ Reading session started successfully:', readingSession.id);
+
+    // Success response in Android format
+    const androidResponse = {
+      type: 'READING_SESSION_STARTED',
+      data: {
+        success: true,
+        sessionId: readingSession.id,
+        mediaType: mediaType,
+        title: title,
+        seriesTitle: seriesTitle,
+        customOrderItemId: finalCustomOrderItemId,
+        startedAt: readingSession.startedAt,
+        isPaused: readingSession.isPaused || false,
+        message: `Started reading session for "${title}"`,
+        timestamp: new Date().toISOString()
+      }
+    };
+
+    console.log('✅ Reading session start successful:', JSON.stringify(androidResponse, null, 2));
+    return sendSuccess(res, androidResponse.data);
+  }));
 
   // Pause/Resume reading session
-  router.post('/reading/pause', async (req, res) => {
+  router.post('/reading/pause', asyncHandler(async (req, res) => {
     console.log('📱 Android app requesting to pause/resume reading session...');
     
-    try {
-      // Use existing reading session pause endpoint
-      const baseUrl = getAndroidApiBaseUrl();
-      const pauseResponse = await fetch(`${baseUrl}/api/reading/pause`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        }
-      });
-
-      const pauseData = await pauseResponse.json();
-
-      if (!pauseResponse.ok) {
-        console.error('Failed to pause/resume reading session:', pauseData);
-
-        const androidErrorResponse = {
-          type: 'READING_SESSION_ERROR',
-          data: {
-            success: false,
-            error: pauseData.error || 'Failed to pause/resume reading session',
-            details: pauseData.details || 'No active reading session found',
-            timestamp: new Date().toISOString()
-          }
-        };
-
-        return res.status(pauseResponse.status).json(androidErrorResponse);
-      }
-
-      console.log('✅ Reading session paused/resumed successfully:', JSON.stringify(pauseData, null, 2));
-
-      // Success response in Android format
-      const androidResponse = {
-        type: pauseData.isPaused ? 'READING_SESSION_PAUSED' : 'READING_SESSION_RESUMED',
-        data: {
-          success: true,
-          sessionId: pauseData.id,
-          isPaused: pauseData.isPaused,
-          title: pauseData.title,
-          mediaType: pauseData.mediaType,
-          message: pauseData.isPaused ?
-            `Paused reading session for "${pauseData.title}"` :
-            `Resumed reading session for "${pauseData.title}"`,
-          pausedAt: pauseData.pausedAt,
-          totalActiveTime: pauseData.totalActiveTime,
-          timestamp: new Date().toISOString()
-        }
-      };
-
-      console.log('✅ Reading session pause/resume successful:', JSON.stringify(androidResponse, null, 2));
-      res.json(androidResponse);
-
-    } catch (error) {
-      console.error('❌ Error in Android reading session pause endpoint:', error);
-
-      const androidErrorResponse = {
-        type: 'READING_SESSION_ERROR',
-        data: {
-          success: false,
-          error: 'Internal server error',
-          details: error.message,
-          timestamp: new Date().toISOString()
-        }
-      };
-
-      res.status(500).json(androidErrorResponse);
+    // Get active reading session
+    const activeSession = await watchLogService.getActiveReadingSession();
+    
+    if (!activeSession) {
+      return sendBadRequest(res, 'No active reading session found');
     }
-  });
+
+    // Pause the reading session
+    const updatedSession = await watchLogService.pauseReading(activeSession.id);
+    
+    console.log('✅ Reading session paused/resumed successfully:', updatedSession.id);
+
+    // Success response in Android format
+    const androidResponse = {
+      type: updatedSession.isPaused ? 'READING_SESSION_PAUSED' : 'READING_SESSION_RESUMED',
+      data: {
+        success: true,
+        sessionId: updatedSession.id,
+        isPaused: updatedSession.isPaused,
+        title: updatedSession.title,
+        mediaType: updatedSession.mediaType,
+        message: updatedSession.isPaused ?
+          `Paused reading session for "${updatedSession.title}"` :
+          `Resumed reading session for "${updatedSession.title}"`,
+        pausedAt: updatedSession.pausedAt,
+        totalActiveTime: updatedSession.totalActiveTime,
+        timestamp: new Date().toISOString()
+      }
+    };
+
+    console.log('✅ Reading session pause/resume successful:', JSON.stringify(androidResponse, null, 2));
+    return sendSuccess(res, androidResponse.data);
+  }));
 
   // Stop reading session
-  router.post('/reading/stop', async (req, res) => {
+  router.post('/reading/stop', asyncHandler(async (req, res) => {
     console.log('📱 Android app requesting to stop reading session...');
     
-    try {
-      const { progress } = req.body;
+    const { progress } = req.body;
 
-      // Check if this will result in 100% completion for better response handling
-      const willMarkAsRead = progress?.readPercentage === 100;
+    // Check if this will result in 100% completion for better response handling
+    const willMarkAsRead = progress?.readPercentage === 100;
 
-      // Use existing reading session stop endpoint
-      const baseUrl = getAndroidApiBaseUrl();
-      const stopResponse = await fetch(`${baseUrl}/api/reading/stop`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({ progress })
-      });
+    // Get active reading session
+    const activeSession = await watchLogService.getActiveReadingSession();
+    
+    if (!activeSession) {
+      return sendBadRequest(res, 'No active reading session found');
+    }
 
-      const stopData = await stopResponse.json();
+    console.log('Stopping session with ID:', activeSession.id);
 
-      if (!stopResponse.ok) {
-        console.error('Failed to stop reading session:', stopData);
-
-        const androidErrorResponse = {
-          type: 'READING_SESSION_ERROR',
-          data: {
-            success: false,
-            error: stopData.error || 'Failed to stop reading session',
-            details: stopData.details || 'No active reading session found',
-            timestamp: new Date().toISOString()
-          }
-        };
-
-        return res.status(stopResponse.status).json(androidErrorResponse);
-      }
-
-      console.log('✅ Reading session stopped successfully:', JSON.stringify(stopData, null, 2));
-
-      // Success response in Android format
+    // Stop the reading session
+    const stoppedSession = await watchLogService.stopReading(activeSession.id);
+    
+    // Handle different scenarios based on session outcome
+    if (stoppedSession.deleted) {
+      // Session was deleted due to being under 1 minute
+      console.log('Reading session was deleted (under 1 minute)');
+      
       const androidResponse = {
-        type: 'READING_SESSION_STOPPED',
+        type: 'READING_SESSION_DELETED',
         data: {
           success: true,
-          sessionId: stopData.id,
-          title: stopData.title,
-          mediaType: stopData.mediaType,
-          duration: stopData.duration,
-          totalActiveTime: stopData.totalActiveTime,
-          progressUpdated: progress ? true : false,
-          progress: progress || null,
-          markedAsRead: willMarkAsRead, // Indicate if item was marked as read due to 100% completion
-          message: willMarkAsRead
-            ? `Completed reading "${stopData.title}" and marked as read`
-            : `Stopped reading session for "${stopData.title}"`,
-          completedAt: stopData.completedAt,
+          sessionDeleted: true,
+          reason: 'Session duration was less than 1 minute',
+          totalTime: stoppedSession.totalTime || 0,
+          message: 'Reading session deleted (too short)',
           timestamp: new Date().toISOString()
         }
       };
-
-      if (willMarkAsRead) {
-        console.log(`📚 Comic/book marked as read due to 100% completion: ${stopData.title}`);
-      }
-
-      console.log('✅ Reading session stop successful:', JSON.stringify(androidResponse, null, 2));
-      res.json(androidResponse);
-
-    } catch (error) {
-      console.error('❌ Error in Android reading session stop endpoint:', error);
-
-      const androidErrorResponse = {
-        type: 'READING_SESSION_ERROR',
-        data: {
-          success: false,
-          error: 'Internal server error',
-          details: error.message,
-          timestamp: new Date().toISOString()
-        }
-      };
-
-      res.status(500).json(androidErrorResponse);
+      
+      return sendSuccess(res, androidResponse.data);
     }
-  });
 
-  return router;
+    // Update reading progress if provided and custom order item exists
+    let actuallyMarkedAsRead = false;
+    if (progress && activeSession.customOrderItemId) {
+      console.log('Updating reading progress for item:', activeSession.customOrderItemId, progress);
+      
+      try {
+        const updateData = {};
+        
+        if (progress.currentPage !== undefined && progress.currentPage > 0) {
+          updateData.bookCurrentPage = progress.currentPage;
+        }
+        
+        if (progress.readPercentage !== undefined && progress.readPercentage >= 0 && progress.readPercentage <= 100) {
+          updateData.bookPercentRead = progress.readPercentage;
+          
+          // If read percentage is 100%, mark as read/watched
+          if (progress.readPercentage === 100) {
+            updateData.isWatched = true;
+            actuallyMarkedAsRead = true;
+            console.log('Marking item as read/watched (100% completion)');
+          }
+        }
+        
+        if (progress.totalPages !== undefined && progress.totalPages > 0) {
+          // Also update the total page count if provided and not already set
+          const existingItem = await prisma.customOrderItem.findUnique({
+            where: { id: activeSession.customOrderItemId },
+            select: { bookPageCount: true }
+          });
+          
+          if (!existingItem?.bookPageCount) {
+            updateData.bookPageCount = progress.totalPages;
+          }
+        }
+        
+        if (Object.keys(updateData).length > 0) {
+          await prisma.customOrderItem.update({
+            where: { id: activeSession.customOrderItemId },
+            data: updateData
+          });
+          
+          console.log('Reading progress updated successfully:', updateData);
+        }
+      } catch (progressError) {
+        console.error('Error updating reading progress:', progressError);
+        // Don't fail the entire request for progress update errors
+      }
+    }
+    
+    console.log('✅ Reading session stopped successfully:', stoppedSession.id);
+
+    // Success response in Android format
+    const androidResponse = {
+      type: 'READING_SESSION_STOPPED',
+      data: {
+        success: true,
+        sessionId: stoppedSession.id,
+        title: activeSession.title,
+        mediaType: activeSession.mediaType,
+        duration: stoppedSession.duration,
+        totalActiveTime: stoppedSession.totalTime,
+        progressUpdated: progress ? true : false,
+        progress: progress || null,
+        markedAsRead: actuallyMarkedAsRead, // Based on actual database update
+        message: actuallyMarkedAsRead
+          ? `Completed reading "${activeSession.title}" and marked as read`
+          : `Stopped reading session for "${activeSession.title}"`,
+        completedAt: stoppedSession.endTime,
+        timestamp: new Date().toISOString()
+      }
+    };
+
+    if (actuallyMarkedAsRead) {
+      console.log(`📚 Comic/book marked as read due to 100% completion: ${activeSession.title}`);
+    }
+
+    console.log('✅ Reading session stop successful:', JSON.stringify(androidResponse, null, 2));
+    return sendSuccess(res, androidResponse.data);
+  }));
+
   return router;
 }
-
-module.exports = createReadingSessionRoutes;
 
 module.exports = createReadingSessionRoutes;

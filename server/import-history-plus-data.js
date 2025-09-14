@@ -17,11 +17,13 @@ class HistoryPlusDataImporter {
     this.importLog = [];
     this.databaseType = null;
     this.forceImport = options.force || false;
+    this.clearExisting = options.clearExisting || false;
     this.stats = {
       imported: 0,
       skipped: 0,
       errors: 0,
-      updated: 0
+      updated: 0,
+      deleted: 0
     };
     
     // ID mapping tables to match exported IDs with production IDs
@@ -166,6 +168,54 @@ class HistoryPlusDataImporter {
     }
     
     return records;
+  }
+
+  async clearExistingHistoryPlusData() {
+    console.log('🗑️  Clearing all existing History Plus data...');
+    
+    try {
+      // Delete in reverse order of foreign key dependencies
+      console.log('   Deleting user activity records...');
+      const userSectionReads = await this.targetPrisma.user_section_reads.deleteMany({});
+      const userChapterReads = await this.targetPrisma.user_chapter_reads.deleteMany({});
+      const userVideoWatches = await this.targetPrisma.user_video_watches.deleteMany({});
+      const userBookReads = await this.targetPrisma.user_book_reads.deleteMany({});
+      const userEventReviews = await this.targetPrisma.user_event_reviews.deleteMany({});
+      
+      console.log('   Deleting content records...');
+      const historySections = await this.targetPrisma.historySection.deleteMany({});
+      const historyChapters = await this.targetPrisma.historyChapter.deleteMany({});
+      const historyBooks = await this.targetPrisma.historyBook.deleteMany({});
+      const historyVideos = await this.targetPrisma.historyVideo.deleteMany({});
+      const historyChannels = await this.targetPrisma.historyChannel.deleteMany({});
+      const historicalEvents = await this.targetPrisma.historicalEvent.deleteMany({});
+      
+      const totalDeleted = (
+        userSectionReads.count + userChapterReads.count + userVideoWatches.count + 
+        userBookReads.count + userEventReviews.count + historySections.count + 
+        historyChapters.count + historyBooks.count + historyVideos.count + 
+        historyChannels.count + historicalEvents.count
+      );
+      
+      console.log(`✅ Deleted ${totalDeleted} existing records`);
+      console.log(`   User section reads: ${userSectionReads.count}`);
+      console.log(`   User chapter reads: ${userChapterReads.count}`);
+      console.log(`   User video watches: ${userVideoWatches.count}`);
+      console.log(`   User book reads: ${userBookReads.count}`);
+      console.log(`   User event reviews: ${userEventReviews.count}`);
+      console.log(`   History sections: ${historySections.count}`);
+      console.log(`   History chapters: ${historyChapters.count}`);
+      console.log(`   History books: ${historyBooks.count}`);
+      console.log(`   History videos: ${historyVideos.count}`);
+      console.log(`   History channels: ${historyChannels.count}`);
+      console.log(`   Historical events: ${historicalEvents.count}`);
+      
+      this.stats.deleted = totalDeleted;
+      
+    } catch (error) {
+      console.error('❌ Error clearing existing data:', error.message);
+      throw error;
+    }
   }
 
   // Simple CSV line parser (handles quoted values)
@@ -484,6 +534,18 @@ class HistoryPlusDataImporter {
   // IMPORT METHODS
   // ==========================================
 
+  // Helper method to create proper options for createMany
+  getCreateManyOptions() {
+    const options = {};
+    
+    // Only use skipDuplicates if we're not clearing existing data
+    if (!this.clearExisting) {
+      options.skipDuplicates = true;
+    }
+    
+    return options;
+  }
+
   async importWithUpsert(tableName, records, existing) {
     try {
       let imported = 0;
@@ -494,7 +556,7 @@ class HistoryPlusDataImporter {
       if (records.length > 0) {
         const result = await this.targetPrisma[tableName].createMany({
           data: records,
-          skipDuplicates: true
+          ...this.getCreateManyOptions()
         });
         imported = result.count;
         console.log(`   Created ${imported} new records`);
@@ -574,7 +636,27 @@ class HistoryPlusDataImporter {
     const records = await this.loadCSVFile('history_videos.csv');
     if (records.length === 0) return;
     
-    const { existing, new: newRecords } = await this.checkExistingRecords('historyVideo', records);
+    console.log(`📄 Loaded ${records.length} records from history_videos.csv`);
+    
+    // Transform records with proper field mapping
+    const transformedRecords = records.map(record => {
+      return {
+        ...record,
+        id: parseInt(record.id),
+        // Map CSV fields to schema fields
+        eventId: record.historicalEventId ? parseInt(record.historicalEventId) : null,
+        thumbnailUrl: record.thumbnail || null,
+        // Remove the old field names
+        historicalEventId: undefined,
+        thumbnail: undefined,
+        watchedProgress: undefined,
+        isWatched: undefined,
+        source: undefined,
+        sourceId: undefined
+      };
+    });
+    
+    const { existing, new: newRecords } = await this.checkExistingRecords('historyVideo', transformedRecords);
     
     if (newRecords.length === 0) {
       console.log('   All records already exist, skipping');
@@ -582,7 +664,7 @@ class HistoryPlusDataImporter {
       
       // Build mapping for existing videos
       console.log('🔄 Building video mappings for existing records...');
-      for (const record of records) {
+      for (const record of transformedRecords) {
         const oldId = parseInt(record.id);
         const existingVideo = await this.targetPrisma.historyVideo.findUnique({
           where: { id: oldId }
@@ -599,14 +681,14 @@ class HistoryPlusDataImporter {
     try {
       const result = await this.targetPrisma.historyVideo.createMany({
         data: newRecords,
-        skipDuplicates: true
+        ...this.getCreateManyOptions()
       });
       
       console.log(`✅ Imported ${result.count} history videos`);
       
       // Build mapping for all records (existing + newly imported)
       console.log('🔄 Building video mappings after import...');
-      for (const record of records) {
+      for (const record of transformedRecords) {
         const oldId = parseInt(record.id);
         const existingVideo = await this.targetPrisma.historyVideo.findUnique({
           where: { id: oldId }
@@ -622,6 +704,8 @@ class HistoryPlusDataImporter {
       this.stats.skipped += existing.length;
     } catch (error) {
       console.error('❌ Error importing history videos:', error.message);
+      console.error('   Full error:', error);
+      console.error('   Sample record that failed:', JSON.stringify(newRecords[0], null, 2));
       this.stats.errors += newRecords.length;
     }
   }
@@ -646,7 +730,7 @@ class HistoryPlusDataImporter {
     try {
       const result = await this.targetPrisma.historyBook.createMany({
         data: newRecords,
-        skipDuplicates: true
+        ...this.getCreateManyOptions()
       });
       
       console.log(`✅ Imported ${result.count} history books`);
@@ -668,23 +752,36 @@ class HistoryPlusDataImporter {
     const records = await this.loadCSVFile('history_chapters.csv');
     if (records.length === 0) return;
     
-    // Transform records with proper type conversion
+    console.log(`📄 Loaded ${records.length} records from history_chapters.csv`);
+    
+    // Transform records with proper type conversion and field mapping
     const typedRecords = records.map(record => {
       return {
         ...record,
         id: parseInt(record.id),
         bookId: parseInt(record.bookId),
-        chapterNumber: record.chapterNumber ? record.chapterNumber.toString() : null
+        chapterNumber: parseInt(record.chapterNumber),
+        // Map CSV fields to schema fields
+        pageStart: record.startPage ? parseInt(record.startPage) : null,
+        pageEnd: record.endPage ? parseInt(record.endPage) : null,
+        // Remove the old field names
+        startPage: undefined,
+        endPage: undefined
       };
     });
+    
+    console.log('🔄 Book ID mappings available:', Array.from(this.idMappings.books.entries()));
     
     // Update chapters with mapped book IDs
     const transformedRecords = typedRecords.map(record => {
       const mappedBookId = this.idMappings.books.get(record.bookId);
       if (mappedBookId) {
+        console.log(`   Chapter ${record.id}: mapping bookId ${record.bookId} -> ${mappedBookId}`);
         return { ...record, bookId: mappedBookId };
+      } else {
+        console.log(`   ⚠️  Chapter ${record.id}: no mapping found for bookId ${record.bookId}`);
+        return record;
       }
-      return record;
     });
     
     // Build mapping for chapters based on unique identifiers
@@ -718,7 +815,7 @@ class HistoryPlusDataImporter {
     try {
       const result = await this.targetPrisma.historyChapter.createMany({
         data: newRecords,
-        skipDuplicates: true
+        ...this.getCreateManyOptions()
       });
       
       console.log(`✅ Imported ${result.count} history chapters`);
@@ -730,6 +827,8 @@ class HistoryPlusDataImporter {
       this.stats.skipped += existing.length;
     } catch (error) {
       console.error('❌ Error importing history chapters:', error.message);
+      console.error('   Full error:', error);
+      console.error('   Sample record that failed:', JSON.stringify(newRecords[0], null, 2));
       this.stats.errors += newRecords.length;
     }
   }
@@ -746,7 +845,7 @@ class HistoryPlusDataImporter {
         ...record,
         id: parseInt(record.id),
         chapterId: parseInt(record.chapterId), // Convert string to int
-        sectionNumber: record.sectionNumber ? record.sectionNumber.toString() : null
+        sectionNumber: parseInt(record.sectionNumber)
       };
     });
     
@@ -790,7 +889,7 @@ class HistoryPlusDataImporter {
     try {
       const result = await this.targetPrisma.historySection.createMany({
         data: newRecords,
-        skipDuplicates: true
+        ...this.getCreateManyOptions()
       });
       
       console.log(`✅ Imported ${result.count} history sections`);
@@ -823,7 +922,7 @@ class HistoryPlusDataImporter {
     try {
       const result = await this.targetPrisma.historyChannel.createMany({
         data: newRecords,
-        skipDuplicates: true
+        ...this.getCreateManyOptions()
       });
       
       console.log(`✅ Imported ${result.count} history channels`);
@@ -865,7 +964,7 @@ class HistoryPlusDataImporter {
     try {
       const result = await this.targetPrisma.user_event_reviews.createMany({
         data: newRecords,
-        skipDuplicates: true
+        ...this.getCreateManyOptions()
       });
 
       console.log(`✅ Imported ${result.count} user event reviews`);
@@ -934,7 +1033,7 @@ class HistoryPlusDataImporter {
     try {
       const result = await this.targetPrisma.user_video_watches.createMany({
         data: newRecords,
-        skipDuplicates: true
+        ...this.getCreateManyOptions()
       });
 
       console.log(`✅ Imported ${result.count} user video watches`);
@@ -977,7 +1076,7 @@ class HistoryPlusDataImporter {
     try {
       const result = await this.targetPrisma.user_book_reads.createMany({
         data: newRecords,
-        skipDuplicates: true
+        ...this.getCreateManyOptions()
       });
 
       console.log(`✅ Imported ${result.count} user book reads`);
@@ -1046,7 +1145,7 @@ class HistoryPlusDataImporter {
     try {
       const result = await this.targetPrisma.user_chapter_reads.createMany({
         data: newRecords,
-        skipDuplicates: true
+        ...this.getCreateManyOptions()
       });
 
       console.log(`✅ Imported ${result.count} user chapter reads`);
@@ -1115,7 +1214,7 @@ class HistoryPlusDataImporter {
     try {
       const result = await this.targetPrisma.user_section_reads.createMany({
         data: newRecords,
-        skipDuplicates: true
+        ...this.getCreateManyOptions()
       });
 
       console.log(`✅ Imported ${result.count} user section reads`);
@@ -1133,6 +1232,12 @@ class HistoryPlusDataImporter {
     console.log('');
     
     try {
+      // Clear existing data if requested
+      if (this.clearExisting) {
+        await this.clearExistingHistoryPlusData();
+        console.log('');
+      }
+      
       // Load export summary
       await this.loadExportSummary();
       console.log('');
@@ -1155,6 +1260,9 @@ class HistoryPlusDataImporter {
       console.log('');
       console.log('✅ Import completed!');
       console.log('📊 Import Statistics:');
+      if (this.stats.deleted > 0) {
+        console.log(`   Records deleted: ${this.stats.deleted}`);
+      }
       console.log(`   Records imported: ${this.stats.imported}`);
       console.log(`   Records updated: ${this.stats.updated}`);
       console.log(`   Records skipped (already exist): ${this.stats.skipped}`);
@@ -1187,8 +1295,9 @@ async function main() {
   const args = process.argv.slice(2);
   const customImportDir = args.find(arg => !arg.startsWith('--'));
   const forceImport = args.includes('--force');
+  const clearExisting = args.includes('--clear-existing');
   
-  const options = { force: forceImport };
+  const options = { force: forceImport, clearExisting: clearExisting };
   if (customImportDir) {
     options.importDir = path.resolve(customImportDir);
   }
@@ -1203,6 +1312,10 @@ async function main() {
     console.log('🔄 Force mode enabled: Will update existing records');
   }
   
+  if (clearExisting) {
+    console.log('🗑️  Clear existing data enabled: Will delete all existing History Plus data first');
+  }
+  
   try {
     await importer.initialize();
     
@@ -1210,8 +1323,13 @@ async function main() {
     console.log('');
     console.log('⚠️  IMPORT CONFIRMATION:');
     console.log(`   This will import History Plus data to ${importer.databaseType.toUpperCase()}`);
-    console.log('   Existing records with matching IDs will be skipped');
-    console.log('   No existing data will be modified or deleted');
+    if (clearExisting) {
+      console.log('   🗑️  ALL EXISTING HISTORY PLUS DATA WILL BE DELETED FIRST');
+      console.log('   This is a destructive operation that cannot be undone');
+    } else {
+      console.log('   Existing records with matching IDs will be skipped');
+      console.log('   No existing data will be modified or deleted');
+    }
     console.log(`   Import directory: ${importer.importDir}`);
     console.log('');
     
