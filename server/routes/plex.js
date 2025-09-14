@@ -184,12 +184,12 @@ router.get('/players', asyncHandler(async (req, res) => {
 // GET /api/plex/selected-player - Get selected Plex player
 router.get('/selected-player', asyncHandler(async (req, res) => {
   const settings = await prisma.settings.findFirst();
-  if (!settings || !settings.selectedPlexPlayer) {
+  if (!settings || !settings.selectedPlayer) {
     return res.json({ selectedPlayer: null });
   }
   
   res.json({ 
-    selectedPlayer: settings.selectedPlexPlayer,
+    selectedPlayer: settings.selectedPlayer,
     playerName: settings.selectedPlexPlayerName 
   });
 }));
@@ -296,13 +296,13 @@ router.post('/play', asyncHandler(async (req, res) => {
   if (!targetPlayerId) {
     const settings = await prisma.settings.findFirst();
     
-    if (!settings || !settings.selectedPlexPlayer) {
+    if (!settings || !settings.selectedPlayer) {
       return res.status(400).json({ 
         error: 'No player specified and no default player selected in settings' 
       });
     }
     
-    targetPlayerId = settings.selectedPlexPlayer;
+    targetPlayerId = settings.selectedPlayer;
   }
 
   console.log('Playing media on device:', targetPlayerId);
@@ -657,13 +657,13 @@ router.post('/test-androidtv-notification', asyncHandler(async (req, res) => {
   if (!targetPlayerId) {
     const settings = await prisma.settings.findFirst();
     
-    if (!settings || !settings.selectedPlexPlayer) {
+    if (!settings || !settings.selectedPlayer) {
       return res.status(400).json({ 
         error: 'No player specified and no default player selected in settings' 
       });
     }
     
-    targetPlayerId = settings.selectedPlexPlayer;
+    targetPlayerId = settings.selectedPlayer;
   }
 
   console.log('Testing AndroidTV notification approach for device:', targetPlayerId);
