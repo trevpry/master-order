@@ -23,6 +23,15 @@ class HistoryPlusDataImporter {
       errors: 0,
       updated: 0
     };
+    
+    // ID mapping tables to match exported IDs with production IDs
+    this.idMappings = {
+      videos: new Map(),      // oldId -> newId
+      chapters: new Map(),    // oldId -> newId
+      sections: new Map(),    // oldId -> newId
+      books: new Map(),       // oldId -> newId
+      events: new Map()       // oldId -> newId
+    };
   }
 
   detectDatabaseType() {
@@ -242,6 +251,239 @@ class HistoryPlusDataImporter {
     }
   }
 
+  // ==========================================
+  // ID MAPPING METHODS
+  // ==========================================
+
+  async buildVideoIdMapping(records) {
+    console.log('🔄 Building video ID mapping...');
+    
+    for (const record of records) {
+      const oldId = parseInt(record.id);
+      
+      // Try to find existing video by unique identifiers
+      let existingVideo = null;
+      
+      // First try by exact title and URL match
+      if (record.title && record.videoUrl) {
+        existingVideo = await this.targetPrisma.historyVideo.findFirst({
+          where: {
+            title: record.title,
+            videoUrl: record.videoUrl
+          }
+        });
+      }
+      
+      // If not found, try by title and channelId
+      if (!existingVideo && record.title && record.channelId) {
+        existingVideo = await this.targetPrisma.historyVideo.findFirst({
+          where: {
+            title: record.title,
+            channelId: parseInt(record.channelId)
+          }
+        });
+      }
+      
+      // If not found, try by just title (less reliable)
+      if (!existingVideo && record.title) {
+        existingVideo = await this.targetPrisma.historyVideo.findFirst({
+          where: {
+            title: record.title
+          }
+        });
+      }
+      
+      if (existingVideo) {
+        this.idMappings.videos.set(oldId, existingVideo.id);
+        console.log(`   Mapped video ${oldId} -> ${existingVideo.id} (${record.title})`);
+      }
+    }
+    
+    console.log(`✅ Built mapping for ${this.idMappings.videos.size} existing videos`);
+  }
+
+  async updateVideoIdMappingAfterImport(newRecords) {
+    console.log('🔄 Updating video ID mapping for newly imported records...');
+    
+    for (const record of newRecords) {
+      const oldId = parseInt(record.id);
+      
+      // Find the newly created record
+      const newVideo = await this.targetPrisma.historyVideo.findFirst({
+        where: {
+          title: record.title,
+          videoUrl: record.videoUrl || undefined
+        }
+      });
+      
+      if (newVideo) {
+        this.idMappings.videos.set(oldId, newVideo.id);
+        console.log(`   Mapped new video ${oldId} -> ${newVideo.id} (${record.title})`);
+      }
+    }
+  }
+
+  async buildChapterIdMapping(records) {
+    console.log('🔄 Building chapter ID mapping...');
+    
+    for (const record of records) {
+      const oldId = parseInt(record.id);
+      
+      // Try to find existing chapter by unique identifiers
+      let existingChapter = null;
+      
+      // Try by title and bookId
+      if (record.title && record.bookId) {
+        const mappedBookId = this.idMappings.books.get(parseInt(record.bookId));
+        if (mappedBookId) {
+          existingChapter = await this.targetPrisma.historyChapter.findFirst({
+            where: {
+              title: record.title,
+              bookId: mappedBookId
+            }
+          });
+        }
+      }
+      
+      if (existingChapter) {
+        this.idMappings.chapters.set(oldId, existingChapter.id);
+        console.log(`   Mapped chapter ${oldId} -> ${existingChapter.id} (${record.title})`);
+      }
+    }
+    
+    console.log(`✅ Built mapping for ${this.idMappings.chapters.size} existing chapters`);
+  }
+
+  async updateChapterIdMappingAfterImport(newRecords) {
+    console.log('🔄 Updating chapter ID mapping for newly imported records...');
+    
+    for (const record of newRecords) {
+      const oldId = parseInt(record.id);
+      
+      // Find the newly created record
+      const mappedBookId = this.idMappings.books.get(parseInt(record.bookId));
+      if (mappedBookId) {
+        const newChapter = await this.targetPrisma.historyChapter.findFirst({
+          where: {
+            title: record.title,
+            bookId: mappedBookId
+          }
+        });
+        
+        if (newChapter) {
+          this.idMappings.chapters.set(oldId, newChapter.id);
+          console.log(`   Mapped new chapter ${oldId} -> ${newChapter.id} (${record.title})`);
+        }
+      }
+    }
+  }
+
+  async buildSectionIdMapping(records) {
+    console.log('🔄 Building section ID mapping...');
+    
+    for (const record of records) {
+      const oldId = parseInt(record.id);
+      
+      // Try to find existing section by unique identifiers
+      let existingSection = null;
+      
+      // Try by title and chapterId
+      if (record.title && record.chapterId) {
+        const mappedChapterId = this.idMappings.chapters.get(parseInt(record.chapterId));
+        if (mappedChapterId) {
+          existingSection = await this.targetPrisma.historySection.findFirst({
+            where: {
+              title: record.title,
+              chapterId: mappedChapterId
+            }
+          });
+        }
+      }
+      
+      if (existingSection) {
+        this.idMappings.sections.set(oldId, existingSection.id);
+        console.log(`   Mapped section ${oldId} -> ${existingSection.id} (${record.title})`);
+      }
+    }
+    
+    console.log(`✅ Built mapping for ${this.idMappings.sections.size} existing sections`);
+  }
+
+  async updateSectionIdMappingAfterImport(newRecords) {
+    console.log('🔄 Updating section ID mapping for newly imported records...');
+    
+    for (const record of newRecords) {
+      const oldId = parseInt(record.id);
+      
+      // Find the newly created record
+      const mappedChapterId = this.idMappings.chapters.get(parseInt(record.chapterId));
+      if (mappedChapterId) {
+        const newSection = await this.targetPrisma.historySection.findFirst({
+          where: {
+            title: record.title,
+            chapterId: mappedChapterId
+          }
+        });
+        
+        if (newSection) {
+          this.idMappings.sections.set(oldId, newSection.id);
+          console.log(`   Mapped new section ${oldId} -> ${newSection.id} (${record.title})`);
+        }
+      }
+    }
+  }
+
+  async buildBookIdMapping(records) {
+    console.log('🔄 Building book ID mapping...');
+    
+    for (const record of records) {
+      const oldId = parseInt(record.id);
+      
+      // Try to find existing book by unique identifiers
+      let existingBook = null;
+      
+      // Try by title
+      if (record.title) {
+        existingBook = await this.targetPrisma.historyBook.findFirst({
+          where: {
+            title: record.title
+          }
+        });
+      }
+      
+      if (existingBook) {
+        this.idMappings.books.set(oldId, existingBook.id);
+        console.log(`   Mapped book ${oldId} -> ${existingBook.id} (${record.title})`);
+      }
+    }
+    
+    console.log(`✅ Built mapping for ${this.idMappings.books.size} existing books`);
+  }
+
+  async updateBookIdMappingAfterImport(newRecords) {
+    console.log('🔄 Updating book ID mapping for newly imported records...');
+    
+    for (const record of newRecords) {
+      const oldId = parseInt(record.id);
+      
+      // Find the newly created record
+      const newBook = await this.targetPrisma.historyBook.findFirst({
+        where: {
+          title: record.title
+        }
+      });
+      
+      if (newBook) {
+        this.idMappings.books.set(oldId, newBook.id);
+        console.log(`   Mapped new book ${oldId} -> ${newBook.id} (${record.title})`);
+      }
+    }
+  }
+
+  // ==========================================
+  // IMPORT METHODS
+  // ==========================================
+
   async importWithUpsert(tableName, records, existing) {
     try {
       let imported = 0;
@@ -332,6 +574,9 @@ class HistoryPlusDataImporter {
     const records = await this.loadCSVFile('history_videos.csv');
     if (records.length === 0) return;
     
+    // Build mapping for videos based on unique identifiers
+    await this.buildVideoIdMapping(records);
+    
     const { existing, new: newRecords } = await this.checkExistingRecords('historyVideo', records);
     
     if (newRecords.length === 0) {
@@ -347,6 +592,10 @@ class HistoryPlusDataImporter {
       });
       
       console.log(`✅ Imported ${result.count} history videos`);
+      
+      // Update mappings for newly imported records
+      await this.updateVideoIdMappingAfterImport(newRecords);
+      
       this.stats.imported += result.count;
       this.stats.skipped += existing.length;
     } catch (error) {
@@ -360,6 +609,9 @@ class HistoryPlusDataImporter {
     
     const records = await this.loadCSVFile('history_books.csv');
     if (records.length === 0) return;
+    
+    // Build mapping for books based on unique identifiers
+    await this.buildBookIdMapping(records);
     
     const { existing, new: newRecords } = await this.checkExistingRecords('historyBook', records);
     
@@ -376,6 +628,10 @@ class HistoryPlusDataImporter {
       });
       
       console.log(`✅ Imported ${result.count} history books`);
+      
+      // Update mappings for newly imported records
+      await this.updateBookIdMappingAfterImport(newRecords);
+      
       this.stats.imported += result.count;
       this.stats.skipped += existing.length;
     } catch (error) {
@@ -390,7 +646,19 @@ class HistoryPlusDataImporter {
     const records = await this.loadCSVFile('history_chapters.csv');
     if (records.length === 0) return;
     
-    const { existing, new: newRecords } = await this.checkExistingRecords('historyChapter', records);
+    // Update chapters with mapped book IDs
+    const transformedRecords = records.map(record => {
+      const mappedBookId = this.idMappings.books.get(parseInt(record.bookId));
+      if (mappedBookId) {
+        return { ...record, bookId: mappedBookId };
+      }
+      return record;
+    });
+    
+    // Build mapping for chapters based on unique identifiers
+    await this.buildChapterIdMapping(transformedRecords);
+    
+    const { existing, new: newRecords } = await this.checkExistingRecords('historyChapter', transformedRecords);
     
     if (newRecords.length === 0) {
       console.log('   All records already exist, skipping');
@@ -405,6 +673,10 @@ class HistoryPlusDataImporter {
       });
       
       console.log(`✅ Imported ${result.count} history chapters`);
+      
+      // Update mappings for newly imported records
+      await this.updateChapterIdMappingAfterImport(newRecords);
+      
       this.stats.imported += result.count;
       this.stats.skipped += existing.length;
     } catch (error) {
@@ -419,7 +691,19 @@ class HistoryPlusDataImporter {
     const records = await this.loadCSVFile('history_sections.csv');
     if (records.length === 0) return;
     
-    const { existing, new: newRecords } = await this.checkExistingRecords('historySection', records);
+    // Update sections with mapped chapter IDs
+    const transformedRecords = records.map(record => {
+      const mappedChapterId = this.idMappings.chapters.get(parseInt(record.chapterId));
+      if (mappedChapterId) {
+        return { ...record, chapterId: mappedChapterId };
+      }
+      return record;
+    });
+    
+    // Build mapping for sections based on unique identifiers
+    await this.buildSectionIdMapping(transformedRecords);
+    
+    const { existing, new: newRecords } = await this.checkExistingRecords('historySection', transformedRecords);
     
     if (newRecords.length === 0) {
       console.log('   All records already exist, skipping');
@@ -434,6 +718,10 @@ class HistoryPlusDataImporter {
       });
       
       console.log(`✅ Imported ${result.count} history sections`);
+      
+      // Update mappings for newly imported records
+      await this.updateSectionIdMappingAfterImport(newRecords);
+      
       this.stats.imported += result.count;
       this.stats.skipped += existing.length;
     } catch (error) {
@@ -520,18 +808,44 @@ class HistoryPlusDataImporter {
     const records = await this.loadCSVFile('user_video_watches.csv');
     if (records.length === 0) return;
 
-    // Transform records to match database schema (remove userId field)
-    const transformedRecords = records.map(record => {
+    // Transform records to match database schema and use mapped video IDs
+    const transformedRecords = [];
+    const skippedRecords = [];
+    
+    for (const record of records) {
       const { userId, ...cleanRecord } = record; // Remove userId field
-      return {
-        id: cleanRecord.id,
-        videoId: parseInt(cleanRecord.videoId),
-        watched: cleanRecord.watched === 'true',
-        watchedAt: cleanRecord.watchDate ? new Date(cleanRecord.watchDate) : null,
-        createdAt: new Date(cleanRecord.createdAt),
-        updatedAt: new Date(cleanRecord.updatedAt)
-      };
-    });
+      const oldVideoId = parseInt(cleanRecord.videoId);
+      const mappedVideoId = this.idMappings.videos.get(oldVideoId);
+      
+      if (mappedVideoId) {
+        transformedRecords.push({
+          id: cleanRecord.id,
+          videoId: mappedVideoId,
+          watched: cleanRecord.watched === 'true',
+          watchedAt: cleanRecord.watchDate ? new Date(cleanRecord.watchDate) : null,
+          createdAt: new Date(cleanRecord.createdAt),
+          updatedAt: new Date(cleanRecord.updatedAt)
+        });
+      } else {
+        skippedRecords.push({
+          id: cleanRecord.id,
+          oldVideoId: oldVideoId,
+          reason: 'Video not found in target database'
+        });
+      }
+    }
+
+    console.log(`   Mapped ${transformedRecords.length} video watches, skipped ${skippedRecords.length} (unmappable videos)`);
+    
+    if (skippedRecords.length > 0) {
+      console.log(`   ⚠️  Skipped video watches for missing videos: ${skippedRecords.slice(0, 5).map(r => r.oldVideoId).join(', ')}${skippedRecords.length > 5 ? '...' : ''}`);
+    }
+
+    if (transformedRecords.length === 0) {
+      console.log('   No mappable video watches to import');
+      this.stats.skipped += records.length;
+      return;
+    }
 
     const { existing, new: newRecords } = await this.checkExistingRecords('user_video_watches', transformedRecords);
 
@@ -549,7 +863,7 @@ class HistoryPlusDataImporter {
 
       console.log(`✅ Imported ${result.count} user video watches`);
       this.stats.imported += result.count;
-      this.stats.skipped += existing.length;
+      this.stats.skipped += existing.length + skippedRecords.length;
     } catch (error) {
       console.error('❌ Error importing user video watches:', error.message);
       console.error('   First record sample:', JSON.stringify(newRecords[0], null, 2));
@@ -606,18 +920,44 @@ class HistoryPlusDataImporter {
     const records = await this.loadCSVFile('user_chapter_reads.csv');
     if (records.length === 0) return;
 
-    // Transform records to match database schema (remove userId field)
-    const transformedRecords = records.map(record => {
+    // Transform records to match database schema and use mapped chapter IDs
+    const transformedRecords = [];
+    const skippedRecords = [];
+    
+    for (const record of records) {
       const { userId, ...cleanRecord } = record; // Remove userId field
-      return {
-        id: cleanRecord.id,
-        chapterId: parseInt(cleanRecord.chapterId),
-        read: cleanRecord.read === 'true',
-        readAt: cleanRecord.readDate ? new Date(cleanRecord.readDate) : null,
-        createdAt: new Date(cleanRecord.createdAt),
-        updatedAt: new Date(cleanRecord.updatedAt)
-      };
-    });
+      const oldChapterId = parseInt(cleanRecord.chapterId);
+      const mappedChapterId = this.idMappings.chapters.get(oldChapterId);
+      
+      if (mappedChapterId) {
+        transformedRecords.push({
+          id: cleanRecord.id,
+          chapterId: mappedChapterId,
+          read: cleanRecord.read === 'true',
+          readAt: cleanRecord.readDate ? new Date(cleanRecord.readDate) : null,
+          createdAt: new Date(cleanRecord.createdAt),
+          updatedAt: new Date(cleanRecord.updatedAt)
+        });
+      } else {
+        skippedRecords.push({
+          id: cleanRecord.id,
+          oldChapterId: oldChapterId,
+          reason: 'Chapter not found in target database'
+        });
+      }
+    }
+
+    console.log(`   Mapped ${transformedRecords.length} chapter reads, skipped ${skippedRecords.length} (unmappable chapters)`);
+    
+    if (skippedRecords.length > 0) {
+      console.log(`   ⚠️  Skipped chapter reads for missing chapters: ${skippedRecords.slice(0, 5).map(r => r.oldChapterId).join(', ')}${skippedRecords.length > 5 ? '...' : ''}`);
+    }
+
+    if (transformedRecords.length === 0) {
+      console.log('   No mappable chapter reads to import');
+      this.stats.skipped += records.length;
+      return;
+    }
 
     const { existing, new: newRecords } = await this.checkExistingRecords('user_chapter_reads', transformedRecords);
 
@@ -635,7 +975,7 @@ class HistoryPlusDataImporter {
 
       console.log(`✅ Imported ${result.count} user chapter reads`);
       this.stats.imported += result.count;
-      this.stats.skipped += existing.length;
+      this.stats.skipped += existing.length + skippedRecords.length;
     } catch (error) {
       console.error('❌ Error importing user chapter reads:', error.message);
       console.error('   First record sample:', JSON.stringify(newRecords[0], null, 2));
@@ -649,18 +989,44 @@ class HistoryPlusDataImporter {
     const records = await this.loadCSVFile('user_section_reads.csv');
     if (records.length === 0) return;
 
-    // Transform records to match database schema (remove userId field)
-    const transformedRecords = records.map(record => {
+    // Transform records to match database schema and use mapped section IDs
+    const transformedRecords = [];
+    const skippedRecords = [];
+    
+    for (const record of records) {
       const { userId, ...cleanRecord } = record; // Remove userId field
-      return {
-        id: cleanRecord.id,
-        sectionId: parseInt(cleanRecord.sectionId),
-        read: cleanRecord.read === 'true',
-        readAt: cleanRecord.readDate ? new Date(cleanRecord.readDate) : null,
-        createdAt: new Date(cleanRecord.createdAt),
-        updatedAt: new Date(cleanRecord.updatedAt)
-      };
-    });
+      const oldSectionId = parseInt(cleanRecord.sectionId);
+      const mappedSectionId = this.idMappings.sections.get(oldSectionId);
+      
+      if (mappedSectionId) {
+        transformedRecords.push({
+          id: cleanRecord.id,
+          sectionId: mappedSectionId,
+          read: cleanRecord.read === 'true',
+          readAt: cleanRecord.readDate ? new Date(cleanRecord.readDate) : null,
+          createdAt: new Date(cleanRecord.createdAt),
+          updatedAt: new Date(cleanRecord.updatedAt)
+        });
+      } else {
+        skippedRecords.push({
+          id: cleanRecord.id,
+          oldSectionId: oldSectionId,
+          reason: 'Section not found in target database'
+        });
+      }
+    }
+
+    console.log(`   Mapped ${transformedRecords.length} section reads, skipped ${skippedRecords.length} (unmappable sections)`);
+    
+    if (skippedRecords.length > 0) {
+      console.log(`   ⚠️  Skipped section reads for missing sections: ${skippedRecords.slice(0, 5).map(r => r.oldSectionId).join(', ')}${skippedRecords.length > 5 ? '...' : ''}`);
+    }
+
+    if (transformedRecords.length === 0) {
+      console.log('   No mappable section reads to import');
+      this.stats.skipped += records.length;
+      return;
+    }
 
     const { existing, new: newRecords } = await this.checkExistingRecords('user_section_reads', transformedRecords);
 
@@ -678,7 +1044,7 @@ class HistoryPlusDataImporter {
 
       console.log(`✅ Imported ${result.count} user section reads`);
       this.stats.imported += result.count;
-      this.stats.skipped += existing.length;
+      this.stats.skipped += existing.length + skippedRecords.length;
     } catch (error) {
       console.error('❌ Error importing user section reads:', error.message);
       console.error('   First record sample:', JSON.stringify(newRecords[0], null, 2));
@@ -717,6 +1083,12 @@ class HistoryPlusDataImporter {
       console.log(`   Records updated: ${this.stats.updated}`);
       console.log(`   Records skipped (already exist): ${this.stats.skipped}`);
       console.log(`   Errors: ${this.stats.errors}`);
+      console.log('');
+      console.log('🔗 ID Mapping Statistics:');
+      console.log(`   Videos mapped: ${this.idMappings.videos.size}`);
+      console.log(`   Books mapped: ${this.idMappings.books.size}`);
+      console.log(`   Chapters mapped: ${this.idMappings.chapters.size}`);
+      console.log(`   Sections mapped: ${this.idMappings.sections.size}`);
       
       return { success: true, stats: this.stats };
       
