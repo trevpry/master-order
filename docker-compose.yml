@@ -14,6 +14,8 @@ services:
       - /mnt/user/appdata/master-order/data:/app/data
       - /mnt/user/appdata/master-order/artwork-cache:/app/server/artwork-cache
       - /mnt/user/appdata/master-order/logs:/app/logs
+      # History Plus CSV import directory (optional - only needed if using import button)
+      - /mnt/user/appdata/master-order/history-plus-export:/app/history-plus-export:ro
       # Mount Plex media paths - REQUIRED for metadata extraction
       - /mnt/user/Media/Christmas:/xmas:ro
       - /mnt/user/Media/Movies:/movies:ro

@@ -1,9 +1,14 @@
 const express = require('express');
 const router = express.Router();
+const { PrismaClient } = require('@prisma/client');
 const HistoryPlusService = require('../services/historyPlusService');
 const { asyncHandler, sendSuccess, sendBadRequest, sendServerError } = require('../utils/responses');
 const { validateRequiredFields } = require('../middleware/validation');
+const { spawn } = require('child_process');
+const path = require('path');
+const fs = require('fs');
 
+const prisma = new PrismaClient();
 const historyPlusService = new HistoryPlusService();
 
 // ==========================================
@@ -364,6 +369,139 @@ router.get('/search', asyncHandler(async (req, res) => {
 router.get('/categories', asyncHandler(async (req, res) => {
   const categories = await historyPlusService.getCategories();
   sendSuccess(res, categories);
+}));
+
+// POST /api/history-plus/import-data
+router.post('/import-data', asyncHandler(async (req, res) => {
+  console.log('🔄 Starting History Plus data import via API...');
+  
+  const { force = false } = req.body;
+  
+  // Check if export directory exists
+  const exportDir = path.join(__dirname, '..', '..', 'history-plus-export');
+  if (!fs.existsSync(exportDir)) {
+    return sendBadRequest(res, 'History Plus export directory not found. Please ensure CSV files are available.');
+  }
+  
+  // Check if CSV files exist
+  const csvFiles = fs.readdirSync(exportDir).filter(file => file.endsWith('.csv'));
+  if (csvFiles.length === 0) {
+    return sendBadRequest(res, 'No CSV files found in export directory.');
+  }
+  
+  console.log(`📂 Found ${csvFiles.length} CSV files ready for import`);
+  if (force) {
+    console.log('🔄 Force mode enabled: Will update existing records');
+  }
+  
+  try {
+    // Start the import process
+    const importScript = path.join(__dirname, '..', 'import-history-plus-data.js');
+    const args = [importScript, exportDir];
+    if (force) {
+      args.push('--force');
+    }
+    
+    const result = await new Promise((resolve, reject) => {
+      const importProcess = spawn('node', args, {
+        stdio: ['pipe', 'pipe', 'pipe'],
+        cwd: path.dirname(importScript)
+      });
+      
+      let output = '';
+      let errorOutput = '';
+      
+      // Send 'y' to confirm the import
+      importProcess.stdin.write('y\n');
+      importProcess.stdin.end();
+      
+      importProcess.stdout.on('data', (data) => {
+        const chunk = data.toString();
+        output += chunk;
+        console.log(chunk.trim());
+      });
+      
+      importProcess.stderr.on('data', (data) => {
+        const chunk = data.toString();
+        errorOutput += chunk;
+        console.error(chunk.trim());
+      });
+      
+      importProcess.on('close', (code) => {
+        if (code === 0) {
+          console.log('✅ History Plus import completed successfully');
+          
+          // Parse the output to extract statistics  
+          const importedMatch = output.match(/Records imported: (\d+)/);
+          const updatedMatch = output.match(/Records updated: (\d+)/);
+          const skippedMatch = output.match(/Records skipped.*: (\d+)/);
+          const errorsMatch = output.match(/Errors: (\d+)/);
+          
+          resolve({
+            success: true,
+            message: 'History Plus data imported successfully',
+            csvFiles: csvFiles.length,
+            force: force,
+            statistics: {
+              imported: importedMatch ? parseInt(importedMatch[1], 10) : 0,
+              updated: updatedMatch ? parseInt(updatedMatch[1], 10) : 0,
+              skipped: skippedMatch ? parseInt(skippedMatch[1], 10) : 0,
+              errors: errorsMatch ? parseInt(errorsMatch[1], 10) : 0
+            },
+            output: output
+          });
+        } else {
+          console.error('❌ History Plus import failed with code:', code);
+          
+          reject(new Error(`Import process failed with code ${code}: ${errorOutput || 'Unknown error'}`));
+        }
+      });
+      
+      importProcess.on('error', (err) => {
+        console.error('❌ Failed to start import process:', err);
+        reject(new Error(`Failed to start import process: ${err.message}`));
+      });
+    });
+    
+    sendSuccess(res, result);
+    
+  } catch (error) {
+    console.error('❌ Import process error:', error);
+    sendServerError(res, 'Import process failed', error.message);
+  }
+}));
+
+// GET /api/history-plus/import-status
+router.get('/import-status', asyncHandler(async (req, res) => {
+  const exportDir = path.join(__dirname, '..', '..', 'history-plus-export');
+  
+  // Check if we have existing History Plus data
+  const historicalEventCount = await prisma.historicalEvent.count();
+  const historyVideoCount = await prisma.historyVideo.count();
+  const historyBookCount = await prisma.historyBook.count();
+  
+  const totalRecords = historicalEventCount + historyVideoCount + historyBookCount;
+  const hasData = totalRecords > 0;
+  
+  const status = {
+    exportDirExists: fs.existsSync(exportDir),
+    csvFiles: [],
+    ready: false,
+    hasData: hasData,
+    existingRecords: {
+      historicalEvents: historicalEventCount,
+      historyVideos: historyVideoCount,
+      historyBooks: historyBookCount,
+      total: totalRecords
+    }
+  };
+  
+  if (status.exportDirExists) {
+    status.csvFiles = fs.readdirSync(exportDir).filter(file => file.endsWith('.csv'));
+    status.ready = status.csvFiles.length > 0;
+  }
+  
+  sendSuccess(res, status);
 }));
 
 module.exports = router;

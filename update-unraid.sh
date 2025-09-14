@@ -1,16 +1,7 @@
 #!/bin/bash
 
-# Master Order Unraid Update Script with History Plus Migration
+# Master Order Unraid Update Script
 # Run this script on your Unraid server to update the container
-# Now includes comprehensive History Plus data migration to PostgreSQL
-# FIXED: Runs migration inside Docker container where Node.js is available
-#
-# 🛡️  DATA SAFETY GUARANTEE:
-# - Migration ONLY INSERTS new records, never updates existing PostgreSQL data
-# - All existing PostgreSQL data is preserved completely unchanged
-# - Database transactions ensure atomicity and rollback capability
-# - Pre-migration analysis shows exactly what will be migrated
-# - User confirmation required before any database operations
 
 # ===============================================================================
 # CONFIGURATION SECTION - UPDATE THESE VALUES FOR YOUR ENVIRONMENT
@@ -35,7 +26,7 @@ DATABASE_URL="postgresql://$POSTGRES_USER:$POSTGRES_PASSWORD@$POSTGRES_HOST:$POS
 # INITIAL SETUP AND GITHUB PULL (MUST HAPPEN FIRST)
 # ===============================================================================
 
-echo "🔄 Starting Master Order update with History Plus migration on Unraid..."
+echo "🔄 Starting Master Order update on Unraid..."
 echo "🗃️  Target PostgreSQL: $POSTGRES_HOST:$POSTGRES_PORT/$POSTGRES_DB"
 
 # Basic pre-flight checks
@@ -89,33 +80,34 @@ fi
 # ===============================================================================
 
 # Set up logging after we have the latest version
-HISTORY_PLUS_MIGRATION_LOG="$BACKUP_DIR/history-plus-migration.log"
+MIGRATION_LOG="$BACKUP_DIR/migration.log"
 
 # Create backup directory if it doesn't exist
 mkdir -p "$BACKUP_DIR"
 
 # Function to log messages (now safe to use after git pull)
 log_info() {
-    echo "ℹ️  $1" | tee -a "$HISTORY_PLUS_MIGRATION_LOG"
+    echo "ℹ️  $1" | tee -a "$MIGRATION_LOG"
 }
 
 log_success() {
-    echo "✅ $1" | tee -a "$HISTORY_PLUS_MIGRATION_LOG"
+    echo "✅ $1" | tee -a "$MIGRATION_LOG"
 }
 
 log_warning() {
-    echo "⚠️  $1" | tee -a "$HISTORY_PLUS_MIGRATION_LOG"
+    echo "⚠️  $1" | tee -a "$MIGRATION_LOG"
 }
 
 log_error() {
-    echo "❌ $1" | tee -a "$HISTORY_PLUS_MIGRATION_LOG"
+    echo "❌ $1" | tee -a "$MIGRATION_LOG"
 }
 
 # Check for required files (now using updated repository)
 log_info "Checking for required files in updated repository..."
 REQUIRED_FILES=(
-    "server/import-history-plus-data.js"
+    "server/index.js"
     "Dockerfile"
+    "docker-compose.yml"
     "package.json"
 )
 
@@ -253,55 +245,6 @@ if [ $? -ne 0 ]; then
 fi
 
 # ===============================================================================
-# HISTORY PLUS MIGRATION (Run inside Docker container where Node.js is available)
-# ===============================================================================
-
-# Step 4: Import History Plus data from pre-exported CSV files
-EXPORT_DIR="$REPO_PATH/history-plus-export"
-
-if [ -d "$EXPORT_DIR" ]; then
-    log_info "History Plus CSV files found, starting import process..."
-    
-    # Check if CSV files exist
-    CSV_COUNT=$(find "$EXPORT_DIR" -name "*.csv" | wc -l)
-    if [ $CSV_COUNT -gt 0 ]; then
-        log_info "Found $CSV_COUNT CSV files ready for import"
-        
-        echo ""
-        echo "🔍 IMPORT PROCESS:"
-        echo "   📂 Source: Pre-exported CSV files in history-plus-export/"
-        echo "   🎯 Target: PostgreSQL ($POSTGRES_HOST:$POSTGRES_PORT/$POSTGRES_DB)"
-        echo "   🛡️  SAFE MODE: Only new records will be added, existing PostgreSQL data preserved"
-        echo "   🐳 Method: Run inside Docker container (Node.js available)"
-        echo ""
-        
-        echo "⚠️  FINAL SAFETY CONFIRMATION:"
-        echo "   This import will ONLY INSERT new records"
-        echo "   Existing PostgreSQL data will NOT be modified"
-        echo "   CSV files contain History Plus data ready for import"
-        echo ""
-        read -p "Proceed with History Plus import to PostgreSQL? (y/N): " -n 1 -r
-        echo
-        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-            log_info "Import cancelled by user (CSV files available for manual import)"
-        else
-            # We need to run the migration AFTER the container is built and running
-            # Set a flag to run migration after container deployment
-            RUN_MIGRATION_AFTER_DEPLOY=true
-            log_info "Migration scheduled to run after container deployment"
-        fi
-    else
-        log_warning "No CSV files found in export directory"
-        log_info "Skipping History Plus migration"
-        RUN_MIGRATION_AFTER_DEPLOY=false
-    fi
-else
-    log_info "No History Plus export directory found"
-    log_info "Skipping History Plus migration"
-    RUN_MIGRATION_AFTER_DEPLOY=false
-fi
-
-# ===============================================================================
 # CONTAINER UPDATE AND DEPLOYMENT
 # ===============================================================================
 
@@ -374,48 +317,8 @@ fi
 log_success "Container is running"
 
 # ===============================================================================
-# POST-DEPLOYMENT HISTORY PLUS MIGRATION
+# POST-DEPLOYMENT SETUP
 # ===============================================================================
-
-# Step 10: Run History Plus migration inside the running container
-if [ "$RUN_MIGRATION_AFTER_DEPLOY" = true ]; then
-    log_info "Running History Plus migration inside container..."
-    
-    # Copy CSV files to container
-    log_info "Copying CSV files to container..."
-    if docker cp "$EXPORT_DIR" "$CONTAINER_NAME:/app/"; then
-        log_success "CSV files copied to container"
-        
-        # Run the import inside the container where Node.js is available
-        log_info "Executing migration inside container..."
-        log_info "Command: docker exec $CONTAINER_NAME sh -c \"cd /app/server && echo 'y' | node import-history-plus-data.js /app/history-plus-export\""
-        
-        if docker exec "$CONTAINER_NAME" sh -c "cd /app/server && echo 'y' | node import-history-plus-data.js /app/history-plus-export" 2>&1 | tee -a "$HISTORY_PLUS_MIGRATION_LOG"; then
-            log_success "History Plus migration completed successfully inside container!"
-        else
-            log_error "History Plus import failed - check log: $HISTORY_PLUS_MIGRATION_LOG"
-            echo ""
-            echo "📋 RECENT LOG OUTPUT:"
-            tail -20 "$HISTORY_PLUS_MIGRATION_LOG"
-            echo ""
-            echo "🔧 DEBUGGING COMMANDS:"
-            echo "   - Check container logs: docker logs $CONTAINER_NAME"
-            echo "   - Test container Node.js: docker exec $CONTAINER_NAME node --version"
-            echo "   - Check CSV files: docker exec $CONTAINER_NAME ls -la /app/history-plus-export/"
-            echo "   - Manual migration: docker exec -it $CONTAINER_NAME sh -c \"cd /app/server && node import-history-plus-data.js /app/history-plus-export\""
-            echo ""
-            echo "🔙 ROLLBACK OPTIONS:"
-            echo "   1. Check migration log: $HISTORY_PLUS_MIGRATION_LOG"
-            if [ -n "$POSTGRES_BACKUP_FILE" ]; then
-                echo "   2. Restore PostgreSQL backup if available"
-            fi
-            echo "   3. Container is still running - you can retry migration manually"
-        fi
-    else
-        log_error "Failed to copy CSV files to container"
-        echo "Manual migration command: docker cp $EXPORT_DIR $CONTAINER_NAME:/app/ && docker exec $CONTAINER_NAME sh -c \"cd /app/server && node import-history-plus-data.js /app/history-plus-export\""
-    fi
-fi
 
 # ===============================================================================
 # VALIDATION AND COMPLETION
@@ -433,14 +336,14 @@ else
     exit 1
 fi
 
-log_success "Master Order updated successfully on Unraid with History Plus migration support!"
+log_success "Master Order updated successfully on Unraid!"
 echo "🌐 Application should be available at: http://192.168.1.252:$HOST_PORT"
 echo "🗃️  Using PostgreSQL database: $POSTGRES_HOST:$POSTGRES_PORT/$POSTGRES_DB"
 echo "💾 Database backups stored at: $BACKUP_DIR"
 if [ -n "$POSTGRES_BACKUP_FILE" ]; then
     echo "🔙 PostgreSQL backup: $(basename "$POSTGRES_BACKUP_FILE")"
 fi
-echo "📋 Migration log: $HISTORY_PLUS_MIGRATION_LOG"
+echo "📋 Log file: $MIGRATION_LOG"
 echo ""
 echo "📊 Container status:"
 docker ps | grep $CONTAINER_NAME
@@ -449,11 +352,12 @@ echo ""
 echo "📝 Useful commands:"
 echo "   - Check logs: docker logs $CONTAINER_NAME"
 echo "   - Access container: docker exec -it $CONTAINER_NAME /bin/sh"
-echo "   - View migration log: cat $HISTORY_PLUS_MIGRATION_LOG"
+echo "   - View log: cat $MIGRATION_LOG"
 echo ""
 if [ "$RUN_MIGRATION_AFTER_DEPLOY" = true ]; then
     echo "🎯 MIGRATION STATUS:"
     echo "   ✅ Container deployed successfully"
     echo "   📊 Check migration results in the log above"
-    echo "   🔍 Verify History Plus data in your application"
+    echo "   echo "   🎯 Access your application at: http://[your-unraid-ip]:$HOST_PORT"
+    echo """
 fi

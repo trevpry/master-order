@@ -28,6 +28,10 @@ const Timeline = () => {
   // Modal state
   const [showEventForm, setShowEventForm] = useState(false);
   const [editingEvent, setEditingEvent] = useState(null);
+  
+  // Import state
+  const [importing, setImporting] = useState(false);
+  const [importStatus, setImportStatus] = useState(null);
 
   // Load initial data
   useEffect(() => {
@@ -176,6 +180,85 @@ const Timeline = () => {
     await loadData(); // Reload data
   };
 
+  const handleImportData = async () => {
+    // First check if data already exists
+    let force = false;
+    try {
+      const statusCheck = await checkImportStatus();
+      
+      if (statusCheck && statusCheck.hasData) {
+        if (!window.confirm('History Plus data already exists. This will import additional data from CSV files. Are you sure?')) {
+          return;
+        }
+        force = window.confirm('Force update existing records? (Select "OK" to update existing, "Cancel" to skip duplicates)');
+      } else {
+        if (!window.confirm('This will import all History Plus data from CSV files. Are you sure?')) {
+          return;
+        }
+      }
+    } catch (error) {
+      console.error('Error checking import status:', error);
+      // If status check fails, just proceed with basic confirmation
+      if (!window.confirm('This will import all History Plus data from CSV files. Are you sure?')) {
+        return;
+      }
+    }
+
+    setImporting(true);
+    setImportStatus({ type: 'info', message: 'Starting import process...' });
+
+    try {
+      const response = await fetch('/api/history-plus/import-data', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ force }),
+      });
+
+      const result = await response.json();
+
+      if (response.ok) {
+        const stats = result.data?.statistics;
+        let message = 'Import completed successfully! ';
+        if (stats) {
+          message += `Imported: ${stats.imported || 0}, Updated: ${stats.updated || 0}, Skipped: ${stats.skipped || 0}, Errors: ${stats.errors || 0}`;
+        }
+        setImportStatus({ 
+          type: 'success', 
+          message: message
+        });
+        await loadData(); // Reload timeline data
+      } else {
+        setImportStatus({ 
+          type: 'error', 
+          message: result.error || 'Import failed' 
+        });
+      }
+    } catch (err) {
+      console.error('Error importing data:', err);
+      setImportStatus({ 
+        type: 'error', 
+        message: 'Failed to start import process' 
+      });
+    } finally {
+      setImporting(false);
+      // Clear status after 10 seconds
+      setTimeout(() => setImportStatus(null), 10000);
+    }
+  };
+
+  const checkImportStatus = async () => {
+    try {
+      const response = await fetch('/api/history-plus/import-status');
+      const result = await response.json();
+      return result.data;
+    } catch (err) {
+      console.error('Error checking import status:', err);
+      return { ready: false, csvFiles: [] };
+    }
+  };
+
   const handleGeneratePrompt = (event) => {
     console.log('Generate prompt for event:', event);
     // TODO: Implement prompt generation functionality
@@ -220,13 +303,49 @@ const Timeline = () => {
           </p>
         </div>
         
-        <button
-          onClick={handleCreateEvent}
-          className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded-lg font-medium transition-colors"
-        >
-          + Add Event
-        </button>
+        <div className="flex gap-2">
+          <button
+            onClick={handleImportData}
+            disabled={importing}
+            className="bg-green-600 hover:bg-green-700 disabled:bg-gray-400 text-white px-6 py-2 rounded-lg font-medium transition-colors flex items-center gap-2"
+          >
+            {importing ? (
+              <>
+                <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24">
+                  <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
+                  <path fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                </svg>
+                Importing...
+              </>
+            ) : (
+              <>📥 Import Data</>
+            )}
+          </button>
+          
+          <button
+            onClick={handleCreateEvent}
+            className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded-lg font-medium transition-colors"
+          >
+            + Add Event
+          </button>
+        </div>
       </div>
+
+      {/* Import Status */}
+      {importStatus && (
+        <div className={`mb-4 p-4 rounded-lg ${
+          importStatus.type === 'success' ? 'bg-green-50 text-green-800 border border-green-200' :
+          importStatus.type === 'error' ? 'bg-red-50 text-red-800 border border-red-200' :
+          'bg-blue-50 text-blue-800 border border-blue-200'
+        }`}>
+          <div className="flex items-center gap-2">
+            {importStatus.type === 'success' && <span>✅</span>}
+            {importStatus.type === 'error' && <span>❌</span>}
+            {importStatus.type === 'info' && <span>ℹ️</span>}
+            <span>{importStatus.message}</span>
+          </div>
+        </div>
+      )}
 
       {/* Search and Filters */}
       <SearchFilters

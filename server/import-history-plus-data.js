@@ -2,7 +2,7 @@
 
 /**
  * History Plus Data Import Script
- * Imports History Plus data from CSV files to PostgreSQL
+ * Imports History Plus data from CSV files to SQLite or PostgreSQL (environment-aware)
  */
 
 const { PrismaClient } = require('@prisma/client');
@@ -11,26 +11,54 @@ const path = require('path');
 const readline = require('readline');
 
 class HistoryPlusDataImporter {
-  constructor() {
+  constructor(options = {}) {
     this.targetPrisma = null;
     this.importDir = path.join(__dirname, '..', 'history-plus-export');
     this.importLog = [];
+    this.databaseType = null;
+    this.forceImport = options.force || false;
     this.stats = {
       imported: 0,
       skipped: 0,
-      errors: 0
+      errors: 0,
+      updated: 0
     };
+  }
+
+  detectDatabaseType() {
+    const databaseUrl = process.env.DATABASE_URL;
+    const isDocker = fs.existsSync('/.dockerenv');
+    
+    // Check if DATABASE_URL suggests PostgreSQL
+    const isPostgres = databaseUrl && (
+      databaseUrl.startsWith('postgresql://') || 
+      databaseUrl.startsWith('postgres://')
+    );
+    
+    // Check if DATABASE_URL suggests SQLite
+    const isSqlite = databaseUrl && databaseUrl.startsWith('file:');
+    
+    // Decision logic: same as setup-schema.js
+    if (isDocker || isPostgres) {
+      return 'postgresql';
+    } else {
+      return 'sqlite';
+    }
   }
 
   async initialize() {
     console.log('📥 Initializing History Plus Data Import...');
+    
+    // Detect database type
+    this.databaseType = this.detectDatabaseType();
+    console.log(`🔍 Detected database type: ${this.databaseType.toUpperCase()}`);
     
     // Check if export directory exists
     if (!fs.existsSync(this.importDir)) {
       throw new Error(`❌ Export directory not found: ${this.importDir}`);
     }
     
-    // Initialize PostgreSQL connection
+    // Initialize database connection
     if (!process.env.DATABASE_URL) {
       throw new Error('❌ DATABASE_URL environment variable not set');
     }
@@ -39,9 +67,19 @@ class HistoryPlusDataImporter {
       datasources: { db: { url: process.env.DATABASE_URL } }
     });
     
-    // Test connection
-    await this.targetPrisma.$executeRaw`SELECT 1`;
-    console.log('✅ Connected to PostgreSQL database');
+    // Test connection with database-specific query
+    try {
+      if (this.databaseType === 'postgresql') {
+        await this.targetPrisma.$executeRaw`SELECT 1`;
+      } else {
+        // For SQLite, use a simpler query that doesn't return results
+        await this.targetPrisma.$queryRaw`SELECT 1`;
+      }
+      console.log(`✅ Connected to ${this.databaseType.toUpperCase()} database`);
+    } catch (error) {
+      throw new Error(`❌ Database connection failed: ${error.message}`);
+    }
+    
     console.log(`📁 Import directory: ${this.importDir}`);
   }
 
@@ -192,11 +230,63 @@ class HistoryPlusDataImporter {
         }
       }
       
-      console.log(`   Found ${existing.length} existing, ${newRecords.length} new records`);
+      if (this.forceImport) {
+        console.log(`   Found ${existing.length} existing (will update), ${newRecords.length} new records`);
+      } else {
+        console.log(`   Found ${existing.length} existing (will skip), ${newRecords.length} new records`);
+      }
       return { existing, new: newRecords };
     } catch (error) {
       console.error(`❌ Error checking existing records for ${tableName}:`, error.message);
       return { existing: [], new: records };
+    }
+  }
+
+  async importWithUpsert(tableName, records, existing) {
+    try {
+      let imported = 0;
+      let updated = 0;
+      let skipped = 0;
+
+      // Handle new records (create)
+      if (records.length > 0) {
+        const result = await this.targetPrisma[tableName].createMany({
+          data: records,
+          skipDuplicates: true
+        });
+        imported = result.count;
+        console.log(`   Created ${imported} new records`);
+      }
+
+      // Handle existing records based on force flag
+      if (existing.length > 0) {
+        if (this.forceImport) {
+          // Update existing records one by one
+          for (const record of existing) {
+            try {
+              await this.targetPrisma[tableName].update({
+                where: { id: record.id },
+                data: record
+              });
+              updated++;
+            } catch (error) {
+              console.warn(`   Failed to update record ${record.id}: ${error.message}`);
+            }
+          }
+          console.log(`   Updated ${updated} existing records`);
+        } else {
+          skipped = existing.length;
+          console.log(`   Skipped ${skipped} existing records`);
+        }
+      }
+
+      this.stats.imported += imported;
+      this.stats.updated += updated;
+      this.stats.skipped += skipped;
+
+    } catch (error) {
+      console.error(`❌ Error importing ${tableName}:`, error.message);
+      this.stats.errors += records.length + existing.length;
     }
   }
 
@@ -206,7 +296,7 @@ class HistoryPlusDataImporter {
     const records = await this.loadCSVFile('historical_events.csv');
     if (records.length === 0) return;
 
-    // Transform records to match PostgreSQL schema
+    // Transform records to match database schema
     const transformedRecords = records.map(record => ({
       id: parseInt(record.id),
       title: record.title,
@@ -221,25 +311,19 @@ class HistoryPlusDataImporter {
 
     const { existing, new: newRecords } = await this.checkExistingRecords('historicalEvent', transformedRecords);
 
-    if (newRecords.length === 0) {
-      console.log('   All records already exist, skipping');
+    if (newRecords.length === 0 && existing.length === 0) {
+      console.log('   No records to process');
+      return;
+    }
+
+    if (newRecords.length === 0 && !this.forceImport) {
+      console.log('   All records already exist, skipping (use --force to update)');
       this.stats.skipped += existing.length;
       return;
     }
 
-    try {
-      const result = await this.targetPrisma.historicalEvent.createMany({
-        data: newRecords,
-        skipDuplicates: true
-      });
-
-      console.log(`✅ Imported ${result.count} historical events`);
-      this.stats.imported += result.count;
-      this.stats.skipped += existing.length;
-    } catch (error) {
-      console.error('❌ Error importing historical events:', error.message);
-      this.stats.errors += newRecords.length;
-    }
+    await this.importWithUpsert('historicalEvent', newRecords, existing);
+    console.log(`✅ Processed historical events`);
   }
 
   async importHistoryVideos() {
@@ -393,7 +477,7 @@ class HistoryPlusDataImporter {
     const records = await this.loadCSVFile('user_event_reviews.csv');
     if (records.length === 0) return;
 
-    // Transform records to match PostgreSQL schema (remove userId field)
+    // Transform records to match database schema (remove userId field)
     const transformedRecords = records.map(record => {
       const { userId, ...cleanRecord } = record; // Remove userId field
       return {
@@ -436,7 +520,7 @@ class HistoryPlusDataImporter {
     const records = await this.loadCSVFile('user_video_watches.csv');
     if (records.length === 0) return;
 
-    // Transform records to match PostgreSQL schema (remove userId field)
+    // Transform records to match database schema (remove userId field)
     const transformedRecords = records.map(record => {
       const { userId, ...cleanRecord } = record; // Remove userId field
       return {
@@ -479,7 +563,7 @@ class HistoryPlusDataImporter {
     const records = await this.loadCSVFile('user_book_reads.csv');
     if (records.length === 0) return;
 
-    // Transform records to match PostgreSQL schema (remove userId field)
+    // Transform records to match database schema (remove userId field)
     const transformedRecords = records.map(record => {
       const { userId, ...cleanRecord } = record; // Remove userId field
       return {
@@ -522,7 +606,7 @@ class HistoryPlusDataImporter {
     const records = await this.loadCSVFile('user_chapter_reads.csv');
     if (records.length === 0) return;
 
-    // Transform records to match PostgreSQL schema (remove userId field)
+    // Transform records to match database schema (remove userId field)
     const transformedRecords = records.map(record => {
       const { userId, ...cleanRecord } = record; // Remove userId field
       return {
@@ -565,7 +649,7 @@ class HistoryPlusDataImporter {
     const records = await this.loadCSVFile('user_section_reads.csv');
     if (records.length === 0) return;
 
-    // Transform records to match PostgreSQL schema (remove userId field)
+    // Transform records to match database schema (remove userId field)
     const transformedRecords = records.map(record => {
       const { userId, ...cleanRecord } = record; // Remove userId field
       return {
@@ -630,6 +714,7 @@ class HistoryPlusDataImporter {
       console.log('✅ Import completed!');
       console.log('📊 Import Statistics:');
       console.log(`   Records imported: ${this.stats.imported}`);
+      console.log(`   Records updated: ${this.stats.updated}`);
       console.log(`   Records skipped (already exist): ${this.stats.skipped}`);
       console.log(`   Errors: ${this.stats.errors}`);
       
@@ -650,14 +735,20 @@ class HistoryPlusDataImporter {
 
 // Main execution
 async function main() {
-  // Check for custom import directory argument
-  const customImportDir = process.argv[2];
+  // Parse command line arguments
+  const args = process.argv.slice(2);
+  const customImportDir = args.find(arg => !arg.startsWith('--'));
+  const forceImport = args.includes('--force');
   
-  const importer = new HistoryPlusDataImporter();
+  const importer = new HistoryPlusDataImporter({ force: forceImport });
   
   if (customImportDir) {
     importer.importDir = path.resolve(customImportDir);
     console.log(`📁 Using custom import directory: ${importer.importDir}`);
+  }
+  
+  if (forceImport) {
+    console.log('🔄 Force mode enabled: Will update existing records');
   }
   
   try {
@@ -666,7 +757,7 @@ async function main() {
     // Show confirmation prompt
     console.log('');
     console.log('⚠️  IMPORT CONFIRMATION:');
-    console.log('   This will import History Plus data to PostgreSQL');
+    console.log(`   This will import History Plus data to ${importer.databaseType.toUpperCase()}`);
     console.log('   Existing records with matching IDs will be skipped');
     console.log('   No existing data will be modified or deleted');
     console.log(`   Import directory: ${importer.importDir}`);
