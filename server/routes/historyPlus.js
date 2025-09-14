@@ -379,6 +379,9 @@ router.post('/import-data', asyncHandler(async (req, res) => {
   
   // Check if export directory exists
   const exportDir = path.join(__dirname, '..', '..', 'history-plus-export');
+  console.log('🔍 Looking for CSV files at:', exportDir);
+  console.log('📁 Directory exists:', fs.existsSync(exportDir));
+  
   if (!fs.existsSync(exportDir)) {
     return sendBadRequest(res, 'History Plus export directory not found. Please ensure CSV files are available.');
   }
@@ -474,6 +477,8 @@ router.post('/import-data', asyncHandler(async (req, res) => {
 // GET /api/history-plus/import-status
 router.get('/import-status', asyncHandler(async (req, res) => {
   const exportDir = path.join(__dirname, '..', '..', 'history-plus-export');
+  console.log('🔍 Checking import status for directory:', exportDir);
+  console.log('📁 Directory exists:', fs.existsSync(exportDir));
   
   // Check if we have existing History Plus data
   const historicalEventCount = await prisma.historicalEvent.count();

@@ -697,11 +697,11 @@ class HistoryPlusDataImporter {
       
       // Import all data in correct order (respecting foreign key relationships)
       await this.importHistoricalEvents();
+      await this.importHistoryChannels();    // Import channels BEFORE videos (FK dependency)
       await this.importHistoryVideos();
       await this.importHistoryBooks();
       await this.importHistoryChapters();
       await this.importHistorySections();
-      await this.importHistoryChannels();
       
       // Import user tracking data (no user ID required - tables link directly to content)
       await this.importUserEventReviews();
