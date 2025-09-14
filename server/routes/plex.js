@@ -284,13 +284,31 @@ router.post('/play', asyncHandler(async (req, res) => {
     });
   }
   
-  const { ratingKey, mediaType } = req.body;
+  const { ratingKey, offset = 0, playerId } = req.body;
+  
   if (!ratingKey) {
     return sendBadRequest(res, 'Missing ratingKey parameter');
   }
   
-  const result = await plexPlayerService.playMedia(ratingKey, mediaType);
-  res.json(result);
+  let targetPlayerId = playerId;
+  
+  // If no specific player provided, use the selected player from settings
+  if (!targetPlayerId) {
+    const settings = await prisma.settings.findFirst();
+    
+    if (!settings || !settings.selectedPlexPlayer) {
+      return res.status(400).json({ 
+        error: 'No player specified and no default player selected in settings' 
+      });
+    }
+    
+    targetPlayerId = settings.selectedPlexPlayer;
+  }
+
+  console.log('Playing media on device:', targetPlayerId);
+  
+  const result = await plexPlayerService.playMedia(targetPlayerId, ratingKey, offset);
+  sendSuccess(res, result);
 }));
 
 // POST /api/plex/play-with-retry - Play with retry logic
