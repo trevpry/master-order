@@ -230,6 +230,9 @@ const Timeline = () => {
   };
 
   const handleImportUploadedFiles = async () => {
+    console.log('🚀 handleImportUploadedFiles called');
+    console.log('📄 uploadedFiles:', uploadedFiles);
+    
     if (!uploadedFiles || !uploadedFiles.ready) {
       setImportStatus({ type: 'error', message: 'No files uploaded or missing required files' });
       return;
@@ -304,6 +307,7 @@ const Timeline = () => {
   };
 
   const handleImportData = async () => {
+    console.log('🚀 handleImportData called (legacy directory import)');
     // First check if data already exists
     let force = false;
     try {

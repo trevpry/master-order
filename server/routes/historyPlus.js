@@ -16,10 +16,18 @@ const historyPlusService = new HistoryPlusService();
 const storage = multer.diskStorage({
   destination: function (req, file, cb) {
     const uploadDir = path.join(__dirname, '..', 'temp-uploads');
-    if (!fs.existsSync(uploadDir)) {
-      fs.mkdirSync(uploadDir, { recursive: true });
+    try {
+      if (!fs.existsSync(uploadDir)) {
+        fs.mkdirSync(uploadDir, { recursive: true });
+        console.log('📁 Created temp-uploads directory:', uploadDir);
+      }
+      // Verify directory is writable
+      fs.accessSync(uploadDir, fs.constants.W_OK);
+      cb(null, uploadDir);
+    } catch (error) {
+      console.error('❌ Failed to create/access upload directory:', error);
+      cb(error);
     }
-    cb(null, uploadDir);
   },
   filename: function (req, file, cb) {
     // Keep original filename but ensure it's a CSV
@@ -91,7 +99,8 @@ router.post('/upload-csv', upload.array('csvFiles', 20), asyncHandler(async (req
     files: uploadedFiles,
     directory: path.join(__dirname, '..', 'temp-uploads'),
     missingFiles: missingFiles,
-    extraFiles: extraFiles
+    extraFiles: extraFiles,
+    ready: missingFiles.length === 0
   };
   
   // Save upload session to temp file for import endpoint
@@ -490,16 +499,35 @@ router.post('/import-data', asyncHandler(async (req, res) => {
     }
     
     try {
+      console.log('📖 Reading session file...');
       const sessionData = JSON.parse(fs.readFileSync(sessionFile, 'utf8'));
+      console.log('📊 Session data:', JSON.stringify(sessionData, null, 2));
       exportDir = sessionData.directory;
-      
-      if (!sessionData.ready || sessionData.missingFiles.length > 0) {
+    console.log('📁 Export directory from session:', exportDir);
+    
+    // Validate export directory exists and is accessible
+    if (!fs.existsSync(exportDir)) {
+      console.log('❌ Export directory does not exist:', exportDir);
+      return sendBadRequest(res, 'Upload directory not found. Please try uploading files again.');
+    }
+    
+    try {
+      fs.accessSync(exportDir, fs.constants.R_OK);
+    } catch (accessError) {
+      console.log('❌ Export directory not accessible:', accessError.message);
+      return sendBadRequest(res, 'Upload directory not accessible. Please try uploading files again.');
+    }
+    
+    console.log('✅ Session ready check:', sessionData.ready);
+    console.log('📋 Missing files:', sessionData.missingFiles);      if (!sessionData.ready || sessionData.missingFiles.length > 0) {
+        console.log('❌ Session not ready or has missing files');
         return sendBadRequest(res, `Cannot import: missing required files: ${sessionData.missingFiles.join(', ')}`);
       }
       
       console.log(`📂 Using uploaded files from: ${exportDir}`);
-      console.log(`� Found ${sessionData.files.length} uploaded CSV files`);
+      console.log(`📁 Found ${sessionData.files.length} uploaded CSV files`);
     } catch (error) {
+      console.log('❌ Error reading session data:', error.message);
       return sendBadRequest(res, 'Failed to read upload session data.');
     }
     
@@ -569,11 +597,22 @@ router.post('/import-data', asyncHandler(async (req, res) => {
           if (useUploaded) {
             try {
               const tempDir = path.join(__dirname, '..', 'temp-uploads');
-              const files = fs.readdirSync(tempDir);
-              files.forEach(file => {
-                fs.unlinkSync(path.join(tempDir, file));
-              });
-              console.log('🧹 Cleaned up uploaded files');
+              if (fs.existsSync(tempDir)) {
+                const files = fs.readdirSync(tempDir);
+                let cleanedCount = 0;
+                files.forEach(file => {
+                  try {
+                    const filePath = path.join(tempDir, file);
+                    fs.unlinkSync(filePath);
+                    cleanedCount++;
+                  } catch (fileError) {
+                    console.warn(`⚠️ Failed to delete file ${file}:`, fileError.message);
+                  }
+                });
+                console.log(`🧹 Cleaned up ${cleanedCount} uploaded files`);
+              } else {
+                console.warn('⚠️ Temp directory not found during cleanup');
+              }
             } catch (cleanupError) {
               console.warn('⚠️ Failed to clean up uploaded files:', cleanupError.message);
             }
