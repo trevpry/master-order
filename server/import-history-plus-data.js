@@ -574,14 +574,25 @@ class HistoryPlusDataImporter {
     const records = await this.loadCSVFile('history_videos.csv');
     if (records.length === 0) return;
     
-    // Build mapping for videos based on unique identifiers
-    await this.buildVideoIdMapping(records);
-    
     const { existing, new: newRecords } = await this.checkExistingRecords('historyVideo', records);
     
     if (newRecords.length === 0) {
       console.log('   All records already exist, skipping');
       this.stats.skipped += existing.length;
+      
+      // Build mapping for existing videos
+      console.log('🔄 Building video mappings for existing records...');
+      for (const record of records) {
+        const oldId = parseInt(record.id);
+        const existingVideo = await this.targetPrisma.historyVideo.findUnique({
+          where: { id: oldId }
+        });
+        
+        if (existingVideo) {
+          this.idMappings.videos.set(oldId, existingVideo.id);
+        }
+      }
+      console.log(`✅ Built mapping for ${this.idMappings.videos.size} videos`);
       return;
     }
     
@@ -593,8 +604,19 @@ class HistoryPlusDataImporter {
       
       console.log(`✅ Imported ${result.count} history videos`);
       
-      // Update mappings for newly imported records
-      await this.updateVideoIdMappingAfterImport(newRecords);
+      // Build mapping for all records (existing + newly imported)
+      console.log('🔄 Building video mappings after import...');
+      for (const record of records) {
+        const oldId = parseInt(record.id);
+        const existingVideo = await this.targetPrisma.historyVideo.findUnique({
+          where: { id: oldId }
+        });
+        
+        if (existingVideo) {
+          this.idMappings.videos.set(oldId, existingVideo.id);
+        }
+      }
+      console.log(`✅ Built mapping for ${this.idMappings.videos.size} videos`);
       
       this.stats.imported += result.count;
       this.stats.skipped += existing.length;
@@ -646,9 +668,19 @@ class HistoryPlusDataImporter {
     const records = await this.loadCSVFile('history_chapters.csv');
     if (records.length === 0) return;
     
+    // Transform records with proper type conversion
+    const typedRecords = records.map(record => {
+      return {
+        ...record,
+        id: parseInt(record.id),
+        bookId: parseInt(record.bookId),
+        chapterNumber: record.chapterNumber ? record.chapterNumber.toString() : null
+      };
+    });
+    
     // Update chapters with mapped book IDs
-    const transformedRecords = records.map(record => {
-      const mappedBookId = this.idMappings.books.get(parseInt(record.bookId));
+    const transformedRecords = typedRecords.map(record => {
+      const mappedBookId = this.idMappings.books.get(record.bookId);
       if (mappedBookId) {
         return { ...record, bookId: mappedBookId };
       }
@@ -656,6 +688,23 @@ class HistoryPlusDataImporter {
     });
     
     // Build mapping for chapters based on unique identifiers
+    console.log('🔄 Building chapter mappings after import...');
+    
+    // For chapters, since they already exist (skipped = 445), build mappings from existing data
+    for (const record of typedRecords) {
+      const oldId = record.id;
+      // Try to find the chapter by the original ID first
+      const existingChapter = await this.targetPrisma.historyChapter.findUnique({
+        where: { id: oldId }
+      });
+      
+      if (existingChapter) {
+        this.idMappings.chapters.set(oldId, existingChapter.id);
+      }
+    }
+    
+    console.log(`✅ Built mapping for ${this.idMappings.chapters.size} chapters`);
+    
     await this.buildChapterIdMapping(transformedRecords);
     
     const { existing, new: newRecords } = await this.checkExistingRecords('historyChapter', transformedRecords);
@@ -691,9 +740,19 @@ class HistoryPlusDataImporter {
     const records = await this.loadCSVFile('history_sections.csv');
     if (records.length === 0) return;
     
-    // Update sections with mapped chapter IDs
+    // Transform records with proper type conversion
     const transformedRecords = records.map(record => {
-      const mappedChapterId = this.idMappings.chapters.get(parseInt(record.chapterId));
+      return {
+        ...record,
+        id: parseInt(record.id),
+        chapterId: parseInt(record.chapterId), // Convert string to int
+        sectionNumber: record.sectionNumber ? record.sectionNumber.toString() : null
+      };
+    });
+    
+    // Update sections with mapped chapter IDs if available
+    const mappedRecords = transformedRecords.map(record => {
+      const mappedChapterId = this.idMappings.chapters.get(record.chapterId);
       if (mappedChapterId) {
         return { ...record, chapterId: mappedChapterId };
       }
@@ -701,9 +760,26 @@ class HistoryPlusDataImporter {
     });
     
     // Build mapping for sections based on unique identifiers
-    await this.buildSectionIdMapping(transformedRecords);
+    console.log('🔄 Building section mappings after import...');
     
-    const { existing, new: newRecords } = await this.checkExistingRecords('historySection', transformedRecords);
+    // For sections, since they already exist, build mappings from existing data
+    for (const record of transformedRecords) {
+      const oldId = record.id;
+      // Try to find the section by the original ID first
+      const existingSection = await this.targetPrisma.historySection.findUnique({
+        where: { id: oldId }
+      });
+      
+      if (existingSection) {
+        this.idMappings.sections.set(oldId, existingSection.id);
+      }
+    }
+    
+    console.log(`✅ Built mapping for ${this.idMappings.sections.size} sections`);
+    
+    await this.buildSectionIdMapping(mappedRecords);
+    
+    const { existing, new: newRecords } = await this.checkExistingRecords('historySection', mappedRecords);
     
     if (newRecords.length === 0) {
       console.log('   All records already exist, skipping');
