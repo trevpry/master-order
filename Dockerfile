@@ -82,9 +82,9 @@ COPY --from=build --chown=app:nodejs /app/server/prisma ./server/prisma
 RUN chmod +x ./docker-entrypoint.sh
 
 # Create data directories with proper permissions
-RUN mkdir -p /app/data /app/server/artwork-cache /app/logs && \
-    chown -R app:nodejs /app/data /app/server/artwork-cache /app/logs && \
-    chmod -R 755 /app/data /app/server/artwork-cache /app/logs
+RUN mkdir -p /app/data /app/server/artwork-cache /app/server/temp-uploads /app/logs && \
+    chown -R app:nodejs /app/data /app/server/artwork-cache /app/server/temp-uploads /app/logs && \
+    chmod -R 755 /app/data /app/server/artwork-cache /app/server/temp-uploads /app/logs
 
 # Set up environment
 ENV NODE_ENV=production

@@ -13,7 +13,7 @@ const readline = require('readline');
 class HistoryPlusDataImporter {
   constructor(options = {}) {
     this.targetPrisma = null;
-    this.importDir = path.join(__dirname, '..', 'history-plus-export');
+    this.importDir = options.importDir || path.join(__dirname, '..', 'history-plus-export');
     this.importLog = [];
     this.databaseType = null;
     this.forceImport = options.force || false;
@@ -740,10 +740,14 @@ async function main() {
   const customImportDir = args.find(arg => !arg.startsWith('--'));
   const forceImport = args.includes('--force');
   
-  const importer = new HistoryPlusDataImporter({ force: forceImport });
+  const options = { force: forceImport };
+  if (customImportDir) {
+    options.importDir = path.resolve(customImportDir);
+  }
+  
+  const importer = new HistoryPlusDataImporter(options);
   
   if (customImportDir) {
-    importer.importDir = path.resolve(customImportDir);
     console.log(`📁 Using custom import directory: ${importer.importDir}`);
   }
   

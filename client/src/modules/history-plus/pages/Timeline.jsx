@@ -32,6 +32,8 @@ const Timeline = () => {
   // Import state
   const [importing, setImporting] = useState(false);
   const [importStatus, setImportStatus] = useState(null);
+  const [uploadedFiles, setUploadedFiles] = useState(null);
+  const [showUpload, setShowUpload] = useState(false);
 
   // Load initial data
   useEffect(() => {
@@ -180,6 +182,127 @@ const Timeline = () => {
     await loadData(); // Reload data
   };
 
+  const handleFileUpload = async (event) => {
+    const files = Array.from(event.target.files);
+    if (files.length === 0) return;
+
+    console.log('Uploading files:', files.map(f => f.name));
+    setImporting(true);
+    setImportStatus({ type: 'info', message: `Uploading ${files.length} CSV files...` });
+
+    try {
+      const formData = new FormData();
+      files.forEach(file => {
+        formData.append('csvFiles', file);
+      });
+
+      const response = await fetch('/api/history-plus/upload-csv', {
+        method: 'POST',
+        body: formData,
+      });
+
+      const result = await response.json();
+
+      if (response.ok) {
+        setUploadedFiles(result.data);
+        setImportStatus({ 
+          type: 'success', 
+          message: `Successfully uploaded ${result.data.summary.uploaded} files. ${result.data.ready ? 'Ready to import!' : `Missing ${result.data.summary.missing} required files.`}` 
+        });
+        setShowUpload(false);
+      } else {
+        setImportStatus({ 
+          type: 'error', 
+          message: result.error || 'Failed to upload files' 
+        });
+      }
+    } catch (err) {
+      console.error('Error uploading files:', err);
+      setImportStatus({ 
+        type: 'error', 
+        message: 'Failed to upload files' 
+      });
+    } finally {
+      setImporting(false);
+      // Clear status after 10 seconds
+      setTimeout(() => setImportStatus(null), 10000);
+    }
+  };
+
+  const handleImportUploadedFiles = async () => {
+    if (!uploadedFiles || !uploadedFiles.ready) {
+      setImportStatus({ type: 'error', message: 'No files uploaded or missing required files' });
+      return;
+    }
+
+    let force = false;
+    try {
+      const statusCheck = await checkImportStatus();
+      
+      if (statusCheck && statusCheck.hasData) {
+        if (!window.confirm('History Plus data already exists. This will import additional data from uploaded CSV files. Are you sure?')) {
+          return;
+        }
+        force = window.confirm('Force update existing records? (Select "OK" to update existing, "Cancel" to skip duplicates)');
+      } else {
+        if (!window.confirm('This will import all History Plus data from uploaded CSV files. Are you sure?')) {
+          return;
+        }
+      }
+    } catch (error) {
+      console.error('Error checking import status:', error);
+      if (!window.confirm('This will import all History Plus data from uploaded CSV files. Are you sure?')) {
+        return;
+      }
+    }
+
+    setImporting(true);
+    setImportStatus({ type: 'info', message: 'Starting import from uploaded files...' });
+
+    try {
+      const response = await fetch('/api/history-plus/import-data', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ 
+          force,
+          useUploaded: true // Flag to use uploaded files instead of mounted directory
+        }),
+      });
+
+      const result = await response.json();
+
+      if (response.ok) {
+        const stats = result.data?.statistics;
+        let message = 'Import completed successfully! ';
+        if (stats) {
+          message += `Imported: ${stats.imported || 0}, Updated: ${stats.updated || 0}, Skipped: ${stats.skipped || 0}, Errors: ${stats.errors || 0}`;
+        }
+        setImportStatus({ 
+          type: 'success', 
+          message: message
+        });
+        setUploadedFiles(null); // Clear uploaded files after successful import
+        await loadData(); // Reload timeline data
+      } else {
+        setImportStatus({ 
+          type: 'error', 
+          message: result.error || 'Import failed' 
+        });
+      }
+    } catch (err) {
+      console.error('Error importing data:', err);
+      setImportStatus({ 
+        type: 'error', 
+        message: 'Failed to start import process' 
+      });
+    } finally {
+      setImporting(false);
+      setTimeout(() => setImportStatus(null), 10000);
+    }
+  };
+
   const handleImportData = async () => {
     // First check if data already exists
     let force = false;
@@ -304,23 +427,48 @@ const Timeline = () => {
         </div>
         
         <div className="flex gap-2">
-          <button
-            onClick={handleImportData}
-            disabled={importing}
-            className="bg-green-600 hover:bg-green-700 disabled:bg-gray-400 text-white px-6 py-2 rounded-lg font-medium transition-colors flex items-center gap-2"
-          >
-            {importing ? (
-              <>
-                <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24">
-                  <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
-                  <path fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-                </svg>
-                Importing...
-              </>
-            ) : (
-              <>📥 Import Data</>
+          {/* Import Section */}
+          <div className="flex items-center gap-3">
+            {/* Upload CSV Files Button */}
+            <button
+              onClick={() => setShowUpload(!showUpload)}
+              disabled={importing}
+              className="bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400 text-white px-4 py-2 rounded-lg font-medium transition-colors flex items-center gap-2"
+            >
+              {showUpload ? '✖️ Cancel' : '📤 Upload CSV Files'}
+            </button>
+
+            {/* Import from Uploaded Files Button */}
+            {uploadedFiles && uploadedFiles.ready && (
+              <button
+                onClick={handleImportUploadedFiles}
+                disabled={importing}
+                className="bg-green-600 hover:bg-green-700 disabled:bg-gray-400 text-white px-4 py-2 rounded-lg font-medium transition-colors flex items-center gap-2"
+              >
+                {importing ? (
+                  <>
+                    <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24">
+                      <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
+                      <path fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                    </svg>
+                    Importing...
+                  </>
+                ) : (
+                  <>📥 Import Uploaded Files</>
+                )}
+              </button>
             )}
-          </button>
+
+            {/* Legacy Import Button (for mounted directories) */}
+            <button
+              onClick={handleImportData}
+              disabled={importing}
+              className="bg-gray-600 hover:bg-gray-700 disabled:bg-gray-400 text-white px-4 py-2 rounded-lg font-medium transition-colors flex items-center gap-2 text-sm"
+              title="Import from mounted directory (requires volume mount or docker cp)"
+            >
+              📁 Import from Directory
+            </button>
+          </div>
           
           <button
             onClick={handleCreateEvent}
@@ -330,6 +478,64 @@ const Timeline = () => {
           </button>
         </div>
       </div>
+
+      {/* File Upload Interface */}
+      {showUpload && (
+        <div className="mb-6 p-6 bg-blue-50 border border-blue-200 rounded-lg">
+          <h3 className="text-lg font-semibold text-blue-800 mb-4">Upload History Plus CSV Files</h3>
+          
+          <div className="mb-4">
+            <label className="block text-sm font-medium text-blue-700 mb-2">
+              Select CSV files to upload (select multiple files at once):
+            </label>
+            <input
+              type="file"
+              multiple
+              accept=".csv"
+              onChange={handleFileUpload}
+              disabled={importing}
+              className="block w-full text-sm text-blue-600 file:mr-4 file:py-2 file:px-4 file:rounded file:border-0 file:text-sm file:font-semibold file:bg-blue-100 file:text-blue-700 hover:file:bg-blue-200 disabled:opacity-50"
+            />
+          </div>
+
+          <div className="text-sm text-blue-600">
+            <p className="font-medium mb-2">Required CSV files:</p>
+            <div className="grid grid-cols-2 gap-1 text-xs">
+              <div>• export_metadata.csv</div>
+              <div>• user_event_reviews.csv</div>
+              <div>• historical_events.csv</div>
+              <div>• user_video_watches.csv</div>
+              <div>• history_books.csv</div>
+              <div>• user_book_reads.csv</div>
+              <div>• history_channels.csv</div>
+              <div>• user_chapter_reads.csv</div>
+              <div>• history_chapters.csv</div>
+              <div>• user_section_reads.csv</div>
+              <div>• history_sections.csv</div>
+              <div>• history_videos.csv</div>
+            </div>
+          </div>
+
+          {uploadedFiles && (
+            <div className="mt-4 p-3 bg-white border border-blue-300 rounded">
+              <h4 className="font-medium text-blue-800 mb-2">Upload Summary:</h4>
+              <div className="text-sm text-blue-600 space-y-1">
+                <div>✅ Uploaded: {uploadedFiles.summary.uploaded} files</div>
+                <div>📋 Expected: {uploadedFiles.summary.expected} files</div>
+                {uploadedFiles.summary.missing > 0 && (
+                  <div className="text-red-600">⚠️ Missing: {uploadedFiles.summary.missing} required files</div>
+                )}
+                {uploadedFiles.summary.extra > 0 && (
+                  <div className="text-orange-600">ℹ️ Extra: {uploadedFiles.summary.extra} files (will be ignored)</div>
+                )}
+                <div className={uploadedFiles.ready ? 'text-green-600 font-medium' : 'text-red-600'}>
+                  {uploadedFiles.ready ? '✅ Ready to import!' : '❌ Cannot import - missing required files'}
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Import Status */}
       {importStatus && (

@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const { PrismaClient } = require('@prisma/client');
+const multer = require('multer');
 const HistoryPlusService = require('../services/historyPlusService');
 const { asyncHandler, sendSuccess, sendBadRequest, sendServerError } = require('../utils/responses');
 const { validateRequiredFields } = require('../middleware/validation');
@@ -10,6 +11,105 @@ const fs = require('fs');
 
 const prisma = new PrismaClient();
 const historyPlusService = new HistoryPlusService();
+
+// Configure multer for CSV file uploads
+const storage = multer.diskStorage({
+  destination: function (req, file, cb) {
+    const uploadDir = path.join(__dirname, '..', 'temp-uploads');
+    if (!fs.existsSync(uploadDir)) {
+      fs.mkdirSync(uploadDir, { recursive: true });
+    }
+    cb(null, uploadDir);
+  },
+  filename: function (req, file, cb) {
+    // Keep original filename but ensure it's a CSV
+    const filename = file.originalname.toLowerCase();
+    if (!filename.endsWith('.csv')) {
+      return cb(new Error('Only CSV files are allowed'));
+    }
+    cb(null, file.originalname);
+  }
+});
+
+const upload = multer({ 
+  storage: storage,
+  fileFilter: function (req, file, cb) {
+    if (!file.originalname.toLowerCase().endsWith('.csv')) {
+      return cb(new Error('Only CSV files are allowed'), false);
+    }
+    cb(null, true);
+  },
+  limits: {
+    fileSize: 50 * 1024 * 1024, // 50MB limit
+    files: 20 // Max 20 files
+  }
+});
+
+// ==========================================
+// CSV FILE UPLOAD AND IMPORT ROUTES
+// ==========================================
+
+// POST /api/history-plus/upload-csv
+router.post('/upload-csv', upload.array('csvFiles', 20), asyncHandler(async (req, res) => {
+  console.log('📤 Processing CSV file uploads...');
+  
+  if (!req.files || req.files.length === 0) {
+    return sendBadRequest(res, 'No CSV files uploaded');
+  }
+  
+  const expectedFiles = [
+    'export_metadata.csv',
+    'historical_events.csv',
+    'history_books.csv',
+    'history_channels.csv',
+    'history_chapters.csv',
+    'history_sections.csv',
+    'history_videos.csv',
+    'user_book_reads.csv',
+    'user_chapter_reads.csv',
+    'user_event_reviews.csv',
+    'user_section_reads.csv',
+    'user_video_watches.csv'
+  ];
+  
+  const uploadedFiles = req.files.map(file => file.filename);
+  const missingFiles = expectedFiles.filter(expected => !uploadedFiles.includes(expected));
+  const extraFiles = uploadedFiles.filter(uploaded => !expectedFiles.includes(uploaded));
+  
+  console.log(`📁 Uploaded ${uploadedFiles.length} files:`, uploadedFiles);
+  if (missingFiles.length > 0) {
+    console.log(`⚠️  Missing files:`, missingFiles);
+  }
+  if (extraFiles.length > 0) {
+    console.log(`ℹ️  Extra files (will be ignored):`, extraFiles);
+  }
+  
+  // Store upload session info
+  const uploadSession = {
+    id: Date.now().toString(),
+    uploadedAt: new Date().toISOString(),
+    files: uploadedFiles,
+    directory: path.join(__dirname, '..', 'temp-uploads'),
+    missingFiles: missingFiles,
+    extraFiles: extraFiles
+  };
+  
+  // Save upload session to temp file for import endpoint
+  const sessionFile = path.join(__dirname, '..', 'temp-uploads', 'upload-session.json');
+  fs.writeFileSync(sessionFile, JSON.stringify(uploadSession, null, 2));
+  
+  sendSuccess(res, {
+    message: 'CSV files uploaded successfully',
+    uploadSession: uploadSession,
+    ready: missingFiles.length === 0,
+    summary: {
+      uploaded: uploadedFiles.length,
+      expected: expectedFiles.length,
+      missing: missingFiles.length,
+      extra: extraFiles.length
+    }
+  });
+}));
 
 // ==========================================
 // HISTORICAL EVENTS ROUTES
@@ -375,40 +475,65 @@ router.get('/categories', asyncHandler(async (req, res) => {
 router.post('/import-data', asyncHandler(async (req, res) => {
   console.log('🔄 Starting History Plus data import via API...');
   
-  const { force = false } = req.body;
+  const { force = false, useUploaded = false } = req.body;
   
-  // Check if export directory exists
-  const exportDir = path.join(__dirname, '..', '..', 'history-plus-export');
-  console.log('🔍 Looking for CSV files at:', exportDir);
-  console.log('📁 Directory exists:', fs.existsSync(exportDir));
+  let exportDir;
+  let importArgs;
   
-  if (!fs.existsSync(exportDir)) {
-    return sendBadRequest(res, 'History Plus export directory not found. Please ensure CSV files are available.');
+  if (useUploaded) {
+    // Use uploaded files from temp directory
+    const tempDir = path.join(__dirname, '..', 'temp-uploads');
+    const sessionFile = path.join(tempDir, 'upload-session.json');
+    
+    if (!fs.existsSync(sessionFile)) {
+      return sendBadRequest(res, 'No uploaded files found. Please upload CSV files first.');
+    }
+    
+    try {
+      const sessionData = JSON.parse(fs.readFileSync(sessionFile, 'utf8'));
+      exportDir = sessionData.directory;
+      
+      if (!sessionData.ready || sessionData.missingFiles.length > 0) {
+        return sendBadRequest(res, `Cannot import: missing required files: ${sessionData.missingFiles.join(', ')}`);
+      }
+      
+      console.log(`📂 Using uploaded files from: ${exportDir}`);
+      console.log(`� Found ${sessionData.files.length} uploaded CSV files`);
+    } catch (error) {
+      return sendBadRequest(res, 'Failed to read upload session data.');
+    }
+    
+    importArgs = [path.join(__dirname, '..', 'import-history-plus-data.js'), exportDir];
+  } else {
+    // Use traditional mounted directory
+    exportDir = path.join(__dirname, '..', '..', 'history-plus-export');
+    
+    if (!fs.existsSync(exportDir)) {
+      return sendBadRequest(res, 'History Plus export directory not found. Please ensure CSV files are available or use file upload.');
+    }
+    
+    console.log(`📂 Using mounted directory: ${exportDir}`);
+    importArgs = [path.join(__dirname, '..', 'import-history-plus-data.js'), exportDir];
   }
   
   // Check if CSV files exist
   const csvFiles = fs.readdirSync(exportDir).filter(file => file.endsWith('.csv'));
   if (csvFiles.length === 0) {
-    return sendBadRequest(res, 'No CSV files found in export directory.');
+    return sendBadRequest(res, 'No CSV files found in directory.');
   }
   
-  console.log(`📂 Found ${csvFiles.length} CSV files ready for import`);
+  console.log(`� Found ${csvFiles.length} CSV files ready for import`);
   if (force) {
     console.log('🔄 Force mode enabled: Will update existing records');
+    importArgs.push('--force');
   }
   
   try {
     // Start the import process
-    const importScript = path.join(__dirname, '..', 'import-history-plus-data.js');
-    const args = [importScript, exportDir];
-    if (force) {
-      args.push('--force');
-    }
-    
     const result = await new Promise((resolve, reject) => {
-      const importProcess = spawn('node', args, {
+      const importProcess = spawn('node', importArgs, {
         stdio: ['pipe', 'pipe', 'pipe'],
-        cwd: path.dirname(importScript)
+        cwd: path.dirname(importArgs[0])
       });
       
       let output = '';
@@ -440,11 +565,26 @@ router.post('/import-data', asyncHandler(async (req, res) => {
           const skippedMatch = output.match(/Records skipped.*: (\d+)/);
           const errorsMatch = output.match(/Errors: (\d+)/);
           
+          // Clean up uploaded files if this was an upload-based import
+          if (useUploaded) {
+            try {
+              const tempDir = path.join(__dirname, '..', 'temp-uploads');
+              const files = fs.readdirSync(tempDir);
+              files.forEach(file => {
+                fs.unlinkSync(path.join(tempDir, file));
+              });
+              console.log('🧹 Cleaned up uploaded files');
+            } catch (cleanupError) {
+              console.warn('⚠️ Failed to clean up uploaded files:', cleanupError.message);
+            }
+          }
+          
           resolve({
             success: true,
             message: 'History Plus data imported successfully',
             csvFiles: csvFiles.length,
             force: force,
+            source: useUploaded ? 'uploaded' : 'mounted',
             statistics: {
               imported: importedMatch ? parseInt(importedMatch[1], 10) : 0,
               updated: updatedMatch ? parseInt(updatedMatch[1], 10) : 0,

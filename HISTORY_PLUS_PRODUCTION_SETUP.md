@@ -1,45 +1,61 @@
 # History Plus Import in Production
 
 ## Overview
-The History Plus import functionality works differently in development vs production environments.
+The History Plus import functionality now supports both file upload and traditional directory-based import methods.
 
 ## Development Environment
-- CSV files are located in the local `history-plus-export` directory
-- Import button works directly via the web UI
+- CSV files can be uploaded via the web UI or placed in the local `history-plus-export` directory
+- Import button works directly via the web UI with both methods
 - No additional setup required
 
 ## Production Environment (Docker/Unraid)
 
-### Option 1: Volume Mount (Recommended)
-The `docker-compose.yml` includes a volume mount for the History Plus export directory:
+### Option 1: File Upload (Recommended)
+The simplest method for production - no volume mounts or file copying required:
+
+1. Access the History Plus Timeline page
+2. Click "📤 Upload CSV Files" 
+3. Select all CSV files at once (use Ctrl/Cmd+click to select multiple)
+4. Click "📥 Import Uploaded Files" once upload completes
+5. Files are automatically cleaned up after import
+
+**Advantages:**
+- No Docker configuration changes needed
+- Works with any deployment method
+- Automatic file validation and cleanup
+- User-friendly interface
+
+### Option 2: Volume Mount (Legacy)
+For automated deployments or when CSV files are already on the host:
+
 ```yaml
-- /mnt/user/appdata/master-order/history-plus-export:/app/history-plus-export:ro
+volumes:
+  - /mnt/user/appdata/master-order/history-plus-export:/app/history-plus-export:ro
 ```
 
 **Setup Steps:**
-1. Copy your CSV files to `/mnt/user/appdata/master-order/history-plus-export/` on the Unraid host
-2. Restart the container to mount the volume
-3. Use the import button in the web UI
+1. Copy CSV files to `/mnt/user/appdata/master-order/history-plus-export/` on host
+2. Restart container to mount the volume
+3. Use "📁 Import from Directory" button
 
-### Option 2: Docker CP Method
-If you don't want to use volume mounts, you can copy files directly:
+### Option 3: Docker CP Method
+Copy files directly to running container:
 
 ```bash
 # Copy CSV files to running container
 docker cp ./history-plus-export master-order:/app/
 
-# Then use the import button in the web UI
+# Then use "📁 Import from Directory" button
 ```
 
-### Option 3: Dedicated Import Script
+### Option 4: Dedicated Import Script
 Use the dedicated Unraid import script:
 ```bash
-# Run the automated import script
 ./import-history-plus-unraid.sh
 ```
 
 ## File Structure
-The system expects these CSV files in the import directory:
+The system expects these CSV files:
 - `export_metadata.csv`
 - `historical_events.csv`
 - `history_books.csv`
@@ -54,8 +70,15 @@ The system expects these CSV files in the import directory:
 - `user_video_watches.csv`
 
 ## Force Mode
-In both development and production, the import system supports force mode:
+Both upload and directory import support force mode:
 - **Normal Mode**: Skips existing records (preserves data)
 - **Force Mode**: Updates existing records (useful for testing/corrections)
 
-The web UI will automatically detect existing data and offer force mode option.
+The web UI automatically detects existing data and offers force mode option.
+
+## File Upload Features
+- **Validation**: Only CSV files accepted, validates required file names
+- **Multi-select**: Upload all files at once for convenience  
+- **Progress**: Real-time upload and import status
+- **Cleanup**: Temporary files automatically removed after import
+- **Error Handling**: Clear error messages for missing or invalid files

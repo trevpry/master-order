@@ -8,6 +8,10 @@ yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 
+# Temporary files and uploads
+server/temp-uploads/
+temp-uploads/
+
 # Production builds
 client/dist/
 client/build/
