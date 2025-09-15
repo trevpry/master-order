@@ -6,6 +6,32 @@ import SearchFilters from '../components/SearchFilters';
 import LoadingSpinner from '../../../components/LoadingSpinner';
 
 const Timeline = () => {
+  // Helper function to parse BCE/CE dates for proper chronological sorting
+  const parseHistoricalDate = (dateInput) => {
+    if (!dateInput) return 0;
+    
+    const dateString = String(dateInput);
+    
+    // Handle BCE dates (negative years in our format: "-YYYY-MM-DD")
+    if (dateString.startsWith('-')) {
+      const year = parseInt(dateString.slice(1, 5));
+      const month = parseInt(dateString.slice(6, 8)) || 1;
+      const day = parseInt(dateString.slice(9, 11)) || 1;
+      
+      // For BCE, convert to negative number for sorting (higher BCE numbers = earlier in time)
+      return -(year * 10000 + month * 100 + day);
+    } else {
+      // Handle CE dates (positive years: "YYYY-MM-DD")
+      const year = parseInt(dateString.slice(0, 4));
+      const month = parseInt(dateString.slice(5, 7)) || 1;
+      const day = parseInt(dateString.slice(8, 10)) || 1;
+      
+      // For CE, use positive number (normal chronological order)
+      return year * 10000 + month * 100 + day;
+    }
+  };
+
+  // State management
   // State management
   const [events, setEvents] = useState([]);
   const [filteredEvents, setFilteredEvents] = useState([]);
@@ -132,11 +158,11 @@ const Timeline = () => {
       });
     }
 
-    // Sort by start date (most recent first)
+    // Sort by start date (earliest first)
     filtered.sort((a, b) => {
-      const dateA = new Date(a.startDate || '0000-01-01');
-      const dateB = new Date(b.startDate || '0000-01-01');
-      return dateB - dateA;
+      const dateA = parseHistoricalDate(a.startDate || '0000-01-01');
+      const dateB = parseHistoricalDate(b.startDate || '0000-01-01');
+      return dateA - dateB;
     });
 
     setFilteredEvents(filtered);

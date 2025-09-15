@@ -1,137 +1,137 @@
-id,chapterId,title,sectionNumber,content,createdAt,updatedAt
-1,1,"Sun-Temples and the Ascendancy of the God Ra",1,,2025-06-23T23:21:14.177Z,2025-06-23T23:21:14.185Z
-2,1,"The Fifth Dynasty",2,,2025-06-23T23:21:14.202Z,2025-06-23T23:21:14.210Z
-135,1,"The Kings of the Pyramid Texts",3,,2025-06-23T23:21:14.226Z,2025-06-29T02:07:10.505Z
-3,2,"Monumental Inscriptions from Private Tombs",1,,2025-06-23T23:21:14.254Z,2025-06-23T23:21:14.260Z
-4,1,"The Sixth Dynasty",4,,2025-06-23T23:21:14.272Z,2025-06-23T23:21:14.278Z
-5,3,"4.1 The Kings of Akkad 64",1,,2025-06-23T23:21:14.300Z,2025-06-23T23:21:14.306Z
-6,5,"The Carpathian Basin and the Steppes (p 221)",1,,2025-06-23T23:21:14.352Z,2025-06-23T23:21:14.359Z
-7,1,"The Decline of the Old Kingdom",5,,2025-06-23T23:21:14.371Z,2025-06-23T23:21:14.377Z
-8,3,"4.2 The Third Dynasty of Ur 74",2,,2025-06-23T23:21:14.421Z,2025-06-23T23:21:14.427Z
-9,9,"6.1 Shamshi-Adad and the Kingdom of Upper Mesopotamia 108",1,,2025-06-23T23:21:14.461Z,2025-06-23T23:21:14.467Z
-10,10,"Minoan Civilization",1,,2025-06-23T23:21:14.488Z,2025-06-23T23:21:14.494Z
-11,5,"Crete and the Minoans (p 188)",2,,2025-06-23T23:21:14.506Z,2025-06-23T23:21:14.513Z
-12,11,"5.1 Nomads and Sedentary People 86",1,,2025-06-23T23:21:14.530Z,2025-06-23T23:21:14.537Z
-13,11,"5.2 Babylonia 90",2,,2025-06-23T23:21:14.552Z,2025-06-23T23:21:14.558Z
-14,11,"5.3 Assyria and the East 94",3,,2025-06-23T23:21:14.587Z,2025-06-23T23:21:14.593Z
-15,11,"5.4 Mari and the West 100",4,,2025-06-23T23:21:14.622Z,2025-06-23T23:21:14.628Z
-16,9,"6.2 HammurabiΓÇÖs Babylon 111",2,,2025-06-23T23:21:14.643Z,2025-06-23T23:21:14.649Z
-17,5,"Enter Mycenaeans (p 196) & The Tyrrhenian Sea and Beyond",3,,2025-06-23T23:21:14.660Z,2025-06-23T23:21:14.666Z
-18,5,"The Nordic Realms (p 213) & Adventurers and Heroes (p 227)",4,,2025-06-23T23:21:14.677Z,2025-06-23T23:21:14.684Z
-19,9,"6.3 The Old Hittite Kingdom 120",3,,2025-06-23T23:21:14.715Z,2025-06-23T23:21:14.722Z
-20,10,"Greece and the Aegean in the Late Bronze Age (1600-1200 BC)",2,,2025-06-23T23:21:14.733Z,2025-06-23T23:21:14.739Z
-21,9,"6.4 The ΓÇ£Dark AgeΓÇ¥ 123",4,,2025-06-23T23:21:14.752Z,2025-06-23T23:21:14.758Z
-22,15,"9.1 Babylonia 172",1,,2025-06-23T23:21:14.774Z,2025-06-23T23:21:14.781Z
-23,17,"8.1 Mittani 150",1,,2025-06-23T23:21:14.814Z,2025-06-23T23:21:14.820Z
-24,15,"9.3 The Middle Elamite Kingdom 184",2,,2025-06-23T23:21:14.832Z,2025-06-23T23:21:14.838Z
-25,15,"9.2 Assyria 178",3,,2025-06-23T23:21:14.873Z,2025-06-23T23:21:14.880Z
-26,17,"8.2 The Hittite New Kingdom 155",2,,2025-06-23T23:21:14.935Z,2025-06-23T23:21:14.941Z
-27,17,"8.3 Syria-Palestine 163",3,,2025-06-23T23:21:14.974Z,2025-06-23T23:21:14.980Z
-28,26,"13.1 The Creation of an Imperial Structure 249",1,,2025-06-23T23:21:15.187Z,2025-06-23T23:21:15.218Z
-29,26,"13.2 The Defeat of the Great Rivals 252",2,,2025-06-23T23:21:15.240Z,2025-06-23T23:21:15.246Z
-30,26,"13.3 The Administration and Ideology of the Empire 259",3,,2025-06-23T23:21:15.259Z,2025-06-23T23:21:15.266Z
-31,26,"13.4 Assyrian Culture 260",4,,2025-06-23T23:21:15.287Z,2025-06-23T23:21:15.294Z
-32,26,"13.5 AssyriaΓÇÖs Fall 265",5,,2025-06-23T23:21:15.340Z,2025-06-23T23:21:15.348Z
-33,31,"14.1 The Medes and the Anatolian States 271",1,,2025-06-23T23:21:15.419Z,2025-06-23T23:21:15.419Z
-34,31,"14.2 The Neo-Babylonian Dynasty 275",2,,2025-06-23T23:21:15.431Z,2025-06-23T23:21:15.431Z
-35,32,"15.1 The Sources and Their Challenges 289",1,,2025-06-23T23:21:15.450Z,2025-06-23T23:21:15.450Z
-36,32,"15.2 The Rise of Persia and Its Expansion 290",2,,2025-06-23T23:21:15.463Z,2025-06-23T23:21:15.463Z
-37,32,"15.3 Governance of the Subject States 295",3,,2025-06-23T23:21:15.481Z,2025-06-23T23:21:15.481Z
-38,32,"15.4 The Creation of an Imperial Structure 298",4,,2025-06-23T23:21:15.494Z,2025-06-23T23:21:15.494Z
-39,33,"16.1 Political Developments 306",1,,2025-06-23T23:21:15.511Z,2025-06-23T23:21:15.511Z
-40,33,"16.2 Administration of the Empire 310",2,,2025-06-23T23:21:15.524Z,2025-06-23T23:21:15.524Z
-41,33,"16.3 Local Forms of Persian Administration 313",3,,2025-06-23T23:21:15.539Z,2025-06-23T23:21:15.539Z
-42,33,"16.4 The End of the Empire 319",4,,2025-06-23T23:21:15.552Z,2025-06-23T23:21:15.552Z
-43,35,"A Greco-Roman World",1,,2025-06-23T23:21:15.582Z,2025-06-23T23:21:15.582Z
-44,35,"The Arrival of the Romans",2,,2025-06-23T23:21:15.595Z,2025-06-23T23:21:15.595Z
-45,10,"The End of the Mycenaean Civilization",3,,2025-06-23T23:21:15.608Z,2025-06-23T23:21:15.608Z
-46,10,"The Years of Glory (c. 1400-1200 BC)",4,,2025-06-23T23:21:15.622Z,2025-06-23T23:21:15.622Z
-47,36,"* The End of Early Iron Age II (c. 750-700 BC)",1,,2025-06-23T23:21:15.640Z,2025-06-23T23:21:15.640Z
-48,36,"Community, Household, and Economy in the Early Iron Age II",2,,2025-06-23T23:21:15.652Z,2025-06-23T23:21:15.652Z
-49,36,"Decline and Recovery, Early Iron Age I (c. 1200-900 BC)",3,,2025-06-23T23:21:15.665Z,2025-06-23T23:21:15.665Z
-50,36,"Homer and Oral Poetry",4,,2025-06-23T23:21:15.680Z,2025-06-23T23:21:15.680Z
-51,36,"Homeric Society",5,,2025-06-23T23:21:15.692Z,2025-06-23T23:21:15.692Z
-52,36,"Revival (c. 900-750 BC)",6,,2025-06-23T23:21:15.706Z,2025-06-23T23:21:15.706Z
-53,36,"Sources for the Early Iron Age",7,,2025-06-23T23:21:15.719Z,2025-06-23T23:21:15.719Z
-54,36,"The New Society of Early Iron Age II (900-750/700 BC)",8,,2025-06-23T23:21:15.732Z,2025-06-23T23:21:15.732Z
-55,37,"Art and Architecture",1,,2025-06-23T23:21:15.753Z,2025-06-23T23:21:15.753Z
-56,37,"Economic and Social Divisions in the Early Poleis",2,,2025-06-23T23:21:15.777Z,2025-06-23T23:21:15.777Z
-57,37,"Emigration and Expansion: The Colonizing Movement",3,,2025-06-23T23:21:15.797Z,2025-06-23T23:21:15.797Z
-58,37,"Government in the Early City-States",4,,2025-06-23T23:21:15.810Z,2025-06-23T23:21:15.810Z
-59,37,"Hesiod: The View from Outside",5,,2025-06-23T23:21:15.825Z,2025-06-23T23:21:15.825Z
-60,37,"Lyric Poetry",6,,2025-06-23T23:21:15.838Z,2025-06-23T23:21:15.838Z
-61,37,"Panhellenic Religious Institutions",7,,2025-06-23T23:21:15.852Z,2025-06-23T23:21:15.852Z
-62,37,"Philosophy and Science",8,,2025-06-23T23:21:15.869Z,2025-06-23T23:21:15.869Z
-63,37,"Relations Among States",9,,2025-06-23T23:21:15.884Z,2025-06-23T23:21:15.884Z
-64,37,"Sources for the Seventh and Sixth Centuries",10,,2025-06-23T23:21:15.898Z,2025-06-23T23:21:15.898Z
-65,37,"The Archaic Age Tyrants",11,,2025-06-23T23:21:15.912Z,2025-06-23T23:21:15.912Z
-66,37,"The Formation of the City-State (Polis)",12,,2025-06-23T23:21:15.926Z,2025-06-23T23:21:15.926Z
-67,37,"The Hoplite Army",13,,2025-06-23T23:21:15.939Z,2025-06-23T23:21:15.939Z
-68,38,"Demography and the Spartan Economy",1,,2025-06-23T23:21:15.957Z,2025-06-23T23:21:15.957Z
-69,38,"Historical Change in Sparta",2,,2025-06-23T23:21:15.970Z,2025-06-23T23:21:15.970Z
-70,38,"Sources for Spartan History and Institutions",3,,2025-06-23T23:21:15.984Z,2025-06-23T23:21:15.984Z
-71,38,"Sparta and Greece",4,,2025-06-23T23:21:15.996Z,2025-06-23T23:21:15.996Z
-72,38,"Spartan Government",5,,2025-06-23T23:21:16.009Z,2025-06-23T23:21:16.009Z
-73,38,"The Early Iron Age and the Archaic Period",6,,2025-06-23T23:21:16.023Z,2025-06-23T23:21:16.023Z
-74,38,"The Spartan Mirage in Western Thought",7,,2025-06-23T23:21:16.038Z,2025-06-23T23:21:16.038Z
-75,38,"The Spartan System",8,,2025-06-23T23:21:16.051Z,2025-06-23T23:21:16.051Z
-76,39,"Law and Democracy in Athens",1,,2025-06-23T23:21:16.068Z,2025-06-23T23:21:16.068Z
-77,39,"Philosophy and the Polis",2,,2025-06-23T23:21:16.082Z,2025-06-23T23:21:16.082Z
-78,39,"Social and Economic Strains in Postwar Greece",3,,2025-06-23T23:21:16.097Z,2025-06-23T23:21:16.097Z
-79,39,"Sources for Fourth-Century Greece",4,,2025-06-23T23:21:16.109Z,2025-06-23T23:21:16.109Z
-80,39,"The Fourth-Century Polis",5,,2025-06-23T23:21:16.123Z,2025-06-23T23:21:16.123Z
-81,40,"Athens from the Bronze Age to the Early Archaic Age",1,,2025-06-23T23:21:16.143Z,2025-06-23T23:21:16.143Z
-82,40,"Pisistratus and His Sons",2,,2025-06-23T23:21:16.160Z,2025-06-23T23:21:16.160Z
-83,40,"Sources for Early Athens",3,,2025-06-23T23:21:16.177Z,2025-06-23T23:21:16.177Z
-84,40,"The Other War: Carthage and the Greek Cities of Sicily",4,,2025-06-23T23:21:16.190Z,2025-06-23T23:21:16.190Z
-85,40,"The Reforms of Cleisthenes",5,,2025-06-23T23:21:16.209Z,2025-06-23T23:21:16.209Z
-86,40,"The Reforms of Solon",6,,2025-06-23T23:21:16.223Z,2025-06-23T23:21:16.223Z
-87,40,"The Rise of Persia",7,,2025-06-23T23:21:16.236Z,2025-06-23T23:21:16.236Z
-88,40,"The Wars Between Greece and Persia",8,,2025-06-23T23:21:16.249Z,2025-06-23T23:21:16.249Z
-89,41,"Literature and Art",1,,2025-06-23T23:21:16.299Z,2025-06-23T23:21:16.299Z
-90,41,"Oikos and Polis",2,,2025-06-23T23:21:16.341Z,2025-06-23T23:21:16.341Z
-91,41,"Pericles and the Growth of Athenian Democracy",3,,2025-06-23T23:21:16.401Z,2025-06-23T23:21:16.401Z
-92,41,"Sources for the Decades After the Persian Wars",4,,2025-06-23T23:21:16.417Z,2025-06-23T23:21:16.417Z
-93,41,"The ""First"" (Undeclared) Peloponnesian War (460-445 BC)",5,,2025-06-23T23:21:16.461Z,2025-06-23T23:21:16.461Z
-94,41,"The Aftermath of the Persian Wars and the Foundation of the Delian League",6,,2025-06-23T23:21:16.493Z,2025-06-23T23:21:16.493Z
-95,41,"The Greek Economy",7,,2025-06-23T23:21:16.513Z,2025-06-23T23:21:16.513Z
-96,42,"Currents in Greek Thought and Education",1,,2025-06-23T23:21:16.531Z,2025-06-23T23:21:16.531Z
-97,42,"Greece After the Thirty Years' Peace",2,,2025-06-23T23:21:16.545Z,2025-06-23T23:21:16.545Z
-98,42,"Historical and Dramatic Literature of the Fifth Century",3,,2025-06-23T23:21:16.558Z,2025-06-23T23:21:16.558Z
-99,42,"Intellectual Life in Fifth-Century Greece",4,,2025-06-23T23:21:16.572Z,2025-06-23T23:21:16.572Z
-100,42,"Resources for War",5,,2025-06-23T23:21:16.585Z,2025-06-23T23:21:16.585Z
-101,42,"Sources for Greece on the Eve of the War",6,,2025-06-23T23:21:16.599Z,2025-06-23T23:21:16.599Z
-102,42,"The Breakdown of the Peace",7,,2025-06-23T23:21:16.615Z,2025-06-23T23:21:16.615Z
-103,42,"The Physical Space of the Polis: Athens on the Eve of War",8,,2025-06-23T23:21:16.628Z,2025-06-23T23:21:16.628Z
-104,43,"Between Peace and War",1,,2025-06-23T23:21:16.647Z,2025-06-23T23:21:16.647Z
-105,43,"Fallout from the Long War",2,,2025-06-23T23:21:16.659Z,2025-06-23T23:21:16.659Z
-106,43,"Sources for Greece During the Peloponnesian War",3,,2025-06-23T23:21:16.671Z,2025-06-23T23:21:16.671Z
-107,43,"The Archidamian War (431-421 BC)",4,,2025-06-23T23:21:16.685Z,2025-06-23T23:21:16.685Z
-108,43,"The Invasion of Sicily (415-413 BC)",5,,2025-06-23T23:21:16.700Z,2025-06-23T23:21:16.700Z
-109,43,"The Rise of Comedy",6,,2025-06-23T23:21:16.713Z,2025-06-23T23:21:16.713Z
-110,43,"The War in Retrospect",7,,2025-06-23T23:21:16.726Z,2025-06-23T23:21:16.726Z
-111,43,"The War in the Aegean and the Oligarchic Coup at Athens (413-411 BC)",8,,2025-06-23T23:21:16.738Z,2025-06-23T23:21:16.738Z
-112,44,"Early Macedonia",1,,2025-06-23T23:21:16.756Z,2025-06-23T23:21:16.756Z
-113,44,"Macedonian Domination of Greece",2,,2025-06-23T23:21:16.768Z,2025-06-23T23:21:16.768Z
-114,44,"Macedonian Society and Kingship",3,,2025-06-23T23:21:16.781Z,2025-06-23T23:21:16.781Z
-115,44,"Sources for Macedonian History",4,,2025-06-23T23:21:16.798Z,2025-06-23T23:21:16.798Z
-116,44,"The Reign of Philip II",5,,2025-06-23T23:21:16.811Z,2025-06-23T23:21:16.811Z
-117,45,"Consolidating Power",1,,2025-06-23T23:21:16.828Z,2025-06-23T23:21:16.828Z
-118,45,"From Alexandria to Persepolis: The King of Asia (331-330 BC)",2,,2025-06-23T23:21:16.865Z,2025-06-23T23:21:16.865Z
-119,45,"From Issus to Egypt: Conquest of the Eastern Mediterranean (332-331 BC)",3,,2025-06-23T23:21:16.879Z,2025-06-23T23:21:16.879Z
-120,45,"India and the End of the Dream",4,,2025-06-23T23:21:16.892Z,2025-06-23T23:21:16.892Z
-121,45,"Return to the West",5,,2025-06-23T23:21:16.921Z,2025-06-23T23:21:16.921Z
-122,45,"Sources for the Reign of Alexander",6,,2025-06-23T23:21:16.933Z,2025-06-23T23:21:16.933Z
-123,45,"The High Road to India: Alexander in Central Asia",7,,2025-06-23T23:21:16.946Z,2025-06-23T23:21:16.946Z
-124,46,"A New World",1,,2025-06-23T23:21:16.963Z,2025-06-23T23:21:16.963Z
-125,46,"Alexandria and Hellenistic Culture",2,,2025-06-23T23:21:16.976Z,2025-06-23T23:21:16.976Z
-126,46,"Birth Pangs of the New Order (301-276 BC)",3,,2025-06-23T23:21:16.989Z,2025-06-23T23:21:16.989Z
-127,46,"Hellenistic Society",4,,2025-06-23T23:21:17.004Z,2025-06-23T23:21:17.004Z
-128,46,"Social Relations in the Hellenistic World",5,,2025-06-23T23:21:17.032Z,2025-06-23T23:21:17.032Z
-129,46,"Sources for the Hellenistic Period",6,,2025-06-23T23:21:17.051Z,2025-06-23T23:21:17.051Z
-130,46,"The Macedonian Kingdoms",7,,2025-06-23T23:21:17.067Z,2025-06-23T23:21:17.067Z
-131,46,"The Place of the Polis in the Cosmopolis",8,,2025-06-23T23:21:17.079Z,2025-06-23T23:21:17.079Z
-132,46,"The Primacy of Antigonus the One-Eyed",9,,2025-06-23T23:21:17.096Z,2025-06-23T23:21:17.096Z
-133,46,"The Regency of Perdiccas",10,,2025-06-23T23:21:17.110Z,2025-06-23T23:21:17.110Z
-134,46,"The Struggle for the Succession",11,,2025-06-23T23:21:17.124Z,2025-06-23T23:21:17.124Z
-136,75,"Pepi I Pyramid Texts",3,,2025-08-19T01:16:23.906Z,2025-08-19T01:24:28.058Z
+id,title,"sectionNumber",description,"pageStart","pageEnd",content,"createdAt","updatedAt","chapterId","eventId"
+1,Sun-Temples and the Ascendancy of the God Ra,1,,,,,2025-06-23 16:21:14.177,2025-06-23 16:21:14.185,1,513
+2,The Fifth Dynasty,2,,,,,2025-06-23 16:21:14.202,2025-06-23 16:21:14.21,1,513
+4,Monumental Inscriptions from Private Tombs,1,,,,,2025-06-23 16:21:14.254,2025-06-23 16:21:14.26,2,525
+5,The Sixth Dynasty,4,,,,,2025-06-23 16:21:14.272,2025-06-23 16:21:14.278,1,528
+6,4.1 The Kings of Akkad 64,1,,,,,2025-06-23 16:21:14.3,2025-06-23 16:21:14.306,3,530
+7,The Carpathian Basin and the Steppes (p 221),1,,,,,2025-06-23 16:21:14.352,2025-06-23 16:21:14.359,5,547
+8,The Decline of the Old Kingdom,5,,,,,2025-06-23 16:21:14.371,2025-06-23 16:21:14.377,1,552
+9,4.2 The Third Dynasty of Ur 74,2,,,,,2025-06-23 16:21:14.421,2025-06-23 16:21:14.427,3,556
+10,6.1 Shamshi-Adad and the Kingdom of Upper Mesopotamia 108,1,,,,,2025-06-23 16:21:14.461,2025-06-23 16:21:14.467,9,561
+11,Minoan Civilization,1,,,,,2025-06-23 16:21:14.488,2025-06-23 16:21:14.494,10,566
+12,Crete and the Minoans (p 188),2,,,,,2025-06-23 16:21:14.506,2025-06-23 16:21:14.513,5,566
+13,5.1 Nomads and Sedentary People 86,1,,,,,2025-06-23 16:21:14.53,2025-06-23 16:21:14.537,11,574
+14,5.2 Babylonia 90,2,,,,,2025-06-23 16:21:14.552,2025-06-23 16:21:14.558,11,574
+15,5.3 Assyria and the East 94,3,,,,,2025-06-23 16:21:14.587,2025-06-23 16:21:14.593,11,575
+16,5.4 Mari and the West 100,4,,,,,2025-06-23 16:21:14.622,2025-06-23 16:21:14.628,11,576
+17,6.2 HammurabiΓÇÖs Babylon 111,2,,,,,2025-06-23 16:21:14.643,2025-06-23 16:21:14.649,9,579
+18,Enter Mycenaeans (p 196) & The Tyrrhenian Sea and Beyond,3,,,,,2025-06-23 16:21:14.66,2025-06-23 16:21:14.666,5,583
+19,The Nordic Realms (p 213) & Adventurers and Heroes (p 227),4,,,,,2025-06-23 16:21:14.677,2025-06-23 16:21:14.684,5,584
+20,6.3 The Old Hittite Kingdom 120,3,,,,,2025-06-23 16:21:14.715,2025-06-23 16:21:14.722,9,590
+21,Greece and the Aegean in the Late Bronze Age (1600-1200 BC),2,,,,,2025-06-23 16:21:14.733,2025-06-23 16:21:14.739,10,594
+22,6.4 The ΓÇ£Dark AgeΓÇ¥ 123,4,,,,,2025-06-23 16:21:14.752,2025-06-23 16:21:14.758,9,598
+23,9.1 Babylonia 172,1,,,,,2025-06-23 16:21:14.774,2025-06-23 16:21:14.781,15,598
+24,8.1 Mittani 150,1,,,,,2025-06-23 16:21:14.814,2025-06-23 16:21:14.82,17,604
+25,9.3 The Middle Elamite Kingdom 184,2,,,,,2025-06-23 16:21:14.832,2025-06-23 16:21:14.838,15,605
+26,9.2 Assyria 178,3,,,,,2025-06-23 16:21:14.873,2025-06-23 16:21:14.88,15,612
+27,8.2 The Hittite New Kingdom 155,2,,,,,2025-06-23 16:21:14.935,2025-06-23 16:21:14.941,17,617
+28,8.3 Syria-Palestine 163,3,,,,,2025-06-23 16:21:14.974,2025-06-23 16:21:14.98,17,626
+29,13.1 The Creation of an Imperial Structure 249,1,,,,,2025-06-23 16:21:15.187,2025-06-23 16:21:15.218,26,681
+30,13.2 The Defeat of the Great Rivals 252,2,,,,,2025-06-23 16:21:15.24,2025-06-23 16:21:15.246,26,681
+31,13.3 The Administration and Ideology of the Empire 259,3,,,,,2025-06-23 16:21:15.259,2025-06-23 16:21:15.266,26,681
+32,13.4 Assyrian Culture 260,4,,,,,2025-06-23 16:21:15.287,2025-06-23 16:21:15.294,26,681
+33,13.5 AssyriaΓÇÖs Fall 265,5,,,,,2025-06-23 16:21:15.34,2025-06-23 16:21:15.348,26,703
+34,14.1 The Medes and the Anatolian States 271,1,,,,,2025-06-23 16:21:15.419,2025-06-23 16:21:15.419,31,
+35,14.2 The Neo-Babylonian Dynasty 275,2,,,,,2025-06-23 16:21:15.431,2025-06-23 16:21:15.431,31,
+36,15.1 The Sources and Their Challenges 289,1,,,,,2025-06-23 16:21:15.45,2025-06-23 16:21:15.45,32,
+37,15.2 The Rise of Persia and Its Expansion 290,2,,,,,2025-06-23 16:21:15.463,2025-06-23 16:21:15.463,32,
+38,15.3 Governance of the Subject States 295,3,,,,,2025-06-23 16:21:15.481,2025-06-23 16:21:15.481,32,
+39,15.4 The Creation of an Imperial Structure 298,4,,,,,2025-06-23 16:21:15.494,2025-06-23 16:21:15.494,32,
+40,16.1 Political Developments 306,1,,,,,2025-06-23 16:21:15.511,2025-06-23 16:21:15.511,33,
+41,16.2 Administration of the Empire 310,2,,,,,2025-06-23 16:21:15.524,2025-06-23 16:21:15.524,33,
+42,16.3 Local Forms of Persian Administration 313,3,,,,,2025-06-23 16:21:15.539,2025-06-23 16:21:15.539,33,
+43,16.4 The End of the Empire 319,4,,,,,2025-06-23 16:21:15.552,2025-06-23 16:21:15.552,33,
+44,A Greco-Roman World,1,,,,,2025-06-23 16:21:15.582,2025-06-23 16:21:15.582,35,
+45,The Arrival of the Romans,2,,,,,2025-06-23 16:21:15.595,2025-06-23 16:21:15.595,35,
+46,The End of the Mycenaean Civilization,3,,,,,2025-06-23 16:21:15.608,2025-06-23 16:21:15.608,10,
+47,The Years of Glory (c. 1400-1200 BC),4,,,,,2025-06-23 16:21:15.622,2025-06-23 16:21:15.622,10,
+48,* The End of Early Iron Age II (c. 750-700 BC),1,,,,,2025-06-23 16:21:15.64,2025-06-23 16:21:15.64,36,
+49,"Community, Household, and Economy in the Early Iron Age II",2,,,,,2025-06-23 16:21:15.652,2025-06-23 16:21:15.652,36,
+50,"Decline and Recovery, Early Iron Age I (c. 1200-900 BC)",3,,,,,2025-06-23 16:21:15.665,2025-06-23 16:21:15.665,36,
+51,Homer and Oral Poetry,4,,,,,2025-06-23 16:21:15.68,2025-06-23 16:21:15.68,36,
+52,Homeric Society,5,,,,,2025-06-23 16:21:15.692,2025-06-23 16:21:15.692,36,
+53,Revival (c. 900-750 BC),6,,,,,2025-06-23 16:21:15.706,2025-06-23 16:21:15.706,36,
+54,Sources for the Early Iron Age,7,,,,,2025-06-23 16:21:15.719,2025-06-23 16:21:15.719,36,
+55,The New Society of Early Iron Age II (900-750/700 BC),8,,,,,2025-06-23 16:21:15.732,2025-06-23 16:21:15.732,36,
+56,Art and Architecture,1,,,,,2025-06-23 16:21:15.753,2025-06-23 16:21:15.753,37,
+57,Economic and Social Divisions in the Early Poleis,2,,,,,2025-06-23 16:21:15.777,2025-06-23 16:21:15.777,37,
+58,Emigration and Expansion: The Colonizing Movement,3,,,,,2025-06-23 16:21:15.797,2025-06-23 16:21:15.797,37,
+59,Government in the Early City-States,4,,,,,2025-06-23 16:21:15.81,2025-06-23 16:21:15.81,37,
+60,Hesiod: The View from Outside,5,,,,,2025-06-23 16:21:15.825,2025-06-23 16:21:15.825,37,
+61,Lyric Poetry,6,,,,,2025-06-23 16:21:15.838,2025-06-23 16:21:15.838,37,
+62,Panhellenic Religious Institutions,7,,,,,2025-06-23 16:21:15.852,2025-06-23 16:21:15.852,37,
+63,Philosophy and Science,8,,,,,2025-06-23 16:21:15.869,2025-06-23 16:21:15.869,37,
+64,Relations Among States,9,,,,,2025-06-23 16:21:15.884,2025-06-23 16:21:15.884,37,
+65,Sources for the Seventh and Sixth Centuries,10,,,,,2025-06-23 16:21:15.898,2025-06-23 16:21:15.898,37,
+66,The Archaic Age Tyrants,11,,,,,2025-06-23 16:21:15.912,2025-06-23 16:21:15.912,37,
+67,The Formation of the City-State (Polis),12,,,,,2025-06-23 16:21:15.926,2025-06-23 16:21:15.926,37,
+68,The Hoplite Army,13,,,,,2025-06-23 16:21:15.939,2025-06-23 16:21:15.939,37,
+69,Demography and the Spartan Economy,1,,,,,2025-06-23 16:21:15.957,2025-06-23 16:21:15.957,38,
+70,Historical Change in Sparta,2,,,,,2025-06-23 16:21:15.97,2025-06-23 16:21:15.97,38,
+71,Sources for Spartan History and Institutions,3,,,,,2025-06-23 16:21:15.984,2025-06-23 16:21:15.984,38,
+72,Sparta and Greece,4,,,,,2025-06-23 16:21:15.996,2025-06-23 16:21:15.996,38,
+73,Spartan Government,5,,,,,2025-06-23 16:21:16.009,2025-06-23 16:21:16.009,38,
+74,The Early Iron Age and the Archaic Period,6,,,,,2025-06-23 16:21:16.023,2025-06-23 16:21:16.023,38,
+75,The Spartan Mirage in Western Thought,7,,,,,2025-06-23 16:21:16.038,2025-06-23 16:21:16.038,38,
+76,The Spartan System,8,,,,,2025-06-23 16:21:16.051,2025-06-23 16:21:16.051,38,
+77,Law and Democracy in Athens,1,,,,,2025-06-23 16:21:16.068,2025-06-23 16:21:16.068,39,
+78,Philosophy and the Polis,2,,,,,2025-06-23 16:21:16.082,2025-06-23 16:21:16.082,39,
+79,Social and Economic Strains in Postwar Greece,3,,,,,2025-06-23 16:21:16.097,2025-06-23 16:21:16.097,39,
+80,Sources for Fourth-Century Greece,4,,,,,2025-06-23 16:21:16.109,2025-06-23 16:21:16.109,39,
+81,The Fourth-Century Polis,5,,,,,2025-06-23 16:21:16.123,2025-06-23 16:21:16.123,39,
+82,Athens from the Bronze Age to the Early Archaic Age,1,,,,,2025-06-23 16:21:16.143,2025-06-23 16:21:16.143,40,
+83,Pisistratus and His Sons,2,,,,,2025-06-23 16:21:16.16,2025-06-23 16:21:16.16,40,
+84,Sources for Early Athens,3,,,,,2025-06-23 16:21:16.177,2025-06-23 16:21:16.177,40,
+85,The Other War: Carthage and the Greek Cities of Sicily,4,,,,,2025-06-23 16:21:16.19,2025-06-23 16:21:16.19,40,
+86,The Reforms of Cleisthenes,5,,,,,2025-06-23 16:21:16.209,2025-06-23 16:21:16.209,40,
+87,The Reforms of Solon,6,,,,,2025-06-23 16:21:16.223,2025-06-23 16:21:16.223,40,
+88,The Rise of Persia,7,,,,,2025-06-23 16:21:16.236,2025-06-23 16:21:16.236,40,
+89,The Wars Between Greece and Persia,8,,,,,2025-06-23 16:21:16.249,2025-06-23 16:21:16.249,40,
+90,Literature and Art,1,,,,,2025-06-23 16:21:16.299,2025-06-23 16:21:16.299,41,
+91,Oikos and Polis,2,,,,,2025-06-23 16:21:16.341,2025-06-23 16:21:16.341,41,
+92,Pericles and the Growth of Athenian Democracy,3,,,,,2025-06-23 16:21:16.401,2025-06-23 16:21:16.401,41,
+93,Sources for the Decades After the Persian Wars,4,,,,,2025-06-23 16:21:16.417,2025-06-23 16:21:16.417,41,
+94,"The ""First"" (Undeclared) Peloponnesian War (460-445 BC)",5,,,,,2025-06-23 16:21:16.461,2025-06-23 16:21:16.461,41,
+95,The Aftermath of the Persian Wars and the Foundation of the Delian League,6,,,,,2025-06-23 16:21:16.493,2025-06-23 16:21:16.493,41,
+96,The Greek Economy,7,,,,,2025-06-23 16:21:16.513,2025-06-23 16:21:16.513,41,
+97,Currents in Greek Thought and Education,1,,,,,2025-06-23 16:21:16.531,2025-06-23 16:21:16.531,42,
+98,Greece After the Thirty Years' Peace,2,,,,,2025-06-23 16:21:16.545,2025-06-23 16:21:16.545,42,
+99,Historical and Dramatic Literature of the Fifth Century,3,,,,,2025-06-23 16:21:16.558,2025-06-23 16:21:16.558,42,
+100,Intellectual Life in Fifth-Century Greece,4,,,,,2025-06-23 16:21:16.572,2025-06-23 16:21:16.572,42,
+101,Resources for War,5,,,,,2025-06-23 16:21:16.585,2025-06-23 16:21:16.585,42,
+102,Sources for Greece on the Eve of the War,6,,,,,2025-06-23 16:21:16.599,2025-06-23 16:21:16.599,42,
+103,The Breakdown of the Peace,7,,,,,2025-06-23 16:21:16.615,2025-06-23 16:21:16.615,42,
+104,The Physical Space of the Polis: Athens on the Eve of War,8,,,,,2025-06-23 16:21:16.628,2025-06-23 16:21:16.628,42,
+105,Between Peace and War,1,,,,,2025-06-23 16:21:16.647,2025-06-23 16:21:16.647,43,
+106,Fallout from the Long War,2,,,,,2025-06-23 16:21:16.659,2025-06-23 16:21:16.659,43,
+107,Sources for Greece During the Peloponnesian War,3,,,,,2025-06-23 16:21:16.671,2025-06-23 16:21:16.671,43,
+108,The Archidamian War (431-421 BC),4,,,,,2025-06-23 16:21:16.685,2025-06-23 16:21:16.685,43,
+109,The Invasion of Sicily (415-413 BC),5,,,,,2025-06-23 16:21:16.7,2025-06-23 16:21:16.7,43,
+110,The Rise of Comedy,6,,,,,2025-06-23 16:21:16.713,2025-06-23 16:21:16.713,43,
+111,The War in Retrospect,7,,,,,2025-06-23 16:21:16.726,2025-06-23 16:21:16.726,43,
+112,The War in the Aegean and the Oligarchic Coup at Athens (413-411 BC),8,,,,,2025-06-23 16:21:16.738,2025-06-23 16:21:16.738,43,
+113,Early Macedonia,1,,,,,2025-06-23 16:21:16.756,2025-06-23 16:21:16.756,44,
+114,Macedonian Domination of Greece,2,,,,,2025-06-23 16:21:16.768,2025-06-23 16:21:16.768,44,
+115,Macedonian Society and Kingship,3,,,,,2025-06-23 16:21:16.781,2025-06-23 16:21:16.781,44,
+116,Sources for Macedonian History,4,,,,,2025-06-23 16:21:16.798,2025-06-23 16:21:16.798,44,
+117,The Reign of Philip II,5,,,,,2025-06-23 16:21:16.811,2025-06-23 16:21:16.811,44,
+118,Consolidating Power,1,,,,,2025-06-23 16:21:16.828,2025-06-23 16:21:16.828,45,
+119,From Alexandria to Persepolis: The King of Asia (331-330 BC),2,,,,,2025-06-23 16:21:16.865,2025-06-23 16:21:16.865,45,
+120,From Issus to Egypt: Conquest of the Eastern Mediterranean (332-331 BC),3,,,,,2025-06-23 16:21:16.879,2025-06-23 16:21:16.879,45,
+121,India and the End of the Dream,4,,,,,2025-06-23 16:21:16.892,2025-06-23 16:21:16.892,45,
+122,Return to the West,5,,,,,2025-06-23 16:21:16.921,2025-06-23 16:21:16.921,45,
+123,Sources for the Reign of Alexander,6,,,,,2025-06-23 16:21:16.933,2025-06-23 16:21:16.933,45,
+124,The High Road to India: Alexander in Central Asia,7,,,,,2025-06-23 16:21:16.946,2025-06-23 16:21:16.946,45,
+125,A New World,1,,,,,2025-06-23 16:21:16.963,2025-06-23 16:21:16.963,46,
+126,Alexandria and Hellenistic Culture,2,,,,,2025-06-23 16:21:16.976,2025-06-23 16:21:16.976,46,
+127,Birth Pangs of the New Order (301-276 BC),3,,,,,2025-06-23 16:21:16.989,2025-06-23 16:21:16.989,46,
+128,Hellenistic Society,4,,,,,2025-06-23 16:21:17.004,2025-06-23 16:21:17.004,46,
+129,Social Relations in the Hellenistic World,5,,,,,2025-06-23 16:21:17.032,2025-06-23 16:21:17.032,46,
+130,Sources for the Hellenistic Period,6,,,,,2025-06-23 16:21:17.051,2025-06-23 16:21:17.051,46,
+131,The Macedonian Kingdoms,7,,,,,2025-06-23 16:21:17.067,2025-06-23 16:21:17.067,46,
+132,The Place of the Polis in the Cosmopolis,8,,,,,2025-06-23 16:21:17.079,2025-06-23 16:21:17.079,46,
+133,The Primacy of Antigonus the One-Eyed,9,,,,,2025-06-23 16:21:17.096,2025-06-23 16:21:17.096,46,
+134,The Regency of Perdiccas,10,,,,,2025-06-23 16:21:17.11,2025-06-23 16:21:17.11,46,
+135,The Struggle for the Succession,11,,,,,2025-06-23 16:21:17.124,2025-06-23 16:21:17.124,46,
+3,The Kings of the Pyramid Texts,3,,,,,2025-06-23 16:21:14.226,2025-06-28 19:07:10.505,1,525
+136,Pepi I Pyramid Texts,3,,,,,2025-08-18 18:16:23.906,2025-08-18 18:24:28.058,75,533

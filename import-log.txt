@@ -1,0 +1,528 @@
+≡ƒôü Using custom import directory: C:\Users\Trevor\Sites\master-order\history-plus-export
+≡ƒùæ∩╕Å  Clear existing data enabled: Will delete all existing History Plus data first
+≡ƒôÑ Initializing History Plus Data Import...
+≡ƒöì Detected database type: SQLITE
+Γ£à Connected to SQLITE database
+≡ƒôü Import directory: C:\Users\Trevor\Sites\master-order\history-plus-export
+
+ΓÜá∩╕Å  IMPORT CONFIRMATION:
+   This will import History Plus data to SQLITE
+   ≡ƒùæ∩╕Å  ALL EXISTING HISTORY PLUS DATA WILL BE DELETED FIRST
+   This is a destructive operation that cannot be undone
+   Import directory: C:\Users\Trevor\Sites\master-order\history-plus-export
+
+Proceed with import? (y/N): 
+≡ƒÜÇ Starting comprehensive History Plus data import...
+
+≡ƒùæ∩╕Å  Clearing all existing History Plus data...
+   Deleting user activity records...
+   Deleting content records...
+Γ£à Deleted 6748 existing records
+   User section reads: 135
+   User chapter reads: 50
+   User video watches: 595
+   User book reads: 2
+   User event reviews: 445
+   History sections: 136
+   History chapters: 77
+   History books: 9
+   History videos: 4755
+   History channels: 78
+   Historical events: 466
+
+≡ƒôè Export Summary:
+   Export Date: 2025-09-13T00:02:02.113Z
+   Files: 11
+   Source Analysis:
+     historicalEvents: 466
+     historyVideos: 4755
+     historyBooks: 9
+     historyChapters: 77
+     historySections: 136
+     historyChannels: 78
+     userEventReviews: 445
+     userVideoWatches: 595
+     userBookReads: 2
+     userChapterReads: 50
+     userSectionReads: 135
+
+≡ƒôÑ Importing Historical Events...
+≡ƒôä Loaded 466 records from historical_events.csv
+   Found 0 existing (will skip), 466 new records
+   Created 466 new records
+Γ£à Processed historical events
+≡ƒôÑ Importing History Channels...
+≡ƒôä Loaded 78 records from history_channels.csv
+≡ƒôä Loaded 78 records from history_channels.csv
+≡ƒöì First channel record structure: [ 'id', 'name', 'description', 'url', 'createdAt', 'updatedAt' ]
+≡ƒöì First channel record: {
+  "id": 2,
+  "name": "History Time",
+  "description": null,
+  "url": null,
+  "createdAt": "2025-06-23T23:09:12.643Z",
+  "updatedAt": "2025-06-23T23:09:12.643Z"
+}
+ΓÜá∩╕Å  No URL found for channel 2 (History Time), using fallback: https://channel-2
+ΓÜá∩╕Å  No URL found for channel 3 (History With Cy), using fallback: https://channel-3
+ΓÜá∩╕Å  No URL found for channel 4 (D-O Research Hub), using fallback: https://channel-4
+ΓÜá∩╕Å  No URL found for channel 5 (EarlyHumans), using fallback: https://channel-5
+ΓÜá∩╕Å  No URL found for channel 6 (BioGraphics), using fallback: https://channel-6
+ΓÜá∩╕Å  No URL found for channel 7 (Dr. Rob's Archaeofilms), using fallback: https://channel-7
+ΓÜá∩╕Å  No URL found for channel 8 (History Hit), using fallback: https://channel-8
+ΓÜá∩╕Å  No URL found for channel 9 (Kings and Generals), using fallback: https://channel-9
+ΓÜá∩╕Å  No URL found for channel 10 (Inspire Education), using fallback: https://channel-10
+ΓÜá∩╕Å  No URL found for channel 11 (History Explained), using fallback: https://channel-11
+ΓÜá∩╕Å  No URL found for channel 12 (World of Antiquity), using fallback: https://channel-12
+ΓÜá∩╕Å  No URL found for channel 13 (The Grand Portfolio), using fallback: https://channel-13
+ΓÜá∩╕Å  No URL found for channel 14 (Tiny Epics), using fallback: https://channel-14
+ΓÜá∩╕Å  No URL found for channel 15 (Penn Museum), using fallback: https://channel-15
+ΓÜá∩╕Å  No URL found for channel 16 (Dan Davis History), using fallback: https://channel-16
+ΓÜá∩╕Å  No URL found for channel 17 (Celtic History Decoded), using fallback: https://channel-17
+ΓÜá∩╕Å  No URL found for channel 18 (Dig it with Raven), using fallback: https://channel-18
+ΓÜá∩╕Å  No URL found for channel 19 (Study of Antiquity and the Middle Ages), using fallback: https://channel-19
+ΓÜá∩╕Å  No URL found for channel 20 (Table of Gods), using fallback: https://channel-20
+ΓÜá∩╕Å  No URL found for channel 21 (The Honorable Caligula), using fallback: https://channel-21
+ΓÜá∩╕Å  No URL found for channel 22 (See U in History), using fallback: https://channel-22
+ΓÜá∩╕Å  No URL found for channel 23 (Odyssey), using fallback: https://channel-23
+ΓÜá∩╕Å  No URL found for channel 24 (cf-apps7865), using fallback: https://channel-24
+ΓÜá∩╕Å  No URL found for channel 25 (Know the Science), using fallback: https://channel-25
+ΓÜá∩╕Å  No URL found for channel 26 (IT Scholar), using fallback: https://channel-26
+ΓÜá∩╕Å  No URL found for channel 27 (RelicHistory), using fallback: https://channel-27
+ΓÜá∩╕Å  No URL found for channel 28 (Forest Archaic Collective), using fallback: https://channel-28
+ΓÜá∩╕Å  No URL found for channel 29 (The British Institute for the Study of Iraq), using fallback: https://channel-29
+ΓÜá∩╕Å  No URL found for channel 30 (Epimetheus), using fallback: https://channel-30
+ΓÜá∩╕Å  No URL found for channel 31 (The Archives of Thot), using fallback: https://channel-31
+ΓÜá∩╕Å  No URL found for channel 32 (DW World History), using fallback: https://channel-32
+ΓÜá∩╕Å  No URL found for channel 33 (Life of the Legends), using fallback: https://channel-33
+ΓÜá∩╕Å  No URL found for channel 34 (Ancient History Profiles), using fallback: https://channel-34
+ΓÜá∩╕Å  No URL found for channel 35 (National Geographic), using fallback: https://channel-35
+ΓÜá∩╕Å  No URL found for channel 36 (The People Profiles), using fallback: https://channel-36
+ΓÜá∩╕Å  No URL found for channel 37 (SLICE Full Doc), using fallback: https://channel-37
+ΓÜá∩╕Å  No URL found for channel 38 (Thersites the Historian), using fallback: https://channel-38
+ΓÜá∩╕Å  No URL found for channel 39 (Anthro Joe), using fallback: https://channel-39
+ΓÜá∩╕Å  No URL found for channel 40 (Archaeoviking), using fallback: https://channel-40
+ΓÜá∩╕Å  No URL found for channel 41 (Historical Adventure), using fallback: https://channel-41
+ΓÜá∩╕Å  No URL found for channel 42 (Wanax TV), using fallback: https://channel-42
+ΓÜá∩╕Å  No URL found for channel 43 (Extra History), using fallback: https://channel-43
+ΓÜá∩╕Å  No URL found for channel 44 (Crecganford), using fallback: https://channel-44
+ΓÜá∩╕Å  No URL found for channel 45 (Crash Course), using fallback: https://channel-45
+ΓÜá∩╕Å  No URL found for channel 46 (Stefan Milo), using fallback: https://channel-46
+ΓÜá∩╕Å  No URL found for channel 47 (SandRhoman History), using fallback: https://channel-47
+ΓÜá∩╕Å  No URL found for channel 48 (Smarthistory), using fallback: https://channel-48
+ΓÜá∩╕Å  No URL found for channel 49 (Side Projects), using fallback: https://channel-49
+ΓÜá∩╕Å  No URL found for channel 50 (The Institute for the Study of Ancient Cultures), using fallback: https://channel-50
+ΓÜá∩╕Å  No URL found for channel 51 (Ortiz, Jemuel Edrien), using fallback: https://channel-51
+ΓÜá∩╕Å  No URL found for channel 52 (Amunology), using fallback: https://channel-52
+ΓÜá∩╕Å  No URL found for channel 53 (SciShow), using fallback: https://channel-53
+ΓÜá∩╕Å  No URL found for channel 54 (Geographics), using fallback: https://channel-54
+ΓÜá∩╕Å  No URL found for channel 55 (Timeline), using fallback: https://channel-55
+ΓÜá∩╕Å  No URL found for channel 56 (The British Museum), using fallback: https://channel-56
+ΓÜá∩╕Å  No URL found for channel 57 (Harappa.com: The Ancient Indus Civilization), using fallback: https://channel-57
+ΓÜá∩╕Å  No URL found for channel 58 (World History Encyclopedia), using fallback: https://channel-58
+ΓÜá∩╕Å  No URL found for channel 59 (NOVA PBS Official), using fallback: https://channel-59
+ΓÜá∩╕Å  No URL found for channel 60 (TED-Ed), using fallback: https://channel-60
+ΓÜá∩╕Å  No URL found for channel 61 (Smithsonian Channel), using fallback: https://channel-61
+ΓÜá∩╕Å  No URL found for channel 62 (How to Make Everything), using fallback: https://channel-62
+ΓÜá∩╕Å  No URL found for channel 63 (History Class), using fallback: https://channel-63
+ΓÜá∩╕Å  No URL found for channel 64 (Stephan's History of the World), using fallback: https://channel-64
+ΓÜá∩╕Å  No URL found for channel 65 (vlad9vt), using fallback: https://channel-65
+ΓÜá∩╕Å  No URL found for channel 66 (The Historian's Craft), using fallback: https://channel-66
+ΓÜá∩╕Å  No URL found for channel 67 (Digital Hammurabi), using fallback: https://channel-67
+ΓÜá∩╕Å  No URL found for channel 68 (Egyptology 101), using fallback: https://channel-68
+ΓÜá∩╕Å  No URL found for channel 69 (Prof. Neal's Art Appreciation & Art History), using fallback: https://channel-69
+ΓÜá∩╕Å  No URL found for channel 70 (Invicta), using fallback: https://channel-70
+ΓÜá∩╕Å  No URL found for channel 71 (American Bookbinders Museum), using fallback: https://channel-71
+ΓÜá∩╕Å  No URL found for channel 72 (SCA Lochac), using fallback: https://channel-72
+ΓÜá∩╕Å  No URL found for channel 73 (Ancient Americas), using fallback: https://channel-73
+ΓÜá∩╕Å  No URL found for channel 74 (Our History: Big Bang to 2025), using fallback: https://channel-74
+ΓÜá∩╕Å  No URL found for channel 75 (The Histocrat), using fallback: https://channel-75
+ΓÜá∩╕Å  No URL found for channel 76 (Survive the Jive), using fallback: https://channel-76
+ΓÜá∩╕Å  No URL found for channel 77 (Fortress of Lugh), using fallback: https://channel-77
+ΓÜá∩╕Å  No URL found for channel 78 (Dig.), using fallback: https://channel-78
+ΓÜá∩╕Å  No URL found for channel 1 (Test History Channel), using fallback: https://channel-1
+   Found 0 existing (will skip), 78 new records
+Γ£à Imported 78 history channels
+≡ƒôÑ Importing History Videos...
+≡ƒôä Loaded 4755 records from history_videos.csv
+≡ƒôä Loaded 4755 records from history_videos.csv
+   Found 0 existing (will skip), 4755 new records
+≡ƒöä Building video mappings for all records...
+Γ£à Imported 4755 history videos
+Γ£à Built mapping for 4755 videos
+≡ƒôÑ Importing History Books...
+≡ƒôä Loaded 9 records from history_books.csv
+≡ƒöä Building book ID mapping...
+Γ£à Built mapping for 0 existing books
+   Found 0 existing (will skip), 9 new records
+Γ£à Imported 9 history books
+≡ƒöä Updating book ID mapping for newly imported records...
+   Mapped new book 1 -> 1 (Stonehenge)
+   Mapped new book 2 -> 2 (The Oxford History of Ancient Egypt)
+   Mapped new book 3 -> 3 (Ancient Egyptian Literature)
+   Mapped new book 4 -> 4 (A History of the Ancient Near East)
+   Mapped new book 5 -> 5 (Babylon: Mesopotamia and the Birth of Civilization)
+   Mapped new book 6 -> 6 (Europe Between the Oceans)
+   Mapped new book 7 -> 7 (Ancient Greece)
+   Mapped new book 8 -> 8 (India: A History)
+   Mapped new book 9 -> 9 (The Ghosts of Cannae)
+≡ƒôÑ Importing History Chapters...
+≡ƒôä Loaded 77 records from history_chapters.csv
+≡ƒôä Loaded 77 records from history_chapters.csv
+≡ƒöä Book ID mappings available: [
+  [ 1, 1 ], [ 2, 2 ],
+  [ 3, 3 ], [ 4, 4 ],
+  [ 5, 5 ], [ 6, 6 ],
+  [ 7, 7 ], [ 8, 8 ],
+  [ 9, 9 ]
+]
+   Chapter 1: mapping bookId 2 -> 2
+   Chapter 2: mapping bookId 3 -> 3
+   Chapter 3: mapping bookId 4 -> 4
+   Chapter 4: mapping bookId 5 -> 5
+   Chapter 5: mapping bookId 6 -> 6
+   Chapter 6: mapping bookId 2 -> 2
+   Chapter 7: mapping bookId 2 -> 2
+   Chapter 8: mapping bookId 5 -> 5
+   Chapter 9: mapping bookId 4 -> 4
+   Chapter 10: mapping bookId 7 -> 7
+   Chapter 11: mapping bookId 4 -> 4
+   Chapter 12: mapping bookId 5 -> 5
+   Chapter 13: mapping bookId 5 -> 5
+   Chapter 14: mapping bookId 2 -> 2
+   Chapter 15: mapping bookId 4 -> 4
+   Chapter 16: mapping bookId 2 -> 2
+   Chapter 17: mapping bookId 4 -> 4
+   Chapter 18: mapping bookId 8 -> 8
+   Chapter 19: mapping bookId 2 -> 2
+   Chapter 20: mapping bookId 2 -> 2
+   Chapter 21: mapping bookId 4 -> 4
+   Chapter 22: mapping bookId 4 -> 4
+   Chapter 23: mapping bookId 2 -> 2
+   Chapter 24: mapping bookId 4 -> 4
+   Chapter 25: mapping bookId 4 -> 4
+   Chapter 26: mapping bookId 4 -> 4
+   Chapter 27: mapping bookId 5 -> 5
+   Chapter 28: mapping bookId 2 -> 2
+   Chapter 29: mapping bookId 2 -> 2
+   Chapter 30: mapping bookId 2 -> 2
+   Chapter 31: mapping bookId 4 -> 4
+   Chapter 32: mapping bookId 4 -> 4
+   Chapter 33: mapping bookId 4 -> 4
+   Chapter 34: mapping bookId 4 -> 4
+   Chapter 35: mapping bookId 7 -> 7
+   Chapter 36: mapping bookId 7 -> 7
+   Chapter 37: mapping bookId 7 -> 7
+   Chapter 38: mapping bookId 7 -> 7
+   Chapter 39: mapping bookId 7 -> 7
+   Chapter 40: mapping bookId 7 -> 7
+   Chapter 41: mapping bookId 7 -> 7
+   Chapter 42: mapping bookId 7 -> 7
+   Chapter 43: mapping bookId 7 -> 7
+   Chapter 44: mapping bookId 7 -> 7
+   Chapter 45: mapping bookId 7 -> 7
+   Chapter 46: mapping bookId 7 -> 7
+   Chapter 47: mapping bookId 6 -> 6
+   Chapter 48: mapping bookId 6 -> 6
+   Chapter 49: mapping bookId 6 -> 6
+   Chapter 50: mapping bookId 6 -> 6
+   Chapter 51: mapping bookId 6 -> 6
+   Chapter 52: mapping bookId 6 -> 6
+   Chapter 53: mapping bookId 6 -> 6
+   Chapter 54: mapping bookId 8 -> 8
+   Chapter 55: mapping bookId 8 -> 8
+   Chapter 56: mapping bookId 8 -> 8
+   Chapter 57: mapping bookId 8 -> 8
+   Chapter 58: mapping bookId 8 -> 8
+   Chapter 59: mapping bookId 8 -> 8
+   Chapter 60: mapping bookId 8 -> 8
+   Chapter 61: mapping bookId 8 -> 8
+   Chapter 62: mapping bookId 8 -> 8
+   Chapter 63: mapping bookId 8 -> 8
+   Chapter 64: mapping bookId 8 -> 8
+   Chapter 65: mapping bookId 8 -> 8
+   Chapter 66: mapping bookId 8 -> 8
+   Chapter 67: mapping bookId 8 -> 8
+   Chapter 68: mapping bookId 8 -> 8
+   Chapter 69: mapping bookId 8 -> 8
+   Chapter 70: mapping bookId 8 -> 8
+   Chapter 71: mapping bookId 8 -> 8
+   Chapter 72: mapping bookId 8 -> 8
+   Chapter 73: mapping bookId 8 -> 8
+   Chapter 74: mapping bookId 8 -> 8
+   Chapter 75: mapping bookId 3 -> 3
+   Chapter 76: mapping bookId 3 -> 3
+   Chapter 77: mapping bookId 3 -> 3
+≡ƒöä Building chapter mappings after import...
+Γ£à Built mapping for 0 chapters
+≡ƒöä Building chapter ID mapping...
+Γ£à Built mapping for 0 existing chapters
+   Found 0 existing (will skip), 77 new records
+Γ£à Imported 77 history chapters
+≡ƒöä Updating chapter ID mapping for newly imported records...
+   Mapped new chapter 1 -> 1 (The Old Kingdom)
+   Mapped new chapter 2 -> 2 (Part 1)
+   Mapped new chapter 3 -> 3 (4 Political Centralization in the Late Third Millennium 63)
+   Mapped new chapter 4 -> 4 (Chapter 6)
+   Mapped new chapter 5 -> 5 (7 Taking to the Sea - Crossing the Peninsula: 2800-1300 BC)
+   Mapped new chapter 6 -> 6 (The First Intermediate period (c. 2160-2055 BC) / Stephan Seidlmayer)
+   Mapped new chapter 7 -> 7 (The Middle Kingdom renaissance (c. 2055-1650 BC) / Gae Callender)
+   Mapped new chapter 8 -> 8 (Chapter 7)
+   Mapped new chapter 9 -> 9 (6 The Growth of Territorial States in the Early Second Millennium 106)
+   Mapped new chapter 10 -> 10 (I. EARLY GREECE AND THE BRONZE AGE)
+   Mapped new chapter 11 -> 11 (5 The Near East in the Early Second Millennium 85)
+   Mapped new chapter 12 -> 12 (Chapter 8)
+   Mapped new chapter 13 -> 13 (Chapter 9)
+   Mapped new chapter 14 -> 14 (The Second Intermediate period (c. 1650-1550 BC) / Janine Bourriau)
+   Mapped new chapter 15 -> 15 (9 Kassites, Assyrians, and Elamites 171)
+   Mapped new chapter 16 -> 16 (The 18th dynasty before the Amarna period (c. 1550-1352 BC) / Betsy M. Bryan)
+   Mapped new chapter 17 -> 17 (8 The Western States of the Late Second Millennium 149)
+   Mapped new chapter 18 -> 18 (2 Vedic Values: C1700-900 B C 19)
+   Mapped new chapter 19 -> 19 (10 The Amarna period and the Later New Kingdom (c. 1352-1069 BC) / Jacobus Van Dijk)
+   Mapped new chapter 20 -> 20 (11 Egypt and the outside world / Ian Shaw)
+   Mapped new chapter 21 -> 21 (7 The Club of the Great Powers 129)
+   Mapped new chapter 22 -> 22 (10 The Collapse of the Regional System and Its Aftermath 189)
+   Mapped new chapter 23 -> 23 (The Third Intermediate period (1069-664 BC) / John Taylor)
+   Mapped new chapter 24 -> 24 (11 The Near East at the Start of the First Millennium 209)
+   Mapped new chapter 25 -> 25 (12 The Rise of Assyria 230)
+   Mapped new chapter 26 -> 26 (13 Assyria's World Domination 248)
+   Mapped new chapter 27 -> 27 (Chapter 10)
+   Mapped new chapter 28 -> 28 (The Late period (664-332 BC) / Alan B. Lloyd)
+   Mapped new chapter 29 -> 29 (The Ptolemaic period (332-30 BC) / Alan B. Lloyd)
+   Mapped new chapter 30 -> 30 (The Roman period (30 BC-AD 395) / David Peacock.)
+   Mapped new chapter 31 -> 31 (14 The Medes and Babylonians 270)
+   Mapped new chapter 32 -> 32 (15 The Creation of a World Empire: Persia 288)
+   Mapped new chapter 33 -> 33 (16 Governing a World Empire: Persia 306)
+   Mapped new chapter 34 -> 34 (Epilogue 323)
+   Mapped new chapter 35 -> 35 (EPILOGUE)
+   Mapped new chapter 36 -> 36 (II. THE EARLY IRON AGE (C. 1200-750/700 BC))
+   Mapped new chapter 37 -> 37 (III. ARCHAIC GREECE (750/700-480 BC))
+   Mapped new chapter 38 -> 38 (IV. SPARTA)
+   Mapped new chapter 39 -> 39 (IX. THE GREEK WORLD OF THE EARLY FOURTH CENTURY)
+   Mapped new chapter 40 -> 40 (V. THE GROWTH OF ATHENS AND THE PERSIAN WARS)
+   Mapped new chapter 41 -> 41 (VI. THE RIVALRIES OF THE GREEK CITY-STATES AND THE GROWTH OF ATHENIAN DEMOCRACY)
+   Mapped new chapter 42 -> 42 (VII. GREECE ON THE EVE OF THE PELOPONNESIAN WAR)
+   Mapped new chapter 43 -> 43 (VIII. THE PELOPONNESIAN WAR)
+   Mapped new chapter 44 -> 44 (X. PHILIP II AND MACEDONIAN SUPREMACY)
+   Mapped new chapter 45 -> 45 (XI. ALEXANDER THE GREAT)
+   Mapped new chapter 46 -> 46 (XII. ALEXANDER'S SUCCESSORS AND THE COSMOPOLIS)
+   Mapped new chapter 47 -> 47 (8 Emerging Eurozones: 1300-800 BC)
+   Mapped new chapter 48 -> 48 (9 The three hundred years that changed the world: 800-500 BC)
+   Mapped new chapter 49 -> 49 (10 States in collision: 500-140 BC)
+   Mapped new chapter 50 -> 50 (11 The interlude of Empire: 140 BC-AD 300)
+   Mapped new chapter 51 -> 51 (12 The change of the tide: AD 300-800)
+   Mapped new chapter 52 -> 52 (13 Europe rebalanced: AD 800-1000)
+   Mapped new chapter 53 -> 53 (14 The longue duree)
+   Mapped new chapter 54 -> 54 (3 The Epic Age: C900-520 B C 37)
+   Mapped new chapter 55 -> 55 (4 Out of the Myth-Smoke: C520-C320 B C 56)
+   Mapped new chapter 56 -> 56 (5 Gloria Maurya: C320-200 B C 78)
+   Mapped new chapter 57 -> 57 (6 An Age of Paradox: C200 B C-C300 ad 101)
+   Mapped new chapter 58 -> 58 (7 Gupta Gold: C300-500 A D 129)
+   Mapped new chapter 59 -> 59 (8 Lords of the Universe: C500-700 155)
+   Mapped new chapter 60 -> 60 (9 Dharma and Defiance: C700-C900 180)
+   Mapped new chapter 61 -> 61 (10 Natraj, the Rule of the Dance: C950-1180 202)
+   Mapped new chapter 62 -> 62 (11 The Triumph of the Sultans: C1180-1320 231)
+   Mapped new chapter 63 -> 63 (12 Other Indias: 1320-1525 262)
+   Mapped new chapter 64 -> 64 (13 The Making of the Mughal Empire: 1500-1605 289)
+   Mapped new chapter 65 -> 65 (14 Mughal Pomp, Indian Circumstance: 1605-1682 320)
+   Mapped new chapter 66 -> 66 (15 From Taj to Raj: 1682-1750 348)
+   Mapped new chapter 67 -> 67 (16 The British Conquest: 1750-1820 383)
+   Mapped new chapter 68 -> 68 (17 Pax Britannica: 1820-1880 414)
+   Mapped new chapter 69 -> 69 (18 Awake the Nation: 1880-1930 448)
+   Mapped new chapter 70 -> 70 (19 At the Stroke of the Midnight Hour: 1930-1948 484)
+   Mapped new chapter 71 -> 71 (20 Surgical Procedures: 1948-1965 510)
+   Mapped new chapter 72 -> 72 (21 The Spectre of Separatism: 1962-1972 537)
+   Mapped new chapter 73 -> 73 (22 'Demockery': 1972-1984 561)
+   Mapped new chapter 74 -> 74 (23 Midnight's Grandchildren: 1984- 582)
+   Mapped new chapter 75 -> 75 (From the Pyramid Texts)
+   Mapped new chapter 76 -> 76 (A Theological Treatise)
+   Mapped new chapter 77 -> 77 (Didactic Literature)
+≡ƒôÑ Importing History Sections...
+≡ƒôä Loaded 136 records from history_sections.csv
+≡ƒöä Building section mappings after import...
+Γ£à Built mapping for 0 sections
+≡ƒöä Building section ID mapping...
+Γ£à Built mapping for 0 existing sections
+   Found 0 existing (will skip), 136 new records
+Γ£à Imported 136 history sections
+≡ƒöä Updating section ID mapping for newly imported records...
+   Mapped new section 1 -> 1 (Sun-Temples and the Ascendancy of the God Ra)
+   Mapped new section 2 -> 2 (The Fifth Dynasty)
+   Mapped new section 135 -> 135 (The Kings of the Pyramid Texts)
+   Mapped new section 3 -> 3 (Monumental Inscriptions from Private Tombs)
+   Mapped new section 4 -> 4 (The Sixth Dynasty)
+   Mapped new section 5 -> 5 (4.1 The Kings of Akkad 64)
+   Mapped new section 6 -> 6 (The Carpathian Basin and the Steppes (p 221))
+   Mapped new section 7 -> 7 (The Decline of the Old Kingdom)
+   Mapped new section 8 -> 8 (4.2 The Third Dynasty of Ur 74)
+   Mapped new section 9 -> 9 (6.1 Shamshi-Adad and the Kingdom of Upper Mesopotamia 108)
+   Mapped new section 10 -> 10 (Minoan Civilization)
+   Mapped new section 11 -> 11 (Crete and the Minoans (p 188))
+   Mapped new section 12 -> 12 (5.1 Nomads and Sedentary People 86)
+   Mapped new section 13 -> 13 (5.2 Babylonia 90)
+   Mapped new section 14 -> 14 (5.3 Assyria and the East 94)
+   Mapped new section 15 -> 15 (5.4 Mari and the West 100)
+   Mapped new section 16 -> 16 (6.2 Hammurabi's Babylon 111)
+   Mapped new section 17 -> 17 (Enter Mycenaeans (p 196) & The Tyrrhenian Sea and Beyond)
+   Mapped new section 18 -> 18 (The Nordic Realms (p 213) & Adventurers and Heroes (p 227))
+   Mapped new section 19 -> 19 (6.3 The Old Hittite Kingdom 120)
+   Mapped new section 20 -> 20 (Greece and the Aegean in the Late Bronze Age (1600-1200 BC))
+   Mapped new section 21 -> 21 (6.4 The "Dark Age" 123)
+   Mapped new section 22 -> 22 (9.1 Babylonia 172)
+   Mapped new section 23 -> 23 (8.1 Mittani 150)
+   Mapped new section 24 -> 24 (9.3 The Middle Elamite Kingdom 184)
+   Mapped new section 25 -> 25 (9.2 Assyria 178)
+   Mapped new section 26 -> 26 (8.2 The Hittite New Kingdom 155)
+   Mapped new section 27 -> 27 (8.3 Syria-Palestine 163)
+   Mapped new section 28 -> 28 (13.1 The Creation of an Imperial Structure 249)
+   Mapped new section 29 -> 29 (13.2 The Defeat of the Great Rivals 252)
+   Mapped new section 30 -> 30 (13.3 The Administration and Ideology of the Empire 259)
+   Mapped new section 31 -> 31 (13.4 Assyrian Culture 260)
+   Mapped new section 32 -> 32 (13.5 Assyria's Fall 265)
+   Mapped new section 33 -> 33 (14.1 The Medes and the Anatolian States 271)
+   Mapped new section 34 -> 34 (14.2 The Neo-Babylonian Dynasty 275)
+   Mapped new section 35 -> 35 (15.1 The Sources and Their Challenges 289)
+   Mapped new section 36 -> 36 (15.2 The Rise of Persia and Its Expansion 290)
+   Mapped new section 37 -> 37 (15.3 Governance of the Subject States 295)
+   Mapped new section 38 -> 38 (15.4 The Creation of an Imperial Structure 298)
+   Mapped new section 39 -> 39 (16.1 Political Developments 306)
+   Mapped new section 40 -> 40 (16.2 Administration of the Empire 310)
+   Mapped new section 41 -> 41 (16.3 Local Forms of Persian Administration 313)
+   Mapped new section 42 -> 42 (16.4 The End of the Empire 319)
+   Mapped new section 43 -> 43 (A Greco-Roman World)
+   Mapped new section 44 -> 44 (The Arrival of the Romans)
+   Mapped new section 45 -> 45 (The End of the Mycenaean Civilization)
+   Mapped new section 46 -> 46 (The Years of Glory (c. 1400-1200 BC))
+   Mapped new section 47 -> 47 (* The End of Early Iron Age II (c. 750-700 BC))
+   Mapped new section 48 -> 48 (Community, Household, and Economy in the Early Iron Age II)
+   Mapped new section 49 -> 49 (Decline and Recovery, Early Iron Age I (c. 1200-900 BC))
+   Mapped new section 50 -> 50 (Homer and Oral Poetry)
+   Mapped new section 51 -> 51 (Homeric Society)
+   Mapped new section 52 -> 52 (Revival (c. 900-750 BC))
+   Mapped new section 53 -> 53 (Sources for the Early Iron Age)
+   Mapped new section 54 -> 54 (The New Society of Early Iron Age II (900-750/700 BC))
+   Mapped new section 55 -> 55 (Art and Architecture)
+   Mapped new section 56 -> 56 (Economic and Social Divisions in the Early Poleis)
+   Mapped new section 57 -> 57 (Emigration and Expansion: The Colonizing Movement)
+   Mapped new section 58 -> 58 (Government in the Early City-States)
+   Mapped new section 59 -> 59 (Hesiod: The View from Outside)
+   Mapped new section 60 -> 60 (Lyric Poetry)
+   Mapped new section 61 -> 61 (Panhellenic Religious Institutions)
+   Mapped new section 62 -> 62 (Philosophy and Science)
+   Mapped new section 63 -> 63 (Relations Among States)
+   Mapped new section 64 -> 64 (Sources for the Seventh and Sixth Centuries)
+   Mapped new section 65 -> 65 (The Archaic Age Tyrants)
+   Mapped new section 66 -> 66 (The Formation of the City-State (Polis))
+   Mapped new section 67 -> 67 (The Hoplite Army)
+   Mapped new section 68 -> 68 (Demography and the Spartan Economy)
+   Mapped new section 69 -> 69 (Historical Change in Sparta)
+   Mapped new section 70 -> 70 (Sources for Spartan History and Institutions)
+   Mapped new section 71 -> 71 (Sparta and Greece)
+   Mapped new section 72 -> 72 (Spartan Government)
+   Mapped new section 73 -> 73 (The Early Iron Age and the Archaic Period)
+   Mapped new section 74 -> 74 (The Spartan Mirage in Western Thought)
+   Mapped new section 75 -> 75 (The Spartan System)
+   Mapped new section 76 -> 76 (Law and Democracy in Athens)
+   Mapped new section 77 -> 77 (Philosophy and the Polis)
+   Mapped new section 78 -> 78 (Social and Economic Strains in Postwar Greece)
+   Mapped new section 79 -> 79 (Sources for Fourth-Century Greece)
+   Mapped new section 80 -> 80 (The Fourth-Century Polis)
+   Mapped new section 81 -> 81 (Athens from the Bronze Age to the Early Archaic Age)
+   Mapped new section 82 -> 82 (Pisistratus and His Sons)
+   Mapped new section 83 -> 83 (Sources for Early Athens)
+   Mapped new section 84 -> 84 (The Other War: Carthage and the Greek Cities of Sicily)
+   Mapped new section 85 -> 85 (The Reforms of Cleisthenes)
+   Mapped new section 86 -> 86 (The Reforms of Solon)
+   Mapped new section 87 -> 87 (The Rise of Persia)
+   Mapped new section 88 -> 88 (The Wars Between Greece and Persia)
+   Mapped new section 89 -> 89 (Literature and Art)
+   Mapped new section 90 -> 90 (Oikos and Polis)
+   Mapped new section 91 -> 91 (Pericles and the Growth of Athenian Democracy)
+   Mapped new section 92 -> 92 (Sources for the Decades After the Persian Wars)
+   Mapped new section 93 -> 93 (The "First" (Undeclared) Peloponnesian War (460-445 BC))
+   Mapped new section 94 -> 94 (The Aftermath of the Persian Wars and the Foundation of the Delian League)
+   Mapped new section 95 -> 95 (The Greek Economy)
+   Mapped new section 96 -> 96 (Currents in Greek Thought and Education)
+   Mapped new section 97 -> 97 (Greece After the Thirty Years' Peace)
+   Mapped new section 98 -> 98 (Historical and Dramatic Literature of the Fifth Century)
+   Mapped new section 99 -> 99 (Intellectual Life in Fifth-Century Greece)
+   Mapped new section 100 -> 100 (Resources for War)
+   Mapped new section 101 -> 101 (Sources for Greece on the Eve of the War)
+   Mapped new section 102 -> 102 (The Breakdown of the Peace)
+   Mapped new section 103 -> 103 (The Physical Space of the Polis: Athens on the Eve of War)
+   Mapped new section 104 -> 104 (Between Peace and War)
+   Mapped new section 105 -> 105 (Fallout from the Long War)
+   Mapped new section 106 -> 106 (Sources for Greece During the Peloponnesian War)
+   Mapped new section 107 -> 107 (The Archidamian War (431-421 BC))
+   Mapped new section 108 -> 108 (The Invasion of Sicily (415-413 BC))
+   Mapped new section 109 -> 109 (The Rise of Comedy)
+   Mapped new section 110 -> 110 (The War in Retrospect)
+   Mapped new section 111 -> 111 (The War in the Aegean and the Oligarchic Coup at Athens (413-411 BC))
+   Mapped new section 112 -> 112 (Early Macedonia)
+   Mapped new section 113 -> 113 (Macedonian Domination of Greece)
+   Mapped new section 114 -> 114 (Macedonian Society and Kingship)
+   Mapped new section 115 -> 115 (Sources for Macedonian History)
+   Mapped new section 116 -> 116 (The Reign of Philip II)
+   Mapped new section 117 -> 117 (Consolidating Power)
+   Mapped new section 118 -> 118 (From Alexandria to Persepolis: The King of Asia (331-330 BC))
+   Mapped new section 119 -> 119 (From Issus to Egypt: Conquest of the Eastern Mediterranean (332-331 BC))
+   Mapped new section 120 -> 120 (India and the End of the Dream)
+   Mapped new section 121 -> 121 (Return to the West)
+   Mapped new section 122 -> 122 (Sources for the Reign of Alexander)
+   Mapped new section 123 -> 123 (The High Road to India: Alexander in Central Asia)
+   Mapped new section 124 -> 124 (A New World)
+   Mapped new section 125 -> 125 (Alexandria and Hellenistic Culture)
+   Mapped new section 126 -> 126 (Birth Pangs of the New Order (301-276 BC))
+   Mapped new section 127 -> 127 (Hellenistic Society)
+   Mapped new section 128 -> 128 (Social Relations in the Hellenistic World)
+   Mapped new section 129 -> 129 (Sources for the Hellenistic Period)
+   Mapped new section 130 -> 130 (The Macedonian Kingdoms)
+   Mapped new section 131 -> 131 (The Place of the Polis in the Cosmopolis)
+   Mapped new section 132 -> 132 (The Primacy of Antigonus the One-Eyed)
+   Mapped new section 133 -> 133 (The Regency of Perdiccas)
+   Mapped new section 134 -> 134 (The Struggle for the Succession)
+   Mapped new section 136 -> 136 (Pepi I Pyramid Texts)
+≡ƒôÑ Importing User Event Reviews...
+≡ƒôä Loaded 445 records from user_event_reviews.csv
+   Found 0 existing (will skip), 445 new records
+Γ£à Imported 445 user event reviews
+≡ƒôÑ Importing User Video Watches...
+≡ƒôä Loaded 595 records from user_video_watches.csv
+≡ƒöù Debug: Video mappings available: 4755
+   First few mappings: 231->231, 232->232, 233->233
+≡ƒöì Debug: Processing 595 video watch records...
+   Sample record: {"id":"c427cd45-240e-4f27-9086-35cbbe647f27","userId":null,"videoId":4456,"watched":true,"watchDate":null,"progress":null,"createdAt":"2025-06-23T23:13:02.933Z","updatedAt":"2025-06-23T23:13:02.933Z"}
+   Mapped 595 video watches, skipped 0 (unmappable videos)
+   Found 0 existing (will skip), 595 new records
+Γ£à Imported 595 user video watches
+≡ƒôÑ Importing User Book Reads...
+≡ƒôä Loaded 2 records from user_book_reads.csv
+   Found 0 existing (will skip), 2 new records
+Γ£à Imported 2 user book reads
+≡ƒôÑ Importing User Chapter Reads...
+≡ƒôä Loaded 50 records from user_chapter_reads.csv
+   Mapped 50 chapter reads, skipped 0 (unmappable chapters)
+   Found 0 existing (will skip), 50 new records
+Γ£à Imported 50 user chapter reads
+≡ƒôÑ Importing User Section Reads...
+≡ƒôä Loaded 135 records from user_section_reads.csv
+   Mapped 135 section reads, skipped 0 (unmappable sections)
+   Found 0 existing (will skip), 135 new records
+Γ£à Imported 135 user section reads
+
+Γ£à Import completed!
+≡ƒôè Import Statistics:
+   Records deleted: 6748
+   Records imported: 6748
+   Records updated: 0
+   Records skipped (already exist): 0
+   Errors: 0
+
+≡ƒöù ID Mapping Statistics:
+   Videos mapped: 4755
+   Books mapped: 9
+   Chapters mapped: 77
+   Sections mapped: 136
+
+≡ƒÄë History Plus data import completed successfully!
+≡ƒîÉ You can now access the migrated data in your application

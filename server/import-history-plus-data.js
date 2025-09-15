@@ -125,7 +125,10 @@ class HistoryPlusDataImporter {
     const lines = csvContent.trim().split('\n');
     if (lines.length === 0) return [];
     
-    const headers = lines[0].split(',');
+    const headers = this.parseCSVLine(lines[0]).map(header => {
+      // Strip quotes from header field names
+      return header.replace(/^["']|["']$/g, '');
+    });
     const records = [];
     
     for (let i = 1; i < lines.length; i++) {
@@ -159,6 +162,10 @@ class HistoryPlusDataImporter {
           value = true;
         } else if (value === 'false') {
           value = false;
+        }
+        // Clean text encoding issues for string values
+        else if (typeof value === 'string') {
+          value = this.cleanTextEncoding(value);
         }
         
         record[header] = value;
@@ -248,6 +255,40 @@ class HistoryPlusDataImporter {
     // Add last field
     result.push(current);
     return result;
+  }
+
+  // Clean text encoding issues common in CSV exports
+  cleanTextEncoding(text) {
+    if (typeof text !== 'string') return text;
+    
+    return text
+      // Fix UTF-8 encoding issues for smart quotes
+      .replace(/ΓÇ£/g, '"')  // Left double quote
+      .replace(/ΓÇ¥/g, '"')  // Right double quote
+      .replace(/ΓÇÖ/g, "'")  // Left single quote  
+      .replace(/ΓÇÖ/g, "'")  // Right single quote
+      .replace(/ΓÇô/g, '–')  // En dash
+      .replace(/ΓÇö/g, '—')  // Em dash
+      .replace(/ΓÇª/g, '…')  // Ellipsis
+      // Additional common encoding fixes
+      .replace(/Γäî/g, 'ä')
+      .replace(/Γ¼/g, 'ü')
+      .replace(/Γ¶/g, 'ö')
+      .replace(/ΓëÇ/g, 'é')
+      .replace(/Γä¢/g, 'â');
+  }
+
+  cleanRecord(record) {
+    const cleanedRecord = {};
+    for (const key in record) {
+      const newKey = key.replace(/^"|"$/g, '');
+      let value = record[key];
+      if (typeof value === 'string') {
+        value = value.replace(/^"|"$/g, '');
+      }
+      cleanedRecord[newKey] = value;
+    }
+    return cleanedRecord;
   }
 
   async loadCSVFile(filename) {
@@ -552,13 +593,40 @@ class HistoryPlusDataImporter {
       let updated = 0;
       let skipped = 0;
 
-      // Handle new records (create)
+      // Handle new records (create) - Use individual creates to preserve IDs
       if (records.length > 0) {
-        const result = await this.targetPrisma[tableName].createMany({
-          data: records,
-          ...this.getCreateManyOptions()
-        });
-        imported = result.count;
+        console.log(`   Creating ${records.length} records individually to preserve IDs...`);
+        for (const record of records) {
+          try {
+            await this.targetPrisma[tableName].create({
+              data: record
+            });
+            imported++;
+            if (imported <= 3) {
+              console.log(`   ✅ Successfully created record ${record.id}: ${record.title || record.name || 'N/A'}`);
+              if (record.eventId) {
+                console.log(`      🔗 With eventId: ${record.eventId}`);
+              }
+            }
+          } catch (error) {
+            if (error.code === 'P2002') {
+              // Unique constraint violation - record already exists
+              console.log(`   ⚠️  Skipped duplicate record: ${record.id}`);
+              skipped++;
+            } else {
+              console.error(`   ❌ Failed to create record ${record.id}:`, error.message);
+              if (record.eventId) {
+                console.error(`      � Record had eventId: ${record.eventId}`);
+              }
+              console.error(`   �📝 Record data:`, JSON.stringify(record, null, 2));
+              this.stats.errors++;
+              if (this.stats.errors > 10) {
+                console.error(`   🛑 Too many errors, stopping this table import`);
+                break;
+              }
+            }
+          }
+        }
         console.log(`   Created ${imported} new records`);
       }
 
@@ -608,7 +676,7 @@ class HistoryPlusDataImporter {
       endDate: record.endDate || null,
       details: record.details || null,
       category: record.category,
-      hidden: record.hidden === 'true',
+      hidden: record.hidden === 't' || record.hidden === 'true' || record.hidden === true,
       createdAt: new Date(record.createdAt),
       updatedAt: new Date(record.updatedAt)
     }));
@@ -638,7 +706,26 @@ class HistoryPlusDataImporter {
     
     console.log(`📄 Loaded ${records.length} records from history_videos.csv`);
     
-    // Transform records with proper field mapping
+    // Debug: Show the structure of the first record
+    if (records.length > 0) {
+      console.log('🔍 First video record structure:', Object.keys(records[0]));
+      console.log('🔍 Sample video record eventId/channelId:', {
+        eventId: records[0].eventId,
+        channelId: records[0].channelId,
+        historicalEventId: records[0].historicalEventId
+      });
+    }
+    
+    // Get existing event and channel IDs to validate foreign keys
+    console.log('🔍 Checking existing events and channels for foreign key validation...');
+    const existingEvents = await this.targetPrisma.historicalEvent.findMany({ select: { id: true } });
+    const existingChannels = await this.targetPrisma.historyChannel.findMany({ select: { id: true } });
+    const validEventIds = new Set(existingEvents.map(e => e.id));
+    const validChannelIds = new Set(existingChannels.map(c => c.id));
+    
+    console.log(`   Found ${validEventIds.size} events and ${validChannelIds.size} channels for validation`);
+    
+    // Transform records with proper field mapping and foreign key validation
     const transformedRecords = records.map(record => {
       // Determine video type based on URL
       let videoType = 'video'; // default fallback
@@ -650,15 +737,41 @@ class HistoryPlusDataImporter {
         }
       }
       
+      // Validate foreign keys
+      const eventId = record.eventId && record.eventId.trim() !== '' ? parseInt(record.eventId) : null;
+      const channelId = record.channelId && record.channelId.trim() !== '' ? parseInt(record.channelId) : null;
+      
+      // Debug: Log the first few records to see what we're working with
+      if (parseInt(record.id) <= 3) {
+        console.log(`🔍 Debug video ${record.id}: eventId="${record.eventId}", channelId="${record.channelId}", historicalEventId="${record.historicalEventId}"`);
+      }
+      
+      // Only use foreign keys if they exist in the database
+      const validEventId = eventId && validEventIds.has(eventId) ? eventId : null;
+      const validChannelId = channelId && validChannelIds.has(channelId) ? channelId : null;
+      
+      if (eventId && !validEventId) {
+        console.log(`   ⚠️  Video ${record.id} references non-existent eventId ${eventId}, setting to null`);
+      }
+      if (channelId && !validChannelId) {
+        console.log(`   ⚠️  Video ${record.id} references non-existent channelId ${channelId}, setting to null`);
+      }
+      
       return {
         ...record,
         id: parseInt(record.id),
-        // Map CSV fields to schema fields
-        eventId: record.historicalEventId ? parseInt(record.historicalEventId) : null,
-        thumbnailUrl: record.thumbnail || null,
-        channelId: record.channelId ? parseInt(record.channelId) : null, // Link to channel if available
+        // Map CSV fields to schema fields with validated foreign keys
+        eventId: validEventId,
+        thumbnailUrl: record.thumbnail || record.thumbnailUrl || null,
+        channelId: validChannelId,
         // Add required type field based on URL detection
         type: record.type || videoType,
+        // Convert date strings to Date objects (same as events)
+        createdAt: new Date(record.createdAt),
+        updatedAt: new Date(record.updatedAt),
+        // Convert boolean fields (same pattern as events)
+        assignLater: record.assignLater === 't' || record.assignLater === 'true' || record.assignLater === true,
+        lectureNumber: record.lectureNumber && record.lectureNumber.trim() !== '' && !isNaN(parseInt(record.lectureNumber)) ? parseInt(record.lectureNumber, 10) : null,
         // Remove the old field names
         historicalEventId: undefined,
         thumbnail: undefined,
@@ -671,55 +784,60 @@ class HistoryPlusDataImporter {
     
     const { existing, new: newRecords } = await this.checkExistingRecords('historyVideo', transformedRecords);
     
-    if (newRecords.length === 0) {
-      console.log('   All records already exist, skipping');
-      this.stats.skipped += existing.length;
-      
-      // Build mapping for existing videos
-      console.log('🔄 Building video mappings for existing records...');
-      for (const record of transformedRecords) {
+    console.log('🔄 Building video mappings for all records...');
+    
+    // Build mappings for existing records first
+    if (existing.length > 0) {
+      for (const record of existing) {
         const oldId = parseInt(record.id);
-        const existingVideo = await this.targetPrisma.historyVideo.findUnique({
-          where: { id: oldId }
-        });
-        
-        if (existingVideo) {
-          this.idMappings.videos.set(oldId, existingVideo.id);
-        }
+        this.idMappings.videos.set(oldId, oldId); // For existing records, mapping is 1:1
+        console.log(`   📍 Mapped existing video ${oldId} -> ${oldId} (${record.title})`);
       }
+    }
+    
+    if (newRecords.length === 0) {
+      console.log('   All records already exist, skipping import');
+      this.stats.skipped += existing.length;
       console.log(`✅ Built mapping for ${this.idMappings.videos.size} videos`);
       return;
     }
     
     try {
-      const result = await this.targetPrisma.historyVideo.createMany({
-        data: newRecords,
-        ...this.getCreateManyOptions()
-      });
+      console.log(`🔄 Creating ${newRecords.length} video records individually...`);
+      let successCount = 0;
       
-      console.log(`✅ Imported ${result.count} history videos`);
-      
-      // Build mapping for all records (existing + newly imported)
-      console.log('🔄 Building video mappings after import...');
-      for (const record of transformedRecords) {
-        const oldId = parseInt(record.id);
-        const existingVideo = await this.targetPrisma.historyVideo.findUnique({
-          where: { id: oldId }
-        });
-        
-        if (existingVideo) {
-          this.idMappings.videos.set(oldId, existingVideo.id);
+      for (const record of newRecords) {
+        try {
+          const result = await this.targetPrisma.historyVideo.create({
+            data: {
+              id: record.id,
+              ...record
+            }
+          });
+          
+          // Build mapping for successfully created record
+          const oldId = parseInt(record.id);
+          this.idMappings.videos.set(oldId, oldId);
+          successCount++;
+          
+        } catch (createError) {
+          console.error(`❌ Failed to create video ${record.id}:`, createError.message);
+          console.error('   Record data:', JSON.stringify(record, null, 2));
+          this.stats.errors++;
         }
       }
-      console.log(`✅ Built mapping for ${this.idMappings.videos.size} videos`);
       
-      this.stats.imported += result.count;
+      console.log(`✅ Videos created: ${successCount}`);
+      this.stats.imported += successCount;
       this.stats.skipped += existing.length;
+      
+      console.log(`✅ Built mapping for ${this.idMappings.videos.size} videos`);
     } catch (error) {
       console.error('❌ Error importing history videos:', error.message);
       console.error('   Full error:', error);
-      console.error('   Sample record that failed:', JSON.stringify(newRecords[0], null, 2));
-      this.stats.errors += newRecords.length;
+      if (newRecords && newRecords.length > 0) {
+        console.error('   Sample record that failed:', JSON.stringify(newRecords[0], null, 2));
+      }
     }
   }
 
@@ -729,10 +847,38 @@ class HistoryPlusDataImporter {
     const records = await this.loadCSVFile('history_books.csv');
     if (records.length === 0) return;
     
-    // Build mapping for books based on unique identifiers
-    await this.buildBookIdMapping(records);
+    // Validate existing events for foreign key validation
+    console.log('🔍 Checking existing events for foreign key validation...');
+    const existingEvents = await this.targetPrisma.historicalEvent.findMany({ select: { id: true } });
+    const validEventIds = new Set(existingEvents.map(e => e.id));
+    console.log(`   Found ${validEventIds.size} events for validation`);
     
-    const { existing, new: newRecords } = await this.checkExistingRecords('historyBook', records);
+    const transformedRecords = records.map(record => {
+      const cleanRecord = this.cleanRecord(record);
+      
+      // Validate eventId foreign key
+      const eventId = cleanRecord.eventId && cleanRecord.eventId.trim() !== '' ? parseInt(cleanRecord.eventId) : null;
+      const validEventId = eventId && validEventIds.has(eventId) ? eventId : null;
+      
+      if (eventId && !validEventId) {
+        console.log(`   ⚠️  Book ${cleanRecord.id} references non-existent eventId ${eventId}, setting to null`);
+      }
+      
+      return {
+        ...cleanRecord,
+        id: parseInt(cleanRecord.id),
+        publishYear: cleanRecord.publishYear && cleanRecord.publishYear.trim() !== '' ? parseInt(cleanRecord.publishYear) : null,
+        pageCount: cleanRecord.pageCount && cleanRecord.pageCount.trim() !== '' ? parseInt(cleanRecord.pageCount) : null,
+        eventId: validEventId,
+        createdAt: new Date(cleanRecord.createdAt),
+        updatedAt: new Date(cleanRecord.updatedAt),
+      };
+    });
+
+    // Build mapping for books based on unique identifiers
+    await this.buildBookIdMapping(transformedRecords);
+    
+    const { existing, new: newRecords } = await this.checkExistingRecords('historyBook', transformedRecords);
     
     if (newRecords.length === 0) {
       console.log('   All records already exist, skipping');
@@ -741,17 +887,35 @@ class HistoryPlusDataImporter {
     }
     
     try {
-      const result = await this.targetPrisma.historyBook.createMany({
-        data: newRecords,
-        ...this.getCreateManyOptions()
-      });
+      // Use individual creates to preserve IDs (like videos and events)
+      let successCount = 0;
+      console.log(`   Creating ${newRecords.length} books individually to preserve IDs...`);
       
-      console.log(`✅ Imported ${result.count} history books`);
+      for (const record of newRecords) {
+        try {
+          await this.targetPrisma.historyBook.create({
+            data: record
+          });
+          successCount++;
+          if (successCount <= 3) {
+            console.log(`   ✅ Successfully created book ${record.id}: ${record.title}`);
+            if (record.eventId) {
+              console.log(`      🔗 With eventId: ${record.eventId}`);
+            }
+          }
+        } catch (createError) {
+          console.error(`❌ Failed to create book ${record.id}:`, createError.message);
+          console.error('   Record data:', JSON.stringify(record, null, 2));
+          this.stats.errors++;
+        }
+      }
+      
+      console.log(`✅ Imported ${successCount} history books`);
       
       // Update mappings for newly imported records
       await this.updateBookIdMappingAfterImport(newRecords);
       
-      this.stats.imported += result.count;
+      this.stats.imported += successCount;
       this.stats.skipped += existing.length;
     } catch (error) {
       console.error('❌ Error importing history books:', error.message);
@@ -765,58 +929,39 @@ class HistoryPlusDataImporter {
     const records = await this.loadCSVFile('history_chapters.csv');
     if (records.length === 0) return;
     
-    console.log(`📄 Loaded ${records.length} records from history_chapters.csv`);
+    // Validate existing events for foreign key validation
+    console.log('🔍 Checking existing events for foreign key validation...');
+    const existingEvents = await this.targetPrisma.historicalEvent.findMany({ select: { id: true } });
+    const validEventIds = new Set(existingEvents.map(e => e.id));
+    console.log(`   Found ${validEventIds.size} events for validation`);
     
-    // Transform records with proper type conversion and field mapping
-    const typedRecords = records.map(record => {
+    const transformedRecords = records.map(record => {
+      const cleanRecord = this.cleanRecord(record);
+      
+      // Validate eventId foreign key
+      const eventId = cleanRecord.eventId && cleanRecord.eventId.trim() !== '' ? parseInt(cleanRecord.eventId) : null;
+      const validEventId = eventId && validEventIds.has(eventId) ? eventId : null;
+      
+      if (eventId && !validEventId) {
+        console.log(`   ⚠️  Chapter ${cleanRecord.id} references non-existent eventId ${eventId}, setting to null`);
+      }
+      
       return {
-        ...record,
-        id: parseInt(record.id),
-        bookId: parseInt(record.bookId),
-        chapterNumber: parseInt(record.chapterNumber),
-        // Map CSV fields to schema fields
-        pageStart: record.startPage ? parseInt(record.startPage) : null,
-        pageEnd: record.endPage ? parseInt(record.endPage) : null,
-        // Remove the old field names
-        startPage: undefined,
-        endPage: undefined
+        id: parseInt(cleanRecord.id),
+        title: cleanRecord.title,
+        chapterNumber: parseInt(cleanRecord.chapterNumber),
+        description: cleanRecord.description,
+        pageStart: cleanRecord.pageStart && cleanRecord.pageStart.trim() !== '' ? parseInt(cleanRecord.pageStart) : null,
+        pageEnd: cleanRecord.pageEnd && cleanRecord.pageEnd.trim() !== '' ? parseInt(cleanRecord.pageEnd) : null,
+        bookId: this.idMappings.books.get(parseInt(cleanRecord.bookId)) || parseInt(cleanRecord.bookId),
+        eventId: validEventId,
+        createdAt: new Date(cleanRecord.createdAt),
+        updatedAt: new Date(cleanRecord.updatedAt),
       };
     });
-    
-    console.log('🔄 Book ID mappings available:', Array.from(this.idMappings.books.entries()));
-    
-    // Update chapters with mapped book IDs
-    const transformedRecords = typedRecords.map(record => {
-      const mappedBookId = this.idMappings.books.get(record.bookId);
-      if (mappedBookId) {
-        console.log(`   Chapter ${record.id}: mapping bookId ${record.bookId} -> ${mappedBookId}`);
-        return { ...record, bookId: mappedBookId };
-      } else {
-        console.log(`   ⚠️  Chapter ${record.id}: no mapping found for bookId ${record.bookId}`);
-        return record;
-      }
-    });
-    
-    // Build mapping for chapters based on unique identifiers
-    console.log('🔄 Building chapter mappings after import...');
-    
-    // For chapters, since they already exist (skipped = 445), build mappings from existing data
-    for (const record of typedRecords) {
-      const oldId = record.id;
-      // Try to find the chapter by the original ID first
-      const existingChapter = await this.targetPrisma.historyChapter.findUnique({
-        where: { id: oldId }
-      });
-      
-      if (existingChapter) {
-        this.idMappings.chapters.set(oldId, existingChapter.id);
-      }
-    }
-    
-    console.log(`✅ Built mapping for ${this.idMappings.chapters.size} chapters`);
-    
+
     await this.buildChapterIdMapping(transformedRecords);
-    
+
     const { existing, new: newRecords } = await this.checkExistingRecords('historyChapter', transformedRecords);
     
     if (newRecords.length === 0) {
@@ -826,22 +971,38 @@ class HistoryPlusDataImporter {
     }
     
     try {
-      const result = await this.targetPrisma.historyChapter.createMany({
-        data: newRecords,
-        ...this.getCreateManyOptions()
-      });
+      // Use individual creates to preserve IDs (like videos and events)
+      let successCount = 0;
+      console.log(`   Creating ${newRecords.length} chapters individually to preserve IDs...`);
       
-      console.log(`✅ Imported ${result.count} history chapters`);
+      for (const record of newRecords) {
+        try {
+          await this.targetPrisma.historyChapter.create({
+            data: record
+          });
+          successCount++;
+          if (successCount <= 3) {
+            console.log(`   ✅ Successfully created chapter ${record.id}: ${record.title}`);
+            if (record.eventId) {
+              console.log(`      🔗 With eventId: ${record.eventId}`);
+            }
+          }
+        } catch (createError) {
+          console.error(`❌ Failed to create chapter ${record.id}:`, createError.message);
+          console.error('   Record data:', JSON.stringify(record, null, 2));
+          this.stats.errors++;
+        }
+      }
+      
+      console.log(`✅ Imported ${successCount} history chapters`);
       
       // Update mappings for newly imported records
       await this.updateChapterIdMappingAfterImport(newRecords);
       
-      this.stats.imported += result.count;
+      this.stats.imported += successCount;
       this.stats.skipped += existing.length;
     } catch (error) {
       console.error('❌ Error importing history chapters:', error.message);
-      console.error('   Full error:', error);
-      console.error('   Sample record that failed:', JSON.stringify(newRecords[0], null, 2));
       this.stats.errors += newRecords.length;
     }
   }
@@ -851,47 +1012,42 @@ class HistoryPlusDataImporter {
     
     const records = await this.loadCSVFile('history_sections.csv');
     if (records.length === 0) return;
-    
-    // Transform records with proper type conversion
+
+    // Validate existing events for foreign key validation
+    console.log('🔍 Checking existing events for foreign key validation...');
+    const existingEvents = await this.targetPrisma.historicalEvent.findMany({ select: { id: true } });
+    const validEventIds = new Set(existingEvents.map(e => e.id));
+    console.log(`   Found ${validEventIds.size} events for validation`);
+
     const transformedRecords = records.map(record => {
+      const cleanRecord = this.cleanRecord(record);
+      
+      // Validate eventId foreign key
+      const eventId = cleanRecord.eventId && cleanRecord.eventId.trim() !== '' ? parseInt(cleanRecord.eventId) : null;
+      const validEventId = eventId && validEventIds.has(eventId) ? eventId : null;
+      
+      if (eventId && !validEventId) {
+        console.log(`   ⚠️  Section ${cleanRecord.id} references non-existent eventId ${eventId}, setting to null`);
+      }
+      
       return {
-        ...record,
-        id: parseInt(record.id),
-        chapterId: parseInt(record.chapterId), // Convert string to int
-        sectionNumber: parseInt(record.sectionNumber)
+        id: parseInt(cleanRecord.id),
+        title: cleanRecord.title,
+        sectionNumber: parseInt(cleanRecord.sectionNumber),
+        description: cleanRecord.description,
+        pageStart: cleanRecord.pageStart && cleanRecord.pageStart.trim() !== '' ? parseInt(cleanRecord.pageStart) : null,
+        pageEnd: cleanRecord.pageEnd && cleanRecord.pageEnd.trim() !== '' ? parseInt(cleanRecord.pageEnd) : null,
+        content: cleanRecord.content,
+        chapterId: this.idMappings.chapters.get(parseInt(cleanRecord.chapterId)) || parseInt(cleanRecord.chapterId),
+        eventId: validEventId,
+        createdAt: new Date(cleanRecord.createdAt),
+        updatedAt: new Date(cleanRecord.updatedAt),
       };
     });
+
+    await this.buildSectionIdMapping(transformedRecords);
     
-    // Update sections with mapped chapter IDs if available
-    const mappedRecords = transformedRecords.map(record => {
-      const mappedChapterId = this.idMappings.chapters.get(record.chapterId);
-      if (mappedChapterId) {
-        return { ...record, chapterId: mappedChapterId };
-      }
-      return record;
-    });
-    
-    // Build mapping for sections based on unique identifiers
-    console.log('🔄 Building section mappings after import...');
-    
-    // For sections, since they already exist, build mappings from existing data
-    for (const record of transformedRecords) {
-      const oldId = record.id;
-      // Try to find the section by the original ID first
-      const existingSection = await this.targetPrisma.historySection.findUnique({
-        where: { id: oldId }
-      });
-      
-      if (existingSection) {
-        this.idMappings.sections.set(oldId, existingSection.id);
-      }
-    }
-    
-    console.log(`✅ Built mapping for ${this.idMappings.sections.size} sections`);
-    
-    await this.buildSectionIdMapping(mappedRecords);
-    
-    const { existing, new: newRecords } = await this.checkExistingRecords('historySection', mappedRecords);
+    const { existing, new: newRecords } = await this.checkExistingRecords('historySection', transformedRecords);
     
     if (newRecords.length === 0) {
       console.log('   All records already exist, skipping');
@@ -900,17 +1056,35 @@ class HistoryPlusDataImporter {
     }
     
     try {
-      const result = await this.targetPrisma.historySection.createMany({
-        data: newRecords,
-        ...this.getCreateManyOptions()
-      });
+      // Use individual creates to preserve IDs (like videos and events)
+      let successCount = 0;
+      console.log(`   Creating ${newRecords.length} sections individually to preserve IDs...`);
       
-      console.log(`✅ Imported ${result.count} history sections`);
+      for (const record of newRecords) {
+        try {
+          await this.targetPrisma.historySection.create({
+            data: record
+          });
+          successCount++;
+          if (successCount <= 3) {
+            console.log(`   ✅ Successfully created section ${record.id}: ${record.title}`);
+            if (record.eventId) {
+              console.log(`      🔗 With eventId: ${record.eventId}`);
+            }
+          }
+        } catch (createError) {
+          console.error(`❌ Failed to create section ${record.id}:`, createError.message);
+          console.error('   Record data:', JSON.stringify(record, null, 2));
+          this.stats.errors++;
+        }
+      }
+      
+      console.log(`✅ Imported ${successCount} history sections`);
       
       // Update mappings for newly imported records
       await this.updateSectionIdMappingAfterImport(newRecords);
       
-      this.stats.imported += result.count;
+      this.stats.imported += successCount;
       this.stats.skipped += existing.length;
     } catch (error) {
       console.error('❌ Error importing history sections:', error.message);
@@ -921,20 +1095,44 @@ class HistoryPlusDataImporter {
   async importHistoryChannels() {
     console.log('📥 Importing History Channels...');
     
+    // Debug: Check if targetPrisma is initialized
+    if (!this.targetPrisma) {
+      console.error('❌ targetPrisma is null! Cannot import channels.');
+      return;
+    }
+    
     const records = await this.loadCSVFile('history_channels.csv');
     if (records.length === 0) return;
 
     console.log(`📄 Loaded ${records.length} records from history_channels.csv`);
     
+    // Debug: Show the first few records to understand the structure
+    if (records.length > 0) {
+      console.log('🔍 First channel record structure:', Object.keys(records[0]));
+      console.log('🔍 First channel record:', JSON.stringify(records[0], null, 2));
+    }
+    
     // Transform records with proper field mapping
     const transformedRecords = records.map(record => {
+      // Check for various possible URL field names
+      let channelUrl = record.url || record.channelUrl || record.link || record.channelLink;
+      
+      // If no URL found, generate fallback
+      if (!channelUrl) {
+        channelUrl = `https://channel-${record.id}`;
+        console.log(`⚠️  No URL found for channel ${record.id} (${record.title || record.name}), using fallback: ${channelUrl}`);
+      }
+      
       return {
-        ...record,
         id: parseInt(record.id),
-        // Map CSV fields to schema fields
-        channelUrl: record.url || record.channelUrl || `https://channel-${record.id}`, // Generate fallback URL if missing
-        // Remove the old field name if it exists
-        url: undefined
+        name: record.name,
+        handle: record.handle || null,
+        channelUrl: channelUrl,
+        description: record.description || null,
+        subscriberCount: record.subscriberCount ? parseInt(record.subscriberCount) : null,
+        verified: record.verified === 't' || record.verified === 'true',
+        createdAt: record.createdAt ? new Date(record.createdAt) : new Date(),
+        updatedAt: record.updatedAt ? new Date(record.updatedAt) : new Date()
       };
     });
 
@@ -947,13 +1145,28 @@ class HistoryPlusDataImporter {
     }
     
     try {
-      const result = await this.targetPrisma.historyChannel.createMany({
-        data: newRecords,
-        ...this.getCreateManyOptions()
-      });
+      // Use individual creates to preserve IDs (like videos and events)
+      let successCount = 0;
+      console.log(`   Creating ${newRecords.length} channels individually to preserve IDs...`);
       
-      console.log(`✅ Imported ${result.count} history channels`);
-      this.stats.imported += result.count;
+      for (const record of newRecords) {
+        try {
+          await this.targetPrisma.historyChannel.create({
+            data: record
+          });
+          successCount++;
+          if (successCount <= 3) {
+            console.log(`   ✅ Successfully created channel ${record.id}: ${record.name}`);
+          }
+        } catch (createError) {
+          console.error(`❌ Failed to create channel ${record.id}:`, createError.message);
+          console.error('   Record data:', JSON.stringify(record, null, 2));
+          this.stats.errors++;
+        }
+      }
+      
+      console.log(`✅ Imported ${successCount} history channels`);
+      this.stats.imported += successCount;
       this.stats.skipped += existing.length;
     } catch (error) {
       console.error('❌ Error importing history channels:', error.message);
@@ -973,7 +1186,7 @@ class HistoryPlusDataImporter {
       return {
         id: cleanRecord.id,
         eventId: parseInt(cleanRecord.eventId),
-        reviewed: cleanRecord.reviewed === 'true',
+        reviewed: cleanRecord.reviewed === true || cleanRecord.reviewed === 'true',
         reviewedAt: cleanRecord.reviewDate ? new Date(cleanRecord.reviewDate) : null,
         createdAt: new Date(cleanRecord.createdAt),
         updatedAt: new Date(cleanRecord.updatedAt)
@@ -988,19 +1201,41 @@ class HistoryPlusDataImporter {
       return;
     }
 
-    try {
-      const result = await this.targetPrisma.user_event_reviews.createMany({
-        data: newRecords,
-        ...this.getCreateManyOptions()
-      });
+    // Use consistent import approach
+    await this.importWithUpsert('user_event_reviews', newRecords, existing);
+    
+    // Update the reviewed field on historical events based on user reviews
+    await this.updateEventReviewStatus();
+    
+    console.log(`✅ Processed user event reviews`);
+  }
 
-      console.log(`✅ Imported ${result.count} user event reviews`);
-      this.stats.imported += result.count;
-      this.stats.skipped += existing.length;
+  async updateEventReviewStatus() {
+    console.log('🔄 Updating event review status...');
+    
+    try {
+      // Get all user event reviews
+      const reviews = await this.targetPrisma.user_event_reviews.findMany({
+        where: { reviewed: true },
+        select: { eventId: true }
+      });
+      
+      if (reviews.length === 0) {
+        console.log('   No reviewed events found');
+        return;
+      }
+      
+      const eventIds = reviews.map(r => r.eventId);
+      
+      // Update the reviewed field on historical events
+      const updateResult = await this.targetPrisma.historicalEvent.updateMany({
+        where: { id: { in: eventIds } },
+        data: { reviewed: true }
+      });
+      
+      console.log(`✅ Updated ${updateResult.count} events as reviewed`);
     } catch (error) {
-      console.error('❌ Error importing user event reviews:', error.message);
-      console.error('   First record sample:', JSON.stringify(newRecords[0], null, 2));
-      this.stats.errors += newRecords.length;
+      console.error('❌ Error updating event review status:', error.message);
     }
   }
 
@@ -1010,20 +1245,34 @@ class HistoryPlusDataImporter {
     const records = await this.loadCSVFile('user_video_watches.csv');
     if (records.length === 0) return;
 
+    console.log(`🔗 Debug: Video mappings available: ${this.idMappings.videos.size}`);
+    if (this.idMappings.videos.size > 0) {
+      const firstFew = Array.from(this.idMappings.videos.entries()).slice(0, 3);
+      console.log(`   First few mappings: ${firstFew.map(([k,v]) => `${k}->${v}`).join(', ')}`);
+    }
+
     // Transform records to match database schema and use mapped video IDs
     const transformedRecords = [];
     const skippedRecords = [];
+    
+    console.log(`🔍 Debug: Processing ${records.length} video watch records...`);
+    if (records.length > 0) {
+      console.log(`   Sample record: ${JSON.stringify(records[0])}`);
+    }
     
     for (const record of records) {
       const { userId, ...cleanRecord } = record; // Remove userId field
       const oldVideoId = parseInt(cleanRecord.videoId);
       const mappedVideoId = this.idMappings.videos.get(oldVideoId);
       
+      // Convert watched field (handles both boolean and string values)
+      const isWatched = cleanRecord.watched === true || cleanRecord.watched === 'true';
+      
       if (mappedVideoId) {
         transformedRecords.push({
           id: cleanRecord.id,
           videoId: mappedVideoId,
-          watched: cleanRecord.watched === 'true',
+          watched: isWatched,
           watchedAt: cleanRecord.watchDate ? new Date(cleanRecord.watchDate) : null,
           createdAt: new Date(cleanRecord.createdAt),
           updatedAt: new Date(cleanRecord.updatedAt)
@@ -1085,7 +1334,7 @@ class HistoryPlusDataImporter {
       return {
         id: cleanRecord.id,
         bookId: parseInt(cleanRecord.bookId),
-        read: cleanRecord.read === 'true',
+        read: cleanRecord.read === true || cleanRecord.read === 'true',
         readAt: cleanRecord.readDate ? new Date(cleanRecord.readDate) : null,
         createdAt: new Date(cleanRecord.createdAt),
         updatedAt: new Date(cleanRecord.updatedAt)
@@ -1135,7 +1384,7 @@ class HistoryPlusDataImporter {
         transformedRecords.push({
           id: cleanRecord.id,
           chapterId: mappedChapterId,
-          read: cleanRecord.read === 'true',
+          read: cleanRecord.read === true || cleanRecord.read === 'true',
           readAt: cleanRecord.readDate ? new Date(cleanRecord.readDate) : null,
           createdAt: new Date(cleanRecord.createdAt),
           updatedAt: new Date(cleanRecord.updatedAt)
@@ -1204,7 +1453,7 @@ class HistoryPlusDataImporter {
         transformedRecords.push({
           id: cleanRecord.id,
           sectionId: mappedSectionId,
-          read: cleanRecord.read === 'true',
+          read: cleanRecord.read === true || cleanRecord.read === 'true',
           readAt: cleanRecord.readDate ? new Date(cleanRecord.readDate) : null,
           createdAt: new Date(cleanRecord.createdAt),
           updatedAt: new Date(cleanRecord.updatedAt)
@@ -1254,6 +1503,65 @@ class HistoryPlusDataImporter {
     }
   }
 
+  async importUserReads() {
+    console.log('📥 Importing User Read Statuses...');
+
+    const bookReads = await this.loadCSVFile('user_book_reads.csv');
+    const chapterReads = await this.loadCSVFile('user_chapter_reads.csv');
+    const sectionReads = await this.loadCSVFile('user_section_reads.csv');
+
+    // Import Book Reads
+    if (bookReads.length > 0) {
+      const transformed = bookReads.map(r => {
+        const clean = this.cleanRecord(r);
+        return {
+          id: clean.id,
+          bookId: this.idMappings.books.get(parseInt(clean.bookId)) || parseInt(clean.bookId),
+          read: clean.read === 'true' || clean.read === true,
+          readAt: clean.readDate ? new Date(clean.readDate) : null,
+          createdAt: new Date(clean.createdAt),
+          updatedAt: new Date(clean.updatedAt),
+        };
+      });
+      await this.targetPrisma.user_book_reads.createMany({ data: transformed, skipDuplicates: true });
+      console.log(`✅ Processed ${transformed.length} book read statuses.`);
+    }
+
+    // Import Chapter Reads
+    if (chapterReads.length > 0) {
+      const transformed = chapterReads.map(r => {
+        const clean = this.cleanRecord(r);
+        return {
+          id: clean.id,
+          chapterId: this.idMappings.chapters.get(parseInt(clean.chapterId)) || parseInt(clean.chapterId),
+          read: clean.read === 'true' || clean.read === true,
+          readAt: clean.readDate ? new Date(clean.readDate) : null,
+          createdAt: new Date(clean.createdAt),
+          updatedAt: new Date(clean.updatedAt),
+        };
+      });
+      await this.targetPrisma.user_chapter_reads.createMany({ data: transformed, skipDuplicates: true });
+      console.log(`✅ Processed ${transformed.length} chapter read statuses.`);
+    }
+
+    // Import Section Reads
+    if (sectionReads.length > 0) {
+      const transformed = sectionReads.map(r => {
+        const clean = this.cleanRecord(r);
+        return {
+          id: clean.id,
+          sectionId: this.idMappings.sections.get(parseInt(clean.sectionId)) || parseInt(clean.sectionId),
+          read: clean.read === 'true' || clean.read === true,
+          readAt: clean.readDate ? new Date(clean.readDate) : null,
+          createdAt: new Date(clean.createdAt),
+          updatedAt: new Date(clean.updatedAt),
+        };
+      });
+      await this.targetPrisma.user_section_reads.createMany({ data: transformed, skipDuplicates: true });
+      console.log(`✅ Processed ${transformed.length} section read statuses.`);
+    }
+  }
+
   async importAll() {
     console.log('🚀 Starting comprehensive History Plus data import...');
     console.log('');
@@ -1270,9 +1578,17 @@ class HistoryPlusDataImporter {
       console.log('');
       
       // Import all data in correct order (respecting foreign key relationships)
+      console.log('🔄 Starting import of Historical Events...');
       await this.importHistoricalEvents();
+      console.log('✅ Historical Events import completed');
+      
+      console.log('🔄 Starting import of History Channels...');
       await this.importHistoryChannels();    // Import channels BEFORE videos (FK dependency)
+      console.log('✅ History Channels import completed');
+      
+      console.log('🔄 Starting import of History Videos...');
       await this.importHistoryVideos();
+      console.log('✅ History Videos import completed');
       await this.importHistoryBooks();
       await this.importHistoryChapters();
       await this.importHistorySections();
