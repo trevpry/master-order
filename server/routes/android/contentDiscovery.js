@@ -177,8 +177,8 @@ function createContentDiscoveryRoutes(services) {
               localArtworkPath: upNextData.localArtworkPath || '',
               artworkUrl: artworkUrl || '',
               streamUrl: '',
-              ratingKey: upNextData.ratingKey,
-              plexId: upNextData.ratingKey,
+              ratingKey: null, // Webvideos don't have Plex rating keys
+              plexId: null, // Webvideos don't have Plex IDs
               webUrl: upNextData.webUrl || null,
               webTitle: upNextData.webTitle,
               webDescription: upNextData.webDescription,
