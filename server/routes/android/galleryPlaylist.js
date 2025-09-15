@@ -177,6 +177,19 @@ function createGalleryPlaylistRoutes(prisma) {
           
           console.log(`📱 Found ${tracks.length} tracks in database out of ${trackRatingKeys.length} playlist items`);
           
+          // Debug: Log missing tracks
+          const foundRatingKeys = tracks.map(t => t.ratingKey);
+          const missingRatingKeys = trackRatingKeys.filter(rk => !foundRatingKeys.includes(rk));
+          if (missingRatingKeys.length > 0) {
+            console.log(`📱 ⚠️ Missing tracks in database:`, missingRatingKeys.slice(0, 10));
+          }
+          
+          // Debug: Check key field availability
+          const tracksWithoutKey = tracks.filter(t => !t.key);
+          if (tracksWithoutKey.length > 0) {
+            console.log(`📱 ⚠️ Tracks missing 'key' field:`, tracksWithoutKey.map(t => `${t.ratingKey}: ${t.title}`).slice(0, 5));
+          }
+          
           // Add playlist-specific metadata (like addedAt from playlist item)
           tracks = tracks.map(track => {
             const playlistItem = plexPlaylist.items.find(item => item.ratingKey === track.ratingKey);
@@ -227,6 +240,19 @@ function createGalleryPlaylistRoutes(prisma) {
             
             console.log(`📱 Found ${tracks.length} tracks in database out of ${trackRatingKeys.length} custom playlist tracks`);
             
+            // Debug: Log missing tracks
+            const foundRatingKeys = tracks.map(t => t.ratingKey);
+            const missingRatingKeys = trackRatingKeys.filter(rk => !foundRatingKeys.includes(rk));
+            if (missingRatingKeys.length > 0) {
+              console.log(`📱 ⚠️ Missing tracks in database:`, missingRatingKeys.slice(0, 10));
+            }
+            
+            // Debug: Check key field availability
+            const tracksWithoutKey = tracks.filter(t => !t.key);
+            if (tracksWithoutKey.length > 0) {
+              console.log(`📱 ⚠️ Tracks missing 'key' field:`, tracksWithoutKey.map(t => `${t.ratingKey}: ${t.title}`).slice(0, 5));
+            }
+            
             // Add custom playlist-specific metadata
             tracks = tracks.map(track => {
               const customTrack = customPlaylist.tracks.find(t => t.ratingKey === track.ratingKey);
@@ -272,6 +298,14 @@ function createGalleryPlaylistRoutes(prisma) {
       
       console.log(`📱 Selected random track: "${randomTrack.title}" by ${randomTrack.album?.artist?.title || randomTrack.originalTitle || 'Unknown'}`);
       console.log(`📱 Track ratingKey: ${randomTrack.ratingKey}, key: ${randomTrack.key || 'MISSING'}`);
+      console.log(`📱 Track data:`, {
+        ratingKey: randomTrack.ratingKey,
+        title: randomTrack.title,
+        hasKey: !!randomTrack.key,
+        key: randomTrack.key || 'MISSING',
+        album: randomTrack.album?.title || 'Unknown',
+        artist: randomTrack.album?.artist?.title || randomTrack.originalTitle || 'Unknown'
+      });
       
       // Get Plex settings for stream URL generation
       const settings = await prisma.settings.findFirst();
@@ -281,33 +315,57 @@ function createGalleryPlaylistRoutes(prisma) {
       let artworkUrl = null;
       let plexUrl = settings?.plexUrl || null;
       
-      // Generate stream URL if we have Plex configuration
-      if (settings?.plexUrl && settings?.plexToken && randomTrack.key) {
-        // Use the track's key field for proper Plex streaming
-        streamUrl = `${settings.plexUrl}${randomTrack.key}?X-Plex-Token=${settings.plexToken}`;
-        
-        console.log(`📱 Generated stream URL: ${streamUrl}`);
-        
-        // Generate artwork URL with fallback hierarchy
-        if (randomTrack.thumb) {
-          artworkUrl = randomTrack.thumb.startsWith('http') 
-            ? randomTrack.thumb 
-            : `${settings.plexUrl}${randomTrack.thumb}?X-Plex-Token=${settings.plexToken}`;
-        } else if (randomTrack.parentThumb) {
-          artworkUrl = randomTrack.parentThumb.startsWith('http')
-            ? randomTrack.parentThumb
-            : `${settings.plexUrl}${randomTrack.parentThumb}?X-Plex-Token=${settings.plexToken}`;
-        } else if (randomTrack.grandparentThumb) {
-          artworkUrl = randomTrack.grandparentThumb.startsWith('http')
-            ? randomTrack.grandparentThumb
-            : `${settings.plexUrl}${randomTrack.grandparentThumb}?X-Plex-Token=${settings.plexToken}`;
+      // Generate stream URL by fetching media part from Plex API
+      if (settings?.plexUrl && settings?.plexToken && randomTrack.ratingKey) {
+        try {
+          console.log(`📱 Fetching Plex metadata for track ${randomTrack.ratingKey}...`);
+          const trackResponse = await fetch(`${settings.plexUrl}/library/metadata/${randomTrack.ratingKey}?X-Plex-Token=${settings.plexToken}`, {
+            headers: {
+              'Accept': 'application/json'
+            }
+          });
+          
+          if (trackResponse.ok) {
+            const trackData = await trackResponse.json();
+            const plexTrackMetadata = trackData.MediaContainer?.Metadata?.[0];
+            
+            // Get the actual media part for streaming (this is the correct approach)
+            const mediaPart = plexTrackMetadata?.Media?.[0]?.Part?.[0];
+            if (mediaPart && mediaPart.key) {
+              streamUrl = `${settings.plexUrl}${mediaPart.key}?X-Plex-Token=${settings.plexToken}`;
+              console.log(`📱 ✅ Generated stream URL from media part: ${streamUrl}`);
+            } else {
+              console.warn(`📱 ❌ No media part found for track ${randomTrack.ratingKey}`);
+            }
+            
+            // Generate artwork URL with fallback hierarchy (from Plex metadata)
+            if (plexTrackMetadata?.thumb) {
+              artworkUrl = plexTrackMetadata.thumb.startsWith('http') 
+                ? plexTrackMetadata.thumb 
+                : `${settings.plexUrl}${plexTrackMetadata.thumb}?X-Plex-Token=${settings.plexToken}`;
+            } else if (plexTrackMetadata?.parentThumb) {
+              artworkUrl = plexTrackMetadata.parentThumb.startsWith('http')
+                ? plexTrackMetadata.parentThumb
+                : `${settings.plexUrl}${plexTrackMetadata.parentThumb}?X-Plex-Token=${settings.plexToken}`;
+            } else if (plexTrackMetadata?.grandparentThumb) {
+              artworkUrl = plexTrackMetadata.grandparentThumb.startsWith('http')
+                ? plexTrackMetadata.grandparentThumb
+                : `${settings.plexUrl}${plexTrackMetadata.grandparentThumb}?X-Plex-Token=${settings.plexToken}`;
+            }
+          } else {
+            console.warn(`📱 ❌ Failed to fetch Plex metadata for track ${randomTrack.ratingKey}:`, trackResponse.status);
+          }
+        } catch (error) {
+          console.error(`📱 ❌ Error fetching Plex metadata for track ${randomTrack.ratingKey}:`, error);
         }
       } else {
-        console.warn(`📱 ⚠️ Cannot generate stream URL for track "${randomTrack.title}":`, {
+        console.warn(`📱 ❌ Cannot generate stream URL:`, {
           hasPlexUrl: !!settings?.plexUrl,
           hasPlexToken: !!settings?.plexToken,
-          hasTrackKey: !!randomTrack.key,
-          trackKey: randomTrack.key
+          hasTrackRatingKey: !!randomTrack.ratingKey,
+          reason: !settings?.plexUrl ? 'Missing Plex URL' : 
+                 !settings?.plexToken ? 'Missing Plex Token' : 
+                 !randomTrack.ratingKey ? 'Missing track ratingKey' : 'Unknown'
         });
       }
       

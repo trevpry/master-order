@@ -340,12 +340,12 @@ function createStashIntegrationRoutes(prisma) {
             const stashData = await stashResponse.json();
             const paths = stashData.data?.findScene?.paths;
             if (paths) {
-              // Convert to relative paths as per documentation
+              // Convert to full URLs for Android app
               artwork = {
-                screenshot: `/screenshot/${scene.id}.webp`,
-                preview: `/scene/${scene.id}/preview`,
-                stream: `/scene/${scene.id}/stream`,
-                webp: `/scene/${scene.id}/webp`
+                screenshot: `${baseUrl}/api/stash/image-proxy/scene/${scene.id}/screenshot`,
+                preview: `${baseUrl}/api/stash/image-proxy/scene/${scene.id}/preview`,
+                stream: `${baseUrl}/api/stash/image-proxy/scene/${scene.id}/stream`,
+                webp: `${baseUrl}/api/stash/image-proxy/scene/${scene.id}/webp`
               };
             }
           }

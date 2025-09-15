@@ -175,12 +175,16 @@ function createReadingSessionRoutes(prisma) {
       try {
         const updateData = {};
         
-        if (progress.currentPage !== undefined && progress.currentPage > 0) {
+        // Update current page (allow 0 as valid page number)
+        if (progress.currentPage !== undefined && progress.currentPage !== null && progress.currentPage >= 0) {
           updateData.bookCurrentPage = progress.currentPage;
+          console.log(`Setting current page to: ${progress.currentPage}`);
         }
         
-        if (progress.readPercentage !== undefined && progress.readPercentage >= 0 && progress.readPercentage <= 100) {
+        // Update read percentage
+        if (progress.readPercentage !== undefined && progress.readPercentage !== null && progress.readPercentage >= 0 && progress.readPercentage <= 100) {
           updateData.bookPercentRead = progress.readPercentage;
+          console.log(`Setting read percentage to: ${progress.readPercentage}%`);
           
           // If read percentage is 100%, mark as read/watched
           if (progress.readPercentage === 100) {
@@ -190,18 +194,23 @@ function createReadingSessionRoutes(prisma) {
           }
         }
         
-        if (progress.totalPages !== undefined && progress.totalPages > 0) {
-          // Also update the total page count if provided and not already set
+        // Update total page count only if not already set (during initial import)
+        if (progress.totalPages !== undefined && progress.totalPages !== null && progress.totalPages > 0) {
           const existingItem = await prisma.customOrderItem.findUnique({
             where: { id: activeSession.customOrderItemId },
             select: { bookPageCount: true }
           });
           
+          // Only set page count if it hasn't been set before (during import)
           if (!existingItem?.bookPageCount) {
             updateData.bookPageCount = progress.totalPages;
+            console.log(`Setting initial total page count to: ${progress.totalPages}`);
+          } else {
+            console.log(`Total page count already set: ${existingItem.bookPageCount} (not changing)`);
           }
         }
         
+        // Apply the updates if there are any
         if (Object.keys(updateData).length > 0) {
           await prisma.customOrderItem.update({
             where: { id: activeSession.customOrderItemId },
@@ -209,10 +218,18 @@ function createReadingSessionRoutes(prisma) {
           });
           
           console.log('Reading progress updated successfully:', updateData);
+        } else {
+          console.log('No valid progress data to update');
         }
       } catch (progressError) {
         console.error('Error updating reading progress:', progressError);
         // Don't fail the entire request for progress update errors
+      }
+    } else {
+      if (!progress) {
+        console.log('No progress data provided');
+      } else if (!activeSession.customOrderItemId) {
+        console.log('No custom order item ID - standalone reading session');
       }
     }
     
