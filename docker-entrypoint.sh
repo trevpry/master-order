@@ -18,7 +18,7 @@ env | grep -i database || echo "[DEBUG] No DATABASE_URL env vars found"
 # Force correct DATABASE_URL if it's been overridden (Docker safety check)
 if [ "$DATABASE_URL" = "file:/app/data/master_order.db" ] || echo "$DATABASE_URL" | grep -q "file:"; then
     echo "[WARN] DATABASE_URL appears to be SQLite format, forcing PostgreSQL for Docker"
-    export DATABASE_URL="postgresql://master_order_user:${POSTGRES_PASSWORD:-secure_password_change_me}@192.168.1.118:5432/master_order"
+    export DATABASE_URL="postgresql://master_order_user:${POSTGRES_PASSWORD:-secure_password_change_me}@192.168.1.119:5432/master_order"
     echo "[INFO] Forced DATABASE_URL to: $DATABASE_URL"
 fi
 
@@ -137,31 +137,31 @@ echo "[DEBUG] Environment variables:"
 echo "[DEBUG] - DATABASE_URL: $DATABASE_URL"
 echo "[DEBUG] - POSTGRES_PASSWORD: $POSTGRES_PASSWORD"
 
-echo "[DEBUG] Testing network connectivity to 192.168.1.118:5432..."
-if ping -c 1 192.168.1.118 >/dev/null 2>&1; then
-    echo "[SUCCESS] Can ping 192.168.1.118"
+echo "[DEBUG] Testing network connectivity to 192.168.1.119:5432..."
+if ping -c 1 192.168.1.119 >/dev/null 2>&1; then
+    echo "[SUCCESS] Can ping 192.168.1.119"
 else
-    echo "[ERROR] Cannot ping 192.168.1.118"
+    echo "[ERROR] Cannot ping 192.168.1.119"
 fi
 
-echo "[DEBUG] Testing if port 5432 is open on 192.168.1.118..."
-if timeout 5 bash -c "echo >/dev/tcp/192.168.1.118/5432" 2>/dev/null; then
-    echo "[SUCCESS] Port 5432 is open and accepting connections on 192.168.1.118"
+echo "[DEBUG] Testing if port 5432 is open on 192.168.1.119..."
+if timeout 5 bash -c "echo >/dev/tcp/192.168.1.119/5432" 2>/dev/null; then
+    echo "[SUCCESS] Port 5432 is open and accepting connections on 192.168.1.119"
 else
-    echo "[ERROR] Port 5432 is not accessible on 192.168.1.118"
+    echo "[ERROR] Port 5432 is not accessible on 192.168.1.119"
     echo "[DEBUG] Checking if port is listening anywhere..."
     netstat -tulpn 2>/dev/null | grep :5432 || echo "[INFO] No port 5432 found in netstat"
 fi
 
 echo "[DEBUG] Testing with nslookup..."
-nslookup 192.168.1.118 2>/dev/null || echo "[INFO] nslookup failed"
+nslookup 192.168.1.119 2>/dev/null || echo "[INFO] nslookup failed"
 
 echo "[DEBUG] Testing with telnet-style connection..."
-timeout 5 bash -c "exec 3<>/dev/tcp/192.168.1.118/5432; echo 'Connected' >&3; cat <&3" 2>/dev/null && echo "[SUCCESS] Raw TCP connection works" || echo "[ERROR] Raw TCP connection failed"
+timeout 5 bash -c "exec 3<>/dev/tcp/192.168.1.119/5432; echo 'Connected' >&3; cat <&3" 2>/dev/null && echo "[SUCCESS] Raw TCP connection works" || echo "[ERROR] Raw TCP connection failed"
 
 if command -v psql >/dev/null 2>&1; then
     echo "[DEBUG] Testing psql connection..."
-    PGPASSWORD=secure_password_change_me timeout 10 psql -h 192.168.1.118 -p 5432 -U master_order_user -d master_order -c "SELECT current_database(), current_user, version();" 2>&1
+    PGPASSWORD=secure_password_change_me timeout 10 psql -h 192.168.1.119 -p 5432 -U master_order_user -d master_order -c "SELECT current_database(), current_user, version();" 2>&1
 else
     echo "[INFO] psql not available for testing"
 fi

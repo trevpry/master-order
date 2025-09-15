@@ -76,7 +76,7 @@ The script uses these configurable settings at the top:
 
 ```bash
 # PostgreSQL Configuration
-POSTGRES_HOST="192.168.1.118"
+POSTGRES_HOST="192.168.1.119"
 POSTGRES_PORT="5432" 
 POSTGRES_DB="master_order"
 POSTGRES_USER="master_order_user"

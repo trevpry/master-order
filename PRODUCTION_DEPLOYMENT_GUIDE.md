@@ -57,7 +57,7 @@ services:
     environment:
       - NODE_ENV=production
       - DATABASE_URL=postgresql://user:pass@postgres:5432/master_order
-      - EXTERNAL_IP=192.168.1.118  # Required for Android companion app
+      - EXTERNAL_IP=192.168.1.119  # Required for Android companion app
       - PLEX_TOKEN=your-plex-token
       - PLEX_URL=http://your-plex-server:32400
     depends_on:
@@ -75,7 +75,7 @@ Volume Mappings:
 Environment Variables:
   - NODE_ENV=production
   - DATABASE_URL=postgresql://user:pass@host:5432/master_order
-  - EXTERNAL_IP=192.168.1.118  # Required for Android companion app
+  - EXTERNAL_IP=192.168.1.119  # Required for Android companion app
   - PLEX_TOKEN=your-plex-token
   - PLEX_URL=http://your-plex-server:32400
 ```
@@ -99,7 +99,7 @@ For the Android companion app to work correctly, you **must** set the `EXTERNAL_
 
 ```yaml
 environment:
-  - EXTERNAL_IP=192.168.1.118  # Replace with your actual server IP
+  - EXTERNAL_IP=192.168.1.119  # Replace with your actual server IP
 ```
 
 **Why this is required:**

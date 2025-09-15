@@ -76,7 +76,7 @@ DATABASE_URL=postgresql://username:password@host:5432/database
 # Server
 NODE_ENV=production
 PORT=3001
-EXTERNAL_IP=192.168.1.118  # Your server IP for Android
+EXTERNAL_IP=192.168.1.119  # Your server IP for Android
 
 # Optional API Keys (if using these features)
 PLEX_URL=http://your-plex:32400

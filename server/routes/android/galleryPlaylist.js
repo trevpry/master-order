@@ -134,7 +134,7 @@ function createGalleryPlaylistRoutes(prisma) {
       
       console.log(`📱 Looking for playlist: "${playlistName}"`);
       
-      // Search both Plex and custom playlists
+      // Search both Plex and custom playlists (case-insensitive)
       let playlist = null;
       let playlistType = null;
       let tracks = [];
@@ -153,9 +153,13 @@ function createGalleryPlaylistRoutes(prisma) {
         playlist = plexPlaylist;
         playlistType = 'plex';
         
+        console.log(`📱 Found Plex playlist "${plexPlaylist.title}" with ${plexPlaylist.items?.length || 0} items`);
+        
         // Get the actual track records based on playlist item ratingKeys
         if (plexPlaylist.items && plexPlaylist.items.length > 0) {
           const trackRatingKeys = plexPlaylist.items.map(item => item.ratingKey);
+          console.log(`📱 Looking for tracks with ratingKeys: ${trackRatingKeys.slice(0, 5).join(', ')}${trackRatingKeys.length > 5 ? '...' : ''}`);
+          
           tracks = await prisma.plexTrack.findMany({
             where: {
               ratingKey: {
@@ -170,6 +174,8 @@ function createGalleryPlaylistRoutes(prisma) {
               }
             }
           });
+          
+          console.log(`📱 Found ${tracks.length} tracks in database out of ${trackRatingKeys.length} playlist items`);
           
           // Add playlist-specific metadata (like addedAt from playlist item)
           tracks = tracks.map(track => {
@@ -197,9 +203,13 @@ function createGalleryPlaylistRoutes(prisma) {
           playlist = customPlaylist;
           playlistType = 'custom';
           
+          console.log(`📱 Found custom playlist "${customPlaylist.title}" with ${customPlaylist.tracks?.length || 0} tracks`);
+          
           // Get the actual track records based on custom playlist track ratingKeys
           if (customPlaylist.tracks && customPlaylist.tracks.length > 0) {
             const trackRatingKeys = customPlaylist.tracks.map(track => track.ratingKey);
+            console.log(`📱 Looking for tracks with ratingKeys: ${trackRatingKeys.slice(0, 5).join(', ')}${trackRatingKeys.length > 5 ? '...' : ''}`);
+            
             tracks = await prisma.plexTrack.findMany({
               where: {
                 ratingKey: {
@@ -214,6 +224,8 @@ function createGalleryPlaylistRoutes(prisma) {
                 }
               }
             });
+            
+            console.log(`📱 Found ${tracks.length} tracks in database out of ${trackRatingKeys.length} custom playlist tracks`);
             
             // Add custom playlist-specific metadata
             tracks = tracks.map(track => {
@@ -258,6 +270,9 @@ function createGalleryPlaylistRoutes(prisma) {
       const randomIndex = Math.floor(Math.random() * tracks.length);
       const randomTrack = tracks[randomIndex];
       
+      console.log(`📱 Selected random track: "${randomTrack.title}" by ${randomTrack.album?.artist?.title || randomTrack.originalTitle || 'Unknown'}`);
+      console.log(`📱 Track ratingKey: ${randomTrack.ratingKey}, key: ${randomTrack.key || 'MISSING'}`);
+      
       // Get Plex settings for stream URL generation
       const settings = await prisma.settings.findFirst();
       const baseUrl = getAndroidApiBaseUrl();
@@ -267,9 +282,11 @@ function createGalleryPlaylistRoutes(prisma) {
       let plexUrl = settings?.plexUrl || null;
       
       // Generate stream URL if we have Plex configuration
-      if (settings?.plexUrl && settings?.plexToken && randomTrack.ratingKey) {
-        // Use the correct Plex audio streaming endpoint format
-        streamUrl = `${settings.plexUrl}/library/parts/${randomTrack.ratingKey}/stream?X-Plex-Token=${settings.plexToken}`;
+      if (settings?.plexUrl && settings?.plexToken && randomTrack.key) {
+        // Use the track's key field for proper Plex streaming
+        streamUrl = `${settings.plexUrl}${randomTrack.key}?X-Plex-Token=${settings.plexToken}`;
+        
+        console.log(`📱 Generated stream URL: ${streamUrl}`);
         
         // Generate artwork URL with fallback hierarchy
         if (randomTrack.thumb) {
@@ -285,6 +302,13 @@ function createGalleryPlaylistRoutes(prisma) {
             ? randomTrack.grandparentThumb
             : `${settings.plexUrl}${randomTrack.grandparentThumb}?X-Plex-Token=${settings.plexToken}`;
         }
+      } else {
+        console.warn(`📱 ⚠️ Cannot generate stream URL for track "${randomTrack.title}":`, {
+          hasPlexUrl: !!settings?.plexUrl,
+          hasPlexToken: !!settings?.plexToken,
+          hasTrackKey: !!randomTrack.key,
+          trackKey: randomTrack.key
+        });
       }
       
       const androidResponse = {

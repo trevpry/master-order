@@ -640,12 +640,25 @@ class HistoryPlusDataImporter {
     
     // Transform records with proper field mapping
     const transformedRecords = records.map(record => {
+      // Determine video type based on URL
+      let videoType = 'video'; // default fallback
+      if (record.url) {
+        if (record.url.includes('youtube.com') || record.url.includes('youtu.be')) {
+          videoType = 'youtube';
+        } else if (record.url.includes('greatcoursesplus') || record.url.includes('thegreatcourses')) {
+          videoType = 'greatcoursesplus';
+        }
+      }
+      
       return {
         ...record,
         id: parseInt(record.id),
         // Map CSV fields to schema fields
         eventId: record.historicalEventId ? parseInt(record.historicalEventId) : null,
         thumbnailUrl: record.thumbnail || null,
+        channelId: record.channelId ? parseInt(record.channelId) : null, // Link to channel if available
+        // Add required type field based on URL detection
+        type: record.type || videoType,
         // Remove the old field names
         historicalEventId: undefined,
         thumbnail: undefined,
@@ -910,8 +923,22 @@ class HistoryPlusDataImporter {
     
     const records = await this.loadCSVFile('history_channels.csv');
     if (records.length === 0) return;
+
+    console.log(`📄 Loaded ${records.length} records from history_channels.csv`);
     
-    const { existing, new: newRecords } = await this.checkExistingRecords('historyChannel', records);
+    // Transform records with proper field mapping
+    const transformedRecords = records.map(record => {
+      return {
+        ...record,
+        id: parseInt(record.id),
+        // Map CSV fields to schema fields
+        channelUrl: record.url || record.channelUrl || `https://channel-${record.id}`, // Generate fallback URL if missing
+        // Remove the old field name if it exists
+        url: undefined
+      };
+    });
+
+    const { existing, new: newRecords } = await this.checkExistingRecords('historyChannel', transformedRecords);
     
     if (newRecords.length === 0) {
       console.log('   All records already exist, skipping');

@@ -30,7 +30,7 @@ First, ensure you have a PostgreSQL database running. You can use the official P
   NODE_ENV=production
   DATABASE_URL=postgresql://master_order_user:your_secure_password_here@192.168.1.114:5432/master_order
   POSTGRES_PASSWORD=your_secure_password_here
-  EXTERNAL_IP=192.168.1.118
+  EXTERNAL_IP=192.168.1.119
   PORT=3001
   ```
 
