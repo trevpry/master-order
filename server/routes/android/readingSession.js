@@ -22,17 +22,22 @@ function createReadingSessionRoutes(prisma) {
   // Start reading session
   router.post('/reading/start', asyncHandler(async (req, res) => {
     console.log('📱 Android app requesting to start reading session...');
+    console.log('📱 Request body received:', JSON.stringify(req.body, null, 2));
+    console.log('📱 Request headers:', JSON.stringify(req.headers, null, 2));
     
-    const { mediaType, title, seriesTitle, customOrderItemId } = req.body;
+    const { mediaType, title, seriesTitle, customOrderItemId, id } = req.body;
+
+    // The Android app might send the custom order item ID as either 'customOrderItemId' or 'id'
+    const actualCustomOrderItemId = customOrderItemId || id;
 
     // Validate required fields
     if (!mediaType || !title) {
       return sendBadRequest(res, 'mediaType and title are required');
     }
 
-    // In this system, customOrderItemId should ALWAYS be provided
-    if (!customOrderItemId) {
-      return sendBadRequest(res, 'customOrderItemId is required - all reading sessions must be linked to a custom order item');
+    // Temporarily allow missing customOrderItemId for debugging
+    if (!actualCustomOrderItemId) {
+      console.log('⚠️ WARNING: Neither customOrderItemId nor id provided - this should be investigated');
     }
 
     // Validate media type
@@ -40,28 +45,57 @@ function createReadingSessionRoutes(prisma) {
       return sendBadRequest(res, 'Reading sessions are only supported for books, comics, and stories');
     }
 
-    console.log(`📱 Start reading session - mediaType: ${mediaType}, title: ${title}, customOrderItemId: ${customOrderItemId}`);
+    console.log(`📱 Start reading session - mediaType: ${mediaType}, title: ${title}, customOrderItemId: ${customOrderItemId}, id: ${id}, actualId: ${actualCustomOrderItemId}`);
 
-    // Validate and parse customOrderItemId (required)
-    const parsedId = parseInt(customOrderItemId);
-    if (!Number.isInteger(parsedId)) {
-      return sendBadRequest(res, 'customOrderItemId must be a valid integer');
-    }
-
-    // Verify the custom order item exists
-    const existingItem = await prisma.customOrderItem.findUnique({
-      where: { id: parsedId }
-    });
+    let finalCustomOrderItemId = null;
     
-    if (!existingItem) {
-      return sendBadRequest(res, `Custom order item with ID ${parsedId} not found`);
-    }
+    if (actualCustomOrderItemId) {
+      // Validate and parse customOrderItemId (if provided)
+      const parsedId = parseInt(actualCustomOrderItemId);
+      if (!Number.isInteger(parsedId)) {
+        return sendBadRequest(res, 'customOrderItemId must be a valid integer');
+      }
 
-    console.log(`✅ Validated customOrderItemId: ${parsedId} for item: "${existingItem.title}"`);
+      // Verify the custom order item exists
+      const existingItem = await prisma.customOrderItem.findUnique({
+        where: { id: parsedId }
+      });
+      
+      if (!existingItem) {
+        return sendBadRequest(res, `Custom order item with ID ${parsedId} not found`);
+      }
 
-    // Verify the title matches (optional check for data consistency)
-    if (existingItem.title !== title) {
-      console.log(`⚠️  Title mismatch: session="${title}" vs item="${existingItem.title}"`);
+      console.log(`✅ Validated customOrderItemId: ${parsedId} for item: "${existingItem.title}"`);
+      finalCustomOrderItemId = parsedId;
+
+      // Verify the title matches (optional check for data consistency)
+      if (existingItem.title !== title) {
+        console.log(`⚠️  Title mismatch: session="${title}" vs item="${existingItem.title}"`);
+      }
+    } else {
+      // Try to find custom order item by title if no ID provided (fallback for debugging)
+      console.log(`🔍 No customOrderItemId provided, searching for item by title: "${title}"`);
+      
+      try {
+        const matchingItem = await prisma.customOrderItem.findFirst({
+          where: {
+            title: {
+              equals: title,
+              mode: 'insensitive'
+            },
+            mediaType: mediaType
+          }
+        });
+        
+        if (matchingItem) {
+          finalCustomOrderItemId = matchingItem.id;
+          console.log(`✅ Found matching custom order item by title: ID ${finalCustomOrderItemId}`);
+        } else {
+          console.log(`📝 No matching custom order item found for title: "${title}"`);
+        }
+      } catch (searchError) {
+        console.error('❌ Error searching for custom order item by title:', searchError);
+      }
     }
 
     // Start reading session using the service directly
@@ -69,7 +103,7 @@ function createReadingSessionRoutes(prisma) {
       mediaType,
       title,
       seriesTitle,
-      customOrderItemId: parsedId
+      customOrderItemId: finalCustomOrderItemId
     });
 
     console.log('✅ Reading session started successfully:', readingSession.id);
@@ -83,7 +117,7 @@ function createReadingSessionRoutes(prisma) {
         mediaType: mediaType,
         title: title,
         seriesTitle: seriesTitle,
-        customOrderItemId: parsedId,
+        customOrderItemId: finalCustomOrderItemId,
         startedAt: readingSession.startedAt,
         isPaused: readingSession.isPaused || false,
         message: `Started reading session for "${title}"`,
