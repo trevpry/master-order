@@ -1475,6 +1475,8 @@ const Music = () => {
             tracksHasMore={tracksHasMore}
             selectedAlbum={selectedAlbum}
             selectedArtist={selectedArtist}
+            selectedSection={selectedSection}
+            searchQuery={searchQuery}
             currentTrack={currentTrack}
             isPlaying={isPlaying}
             playlists={playlists}

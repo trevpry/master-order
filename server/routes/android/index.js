@@ -17,6 +17,7 @@ const createContentDiscoveryRoutes = require('./contentDiscovery');
 const createActivityTrackingRoutes = require('./activityTracking');
 const createPlaybackControlRoutes = require('./playbackControl');
 const createReadingSessionRoutes = require('./readingSession');
+const createHistoryPlusReadingSessionRoutes = require('./historyPlusReadingSession');
 const createStashIntegrationRoutes = require('./stashIntegration');
 const createViewingSessionRoutes = require('./viewingSession');
 const createGalleryPlaylistRoutes = require('./galleryPlaylist');
@@ -61,6 +62,9 @@ function createAndroidRouter(options = {}) {
   // Reading session management
   router.use('/', createReadingSessionRoutes(prisma));
   
+  // History Plus reading session management
+  router.use('/', createHistoryPlusReadingSessionRoutes(prisma));
+  
   // Stash integration
   router.use('/', createStashIntegrationRoutes(prisma));
   
@@ -73,7 +77,7 @@ function createAndroidRouter(options = {}) {
   // Weather services
   router.use('/', createWeatherRoutes());
   
-  console.log('Android router: All 8 modules mounted successfully');
+  console.log('Android router: All 9 modules mounted successfully');
   
   return router;
 }

@@ -1,0 +1,287 @@
+/**
+ * Tracks Playlist Player Styles
+ * Part of Eddie Life Management - Music Module
+ * 
+ * Modular CSS for the tracks page playlist player component
+ */
+
+.tracks-playlist-player {
+  background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+  border: 1px solid #dee2e6;
+  border-radius: 12px;
+  padding: 1rem;
+  margin-bottom: 1.5rem;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+  transition: all 0.3s ease;
+}
+
+.tracks-playlist-player.minimized {
+  padding: 0.75rem 1rem;
+}
+
+/* Player Header */
+.playlist-player-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1rem;
+}
+
+.tracks-playlist-player.minimized .playlist-player-header {
+  margin-bottom: 0;
+}
+
+.playlist-info {
+  flex: 1;
+}
+
+.playlist-title {
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: #343a40;
+  margin-bottom: 0.25rem;
+}
+
+.playlist-meta {
+  font-size: 0.9rem;
+  color: #6c757d;
+}
+
+.play-all-note {
+  font-size: 0.8rem;
+  color: #868e96;
+  font-style: italic;
+  margin-top: 0.25rem;
+}
+
+.minimize-btn {
+  background: #f8f9fa;
+  border: 1px solid #dee2e6;
+  border-radius: 50%;
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  font-size: 0.9rem;
+}
+
+.minimize-btn:hover {
+  background: #e9ecef;
+  transform: translateY(-1px);
+}
+
+/* Playlist Controls */
+.playlist-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.main-controls {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  justify-content: center;
+}
+
+.control-btn {
+  background: #ffffff;
+  border: 1px solid #dee2e6;
+  border-radius: 50%;
+  width: 40px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  font-size: 1rem;
+}
+
+.control-btn:hover:not(:disabled) {
+  background: #f8f9fa;
+  transform: translateY(-2px);
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.15);
+}
+
+.control-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.shuffle-btn[data-active="true"] {
+  background: #007bff;
+  color: white;
+  border-color: #007bff;
+}
+
+.shuffle-btn[data-active="true"]:hover {
+  background: #0056b3;
+  border-color: #0056b3;
+}
+
+.play-all-btn {
+  background: #007bff;
+  color: white;
+  border: 1px solid #007bff;
+  border-radius: 24px;
+  padding: 0.5rem 1.5rem;
+  font-size: 1rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.play-all-btn:hover:not(:disabled) {
+  background: #0056b3;
+  border-color: #0056b3;
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0, 123, 255, 0.3);
+}
+
+.play-all-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  transform: none;
+}
+
+/* Current Track Info */
+.current-track-info {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: #ffffff;
+  border: 1px solid #e9ecef;
+  border-radius: 8px;
+  padding: 0.75rem;
+}
+
+.track-details {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  flex: 1;
+}
+
+.track-title {
+  font-weight: 600;
+  color: #343a40;
+  font-size: 0.95rem;
+}
+
+.track-artist {
+  color: #6c757d;
+  font-size: 0.85rem;
+}
+
+.track-progress {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.track-position {
+  background: #e9ecef;
+  border-radius: 12px;
+  padding: 0.25rem 0.5rem;
+  font-size: 0.8rem;
+  font-weight: 500;
+  color: #495057;
+}
+
+/* Error Display */
+.player-error {
+  background: #f8d7da;
+  border: 1px solid #f5c2c7;
+  border-radius: 6px;
+  padding: 0.75rem;
+  color: #721c24;
+  font-size: 0.9rem;
+  margin-top: 0.75rem;
+  text-align: center;
+}
+
+/* Responsive Design */
+@media (max-width: 768px) {
+  .tracks-playlist-player {
+    padding: 0.75rem;
+    margin-bottom: 1rem;
+  }
+  
+  .playlist-player-header {
+    margin-bottom: 0.75rem;
+  }
+  
+  .playlist-title {
+    font-size: 1rem;
+  }
+  
+  .playlist-meta {
+    font-size: 0.85rem;
+  }
+  
+  .main-controls {
+    gap: 0.5rem;
+  }
+  
+  .control-btn {
+    width: 36px;
+    height: 36px;
+    font-size: 0.9rem;
+  }
+  
+  .play-all-btn {
+    padding: 0.4rem 1.2rem;
+    font-size: 0.9rem;
+  }
+  
+  .current-track-info {
+    padding: 0.5rem;
+  }
+  
+  .track-title {
+    font-size: 0.9rem;
+  }
+  
+  .track-artist {
+    font-size: 0.8rem;
+  }
+}
+
+@media (max-width: 480px) {
+  .main-controls {
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 0.4rem;
+  }
+  
+  .control-btn {
+    width: 32px;
+    height: 32px;
+    font-size: 0.8rem;
+  }
+  
+  .play-all-btn {
+    order: -1;
+    width: 100%;
+    justify-content: center;
+    margin-bottom: 0.5rem;
+  }
+  
+  .current-track-info {
+    flex-direction: column;
+    gap: 0.5rem;
+    text-align: center;
+  }
+  
+  .track-progress {
+    justify-content: center;
+  }
+}

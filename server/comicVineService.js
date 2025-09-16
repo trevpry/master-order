@@ -1,10 +1,12 @@
 const axios = require('axios');
 const prisma = require('./prismaClient'); // Use shared Prisma client
+const ComicVineCacheService = require('./services/ComicVineCacheService');
 
 class ComicVineService {
   constructor() {
     this.baseURL = 'https://comicvine.gamespot.com/api';
     this.apiKey = null; // Will be loaded from database
+    this.cache = new ComicVineCacheService(60); // 60-minute cache
   }
 
   async loadApiKey() {
@@ -77,11 +79,19 @@ class ComicVineService {
    * Search for a comic series by name with fuzzy matching
    * @param {string} seriesName - The name of the comic series
    * @returns {Promise<Array>} Array of search results with similarity scores
-   */  async searchSeries(seriesName) {
+   */  
+  async searchSeries(seriesName) {
     try {
       if (!(await this.isApiKeyAvailable())) {
         console.log('ComicVine API key not available');
         return [];
+      }
+
+      // Check cache first
+      const cacheKey = this.cache.getSeriesSearchKey(seriesName);
+      const cachedResult = this.cache.get(cacheKey);
+      if (cachedResult) {
+        return cachedResult;
       }
 
       console.log(`Searching ComicVine for series: ${seriesName}`);
@@ -155,15 +165,21 @@ class ComicVineService {
           console.log(`Best match: "${sortedResults[0].name}" (${Math.round(sortedResults[0].similarity * 100)}% similarity)`);
         }
         
+        // Cache the fuzzy results
+        this.cache.set(cacheKey, sortedResults);
         return sortedResults;
       }
       
       // Add exact match indicators to normal results
-      return results.map(result => ({
+      const finalResults = results.map(result => ({
         ...result,
         similarity: this.calculateSimilarity(seriesName, result.name),
         isFuzzyMatch: false
       }));
+      
+      // Cache the results
+      this.cache.set(cacheKey, finalResults);
+      return finalResults;
     } catch (error) {
       console.error('ComicVine series search failed:', error.response?.data || error.message);
       return [];
@@ -175,11 +191,19 @@ class ComicVineService {
    * @param {number} volumeId - The ComicVine volume ID
    * @param {number} issueNumber - The issue number to find
    * @returns {Promise<Object|null>} Issue details or null
-   */  async getIssueByNumber(volumeId, issueNumber) {
+   */  
+  async getIssueByNumber(volumeId, issueNumber) {
     try {
       if (!(await this.isApiKeyAvailable())) {
         console.log('ComicVine API key not available');
         return null;
+      }
+
+      // Check cache first
+      const cacheKey = this.cache.getIssueKey(volumeId, issueNumber);
+      const cachedResult = this.cache.get(cacheKey);
+      if (cachedResult) {
+        return cachedResult;
       }
 
       console.log(`Searching for issue #${issueNumber} in volume ${volumeId}`);
@@ -201,6 +225,8 @@ class ComicVineService {
       const issues = listResponse.data.results || [];
       if (issues.length === 0) {
         console.log(`No issue #${issueNumber} found in volume ${volumeId}`);
+        // Cache the null result to avoid repeated API calls for non-existent issues
+        this.cache.set(cacheKey, null);
         return null;
       }
       
@@ -222,14 +248,22 @@ class ComicVineService {
       if (detailResponse.data.results) {
         const fullIssue = detailResponse.data.results;
         console.log(`Retrieved full details for issue #${issueNumber}${fullIssue.character_credits ? ` with ${fullIssue.character_credits.length} characters` : ''}`);
+        
+        // Cache the successful result
+        this.cache.set(cacheKey, fullIssue);
         return fullIssue;
       } else {
         console.log(`Could not retrieve full details for issue #${issueNumber}`);
+        // Cache the basic issue data
+        this.cache.set(cacheKey, issues[0]);
         return issues[0]; // Fallback to basic issue data
       }
       
     } catch (error) {
       console.error('ComicVine issue search failed:', error.response?.data || error.message);
+      // Cache null result to avoid repeated failed attempts
+      const cacheKey = this.cache.getIssueKey(volumeId, issueNumber);
+      this.cache.set(cacheKey, null);
       return null;
     }
   }
@@ -326,6 +360,21 @@ class ComicVineService {
       console.error('Error getting comic cover art:', error.message);
       return null;
     }
+  }
+
+  /**
+   * Get cache statistics for monitoring
+   * @returns {object} Cache statistics
+   */
+  getCacheStats() {
+    return this.cache.getStats();
+  }
+
+  /**
+   * Clear the cache (useful for testing or troubleshooting)
+   */
+  clearCache() {
+    this.cache.clear();
   }
 }
 

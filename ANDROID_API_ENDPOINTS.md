@@ -23,7 +23,7 @@ Currently, no authentication is required for these endpoints. They are designed 
 
 **Endpoint**: `GET /api/android/up-next`
 
-**Description**: Retrieves the next recommended content from the Master Order system, equivalent to pressing the "Get Up Next" button on the home page. This can return TV episodes, movies, or custom order items based on the current configuration.
+**Description**: Retrieves the next recommended content from the Master Order system, equivalent to pressing the "Get Up Next" button on the home page. This can return TV episodes, movies, custom order items, or History Plus reading sessions (books, chapters, sections) based on the current configuration.
 
 **Response Format**:
 
@@ -108,8 +108,70 @@ Currently, no authentication is required for these endpoints. They are designed 
 }
 ```
 
+**History Plus Content Response**:
+```json
+{
+  "type": "HISTORY_PLUS_CONTENT",
+  "data": {
+    "orderType": "HISTORY_PLUS",
+    "type": "section",
+    "content": {
+      "id": 136,
+      "title": "Pepi I Pyramid Texts",
+      "sectionNumber": 3,
+      "description": null,
+      "pageStart": null,
+      "pageEnd": null,
+      "chapterId": 75,
+      "eventId": 533,
+      "chapter": {
+        "id": 75,
+        "title": "From the Pyramid Texts",
+        "chapterNumber": 3,
+        "pageStart": 29,
+        "pageEnd": 50,
+        "bookId": 3,
+        "book": {
+          "id": 3,
+          "title": "Ancient Egyptian Literature",
+          "author": null,
+          "isbn": null,
+          "publisher": null,
+          "publishYear": null,
+          "description": null,
+          "coverUrl": null,
+          "pageCount": null
+        }
+      }
+    },
+    "title": "Ancient Egyptian Literature - Chapter 3: From the Pyramid Texts - Section 3: Pepi I Pyramid Texts",
+    "description": "",
+    "bookTitle": "Ancient Egyptian Literature",
+    "bookAuthor": "Unknown Author",
+    "bookYear": null,
+    "bookIsbn": null,
+    "bookPublisher": null,
+    "bookPageCount": null,
+    "bookCoverUrl": null,
+    "bookDescription": null,
+    "chapterNumber": 3,
+    "chapterTitle": "From the Pyramid Texts",
+    "chapterDescription": null,
+    "sectionNumber": 3,
+    "sectionTitle": "Pepi I Pyramid Texts",
+    "sectionDescription": null,
+    "pageStart": null,
+    "pageEnd": null,
+    "eventId": 533,
+    "eventTitle": "Reign of Pharaoh Pepi I",
+    "eventTitleWithDates": "Reign of Pharaoh Pepi I (2331 BCE - 2287 BCE)",
+    "eventDate": "-2331-01-01"
+  }
+}
+```
+
 **Response Fields**:
-- `type`: Indicates the content type (`PLAY_TV_EPISODE`, `PLAY_MOVIE`, or `PLAY_CUSTOM_ORDER_ITEM`)
+- `type`: Indicates the content type (`PLAY_TV_EPISODE`, `PLAY_MOVIE`, `PLAY_CUSTOM_ORDER_ITEM`, or `HISTORY_PLUS_CONTENT`)
 - TV Episode Fields:
   - `ratingKey`: Plex rating key for the specific episode (not the series)
   - `episodeRatingKey`: Explicit episode-specific rating key for direct episode playback
@@ -165,6 +227,37 @@ Currently, no authentication is required for these endpoints. They are designed 
     - `episodeNumber`: Episode number within the season (integer)  
     - `episodeTitle`: Specific episode title
     - `seriesTitle`: Name of the TV series
+- History Plus Content Fields:
+  - `orderType`: Always "HISTORY_PLUS" for this response type
+  - `type`: Content type ("book", "chapter", "section", or "video")
+  - `content`: Raw content object with full relational data
+  - `title`: Formatted hierarchical title (e.g., "Book - Chapter X: Title - Section Y: Title")
+  - `description`: Content description
+  - Book information (available for all content types):
+    - `bookTitle`: Title of the book
+    - `bookAuthor`: Author of the book
+    - `bookYear`: Publication year
+    - `bookIsbn`: ISBN number
+    - `bookPublisher`: Publisher name
+    - `bookPageCount`: Total pages in book
+    - `bookCoverUrl`: Book cover image URL
+    - `bookDescription`: Book description
+  - Chapter information (available for chapter and section types):
+    - `chapterNumber`: Chapter number within the book
+    - `chapterTitle`: Chapter title
+    - `chapterDescription`: Chapter description
+  - Section information (available for section type only):
+    - `sectionNumber`: Section number within the chapter
+    - `sectionTitle`: Section title
+    - `sectionDescription`: Section description
+  - Page information (when available):
+    - `pageStart`: Starting page number
+    - `pageEnd`: Ending page number
+  - Historical context:
+    - `eventId`: History Plus event ID
+    - `eventTitle`: Event title
+    - `eventTitleWithDates`: Event title with historical dates
+    - `eventDate`: Historical date of the event
 
 **Content Selection Logic**: The endpoint uses the same logic as the web interface to determine what content to return based on current settings and order type configuration.
 
@@ -750,7 +843,270 @@ curl -X POST "http://localhost:3001/api/android/mark-watched" \
 
 ---
 
-### 5. Viewing Session Management
+### 5. History Plus Reading Session Management
+
+#### Start History Plus Reading Session
+
+**Endpoint**: `POST /api/android/history-plus/reading/start`
+
+**Description**: Starts a reading session for History Plus content (books, chapters, or sections). Creates a reading session for the parent book while tracking the specific content being read. This implements a dual-layer approach where time is tracked at the book level but completion can be marked at the granular level.
+
+**Request Body**:
+```json
+{
+  "contentType": "section",
+  "contentId": 136,
+  "bookId": 3,
+  "bookTitle": "Ancient Egyptian Literature",
+  "chapterId": 75,
+  "chapterTitle": "From the Pyramid Texts",
+  "chapterNumber": 3,
+  "sectionId": 136,
+  "sectionTitle": "Pepi I Pyramid Texts",
+  "sectionNumber": 3,
+  "eventId": 533,
+  "eventTitle": "Reign of Pharaoh Pepi I"
+}
+```
+
+**Request Fields**:
+- `contentType` (required): Type of content being read ("book", "chapter", or "section")
+- `contentId` (required): ID of the specific content being read
+- `bookId` (required): ID of the parent book (always required for session tracking)
+- `bookTitle` (required): Title of the parent book
+- `chapterId` (optional): Chapter ID (required for section type, optional for chapter type)
+- `chapterTitle` (optional): Chapter title
+- `chapterNumber` (optional): Chapter number
+- `sectionId` (optional): Section ID (required for section type)
+- `sectionTitle` (optional): Section title
+- `sectionNumber` (optional): Section number
+- `eventId` (required): History Plus event ID
+- `eventTitle` (required): History Plus event title
+
+**Success Response**:
+```json
+{
+  "type": "HISTORY_PLUS_READING_SESSION_STARTED",
+  "data": {
+    "success": true,
+    "sessionId": 789,
+    "bookSessionId": 790,
+    "contentType": "section",
+    "contentId": 136,
+    "bookId": 3,
+    "bookTitle": "Ancient Egyptian Literature",
+    "readingContent": {
+      "type": "section",
+      "title": "Ancient Egyptian Literature - Chapter 3: From the Pyramid Texts - Section 3: Pepi I Pyramid Texts",
+      "chapterNumber": 3,
+      "chapterTitle": "From the Pyramid Texts",
+      "sectionNumber": 3,
+      "sectionTitle": "Pepi I Pyramid Texts"
+    },
+    "eventContext": {
+      "eventId": 533,
+      "eventTitle": "Reign of Pharaoh Pepi I"
+    },
+    "startedAt": "2024-01-15T10:30:00.000Z",
+    "isPaused": false,
+    "message": "Started reading session for \"Ancient Egyptian Literature\" (Section 3: Pepi I Pyramid Texts)",
+    "timestamp": "2024-01-15T10:30:00.000Z"
+  }
+}
+```
+
+#### Pause/Resume History Plus Reading Session
+
+**Endpoint**: `POST /api/android/history-plus/reading/pause`
+
+**Description**: Pauses or resumes the active History Plus reading session. This affects the parent book's reading session time tracking.
+
+**Request Body**: Empty `{}`
+
+**Success Response**:
+```json
+{
+  "type": "HISTORY_PLUS_READING_SESSION_PAUSED",
+  "data": {
+    "success": true,
+    "sessionId": 789,
+    "bookSessionId": 790,
+    "isPaused": true,
+    "bookTitle": "Ancient Egyptian Literature",
+    "contentType": "section",
+    "readingContent": {
+      "title": "Ancient Egyptian Literature - Chapter 3: From the Pyramid Texts - Section 3: Pepi I Pyramid Texts"
+    },
+    "message": "Paused reading session for \"Ancient Egyptian Literature\"",
+    "pausedAt": "2024-01-15T10:35:00.000Z",
+    "totalActiveTime": 300,
+    "timestamp": "2024-01-15T10:35:00.000Z"
+  }
+}
+```
+
+#### Stop History Plus Reading Session
+
+**Endpoint**: `POST /api/android/history-plus/reading/stop`
+
+**Description**: Stops the active History Plus reading session. This stops the parent book's reading session and logs the total time, but does not automatically mark any content as read. Use the separate mark-as-read endpoint for completion tracking.
+
+**Request Body**: Empty `{}`
+
+**Success Response**:
+```json
+{
+  "type": "HISTORY_PLUS_READING_SESSION_STOPPED",
+  "data": {
+    "success": true,
+    "sessionId": 789,
+    "bookSessionId": 790,
+    "bookTitle": "Ancient Egyptian Literature",
+    "contentType": "section",
+    "readingContent": {
+      "title": "Ancient Egyptian Literature - Chapter 3: From the Pyramid Texts - Section 3: Pepi I Pyramid Texts"
+    },
+    "duration": 600,
+    "totalActiveTime": 480,
+    "message": "Stopped reading session for \"Ancient Egyptian Literature\"",
+    "completedAt": "2024-01-15T10:40:00.000Z",
+    "timestamp": "2024-01-15T10:40:00.000Z"
+  }
+}
+```
+
+#### Mark History Plus Content as Read
+
+**Endpoint**: `POST /api/android/history-plus/reading/mark-read`
+
+**Description**: Marks the specific History Plus content (book, chapter, or section) as read. This only affects the granular content that was being read, not necessarily the parent book, unless the content type is "book".
+
+**Request Body**:
+```json
+{
+  "contentType": "section",
+  "contentId": 136,
+  "bookId": 3,
+  "chapterId": 75,
+  "eventId": 533
+}
+```
+
+**Request Fields**:
+- `contentType` (required): Type of content to mark as read ("book", "chapter", or "section")
+- `contentId` (required): ID of the specific content to mark as read
+- `bookId` (required): ID of the parent book
+- `chapterId` (optional): Chapter ID (required for section type)
+- `eventId` (required): History Plus event ID
+
+**Success Response for Section**:
+```json
+{
+  "type": "HISTORY_PLUS_CONTENT_MARKED_READ",
+  "data": {
+    "success": true,
+    "contentType": "section",
+    "contentId": 136,
+    "bookId": 3,
+    "chapterId": 75,
+    "markedAsRead": true,
+    "affectedContent": {
+      "sectionTitle": "Pepi I Pyramid Texts",
+      "chapterTitle": "From the Pyramid Texts",
+      "bookTitle": "Ancient Egyptian Literature"
+    },
+    "eventProgress": {
+      "eventId": 533,
+      "eventTitle": "Reign of Pharaoh Pepi I",
+      "totalContent": 15,
+      "readContent": 8,
+      "completionPercentage": 53.3,
+      "eventCompleted": false
+    },
+    "message": "Marked section \"Pepi I Pyramid Texts\" as read",
+    "timestamp": "2024-01-15T10:40:00.000Z"
+  }
+}
+```
+
+**Success Response for Chapter**:
+```json
+{
+  "type": "HISTORY_PLUS_CONTENT_MARKED_READ",
+  "data": {
+    "success": true,
+    "contentType": "chapter",
+    "contentId": 75,
+    "bookId": 3,
+    "markedAsRead": true,
+    "affectedContent": {
+      "chapterTitle": "From the Pyramid Texts",
+      "bookTitle": "Ancient Egyptian Literature",
+      "sectionsInChapter": 5,
+      "sectionsMarkedRead": 5
+    },
+    "eventProgress": {
+      "eventId": 533,
+      "eventTitle": "Reign of Pharaoh Pepi I",
+      "totalContent": 15,
+      "readContent": 12,
+      "completionPercentage": 80.0,
+      "eventCompleted": false
+    },
+    "message": "Marked chapter \"From the Pyramid Texts\" as read",
+    "timestamp": "2024-01-15T10:40:00.000Z"
+  }
+}
+```
+
+**Success Response for Book**:
+```json
+{
+  "type": "HISTORY_PLUS_CONTENT_MARKED_READ",
+  "data": {
+    "success": true,
+    "contentType": "book",
+    "contentId": 3,
+    "markedAsRead": true,
+    "affectedContent": {
+      "bookTitle": "Ancient Egyptian Literature",
+      "chaptersInBook": 8,
+      "chaptersMarkedRead": 8
+    },
+    "eventProgress": {
+      "eventId": 533,
+      "eventTitle": "Reign of Pharaoh Pepi I",
+      "totalContent": 15,
+      "readContent": 15,
+      "completionPercentage": 100.0,
+      "eventCompleted": true
+    },
+    "message": "Marked book \"Ancient Egyptian Literature\" as read - Event completed!",
+    "timestamp": "2024-01-15T10:40:00.000Z"
+  }
+}
+```
+
+**Response Fields**:
+- `contentType`: Type of content that was marked as read
+- `contentId`: ID of the content that was marked as read
+- `markedAsRead`: Always true for successful requests
+- `affectedContent`: Details about what was marked as read
+- `eventProgress`: Progress tracking for the History Plus event
+  - `eventCompleted`: Boolean indicating if the entire event is now completed
+  - `completionPercentage`: Percentage of event content that has been read
+- `message`: Dynamic message indicating what was completed
+
+**Key Behavior Notes**:
+- **Granular Marking**: Only the specific content type is marked as read
+- **Session Independence**: Marking as read is independent of reading sessions
+- **Event Progress**: Each response includes overall event completion progress
+- **Hierarchical Awareness**: The system understands the book→chapter→section hierarchy
+- **No Automatic Propagation**: Marking a section as read does NOT automatically mark the chapter or book as read
+
+---
+
+### 6. Viewing Session Management
 
 #### Start Viewing Session
 

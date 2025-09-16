@@ -6,6 +6,7 @@ import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
 // Shared Components
 import Layout from './shared/components/Layout';
 import Dashboard from './Dashboard';
+import GlobalMusicPlayer from './components/GlobalMusicPlayer';
 
 // Media Module Components
 import Settings from './modules/media/pages/settings/index';
@@ -73,6 +74,9 @@ function App() {
           <Route path="/eddie-settings" element={<EddieSettings />} />
         </Routes>
       </Layout>
+      
+      {/* Global Music Player - always available */}
+      <GlobalMusicPlayer />
     </Router>
   )
 }

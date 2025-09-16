@@ -17,14 +17,78 @@ const GlobalMusicPlayer = () => {
   const [shuffledTracks, setShuffledTracks] = useState([]);
   const [isRepeat, setIsRepeat] = useState(false);
   const [isMinimized, setIsMinimized] = useState(false);
-  const [isVisible, setIsVisible] = useState(true); // Make visible by default for testing
+  const [isVisible, setIsVisible] = useState(false); // Hidden by default until music is played
   
   const audioRef = useRef(null);
   const progressRef = useRef(null);
+
+  // Function to get artwork URL for a track/media item
+  const getArtworkUrl = (track) => {
+    if (!track) return null;
+
+    // Web videos don't have artwork
+    if (track?.type === 'webvideo') {
+      return null;
+    }
+
+    // First priority: Check for cached artwork (works for all media types)
+    if (track?.localArtworkPath) {
+      const filename = track.localArtworkPath.includes('\\') || track.localArtworkPath.includes('/')
+        ? track.localArtworkPath.split(/[\\\/]/).pop()
+        : track.localArtworkPath;
+      console.log('🎨 Using cached artwork:', filename);
+      return `${config.apiBaseUrl}/api/artwork/${filename}`;
+    }
+
+    // For comics, fallback to ComicVine artwork if no cached artwork
+    if (track?.type === 'comic' && track?.comicDetails?.coverUrl) {
+      console.log('🎨 Using ComicVine artwork (fallback):', track.comicDetails.coverUrl);
+      return `${config.apiBaseUrl}/api/comicvine-artwork?url=${encodeURIComponent(track.comicDetails.coverUrl)}`;
+    }
+
+    // For books, use OpenLibrary artwork
+    if (track?.type === 'book' && track?.bookCoverUrl) {
+      console.log('🎨 Using OpenLibrary artwork:', track.bookCoverUrl);
+      return `${config.apiBaseUrl}/api/openlibrary-artwork?url=${encodeURIComponent(track.bookCoverUrl)}`;
+    }
+
+    // For short stories, use story cover or fallback to containing book's cover
+    if (track?.type === 'shortstory') {
+      if (track?.storyCoverUrl) {
+        console.log('🎨 Using short story cover artwork:', track.storyCoverUrl);
+        return `${config.apiBaseUrl}/api/openlibrary-artwork?url=${encodeURIComponent(track.storyCoverUrl)}`;
+      } else if (track?.containedInBookDetails?.coverUrl) {
+        console.log('🎨 Using containing book cover artwork for short story:', track.containedInBookDetails.coverUrl);
+        return `${config.apiBaseUrl}/api/openlibrary-artwork?url=${encodeURIComponent(track.containedInBookDetails.coverUrl)}`;
+      }
+    }
+
+    // Prioritize TVDB artwork if available for TV content
+    if (track?.tvdbArtwork?.url) {
+      console.log('🎨 Using TVDB artwork:', track.tvdbArtwork.url);
+      return `${config.apiBaseUrl}/api/tvdb-artwork?url=${encodeURIComponent(track.tvdbArtwork.url)}`;
+    }
+
+    // Fall back to Plex artwork
+    const thumb = track?.thumb || track?.art;
+    if (!thumb) return null;
+
+    // Check if thumb is already a full URL (starts with http)
+    if (thumb.startsWith('http')) {
+      console.log('🎨 Using full artwork URL:', thumb);
+      return thumb;
+    }
+
+    // Otherwise, it's a relative path, so add the base URL
+    console.log('🎨 Using Plex artwork:', thumb);
+    return `${config.apiBaseUrl}/api/artwork${thumb}`;
+  };
   
   // Load playlist tracks when playlist changes
   useEffect(() => {
-    if (playlist && playlist.id) {
+    if (playlist && playlist.id && (!tracks || tracks.length === 0)) {
+      // Only load from API if we don't already have tracks directly provided
+      console.log('🎵 Loading playlist tracks for playlist ID:', playlist.id);
       loadPlaylistTracks();
     }
   }, [playlist]);
@@ -32,8 +96,14 @@ const GlobalMusicPlayer = () => {
   // Update current track when index changes
   useEffect(() => {
     const trackList = isShuffled ? shuffledTracks : tracks;
+    console.log('🎵 [useEffect] Current track index changed to:', currentTrackIndex);
+    console.log('🎵 [useEffect] Using track list:', isShuffled ? 'shuffled' : 'original', 'length:', trackList?.length);
     if (trackList && trackList.length > 0 && currentTrackIndex >= 0 && currentTrackIndex < trackList.length) {
-      setCurrentTrack(trackList[currentTrackIndex]);
+      const newTrack = trackList[currentTrackIndex];
+      console.log('🎵 [useEffect] Updating current track display:', newTrack.title, 'by', newTrack.artist, 'from', newTrack.album);
+      setCurrentTrack(newTrack);
+    } else {
+      console.log('🎵 [useEffect] Invalid conditions - trackList length:', trackList?.length, 'currentTrackIndex:', currentTrackIndex);
     }
   }, [currentTrackIndex, tracks, shuffledTracks, isShuffled]);
   
@@ -73,6 +143,37 @@ const GlobalMusicPlayer = () => {
     };
   }, [tracks, currentTrackIndex, isRepeat]);
   
+  // Auto-play when tracks are loaded from event
+  useEffect(() => {
+    if (tracks && tracks.length > 0 && playlist && playlist.id && playlist.id.includes('tracks-playlist')) {
+      // This is a tracks page playlist that should auto-play
+      console.log('🎵 Auto-playing tracks playlist with', tracks.length, 'tracks', isShuffled ? '(shuffled)' : '');
+      setCurrentTrackIndex(0);
+      
+      // Immediately set the current track for display
+      const firstTrack = isShuffled && shuffledTracks && shuffledTracks.length > 0 
+        ? shuffledTracks[0] 
+        : tracks[0];
+      
+      if (firstTrack) {
+        console.log('🎵 Setting current track for display:', firstTrack.title, 'by', firstTrack.artist);
+        setCurrentTrack(firstTrack);
+      }
+      
+      // Small delay to ensure all state is updated, including shuffled tracks
+      const timer = setTimeout(() => {
+        if (isShuffled && shuffledTracks && shuffledTracks.length > 0) {
+          console.log('🎵 Playing first shuffled track:', shuffledTracks[0].title);
+        } else {
+          console.log('🎵 Playing first track:', tracks[0].title);
+        }
+        playTrack(0);
+      }, 200); // Increased delay to ensure shuffled tracks are set
+      
+      return () => clearTimeout(timer);
+    }
+  }, [tracks, playlist, isShuffled, shuffledTracks]);
+
   // Event listener for starting music from reading sessions
   useEffect(() => {
     const handleStartMusicPlayback = (event) => {
@@ -82,47 +183,21 @@ const GlobalMusicPlayer = () => {
       if (playlist && playlist.tracks && playlist.tracks.length > 0) {
         console.log('🎵 Starting playlist with', playlist.tracks.length, 'tracks');
         setPlaylist(playlist);
-        setTracks(playlist.tracks);
+        setIsLoading(false); // Set loading to false since we have tracks directly
+        setError(null); // Clear any existing errors
         
         if (shuffle) {
           const shuffledTracks = [...playlist.tracks].sort(() => Math.random() - 0.5);
           setShuffledTracks(shuffledTracks);
           setIsShuffled(true);
-          
-          setCurrentTrackIndex(0);
-          const firstTrack = shuffledTracks[0];
-          setCurrentTrack(firstTrack);
-          
-          // Start playing the first track
-          const audioElement = audioRef.current;
-          if (audioElement && firstTrack) {
-            console.log('🎵 Starting to play first track:', firstTrack.title);
-            audioElement.src = `${config.apiBaseUrl}/api/music/stream/${firstTrack.id}`;
-            audioElement.play().catch(err => {
-              console.error('Error playing track:', err);
-              setError(`Failed to play ${firstTrack.title}`);
-            });
-          }
         } else {
-          setCurrentTrackIndex(0);
-          const firstTrack = playlist.tracks[0];
-          setCurrentTrack(firstTrack);
-          
-          // Start playing the first track
-          const audioElement = audioRef.current;
-          if (audioElement && firstTrack) {
-            console.log('🎵 Starting to play first track (no shuffle):', firstTrack.title);
-            audioElement.src = `${config.apiBaseUrl}/api/music/stream/${firstTrack.id}`;
-            audioElement.play().catch(err => {
-              console.error('Error playing track:', err);
-              setError(`Failed to play ${firstTrack.title}`);
-            });
-          }
+          setIsShuffled(false);
         }
         
+        // Set tracks (this will trigger the auto-play useEffect above)
+        setTracks(playlist.tracks);
         setIsVisible(true);
         setIsMinimized(false);
-        setIsPlaying(true);
       } else {
         console.log('❌ No valid playlist data received:', playlist);
       }
@@ -131,8 +206,31 @@ const GlobalMusicPlayer = () => {
     console.log('🎵 GlobalMusicPlayer: Adding event listener for startMusicPlayback');
     window.addEventListener('startMusicPlayback', handleStartMusicPlayback);
     
+    // Event listener for external player controls
+    const handlePlayerControl = (event) => {
+      console.log('🎵 GlobalMusicPlayer received control event:', event.detail);
+      const { action } = event.detail;
+      
+      switch (action) {
+        case 'next':
+          handleNextTrack();
+          break;
+        case 'previous':
+          handlePreviousTrack();
+          break;
+        case 'toggle':
+          togglePlayPause();
+          break;
+        default:
+          console.log('Unknown control action:', action);
+      }
+    };
+    
+    window.addEventListener('globalMusicPlayerControl', handlePlayerControl);
+    
     return () => {
       window.removeEventListener('startMusicPlayback', handleStartMusicPlayback);
+      window.removeEventListener('globalMusicPlayerControl', handlePlayerControl);
     };
   }, []);
   
@@ -141,6 +239,24 @@ const GlobalMusicPlayer = () => {
       setIsLoading(true);
       setError(null);
       
+      // Check if playlist contains tracks directly (for ad-hoc playlists like from tracks page)
+      if (playlist.tracks && Array.isArray(playlist.tracks)) {
+        console.log('🎵 Using provided tracks directly:', playlist.tracks.length);
+        setTracks(playlist.tracks);
+        setIsShuffled(playlist.shuffle || false);
+        setCurrentTrackIndex(0);
+        
+        // Auto-play first track if there are tracks
+        if (playlist.tracks.length > 0) {
+          console.log('🎵 Auto-playing first track:', playlist.tracks[0].title);
+          setCurrentTrack(playlist.tracks[0]);
+          setIsPlaying(true);
+        }
+        return;
+      }
+      
+      // Otherwise, load from API (for saved playlists)
+      console.log('🎵 Loading playlist tracks from API for:', playlist.id);
       const response = await fetch(
         `${config.apiBaseUrl}/api/playlists/${playlist.type}/${playlist.id}/tracks?shuffle=${playlist.shuffle || false}`
       );
@@ -169,9 +285,13 @@ const GlobalMusicPlayer = () => {
   };
   
   const playTrack = async (trackIndex = currentTrackIndex) => {
-    if (!tracks[trackIndex]) return;
+    const trackList = isShuffled ? shuffledTracks : tracks;
+    if (!trackList[trackIndex]) return;
     
-    const track = tracks[trackIndex];
+    const track = trackList[trackIndex];
+    console.log('🎵 [playTrack] Playing track at index:', trackIndex, '| Track:', track.title, 'by', track.artist);
+    console.log('🎵 [playTrack] Current track index before:', currentTrackIndex, 'setting to:', trackIndex);
+    
     setIsLoading(true);
     setError(null);
     
@@ -180,9 +300,12 @@ const GlobalMusicPlayer = () => {
       
       // If playing a different track, load new audio
       if (trackIndex !== currentTrackIndex) {
+        console.log('🎵 [playTrack] Index changed, updating currentTrackIndex from', currentTrackIndex, 'to', trackIndex);
         setCurrentTrackIndex(trackIndex);
         setCurrentTime(0);
         setDuration(0);
+      } else {
+        console.log('🎵 [playTrack] Same track index, not updating currentTrackIndex');
       }
       
       // Get stream URL based on track type
@@ -204,10 +327,8 @@ const GlobalMusicPlayer = () => {
           await audio.play();
           setIsPlaying(true);
           
-          // Notify parent component of track change
-          if (onTrackChange) {
-            onTrackChange(track, trackIndex);
-          }
+          // Track change is handled by the useEffect that watches currentTrackIndex
+          console.log('🎵 Successfully started playing:', track.title);
         } catch (playError) {
           if (playError.name === 'NotAllowedError') {
             setError('Audio playback blocked. Please interact with the page first.');
@@ -247,29 +368,37 @@ const GlobalMusicPlayer = () => {
   };
   
   const handleNextTrack = () => {
-    if (!tracks.length) return;
+    const trackList = isShuffled ? shuffledTracks : tracks;
+    if (!trackList.length) return;
     
     let nextIndex;
     if (isRepeat) {
       nextIndex = currentTrackIndex;
-    } else if (currentTrackIndex < tracks.length - 1) {
+    } else if (currentTrackIndex < trackList.length - 1) {
       nextIndex = currentTrackIndex + 1;
     } else {
       nextIndex = 0; // Loop back to first track
     }
     
+    console.log('🎵 Moving to next track. Current index:', currentTrackIndex, 'Next index:', nextIndex);
+    console.log('🎵 Next track will be:', trackList[nextIndex]?.title, 'by', trackList[nextIndex]?.artist);
+    
     playTrack(nextIndex);
   };
   
   const handlePreviousTrack = () => {
-    if (!tracks.length) return;
+    const trackList = isShuffled ? shuffledTracks : tracks;
+    if (!trackList.length) return;
     
     let prevIndex;
     if (currentTrackIndex > 0) {
       prevIndex = currentTrackIndex - 1;
     } else {
-      prevIndex = tracks.length - 1; // Loop to last track
+      prevIndex = trackList.length - 1; // Loop to last track
     }
+    
+    console.log('🎵 Moving to previous track. Current index:', currentTrackIndex, 'Previous index:', prevIndex);
+    console.log('🎵 Previous track will be:', trackList[prevIndex]?.title, 'by', trackList[prevIndex]?.artist);
     
     playTrack(prevIndex);
   };
@@ -364,6 +493,23 @@ const GlobalMusicPlayer = () => {
           {/* Current Track Info */}
           {currentTrack && (
             <div className="current-track">
+              <div className="track-artwork">
+                {getArtworkUrl(currentTrack) ? (
+                  <img 
+                    src={getArtworkUrl(currentTrack)} 
+                    alt={`${currentTrack.album || currentTrack.parentTitle || 'Album'} artwork`}
+                    className="artwork-image"
+                    onError={(e) => {
+                      console.log('🎨 Artwork failed to load, hiding image');
+                      e.target.style.display = 'none';
+                    }}
+                  />
+                ) : (
+                  <div className="artwork-placeholder">
+                    🎵
+                  </div>
+                )}
+              </div>
               <div className="track-info">
                 <div className="track-title">{currentTrack.title}</div>
                 <div className="track-meta">
@@ -484,10 +630,26 @@ const GlobalMusicPlayer = () => {
           </button>
           
           <div className="mini-track-info">
-            <span className="mini-track-title">{currentTrack?.title || 'No track loaded'}</span>
-            <span className="mini-track-artist">
-              {currentTrack?.artist || currentTrack?.grandparentTitle || 'Unknown artist'}
-            </span>
+            <div className="mini-track-artwork">
+              {getArtworkUrl(currentTrack) ? (
+                <img 
+                  src={getArtworkUrl(currentTrack)} 
+                  alt="Album artwork"
+                  className="mini-artwork-image"
+                  onError={(e) => {
+                    e.target.style.display = 'none';
+                  }}
+                />
+              ) : (
+                <div className="mini-artwork-placeholder">🎵</div>
+              )}
+            </div>
+            <div className="mini-track-details">
+              <span className="mini-track-title">{currentTrack?.title || 'No track loaded'}</span>
+              <span className="mini-track-artist">
+                {currentTrack?.artist || currentTrack?.grandparentTitle || 'Unknown artist'}
+              </span>
+            </div>
           </div>
         </div>
       )}

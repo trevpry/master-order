@@ -1384,6 +1384,42 @@ function CustomOrders() {
     }
   };
 
+  // Helper function to batch ComicVine searches for optimization
+  const batchComicVineSearch = async (comics) => {
+    try {
+      console.log(`🚀 Batching ComicVine search for ${comics.length} comics`);
+      
+      const response = await fetch(`${config.apiBaseUrl}/api/comicvine/bulk-search-with-issues`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ comics }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`Bulk ComicVine search failed: ${response.statusText}`);
+      }
+
+      const result = await response.json();
+      console.log(`✅ Bulk ComicVine search completed:`, result.summary);
+      
+      // Return a map for easy lookup
+      const resultMap = new Map();
+      result.results.forEach((item, index) => {
+        if (item.success && item.results.length > 0) {
+          // Use the best match (first result)
+          resultMap.set(index, item.results[0]);
+        }
+      });
+      
+      return resultMap;
+    } catch (error) {
+      console.error('Error in bulk ComicVine search:', error);
+      return new Map(); // Return empty map on error
+    }
+  };
+
   const handleBulkImport = async (e) => {
     e.preventDefault();
     

@@ -1,5 +1,7 @@
 import React from 'react';
 import LoadingState from '../../../../../shared/components/LoadingState';
+import TracksPlaylistPlayer from './TracksPlaylistPlayer';
+import './TracksPlaylistPlayer.css';
 
 const MusicTracksView = ({ 
   tracks, 
@@ -7,6 +9,8 @@ const MusicTracksView = ({
   tracksHasMore,
   selectedAlbum,
   selectedArtist,
+  selectedSection,
+  searchQuery,
   currentTrack,
   isPlaying,
   playlists,
@@ -33,6 +37,21 @@ const MusicTracksView = ({
            'All Tracks'}
         </h2>
       </div>
+
+      {/* Playlist Player for all tracks */}
+      {tracks && tracks.length > 0 && (
+        <TracksPlaylistPlayer
+          tracks={tracks}
+          selectedSection={selectedSection}
+          searchQuery={searchQuery}
+          onPlayTrack={onPlayTrack}
+          currentTrack={currentTrack}
+          isPlaying={isPlaying}
+          selectedAlbum={selectedAlbum}
+          selectedArtist={selectedArtist}
+        />
+      )}
+
       <div className="tracks-list">
         {!Array.isArray(tracks) || tracks.length === 0 ? (
           <div className="empty-state">
