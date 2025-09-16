@@ -395,15 +395,36 @@ async function fetchMediaDetailsFromPlex(plexKey, mediaType, customOrderItem, ba
 }
 
 // Mark a custom order item as watched
-async function markCustomOrderItemAsWatched(itemId) {
+async function markCustomOrderItemAsWatched(itemIdentifier) {
   try {
+    let actualItemId;
+    
+    // Handle both numeric IDs and non-numeric plexKeys
+    if (!isNaN(itemIdentifier) && Number.isInteger(Number(itemIdentifier))) {
+      // Numeric ID - use directly
+      actualItemId = parseInt(itemIdentifier);
+    } else {
+      // Non-numeric identifier - look up by plexKey
+      const item = await prisma.customOrderItem.findFirst({
+        where: { plexKey: String(itemIdentifier) }
+      });
+      
+      if (!item) {
+        console.error(`Could not find CustomOrderItem with plexKey: ${itemIdentifier}`);
+        return;
+      }
+      
+      actualItemId = item.id;
+      console.log(`🔍 Resolved non-numeric itemId '${itemIdentifier}' to database ID ${actualItemId}`);
+    }
+    
     await prisma.customOrderItem.update({
-      where: { id: parseInt(itemId) },
+      where: { id: actualItemId },
       data: { isWatched: true }
     });
-    console.log(`Marked custom order item ${itemId} as watched`);
+    console.log(`Marked custom order item ${actualItemId} as watched`);
   } catch (error) {
-    console.error(`Error marking custom order item ${itemId} as watched:`, error);
+    console.error(`Error marking custom order item ${itemIdentifier} as watched:`, error);
   }
 }
 

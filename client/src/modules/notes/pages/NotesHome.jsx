@@ -140,6 +140,35 @@ function NotesHome() {
     }
   };
 
+  const handleNoteDeleted = (noteId) => {
+    setNotes(prev => prev.filter(note => note.id !== noteId));
+    setStats(prev => ({ ...prev, totalNotes: prev.totalNotes - 1 }));
+    if (selectedNote?.id === noteId) {
+      setSelectedNote(null);
+    }
+  };
+
+  const handleNoteEdit = (note) => {
+    // For now, just select the note. You can expand this to open an edit modal/form
+    setSelectedNote(note);
+    console.log('Edit note:', note);
+  };
+
+  const handleNoteFavorite = async (noteId) => {
+    try {
+      const response = await fetch(`/api/notes/${noteId}/favorite`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' }
+      });
+      
+      if (response.ok) {
+        loadNotes(); // Refresh notes
+      }
+    } catch (error) {
+      console.error('Error toggling favorite:', error);
+    }
+  };
+
   const goToToday = () => {
     const today = new Date().toISOString().split('T')[0];
     setSelectedDate(today);
@@ -410,6 +439,9 @@ function NotesHome() {
           notes={notes}
           selectedNote={selectedNote}
           onNoteSelect={handleNoteSelect}
+          onNoteEdit={handleNoteEdit}
+          onNoteDelete={handleNoteDeleted}
+          onNoteFavorite={handleNoteFavorite}
           searchQuery={searchQuery}
           activeView={activeView}
         />

@@ -48,13 +48,13 @@ function createContentDiscoveryRoutes(services) {
           
           upNextData = {
             ratingKey: `history-plus-video-${video.id}`,
-            title: data.title,
+            title: data.title, // Keep actual video title
             type: 'webvideo',
             year: null,
             summary: data.description || '',
             thumb: data.thumbnail,
             art: null,
-            webTitle: data.title,
+            webTitle: data.title, // Keep actual video title
             webUrl: video.url,
             webDescription: data.description || '',
             localArtworkPath: null,
@@ -63,6 +63,7 @@ function createContentDiscoveryRoutes(services) {
             // Include History Plus context
             eventId: data.eventId,
             eventTitle: data.eventTitle,
+            eventTitleWithDates: data.eventTitleWithDates,
             eventDate: data.eventDate,
             channel: data.channel
           };
@@ -169,9 +170,9 @@ function createContentDiscoveryRoutes(services) {
             type: 'PLAY_CUSTOM_ORDER_ITEM',
             data: {
               id: upNextData.ratingKey,
-              title: upNextData.title,
+              title: upNextData.title, // Use actual video title
               type: upNextData.type,
-              orderName: `History Plus: ${upNextData.eventTitle}`,
+              orderName: `History Plus: ${upNextData.eventTitleWithDates || upNextData.eventTitle}`, // Use formatted title with dates for order name
               summary: upNextData.summary || '',
               duration: 0, // Webvideos don't have duration
               localArtworkPath: upNextData.localArtworkPath || '',
@@ -180,13 +181,14 @@ function createContentDiscoveryRoutes(services) {
               ratingKey: null, // Webvideos don't have Plex rating keys
               plexId: null, // Webvideos don't have Plex IDs
               webUrl: upNextData.webUrl || null,
-              webTitle: upNextData.webTitle,
+              webTitle: upNextData.webTitle, // Use actual video title
               webDescription: upNextData.webDescription,
               customOrderId: null,
               customOrderItemId: null,
               // History Plus specific context
               eventId: upNextData.eventId,
               eventTitle: upNextData.eventTitle,
+              eventTitleWithDates: upNextData.eventTitleWithDates,
               eventDate: upNextData.eventDate,
               channel: upNextData.channel
             }
@@ -231,6 +233,7 @@ function createContentDiscoveryRoutes(services) {
               // History Plus specific context
               eventId: upNextData.eventId,
               eventTitle: upNextData.eventTitle,
+              eventTitleWithDates: upNextData.eventTitleWithDates,
               eventDate: upNextData.eventDate
             }
           };

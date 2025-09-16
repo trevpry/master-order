@@ -1598,10 +1598,41 @@ class HistoryPlusService {
 
       console.log(`🎲 Randomly selected ${selectedContent.type}: ${selectedContent.title}`);
 
-      // Add event information
+      // Add event information with formatted date range
       selectedContent.eventId = event.id;
       selectedContent.eventTitle = event.title;
       selectedContent.eventDate = event.startDate;
+      
+      // Format the event title with date range for Android display
+      // Convert dates from ISO format to BCE/CE format
+      const formatHistoricalDate = (dateStr) => {
+        if (!dateStr) return '';
+        
+        // Handle negative years (BCE) and positive years (CE)
+        const match = dateStr.match(/^(-?\d{1,4})/);
+        if (match) {
+          const year = parseInt(match[1]);
+          if (year < 0) {
+            return `${Math.abs(year)} BCE`;
+          } else if (year > 0) {
+            return `${year} CE`;
+          }
+        }
+        return dateStr; // Fallback to original string
+      };
+      
+      let formattedEventTitle = event.title;
+      if (event.startDate && event.endDate && event.startDate !== event.endDate) {
+        // Both start and end dates exist and are different
+        const startFormatted = formatHistoricalDate(event.startDate);
+        const endFormatted = formatHistoricalDate(event.endDate);
+        formattedEventTitle = `${event.title} (${startFormatted} - ${endFormatted})`;
+      } else if (event.startDate) {
+        // Only start date exists or start and end are the same
+        const startFormatted = formatHistoricalDate(event.startDate);
+        formattedEventTitle = `${event.title} (${startFormatted})`;
+      }
+      selectedContent.eventTitleWithDates = formattedEventTitle;
 
       return selectedContent;
     } catch (error) {

@@ -27,7 +27,9 @@ const CmroBulkImportModal = ({
 301/1962 Tales to Astonish (1958) #27-Tales to Astonish (1958) #27
 403/1962 Fantastic Four (1961) #3-Fantastic Four (1961) #3
 505/1962 Fantastic Four (1961) #4-Fantastic Four (1961) #4
-603/1962 Tales to Astonish (1958) #29 [A Story]-Tales to Astonish (1958) #29 [A Story]`);
+603/1962 Tales to Astonish (1958) #29 [A Story]-Tales to Astonish (1958) #29 [A Story]
+1,89301/1974 Fantastic Four (1961) #142-Fantastic Four (1961) #142
+1,89402/1974 Marvel Team-Up (1972) #18-Marvel Team-Up (1972) #18`);
   };
 
   return (
@@ -53,7 +55,9 @@ const CmroBulkImportModal = ({
               <h5>New Format (Comics):</h5>
               <ul>
                 <li><strong>Pattern:</strong> "111/1961 Fantastic Four (1961) #1-Fantastic Four (1961) #1"</li>
+                <li><strong>With Commas:</strong> "1,89301/1974 Fantastic Four (1961) #142-Fantastic Four (1961) #142"</li>
                 <li><strong>Structure:</strong> Entry#/Year SeriesName (Year) #Issue-Full Title</li>
+                <li>Entry numbers can include commas (e.g., 1,89301) which will be automatically handled</li>
                 <li>Automatically extracts series, year, issue, and title information</li>
               </ul>
             </div>
@@ -79,6 +83,8 @@ const CmroBulkImportModal = ({
 201/1962 Fantastic Four (1961) #2-Fantastic Four (1961) #2
 301/1962 Tales to Astonish (1958) #27-Tales to Astonish (1958) #27
 603/1962 Tales to Astonish (1958) #29 [A Story]-Tales to Astonish (1958) #29 [A Story]
+1,89301/1974 Fantastic Four (1961) #142-Fantastic Four (1961) #142
+1,89402/1974 Marvel Team-Up (1972) #18-Marvel Team-Up (1972) #18
               </pre>
               
               <strong>Original Format Example:</strong>

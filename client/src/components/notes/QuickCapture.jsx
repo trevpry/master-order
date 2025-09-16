@@ -11,6 +11,182 @@ import {
 } from 'lucide-react';
 import Button from '../../shared/components/Button';
 
+// Extract the form component outside to prevent re-creation
+const QuickCaptureForm = ({ 
+  formData, 
+  setFormData, 
+  tagInput, 
+  setTagInput, 
+  folders, 
+  saving, 
+  titleInputRef, 
+  contentInputRef, 
+  handleClose, 
+  handleSave, 
+  handleTagInputKeyDown, 
+  removeTag, 
+  typeOptions 
+}) => (
+  <>
+    {/* Header */}
+    <div className="flex items-center justify-between p-4 border-b border-gray-200">
+      <div className="flex items-center space-x-2">
+        <Zap className="h-5 w-5 text-yellow-500" />
+        <h3 className="text-lg font-semibold text-gray-900">
+          Quick Capture
+        </h3>
+      </div>
+      <button
+        onClick={handleClose}
+        className="text-gray-400 hover:text-gray-600 transition-colors"
+      >
+        <X className="h-5 w-5" />
+      </button>
+    </div>
+
+    {/* Form */}
+    <div className="p-4 space-y-4">
+      {/* Title */}
+      <div>
+        <label className="block text-sm font-medium text-gray-700 mb-1">
+          Title
+        </label>
+        <input
+          ref={titleInputRef}
+          type="text"
+          value={formData.title}
+          onChange={(e) => setFormData(prev => ({ ...prev, title: e.target.value }))}
+          placeholder="Enter note title..."
+          className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              contentInputRef.current?.focus();
+            }
+          }}
+        />
+      </div>
+
+      {/* Type and Folder */}
+      <div className="grid grid-cols-2 gap-4">
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">
+            Type
+          </label>
+          <select
+            value={formData.type}
+            onChange={(e) => setFormData(prev => ({ ...prev, type: e.target.value }))}
+            className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+          >
+            {typeOptions.map(option => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">
+            Folder
+          </label>
+          <select
+            value={formData.folderId || ''}
+            onChange={(e) => setFormData(prev => ({ 
+              ...prev, 
+              folderId: e.target.value ? parseInt(e.target.value) : null 
+            }))}
+            className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+          >
+            <option value="">No folder</option>
+            {folders.map(folder => (
+              <option key={folder.id} value={folder.id}>
+                {folder.name} ({folder.noteCount})
+              </option>
+            ))}
+          </select>
+        </div>
+      </div>
+
+      {/* Tags */}
+      <div>
+        <label className="block text-sm font-medium text-gray-700 mb-1">
+          Tags
+        </label>
+        <div className="flex flex-wrap items-center gap-2 p-2 border border-gray-300 rounded-md focus-within:ring-2 focus-within:ring-blue-500 focus-within:border-transparent">
+          {formData.tags.map(tag => (
+            <span
+              key={tag}
+              className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-800"
+            >
+              <Tag className="h-3 w-3 mr-1" />
+              {tag}
+              <button
+                onClick={() => removeTag(tag)}
+                className="ml-1 text-blue-600 hover:text-blue-800"
+              >
+                <X className="h-3 w-3" />
+              </button>
+            </span>
+          ))}
+          <input
+            type="text"
+            value={tagInput}
+            onChange={(e) => setTagInput(e.target.value)}
+            onKeyDown={handleTagInputKeyDown}
+            placeholder={formData.tags.length === 0 ? "Add tags..." : ""}
+            className="flex-1 min-w-20 outline-none text-sm"
+          />
+        </div>
+        <p className="text-xs text-gray-500 mt-1">
+          Press Enter or comma to add tags
+        </p>
+      </div>
+
+      {/* Content */}
+      <div>
+        <label className="block text-sm font-medium text-gray-700 mb-1">
+          Content
+        </label>
+        <textarea
+          ref={contentInputRef}
+          value={formData.content}
+          onChange={(e) => setFormData(prev => ({ ...prev, content: e.target.value }))}
+          placeholder="Write your note content..."
+          rows={6}
+          className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none"
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+              handleSave();
+            }
+          }}
+        />
+        <p className="text-xs text-gray-500 mt-1">
+          Ctrl+Enter to save quickly
+        </p>
+      </div>
+    </div>
+
+    {/* Footer */}
+    <div className="flex justify-end space-x-2 p-4 border-t border-gray-200 bg-gray-50 rounded-b-lg">
+      <Button
+        variant="secondary"
+        onClick={handleClose}
+        disabled={saving}
+      >
+        Cancel
+      </Button>
+      <Button
+        variant="primary"
+        onClick={handleSave}
+        disabled={saving || !formData.title.trim()}
+      >
+        <Save className="h-4 w-4 mr-1" />
+        {saving ? 'Saving...' : 'Save Note'}
+      </Button>
+    </div>
+  </>
+);
+
 const QuickCapture = ({ 
   onNoteCreated, 
   defaultType = 'note',
@@ -190,175 +366,27 @@ const QuickCapture = ({
         {isOpen && (
           <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
             <div className="bg-white rounded-lg shadow-xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
-              <QuickCaptureForm />
+              <QuickCaptureForm 
+                formData={formData}
+                setFormData={setFormData}
+                tagInput={tagInput}
+                setTagInput={setTagInput}
+                folders={folders}
+                saving={saving}
+                titleInputRef={titleInputRef}
+                contentInputRef={contentInputRef}
+                handleClose={handleClose}
+                handleSave={handleSave}
+                handleTagInputKeyDown={handleTagInputKeyDown}
+                removeTag={removeTag}
+                typeOptions={typeOptions}
+              />
             </div>
           </div>
         )}
       </>
     );
   }
-
-  // Inline form component
-  const QuickCaptureForm = () => (
-    <>
-      {/* Header */}
-      <div className="flex items-center justify-between p-4 border-b border-gray-200">
-        <div className="flex items-center space-x-2">
-          <Zap className="h-5 w-5 text-yellow-500" />
-          <h3 className="text-lg font-semibold text-gray-900">
-            Quick Capture
-          </h3>
-        </div>
-        <button
-          onClick={handleClose}
-          className="text-gray-400 hover:text-gray-600 transition-colors"
-        >
-          <X className="h-5 w-5" />
-        </button>
-      </div>
-
-      {/* Form */}
-      <div className="p-4 space-y-4">
-        {/* Title */}
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">
-            Title
-          </label>
-          <input
-            ref={titleInputRef}
-            type="text"
-            value={formData.title}
-            onChange={(e) => setFormData(prev => ({ ...prev, title: e.target.value }))}
-            placeholder="Enter note title..."
-            className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') {
-                contentInputRef.current?.focus();
-              }
-            }}
-          />
-        </div>
-
-        {/* Type and Folder */}
-        <div className="grid grid-cols-2 gap-4">
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Type
-            </label>
-            <select
-              value={formData.type}
-              onChange={(e) => setFormData(prev => ({ ...prev, type: e.target.value }))}
-              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-            >
-              {typeOptions.map(option => (
-                <option key={option.value} value={option.value}>
-                  {option.label}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Folder
-            </label>
-            <select
-              value={formData.folderId || ''}
-              onChange={(e) => setFormData(prev => ({ 
-                ...prev, 
-                folderId: e.target.value ? parseInt(e.target.value) : null 
-              }))}
-              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-            >
-              <option value="">No folder</option>
-              {folders.map(folder => (
-                <option key={folder.id} value={folder.id}>
-                  {folder.name} ({folder.noteCount})
-                </option>
-              ))}
-            </select>
-          </div>
-        </div>
-
-        {/* Tags */}
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">
-            Tags
-          </label>
-          <div className="flex flex-wrap items-center gap-2 p-2 border border-gray-300 rounded-md focus-within:ring-2 focus-within:ring-blue-500 focus-within:border-transparent">
-            {formData.tags.map(tag => (
-              <span
-                key={tag}
-                className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-800"
-              >
-                <Tag className="h-3 w-3 mr-1" />
-                {tag}
-                <button
-                  onClick={() => removeTag(tag)}
-                  className="ml-1 text-blue-600 hover:text-blue-800"
-                >
-                  <X className="h-3 w-3" />
-                </button>
-              </span>
-            ))}
-            <input
-              type="text"
-              value={tagInput}
-              onChange={(e) => setTagInput(e.target.value)}
-              onKeyDown={handleTagInputKeyDown}
-              placeholder={formData.tags.length === 0 ? "Add tags..." : ""}
-              className="flex-1 min-w-20 outline-none text-sm"
-            />
-          </div>
-          <p className="text-xs text-gray-500 mt-1">
-            Press Enter or comma to add tags
-          </p>
-        </div>
-
-        {/* Content */}
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">
-            Content
-          </label>
-          <textarea
-            ref={contentInputRef}
-            value={formData.content}
-            onChange={(e) => setFormData(prev => ({ ...prev, content: e.target.value }))}
-            placeholder="Write your note content..."
-            rows={6}
-            className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none"
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
-                handleSave();
-              }
-            }}
-          />
-          <p className="text-xs text-gray-500 mt-1">
-            Ctrl+Enter to save quickly
-          </p>
-        </div>
-      </div>
-
-      {/* Footer */}
-      <div className="flex justify-end space-x-2 p-4 border-t border-gray-200 bg-gray-50 rounded-b-lg">
-        <Button
-          variant="secondary"
-          onClick={handleClose}
-          disabled={saving}
-        >
-          Cancel
-        </Button>
-        <Button
-          variant="primary"
-          onClick={handleSave}
-          disabled={saving || !formData.title.trim()}
-        >
-          <Save className="h-4 w-4 mr-1" />
-          {saving ? 'Saving...' : 'Save Note'}
-        </Button>
-      </div>
-    </>
-  );
 
   // Inline version (non-compact)
   return (
@@ -374,7 +402,21 @@ const QuickCapture = ({
           </div>
         </button>
       ) : (
-        <QuickCaptureForm />
+        <QuickCaptureForm 
+          formData={formData}
+          setFormData={setFormData}
+          tagInput={tagInput}
+          setTagInput={setTagInput}
+          folders={folders}
+          saving={saving}
+          titleInputRef={titleInputRef}
+          contentInputRef={contentInputRef}
+          handleClose={handleClose}
+          handleSave={handleSave}
+          handleTagInputKeyDown={handleTagInputKeyDown}
+          removeTag={removeTag}
+          typeOptions={typeOptions}
+        />
       )}
     </div>
   );

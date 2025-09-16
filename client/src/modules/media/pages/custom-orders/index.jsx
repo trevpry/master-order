@@ -2078,26 +2078,62 @@ function CustomOrders() {
         // Skip empty lines
         if (!line) continue;
         
-        // Check for new CMRO format: "111/1961 Fantastic Four (1961) #1-Fantastic Four (1961) #1"
-        const newCmroMatch = line.match(/^(\d+)\/(\d{4})\s+(.+?)-(.+)$/);
+        // Check for new CMRO format: "1,89301/1974 Fantastic Four (1961) #142-Fantastic Four (1961) #142"
+        // Pattern where series info and full title are typically identical
+        const newCmroPattern = /^([\d,]+)\/(\d{4})\s+(.+)$/;
+        const newCmroMatch = line.match(newCmroPattern);
         if (newCmroMatch) {
-          const entryNumber = parseInt(newCmroMatch[1]);
+          // Parse the entry number (remove commas and convert to integer)
+          const entryNumberString = newCmroMatch[1].replace(/,/g, '');
+          const entryNumber = parseInt(entryNumberString);
           const entryYear = parseInt(newCmroMatch[2]);
-          const seriesInfo = newCmroMatch[3].trim();
-          const fullTitle = newCmroMatch[4].trim();
+          const remainder = newCmroMatch[3];
+          
+          // Find the middle dash by looking for identical parts
+          let firstPart, secondPart;
+          const dashIndex = remainder.indexOf('-');
+          if (dashIndex !== -1) {
+            // Try splitting at various dash positions to find identical parts
+            for (let i = dashIndex; i < remainder.length; i++) {
+              if (remainder[i] === '-') {
+                const potential1 = remainder.substring(0, i).trim();
+                const potential2 = remainder.substring(i + 1).trim();
+                
+                if (potential1 === potential2) {
+                  firstPart = potential1;
+                  secondPart = potential2;
+                  break;
+                }
+              }
+            }
+            
+            // If no identical parts found, use the first dash
+            if (!firstPart) {
+              firstPart = remainder.substring(0, dashIndex).trim();
+              secondPart = remainder.substring(dashIndex + 1).trim();
+            }
+          } else {
+            // No dash found, use the whole remainder
+            firstPart = remainder.trim();
+            secondPart = remainder.trim();
+          }
+          
+          // For the series info, use the first part
+          const seriesInfo = firstPart;
+          const fullTitle = `${firstPart}-${secondPart}`;
           
           // Parse series info: "Tales to Astonish (1958) #29 [A Story]"
-          const seriesMatch = seriesInfo.match(/^(.+?)\s*\((\d{4})\)\s*#(\d+)(.*)$/);
+          const seriesMatch = seriesInfo.match(/^(.+?)\s*\((\d{4})\)\s*#(\d+).*$/);
           if (seriesMatch) {
             const seriesName = seriesMatch[1].trim();
             const seriesYear = parseInt(seriesMatch[2]);
             const issueNumber = seriesMatch[3];
-            const issueTitle = seriesMatch[4].trim();
+            const issueTitle = seriesInfo; // Use the full series info as the issue title
             
             // Create entry for new CMRO format
             const entry = {
               number: entryNumber,
-              title: fullTitle,
+              title: issueTitle,
               source: null,
               year: entryYear,
               seriesName: seriesName,

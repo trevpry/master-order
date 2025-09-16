@@ -28,17 +28,34 @@ router.post('/mark-custom-order-item-watched/:itemId', asyncHandler(async (req, 
     return sendBadRequest(res, 'Item ID is required');
   }
 
-  // Get the custom order item details first to check what type of media it is
-  const customOrderItem = await prisma.customOrderItem.findUnique({
-    where: { id: parseInt(itemId) }
-  });
+  let customOrderItem;
+  let actualItemId;
+
+  // Try to resolve the item - handle both numeric IDs and non-numeric plexKeys
+  if (!isNaN(itemId) && Number.isInteger(Number(itemId))) {
+    // Numeric ID - use directly
+    actualItemId = parseInt(itemId);
+    customOrderItem = await prisma.customOrderItem.findUnique({
+      where: { id: actualItemId }
+    });
+  } else {
+    // Non-numeric ID - look up by plexKey
+    customOrderItem = await prisma.customOrderItem.findFirst({
+      where: { plexKey: itemId }
+    });
+    
+    if (customOrderItem) {
+      actualItemId = customOrderItem.id;
+      console.log(`🔍 Resolved non-numeric itemId '${itemId}' to database ID ${actualItemId}`);
+    }
+  }
 
   if (!customOrderItem) {
     return sendNotFound(res, 'Custom order item not found');
   }
 
-  // Mark the custom order item as watched
-  await markCustomOrderItemAsWatched(itemId);
+  // Mark the custom order item as watched using the actual database ID
+  await markCustomOrderItemAsWatched(actualItemId);
 
   // Create a watch log entry for statistics
   let duration = null;
@@ -82,7 +99,7 @@ router.post('/mark-custom-order-item-watched/:itemId', asyncHandler(async (req, 
     }
     
     await prisma.customOrderItem.update({
-      where: { id: parseInt(itemId) },
+      where: { id: actualItemId },
       data: updateData
     });
     
@@ -97,14 +114,14 @@ router.post('/mark-custom-order-item-watched/:itemId', asyncHandler(async (req, 
       seasonNumber: customOrderItem.seasonNumber,
       episodeNumber: customOrderItem.episodeNumber,
       plexKey: customOrderItem.plexKey,
-      customOrderItemId: parseInt(itemId),
+      customOrderItemId: actualItemId,
       duration: duration,
       activityType: (mediaType === 'book' || mediaType === 'comic' || mediaType === 'shortstory') ? 'read' : 'watch',
       isCompleted: true
     };
 
   await watchLogService.logWatched(watchLogParams);
-  console.log(`Created watch log entry for custom order item ${itemId}`);
+  console.log(`Created watch log entry for custom order item ${actualItemId} (original ID: ${itemId})`);
 
   // If this is an episode or movie with a plexKey, also mark it as watched in the Plex database
   if (customOrderItem.plexKey && (customOrderItem.mediaType === 'episode' || customOrderItem.mediaType === 'movie')) {

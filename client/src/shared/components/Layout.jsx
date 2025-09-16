@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import SideMenu from './SideMenu';
+import GlobalHeader from '../../components/GlobalHeader';
 import './Layout.css';
 
 const Layout = ({ children }) => {
@@ -22,42 +23,48 @@ const Layout = ({ children }) => {
 
   return (
     <div className="layout">
-      {/* Mobile menu overlay */}
-      {isMobile && isSideMenuOpen && (
-        <div 
-          className="mobile-overlay" 
-          onClick={() => setIsSideMenuOpen(false)}
-        />
-      )}
+      {/* Global Header - Time and Weather */}
+      <GlobalHeader />
       
-      {/* Side Menu */}
-      <div className={`side-menu-container ${isMobile && isSideMenuOpen ? 'mobile-open' : ''}`}>
-        <SideMenu 
-          isMobile={isMobile}
-          closeMobileMenu={() => setIsSideMenuOpen(false)}
-        />
+      {/* Layout Content */}
+      <div className="layout-content">
+        {/* Mobile menu overlay */}
+        {isMobile && isSideMenuOpen && (
+          <div 
+            className="mobile-overlay" 
+            onClick={() => setIsSideMenuOpen(false)}
+          />
+        )}
+        
+        {/* Side Menu */}
+        <div className={`side-menu-container ${isMobile && isSideMenuOpen ? 'mobile-open' : ''}`}>
+          <SideMenu 
+            isMobile={isMobile}
+            closeMobileMenu={() => setIsSideMenuOpen(false)}
+          />
+        </div>
+
+        {/* Mobile Header with Menu Button */}
+        {isMobile && (
+          <header className="mobile-header">
+            <button 
+              className="mobile-menu-button"
+              onClick={toggleMobileMenu}
+              aria-label="Toggle menu"
+            >
+              <span className="hamburger-line"></span>
+              <span className="hamburger-line"></span>
+              <span className="hamburger-line"></span>
+            </button>
+            <h1 className="mobile-title">Master Order</h1>
+          </header>
+        )}
+
+        {/* Main Content */}
+        <main className="main-content">
+          {children}
+        </main>
       </div>
-
-      {/* Mobile Header with Menu Button */}
-      {isMobile && (
-        <header className="mobile-header">
-          <button 
-            className="mobile-menu-button"
-            onClick={toggleMobileMenu}
-            aria-label="Toggle menu"
-          >
-            <span className="hamburger-line"></span>
-            <span className="hamburger-line"></span>
-            <span className="hamburger-line"></span>
-          </button>
-          <h1 className="mobile-title">Master Order</h1>
-        </header>
-      )}
-
-      {/* Main Content */}
-      <main className="main-content">
-        {children}
-      </main>
     </div>
   );
 };

@@ -1,8 +1,20 @@
 /* Layout Component Styles */
 .layout {
   display: flex;
+  flex-direction: column;
   min-height: 100vh;
   background-color: #f8f9fa;
+}
+
+/* Global header height variable for consistency */
+:root {
+  --global-header-height: 70px;
+  --mobile-header-height: 60px;
+}
+
+.layout-content {
+  display: flex;
+  flex: 1;
 }
 
 .side-menu-container {
@@ -14,7 +26,8 @@
   flex: 1;
   margin-left: 280px;
   padding: 40px;
-  min-height: 100vh;
+  padding-top: calc(var(--global-header-height) + 30px); /* Fixed header height + extra spacing */
+  min-height: calc(100vh - var(--global-header-height));
   transition: margin-left 0.3s ease;
   overflow-x: hidden;
 }
@@ -28,10 +41,10 @@
 .mobile-header {
   display: none;
   position: fixed;
-  top: 0;
+  top: var(--global-header-height); /* Position below the global header */
   left: 0;
   right: 0;
-  height: 60px;
+  height: var(--mobile-header-height);
   background: #2c3e50;
   color: white;
   padding: 0 20px;
@@ -80,11 +93,13 @@
   .main-content {
     margin-left: 0;
     padding: 20px;
-    padding-top: 80px; /* Account for mobile header */
+    padding-top: calc(var(--global-header-height) + var(--mobile-header-height) + 10px); /* Both headers + spacing */
+    min-height: calc(100vh - var(--global-header-height) - var(--mobile-header-height));
   }
   
   .mobile-header {
     display: flex;
+    top: var(--global-header-height); /* Position below global header */
   }
   
   .side-menu-container.mobile-open .side-menu {

@@ -442,13 +442,13 @@ router.get('/up-next', asyncHandler(async (req, res) => {
       
       const webvideoData = {
         ratingKey: `history-plus-video-${video.id}`,
-        title: data.title,
+        title: data.title, // Keep the actual video title
         type: 'webvideo',
         year: null,
         summary: data.description || '',
         thumb: data.thumbnail,
         art: null,
-        webTitle: data.title,
+        webTitle: data.title, // Keep the actual video title
         webUrl: video.url,
         webDescription: data.description || '',
         localArtworkPath: null,
@@ -457,6 +457,7 @@ router.get('/up-next', asyncHandler(async (req, res) => {
         // Include History Plus context
         eventId: data.eventId,
         eventTitle: data.eventTitle,
+        eventTitleWithDates: data.eventTitleWithDates,
         eventDate: data.eventDate,
         channel: data.channel
       };
