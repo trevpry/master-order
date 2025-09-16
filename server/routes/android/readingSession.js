@@ -30,6 +30,11 @@ function createReadingSessionRoutes(prisma) {
       return sendBadRequest(res, 'mediaType and title are required');
     }
 
+    // In this system, customOrderItemId should ALWAYS be provided
+    if (!customOrderItemId) {
+      return sendBadRequest(res, 'customOrderItemId is required - all reading sessions must be linked to a custom order item');
+    }
+
     // Validate media type
     if (!['book', 'comic', 'shortstory'].includes(mediaType)) {
       return sendBadRequest(res, 'Reading sessions are only supported for books, comics, and stories');
@@ -37,24 +42,26 @@ function createReadingSessionRoutes(prisma) {
 
     console.log(`📱 Start reading session - mediaType: ${mediaType}, title: ${title}, customOrderItemId: ${customOrderItemId}`);
 
-    // Validate customOrderItemId if provided
-    let finalCustomOrderItemId = null;
-    if (customOrderItemId) {
-      const parsedId = parseInt(customOrderItemId);
-      if (Number.isInteger(parsedId)) {
-        const existingItem = await prisma.customOrderItem.findUnique({
-          where: { id: parsedId }
-        });
-        
-        if (existingItem) {
-          finalCustomOrderItemId = parsedId;
-          console.log(`✅ Validated customOrderItemId: ${finalCustomOrderItemId}`);
-        } else {
-          console.log(`⚠️  CustomOrderItem ${parsedId} not found - proceeding without link`);
-        }
-      } else {
-        console.log('⚠️  Invalid customOrderItemId format - proceeding without link');
-      }
+    // Validate and parse customOrderItemId (required)
+    const parsedId = parseInt(customOrderItemId);
+    if (!Number.isInteger(parsedId)) {
+      return sendBadRequest(res, 'customOrderItemId must be a valid integer');
+    }
+
+    // Verify the custom order item exists
+    const existingItem = await prisma.customOrderItem.findUnique({
+      where: { id: parsedId }
+    });
+    
+    if (!existingItem) {
+      return sendBadRequest(res, `Custom order item with ID ${parsedId} not found`);
+    }
+
+    console.log(`✅ Validated customOrderItemId: ${parsedId} for item: "${existingItem.title}"`);
+
+    // Verify the title matches (optional check for data consistency)
+    if (existingItem.title !== title) {
+      console.log(`⚠️  Title mismatch: session="${title}" vs item="${existingItem.title}"`);
     }
 
     // Start reading session using the service directly
@@ -62,7 +69,7 @@ function createReadingSessionRoutes(prisma) {
       mediaType,
       title,
       seriesTitle,
-      customOrderItemId: finalCustomOrderItemId
+      customOrderItemId: parsedId
     });
 
     console.log('✅ Reading session started successfully:', readingSession.id);
@@ -76,7 +83,7 @@ function createReadingSessionRoutes(prisma) {
         mediaType: mediaType,
         title: title,
         seriesTitle: seriesTitle,
-        customOrderItemId: finalCustomOrderItemId,
+        customOrderItemId: parsedId,
         startedAt: readingSession.startedAt,
         isPaused: readingSession.isPaused || false,
         message: `Started reading session for "${title}"`,
