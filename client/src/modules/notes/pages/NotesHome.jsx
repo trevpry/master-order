@@ -18,12 +18,14 @@ import Calendar from '../../../components/notes/Calendar';
 import DailyNoteEditor from '../../../components/notes/DailyNoteEditor';
 import QuickCapture from '../../../components/notes/QuickCapture';
 import NoteTemplateManager from '../../../components/notes/NoteTemplateManager';
+import { getTodayDateString, getTimezone } from '../../../utils/timezoneUtils';
 import NotesList from '../../../components/notes/NotesList';
 import NoteFolders from '../../../components/notes/NoteFolders';
 
 function NotesHome() {
   const [activeView, setActiveView] = useState('overview'); // overview, daily, notes, templates
-  const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
+  const [selectedDate, setSelectedDate] = useState(null); // Will be set after timezone is loaded
+  const [timezone, setTimezone] = useState('UTC');
   const [stats, setStats] = useState(null);
   const [recentNotes, setRecentNotes] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -33,9 +35,27 @@ function NotesHome() {
   const [folders, setFolders] = useState([]);
   const [tags, setTags] = useState([]);
 
+  // Initialize timezone and today's date
   useEffect(() => {
-    loadInitialData();
+    const initializeTimezone = async () => {
+      const tz = await getTimezone();
+      console.log('NotesHome: Timezone from utils:', tz);
+      setTimezone(tz);
+      
+      const today = await getTodayDateString();
+      console.log('NotesHome: Today date string:', today);
+      console.log('NotesHome: Setting selectedDate to:', today);
+      setSelectedDate(today);
+    };
+    initializeTimezone();
   }, []);
+
+  useEffect(() => {
+    if (selectedDate) {
+      console.log('NotesHome: selectedDate changed to:', selectedDate);
+      loadInitialData();
+    }
+  }, [selectedDate]);
 
   const loadInitialData = async () => {
     setLoading(true);
@@ -169,8 +189,8 @@ function NotesHome() {
     }
   };
 
-  const goToToday = () => {
-    const today = new Date().toISOString().split('T')[0];
+  const goToToday = async () => {
+    const today = await getTodayDateString();
     setSelectedDate(today);
     setActiveView('daily');
   };
@@ -319,7 +339,7 @@ function NotesHome() {
                         {note.title}
                       </h4>
                       <span className="text-xs text-gray-500">
-                        {new Date(note.updatedAt).toLocaleDateString()}
+                        {new Date(note.updatedAt).toLocaleDateString('en-US', { timeZone: timezone })}
                       </span>
                     </div>
                     {note.content && (

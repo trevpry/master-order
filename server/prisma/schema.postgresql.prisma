@@ -19,7 +19,6 @@ model Settings {
   tvdbBearerToken                   String?
   selectedPlayer                    String?
   selectedPlexUser                  String?
-  timezone                          String?   @default("UTC")
   tvGeneralPercent                  Int       @default(50)
   moviesGeneralPercent              Int       @default(50)
   customOrderPercent                Int       @default(0)
@@ -40,6 +39,7 @@ model Settings {
 
 model EddieSettings {
   id              Int      @id @default(autoincrement())
+  timezone        String   @default("UTC")
   weatherApiKey   String?
   weatherLocation String?
   weatherUnits    String   @default("metric")
@@ -1707,4 +1707,24 @@ model user_section_reads {
   createdAt DateTime       @default(now())
   updatedAt DateTime       @updatedAt
   section   HistorySection @relation(fields: [sectionId], references: [id], onDelete: Cascade)
+}
+
+model DailyWeatherSummary {
+  id              Int      @id @default(autoincrement())
+  date            String   @unique // YYYY-MM-DD format
+  conditions      String   // Main weather condition (e.g., "Clear", "Cloudy", "Rain")
+  description     String   // Detailed description (e.g., "light rain")
+  tempMin         Float?   // Daily minimum temperature
+  tempMax         Float?   // Daily maximum temperature
+  tempAvg         Float?   // Daily average temperature
+  humidity        Int?     // Average humidity percentage
+  precipitation   Float?   // Total precipitation in mm
+  windSpeed       Float?   // Average wind speed
+  pressure        Float?   // Atmospheric pressure
+  cloudiness      Int?     // Cloud coverage percentage
+  sunrise         String?  // Sunrise time (HH:MM format)
+  sunset          String?  // Sunset time (HH:MM format)
+  weatherData     String?  // Raw weather data JSON for reference
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
 }

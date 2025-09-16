@@ -1,4 +1,5 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
+import { formatDateWithTimezone, getTimezone } from '../../../utils/timezoneUtils';
 
 const TaskCard = ({ 
   task, 
@@ -11,6 +12,30 @@ const TaskCard = ({
   showProject = true,
   compact = false 
 }) => {
+  const [timezone, setTimezone] = useState('UTC');
+  const [formattedDueDate, setFormattedDueDate] = useState(null);
+
+  useEffect(() => {
+    // Initialize timezone
+    const initTimezone = async () => {
+      const tz = await getTimezone();
+      setTimezone(tz);
+    };
+    initTimezone();
+  }, []);
+
+  useEffect(() => {
+    // Format due date when timezone or task changes
+    const formatDate = async () => {
+      if (task.dueDate) {
+        const dueInfo = await formatDueDate(task.dueDate);
+        setFormattedDueDate(dueInfo);
+      } else {
+        setFormattedDueDate(null);
+      }
+    };
+    formatDate();
+  }, [task.dueDate, timezone]);
   const getStatusColor = (status) => {
     switch (status) {
       case 'todo':
@@ -61,12 +86,18 @@ const TaskCard = ({
     }
   };
 
-  const formatDueDate = (dueDate) => {
+  const formatDueDate = async (dueDate) => {
     if (!dueDate) return null;
     
+    // Create dates in the user's timezone
     const date = new Date(dueDate);
     const now = new Date();
-    const diffTime = date - now;
+    
+    // Convert both dates to the user's timezone for comparison
+    const dateInTimezone = new Date(date.toLocaleString('en-US', { timeZone: timezone }));
+    const nowInTimezone = new Date(now.toLocaleString('en-US', { timeZone: timezone }));
+    
+    const diffTime = dateInTimezone - nowInTimezone;
     const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
     
     if (diffDays < 0) {
@@ -78,11 +109,12 @@ const TaskCard = ({
     } else if (diffDays <= 7) {
       return { text: `Due in ${diffDays} days`, class: 'text-blue-600' };
     } else {
-      return { text: date.toLocaleDateString(), class: 'text-gray-600' };
+      const formattedDate = await formatDateWithTimezone(date);
+      return { text: formattedDate, class: 'text-gray-600' };
     }
   };
 
-  const dueInfo = task.dueDate ? formatDueDate(task.dueDate) : null;
+  const dueInfo = formattedDueDate;
 
   return (
     <div className={`rounded-lg shadow-sm border hover:shadow-md transition-shadow ${compact ? 'p-3' : 'p-4'} ${

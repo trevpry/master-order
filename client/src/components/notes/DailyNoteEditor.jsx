@@ -16,6 +16,7 @@ import {
   RotateCcw
 } from 'lucide-react';
 import Button from '../../shared/components/Button';
+import { getTimezone } from '../../utils/timezoneUtils';
 
 const DailyNoteEditor = ({ 
   date, 
@@ -24,6 +25,7 @@ const DailyNoteEditor = ({
   className = '',
   readOnly = false 
 }) => {
+  const [timezone, setTimezone] = useState('UTC');
   const [dailyNote, setDailyNote] = useState(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -42,8 +44,18 @@ const DailyNoteEditor = ({
   const [newHabit, setNewHabit] = useState('');
   const [newGratitude, setNewGratitude] = useState('');
 
+  // Initialize timezone
+  useEffect(() => {
+    const initTimezone = async () => {
+      const tz = await getTimezone();
+      setTimezone(tz);
+    };
+    initTimezone();
+  }, []);
+
   useEffect(() => {
     if (date) {
+      console.log('DailyNoteEditor: Received date prop:', date);
       loadDailyNote();
     }
   }, [date]);
@@ -206,13 +218,21 @@ const DailyNoteEditor = ({
   };
 
   const formatDate = (dateStr) => {
-    const date = new Date(dateStr);
-    return date.toLocaleDateString('en-US', { 
+    console.log('DailyNoteEditor formatDate: received dateStr:', dateStr, 'timezone:', timezone);
+    
+    // Parse YYYY-MM-DD string correctly - create date at noon to avoid timezone shifting
+    const [year, month, day] = dateStr.split('-').map(Number);
+    const date = new Date(year, month - 1, day, 12, 0, 0); // Create at noon local time
+    
+    const formatted = date.toLocaleDateString('en-US', { 
+      timeZone: timezone,
       weekday: 'long', 
       year: 'numeric', 
       month: 'long', 
       day: 'numeric' 
     });
+    console.log('DailyNoteEditor formatDate: formatted result:', formatted);
+    return formatted;
   };
 
   const moodOptions = [

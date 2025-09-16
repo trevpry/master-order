@@ -74,6 +74,12 @@ const SideMenu = ({ isMobile, closeMobileMenu }) => {
       description: 'Knowledge & ideas'
     },
     {
+      path: '/calendar',
+      icon: '📅',
+      label: 'Calendar',
+      description: 'Daily notes, weather & stats'
+    },
+    {
       path: '/locations',
       icon: '🗺️',
       label: 'Locations',

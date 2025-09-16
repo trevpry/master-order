@@ -73,7 +73,7 @@ const WatchStats = () => {
   const [characterSortBy, setCharacterSortBy] = useState('readtime'); // 'readtime', 'comics'
   
   // Settings state for timezone
-  const [settings, setSettings] = useState(null);
+  const [eddieSettings, setEddieSettings] = useState(null);
 
   // Fetch watch statistics
   const fetchStats = async (selectedPeriod = globalPeriod, selectedGroupBy = globalGroupBy) => {
@@ -204,12 +204,12 @@ const WatchStats = () => {
   // Fetch settings (for timezone)
   const fetchSettings = async () => {
     try {
-      const response = await fetch(`${config.apiBaseUrl}/api/settings`);
-      if (!response.ok) throw new Error('Failed to fetch settings');
+      const response = await fetch(`${config.apiBaseUrl}/api/settings/eddie`);
+      if (!response.ok) throw new Error('Failed to fetch Eddie settings');
       const data = await response.json();
-      setSettings(data);
+      setEddieSettings(data);
     } catch (err) {
-      console.error('Error fetching settings:', err);
+      console.error('Error fetching Eddie settings:', err);
     }
   };
 
@@ -375,7 +375,7 @@ const WatchStats = () => {
   };
 
   const formatDate = (dateString) => {
-    const timezone = settings?.timezone || 'UTC';
+    const timezone = eddieSettings?.timezone || 'UTC';
     
     // Handle date-only strings (YYYY-MM-DD) to avoid timezone issues
     if (typeof dateString === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(dateString)) {
@@ -410,7 +410,7 @@ const WatchStats = () => {
 
   // Helper function for formatting any date with timezone
   const formatDateWithTimezone = (dateString) => {
-    const timezone = settings?.timezone || 'UTC';
+    const timezone = eddieSettings?.timezone || 'UTC';
     return new Date(dateString).toLocaleDateString('en-US', { timeZone: timezone });
   };
 
@@ -491,7 +491,7 @@ const WatchStats = () => {
 
     // Extract labels (time periods) and format them based on the appropriate groupBy
     const labels = chronologicalStats.map(group => {
-      const timezone = settings?.timezone || 'UTC';
+      const timezone = eddieSettings?.timezone || 'UTC';
       // Handle date-only strings (YYYY-MM-DD) to avoid timezone issues
       let date;
       if (typeof group.period === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(group.period)) {
@@ -707,7 +707,7 @@ const WatchStats = () => {
           chartType={chartType}
           setChartType={setChartType}
           recentActivity={recentActivity}
-          settings={settings}
+          settings={eddieSettings}
           globalPeriod={globalPeriod}
           formatDate={formatDate}
         />

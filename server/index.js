@@ -56,6 +56,7 @@ const comicSearchService = require('./comicSearchService'); // Added import
 const { getTimezoneAwarePeriodBounds, getTimezoneAwareDateGrouping, formatDateInTimezone } = require('./utils/timezoneUtils');
 const StatisticsService = require('./services/statisticsService');
 const WatchStatsRoutes = require('./routes/watchStatsRoutes');
+const WeatherSchedulerService = require('./services/WeatherSchedulerService'); // Added import
 
 // Initialize services
 const plexDb = new PlexDatabaseService();
@@ -66,6 +67,7 @@ const artworkCache = new ArtworkCacheService(); // Initialize artwork cache serv
 const watchLogService = new WatchLogService(prisma); // Initialize watch log service
 const statisticsService = new StatisticsService(prisma, watchLogService);
 const watchStatsRoutes = new WatchStatsRoutes(watchLogService, statisticsService);
+const weatherScheduler = new WeatherSchedulerService(); // Initialize weather scheduler service
 const PlexPlayerService = require('./plexPlayerService');
 const plexPlayer = new PlexPlayerService(); // Initialize Plex player service
 const StashService = require('./stashService');
@@ -684,6 +686,13 @@ server.listen(PORT, '0.0.0.0', async () => {
     await stashBackgroundSync.start();
   } catch (error) {
     console.error('Failed to start Stash background sync service:', error);
+  }
+  
+  // Start weather scheduler service
+  try {
+    await weatherScheduler.start();
+  } catch (error) {
+    console.error('Failed to start weather scheduler service:', error);
   }
   
   // Initialize Stash service

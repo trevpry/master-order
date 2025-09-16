@@ -4,6 +4,7 @@ import './EddieSettings.css';
 
 function EddieSettings() {
   const [settings, setSettings] = useState({
+    timezone: 'UTC',
     weatherEnabled: false,
     weatherApiKey: '',
     weatherLocation: '',
@@ -21,12 +22,18 @@ function EddieSettings() {
   const fetchSettings = async () => {
     try {
       setLoading(true);
-      const response = await fetch(`${config.apiBaseUrl}/api/eddie-settings`);
+      const response = await fetch(`${config.apiBaseUrl}/api/settings/eddie`);
       if (!response.ok) {
         throw new Error('Failed to fetch settings');
       }
       const data = await response.json();
-      setSettings(data);
+      setSettings({
+        timezone: data.timezone || 'UTC',
+        weatherEnabled: data.weatherEnabled || false,
+        weatherApiKey: data.weatherApiKey || '',
+        weatherLocation: data.weatherLocation || '',
+        weatherUnits: data.weatherUnits || 'metric'
+      });
     } catch (err) {
       setError('Failed to load settings: ' + err.message);
     } finally {
@@ -41,7 +48,7 @@ function EddieSettings() {
       setError('');
       setSuccess('');
 
-      const response = await fetch(`${config.apiBaseUrl}/api/eddie-settings`, {
+      const response = await fetch(`${config.apiBaseUrl}/api/settings/eddie`, {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
@@ -55,7 +62,13 @@ function EddieSettings() {
       }
 
       const savedSettings = await response.json();
-      setSettings(savedSettings);
+      setSettings({
+        timezone: savedSettings.settings?.timezone || savedSettings.timezone || 'UTC',
+        weatherEnabled: savedSettings.settings?.weatherEnabled || savedSettings.weatherEnabled || false,
+        weatherApiKey: savedSettings.settings?.weatherApiKey || savedSettings.weatherApiKey || '',
+        weatherLocation: savedSettings.settings?.weatherLocation || savedSettings.weatherLocation || '',
+        weatherUnits: savedSettings.settings?.weatherUnits || savedSettings.weatherUnits || 'metric'
+      });
       setSuccess('Settings saved successfully!');
       
       // Clear success message after 3 seconds
@@ -112,6 +125,49 @@ function EddieSettings() {
       <form onSubmit={handleSave} className="settings-form">
         {error && <div className="error-message">{error}</div>}
         {success && <div className="success-message">{success}</div>}
+
+        {/* Timezone Settings */}
+        <div className="settings-section">
+          <h2>🌍 Timezone Settings</h2>
+          
+          <div className="form-group">
+            <label htmlFor="timezone">Timezone</label>
+            <select
+              id="timezone"
+              name="timezone"
+              value={settings.timezone}
+              onChange={(e) => handleInputChange('timezone', e.target.value)}
+              className="form-control"
+            >
+              <option value="UTC">UTC (Coordinated Universal Time)</option>
+              <option value="America/New_York">Eastern Time (New York)</option>
+              <option value="America/Chicago">Central Time (Chicago)</option>
+              <option value="America/Denver">Mountain Time (Denver)</option>
+              <option value="America/Los_Angeles">Pacific Time (Los Angeles)</option>
+              <option value="America/Phoenix">Arizona Time (Phoenix)</option>
+              <option value="America/Anchorage">Alaska Time (Anchorage)</option>
+              <option value="Pacific/Honolulu">Hawaii Time (Honolulu)</option>
+              <option value="Europe/London">Greenwich Mean Time (London)</option>
+              <option value="Europe/Paris">Central European Time (Paris)</option>
+              <option value="Europe/Berlin">Central European Time (Berlin)</option>
+              <option value="Europe/Rome">Central European Time (Rome)</option>
+              <option value="Europe/Madrid">Central European Time (Madrid)</option>
+              <option value="Europe/Amsterdam">Central European Time (Amsterdam)</option>
+              <option value="Europe/Moscow">Moscow Time</option>
+              <option value="Asia/Tokyo">Japan Standard Time (Tokyo)</option>
+              <option value="Asia/Shanghai">China Standard Time (Shanghai)</option>
+              <option value="Asia/Kolkata">India Standard Time (Kolkata)</option>
+              <option value="Asia/Dubai">Gulf Standard Time (Dubai)</option>
+              <option value="Australia/Sydney">Australian Eastern Time (Sydney)</option>
+              <option value="Australia/Melbourne">Australian Eastern Time (Melbourne)</option>
+              <option value="Australia/Perth">Australian Western Time (Perth)</option>
+              <option value="Pacific/Auckland">New Zealand Time (Auckland)</option>
+            </select>
+            <p className="form-help">
+              Used for tasks, notes, and watch statistics date calculations. Current selection: {settings.timezone}
+            </p>
+          </div>
+        </div>
 
         {/* Weather Settings */}
         <div className="settings-section">

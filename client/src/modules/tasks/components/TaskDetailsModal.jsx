@@ -1,5 +1,6 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import Button from '../../../shared/components/Button';
+import { formatDateWithTimezone, formatDateTimeWithTimezone, getTimezone } from '../../../utils/timezoneUtils';
 
 const TaskDetailsModal = ({ 
   task, 
@@ -11,11 +12,22 @@ const TaskDetailsModal = ({
   onToggleCompletion,
   onStartTimer 
 }) => {
+  const [timezone, setTimezone] = useState('UTC');
+
+  useEffect(() => {
+    const initTimezone = async () => {
+      const tz = await getTimezone();
+      setTimezone(tz);
+    };
+    initTimezone();
+  }, []);
+
   if (!isOpen || !task) return null;
 
   const formatDate = (dateString) => {
     if (!dateString) return 'Not set';
     return new Date(dateString).toLocaleDateString('en-US', {
+      timeZone: timezone,
       year: 'numeric',
       month: 'long',
       day: 'numeric'
@@ -25,6 +37,7 @@ const TaskDetailsModal = ({
   const formatDateTime = (dateString) => {
     if (!dateString) return 'Not set';
     return new Date(dateString).toLocaleString('en-US', {
+      timeZone: timezone,
       year: 'numeric',
       month: 'long',
       day: 'numeric',

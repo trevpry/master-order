@@ -6,6 +6,7 @@ import {
   Edit3,
   Plus
 } from 'lucide-react';
+import { getTodayDateString, getTimezone } from '../../utils/timezoneUtils';
 
 const Calendar = ({ 
   selectedDate, 
@@ -16,6 +17,22 @@ const Calendar = ({
 }) => {
   const [currentMonth, setCurrentMonth] = useState(new Date());
   const [dailyNoteDates, setDailyNoteDates] = useState([]);
+  const [todayDateString, setTodayDateString] = useState(null);
+  const [timezone, setTimezone] = useState('UTC');
+
+  useEffect(() => {
+    // Initialize timezone and today's date
+    const initializeDate = async () => {
+      const tz = await getTimezone();
+      console.log('Calendar: Timezone from utils:', tz);
+      setTimezone(tz);
+      
+      const today = await getTodayDateString();
+      console.log('Calendar: Today date string:', today);
+      setTodayDateString(today);
+    };
+    initializeDate();
+  }, []);
 
   useEffect(() => {
     fetchDailyNoteDates();
@@ -36,8 +53,11 @@ const Calendar = ({
     }
   };
 
-  const today = new Date();
-  const selectedDateObj = selectedDate ? new Date(selectedDate) : null;
+  const selectedDateObj = selectedDate ? (() => {
+    // Parse YYYY-MM-DD string correctly to avoid timezone issues
+    const [year, month, day] = selectedDate.split('-').map(Number);
+    return new Date(year, month - 1, day);
+  })() : null;
 
   // Get first day of the month and number of days
   const firstDayOfMonth = new Date(currentMonth.getFullYear(), currentMonth.getMonth(), 1);
@@ -55,7 +75,9 @@ const Calendar = ({
   }
 
   const isToday = (date) => {
-    return date.toDateString() === today.toDateString();
+    if (!todayDateString) return false;
+    const dateString = date.toISOString().split('T')[0];
+    return dateString === todayDateString;
   };
 
   const isSelected = (date) => {
@@ -82,16 +104,25 @@ const Calendar = ({
     setCurrentMonth(newMonth);
   };
 
-  const goToToday = () => {
+  const goToToday = async () => {
     setCurrentMonth(new Date());
     if (onDateSelect) {
-      onDateSelect(today.toISOString().split('T')[0]);
+      const todayString = await getTodayDateString();
+      console.log('Calendar goToToday: Using timezone-aware date:', todayString);
+      onDateSelect(todayString);
     }
   };
 
   const handleDateClick = (date) => {
     if (onDateSelect) {
-      onDateSelect(date.toISOString().split('T')[0]);
+      // Convert the clicked date to YYYY-MM-DD format
+      const year = date.getFullYear();
+      const month = String(date.getMonth() + 1).padStart(2, '0');
+      const day = String(date.getDate()).padStart(2, '0');
+      const dateString = `${year}-${month}-${day}`;
+      
+      console.log('Calendar handleDateClick: Converting clicked date to:', dateString);
+      onDateSelect(dateString);
     }
   };
 
@@ -174,15 +205,11 @@ const Calendar = ({
                   : 'text-gray-300 hover:bg-gray-50'
                 }
                 ${isTodayDate 
-                  ? 'bg-blue-100 text-blue-700 font-semibold border-2 border-blue-300' 
-                  : ''
-                }
-                ${isSelectedDate && !isTodayDate
+                  ? 'bg-blue-600 text-white font-bold border-2 border-blue-400 ring-2 ring-blue-300' 
+                  : isSelectedDate
                   ? 'bg-blue-500 text-white font-semibold' 
-                  : ''
-                }
-                ${isHighlightedDate && !isSelectedDate && !isTodayDate
-                  ? 'bg-green-100 text-green-700' 
+                  : isHighlightedDate
+                  ? 'bg-green-100 text-green-700'
                   : ''
                 }
                 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-1

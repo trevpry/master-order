@@ -37,7 +37,6 @@ router.get('/', asyncHandler(async (req, res) => {
     settings = await prisma.settings.create({
       data: { 
         id: 1,
-        timezone: 'UTC',
         tvGeneralPercent: 50,
         moviesGeneralPercent: 50,
         customOrderPercent: 0,
@@ -107,6 +106,7 @@ router.get('/eddie', asyncHandler(async (req, res) => {
     // Create default Eddie settings if none exist
     eddieSettings = await prisma.eddieSettings.create({
       data: {
+        timezone: 'UTC',
         weatherEnabled: false,
         weatherApiKey: '',
         weatherLocation: '',
@@ -121,6 +121,7 @@ router.get('/eddie', asyncHandler(async (req, res) => {
 // PUT /api/settings/eddie - Update Eddie settings
 router.put('/eddie', asyncHandler(async (req, res) => {
   const { 
+    timezone,
     weatherEnabled, 
     weatherApiKey, 
     weatherLocation, 
@@ -129,6 +130,7 @@ router.put('/eddie', asyncHandler(async (req, res) => {
 
   // Prepare update data - only include defined fields
   const updateData = {};
+  if (timezone !== undefined) updateData.timezone = timezone || 'UTC';
   if (weatherEnabled !== undefined) updateData.weatherEnabled = weatherEnabled;
   if (weatherApiKey !== undefined) updateData.weatherApiKey = weatherApiKey?.trim() || null;
   if (weatherLocation !== undefined) updateData.weatherLocation = weatherLocation?.trim() || null;
@@ -149,6 +151,7 @@ router.put('/eddie', asyncHandler(async (req, res) => {
     // Create new Eddie settings
     eddieSettings = await prisma.eddieSettings.create({
       data: {
+        timezone: 'UTC',
         weatherEnabled: false,
         weatherUnits: 'metric',
         ...updateData
