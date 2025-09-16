@@ -394,4 +394,95 @@ router.delete('/:id/images/:imageId', async (req, res) => {
   }
 });
 
+// Get backgrounds for a specific gallery
+router.get('/:id/backgrounds', async (req, res) => {
+  console.log('🖼️ [BACKGROUND-GALLERIES] Get gallery backgrounds called for ID:', req.params.id);
+  
+  try {
+    const galleryId = parseInt(req.params.id);
+    
+    const gallery = await prisma.backgroundGallery.findUnique({
+      where: { id: galleryId },
+      include: {
+        backgrounds: {
+          orderBy: { createdAt: 'desc' }
+        }
+      }
+    });
+
+    if (!gallery) {
+      return res.status(404).json({
+        success: false,
+        error: 'Gallery not found'
+      });
+    }
+
+    console.log(`🖼️ [BACKGROUND-GALLERIES] Found ${gallery.backgrounds.length} backgrounds`);
+
+    res.json(gallery.backgrounds);
+  } catch (error) {
+    console.error('🖼️ [BACKGROUND-GALLERIES] Get gallery backgrounds error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to fetch gallery backgrounds',
+      message: error.message
+    });
+  }
+});
+
+// Add backgrounds to gallery
+router.post('/:id/add-backgrounds', async (req, res) => {
+  console.log('🖼️ [BACKGROUND-GALLERIES] Add backgrounds called for ID:', req.params.id);
+  console.log('🖼️ [BACKGROUND-GALLERIES] Request body:', req.body);
+  
+  try {
+    const galleryId = parseInt(req.params.id);
+    const { backgroundIds } = req.body;
+
+    if (!Array.isArray(backgroundIds) || backgroundIds.length === 0) {
+      return res.status(400).json({
+        success: false,
+        error: 'Background IDs array is required'
+      });
+    }
+
+    const gallery = await prisma.backgroundGallery.findUnique({
+      where: { id: galleryId }
+    });
+
+    if (!gallery) {
+      return res.status(404).json({
+        success: false,
+        error: 'Gallery not found'
+      });
+    }
+
+    // Update background images to belong to this gallery
+    const updatedCount = await prisma.backgroundImage.updateMany({
+      where: {
+        id: { in: backgroundIds.map(id => parseInt(id)) },
+        galleryId: null // Only update backgrounds not already in a gallery
+      },
+      data: {
+        galleryId: galleryId
+      }
+    });
+
+    console.log(`🖼️ [BACKGROUND-GALLERIES] Added ${updatedCount.count} backgrounds to gallery`);
+
+    res.json({
+      success: true,
+      addedCount: updatedCount.count,
+      message: `Added ${updatedCount.count} backgrounds to gallery`
+    });
+  } catch (error) {
+    console.error('🖼️ [BACKGROUND-GALLERIES] Add backgrounds error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to add backgrounds to gallery',
+      message: error.message
+    });
+  }
+});
+
 module.exports = router;

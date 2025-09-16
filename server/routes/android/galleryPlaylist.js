@@ -74,6 +74,10 @@ function createGalleryPlaylistRoutes(prisma) {
       const randomIndex = Math.floor(Math.random() * gallery.backgrounds.length);
       const randomImage = gallery.backgrounds[randomIndex];
       
+      // Generate server-local URL for the image instead of external URL
+      const baseUrl = `${req.protocol}://${req.get('host')}`;
+      const localImageUrl = `${baseUrl}/api/backgrounds/${randomImage.id}/image`;
+      
       const androidResponse = {
         type: 'RANDOM_IMAGE_SUCCESS',
         data: {
@@ -85,7 +89,8 @@ function createGalleryPlaylistRoutes(prisma) {
             id: randomImage.id,
             filename: randomImage.filename || randomImage.url?.split('/').pop() || 'unknown',
             originalName: randomImage.originalName || randomImage.filename || 'Unnamed Image',
-            url: randomImage.url,
+            url: localImageUrl, // Use local server URL instead of external URL
+            originalUrl: randomImage.url, // Keep original URL for reference
             width: randomImage.width || null,
             height: randomImage.height || null,
             size: randomImage.size || null,

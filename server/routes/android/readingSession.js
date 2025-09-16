@@ -169,38 +169,54 @@ function createReadingSessionRoutes(prisma) {
 
     // Update reading progress if provided and custom order item exists
     let actuallyMarkedAsRead = false;
+    let finalProgressData = null;
     if (progress && activeSession.customOrderItemId) {
       console.log('Updating reading progress for item:', activeSession.customOrderItemId, progress);
       
       try {
         const updateData = {};
         
+        // Get existing item data for calculations
+        const existingItem = await prisma.customOrderItem.findUnique({
+          where: { id: activeSession.customOrderItemId },
+          select: { bookPageCount: true, bookCurrentPage: true, bookPercentRead: true }
+        });
+
         // Update current page (allow 0 as valid page number)
         if (progress.currentPage !== undefined && progress.currentPage !== null && progress.currentPage >= 0) {
           updateData.bookCurrentPage = progress.currentPage;
           console.log(`Setting current page to: ${progress.currentPage}`);
         }
         
-        // Update read percentage
-        if (progress.readPercentage !== undefined && progress.readPercentage !== null && progress.readPercentage >= 0 && progress.readPercentage <= 100) {
-          updateData.bookPercentRead = progress.readPercentage;
-          console.log(`Setting read percentage to: ${progress.readPercentage}%`);
+        // Calculate read percentage if we have current page and total pages
+        let calculatedReadPercentage = null;
+        const currentPage = progress.currentPage !== undefined ? progress.currentPage : existingItem?.bookCurrentPage;
+        const totalPages = progress.totalPages !== undefined ? progress.totalPages : existingItem?.bookPageCount;
+        
+        if (currentPage !== null && totalPages && totalPages > 0) {
+          calculatedReadPercentage = Math.round((currentPage / totalPages) * 100);
+          calculatedReadPercentage = Math.min(100, Math.max(0, calculatedReadPercentage)); // Clamp to 0-100
+          console.log(`Calculated read percentage: ${calculatedReadPercentage}% (${currentPage}/${totalPages})`);
+        }
+        
+        // Update read percentage (use provided value or calculated value)
+        const finalReadPercentage = progress.readPercentage !== undefined ? progress.readPercentage : calculatedReadPercentage;
+        
+        if (finalReadPercentage !== null && finalReadPercentage >= 0 && finalReadPercentage <= 100) {
+          updateData.bookPercentRead = finalReadPercentage;
+          console.log(`Setting read percentage to: ${finalReadPercentage}%`);
           
           // If read percentage is 100%, mark as read/watched
-          if (progress.readPercentage === 100) {
+          if (finalReadPercentage === 100) {
             updateData.isWatched = true;
             actuallyMarkedAsRead = true;
             console.log('Marking item as read/watched (100% completion)');
           }
         }
         
+        
         // Update total page count only if not already set (during initial import)
         if (progress.totalPages !== undefined && progress.totalPages !== null && progress.totalPages > 0) {
-          const existingItem = await prisma.customOrderItem.findUnique({
-            where: { id: activeSession.customOrderItemId },
-            select: { bookPageCount: true }
-          });
-          
           // Only set page count if it hasn't been set before (during import)
           if (!existingItem?.bookPageCount) {
             updateData.bookPageCount = progress.totalPages;
@@ -221,6 +237,13 @@ function createReadingSessionRoutes(prisma) {
         } else {
           console.log('No valid progress data to update');
         }
+        
+        // Store the final progress data for response
+        finalProgressData = {
+          currentPage: updateData.bookCurrentPage || currentPage,
+          totalPages: updateData.bookPageCount || totalPages,
+          readPercentage: updateData.bookPercentRead || finalReadPercentage
+        };
       } catch (progressError) {
         console.error('Error updating reading progress:', progressError);
         // Don't fail the entire request for progress update errors
@@ -245,8 +268,8 @@ function createReadingSessionRoutes(prisma) {
         mediaType: activeSession.mediaType,
         duration: stoppedSession.duration,
         totalActiveTime: stoppedSession.totalTime,
-        progressUpdated: progress ? true : false,
-        progress: progress || null,
+        progressUpdated: finalProgressData ? true : false,
+        progress: finalProgressData || progress || null,
         markedAsRead: actuallyMarkedAsRead, // Based on actual database update
         message: actuallyMarkedAsRead
           ? `Completed reading "${activeSession.title}" and marked as read`
