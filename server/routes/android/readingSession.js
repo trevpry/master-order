@@ -217,8 +217,6 @@ function createReadingSessionRoutes(prisma) {
       console.log('Updating reading progress for item:', activeSession.customOrderItemId, progress);
       
       try {
-        const updateData = {};
-        
         // Get existing item data for calculations
         const existingItem = await prisma.customOrderItem.findUnique({
           where: { id: activeSession.customOrderItemId },
@@ -227,74 +225,114 @@ function createReadingSessionRoutes(prisma) {
             bookCurrentPage: true, 
             bookPercentRead: true,
             bookId: true,
-            title: true
+            title: true,
+            mediaType: true
           }
         });
 
-        // Update current page (allow 0 as valid page number)
-        if (progress.currentPage !== undefined && progress.currentPage !== null && progress.currentPage >= 0) {
-          updateData.bookCurrentPage = progress.currentPage;
-          console.log(`Setting current page to: ${progress.currentPage}`);
-        }
+        // Determine if this is a book or comic/other media
+        const isUnifiedBook = existingItem?.bookId !== null;
+        const isBookMediaType = activeSession.mediaType === 'book';
         
-        // Calculate read percentage if we have current page and total pages
-        let calculatedReadPercentage = null;
-        const currentPage = progress.currentPage !== undefined ? progress.currentPage : existingItem?.bookCurrentPage;
-        const totalPages = progress.totalPages !== undefined ? progress.totalPages : existingItem?.bookPageCount;
-        
-        if (currentPage !== null && totalPages && totalPages > 0) {
-          calculatedReadPercentage = Math.round((currentPage / totalPages) * 100);
-          calculatedReadPercentage = Math.min(100, Math.max(0, calculatedReadPercentage)); // Clamp to 0-100
-          console.log(`Calculated read percentage: ${calculatedReadPercentage}% (${currentPage}/${totalPages})`);
-        }
-        
-        // Update read percentage (use provided value or calculated value)
-        const finalReadPercentage = progress.readPercentage !== undefined ? progress.readPercentage : calculatedReadPercentage;
-        
-        if (finalReadPercentage !== null && finalReadPercentage >= 0 && finalReadPercentage <= 100) {
-          updateData.bookPercentRead = finalReadPercentage;
-          console.log(`Setting read percentage to: ${finalReadPercentage}%`);
+        console.log(`Media type: ${activeSession.mediaType}, Has bookId: ${!!existingItem?.bookId}, IsUnifiedBook: ${isUnifiedBook}`);
+
+        let updateData = {};
+        let currentPage, totalPages, finalReadPercentage;
+
+        if (isUnifiedBook && isBookMediaType) {
+          // FOR BOOKS: Only update unified system, do NOT touch CustomOrderItem book fields
+          console.log('📚 Processing book progress update - using unified system only');
           
-          // If read percentage is 100%, mark as read/watched
+          // Calculate values but don't store in CustomOrderItem
+          currentPage = progress.currentPage !== undefined ? progress.currentPage : null;
+          totalPages = progress.totalPages !== undefined ? progress.totalPages : null;
+          
+          // Calculate read percentage if we have current page and total pages
+          let calculatedReadPercentage = null;
+          if (currentPage !== null && totalPages && totalPages > 0) {
+            calculatedReadPercentage = Math.round((currentPage / totalPages) * 100);
+            calculatedReadPercentage = Math.min(100, Math.max(0, calculatedReadPercentage));
+            console.log(`📚 Calculated read percentage: ${calculatedReadPercentage}% (${currentPage}/${totalPages})`);
+          }
+          
+          finalReadPercentage = progress.readPercentage !== undefined ? progress.readPercentage : calculatedReadPercentage;
+          
+          // Mark as read if 100% (will be handled in unified system)
           if (finalReadPercentage === 100) {
             updateData.isWatched = true;
             actuallyMarkedAsRead = true;
-            console.log('Marking item as read/watched (100% completion)');
+            console.log('📚 Will mark book as read in unified system (100% completion)');
+          }
+        } else {
+          // FOR COMICS/OTHER: Use legacy CustomOrderItem fields (existing logic)
+          console.log('📖 Processing comic/other media progress update - using CustomOrderItem fields');
+          
+          // Update current page (allow 0 as valid page number)
+          if (progress.currentPage !== undefined && progress.currentPage !== null && progress.currentPage >= 0) {
+            updateData.bookCurrentPage = progress.currentPage;
+            console.log(`Setting current page to: ${progress.currentPage}`);
+          }
+          
+          // Calculate read percentage if we have current page and total pages
+          let calculatedReadPercentage = null;
+          currentPage = progress.currentPage !== undefined ? progress.currentPage : existingItem?.bookCurrentPage;
+          totalPages = progress.totalPages !== undefined ? progress.totalPages : existingItem?.bookPageCount;
+          
+          if (currentPage !== null && totalPages && totalPages > 0) {
+            calculatedReadPercentage = Math.round((currentPage / totalPages) * 100);
+            calculatedReadPercentage = Math.min(100, Math.max(0, calculatedReadPercentage));
+            console.log(`Calculated read percentage: ${calculatedReadPercentage}% (${currentPage}/${totalPages})`);
+          }
+          
+          // Update read percentage (use provided value or calculated value)
+          finalReadPercentage = progress.readPercentage !== undefined ? progress.readPercentage : calculatedReadPercentage;
+          
+          if (finalReadPercentage !== null && finalReadPercentage >= 0 && finalReadPercentage <= 100) {
+            updateData.bookPercentRead = finalReadPercentage;
+            console.log(`Setting read percentage to: ${finalReadPercentage}%`);
+            
+            // If read percentage is 100%, mark as read/watched
+            if (finalReadPercentage === 100) {
+              updateData.isWatched = true;
+              actuallyMarkedAsRead = true;
+              console.log('Marking item as read/watched (100% completion)');
+            }
+          }
+          
+          // Update total page count only if not already set (during initial import)
+          if (progress.totalPages !== undefined && progress.totalPages !== null && progress.totalPages > 0) {
+            // Only set page count if it hasn't been set before (during import)
+            if (!existingItem?.bookPageCount) {
+              updateData.bookPageCount = progress.totalPages;
+              console.log(`Setting initial total page count to: ${progress.totalPages}`);
+            } else {
+              console.log(`Total page count already set: ${existingItem.bookPageCount} (not changing)`);
+            }
           }
         }
         
-        
-        // Update total page count only if not already set (during initial import)
-        if (progress.totalPages !== undefined && progress.totalPages !== null && progress.totalPages > 0) {
-          // Only set page count if it hasn't been set before (during import)
-          if (!existingItem?.bookPageCount) {
-            updateData.bookPageCount = progress.totalPages;
-            console.log(`Setting initial total page count to: ${progress.totalPages}`);
-          } else {
-            console.log(`Total page count already set: ${existingItem.bookPageCount} (not changing)`);
-          }
-        }
-        
-        // Apply the updates to legacy fields if there are any
+        // Apply updates to CustomOrderItem only for comics/other media (not books)
         if (Object.keys(updateData).length > 0) {
           await prisma.customOrderItem.update({
             where: { id: activeSession.customOrderItemId },
             data: updateData
           });
           
-          console.log('Reading progress updated successfully (legacy fields):', updateData);
-        } else {
-          console.log('No valid progress data to update (legacy fields)');
+          if (isUnifiedBook && isBookMediaType) {
+            console.log('📚 Updated book completion status in CustomOrderItem (isWatched only):', updateData);
+          } else {
+            console.log('📖 Updated reading progress in CustomOrderItem (legacy fields):', updateData);
+          }
         }
 
-        // Update unified BookCompletion system if bookId exists
-        if (existingItem?.bookId) {
-          console.log('Updating unified BookCompletion for book:', existingItem.bookId);
+        // Update unified BookCompletion system for books
+        if (isUnifiedBook && isBookMediaType) {
+          console.log('📚 Updating unified BookCompletion for book:', existingItem.bookId);
           
           const sessionData = {};
           
-          if (progress.currentPage !== undefined && progress.currentPage > 0) {
-            sessionData.currentPage = progress.currentPage;
+          if (currentPage !== undefined && currentPage !== null && currentPage >= 0) {
+            sessionData.currentPage = currentPage;
           }
           
           if (finalReadPercentage !== null && finalReadPercentage >= 0 && finalReadPercentage <= 100) {
@@ -303,20 +341,20 @@ function createReadingSessionRoutes(prisma) {
             // Mark as completed if 100%
             if (finalReadPercentage === 100) {
               sessionData.isCompleted = true;
-              console.log('Marking book as completed in unified system (100% reading progress)');
+              console.log('📚 Marking book as completed in unified system (100% reading progress)');
             }
           }
           
-          if (progress.totalPages !== undefined && progress.totalPages > 0) {
-            sessionData.totalPages = progress.totalPages;
+          if (totalPages !== undefined && totalPages > 0) {
+            sessionData.totalPages = totalPages;
           }
 
           // Update the unified BookCompletion system
           await bookCompletionService.updateProgressFromSession(existingItem.bookId, sessionData);
-          console.log('Unified BookCompletion updated successfully for book:', existingItem.bookId);
+          console.log('📚 Unified BookCompletion updated successfully for book:', existingItem.bookId);
           
-          // Ensure Book record has correct pageCount (migrate from CustomOrderItem if needed)
-          if (progress.totalPages !== undefined && progress.totalPages > 0) {
+          // Ensure Book record has correct pageCount
+          if (totalPages !== undefined && totalPages > 0) {
             try {
               const book = await prisma.book.findUnique({
                 where: { id: existingItem.bookId },
@@ -326,24 +364,31 @@ function createReadingSessionRoutes(prisma) {
               if (book && !book.pageCount) {
                 await prisma.book.update({
                   where: { id: existingItem.bookId },
-                  data: { pageCount: progress.totalPages }
+                  data: { pageCount: totalPages }
                 });
-                console.log(`📚 Updated Book ${existingItem.bookId} pageCount to ${progress.totalPages}`);
+                console.log(`📚 Updated Book ${existingItem.bookId} pageCount to ${totalPages}`);
               }
             } catch (bookUpdateError) {
               console.error('Error updating Book pageCount:', bookUpdateError);
             }
           }
+
+          // For books, get progress data from what we just set
+          finalProgressData = {
+            currentPage: currentPage,
+            totalPages: totalPages,
+            readPercentage: finalReadPercentage
+          };
         } else {
-          console.log('CustomOrderItem has no linked bookId - cannot update unified progress');
+          console.log('📖 Skipping unified BookCompletion update (not a unified book)');
+          
+          // For comics/other media, get progress data from CustomOrderItem fields
+          finalProgressData = {
+            currentPage: updateData.bookCurrentPage || currentPage,
+            totalPages: updateData.bookPageCount || totalPages,
+            readPercentage: updateData.bookPercentRead || finalReadPercentage
+          };
         }
-        
-        // Store the final progress data for response
-        finalProgressData = {
-          currentPage: updateData.bookCurrentPage || currentPage,
-          totalPages: updateData.bookPageCount || totalPages,
-          readPercentage: updateData.bookPercentRead || finalReadPercentage
-        };
       } catch (progressError) {
         console.error('Error updating reading progress:', progressError);
         // Don't fail the entire request for progress update errors

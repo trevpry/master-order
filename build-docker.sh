@@ -1,9 +1,22 @@
 #!/bin/bash
-# Build script for Master Order Docker image
+# Build script for Master Order Docker image with DATA SAFETY PROTECTION
 
 set -e
 
 echo "🏗️  Building Master Order Docker Image"
+echo "🛡️  DATA SAFETY FIRST - Creating automatic backup..."
+
+# CRITICAL: Run data safety backup before any Docker operations
+if [ -f "./pre-docker-backup.sh" ]; then
+    chmod +x ./pre-docker-backup.sh
+    ./pre-docker-backup.sh
+else
+    echo "⚠️  WARNING: pre-docker-backup.sh not found!"
+    echo "   Continuing without automatic backup..."
+fi
+
+echo ""
+echo "🏗️  PROCEEDING WITH DOCKER BUILD..."
 
 # Check if we're in the right directory
 if [ ! -f "package.json" ]; then

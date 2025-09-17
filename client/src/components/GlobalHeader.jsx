@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import config from '../config';
 import logoImage from '../assets/logo.png';
+import WeatherDetailOverlay from './WeatherDetailOverlay';
 
 /**
  * Global Header Component
@@ -12,6 +13,7 @@ function GlobalHeader() {
   const [weather, setWeather] = useState(null);
   const [weatherLoading, setWeatherLoading] = useState(true);
   const [weatherError, setWeatherError] = useState(null);
+  const [showWeatherOverlay, setShowWeatherOverlay] = useState(false);
 
   useEffect(() => {
     fetchWeatherData();
@@ -89,7 +91,11 @@ function GlobalHeader() {
 
             {/* Weather Display */}
             {!weatherError && (
-              <div className="px-4 py-2 text-white shadow-md bg-gradient-to-r from-emerald-500 to-blue-500 rounded-lg min-w-[140px]">
+              <div 
+                className="px-4 py-2 text-white shadow-md bg-gradient-to-r from-emerald-500 to-blue-500 rounded-lg min-w-[140px] cursor-pointer hover:from-emerald-600 hover:to-blue-600 transition-all duration-200 hover:shadow-lg"
+                onClick={() => setShowWeatherOverlay(true)}
+                title="Click for detailed weather forecast"
+              >
                 {weatherLoading ? (
                   <div className="flex items-center justify-center">
                     <div className="w-4 h-4 mr-2 border-2 border-white rounded-full animate-spin border-t-transparent"></div>
@@ -117,6 +123,13 @@ function GlobalHeader() {
           </div>
         </div>
       </div>
+
+      {/* Weather Detail Overlay */}
+      <WeatherDetailOverlay
+        isOpen={showWeatherOverlay}
+        onClose={() => setShowWeatherOverlay(false)}
+        currentWeather={weather}
+      />
     </div>
   );
 }

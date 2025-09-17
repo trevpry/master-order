@@ -1,7 +1,19 @@
 @echo off
-REM Build script for Master Order Docker image (Windows)
+REM Build script for Master Order Docker image (Windows) with DATA SAFETY PROTECTION
 
 echo 🏗️  Building Master Order Docker Image
+echo 🛡️  DATA SAFETY FIRST - Creating automatic backup...
+
+REM CRITICAL: Run data safety backup before any Docker operations
+if exist "pre-docker-backup.ps1" (
+    powershell -ExecutionPolicy Bypass -File "pre-docker-backup.ps1"
+) else (
+    echo ⚠️  WARNING: pre-docker-backup.ps1 not found!
+    echo    Continuing without automatic backup...
+)
+
+echo.
+echo 🏗️  PROCEEDING WITH DOCKER BUILD...
 
 REM Check if we're in the right directory
 if not exist "package.json" (

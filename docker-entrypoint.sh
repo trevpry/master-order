@@ -1,10 +1,14 @@
 #!/bin/sh
-# Master Order Docker Entrypoint - PostgreSQL Production Setup
+# Master Order Docker Entrypoint - DATA-SAFE PostgreSQL Production Setup
 # This script is designed for production use with PostgreSQL
 # SQLite is used only in development outside of Docker
+# 
+# DATA SAFETY GUARANTEE: This script will NEVER delete or reset your database
+# All database operations are designed to preserve existing data
 
-echo "[INFO] Master Order Docker Entrypoint Started"
+echo "[INFO] DATA-SAFE Master Order Docker Entrypoint Started"
 echo "[INFO] This script runs when the container STARTS, not during build"
+echo "[DATA-SAFE] This entrypoint will NEVER delete or reset your database"
 echo "[DEBUG] Initial DATABASE_URL: $DATABASE_URL"
 echo "[DEBUG] Environment check:"
 echo "[DEBUG] - NODE_ENV: $NODE_ENV"
@@ -173,7 +177,7 @@ echo "[INFO] Checking for existing database data..."
 PRESERVE_EXISTING_DATA=false
 
 # Test if we can connect and if key tables exist with data
-if npx prisma db pull --force-reset >/dev/null 2>&1; then
+if npx prisma db execute --stdin <<< "SELECT 1;" >/dev/null 2>&1; then
     # Database exists and is accessible, check for user data
     echo "[INFO] Database connection successful, checking for existing data..."
     
@@ -235,6 +239,7 @@ if [ "$PRESERVE_EXISTING_DATA" = true ]; then
         
         # Try push again with more verbose output
         echo "[DEBUG] Retry db push with verbose output..."
+        # Try to update schema with explicit data protection
         if ! npx prisma db push --accept-data-loss=false --force-reset=false 2>&1; then
             echo "[ERROR] DB push failed - schema may have breaking changes"
             echo "[INFO] Falling back to migration approach..."
@@ -245,9 +250,10 @@ if [ "$PRESERVE_EXISTING_DATA" = true ]; then
                 echo "[INFO] Applying pending migrations..."
                 npx prisma migrate deploy
             elif echo "$MIGRATION_STATUS" | grep -q "Your local migration history and the migrations table"; then
-                echo "[INFO] Migration history conflict detected - using reset approach..."
-                echo "[WARNING] This may cause minor data reorganization but will preserve content"
-                npx prisma migrate reset --force --skip-seed 2>&1 || echo "[DEBUG] Reset failed"
+                echo "[WARNING] Migration history conflict detected"
+                echo "[DATA-SAFE] Will NOT reset database to preserve your data"
+                echo "[INFO] Continuing with existing schema - manual intervention may be needed"
+                echo "[INFO] Your data is completely safe"
             fi
         else
             echo "[SUCCESS] Schema updated successfully with db push"
@@ -273,8 +279,9 @@ else
             echo "[DEBUG] Attempting to generate Prisma client first..."
             npx prisma generate 2>&1 || echo "[DEBUG] Generate failed"
             
-            echo "[DEBUG] Final attempt with reset (THIS WILL DELETE DATA)..."
-            npx prisma migrate reset --force --skip-seed 2>&1 || echo "[DEBUG] Reset failed"
+            echo "[DATA-SAFE] Will NOT attempt reset to preserve any existing data"
+            echo "[ERROR] Manual intervention required for database schema setup"
+            echo "[INFO] Your data is completely safe - no destructive operations performed"
             exit 1
         fi
     else
