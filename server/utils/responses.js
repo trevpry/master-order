@@ -58,7 +58,7 @@ const sendServerError = (res, message = 'Internal server error') => {
  * @param {string} message - Success message (optional)
  */
 const sendSuccess = (res, data, message = null) => {
-  const response = { data };
+  const response = { success: true, data };
   if (message) {
     response.message = message;
   }

@@ -7,6 +7,7 @@ import '../../../App.css'
 import './HomeMobile.css'
 import '../../../shared/components/MobileImageFix.css'
 import toast, { Toaster } from 'react-hot-toast';
+import readingSessionService from '../../../services/readingSessionService.js';
 
 function MediaHome() {
   const [selectedMedia, setSelectedMedia] = useState(null);
@@ -184,6 +185,54 @@ function MediaHome() {
       console.error('Error saving viewing session:', error);
     }
   }, [viewingSession]);
+
+  // Check for active reading session - used by focus listeners
+  const checkActiveReadingSession = async () => {
+    try {
+      const activeSession = await readingSessionService.getActiveSession();
+      if (activeSession && (!readingSession || readingSession.id !== activeSession.id)) {
+        console.log('Found active reading session, updating state:', activeSession.id);
+        setReadingSession(activeSession);
+      } else if (!activeSession && readingSession) {
+        console.log('No active reading session found, clearing state');
+        setReadingSession(null);
+        setReadingTimer(0);
+      }
+    } catch (error) {
+      // Only log errors that aren't "no active session" messages
+      if (!error.message.includes('No active reading session')) {
+        console.error('Error checking active reading session:', error);
+      }
+    }
+  };
+
+  // Add window focus and visibility listeners for reading session synchronization
+  useEffect(() => {
+    const handleFocus = () => {
+      console.log('Web Up Next gained focus, checking for active reading session...');
+      checkActiveReadingSession();
+    };
+
+    const handleVisibilityChange = () => {
+      if (!document.hidden) {
+        console.log('Web Up Next became visible, checking for active reading session...');
+        checkActiveReadingSession();
+      }
+    };
+
+    // Check for active session on component mount
+    checkActiveReadingSession();
+
+    // Add event listeners
+    window.addEventListener('focus', handleFocus);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    // Cleanup listeners on unmount
+    return () => {
+      window.removeEventListener('focus', handleFocus);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, []); // Empty dependency array - only set up listeners once
 
   const formatReadingTime = (seconds) => {
     const hours = Math.floor(seconds / 3600);
@@ -505,44 +554,33 @@ function MediaHome() {
 
     setReadingActionLoading('start');
     try {
-      const requestBody = {
+      // Prepare parameters for the modular reading service
+      const sessionParams = {
         mediaType: selectedMedia.type,
-        customOrderItemId: selectedMedia.customOrderItemId || selectedMedia.ratingKey,
-        title: selectedMedia.title || selectedMedia.storyTitle || selectedMedia.comicSeries
+        title: selectedMedia.title || selectedMedia.storyTitle || selectedMedia.comicSeries,
+        customOrderItemId: selectedMedia.customOrderItemId || selectedMedia.ratingKey
       };
 
-      // Add comic-specific fields for validation
+      // Add comic-specific handling
       if (selectedMedia.type === 'comic') {
-        requestBody.comicSeries = selectedMedia.comicSeries;
-        requestBody.comicIssue = selectedMedia.comicIssue;
+        sessionParams.comicSeries = selectedMedia.comicSeries;
+        sessionParams.comicIssue = selectedMedia.comicIssue;
+        sessionParams.seriesTitle = selectedMedia.comicSeries;
+        if (selectedMedia.comicIssue) {
+          sessionParams.title = `${selectedMedia.comicSeries} #${selectedMedia.comicIssue}`;
+        }
       }
 
-      const response = await fetch(`${config.apiBaseUrl}/api/reading/start`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(requestBody),
+      const session = await readingSessionService.startSession(sessionParams);
+      setReadingSession(session);
+      setReadingTimer(0);
+      toast.success('📚 Started reading session!', {
+        duration: 2000,
+        position: 'top-right'
       });
-
-      if (response.ok) {
-        const session = await response.json();
-        setReadingSession(session);
-        setReadingTimer(0);
-        toast.success('📚 Started reading session!', {
-          duration: 2000,
-          position: 'top-right'
-        });
-      } else {
-        const error = await response.json();
-        toast.error(`Failed to start reading: ${error.error}`, {
-          duration: 4000,
-          position: 'top-right'
-        });
-      }
     } catch (error) {
       console.error('Error starting reading session:', error);
-      toast.error('Error starting reading session', {
+      toast.error(`Failed to start reading: ${error.message}`, {
         duration: 4000,
         position: 'top-right'
       });
@@ -556,21 +594,15 @@ function MediaHome() {
 
     setReadingActionLoading('pause');
     try {
-      const response = await fetch(`${config.apiBaseUrl}/api/reading/pause`, {
-        method: 'POST',
+      const updatedSession = await readingSessionService.pauseResumeSession();
+      setReadingSession(updatedSession);
+      toast(`📚 Reading ${updatedSession.isPaused ? 'paused' : 'resumed'}!`, {
+        duration: 2000,
+        position: 'top-right'
       });
-
-      if (response.ok) {
-        const updatedSession = await response.json();
-        setReadingSession(updatedSession);
-        toast(`📚 Reading ${updatedSession.isPaused ? 'paused' : 'resumed'}!`, {
-          duration: 2000,
-          position: 'top-right'
-        });
-      }
     } catch (error) {
       console.error('Error pausing reading session:', error);
-      toast.error('Error pausing reading session', {
+      toast.error(`Error pausing reading session: ${error.message}`, {
         duration: 4000,
         position: 'top-right'
       });
@@ -607,61 +639,51 @@ function MediaHome() {
           progressData.totalPages = parseInt(readingProgress.totalPages);
         }
       } else if (readingProgress.inputType === 'percentage' && readingProgress.readPercentage) {
-        progressData.readPercentage = parseFloat(readingProgress.readPercentage);
+        progressData.percentComplete = parseFloat(readingProgress.readPercentage);
       }
 
       console.log('📤 Sending progressData:', progressData);
 
-      const response = await fetch(`${config.apiBaseUrl}/api/reading/stop`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(progressData),
+      const completedSession = await readingSessionService.stopSession(progressData);
+      setReadingSession(null);
+      setReadingTimer(0);
+      setShowReadingProgressModal(false);
+      setReadingProgress({
+        currentPage: '',
+        totalPages: '',
+        readPercentage: '',
+        inputType: 'page'
       });
 
-      if (response.ok) {
-        const completedSession = await response.json();
-        setReadingSession(null);
-        setReadingTimer(0);
-        setShowReadingProgressModal(false);
-        setReadingProgress({
-          currentPage: '',
-          totalPages: '',
-          readPercentage: '',
-          inputType: 'page'
-        });
+      const formatTime = (seconds) => {
+        const hours = Math.floor(seconds / 3600);
+        const minutes = Math.floor((seconds % 3600) / 60);
+        const secs = seconds % 60;
 
-        const formatTime = (seconds) => {
-          const hours = Math.floor(seconds / 3600);
-          const minutes = Math.floor((seconds % 3600) / 60);
-          const secs = seconds % 60;
-
-          if (hours > 0) {
-            return `${hours}h ${minutes}m ${secs}s`;
-          } else if (minutes > 0) {
-            return `${minutes}m ${secs}s`;
-          } else {
-            return `${secs}s`;
-          }
-        };
-
-        if (completedSession.deleted) {
-          toast(`🗑️ Reading session discarded (less than 1 minute)`, {
-            duration: 4000,
-            position: 'top-right'
-          });
+        if (hours > 0) {
+          return `${hours}h ${minutes}m ${secs}s`;
+        } else if (minutes > 0) {
+          return `${minutes}m ${secs}s`;
         } else {
-          let message = `📚 Reading session completed! Total time: ${formatTime(completedSession.totalTime)}`;
-          toast.success(message, {
-            duration: 5000,
-            position: 'top-right'
-          });
+          return `${secs}s`;
         }
+      };
+
+      if (completedSession.deleted) {
+        toast(`🗑️ Reading session discarded (less than 1 minute)`, {
+          duration: 4000,
+          position: 'top-right'
+        });
+      } else {
+        let message = `📚 Reading session completed! Total time: ${formatTime(completedSession.totalTime)}`;
+        toast.success(message, {
+          duration: 5000,
+          position: 'top-right'
+        });
       }
     } catch (error) {
       console.error('Error stopping reading session:', error);
-      toast.error('Error stopping reading session', {
+      toast.error(`Error stopping reading session: ${error.message}`, {
         duration: 4000,
         position: 'top-right'
       });

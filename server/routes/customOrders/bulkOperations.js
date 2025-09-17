@@ -14,7 +14,7 @@ const { extractComicVineMetadata } = require('./utilities/metadataExtractor');
  */
 function createBulkOperationsRoutes(prisma, services) {
   const router = express.Router();
-  const { artworkCache } = services;
+  const { artworkCache, bookService } = services;
   
   // Import validation and response utilities
   const { validateCustomOrderItem, validateMediaTypeAndTitle } = require('../../middleware/validation');
@@ -209,6 +209,36 @@ function createBulkOperationsRoutes(prisma, services) {
 
       if (mediaType === 'comic') {
         console.log('Comic item created successfully with ComicVine metadata');
+      }
+
+      // Create unified Book record for book items
+      if (mediaType === 'book' && bookService) {
+        try {
+          const bookData = {
+            title: bookTitle,
+            author: bookAuthor,
+            isbn: bookIsbn,
+            publisher: bookPublisher,
+            publishYear: bookYear ? parseInt(bookYear) : null,
+            coverUrl: bookCoverUrl,
+            pageCount: bookPageCount ? parseInt(bookPageCount) : null,
+            openLibraryId: bookOpenLibraryId
+          };
+
+          // Create or find existing Book record (createBook handles duplicates)
+          const book = await bookService.createBook(bookData);
+          
+          // Update the CustomOrderItem to reference the unified Book
+          await prisma.customOrderItem.update({
+            where: { id: item.id },
+            data: { bookId: book.id }
+          });
+
+          console.log(`📚 Created/linked unified Book record for CustomOrderItem: "${bookTitle}" (Book ID: ${book.id})`);
+        } catch (error) {
+          console.warn(`⚠️ Failed to create unified Book record for "${bookTitle}":`, error.message);
+          // Don't fail the CustomOrderItem creation if Book creation fails
+        }
       }
 
       // After creation, try to update with TVDB data if applicable

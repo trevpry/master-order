@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { Link } from 'react-router-dom';
 import Button from '../../../../shared/components/Button';
 import config from '../../../../config';
 import './CustomOrders.css';
@@ -3335,6 +3336,19 @@ function CustomOrders() {
                           ) : (
                             item.title
                           )
+                        ) : item.mediaType === 'book' ? (
+                          // Book - link to unified Books page
+                          item.bookId ? (
+                            <Link 
+                              to={`/media/books?id=${item.bookId}`}
+                              className="book-link"
+                              title="View full book details"
+                            >
+                              {item.title}
+                            </Link>
+                          ) : (
+                            item.title
+                          )
                         ) : (
                           item.title
                         )}
@@ -3431,14 +3445,14 @@ function CustomOrders() {
 
                       {/* Reading Progress Display */}
                       {(item.mediaType === 'book' || item.mediaType === 'comic' || item.mediaType === 'shortstory') && 
-                       (item.bookCurrentPage || item.bookPercentRead) && (
+                       (item.unifiedProgress?.percentageComplete > 0 || item.bookCurrentPage || item.bookPercentRead) && (
                         <div className="reading-progress">
                           <div className="progress-bar-container">
                             <div 
                               className="progress-bar-fill" 
                               style={{ 
-                                width: `${item.bookPercentRead || 0}%`,
-                                backgroundColor: item.bookPercentRead >= 100 ? '#28a745' : '#007bff'
+                                width: `${item.unifiedProgress?.percentageComplete || item.bookPercentRead || 0}%`,
+                                backgroundColor: (item.unifiedProgress?.percentageComplete || item.bookPercentRead || 0) >= 100 ? '#28a745' : '#007bff'
                               }}
                             />
                           </div>

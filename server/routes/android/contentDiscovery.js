@@ -124,41 +124,73 @@ function createContentDiscoveryRoutes(services) {
           console.log('📱 Using episode-specific rating key for Android:', episodeRatingKey);
         }
 
+        // Base data structure for all Custom Order items
+        const baseData = {
+          id: upNextData.customOrderItemId || upNextData.id,
+          title: upNextData.title,
+          type: upNextData.type,
+          orderName: upNextData.customOrderName || 'Custom Order',
+          summary: upNextData.summary || '',
+          duration: upNextData.duration || 0,
+          localArtworkPath: upNextData.localArtworkPath || '',
+          artworkUrl: artworkUrl || '',
+          streamUrl: upNextData.streamUrl || '',
+          ratingKey: episodeRatingKey || null,
+          plexId: episodeRatingKey || null,
+          webUrl: upNextData.webUrl || null,
+          customOrderId: upNextData.customOrderId || null,
+          customOrderItemId: upNextData.customOrderItemId || null,
+          // Playlist information
+          ...(upNextData.playlistName && {
+            playlistName: upNextData.playlistName,
+            playlistType: upNextData.playlistType
+          }),
+          // Background gallery information
+          ...(upNextData.backgroundGalleryName && {
+            backgroundGalleryName: upNextData.backgroundGalleryName,
+            backgroundGalleryId: upNextData.backgroundGalleryId
+          }),
+          // Episode-specific fields for custom orders
+          ...(upNextData.type === 'episode' && {
+            seasonNumber: upNextData.seasonNumber || upNextData.currentSeason || null,
+            episodeNumber: upNextData.episodeNumber || upNextData.currentEpisode || null,
+            episodeTitle: upNextData.episodeTitle || upNextData.nextEpisodeTitle || null,
+            seriesTitle: upNextData.seriesTitle || upNextData.grandparentTitle || null
+          }),
+          // Book-specific fields for custom order books (same structure as History Plus books)
+          ...(upNextData.type === 'book' && {
+            bookTitle: upNextData.bookTitle,
+            bookAuthor: upNextData.bookAuthor,
+            bookYear: upNextData.bookYear,
+            bookIsbn: upNextData.bookIsbn,
+            bookPublisher: upNextData.bookPublisher,
+            bookPageCount: upNextData.bookPageCount,
+            bookCoverUrl: upNextData.bookCoverUrl || upNextData.thumb || upNextData.art,
+            bookDescription: upNextData.bookDetails?.description || upNextData.summary || '',
+            bookOpenLibraryId: upNextData.bookOpenLibraryId,
+            // Chapter information (if available - for future chapter/section support)
+            ...(upNextData.chapterNumber && {
+              chapterNumber: upNextData.chapterNumber,
+              chapterTitle: upNextData.chapterTitle,
+              chapterDescription: upNextData.chapterDescription
+            }),
+            // Section information (if available - for future chapter/section support)
+            ...(upNextData.sectionNumber && {
+              sectionNumber: upNextData.sectionNumber,
+              sectionTitle: upNextData.sectionTitle,
+              sectionDescription: upNextData.sectionDescription
+            }),
+            // Page information (if available)
+            ...(upNextData.pageStart && {
+              pageStart: upNextData.pageStart,
+              pageEnd: upNextData.pageEnd
+            })
+          })
+        };
+
         androidResponse = {
           type: 'PLAY_CUSTOM_ORDER_ITEM',
-          data: {
-            id: upNextData.customOrderItemId || upNextData.id,
-            title: upNextData.title,
-            type: upNextData.type,
-            orderName: upNextData.customOrderName || 'Custom Order',
-            summary: upNextData.summary || '',
-            duration: upNextData.duration || 0,
-            localArtworkPath: upNextData.localArtworkPath || '',
-            artworkUrl: artworkUrl || '',
-            streamUrl: upNextData.streamUrl || '',
-            ratingKey: episodeRatingKey || null,
-            plexId: episodeRatingKey || null,
-            webUrl: upNextData.webUrl || null,
-            customOrderId: upNextData.customOrderId || null,
-            customOrderItemId: upNextData.customOrderItemId || null,
-            // Playlist information
-            ...(upNextData.playlistName && {
-              playlistName: upNextData.playlistName,
-              playlistType: upNextData.playlistType
-            }),
-            // Background gallery information
-            ...(upNextData.backgroundGalleryName && {
-              backgroundGalleryName: upNextData.backgroundGalleryName,
-              backgroundGalleryId: upNextData.backgroundGalleryId
-            }),
-            // Episode-specific fields for custom orders
-            ...(upNextData.type === 'episode' && {
-              seasonNumber: upNextData.seasonNumber || upNextData.currentSeason || null,
-              episodeNumber: upNextData.episodeNumber || upNextData.currentEpisode || null,
-              episodeTitle: upNextData.episodeTitle || upNextData.nextEpisodeTitle || null,
-              seriesTitle: upNextData.seriesTitle || upNextData.grandparentTitle || null
-            })
-          }
+          data: baseData
         };
       } else if (upNextData.orderType === 'HISTORY_PLUS') {
         // History Plus response - treat webvideos like custom order webvideos

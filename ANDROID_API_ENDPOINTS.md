@@ -108,6 +108,46 @@ Currently, no authentication is required for these endpoints. They are designed 
 }
 ```
 
+**Custom Order Book Response**:
+```json
+{
+  "type": "PLAY_CUSTOM_ORDER_ITEM",
+  "data": {
+    "id": 123,
+    "title": "Book Title",
+    "type": "book",
+    "orderName": "My Reading List",
+    "summary": "Book description...",
+    "duration": 0,
+    "localArtworkPath": "/path/to/book-cover.jpg",
+    "artworkUrl": "http://localhost:3000/api/artwork/book-cover.jpg",
+    "streamUrl": "",
+    "ratingKey": null,
+    "plexId": null,
+    "webUrl": null,
+    "customOrderId": 456,
+    "customOrderItemId": 789,
+    "bookTitle": "The Example Book",
+    "bookAuthor": "Author Name",
+    "bookYear": 2023,
+    "bookIsbn": "978-0123456789",
+    "bookPublisher": "Example Publisher",
+    "bookPageCount": 300,
+    "bookCoverUrl": "https://covers.openlibrary.org/b/id/12345-L.jpg",
+    "bookDescription": "Detailed book description...",
+    "bookOpenLibraryId": "OL12345M",
+    "chapterNumber": 5,
+    "chapterTitle": "Chapter Title",
+    "chapterDescription": "Chapter description...",
+    "sectionNumber": 2,
+    "sectionTitle": "Section Title", 
+    "sectionDescription": "Section description...",
+    "pageStart": 100,
+    "pageEnd": 120
+  }
+}
+```
+
 **History Plus Content Response**:
 ```json
 {
@@ -227,6 +267,24 @@ Currently, no authentication is required for these endpoints. They are designed 
     - `episodeNumber`: Episode number within the season (integer)  
     - `episodeTitle`: Specific episode title
     - `seriesTitle`: Name of the TV series
+  - Book-specific fields (only included for book items):
+    - `bookTitle`: Title of the book
+    - `bookAuthor`: Author of the book
+    - `bookYear`: Publication year
+    - `bookIsbn`: ISBN number
+    - `bookPublisher`: Publisher name
+    - `bookPageCount`: Total pages in book
+    - `bookCoverUrl`: Book cover image URL
+    - `bookDescription`: Book description
+    - `bookOpenLibraryId`: OpenLibrary identifier (if available)
+    - `chapterNumber`: Chapter number (if reading chapter/section)
+    - `chapterTitle`: Chapter title (if reading chapter/section)
+    - `chapterDescription`: Chapter description (if reading chapter/section)
+    - `sectionNumber`: Section number (if reading section)
+    - `sectionTitle`: Section title (if reading section)
+    - `sectionDescription`: Section description (if reading section)
+    - `pageStart`: Starting page number (if applicable)
+    - `pageEnd`: Ending page number (if applicable)
 - History Plus Content Fields:
   - `orderType`: Always "HISTORY_PLUS" for this response type
   - `type`: Content type ("book", "chapter", "section", or "video")

@@ -24,7 +24,22 @@ function createOrderManagementRoutes(prisma, services) {
             include: {
               storyContainedInBook: true,
               containedStories: true,
-              referencedCustomOrder: true // Include referenced custom order for sub-order items
+              referencedCustomOrder: true, // Include referenced custom order for sub-order items
+              book: { // Include unified book data
+                include: {
+                  bookCompletions: true,
+                  chapters: {
+                    include: {
+                      chapterCompletions: true,
+                      sections: {
+                        include: {
+                          sectionCompletions: true
+                        }
+                      }
+                    }
+                  }
+                }
+              }
             },
             orderBy: { sortOrder: 'asc' }
           },
@@ -62,6 +77,25 @@ function createOrderManagementRoutes(prisma, services) {
         // Transform custom playlist to include trackCount
         if (order.customPlaylist) {
           order.customPlaylist.trackCount = order.customPlaylist._count?.tracks || 0;
+        }
+
+        // Add unified progress data for book items
+        for (const item of order.items) {
+          if (item.book && (item.mediaType === 'book' || item.mediaType === 'comic' || item.mediaType === 'shortstory')) {
+            try {
+              // Import BookCompletionService to calculate progress
+              const BookCompletionService = require('../../services/BookCompletionService');
+              const completionService = new BookCompletionService();
+              
+              const progressReport = await completionService.getBookProgressReport(item.book.id);
+              item.unifiedProgress = progressReport;
+              
+              console.log(`📊 Added unified progress for "${item.title}": ${progressReport?.percentageComplete || 0}%`);
+            } catch (error) {
+              console.error(`Error calculating progress for book item ${item.id}:`, error);
+              item.unifiedProgress = { percentageComplete: 0 };
+            }
+          }
         }
       }
       

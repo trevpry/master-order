@@ -5,6 +5,7 @@ const WatchStatsRoutes = require('./watchStatsRoutes');
 const { markCustomOrderItemAsWatched } = require('../databaseUtils');
 const { validateRequiredFields, validateMediaTypeAndTitle, validateReadingOperation, validateViewingOperation, validateEpisodeMovieMediaType } = require('../middleware/validation');
 const { sendBadRequest, sendNotFound, sendSuccess, sendServerError, asyncHandler, logError } = require('../utils/responses');
+const BookCompletionService = require('../services/BookCompletionService');
 
 const prisma = require('../prismaClient'); // Use shared singleton instance
 
@@ -15,6 +16,7 @@ function createWatchTrackingRoutes(io) {
   // Initialize services
   const plexDb = new PlexDatabaseService();
   const watchLogService = new WatchLogService(prisma);
+  const bookCompletionService = new BookCompletionService(prisma);
   const StatisticsService = require('../services/statisticsService');
   const statisticsService = new StatisticsService(prisma, watchLogService);
   const watchStatsRoutes = new WatchStatsRoutes(watchLogService, statisticsService);
@@ -343,145 +345,200 @@ router.post('/reading/start', validateReadingOperation, asyncHandler(async (req,
     io.emit('androidCompanion', androidMessage);
   }
   
-  res.json(readingSession);
+  res.json({ success: true, data: readingSession });
 }));
 
 // Pause/Resume the active reading session
-router.post('/reading/pause', async (req, res) => {
-  try {
-    console.log('Attempting to pause/resume reading session...');
-    
-    // Find the active reading session
-    const activeSession = await watchLogService.getActiveReadingSession();
-    
-    console.log('Active session found:', activeSession);
-    
-    if (!activeSession) {
-      console.log('No active reading session found');
-      return res.status(404).json({ error: 'No active reading session found' });
-    }
-
-    console.log('Pausing/resuming session with ID:', activeSession.id);
-    const updatedSession = await watchLogService.pauseReading(activeSession.id);
-    console.log('Session paused/resumed successfully');
-    res.json(updatedSession);
-  } catch (error) {
-    console.error('Error pausing reading session:', error);
-    res.status(500).json({ error: error.message });
+router.post('/reading/pause', asyncHandler(async (req, res) => {
+  console.log('Attempting to pause/resume reading session...');
+  
+  // Find the active reading session
+  const activeSession = await watchLogService.getActiveReadingSession();
+  
+  console.log('Active session found:', activeSession);
+  
+  if (!activeSession) {
+    console.log('No active reading session found');
+    return sendNotFound(res, 'No active reading session found');
   }
-});
+
+  console.log('Pausing/resuming session with ID:', activeSession.id);
+  const updatedSession = await watchLogService.pauseReading(activeSession.id);
+  console.log('Session paused/resumed successfully');
+  
+  sendSuccess(res, updatedSession);
+}));
 
 // Stop the active reading session
-router.post('/reading/stop', async (req, res) => {
-  try {
-    console.log('Attempting to stop reading session...');
-    const { progress } = req.body;
-    
-    // Find the active reading session
-    const activeSession = await watchLogService.getActiveReadingSession();
-    
-    console.log('Active session found:', activeSession);
-    
-    if (!activeSession) {
-      console.log('No active reading session found');
-      return res.status(404).json({ error: 'No active reading session found' });
-    }
+router.post('/reading/stop', asyncHandler(async (req, res) => {
+  console.log('Attempting to stop reading session...');
+  const { progress } = req.body;
+  
+  // Find the active reading session
+  const activeSession = await watchLogService.getActiveReadingSession();
+  
+  console.log('Active session found:', activeSession);
+  
+  if (!activeSession) {
+    console.log('No active reading session found');
+    return sendNotFound(res, 'No active reading session found');
+  }
 
-    console.log('Stopping session with ID:', activeSession.id);
+  console.log('Stopping session with ID:', activeSession.id);
+  
+  // Stop the reading session
+  const completedSession = await watchLogService.stopReading(activeSession.id);
+  
+  // Update reading progress if provided and session wasn't deleted
+  if (progress && !completedSession.deleted && activeSession.customOrderItemId) {
+    console.log('Updating reading progress for item:', activeSession.customOrderItemId, progress);
     
-    // Stop the reading session
-    const completedSession = await watchLogService.stopReading(activeSession.id);
-    
-    // Update reading progress if provided and session wasn't deleted
-    if (progress && !completedSession.deleted && activeSession.customOrderItemId) {
-      console.log('Updating reading progress for item:', activeSession.customOrderItemId, progress);
-      
-      try {
-        const updateData = {};
+    try {
+      // Get the CustomOrderItem to find the associated bookId
+      const customOrderItem = await prisma.customOrderItem.findUnique({
+        where: { id: activeSession.customOrderItemId },
+        select: { 
+          bookId: true,
+          bookPageCount: true,
+          title: true
+        }
+      });
+
+      if (!customOrderItem) {
+        console.error('CustomOrderItem not found:', activeSession.customOrderItemId);
+        throw new Error('CustomOrderItem not found');
+      }
+
+      // Update unified BookCompletion table if bookId exists
+      if (customOrderItem.bookId) {
+        console.log('Updating unified BookCompletion for book:', customOrderItem.bookId);
+        
+        const sessionData = {};
         
         if (progress.currentPage !== undefined && progress.currentPage > 0) {
-          updateData.bookCurrentPage = progress.currentPage;
+          sessionData.currentPage = progress.currentPage;
         }
         
         if (progress.readPercentage !== undefined && progress.readPercentage >= 0 && progress.readPercentage <= 100) {
-          updateData.bookPercentRead = progress.readPercentage;
+          sessionData.percentRead = progress.readPercentage;
           
-          // If read percentage is 100%, mark as read/watched
+          // Mark as completed if 100%
           if (progress.readPercentage === 100) {
-            updateData.isWatched = true;
-            console.log('Marking item as read/watched (100% completion)');
+            sessionData.isCompleted = true;
+            console.log('Marking book as completed (100% reading progress)');
           }
         }
         
         if (progress.totalPages !== undefined && progress.totalPages > 0) {
-          // Also update the total page count if provided and not already set
-          const existingItem = await prisma.customOrderItem.findUnique({
-            where: { id: activeSession.customOrderItemId },
-            select: { bookPageCount: true }
-          });
-          
-          if (!existingItem?.bookPageCount) {
-            updateData.bookPageCount = progress.totalPages;
+          sessionData.totalPages = progress.totalPages;
+        }
+
+        // Update the unified BookCompletion system
+        await bookCompletionService.updateProgressFromSession(customOrderItem.bookId, sessionData);
+        console.log('Unified BookCompletion updated successfully for book:', customOrderItem.bookId);
+        
+        // Ensure Book record has correct pageCount (migrate from CustomOrderItem if needed)
+        if (progress.totalPages !== undefined && progress.totalPages > 0) {
+          try {
+            const book = await prisma.book.findUnique({
+              where: { id: customOrderItem.bookId },
+              select: { pageCount: true }
+            });
+            
+            if (book && !book.pageCount) {
+              await prisma.book.update({
+                where: { id: customOrderItem.bookId },
+                data: { pageCount: progress.totalPages }
+              });
+              console.log(`📚 Updated Book ${customOrderItem.bookId} pageCount to ${progress.totalPages}`);
+            }
+          } catch (bookUpdateError) {
+            console.error('Error updating Book pageCount:', bookUpdateError);
           }
         }
-        
-        if (Object.keys(updateData).length > 0) {
-          await prisma.customOrderItem.update({
-            where: { id: activeSession.customOrderItemId },
-            data: updateData
-          });
-          
-          console.log('Reading progress updated successfully:', updateData);
-        }
-      } catch (progressError) {
-        console.error('Error updating reading progress:', progressError);
-        // Don't fail the whole request if progress update fails
+      } else {
+        console.error('CustomOrderItem has no linked bookId - cannot update unified progress');
       }
+
+      // Update legacy CustomOrderItem fields for consistency with Android app
+      const legacyUpdateData = {};
+      
+      // Update current page (allow 0 as valid page number)
+      if (progress.currentPage !== undefined && progress.currentPage !== null && progress.currentPage >= 0) {
+        legacyUpdateData.bookCurrentPage = progress.currentPage;
+        console.log(`Setting legacy current page to: ${progress.currentPage}`);
+      }
+      
+      // Update read percentage
+      if (progress.readPercentage !== undefined && progress.readPercentage >= 0 && progress.readPercentage <= 100) {
+        legacyUpdateData.bookPercentRead = progress.readPercentage;
+        console.log(`Setting legacy read percentage to: ${progress.readPercentage}%`);
+      }
+      
+      // Update total page count only if not already set
+      if (progress.totalPages !== undefined && progress.totalPages > 0) {
+        if (!customOrderItem.bookPageCount) {
+          legacyUpdateData.bookPageCount = progress.totalPages;
+          console.log(`Setting legacy total page count to: ${progress.totalPages}`);
+        } else {
+          console.log(`Legacy total page count already set: ${customOrderItem.bookPageCount} (not changing)`);
+        }
+      }
+      
+      // Mark as watched if 100% completion
+      if (progress.readPercentage !== undefined && progress.readPercentage === 100) {
+        legacyUpdateData.isWatched = true;
+        console.log('Marking CustomOrderItem as read/watched (100% completion)');
+      }
+      
+      if (Object.keys(legacyUpdateData).length > 0) {
+        await prisma.customOrderItem.update({
+          where: { id: activeSession.customOrderItemId },
+          data: legacyUpdateData
+        });
+        
+        console.log('Updated CustomOrderItem legacy fields:', legacyUpdateData);
+      }
+    } catch (progressError) {
+      console.error('Error updating reading progress:', progressError);
+      // Don't fail the whole request if progress update fails
     }
-    
-    console.log('Session stopped successfully');
-    res.json(completedSession);
-  } catch (error) {
-    console.error('Error stopping reading session:', error);
-    res.status(500).json({ error: error.message });
   }
-});
+  
+  console.log('Session stopped successfully');
+  sendSuccess(res, completedSession);
+}));
 
 // Get the current active reading session
-router.get('/reading/active', async (req, res) => {
-  try {
-    console.log('Getting active reading session...');
-    const activeSession = await watchLogService.getActiveReadingSession();
-    console.log('Active session:', activeSession);
-    res.json(activeSession);
-  } catch (error) {
-    console.error('Error getting active reading session:', error);
-    res.status(500).json({ error: error.message });
+router.get('/reading/active', asyncHandler(async (req, res) => {
+  console.log('Getting active reading session...');
+  const activeSession = await watchLogService.getActiveReadingSession();
+  console.log('Active session:', activeSession);
+  
+  if (!activeSession) {
+    return sendNotFound(res, 'No active reading session found');
   }
-});
+  
+  sendSuccess(res, activeSession);
+}));
 
 // Manual reading log endpoint (for testing)
-router.post('/reading/log', async (req, res) => {
-  try {
-    const watchLogData = {
-      mediaType: req.body.mediaType,
-      activityType: 'read',
-      title: req.body.title,
-      seriesTitle: req.body.seriesTitle,
-      customOrderItemId: req.body.customOrderItemId,
-      startTime: req.body.startTime,
-      endTime: req.body.endTime,
-      totalWatchTime: req.body.totalWatchTime,
-      isCompleted: true
-    };
+router.post('/reading/log', asyncHandler(async (req, res) => {
+  const watchLogData = {
+    mediaType: req.body.mediaType,
+    activityType: 'read',
+    title: req.body.title,
+    seriesTitle: req.body.seriesTitle,
+    customOrderItemId: req.body.customOrderItemId,
+    startTime: req.body.startTime,
+    endTime: req.body.endTime,
+    totalWatchTime: req.body.totalWatchTime,
+    isCompleted: true
+  };
 
-    const watchLog = await watchLogService.logWatched(watchLogData);
-    res.json({ success: true, watchLog });
-  } catch (error) {
-    console.error('Error logging reading session:', error);
-    res.status(500).json({ error: error.message });
-  }
-});
+  const watchLog = await watchLogService.logWatched(watchLogData);
+  sendSuccess(res, { watchLog });
+}));
 
 // ==================== VIEWING SESSION ENDPOINTS ====================
 
@@ -724,286 +781,6 @@ router.post('/debug/fix-webvideo-completion', async (req, res) => {
     console.error('Error fixing webvideo completion status:', error);
     res.status(500).json({ error: 'Failed to fix webvideo completion status' });
   }
-  });
-
-  // ==================== READING SESSION ROUTES ====================
-
-  // Start a reading session
-  router.post('/reading/start', async (req, res) => {
-    try {
-      const { mediaType, title, seriesTitle, customOrderItemId } = req.body;
-      
-      console.log('Reading session start request:', { mediaType, title, seriesTitle, customOrderItemId });
-      
-      if (!mediaType || !title) {
-        console.log('Missing required fields - mediaType or title');
-        return res.status(400).json({ error: 'Missing required fields: mediaType and title are required' });
-      }
-
-      if (!['book', 'comic', 'shortstory'].includes(mediaType)) {
-        console.log('Invalid media type:', mediaType);
-        return res.status(400).json({ error: 'Invalid media type for reading' });
-      }
-
-      // Validate customOrderItemId if provided - Fix for foreign key constraint error
-      let finalCustomOrderItemId = null;
-      if (customOrderItemId) {
-        const parsedId = parseInt(customOrderItemId);
-        if (Number.isInteger(parsedId)) {
-          // Verify the customOrderItem exists before using it
-          const existingItem = await prisma.customOrderItem.findUnique({
-            where: { id: parsedId }
-          });
-          
-          if (existingItem) {
-            finalCustomOrderItemId = parsedId;
-            console.log(`✅ Validated customOrderItemId: ${finalCustomOrderItemId}`);
-          } else {
-            console.log(`⚠️  CustomOrderItem ${parsedId} not found - proceeding without link`);
-          }
-        } else {
-          console.log('⚠️  Invalid customOrderItemId format - proceeding without link');
-        }
-      }
-      
-      const readingSession = await watchLogService.startReading({
-        mediaType,
-        title,
-        seriesTitle,
-        customOrderItemId: finalCustomOrderItemId
-      });
-
-      console.log('Reading session started successfully:', readingSession.id);
-      
-      // Emit Android companion app message if this is part of a custom order
-      if (customOrderItemId) {
-        try {
-          const customOrderItem = await prisma.customOrderItem.findUnique({
-            where: { id: parseInt(customOrderItemId) },
-            include: {
-              customOrder: {
-                include: {
-                  plexPlaylist: true,
-                  customPlaylist: {
-                    include: {
-                      _count: {
-                        select: { tracks: true }
-                      }
-                    }
-                  }
-                }
-              }
-            }
-          });
-
-          if (customOrderItem?.customOrder) {
-            const customOrder = customOrderItem.customOrder;
-            
-            // Build Android companion app message
-            let androidMessage = {
-              action: 'START_READ_SESSION',
-              mediaTitle: title,
-              mediaType: mediaType,
-              customOrderName: customOrder.name,
-              customOrderDescription: customOrder.description,
-              timestamp: new Date().toISOString()
-            };
-
-            // Add playlist information if available
-            if (customOrder.plexPlaylist || customOrder.customPlaylist) {
-              if (customOrder.plexPlaylist) {
-                androidMessage.playlistName = customOrder.plexPlaylist.title;
-                androidMessage.playlistPath = `plex://playlist/${customOrder.plexPlaylist.ratingKey}`;
-                androidMessage.playlistType = 'plex';
-                androidMessage.playlistTrackCount = customOrder.plexPlaylist.leafCount || 0;
-                androidMessage.playlistMetadata = {
-                  ratingKey: customOrder.plexPlaylist.ratingKey,
-                  playlistType: customOrder.plexPlaylist.playlistType || 'audio',
-                  duration: customOrder.plexPlaylist.duration
-                };
-              } else if (customOrder.customPlaylist) {
-                // Transform custom playlist to include trackCount
-                customOrder.customPlaylist.trackCount = customOrder.customPlaylist._count?.tracks || 0;
-                
-                androidMessage.playlistName = customOrder.customPlaylist.title;
-                androidMessage.playlistPath = `${process.env.API_BASE_URL || 'http://localhost:3001'}/api/custom-playlists/${customOrder.customPlaylist.id}/play`;
-                androidMessage.playlistType = 'custom';
-                androidMessage.playlistTrackCount = customOrder.customPlaylist.trackCount;
-                androidMessage.playlistDescription = customOrder.customPlaylist.description;
-                androidMessage.playlistMetadata = {
-                  id: customOrder.customPlaylist.id,
-                  trackCount: customOrder.customPlaylist.trackCount,
-                  isPublic: customOrder.customPlaylist.isPublic,
-                  createdBy: customOrder.customPlaylist.createdBy
-                };
-              }
-            } else {
-              androidMessage.note = 'Custom order has no linked playlist';
-            }
-
-            // Emit to Android companion app clients
-            console.log('📱 Emitting Android companion app message:', JSON.stringify(androidMessage, null, 2));
-            io.emit('androidCompanion', androidMessage);
-          }
-        } catch (error) {
-          console.warn('Could not fetch custom order info for Android companion app:', error);
-        }
-      } else {
-        // Still emit a message for standalone reading sessions
-        const androidMessage = {
-          action: 'START_READ_SESSION',
-          mediaTitle: title,
-          mediaType: mediaType,
-          note: 'Standalone reading session - not part of a custom order',
-          timestamp: new Date().toISOString()
-        };
-        
-        console.log('📱 Emitting Android companion app message (standalone):', JSON.stringify(androidMessage, null, 2));
-        io.emit('androidCompanion', androidMessage);
-      }
-      
-      res.json(readingSession);
-    } catch (error) {
-      console.error('Error starting reading session:', error);
-      res.status(500).json({ error: error.message });
-    }
-  });
-
-  // Pause/Resume the active reading session
-  router.post('/reading/pause', async (req, res) => {
-    try {
-      console.log('Attempting to pause/resume reading session...');
-      
-      // Find the active reading session
-      const activeSession = await watchLogService.getActiveReadingSession();
-      
-      console.log('Active session found:', activeSession);
-      
-      if (!activeSession) {
-        console.log('No active reading session found');
-        return res.status(404).json({ error: 'No active reading session found' });
-      }
-
-      console.log('Pausing/resuming session with ID:', activeSession.id);
-      const updatedSession = await watchLogService.pauseReading(activeSession.id);
-      console.log('Session paused/resumed successfully');
-      res.json(updatedSession);
-    } catch (error) {
-      console.error('Error pausing reading session:', error);
-      res.status(500).json({ error: error.message });
-    }
-  });
-
-  // Stop the active reading session
-  router.post('/reading/stop', async (req, res) => {
-    try {
-      console.log('Attempting to stop reading session...');
-      const { progress } = req.body;
-      
-      // Find the active reading session
-      const activeSession = await watchLogService.getActiveReadingSession();
-      
-      console.log('Active session found:', activeSession);
-      
-      if (!activeSession) {
-        console.log('No active reading session found');
-        return res.status(404).json({ error: 'No active reading session found' });
-      }
-
-      console.log('Stopping session with ID:', activeSession.id);
-      
-      // Stop the reading session
-      const completedSession = await watchLogService.stopReading(activeSession.id);
-      
-      // Update reading progress if provided and session wasn't deleted
-      if (progress && !completedSession.deleted && activeSession.customOrderItemId) {
-        console.log('Updating reading progress for item:', activeSession.customOrderItemId, progress);
-        
-        try {
-          const updateData = {};
-          
-          if (progress.currentPage !== undefined && progress.currentPage > 0) {
-            updateData.bookCurrentPage = progress.currentPage;
-          }
-          
-          if (progress.readPercentage !== undefined && progress.readPercentage >= 0 && progress.readPercentage <= 100) {
-            updateData.bookPercentRead = progress.readPercentage;
-            
-            // If read percentage is 100%, mark as read/watched
-            if (progress.readPercentage === 100) {
-              updateData.isWatched = true;
-              console.log('Marking item as read/watched (100% completion)');
-            }
-          }
-          
-          if (progress.totalPages !== undefined && progress.totalPages > 0) {
-            // Also update the total page count if provided and not already set
-            const existingItem = await prisma.customOrderItem.findUnique({
-              where: { id: activeSession.customOrderItemId },
-              select: { bookPageCount: true }
-            });
-            
-            if (!existingItem?.bookPageCount) {
-              updateData.bookPageCount = progress.totalPages;
-            }
-          }
-          
-          if (Object.keys(updateData).length > 0) {
-            await prisma.customOrderItem.update({
-              where: { id: activeSession.customOrderItemId },
-              data: updateData
-            });
-            
-            console.log('Reading progress updated successfully:', updateData);
-          }
-        } catch (progressError) {
-          console.error('Error updating reading progress:', progressError);
-          // Don't fail the whole request if progress update fails
-        }
-      }
-      
-      console.log('Session stopped successfully');
-      res.json(completedSession);
-    } catch (error) {
-      console.error('Error stopping reading session:', error);
-      res.status(500).json({ error: error.message });
-    }
-  });
-
-  // Get the current active reading session
-  router.get('/reading/active', async (req, res) => {
-    try {
-      console.log('Getting active reading session...');
-      const activeSession = await watchLogService.getActiveReadingSession();
-      console.log('Active session:', activeSession);
-      res.json(activeSession);
-    } catch (error) {
-      console.error('Error getting active reading session:', error);
-      res.status(500).json({ error: error.message });
-    }
-  });
-
-  // Manual reading log endpoint (for testing)
-  router.post('/reading/log', async (req, res) => {
-    try {
-      const watchLogData = {
-        mediaType: req.body.mediaType,
-        activityType: 'read',
-        title: req.body.title,
-        seriesTitle: req.body.seriesTitle,
-        customOrderItemId: req.body.customOrderItemId,
-        startTime: req.body.startTime,
-        endTime: req.body.endTime,
-        totalWatchTime: req.body.totalWatchTime,
-        isCompleted: true
-      };
-
-      const watchLog = await watchLogService.logWatched(watchLogData);
-      res.json({ success: true, watchLog });
-    } catch (error) {
-      console.error('Error logging reading session:', error);
-      res.status(500).json({ error: error.message });
-    }
   });
 
   // ==================== VIEWING SESSION ROUTES ====================

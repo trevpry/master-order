@@ -28,15 +28,18 @@ function createCustomOrdersRouter(options = {}) {
   let artworkCache = null;
   let watchLogService = null;
   let subOrderService = null;
+  let bookService = null;
   
   try {
     const ArtworkCacheService = require('../../artworkCacheService');
     const WatchLogService = require('../../watchLogService');
     const subOrderServiceModule = require('../../subOrderService');
+    const BookService = require('../../services/BookService');
     
     artworkCache = new ArtworkCacheService();
     watchLogService = new WatchLogService(prisma); // Reuse shared prisma instance
     subOrderService = subOrderServiceModule;
+    bookService = new BookService(prisma);
     
     console.log('Custom orders: All services loaded successfully');
   } catch (error) {
@@ -47,7 +50,8 @@ function createCustomOrdersRouter(options = {}) {
   const services = {
     artworkCache,
     watchLogService,
-    subOrderService
+    subOrderService,
+    bookService
   };
   
   // Mount modular routes with proper order (most specific first)

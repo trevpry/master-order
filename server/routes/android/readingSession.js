@@ -8,6 +8,7 @@ const express = require('express');
 const { asyncHandler, sendSuccess, sendBadRequest, sendServerError } = require('../../utils/responses');
 const { validateRequiredFields } = require('../../middleware/validation');
 const WatchLogService = require('../../watchLogService');
+const BookCompletionService = require('../../services/BookCompletionService');
 const prisma = require('../../prismaClient');
 
 /**
@@ -18,6 +19,7 @@ const prisma = require('../../prismaClient');
 function createReadingSessionRoutes(prisma) {
   const router = express.Router();
   const watchLogService = new WatchLogService(prisma);
+  const bookCompletionService = new BookCompletionService(prisma);
 
   // Start reading session
   router.post('/reading/start', asyncHandler(async (req, res) => {
@@ -220,7 +222,13 @@ function createReadingSessionRoutes(prisma) {
         // Get existing item data for calculations
         const existingItem = await prisma.customOrderItem.findUnique({
           where: { id: activeSession.customOrderItemId },
-          select: { bookPageCount: true, bookCurrentPage: true, bookPercentRead: true }
+          select: { 
+            bookPageCount: true, 
+            bookCurrentPage: true, 
+            bookPercentRead: true,
+            bookId: true,
+            title: true
+          }
         });
 
         // Update current page (allow 0 as valid page number)
@@ -267,16 +275,67 @@ function createReadingSessionRoutes(prisma) {
           }
         }
         
-        // Apply the updates if there are any
+        // Apply the updates to legacy fields if there are any
         if (Object.keys(updateData).length > 0) {
           await prisma.customOrderItem.update({
             where: { id: activeSession.customOrderItemId },
             data: updateData
           });
           
-          console.log('Reading progress updated successfully:', updateData);
+          console.log('Reading progress updated successfully (legacy fields):', updateData);
         } else {
-          console.log('No valid progress data to update');
+          console.log('No valid progress data to update (legacy fields)');
+        }
+
+        // Update unified BookCompletion system if bookId exists
+        if (existingItem?.bookId) {
+          console.log('Updating unified BookCompletion for book:', existingItem.bookId);
+          
+          const sessionData = {};
+          
+          if (progress.currentPage !== undefined && progress.currentPage > 0) {
+            sessionData.currentPage = progress.currentPage;
+          }
+          
+          if (finalReadPercentage !== null && finalReadPercentage >= 0 && finalReadPercentage <= 100) {
+            sessionData.percentRead = finalReadPercentage;
+            
+            // Mark as completed if 100%
+            if (finalReadPercentage === 100) {
+              sessionData.isCompleted = true;
+              console.log('Marking book as completed in unified system (100% reading progress)');
+            }
+          }
+          
+          if (progress.totalPages !== undefined && progress.totalPages > 0) {
+            sessionData.totalPages = progress.totalPages;
+          }
+
+          // Update the unified BookCompletion system
+          await bookCompletionService.updateProgressFromSession(existingItem.bookId, sessionData);
+          console.log('Unified BookCompletion updated successfully for book:', existingItem.bookId);
+          
+          // Ensure Book record has correct pageCount (migrate from CustomOrderItem if needed)
+          if (progress.totalPages !== undefined && progress.totalPages > 0) {
+            try {
+              const book = await prisma.book.findUnique({
+                where: { id: existingItem.bookId },
+                select: { pageCount: true }
+              });
+              
+              if (book && !book.pageCount) {
+                await prisma.book.update({
+                  where: { id: existingItem.bookId },
+                  data: { pageCount: progress.totalPages }
+                });
+                console.log(`📚 Updated Book ${existingItem.bookId} pageCount to ${progress.totalPages}`);
+              }
+            } catch (bookUpdateError) {
+              console.error('Error updating Book pageCount:', bookUpdateError);
+            }
+          }
+        } else {
+          console.log('CustomOrderItem has no linked bookId - cannot update unified progress');
         }
         
         // Store the final progress data for response

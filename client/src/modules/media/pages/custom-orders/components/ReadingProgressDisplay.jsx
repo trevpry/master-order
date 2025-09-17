@@ -1,21 +1,30 @@
 import React from 'react';
 
 const ReadingProgressDisplay = ({ item }) => {
-  if (item.bookCurrentPage && item.bookPageCount) {
+  // Prioritize unified progress data from the Books system
+  const unifiedProgress = item.unifiedProgress?.percentageComplete;
+  const legacyProgress = item.bookPercentRead;
+  const currentPage = item.bookCurrentPage;
+  const totalPages = item.bookPageCount;
+  
+  // Use unified progress if available, fallback to legacy data
+  const percentComplete = unifiedProgress !== undefined ? unifiedProgress : legacyProgress;
+  
+  if (currentPage && totalPages) {
     return (
-      <span>📖 Page {item.bookCurrentPage} of {item.bookPageCount} ({Math.round(item.bookPercentRead || 0)}%)</span>
+      <span>📖 Page {currentPage} of {totalPages} ({Math.round(percentComplete || 0)}%)</span>
     );
   }
   
-  if (item.bookPercentRead) {
+  if (percentComplete > 0) {
     return (
-      <span>📖 {Math.round(item.bookPercentRead)}% complete</span>
+      <span>📖 {Math.round(percentComplete)}% complete{unifiedProgress !== undefined ? ' (unified)' : ''}</span>
     );
   }
   
-  if (item.bookCurrentPage) {
+  if (currentPage) {
     return (
-      <span>📖 Page {item.bookCurrentPage}</span>
+      <span>📖 Page {currentPage}</span>
     );
   }
   

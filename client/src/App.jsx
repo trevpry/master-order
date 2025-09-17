@@ -16,6 +16,7 @@ import WatchStats from './modules/media/pages/watch-stats/index';
 import Stash from './modules/media/pages/Stash';
 import Music from './modules/media/pages/music/index';
 import Backgrounds from './modules/media/pages/backgrounds/index';
+import Books from './pages/Books'; // Unified Books component
 
 // Eddie Module Components (placeholders for now)
 import TasksHome from './modules/tasks/pages/TasksHome';
@@ -26,7 +27,7 @@ import EddieSettings from './modules/eddie/pages/EddieSettings';
 import Dating from './pages/Dating';
 import HistoryPlusHome from './modules/history-plus/pages/HistoryPlusHome';
 import Timeline from './modules/history-plus/pages/Timeline';
-import Books from './modules/history-plus/pages/Books';
+import HistoryPlusBooks from './modules/history-plus/pages/Books';
 import Videos from './modules/history-plus/pages/Videos';
 import Channels from './modules/history-plus/pages/Channels';
 
@@ -47,7 +48,7 @@ function App() {
           <Route path="/media/stash" element={<Stash />} />
           <Route path="/media/music" element={<Music />} />
           <Route path="/media/backgrounds" element={<Backgrounds />} />
-          <Route path="/media/books" element={<div><h1>Books</h1><p>Coming Soon</p></div>} />
+          <Route path="/media/books" element={<Books />} />
           <Route path="/media/comics" element={<div><h1>Comics</h1><p>Coming Soon</p></div>} />
           <Route path="/media/settings" element={<Settings />} />
           
@@ -68,7 +69,7 @@ function App() {
           <Route path="/dating" element={<Dating />} />
           <Route path="/history-plus" element={<HistoryPlusHome />} />
           <Route path="/history-plus/timeline" element={<Timeline />} />
-          <Route path="/history-plus/books" element={<Books />} />
+          <Route path="/history-plus/books" element={<HistoryPlusBooks />} />
           <Route path="/history-plus/videos" element={<Videos />} />
           <Route path="/history-plus/channels" element={<Channels />} />
           <Route path="/eddie-settings" element={<EddieSettings />} />

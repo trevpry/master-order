@@ -447,6 +447,22 @@ function Home() {
             duration: 5000,
             position: 'top-right'
           });
+          
+          // Refresh up next data to reflect progress changes (especially for 100% completion)
+          console.log('Reading session completed successfully. Refreshing up next data...');
+          try {
+            // Add a small delay to ensure backend has fully processed the update
+            await new Promise(resolve => setTimeout(resolve, 500));
+            console.log('Calling callExpressRoute() to refresh data...');
+            await callExpressRoute();
+            console.log('Up next data refresh completed.');
+          } catch (refreshError) {
+            console.error('Error refreshing up next data:', refreshError);
+            toast.error('Progress saved but failed to refresh display. Try clicking "Get Up Next" to see updated status.', {
+              duration: 6000,
+              position: 'top-right'
+            });
+          }
         }
       } else {
         const error = await response.json();

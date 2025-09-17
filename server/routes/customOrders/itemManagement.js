@@ -14,7 +14,7 @@ const express = require('express');
  */
 function createItemManagementRoutes(prisma, services) {
   const router = express.Router();
-  const { artworkCache, watchLogService, subOrderService } = services;
+  const { artworkCache, watchLogService, subOrderService, bookService } = services;
 
   // Get a single custom order item by ID
   router.get('/item/:itemId', async (req, res) => {
@@ -353,6 +353,53 @@ function createItemManagementRoutes(prisma, services) {
           }
         }
       });
+
+      // Handle Book creation/update for unified system if this was a book re-selection
+      if (isBookReselect && bookService) {
+        try {
+          console.log(`🔄 Book re-selected for item ${itemId}, creating/updating unified Book record...`);
+          
+          // Create book data from the updated item
+          const bookData = {
+            title: item.bookTitle || item.title,
+            author: item.bookAuthor,
+            year: item.bookYear,
+            isbn: item.bookIsbn,
+            publisher: item.bookPublisher,
+            pageCount: item.bookPageCount,
+            openLibraryId: item.bookOpenLibraryId,
+            coverUrl: item.bookCoverUrl || item.originalArtworkUrl
+          };
+
+          // Create or find existing Book record (createBook handles duplicates)
+          const book = await bookService.createBook(bookData);
+          console.log(`📚 Created/found Book record:`, book.id);
+
+          // Ensure the Book record has the correct pageCount (update if missing)
+          if (item.bookPageCount && !book.pageCount) {
+            try {
+              await prisma.book.update({
+                where: { id: book.id },
+                data: { pageCount: item.bookPageCount }
+              });
+              console.log(`📚 Updated Book ${book.id} pageCount to ${item.bookPageCount}`);
+            } catch (pageCountError) {
+              console.error(`Error updating Book pageCount:`, pageCountError);
+            }
+          }
+
+          // Link the CustomOrderItem to the Book
+          await prisma.customOrderItem.update({
+            where: { id: parseInt(itemId) },
+            data: { bookId: book.id }
+          });
+          console.log(`🔗 Linked CustomOrderItem ${itemId} to Book ${book.id}`);
+
+        } catch (bookError) {
+          console.error(`Error creating/updating Book record for item ${itemId}:`, bookError);
+          // Don't fail the whole request if Book creation fails
+        }
+      }
 
       // Log watched activity for TV and movie content
       if (isWatched !== undefined && isWatched === true && (item.mediaType === 'tv' || item.mediaType === 'movie') && watchLogService) {

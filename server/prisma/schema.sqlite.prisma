@@ -145,10 +145,15 @@ model CustomOrderItem {
   komgaSeriesId           String?
   komgaSeriesUrl          String?
   komgaUrl                String?
+  
+  // NEW: Reference to unified books table
+  bookId                  Int?
+  
   customOrder             CustomOrder       @relation(fields: [customOrderId], references: [id], onDelete: Cascade)
   referencedCustomOrder   CustomOrder?      @relation("SubOrderReference", fields: [referencedCustomOrderId], references: [id])
   storyContainedInBook    CustomOrderItem?  @relation("StoryInBook", fields: [storyContainedInBookId], references: [id])
   containedStories        CustomOrderItem[] @relation("StoryInBook")
+  book                    Book?             @relation(fields: [bookId], references: [id])
   watchLogs               WatchLog[]
 }
 
@@ -633,6 +638,13 @@ model WatchLog {
   episodeNumber     Int?
   plexKey           String?
   customOrderItemId Int?
+  
+  // NEW: Book reading session support
+  bookId            Int?             // Reference to unified books table
+  chapterId         Int?             // Specific chapter being read (optional)
+  sectionId         Int?             // Specific section being read (optional)
+  currentPage       Int?             // Current page position
+  
   startTime         DateTime
   endTime           DateTime?
   duration          Int?
@@ -641,7 +653,9 @@ model WatchLog {
   isPaused          Boolean          @default(false)
   createdAt         DateTime         @default(now())
   updatedAt         DateTime         @updatedAt
+  
   customOrderItem   CustomOrderItem? @relation(fields: [customOrderItemId], references: [id])
+  book              Book?            @relation(fields: [bookId], references: [id])
 }
 
 model PlexArtist {
@@ -1518,9 +1532,17 @@ model HistoricalEvent {
   hidden             Boolean             @default(false)
   createdAt          DateTime            @default(now())
   updatedAt          DateTime            @updatedAt
+  
+  // OLD: Direct book relations (to be migrated)
   books              HistoryBook[]
   chapters           HistoryChapter[]
   sections           HistorySection[]
+  
+  // NEW: Unified book system
+  bookLinks          HistoryBookLink[]   // Links to unified books table
+  bookChapters       BookChapter[]       // Links to unified book chapters
+  bookSections       BookSection[]       // Links to unified book sections
+  
   videos             HistoryVideo[]
   readingLists       ReadingList[]
   user_event_reviews user_event_reviews?
@@ -1727,4 +1749,166 @@ model DailyWeatherSummary {
   weatherData     String?  // Raw weather data JSON for reference
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
+}
+
+// =====================================
+// UNIFIED BOOKS SYSTEM
+// =====================================
+// Centralized book management system that replaces distributed book data
+// across CustomOrderItems and HistoryBooks with a single source of truth.
+
+model Book {
+  id                  Int       @id @default(autoincrement())
+  title               String
+  author              String?
+  isbn                String?   @unique
+  publisher           String?
+  publishYear         Int?
+  description         String?
+  coverUrl            String?
+  pageCount           Int?
+  openLibraryId       String?   @unique
+  komgaBookId         String?   @unique
+  komgaSeriesId       String?
+  komgaUrl            String?
+  komgaMetadata       String?
+  
+  // Artwork caching (consistent with existing pattern)
+  artworkLastCached   DateTime?
+  artworkMimeType     String?
+  localArtworkPath    String?
+  originalArtworkUrl  String?
+  
+  // Metadata
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+  
+  // Relations
+  chapters            BookChapter[]
+  customOrderItems    CustomOrderItem[]  // Books referenced by custom orders
+  historyBookLinks    HistoryBookLink[]  // Links to historical events
+  readingSessions     WatchLog[]         // All reading sessions for this book
+  bookCompletions     BookCompletion[]   // Completion tracking
+  
+  @@index([isbn])
+  @@index([openLibraryId])
+  @@index([komgaBookId])
+  @@index([title])
+}
+
+model BookChapter {
+  id                  Int       @id @default(autoincrement())
+  bookId              Int
+  title               String
+  chapterNumber       Int
+  description         String?
+  pageStart           Int?
+  pageEnd             Int?
+  eventId             Int?
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+  
+  // Relations
+  book                Book                @relation(fields: [bookId], references: [id], onDelete: Cascade)
+  event               HistoricalEvent?    @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  sections            BookSection[]
+  chapterCompletions  ChapterCompletion[]
+  
+  @@unique([bookId, chapterNumber])
+  @@index([bookId])
+  @@index([eventId])
+}
+
+model BookSection {
+  id                  Int       @id @default(autoincrement())
+  chapterId           Int
+  title               String
+  sectionNumber       Int
+  description         String?
+  content             String?
+  pageStart           Int?
+  pageEnd             Int?
+  eventId             Int?
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+  
+  // Relations
+  chapter             BookChapter         @relation(fields: [chapterId], references: [id], onDelete: Cascade)
+  event               HistoricalEvent?    @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  sectionCompletions  SectionCompletion[]
+  
+  @@unique([chapterId, sectionNumber])
+  @@index([chapterId])
+  @@index([eventId])
+}
+
+// =====================================
+// COMPLETION TRACKING SYSTEM
+// =====================================
+// Granular completion tracking at book, chapter, and section levels
+
+model BookCompletion {
+  id          Int       @id @default(autoincrement())
+  bookId      Int
+  userId      String?   // For future multi-user support, nullable for now
+  isCompleted Boolean   @default(false)
+  currentPage Int?      // Current reading position
+  percentRead Float?    // Calculated reading progress
+  completedAt DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  
+  book        Book      @relation(fields: [bookId], references: [id], onDelete: Cascade)
+  
+  @@unique([bookId, userId])
+  @@index([bookId])
+}
+
+model ChapterCompletion {
+  id          Int         @id @default(autoincrement())
+  chapterId   Int
+  userId      String?
+  isCompleted Boolean     @default(false)
+  completedAt DateTime?
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+  
+  chapter     BookChapter @relation(fields: [chapterId], references: [id], onDelete: Cascade)
+  
+  @@unique([chapterId, userId])
+  @@index([chapterId])
+}
+
+model SectionCompletion {
+  id          Int         @id @default(autoincrement())
+  sectionId   Int
+  userId      String?
+  isCompleted Boolean     @default(false)
+  completedAt DateTime?
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+  
+  section     BookSection @relation(fields: [sectionId], references: [id], onDelete: Cascade)
+  
+  @@unique([sectionId, userId])
+  @@index([sectionId])
+}
+
+// =====================================
+// HISTORY PLUS INTEGRATION
+// =====================================
+// Links books to historical events, replacing HistoryBook model
+
+model HistoryBookLink {
+  id        Int               @id @default(autoincrement())
+  bookId    Int
+  eventId   Int
+  createdAt DateTime          @default(now())
+  
+  book      Book              @relation(fields: [bookId], references: [id], onDelete: Cascade)
+  event     HistoricalEvent   @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  
+  @@unique([bookId, eventId])
+  @@index([bookId])
+  @@index([eventId])
 }
