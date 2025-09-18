@@ -182,47 +182,70 @@ PRESERVE_EXISTING_DATA=false
 
 # Test if we can connect and if key tables exist with data
 if echo "SELECT 1;" | npx prisma db execute --stdin >/dev/null 2>&1; then
-    # Database exists and is accessible, check for user data
-    echo "[INFO] Database connection successful, checking for existing data..."
+    echo "[INFO] Database connection successful"
     
-    # Check if key tables have data using Prisma
-    EXISTING_DATA_CHECK=$(node -e "
-        const { PrismaClient } = require('@prisma/client');
-        const prisma = new PrismaClient();
+    # First check for failed migrations before checking data
+    echo "[INFO] Checking migration status..."
+    MIGRATION_STATUS=$(npx prisma migrate status 2>&1)
+    
+    if echo "$MIGRATION_STATUS" | grep -q "migrate found failed migrations"; then
+        echo "[WARNING] Failed migrations detected in database"
+        echo "[INFO] Database exists with failed migrations - attempting recovery..."
         
-        async function checkData() {
-            try {
-                const settings = await prisma.settings.count().catch(() => 0);
-                const customOrders = await prisma.customOrder.count().catch(() => 0);
-                const plexData = await prisma.plexMovie.count().catch(() => 0);
-                const total = settings + customOrders + plexData;
-                
-                if (total > 0) {
-                    console.log('HAS_DATA');
-                    console.log('Settings: ' + settings);
-                    console.log('Custom Orders: ' + customOrders);
-                    console.log('Plex Movies: ' + plexData);
-                } else {
-                    console.log('NO_DATA');
+        # Try to recover failed migrations first
+        if node server/fix-failed-migration.js; then
+            echo "[SUCCESS] Failed migrations recovered successfully"
+            echo "[INFO] Continuing with normal data check..."
+        else
+            echo "[ERROR] Could not recover failed migrations"
+            echo "[INFO] Proceeding with caution - treating as existing database with data"
+            PRESERVE_EXISTING_DATA=true
+        fi
+    fi
+    
+    # Check for existing data if migrations are OK or recovered
+    if [ "$PRESERVE_EXISTING_DATA" != true ]; then
+        echo "[INFO] Checking for existing user data..."
+        
+        # Check if key tables have data using Prisma
+        EXISTING_DATA_CHECK=$(node -e "
+            const { PrismaClient } = require('@prisma/client');
+            const prisma = new PrismaClient();
+            
+            async function checkData() {
+                try {
+                    const settings = await prisma.settings.count().catch(() => 0);
+                    const customOrders = await prisma.customOrder.count().catch(() => 0);
+                    const plexData = await prisma.plexMovie.count().catch(() => 0);
+                    const total = settings + customOrders + plexData;
+                    
+                    if (total > 0) {
+                        console.log('HAS_DATA');
+                        console.log('Settings: ' + settings);
+                        console.log('Custom Orders: ' + customOrders);
+                        console.log('Plex Movies: ' + plexData);
+                    } else {
+                        console.log('NO_DATA');
+                    }
+                } catch (error) {
+                    console.log('CHECK_FAILED');
+                } finally {
+                    await prisma.\$disconnect();
                 }
-            } catch (error) {
-                console.log('CHECK_FAILED');
-            } finally {
-                await prisma.\$disconnect();
             }
-        }
+            
+            checkData();
+        " 2>/dev/null || echo "CHECK_FAILED")
         
-        checkData();
-    " 2>/dev/null || echo "CHECK_FAILED")
-    
-    if echo "$EXISTING_DATA_CHECK" | grep -q "HAS_DATA"; then
-        echo "[INFO] FOUND EXISTING USER DATA:"
-        echo "$EXISTING_DATA_CHECK" | grep -E "(Settings|Custom Orders|Plex Movies):"
-        echo "[INFO] PRESERVING EXISTING DATABASE - Will only apply new migrations"
-        PRESERVE_EXISTING_DATA=true
-    else
-        echo "[INFO] Database exists but has no user data"
-        PRESERVE_EXISTING_DATA=false
+        if echo "$EXISTING_DATA_CHECK" | grep -q "HAS_DATA"; then
+            echo "[INFO] FOUND EXISTING USER DATA:"
+            echo "$EXISTING_DATA_CHECK" | grep -E "(Settings|Custom Orders|Plex Movies):"
+            echo "[INFO] PRESERVING EXISTING DATABASE - Will only apply new migrations"
+            PRESERVE_EXISTING_DATA=true
+        else
+            echo "[INFO] Database exists but has no user data"
+            PRESERVE_EXISTING_DATA=false
+        fi
     fi
 else
     echo "[INFO] Database does not exist or is not accessible - will initialize new database"
@@ -231,35 +254,34 @@ fi
 
 # Apply database migrations based on database state
 if [ "$PRESERVE_EXISTING_DATA" = true ]; then
-    echo "[INFO] PRESERVING EXISTING DATA - Using db push for safe schema updates"
+    echo "[INFO] PRESERVING EXISTING DATA - Applying pending migrations safely"
     echo "[INFO] This method preserves all existing data while updating schema"
-    echo "[INFO] Running Prisma db push (safe for existing data)..."
-    if ! npx prisma db push --accept-data-loss=false 2>&1; then
-        echo "[ERROR] Prisma db push failed"
-        echo "[INFO] This suggests schema changes that might cause data loss"
-        echo "[INFO] Attempting to generate client and retry..."
-        
-        npx prisma generate 2>&1 || echo "[DEBUG] Generate failed"
-        
-        # Try push again with more verbose output
-        echo "[DEBUG] Retry db push with verbose output..."
-        # Try to update schema with explicit data protection
-        if ! npx prisma db push --accept-data-loss=false --force-reset=false 2>&1; then
-            echo "[ERROR] DB push failed - schema may have breaking changes"
-            echo "[INFO] Falling back to migration approach..."
+    
+    # First try migrate deploy (preferred for existing databases)
+    echo "[INFO] Attempting migrate deploy for existing database..."
+    if npx prisma migrate deploy 2>&1; then
+        echo "[SUCCESS] Migrations applied successfully with migrate deploy"
+    else
+        echo "[WARN] Migrate deploy failed, trying db push as fallback..."
+        if ! npx prisma db push --accept-data-loss=false 2>&1; then
+            echo "[ERROR] Both migrate deploy and db push failed"
+            echo "[INFO] This suggests schema changes that might cause data loss"
+            echo "[INFO] Attempting to generate client and retry..."
             
-            # Check migration status and try to resolve
+            npx prisma generate 2>&1 || echo "[DEBUG] Generate failed"
+            
+            # Check migration status and try to resolve any remaining issues
             MIGRATION_STATUS=$(npx prisma migrate status 2>&1)
             echo "$MIGRATION_STATUS"
             
             if echo "$MIGRATION_STATUS" | grep -q "migrate found failed migrations"; then
-                echo "[INFO] Failed migrations detected - attempting safe recovery..."
+                echo "[INFO] Still have failed migrations - attempting recovery again..."
                 if node server/fix-failed-migration.js; then
-                    echo "[SUCCESS] Failed migrations recovered safely"
+                    echo "[SUCCESS] Failed migrations recovered on retry"
                     echo "[INFO] Attempting migrate deploy after recovery..."
                     npx prisma migrate deploy
                 else
-                    echo "[ERROR] Could not recover failed migrations automatically"
+                    echo "[ERROR] Could not recover failed migrations on retry"
                     echo "[DATA-SAFE] Will NOT reset database to preserve your data"
                     echo "[INFO] Continuing with existing schema - manual intervention may be needed"
                     echo "[INFO] Your data is completely safe"
@@ -276,8 +298,6 @@ if [ "$PRESERVE_EXISTING_DATA" = true ]; then
         else
             echo "[SUCCESS] Schema updated successfully with db push"
         fi
-    else
-        echo "[SUCCESS] Existing database schema updated with db push"
     fi
     echo "[INFO] Existing database updated safely"
 else
@@ -293,7 +313,7 @@ else
         # Check if there are failed migrations
         if echo "$MIGRATE_STATUS" | grep -q "migrate found failed migrations"; then
             echo "[INFO] Failed migrations detected - attempting safe recovery..."
-            if node fix-failed-migration.js; then
+            if node server/fix-failed-migration.js; then
                 echo "[SUCCESS] Failed migrations recovered safely"
                 echo "[INFO] Attempting migrate deploy after recovery..."
                 npx prisma migrate deploy 2>&1
