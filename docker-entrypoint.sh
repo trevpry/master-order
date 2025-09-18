@@ -253,9 +253,11 @@ if [ "$PRESERVE_EXISTING_DATA" = true ]; then
                 echo "[INFO] Applying pending migrations..."
                 npx prisma migrate deploy
             elif echo "$MIGRATION_STATUS" | grep -q "Your local migration history and the migrations table"; then
-                echo "[INFO] Migration history conflict detected - using reset approach..."
-                echo "[WARNING] This may cause minor data reorganization but will preserve content"
-                npx prisma migrate reset --force --skip-seed 2>&1 || echo "[DEBUG] Reset failed"
+                echo "[WARNING] Migration history conflict detected"
+                echo "[DATA-SAFE] Will NOT reset database to preserve your data"
+                echo "[INFO] Continuing with existing schema - manual intervention may be needed"
+                echo "[INFO] Your data is completely safe"
+                echo "[INFO] To resolve manually, use: npx prisma db push --accept-data-loss=false"
             fi
         else
             echo "[SUCCESS] Schema updated successfully with db push"
@@ -281,8 +283,9 @@ else
             echo "[DEBUG] Attempting to generate Prisma client first..."
             npx prisma generate 2>&1 || echo "[DEBUG] Generate failed"
             
-            echo "[DEBUG] Final attempt with reset (THIS WILL DELETE DATA)..."
-            npx prisma migrate reset --force --skip-seed 2>&1 || echo "[DEBUG] Reset failed"
+            echo "[DATA-SAFE] Will NOT attempt reset to preserve any existing data"
+            echo "[ERROR] Manual intervention required for database schema setup"
+            echo "[INFO] Your data is completely safe - no destructive operations performed"
             exit 1
         fi
     else
