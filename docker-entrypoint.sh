@@ -149,7 +149,7 @@ else
 fi
 
 echo "[DEBUG] Testing if port 5432 is open on 192.168.1.119..."
-if timeout 5 bash -c "echo >/dev/tcp/192.168.1.119/5432" 2>/dev/null; then
+if nc -z 192.168.1.119 5432 2>/dev/null; then
     echo "[SUCCESS] Port 5432 is open and accepting connections on 192.168.1.119"
 else
     echo "[ERROR] Port 5432 is not accessible on 192.168.1.119"
@@ -160,8 +160,12 @@ fi
 echo "[DEBUG] Testing with nslookup..."
 nslookup 192.168.1.119 2>/dev/null || echo "[INFO] nslookup failed"
 
-echo "[DEBUG] Testing with telnet-style connection..."
-timeout 5 bash -c "exec 3<>/dev/tcp/192.168.1.119/5432; echo 'Connected' >&3; cat <&3" 2>/dev/null && echo "[SUCCESS] Raw TCP connection works" || echo "[ERROR] Raw TCP connection failed"
+echo "[DEBUG] Testing with netcat connection..."
+if nc -z 192.168.1.119 5432 2>/dev/null; then
+    echo "[SUCCESS] Port 5432 is accessible via netcat"
+else
+    echo "[ERROR] Port 5432 is not accessible via netcat"
+fi
 
 if command -v psql >/dev/null 2>&1; then
     echo "[DEBUG] Testing psql connection..."
@@ -177,7 +181,7 @@ echo "[INFO] Checking for existing database data..."
 PRESERVE_EXISTING_DATA=false
 
 # Test if we can connect and if key tables exist with data
-if npx prisma db execute --stdin <<< "SELECT 1;" >/dev/null 2>&1; then
+if echo "SELECT 1;" | npx prisma db execute --stdin >/dev/null 2>&1; then
     # Database exists and is accessible, check for user data
     echo "[INFO] Database connection successful, checking for existing data..."
     
