@@ -326,10 +326,33 @@ router.get('/:id', asyncHandler(async (req, res) => {
   // Add progress information if requested
   if (includeProgress === 'true') {
     const progressReport = await completionService.getBookProgressReport(book.id);
+    
+    // Merge progress data into the book structure
     book.progress = {
       ...progressReport,
       percentageComplete: progressReport.percentRead || 0
     };
+    
+    // If we have chapters with progress data, merge them with the book chapters
+    if (progressReport.chapters && book.chapters) {
+      book.chapters = book.chapters.map(chapter => {
+        const progressChapter = progressReport.chapters.find(pc => pc.id === chapter.id);
+        return {
+          ...chapter,
+          isCompleted: progressChapter?.isCompleted || false,
+          completedAt: progressChapter?.completedAt,
+          sectionsProgress: progressChapter?.sectionsProgress || 0,
+          sections: chapter.sections?.map(section => {
+            const progressSection = progressChapter?.sections?.find(ps => ps.id === section.id);
+            return {
+              ...section,
+              isCompleted: progressSection?.isCompleted || false,
+              completedAt: progressSection?.completedAt
+            };
+          }) || []
+        };
+      });
+    }
   }
 
   sendSuccess(res, book);

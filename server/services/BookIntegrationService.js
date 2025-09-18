@@ -43,49 +43,11 @@ class BookIntegrationService {
         }
       }
 
-      // Extract book data from custom order item
-      const bookData = {
-        title: customOrderItem.bookTitle,
-        author: customOrderItem.bookAuthor,
-        isbn: customOrderItem.bookIsbn,
-        publisher: customOrderItem.bookPublisher,
-        publishYear: customOrderItem.bookYear,
-        coverUrl: customOrderItem.bookCoverUrl,
-        pageCount: customOrderItem.bookPageCount,
-        openLibraryId: customOrderItem.bookOpenLibraryId,
-        komgaBookId: customOrderItem.komgaBookId,
-        komgaSeriesId: customOrderItem.komgaSeriesId,
-        komgaUrl: customOrderItem.komgaUrl,
-        komgaMetadata: customOrderItem.komgaMetadata,
-        artworkLastCached: customOrderItem.artworkLastCached,
-        artworkMimeType: customOrderItem.artworkMimeType,
-        localArtworkPath: customOrderItem.localArtworkPath,
-        originalArtworkUrl: customOrderItem.originalArtworkUrl
-      };
-
-      // Create or find existing book
-      const book = await this.bookService.createBook(bookData);
-
-      // Update custom order item to reference the book
-      await this.prisma.customOrderItem.update({
-        where: { id: customOrderItem.id },
-        data: { bookId: book.id }
-      });
-
-      // Migrate reading progress if exists
-      if (customOrderItem.bookCurrentPage || customOrderItem.bookPercentRead || customOrderItem.isWatched) {
-        await this.completionService.updateBookProgress(book.id, {
-          currentPage: customOrderItem.bookCurrentPage,
-          percentRead: customOrderItem.bookPercentRead,
-          isCompleted: customOrderItem.isWatched
-        });
-      }
-
-      console.log(`📚 Linked CustomOrderItem ${customOrderItem.id} to book ${book.id}`);
-      return book;
+      // If no bookId, this is likely a non-book item or error state
+      throw new Error(`CustomOrderItem ${customOrderItem.id} has no linked book. This should have been migrated to the unified system.`);
     } catch (error) {
-      console.error('Error creating/getting book for custom order:', error);
-      throw new Error(`Failed to handle custom order book: ${error.message}`);
+      console.error('Error getting book for custom order:', error);
+      throw new Error(`Failed to get custom order book: ${error.message}`);
     }
   }
 
@@ -394,17 +356,17 @@ class BookIntegrationService {
         throw new Error(`CustomOrderItem ${customOrderItemId} not found`);
       }
 
-      // Return in legacy format for backward compatibility
+      // Return in legacy format using unified book data
       return {
         id: customOrderItem.id,
-        bookTitle: customOrderItem.book?.title || customOrderItem.bookTitle,
-        bookAuthor: customOrderItem.book?.author || customOrderItem.bookAuthor,
-        bookIsbn: customOrderItem.book?.isbn || customOrderItem.bookIsbn,
-        bookPublisher: customOrderItem.book?.publisher || customOrderItem.bookPublisher,
-        bookYear: customOrderItem.book?.publishYear || customOrderItem.bookYear,
-        bookCoverUrl: customOrderItem.book?.coverUrl || customOrderItem.bookCoverUrl,
-        bookPageCount: customOrderItem.book?.pageCount || customOrderItem.bookPageCount,
-        bookOpenLibraryId: customOrderItem.book?.openLibraryId || customOrderItem.bookOpenLibraryId,
+        bookTitle: customOrderItem.book?.title || customOrderItem.title,
+        bookAuthor: customOrderItem.book?.author || null,
+        bookIsbn: customOrderItem.book?.isbn || null,
+        bookPublisher: customOrderItem.book?.publisher || null,
+        bookYear: customOrderItem.book?.publishYear || null,
+        bookCoverUrl: customOrderItem.book?.coverUrl || null,
+        bookPageCount: customOrderItem.book?.pageCount || null,
+        bookOpenLibraryId: customOrderItem.book?.openLibraryId || null,
         // Add unified book reference
         unifiedBook: customOrderItem.book
       };

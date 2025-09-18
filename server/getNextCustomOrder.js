@@ -55,14 +55,20 @@ async function getActiveCustomOrders() {
       include: {
         items: {
           where: { isWatched: false },
-          orderBy: { sortOrder: 'asc' }
+          orderBy: { sortOrder: 'asc' },
+          include: {
+            book: true // Include unified book data for books
+          }
         },
         subOrders: {
           where: { isActive: true },
           include: {
             items: {
               where: { isWatched: false },
-              orderBy: { sortOrder: 'asc' }
+              orderBy: { sortOrder: 'asc' },
+              include: {
+                book: true // Include unified book data for books
+              }
             }
           }
         },
@@ -207,7 +213,7 @@ async function fetchMediaDetailsFromPlex(plexKey, mediaType, customOrderItem, ba
           ratingKey: plexKey,
           title: customOrderItem.title,
           type: mediaType,
-          year: customOrderItem.storyYear || customOrderItem.bookYear,
+          year: customOrderItem.storyYear || customOrderItem.book?.publishYear || null,
           summary: customOrderItem.customTitle || '',
           thumb: null,
           art: null,
@@ -222,7 +228,7 @@ async function fetchMediaDetailsFromPlex(plexKey, mediaType, customOrderItem, ba
           tvdbSeriesId: customOrderItem.comicSeries?.replace('tvdb-series-', ''),
           tvdbSeasonId: customOrderItem.comicVolume?.replace('tvdb-season-', ''),
           tvdbEpisodeId: customOrderItem.comicIssue?.replace('tvdb-episode-', ''),
-          tvdbMovieId: customOrderItem.bookIsbn?.replace('tvdb-movie-', '')
+          tvdbMovieId: customOrderItem.book?.isbn?.replace('tvdb-movie-', '') || null
         };
         
         return mockMetadata;
@@ -270,12 +276,15 @@ async function fetchMediaDetailsFromPlex(plexKey, mediaType, customOrderItem, ba
       // For books, we generate mock Plex-like metadata
       let bookDetails = null;
       
+      // Get unified book data if available
+      const unifiedBook = customOrderItem.book;
+      
       // Try to get additional details from OpenLibrary if we have an ID
-      if (customOrderItem.bookOpenLibraryId) {
+      if (unifiedBook?.openLibraryId) {
         try {
-          bookDetails = await openLibraryService.getBookDetails(customOrderItem.bookOpenLibraryId);
+          bookDetails = await openLibraryService.getBookDetails(unifiedBook.openLibraryId);
         } catch (error) {
-          console.log(`Could not fetch OpenLibrary details for ${customOrderItem.bookOpenLibraryId}:`, error.message);
+          console.log(`Could not fetch OpenLibrary details for ${unifiedBook.openLibraryId}:`, error.message);
         }
       }
       
@@ -285,7 +294,8 @@ async function fetchMediaDetailsFromPlex(plexKey, mediaType, customOrderItem, ba
         id: customOrderItem.id,
         localArtworkPath: customOrderItem.localArtworkPath,
         originalArtworkUrl: customOrderItem.originalArtworkUrl,
-        bookOpenLibraryId: customOrderItem.bookOpenLibraryId
+        unifiedBookId: unifiedBook?.id,
+        openLibraryId: unifiedBook?.openLibraryId
       });
       console.log(`Using cached artwork URL for book "${customOrderItem.title}": ${artworkUrl}`);
       
@@ -293,18 +303,18 @@ async function fetchMediaDetailsFromPlex(plexKey, mediaType, customOrderItem, ba
         ratingKey: plexKey,
         title: customOrderItem.title,
         type: 'book',
-        year: customOrderItem.bookYear,
-        summary: bookDetails?.description || '',
+        year: unifiedBook?.publishYear || null,
+        summary: bookDetails?.description || unifiedBook?.description || '',
         thumb: artworkUrl, // Use cached artwork URL
         art: artworkUrl,   // Use cached artwork URL for both thumb and art
         bookDetails: bookDetails, // Store OpenLibrary details
-        bookTitle: customOrderItem.bookTitle,
-        bookAuthor: customOrderItem.bookAuthor,
-        bookYear: customOrderItem.bookYear,
-        bookIsbn: customOrderItem.bookIsbn,
-        bookPublisher: customOrderItem.bookPublisher,
-        bookOpenLibraryId: customOrderItem.bookOpenLibraryId,
-        bookCoverUrl: bookDetails?.coverUrl || customOrderItem.bookCoverUrl || null,
+        bookTitle: unifiedBook?.title || customOrderItem.title,
+        bookAuthor: unifiedBook?.author || null,
+        bookYear: unifiedBook?.publishYear || null,
+        bookIsbn: unifiedBook?.isbn || null,
+        bookPublisher: unifiedBook?.publisher || null,
+        bookOpenLibraryId: unifiedBook?.openLibraryId || null,
+        bookCoverUrl: bookDetails?.coverUrl || unifiedBook?.coverUrl || null,
         localArtworkPath: customOrderItem.localArtworkPath, // Include for frontend cached artwork logic
         orderType: 'CUSTOM_ORDER',
         customOrderMediaType: mediaType

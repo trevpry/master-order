@@ -338,7 +338,14 @@ class ArtworkCacheService {
         break;
       
       case 'book':
-        if (item.bookCoverUrl) {
+        // Check unified book system first (preferred)
+        if (item.book?.coverUrl) {
+          return item.book.coverUrl;
+        } else if (item.book?.openLibraryId) {
+          return `https://covers.openlibrary.org/b/olid/${item.book.openLibraryId}-M.jpg`;
+        }
+        // Fallback to legacy fields (for items not yet migrated)
+        else if (item.bookCoverUrl) {
           return item.bookCoverUrl;
         } else if (item.bookOpenLibraryId) {
           return `https://covers.openlibrary.org/b/olid/${item.bookOpenLibraryId}-M.jpg`;

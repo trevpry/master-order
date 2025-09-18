@@ -90,22 +90,24 @@ router.post('/mark-custom-order-item-watched/:itemId', asyncHandler(async (req, 
   }
 
   // For books, comics, and short stories, set completion status to 100%
-  if (customOrderItem.mediaType === 'book' || customOrderItem.mediaType === 'comic' || customOrderItem.mediaType === 'shortstory') {
-    const updateData = {
-      bookPercentRead: 100
-    };
-    
-    // If we have page count but no current page, set current page to total pages
-    if (customOrderItem.bookPageCount && !customOrderItem.bookCurrentPage) {
-      updateData.bookCurrentPage = customOrderItem.bookPageCount;
+  if (customOrderItem.mediaType === 'book' && customOrderItem.bookId) {
+    // For unified books, use BookCompletion system
+    try {
+      const BookCompletionService = require('../../services/bookCompletionService');
+      const bookCompletionService = new BookCompletionService();
+      
+      await bookCompletionService.updateProgressFromSession(customOrderItem.bookId, {
+        isCompleted: true,
+        readPercentage: 100
+      });
+      
+      console.log(`Set unified book "${customOrderItem.title}" to 100% completed in BookCompletion system`);
+    } catch (error) {
+      console.error('Error updating unified book completion:', error);
     }
-    
-    await prisma.customOrderItem.update({
-      where: { id: actualItemId },
-      data: updateData
-    });
-    
-    console.log(`Set ${customOrderItem.mediaType} "${customOrderItem.title}" to 100% completed`);
+  } else if (customOrderItem.mediaType === 'comic' || customOrderItem.mediaType === 'shortstory') {
+    // For comics and short stories, these remain in the simple system (just mark as watched)
+    console.log(`Marked ${customOrderItem.mediaType} "${customOrderItem.title}" as watched`);
   }
 
   // Create watch log entry
@@ -394,13 +396,13 @@ router.post('/reading/stop', asyncHandler(async (req, res) => {
     console.log('Updating reading progress for item:', activeSession.customOrderItemId, progress);
     
     try {
-      // Get the CustomOrderItem to find the associated bookId
+      // Get the CustomOrderItem to find the associated bookId and mediaType
       const customOrderItem = await prisma.customOrderItem.findUnique({
         where: { id: activeSession.customOrderItemId },
         select: { 
           bookId: true,
-          bookPageCount: true,
-          title: true
+          title: true,
+          mediaType: true
         }
       });
 
@@ -409,8 +411,9 @@ router.post('/reading/stop', asyncHandler(async (req, res) => {
         throw new Error('CustomOrderItem not found');
       }
 
-      // Update unified BookCompletion table if bookId exists
-      if (customOrderItem.bookId) {
+      // Handle progress updates based on media type
+      if (customOrderItem.mediaType === 'book' && customOrderItem.bookId) {
+        // Books: Use unified BookCompletion system
         console.log('Updating unified BookCompletion for book:', customOrderItem.bookId);
         
         const sessionData = {};
@@ -419,11 +422,12 @@ router.post('/reading/stop', asyncHandler(async (req, res) => {
           sessionData.currentPage = progress.currentPage;
         }
         
-        if (progress.readPercentage !== undefined && progress.readPercentage >= 0 && progress.readPercentage <= 100) {
-          sessionData.percentRead = progress.readPercentage;
+        const readPercentage = progress.readPercentage !== undefined ? progress.readPercentage : progress.percentComplete;
+        if (readPercentage !== undefined && readPercentage >= 0 && readPercentage <= 100) {
+          sessionData.percentRead = readPercentage;
           
           // Mark as completed if 100%
-          if (progress.readPercentage === 100) {
+          if (readPercentage === 100) {
             sessionData.isCompleted = true;
             console.log('Marking book as completed (100% reading progress)');
           }
@@ -456,48 +460,54 @@ router.post('/reading/stop', asyncHandler(async (req, res) => {
             console.error('Error updating Book pageCount:', bookUpdateError);
           }
         }
+      } else if (customOrderItem.mediaType === 'comic') {
+        // Comics: Update CustomOrderItem fields directly
+        console.log('Updating comic progress directly on CustomOrderItem:', activeSession.customOrderItemId);
+        
+        const comicUpdateData = {};
+        
+        if (progress.currentPage !== undefined && progress.currentPage > 0) {
+          comicUpdateData.comicCurrentPage = progress.currentPage;
+        }
+        
+        const readPercentage = progress.readPercentage !== undefined ? progress.readPercentage : progress.percentComplete;
+        if (readPercentage !== undefined && readPercentage >= 0 && readPercentage <= 100) {
+          comicUpdateData.comicPercentRead = readPercentage;
+        }
+        
+        if (progress.totalPages !== undefined && progress.totalPages > 0) {
+          comicUpdateData.comicPageCount = progress.totalPages;
+        }
+        
+        // Update the CustomOrderItem with comic progress
+        await prisma.customOrderItem.update({
+          where: { id: activeSession.customOrderItemId },
+          data: comicUpdateData
+        });
+        
+        console.log('Comic progress updated successfully on CustomOrderItem');
+      } else if (customOrderItem.mediaType === 'book') {
+        // Book without unified bookId - legacy book
+        console.log('Book item has no unified bookId - this should be migrated to unified system');
       } else {
-        console.error('CustomOrderItem has no linked bookId - cannot update unified progress');
+        console.log(`Progress updates not applicable for media type: ${customOrderItem.mediaType}`);
       }
 
-      // Update legacy CustomOrderItem fields for consistency with Android app
-      const legacyUpdateData = {};
-      
-      // Update current page (allow 0 as valid page number)
-      if (progress.currentPage !== undefined && progress.currentPage !== null && progress.currentPage >= 0) {
-        legacyUpdateData.bookCurrentPage = progress.currentPage;
-        console.log(`Setting legacy current page to: ${progress.currentPage}`);
-      }
-      
-      // Update read percentage
-      if (progress.readPercentage !== undefined && progress.readPercentage >= 0 && progress.readPercentage <= 100) {
-        legacyUpdateData.bookPercentRead = progress.readPercentage;
-        console.log(`Setting legacy read percentage to: ${progress.readPercentage}%`);
-      }
-      
-      // Update total page count only if not already set
-      if (progress.totalPages !== undefined && progress.totalPages > 0) {
-        if (!customOrderItem.bookPageCount) {
-          legacyUpdateData.bookPageCount = progress.totalPages;
-          console.log(`Setting legacy total page count to: ${progress.totalPages}`);
-        } else {
-          console.log(`Legacy total page count already set: ${customOrderItem.bookPageCount} (not changing)`);
-        }
-      }
-      
-      // Mark as watched if 100% completion
-      if (progress.readPercentage !== undefined && progress.readPercentage === 100) {
-        legacyUpdateData.isWatched = true;
+      // Mark as watched if 100% completion (handle both field names)
+      let shouldMarkAsWatched = false;
+      const readPercentage = progress.readPercentage !== undefined ? progress.readPercentage : progress.percentComplete;
+      if (readPercentage !== undefined && readPercentage === 100) {
+        shouldMarkAsWatched = true;
         console.log('Marking CustomOrderItem as read/watched (100% completion)');
       }
       
-      if (Object.keys(legacyUpdateData).length > 0) {
+      if (shouldMarkAsWatched) {
         await prisma.customOrderItem.update({
           where: { id: activeSession.customOrderItemId },
-          data: legacyUpdateData
+          data: { isWatched: true }
         });
         
-        console.log('Updated CustomOrderItem legacy fields:', legacyUpdateData);
+        console.log('Updated CustomOrderItem isWatched status');
       }
     } catch (progressError) {
       console.error('Error updating reading progress:', progressError);

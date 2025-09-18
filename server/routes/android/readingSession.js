@@ -221,9 +221,6 @@ function createReadingSessionRoutes(prisma) {
         const existingItem = await prisma.customOrderItem.findUnique({
           where: { id: activeSession.customOrderItemId },
           select: { 
-            bookPageCount: true, 
-            bookCurrentPage: true, 
-            bookPercentRead: true,
             bookId: true,
             title: true,
             mediaType: true
@@ -264,50 +261,27 @@ function createReadingSessionRoutes(prisma) {
             console.log('📚 Will mark book as read in unified system (100% completion)');
           }
         } else {
-          // FOR COMICS/OTHER: Use legacy CustomOrderItem fields (existing logic)
-          console.log('📖 Processing comic/other media progress update - using CustomOrderItem fields');
+          // FOR COMICS/OTHER: Comics don't use the unified book system
+          console.log('📖 Processing comic/other media progress update - unified system not applicable for comics');
           
-          // Update current page (allow 0 as valid page number)
-          if (progress.currentPage !== undefined && progress.currentPage !== null && progress.currentPage >= 0) {
-            updateData.bookCurrentPage = progress.currentPage;
-            console.log(`Setting current page to: ${progress.currentPage}`);
-          }
+          // Calculate read percentage for comics (without storing in deprecated fields)
+          currentPage = progress.currentPage !== undefined ? progress.currentPage : null;
+          totalPages = progress.totalPages !== undefined ? progress.totalPages : null;
           
-          // Calculate read percentage if we have current page and total pages
           let calculatedReadPercentage = null;
-          currentPage = progress.currentPage !== undefined ? progress.currentPage : existingItem?.bookCurrentPage;
-          totalPages = progress.totalPages !== undefined ? progress.totalPages : existingItem?.bookPageCount;
-          
           if (currentPage !== null && totalPages && totalPages > 0) {
             calculatedReadPercentage = Math.round((currentPage / totalPages) * 100);
             calculatedReadPercentage = Math.min(100, Math.max(0, calculatedReadPercentage));
             console.log(`Calculated read percentage: ${calculatedReadPercentage}% (${currentPage}/${totalPages})`);
           }
           
-          // Update read percentage (use provided value or calculated value)
           finalReadPercentage = progress.readPercentage !== undefined ? progress.readPercentage : calculatedReadPercentage;
           
-          if (finalReadPercentage !== null && finalReadPercentage >= 0 && finalReadPercentage <= 100) {
-            updateData.bookPercentRead = finalReadPercentage;
-            console.log(`Setting read percentage to: ${finalReadPercentage}%`);
-            
-            // If read percentage is 100%, mark as read/watched
-            if (finalReadPercentage === 100) {
-              updateData.isWatched = true;
-              actuallyMarkedAsRead = true;
-              console.log('Marking item as read/watched (100% completion)');
-            }
-          }
-          
-          // Update total page count only if not already set (during initial import)
-          if (progress.totalPages !== undefined && progress.totalPages !== null && progress.totalPages > 0) {
-            // Only set page count if it hasn't been set before (during import)
-            if (!existingItem?.bookPageCount) {
-              updateData.bookPageCount = progress.totalPages;
-              console.log(`Setting initial total page count to: ${progress.totalPages}`);
-            } else {
-              console.log(`Total page count already set: ${existingItem.bookPageCount} (not changing)`);
-            }
+          // Mark comic as read if 100%
+          if (finalReadPercentage === 100) {
+            updateData.isWatched = true;
+            actuallyMarkedAsRead = true;
+            console.log('Marking comic as read/watched (100% completion)');
           }
         }
         
@@ -382,11 +356,11 @@ function createReadingSessionRoutes(prisma) {
         } else {
           console.log('📖 Skipping unified BookCompletion update (not a unified book)');
           
-          // For comics/other media, get progress data from CustomOrderItem fields
+          // For comics/other media, get progress data from calculated values
           finalProgressData = {
-            currentPage: updateData.bookCurrentPage || currentPage,
-            totalPages: updateData.bookPageCount || totalPages,
-            readPercentage: updateData.bookPercentRead || finalReadPercentage
+            currentPage: currentPage,
+            totalPages: totalPages,
+            readPercentage: finalReadPercentage
           };
         }
       } catch (progressError) {

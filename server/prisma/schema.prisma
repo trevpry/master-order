@@ -103,17 +103,13 @@ model CustomOrderItem {
   comicCreators           String?
   comicCharacters         String?
   comicStoryArcs          String?
+  
+  // Comic progress tracking (separate from unified Book system)
+  comicPercentRead        Float?
+  comicCurrentPage        Int?
+  comicPageCount          Int?
+  
   customTitle             String?
-  bookTitle               String?
-  bookAuthor              String?
-  bookYear                Int?
-  bookIsbn                String?
-  bookPublisher           String?
-  bookOpenLibraryId       String?
-  bookCoverUrl            String?
-  bookPageCount           Int?
-  bookCurrentPage         Int?
-  bookPercentRead         Float?
   storyTitle              String?
   storyAuthor             String?
   storyYear               Int?
@@ -1773,6 +1769,10 @@ model Book {
   komgaUrl            String?
   komgaMetadata       String?
   
+  // History Plus migration support
+  isHistoryPlusBook   Boolean   @default(false)
+  originalHistoryBookId Int?
+  
   // Artwork caching (consistent with existing pattern)
   artworkLastCached   DateTime?
   artworkMimeType     String?
@@ -1792,6 +1792,8 @@ model Book {
   
   @@index([isbn])
   @@index([openLibraryId])
+  @@index([isHistoryPlusBook])
+  @@index([originalHistoryBookId])
   @@index([komgaBookId])
   @@index([title])
 }
@@ -1805,6 +1807,10 @@ model BookChapter {
   pageStart           Int?
   pageEnd             Int?
   eventId             Int?
+  
+  // History Plus migration tracking
+  originalHistoryChapterId Int?
+  
   createdAt           DateTime  @default(now())
   updatedAt           DateTime  @updatedAt
   
@@ -1817,6 +1823,7 @@ model BookChapter {
   @@unique([bookId, chapterNumber])
   @@index([bookId])
   @@index([eventId])
+  @@index([originalHistoryChapterId])
 }
 
 model BookSection {
@@ -1829,6 +1836,10 @@ model BookSection {
   pageStart           Int?
   pageEnd             Int?
   eventId             Int?
+  
+  // History Plus migration tracking
+  originalHistorySectionId Int?
+  
   createdAt           DateTime  @default(now())
   updatedAt           DateTime  @updatedAt
   
@@ -1840,6 +1851,7 @@ model BookSection {
   @@unique([chapterId, sectionNumber])
   @@index([chapterId])
   @@index([eventId])
+  @@index([originalHistorySectionId])
 }
 
 // =====================================

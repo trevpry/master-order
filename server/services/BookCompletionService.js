@@ -160,16 +160,18 @@ class BookCompletionService {
    */
   async markChapterCompleted(chapterId, userId = null) {
     try {
+      const normalizedUserId = this.normalizeUserId(userId);
+      
       const completion = await this.prisma.chapterCompletion.upsert({
         where: {
           chapterId_userId: {
             chapterId,
-            userId
+            userId: normalizedUserId
           }
         },
         create: {
           chapterId,
-          userId,
+          userId: normalizedUserId,
           isCompleted: true,
           completedAt: new Date()
         },
@@ -208,11 +210,13 @@ class BookCompletionService {
    */
   async getChapterCompletion(chapterId, userId = null) {
     try {
+      const normalizedUserId = this.normalizeUserId(userId);
+      
       return await this.prisma.chapterCompletion.findUnique({
         where: {
           chapterId_userId: {
             chapterId,
-            userId
+            userId: normalizedUserId
           }
         }
       });
@@ -234,16 +238,18 @@ class BookCompletionService {
    */
   async markSectionCompleted(sectionId, userId = null) {
     try {
+      const normalizedUserId = this.normalizeUserId(userId);
+      
       const completion = await this.prisma.sectionCompletion.upsert({
         where: {
           sectionId_userId: {
             sectionId,
-            userId
+            userId: normalizedUserId
           }
         },
         create: {
           sectionId,
-          userId,
+          userId: normalizedUserId,
           isCompleted: true,
           completedAt: new Date()
         },
@@ -273,11 +279,13 @@ class BookCompletionService {
    */
   async getSectionCompletion(sectionId, userId = null) {
     try {
+      const normalizedUserId = this.normalizeUserId(userId);
+      
       return await this.prisma.sectionCompletion.findUnique({
         where: {
           sectionId_userId: {
             sectionId,
-            userId
+            userId: normalizedUserId
           }
         }
       });
@@ -299,11 +307,13 @@ class BookCompletionService {
    */
   async calculateBookProgress(bookId, userId = null) {
     try {
+      const normalizedUserId = this.normalizeUserId(userId);
+      
       const chapters = await this.prisma.bookChapter.findMany({
         where: { bookId },
         include: {
           chapterCompletions: {
-            where: { userId }
+            where: { userId: normalizedUserId }
           }
         }
       });
@@ -339,11 +349,13 @@ class BookCompletionService {
    */
   async calculateChapterProgress(chapterId, userId = null) {
     try {
+      const normalizedUserId = this.normalizeUserId(userId);
+      
       const sections = await this.prisma.bookSection.findMany({
         where: { chapterId },
         include: {
           sectionCompletions: {
-            where: { userId }
+            where: { userId: normalizedUserId }
           }
         }
       });
@@ -527,17 +539,13 @@ class BookCompletionService {
         const book = await this.prisma.book.findUnique({
           where: { id: bookId },
           select: { 
-            pageCount: true,
-            customOrderItems: {
-              select: { bookPageCount: true },
-              take: 1
-            }
+            pageCount: true
           }
         });
         console.log(`📖 Found book:`, book);
 
-        // Use book.pageCount or fall back to customOrderItems[0].bookPageCount
-        const totalPages = book?.pageCount || book?.customOrderItems?.[0]?.bookPageCount;
+        // Use book.pageCount (unified system)
+        const totalPages = book?.pageCount;
         
         if (totalPages && totalPages > 0) {
           const calculatedPercent = Math.min(
@@ -547,7 +555,7 @@ class BookCompletionService {
           progressData.percentRead = calculatedPercent;
           console.log(`📊 Calculated percentage: ${sessionData.currentPage}/${totalPages} = ${calculatedPercent}%`);
         } else {
-          console.log(`⚠️ No pageCount found for book ${bookId} (book.pageCount: ${book?.pageCount}, customOrderItem.bookPageCount: ${book?.customOrderItems?.[0]?.bookPageCount})`);
+          console.log(`⚠️ No pageCount found for book ${bookId} (book.pageCount: ${book?.pageCount})`);
         }
       }
 

@@ -89,9 +89,11 @@ function createItemManagementRoutes(prisma, services) {
         isWatched, 
         title,
         seriesTitle, // For episodes
-        // Book/reading progress fields
+        // Book/reading progress fields - now handled by unified system
         bookPercentRead, bookCurrentPage,
-        // Book fields
+        // Comic/story progress fields
+        comicPercentRead, storyPercentRead,
+        // Book fields - for book re-selection only
         bookTitle, bookAuthor, bookYear, bookIsbn, bookPublisher, bookOpenLibraryId, bookCoverUrl, bookPageCount,
         // Comic fields
         comicSeries, comicYear, comicIssue, comicVolume, comicPublisher, customTitle, comicVineId, comicVineDetailsJson, comicCoverUrl,
@@ -142,25 +144,35 @@ function createItemManagementRoutes(prisma, services) {
       if (sortOrder !== undefined) updateData.sortOrder = sortOrder;
       if (isWatched !== undefined) updateData.isWatched = isWatched;
       
-      // If marking a book, comic, or short story as watched, set completion to 100%
+      // If marking a book, comic, or short story as watched, handle appropriately
       if (isWatched === true) {
         const item = await prisma.customOrderItem.findUnique({
-          where: { id: parseInt(itemId) }
+          where: { id: parseInt(itemId) },
+          include: { book: true }
         });
         
-        if (item && (item.mediaType === 'book' || item.mediaType === 'comic' || item.mediaType === 'shortstory')) {
-          updateData.bookPercentRead = 100;
-          
-          // If we have page count but no current page, set current page to total pages
-          if (item.bookPageCount && !item.bookCurrentPage) {
-            updateData.bookCurrentPage = item.bookPageCount;
+        if (item && item.mediaType === 'book' && item.bookId) {
+          // For unified books, update BookCompletion system
+          try {
+            const BookCompletionService = require('../../services/BookCompletionService');
+            const bookCompletionService = new BookCompletionService();
+            
+            await bookCompletionService.updateBookProgress(item.bookId, {
+              percentRead: 100,
+              isCompleted: true
+            });
+            
+            console.log(`Set unified book "${item.title}" to 100% completed in BookCompletion system`);
+          } catch (error) {
+            console.error('Error updating unified book completion:', error);
           }
-          
-          console.log(`Setting ${item.mediaType} "${item.title}" to 100% completed`);
+        } else if (item && (item.mediaType === 'comic' || item.mediaType === 'shortstory')) {
+          // For comics and short stories, these remain simple (just mark as watched)
+          console.log(`Marked ${item.mediaType} "${item.title}" as watched`);
         }
       }
       
-      // Handle progress updates for books (should use unified system, not legacy fields)
+      // Handle progress updates for books (using unified system only)
       if (bookPercentRead !== undefined || bookCurrentPage !== undefined) {
         console.log('Processing book progress update...');
         
@@ -171,9 +183,7 @@ function createItemManagementRoutes(prisma, services) {
             id: true, 
             bookId: true, 
             mediaType: true,
-            bookPageCount: true, 
-            bookCurrentPage: true, 
-            bookPercentRead: true 
+            title: true
           }
         });
         
@@ -182,23 +192,28 @@ function createItemManagementRoutes(prisma, services) {
           console.log(`Updating progress for unified book ${currentItem.bookId}`);
           
           try {
-            const { BookCompletionService } = require('../../services');
+            const BookCompletionService = require('../../services/BookCompletionService');
             const bookCompletionService = new BookCompletionService();
-            
-            const pageCount = bookPageCount !== undefined ? parseInt(bookPageCount) : currentItem?.bookPageCount;
             
             const progressData = {};
             if (bookCurrentPage !== undefined) progressData.currentPage = parseInt(bookCurrentPage);
             if (bookPercentRead !== undefined) progressData.percentRead = parseFloat(bookPercentRead);
-            if (pageCount) progressData.totalPages = pageCount;
+            if (bookPageCount !== undefined) progressData.totalPages = parseInt(bookPageCount);
             
-            // Calculate missing values if we have page count
-            if (pageCount && pageCount > 0) {
+            // Calculate missing values if we have total pages from unified book
+            const book = await prisma.book.findUnique({
+              where: { id: currentItem.bookId },
+              select: { pageCount: true }
+            });
+            
+            const totalPages = progressData.totalPages || book?.pageCount;
+            
+            if (totalPages && totalPages > 0) {
               if (bookPercentRead !== undefined && bookCurrentPage === undefined) {
-                progressData.currentPage = Math.round((bookPercentRead / 100) * pageCount);
+                progressData.currentPage = Math.round((bookPercentRead / 100) * totalPages);
               }
               if (bookCurrentPage !== undefined && bookPercentRead === undefined) {
-                progressData.percentRead = Math.min(100, Math.round((bookCurrentPage / pageCount) * 100));
+                progressData.percentRead = Math.min(100, Math.round((bookCurrentPage / totalPages) * 100));
               }
             }
             
@@ -215,59 +230,23 @@ function createItemManagementRoutes(prisma, services) {
             
           } catch (error) {
             console.error('Error updating unified book progress:', error);
-            console.log('Falling back to legacy progress fields...');
-            // Fall back to legacy behavior
-            const pageCount = bookPageCount !== undefined ? parseInt(bookPageCount) : currentItem?.bookPageCount;
-            if (bookPercentRead !== undefined) updateData.bookPercentRead = bookPercentRead;
-            if (bookCurrentPage !== undefined) updateData.bookCurrentPage = bookCurrentPage;
-            
-            if (pageCount && pageCount > 0) {
-              if (bookPercentRead !== undefined && bookCurrentPage === undefined) {
-                updateData.bookCurrentPage = Math.round((bookPercentRead / 100) * pageCount);
-              }
-              if (bookCurrentPage !== undefined && bookPercentRead === undefined) {
-                updateData.bookPercentRead = Math.min(100, Math.round((bookCurrentPage / pageCount) * 100));
-              }
-            }
+            return res.status(500).json({ error: 'Failed to update book progress in unified system' });
           }
+        } else if (currentItem.mediaType === 'book') {
+          // Book without unified bookId - this shouldn't happen after migration
+          console.error(`Book item ${itemId} has no bookId - migration may be incomplete`);
+          return res.status(400).json({ error: 'Book item not properly migrated to unified system' });
         } else {
-          // For non-unified books or non-books, use legacy fields
-          console.log('Using legacy progress fields for non-unified item');
-          const pageCount = bookPageCount !== undefined ? parseInt(bookPageCount) : currentItem?.bookPageCount;
-          
-          if (bookPercentRead !== undefined) updateData.bookPercentRead = bookPercentRead;
-          if (bookCurrentPage !== undefined) updateData.bookCurrentPage = bookCurrentPage;
-          
-          if (pageCount && pageCount > 0) {
-            if (bookPercentRead !== undefined && bookCurrentPage === undefined) {
-              updateData.bookCurrentPage = Math.round((bookPercentRead / 100) * pageCount);
-            }
-            if (bookCurrentPage !== undefined && bookPercentRead === undefined) {
-              updateData.bookPercentRead = Math.min(100, Math.round((bookCurrentPage / pageCount) * 100));
-            }
-          }
+          // Not a book - progress updates not applicable
+          console.log('Progress updates only apply to books');
         }
       }
       
-      // Check if this update sets reading completion to 100% and auto-mark as watched
-      // For unified books, this is handled in the progress update section above
-      // For legacy books/comics, check the legacy fields
-      const finalPercentRead = updateData.bookPercentRead !== undefined ? updateData.bookPercentRead : bookPercentRead;
-      const finalCurrentPage = updateData.bookCurrentPage !== undefined ? updateData.bookCurrentPage : bookCurrentPage;
-      const finalPageCount = bookPageCount !== undefined ? parseInt(bookPageCount) : undefined;
-      
-      if (finalPercentRead === 100 || 
-          (finalCurrentPage !== undefined && finalPageCount !== undefined && finalCurrentPage >= finalPageCount)) {
-        
-        // Get the current item to check media type (if not already fetched above)
-        const currentItem = await prisma.customOrderItem.findUnique({
-          where: { id: parseInt(itemId) }
-        });
-        
-        if (currentItem && (currentItem.mediaType === 'book' || currentItem.mediaType === 'comic' || currentItem.mediaType === 'shortstory')) {
-          updateData.isWatched = true;
-          console.log(`Setting ${currentItem.mediaType} "${currentItem.title}" as watched (100% completion)`);
-        }
+      // Check if this update sets reading completion to 100% for comics/short stories
+      // (Books are handled through unified system above)
+      if (comicPercentRead === 100 || storyPercentRead === 100) {
+        updateData.isWatched = true;
+        console.log('Setting item as watched (100% completion)');
       }
       
       // Handle general data updates
@@ -283,15 +262,12 @@ function createItemManagementRoutes(prisma, services) {
           const bookData = {
             title: bookTitle,
             author: bookAuthor,
-            year: bookYear ? parseInt(bookYear) : null,
+            publishYear: bookYear ? parseInt(bookYear) : null,
             isbn: bookIsbn,
             publisher: bookPublisher,
             openLibraryId: bookOpenLibraryId,
             pageCount: bookPageCount ? parseInt(bookPageCount) : null,
-            coverUrl: bookCoverUrl,
-            // Set source and content type
-            source: 'custom-order',
-            contentType: 'book'
+            coverUrl: bookCoverUrl
           };
           
           // Remove undefined values
@@ -323,15 +299,8 @@ function createItemManagementRoutes(prisma, services) {
             console.log(`Linked custom order item to unified book ${unifiedBook.id}`);
           }
           
-          // Clear legacy book fields from custom order item (should not store book data here)
-          updateData.bookTitle = null;
-          updateData.bookAuthor = null;
-          updateData.bookYear = null;
-          updateData.bookIsbn = null;
-          updateData.bookPublisher = null;
-          updateData.bookOpenLibraryId = null;
-          updateData.bookPageCount = null;
-          updateData.bookCoverUrl = null;
+          // Legacy book fields have been removed from CustomOrderItem - no longer need to clear them
+          // Book data is now stored in unified Book table only
           
           // Clear artwork fields for re-caching since we updated the book
           updateData.localArtworkPath = null;
@@ -343,20 +312,9 @@ function createItemManagementRoutes(prisma, services) {
           
         } catch (error) {
           console.error('Error processing book re-selection:', error);
-          // Fall back to legacy behavior if unified system fails
-          console.log('Falling back to legacy book field updates...');
-          if (bookTitle !== undefined) updateData.bookTitle = bookTitle;
-          if (bookAuthor !== undefined) updateData.bookAuthor = bookAuthor;
-          if (bookYear !== undefined) updateData.bookYear = bookYear;
-          if (bookIsbn !== undefined) updateData.bookIsbn = bookIsbn;
-          if (bookPublisher !== undefined) updateData.bookPublisher = bookPublisher;
-          if (bookOpenLibraryId !== undefined) updateData.bookOpenLibraryId = bookOpenLibraryId;
-          if (bookPageCount !== undefined) updateData.bookPageCount = bookPageCount ? parseInt(bookPageCount) : null;
-          updateData.bookCoverUrl = bookCoverUrl !== undefined ? bookCoverUrl : null;
-          updateData.localArtworkPath = null;
-          updateData.originalArtworkUrl = bookCoverUrl !== undefined ? bookCoverUrl : null; 
-          updateData.artworkLastCached = null;
-          updateData.artworkMimeType = null;
+          // Unable to use unified system, but can't fall back to legacy fields (removed)
+          console.log('Unable to fall back to legacy fields - fields have been removed');
+          return res.status(500).json({ error: 'Failed to update book in unified system' });
         }
       }
       
@@ -473,6 +431,7 @@ function createItemManagementRoutes(prisma, services) {
         where: { id: parseInt(itemId) },
         data: updateData,
         include: {
+          book: true, // Include unified book data for artwork caching
           storyContainedInBook: true,
           referencedCustomOrder: {
             include: { items: true }
@@ -485,16 +444,16 @@ function createItemManagementRoutes(prisma, services) {
         try {
           console.log(`🔄 Book re-selected for item ${itemId}, creating/updating unified Book record...`);
           
-          // Create book data from the updated item
+          // Create book data from the request body (not from item since those fields are removed)
           const bookData = {
-            title: item.bookTitle || item.title,
-            author: item.bookAuthor,
-            year: item.bookYear,
-            isbn: item.bookIsbn,
-            publisher: item.bookPublisher,
-            pageCount: item.bookPageCount,
-            openLibraryId: item.bookOpenLibraryId,
-            coverUrl: item.bookCoverUrl || item.originalArtworkUrl
+            title: bookTitle || title,
+            author: bookAuthor,
+            publishYear: bookYear,
+            isbn: bookIsbn,
+            publisher: bookPublisher,
+            pageCount: bookPageCount,
+            openLibraryId: bookOpenLibraryId,
+            coverUrl: bookCoverUrl
           };
 
           // Create or find existing Book record (createBook handles duplicates)
@@ -502,13 +461,13 @@ function createItemManagementRoutes(prisma, services) {
           console.log(`📚 Created/found Book record:`, book.id);
 
           // Ensure the Book record has the correct pageCount (update if missing)
-          if (item.bookPageCount && !book.pageCount) {
+          if (bookPageCount && !book.pageCount) {
             try {
               await prisma.book.update({
                 where: { id: book.id },
-                data: { pageCount: item.bookPageCount }
+                data: { pageCount: bookPageCount }
               });
-              console.log(`📚 Updated Book ${book.id} pageCount to ${item.bookPageCount}`);
+              console.log(`📚 Updated Book ${book.id} pageCount to ${bookPageCount}`);
             } catch (pageCountError) {
               console.error(`Error updating Book pageCount:`, pageCountError);
             }
