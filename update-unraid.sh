@@ -148,26 +148,150 @@ test_postgresql_connection() {
     fi
 }
 
-# Function to create PostgreSQL backup (skip if tools not available)
+# Function to create SQLite backup (only used when SQLite is detected)
+create_sqlite_backup() {
+    local backup_timestamp=$(date +"%Y%m%d_%H%M%S")
+    local sqlite_backup_file="$BACKUP_DIR/master_order_backup_$backup_timestamp.db"
+    
+    log_info "Creating SQLite database backup..."
+    
+    # Try to backup from running container first
+    if docker ps | grep -q "$CONTAINER_NAME"; then
+        if docker exec "$CONTAINER_NAME" test -f "/app/data/master_order.db" 2>/dev/null; then
+            if docker cp "$CONTAINER_NAME:/app/data/master_order.db" "$sqlite_backup_file"; then
+                local backup_size=$(ls -lh "$sqlite_backup_file" | awk '{print $5}')
+                log_success "SQLite backup created from container: $(basename "$sqlite_backup_file") ($backup_size)"
+                echo "$sqlite_backup_file"
+                return 0
+            else
+                log_warning "Failed to copy SQLite database from container"
+            fi
+        else
+            log_warning "SQLite database not found in container"
+        fi
+    fi
+    
+    # Try local file backup
+    if [ -f "./master_order.db" ]; then
+        if cp "./master_order.db" "$sqlite_backup_file"; then
+            local backup_size=$(ls -lh "$sqlite_backup_file" | awk '{print $5}')
+            log_success "SQLite backup created from local file: $(basename "$sqlite_backup_file") ($backup_size)"
+            echo "$sqlite_backup_file"
+            return 0
+        else
+            log_warning "Failed to copy local SQLite database"
+        fi
+    else
+        log_warning "Local SQLite database not found"
+    fi
+    
+    log_warning "SQLite backup failed - no database found"
+    return 1
+}
+
+# Function to create database backup based on detected type
+create_database_backup() {
+    log_info "Determining database type and creating backup..."
+    
+    # Check if using PostgreSQL
+    if [ ! -z "$DATABASE_URL" ] && [[ "$DATABASE_URL" == postgresql* ]]; then
+        log_info "PostgreSQL detected - creating PostgreSQL backup"
+        create_postgresql_backup
+        return $?
+    fi
+    
+    # Check for SQLite database file in container (only if PostgreSQL not detected)
+    if docker ps | grep -q "$CONTAINER_NAME"; then
+        if docker exec "$CONTAINER_NAME" test -f "/app/data/master_order.db" 2>/dev/null; then
+            log_info "SQLite database detected in container"
+            create_sqlite_backup
+            return $?
+        fi
+    fi
+    
+    # Check for local SQLite files (only if PostgreSQL not detected)
+    if [ -f "./master_order.db" ]; then
+        log_info "Local SQLite database detected"
+        create_sqlite_backup
+        return $?
+    fi
+    
+    # If we have database connection info, assume PostgreSQL
+    if [ ! -z "$POSTGRES_HOST" ] && [ ! -z "$POSTGRES_DB" ]; then
+        log_info "PostgreSQL configuration detected - creating PostgreSQL backup"
+        create_postgresql_backup
+        return $?
+    fi
+    
+    log_warning "No database detected for backup"
+    return 1
+}
+
+# Function to create PostgreSQL backup using the existing container
 create_postgresql_backup() {
     local backup_timestamp=$(date +"%Y%m%d_%H%M%S")
     local postgres_backup_file="$BACKUP_DIR/postgresql_backup_$backup_timestamp.sql"
     
     log_info "Creating PostgreSQL database backup..."
     
-    if command -v pg_dump &> /dev/null; then
-        if pg_dump "$DATABASE_URL" > "$postgres_backup_file"; then
-            log_success "PostgreSQL backup created: $(basename "$postgres_backup_file")"
-            echo "$postgres_backup_file"
-            return 0
+    # First try using the running container's pg_dump
+    if docker ps | grep -q "$CONTAINER_NAME"; then
+        log_info "Using running container for PostgreSQL backup..."
+        
+        # Use the container's pg_dump to create backup
+        if docker exec "$CONTAINER_NAME" pg_dump -h "$POSTGRES_HOST" -p "$POSTGRES_PORT" -U "$POSTGRES_USER" -d "$POSTGRES_DB" > "$postgres_backup_file" 2>/dev/null; then
+            if [ -s "$postgres_backup_file" ]; then
+                local backup_size=$(ls -lh "$postgres_backup_file" | awk '{print $5}')
+                log_success "PostgreSQL backup created: $(basename "$postgres_backup_file") ($backup_size)"
+                echo "$postgres_backup_file"
+                return 0
+            else
+                log_warning "Backup file created but is empty"
+                rm -f "$postgres_backup_file"
+            fi
         else
-            log_error "PostgreSQL backup failed"
-            return 1
+            log_warning "Container pg_dump failed"
         fi
-    else
-        log_warning "pg_dump not available, cannot create PostgreSQL backup"
-        return 1
     fi
+    
+    # Try using the postgresql16 container directly
+    if docker ps | grep -q "postgresql16"; then
+        log_info "Using postgresql16 container for backup..."
+        
+        if docker exec postgresql16 pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" > "$postgres_backup_file" 2>/dev/null; then
+            if [ -s "$postgres_backup_file" ]; then
+                local backup_size=$(ls -lh "$postgres_backup_file" | awk '{print $5}')
+                log_success "PostgreSQL backup created via postgresql16 container: $(basename "$postgres_backup_file") ($backup_size)"
+                echo "$postgres_backup_file"
+                return 0
+            else
+                log_warning "Backup file created but is empty"
+                rm -f "$postgres_backup_file"
+            fi
+        else
+            log_warning "PostgreSQL16 container backup failed"
+        fi
+    fi
+    
+    # If both methods fail, try host pg_dump (unlikely to exist on Unraid)
+    if command -v pg_dump &> /dev/null; then
+        if PGPASSWORD="$POSTGRES_PASSWORD" pg_dump -h "$POSTGRES_HOST" -p "$POSTGRES_PORT" -U "$POSTGRES_USER" -d "$POSTGRES_DB" > "$postgres_backup_file" 2>/dev/null; then
+            if [ -s "$postgres_backup_file" ]; then
+                local backup_size=$(ls -lh "$postgres_backup_file" | awk '{print $5}')
+                log_success "PostgreSQL backup created via host pg_dump: $(basename "$postgres_backup_file") ($backup_size)"
+                echo "$postgres_backup_file"
+                return 0
+            else
+                log_warning "Host backup file created but is empty"
+                rm -f "$postgres_backup_file"
+            fi
+        else
+            log_warning "Host pg_dump failed"
+        fi
+    fi
+    
+    log_warning "All PostgreSQL backup methods failed"
+    return 1
 }
 
 # ===============================================================================
@@ -238,10 +362,12 @@ cd "$REPO_PATH"
 # Step 2: Test PostgreSQL connection before proceeding (if tools available)
 test_postgresql_connection
 
-# Step 3: Create PostgreSQL backup before any changes (if tools available)
-POSTGRES_BACKUP_FILE=$(create_postgresql_backup)
-if [ $? -ne 0 ]; then
-    log_warning "PostgreSQL backup failed, but continuing with update"
+# Step 3: Create database backup before any changes
+BACKUP_FILE=$(create_database_backup)
+if [ $? -eq 0 ]; then
+    log_success "Database backup completed: $(basename "$BACKUP_FILE")"
+else
+    log_warning "Database backup failed, but continuing with update"
 fi
 
 # ===============================================================================
@@ -340,8 +466,8 @@ log_success "Master Order updated successfully on Unraid!"
 echo "🌐 Application should be available at: http://192.168.1.252:$HOST_PORT"
 echo "🗃️  Using PostgreSQL database: $POSTGRES_HOST:$POSTGRES_PORT/$POSTGRES_DB"
 echo "💾 Database backups stored at: $BACKUP_DIR"
-if [ -n "$POSTGRES_BACKUP_FILE" ]; then
-    echo "🔙 PostgreSQL backup: $(basename "$POSTGRES_BACKUP_FILE")"
+if [ -n "$BACKUP_FILE" ]; then
+    echo "🔙 Database backup: $(basename "$BACKUP_FILE")"
 fi
 echo "📋 Log file: $MIGRATION_LOG"
 echo ""
