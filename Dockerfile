@@ -75,6 +75,9 @@ COPY --from=build --chown=app:nodejs /app/package*.json ./
 COPY --from=build --chown=app:nodejs /app/start.js ./start.js
 COPY --chown=app:nodejs ./docker-entrypoint.sh ./docker-entrypoint.sh
 
+# Copy migration recovery script
+COPY --from=build --chown=app:nodejs /app/server/fix-failed-migration.js ./server/fix-failed-migration.js
+
 # Ensure Prisma files are copied (schema and migrations)
 COPY --from=build --chown=app:nodejs /app/server/prisma ./server/prisma
 

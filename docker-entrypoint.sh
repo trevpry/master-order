@@ -250,7 +250,21 @@ if [ "$PRESERVE_EXISTING_DATA" = true ]; then
             
             # Check migration status and try to resolve
             MIGRATION_STATUS=$(npx prisma migrate status 2>&1)
-            if echo "$MIGRATION_STATUS" | grep -q "following migration have not yet been applied"; then
+            echo "$MIGRATION_STATUS"
+            
+            if echo "$MIGRATION_STATUS" | grep -q "migrate found failed migrations"; then
+                echo "[INFO] Failed migrations detected - attempting safe recovery..."
+                if node server/fix-failed-migration.js; then
+                    echo "[SUCCESS] Failed migrations recovered safely"
+                    echo "[INFO] Attempting migrate deploy after recovery..."
+                    npx prisma migrate deploy
+                else
+                    echo "[ERROR] Could not recover failed migrations automatically"
+                    echo "[DATA-SAFE] Will NOT reset database to preserve your data"
+                    echo "[INFO] Continuing with existing schema - manual intervention may be needed"
+                    echo "[INFO] Your data is completely safe"
+                fi
+            elif echo "$MIGRATION_STATUS" | grep -q "following migration have not yet been applied"; then
                 echo "[INFO] Applying pending migrations..."
                 npx prisma migrate deploy
             elif echo "$MIGRATION_STATUS" | grep -q "Your local migration history and the migrations table"; then
@@ -273,20 +287,37 @@ else
         echo "[ERROR] Prisma db push failed, trying migrate deploy..."
         
         echo "[DEBUG] Checking Prisma migrate status..."
-        npx prisma migrate status 2>&1 || echo "[DEBUG] Migrate status failed"
+        MIGRATE_STATUS=$(npx prisma migrate status 2>&1)
+        echo "$MIGRATE_STATUS"
         
-        echo "[DEBUG] Trying migrate deploy..."
-        if npx prisma migrate deploy 2>&1; then
-            echo "[SUCCESS] Schema created successfully using migrate deploy"
+        # Check if there are failed migrations
+        if echo "$MIGRATE_STATUS" | grep -q "migrate found failed migrations"; then
+            echo "[INFO] Failed migrations detected - attempting safe recovery..."
+            if node fix-failed-migration.js; then
+                echo "[SUCCESS] Failed migrations recovered safely"
+                echo "[INFO] Attempting migrate deploy after recovery..."
+                npx prisma migrate deploy 2>&1
+            else
+                echo "[ERROR] Could not recover failed migrations automatically"
+                echo "[DATA-SAFE] Will NOT attempt reset to preserve your data"
+                echo "[ERROR] Manual intervention required for database schema setup"
+                echo "[INFO] Your data is completely safe - no destructive operations performed"
+                exit 1
+            fi
         else
-            echo "[ERROR] Both db push and migrate deploy failed"
-            echo "[DEBUG] Attempting to generate Prisma client first..."
-            npx prisma generate 2>&1 || echo "[DEBUG] Generate failed"
-            
-            echo "[DATA-SAFE] Will NOT attempt reset to preserve any existing data"
-            echo "[ERROR] Manual intervention required for database schema setup"
-            echo "[INFO] Your data is completely safe - no destructive operations performed"
-            exit 1
+            echo "[DEBUG] Trying migrate deploy..."
+            if npx prisma migrate deploy 2>&1; then
+                echo "[SUCCESS] Schema created successfully using migrate deploy"
+            else
+                echo "[ERROR] Both db push and migrate deploy failed"
+                echo "[DEBUG] Attempting to generate Prisma client first..."
+                npx prisma generate 2>&1 || echo "[DEBUG] Generate failed"
+                
+                echo "[DATA-SAFE] Will NOT attempt reset to preserve any existing data"
+                echo "[ERROR] Manual intervention required for database schema setup"
+                echo "[INFO] Your data is completely safe - no destructive operations performed"
+                exit 1
+            fi
         fi
     else
         echo "[SUCCESS] Fresh database schema created with db push"
