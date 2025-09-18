@@ -1,5 +1,8 @@
 version: '3.8'
 
+# 🔒 DATA SAFETY REQUIRED: Run ./verify-safety.sh BEFORE deployment
+# This prevents data loss incidents like the one that occurred on 2025-09-18
+
 services:
   master-order:
     build: .
