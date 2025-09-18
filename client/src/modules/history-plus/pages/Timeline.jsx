@@ -286,18 +286,17 @@ const Timeline = () => {
     }
 
     setImporting(true);
-    setImportStatus({ type: 'info', message: 'Starting import from uploaded files...' });
+    setImportStatus({ type: 'info', message: 'Starting books import to unified Books system...' });
 
     try {
-      const response = await fetch('/api/history-plus/import-data', {
+      const response = await fetch('/api/unified-books/import', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({ 
           force,
-          useUploaded: true, // Flag to use uploaded files instead of mounted directory
-          clearExisting: true // Clear all existing History Plus data before import
+          useUploaded: true // Flag to use uploaded files instead of mounted directory
         }),
       });
 
@@ -362,10 +361,10 @@ const Timeline = () => {
     }
 
     setImporting(true);
-    setImportStatus({ type: 'info', message: 'Starting import process...' });
+    setImportStatus({ type: 'info', message: 'Starting books import to unified Books system...' });
 
     try {
-      const response = await fetch('/api/history-plus/import-data', {
+      const response = await fetch('/api/unified-books/import', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -494,7 +493,7 @@ const Timeline = () => {
                     Importing...
                   </>
                 ) : (
-                  <>📥 Import Uploaded Files</>
+                  <>� Import Books to Unified System</>
                 )}
               </button>
             )}
@@ -504,9 +503,9 @@ const Timeline = () => {
               onClick={handleImportData}
               disabled={importing}
               className="bg-gray-600 hover:bg-gray-700 disabled:bg-gray-400 text-white px-4 py-2 rounded-lg font-medium transition-colors flex items-center gap-2 text-sm"
-              title="Import from mounted directory (requires volume mount or docker cp)"
+              title="Import books directly to unified Books system from mounted directory (requires volume mount or docker cp)"
             >
-              📁 Import from Directory
+              📁 Import Books from Directory
             </button>
           </div>
           

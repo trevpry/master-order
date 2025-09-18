@@ -32,6 +32,7 @@ const searchDebugRoutes = require('./routes/searchDebug');
 const settingsLegacyRedirectsRoutes = require('./routes/settingsLegacyRedirects');
 const weatherRoutes = require('./routes/weather');
 const historyPlusRoutes = require('./routes/historyPlus');
+const unifiedBooksRoutes = require('./routes/unifiedBooks');
 const importDataRoutes = require('./routes/importData');
 
 // Import utility functions
@@ -398,6 +399,9 @@ app.use('/api/weather', weatherRoutes);
 
 // History Plus API routes
 app.use('/api/history-plus', historyPlusRoutes);
+
+// Unified Books API routes
+app.use('/api/unified-books', unifiedBooksRoutes);
 
 // Import Data API routes
 app.use('/api/import', importDataRoutes);

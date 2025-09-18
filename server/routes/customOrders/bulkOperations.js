@@ -102,9 +102,11 @@ function createBulkOperationsRoutes(prisma, services) {
           where: {
             customOrderId: parseInt(id),
             mediaType: 'book',
-            bookTitle: bookTitle,
-            bookAuthor: bookAuthor,
-            bookYear: bookYear ? parseInt(bookYear) : null
+            title: bookTitle,
+            // Use unified Book system to identify duplicates
+            book: bookOpenLibraryId ? {
+              openLibraryId: bookOpenLibraryId
+            } : undefined
           }
         });
       } else if (mediaType === 'shortstory') {
@@ -184,15 +186,6 @@ function createBulkOperationsRoutes(prisma, services) {
           comicCreators: comicVineMetadata.comicPersonCredits || null,  // JSON string with all creator roles
           comicCharacters: comicVineMetadata.comicCharacters || null,   // Character names
           comicStoryArcs: comicVineMetadata.comicConcepts || null,      // Concepts/story arcs
-          // Book fields
-          bookTitle: bookTitle || null,
-          bookAuthor: bookAuthor || null,
-          bookYear: bookYear ? parseInt(bookYear) : null,
-          bookIsbn: bookIsbn || null,
-          bookPublisher: bookPublisher || null,
-          bookOpenLibraryId: bookOpenLibraryId || null,
-          bookCoverUrl: bookCoverUrl || null,
-          bookPageCount: bookPageCount ? parseInt(bookPageCount) : null,
           // Story fields
           storyTitle: storyTitle || null,
           storyAuthor: storyAuthor || null,
