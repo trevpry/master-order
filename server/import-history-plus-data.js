@@ -286,7 +286,26 @@ class HistoryPlusDataImporter {
       .replace(/Γ¼/g, 'ü')
       .replace(/Γ¶/g, 'ö')
       .replace(/ΓëÇ/g, 'é')
-      .replace(/Γä¢/g, 'â');
+      .replace(/Γä¢/g, 'â')
+      // Fix common box drawing character issues
+      .replace(/├Ün─¢/g, 'Ün') // Fix "├Ün─¢tice" -> "Ün" patterns
+      .replace(/├([^─]*?)─¢/g, '$1') // More general pattern for box drawing corrupted text
+      .replace(/├/g, '') // Remove stray left box drawing characters
+      .replace(/─/g, '') // Remove stray horizontal box drawing characters
+      .replace(/¢/g, '') // Remove stray cent symbols used in encoding
+      // Fix accented characters that got corrupted
+      .replace(/Ãœ/g, 'Ü') // Capital U with diaresis
+      .replace(/Ã¼/g, 'ü') // Lowercase u with diaresis
+      .replace(/Ã¡/g, 'á') // Lowercase a with acute
+      .replace(/Ã©/g, 'é') // Lowercase e with acute
+      .replace(/Ã­/g, 'í') // Lowercase i with acute
+      .replace(/Ã³/g, 'ó') // Lowercase o with acute
+      .replace(/Ãº/g, 'ú') // Lowercase u with acute
+      .replace(/Ã±/g, 'ñ') // Lowercase n with tilde
+      .replace(/Ã§/g, 'ç') // Lowercase c with cedilla
+      // Clean up any remaining multiple spaces or weird characters
+      .replace(/\s+/g, ' ') // Multiple spaces to single space
+      .trim();
   }
 
   cleanRecord(record) {
@@ -682,11 +701,11 @@ class HistoryPlusDataImporter {
     // Transform records to match database schema
     const transformedRecords = records.map(record => ({
       id: parseInt(record.id),
-      title: record.title,
+      title: this.cleanTextEncoding(record.title),
       startDate: record.startDate,
       endDate: record.endDate || null,
-      details: record.details || null,
-      category: record.category,
+      details: this.cleanTextEncoding(record.details) || null,
+      category: this.cleanTextEncoding(record.category),
       hidden: record.hidden === 't' || record.hidden === 'true' || record.hidden === true,
       createdAt: new Date(record.createdAt),
       updatedAt: new Date(record.updatedAt)
@@ -771,6 +790,9 @@ class HistoryPlusDataImporter {
       return {
         ...record,
         id: parseInt(record.id),
+        // Clean text fields
+        title: this.cleanTextEncoding(record.title),
+        description: this.cleanTextEncoding(record.description) || null,
         // Map CSV fields to schema fields with validated foreign keys
         eventId: validEventId,
         thumbnailUrl: record.thumbnail || record.thumbnailUrl || null,
@@ -900,12 +922,12 @@ class HistoryPlusDataImporter {
         
         // Prepare book data for unified system
         const bookData = {
-          title: cleanRecord.title || 'Unknown Title',
-          author: cleanRecord.author || null,
+          title: this.cleanTextEncoding(cleanRecord.title) || 'Unknown Title',
+          author: this.cleanTextEncoding(cleanRecord.author) || null,
           isbn: cleanRecord.isbn || null,
-          publisher: cleanRecord.publisher || null,
+          publisher: this.cleanTextEncoding(cleanRecord.publisher) || null,
           publishYear: cleanRecord.publishYear && cleanRecord.publishYear.trim() !== '' ? parseInt(cleanRecord.publishYear) : null,
-          description: cleanRecord.description || null,
+          description: this.cleanTextEncoding(cleanRecord.description) || null,
           coverUrl: cleanRecord.coverUrl || null,
           pageCount: cleanRecord.pageCount && cleanRecord.pageCount.trim() !== '' ? parseInt(cleanRecord.pageCount) : null,
           isHistoryPlusBook: true, // Mark as History Plus book
@@ -1004,13 +1026,22 @@ class HistoryPlusDataImporter {
         
         // Prepare chapter data for unified system
         const chapterData = {
-          title: cleanRecord.title || `Chapter ${cleanRecord.chapterNumber}`,
+          title: this.cleanTextEncoding(cleanRecord.title) || `Chapter ${cleanRecord.chapterNumber}`,
           chapterNumber: parseInt(cleanRecord.chapterNumber),
-          description: cleanRecord.description || null,
+          description: this.cleanTextEncoding(cleanRecord.description) || null,
           pageStart: cleanRecord.pageStart && cleanRecord.pageStart.trim() !== '' ? parseInt(cleanRecord.pageStart) : null,
           pageEnd: cleanRecord.pageEnd && cleanRecord.pageEnd.trim() !== '' ? parseInt(cleanRecord.pageEnd) : null,
-          bookId: unifiedBookId
+          bookId: unifiedBookId,
+          originalHistoryChapterId: parseInt(cleanRecord.id) // Track original ID
         };
+        
+        // Add eventId if present in the source data
+        if (cleanRecord.eventId && cleanRecord.eventId.trim() !== '') {
+          const eventId = parseInt(cleanRecord.eventId);
+          if (!isNaN(eventId)) {
+            chapterData.eventId = eventId;
+          }
+        }
         
         let unifiedChapter;
         if (existingChapter && this.forceImport) {
@@ -1091,14 +1122,23 @@ class HistoryPlusDataImporter {
         
         // Prepare section data for unified system
         const sectionData = {
-          title: cleanRecord.title || `Section ${cleanRecord.sectionNumber}`,
+          title: this.cleanTextEncoding(cleanRecord.title) || `Section ${cleanRecord.sectionNumber}`,
           sectionNumber: parseInt(cleanRecord.sectionNumber),
-          description: cleanRecord.description || null,
+          description: this.cleanTextEncoding(cleanRecord.description) || null,
           pageStart: cleanRecord.pageStart && cleanRecord.pageStart.trim() !== '' ? parseInt(cleanRecord.pageStart) : null,
           pageEnd: cleanRecord.pageEnd && cleanRecord.pageEnd.trim() !== '' ? parseInt(cleanRecord.pageEnd) : null,
-          content: cleanRecord.content || null,
-          chapterId: unifiedChapterId
+          content: this.cleanTextEncoding(cleanRecord.content) || null,
+          chapterId: unifiedChapterId,
+          originalHistorySectionId: parseInt(cleanRecord.id) // Track original ID
         };
+        
+        // Add eventId if present in the source data
+        if (cleanRecord.eventId && cleanRecord.eventId.trim() !== '') {
+          const eventId = parseInt(cleanRecord.eventId);
+          if (!isNaN(eventId)) {
+            sectionData.eventId = eventId;
+          }
+        }
         
         let unifiedSection;
         if (existingSection && this.forceImport) {
@@ -1171,10 +1211,10 @@ class HistoryPlusDataImporter {
       
       return {
         id: parseInt(record.id),
-        name: record.name,
-        handle: record.handle || null,
+        name: this.cleanTextEncoding(record.name),
+        handle: this.cleanTextEncoding(record.handle) || null,
         channelUrl: channelUrl,
-        description: record.description || null,
+        description: this.cleanTextEncoding(record.description) || null,
         subscriberCount: record.subscriberCount ? parseInt(record.subscriberCount) : null,
         verified: record.verified === 't' || record.verified === 'true',
         createdAt: record.createdAt ? new Date(record.createdAt) : new Date(),

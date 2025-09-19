@@ -275,20 +275,37 @@ class BookService {
    */
   async deleteBook(bookId) {
     try {
-      // Check if book is referenced by any custom order items
-      const referencingItems = await this.prisma.customOrderItem.count({
-        where: { bookId }
+      // Get details about referencing items before deletion
+      const referencingItems = await this.prisma.customOrderItem.findMany({
+        where: { bookId },
+        include: {
+          customOrder: {
+            select: { name: true }
+          }
+        }
       });
 
-      if (referencingItems > 0) {
-        throw new Error(`Cannot delete book: ${referencingItems} custom order items reference this book`);
+      if (referencingItems.length > 0) {
+        console.log(`📋 Book ${bookId} is referenced by ${referencingItems.length} custom order items. Deleting them first...`);
+        
+        // Delete all custom order items that reference this book
+        await this.prisma.customOrderItem.deleteMany({
+          where: { bookId }
+        });
+        
+        console.log(`✅ Deleted ${referencingItems.length} custom order items that referenced book ${bookId}`);
+        
+        // Log which custom orders were affected
+        const affectedOrders = [...new Set(referencingItems.map(item => item.customOrder.name))];
+        console.log(`📝 Affected custom orders: ${affectedOrders.join(', ')}`);
       }
 
+      // Delete the book (this will also cascade delete chapters, sections, and completions due to Prisma schema)
       await this.prisma.book.delete({
         where: { id: bookId }
       });
 
-      console.log(`✅ Deleted book (ID: ${bookId})`);
+      console.log(`✅ Deleted book (ID: ${bookId}) and all related data`);
       return true;
     } catch (error) {
       console.error(`Error deleting book ${bookId}:`, error);

@@ -559,6 +559,11 @@ const Books = () => {
             {book.sources?.customOrders && (
               <span className="bg-blue-100 text-blue-800 px-2 py-1 rounded">Custom Order</span>
             )}
+            {book.customOrderItems && book.customOrderItems.length > 0 && (
+              <span className="bg-blue-100 text-blue-800 px-2 py-1 rounded text-xs">
+                📋 Used in {book.customOrderItems.length} order{book.customOrderItems.length !== 1 ? 's' : ''}
+              </span>
+            )}
             {book.sources?.historyPlus && (
               <span className="bg-purple-100 text-purple-800 px-2 py-1 rounded">History Plus</span>
             )}
@@ -1158,6 +1163,26 @@ const Books = () => {
                   Are you sure you want to delete "<strong>{bookToDelete.title}</strong>"
                   {bookToDelete.author && <span> by {bookToDelete.author}</span>}?
                 </p>
+                
+                {bookToDelete.customOrderItems && bookToDelete.customOrderItems.length > 0 && (
+                  <div className="mt-3 p-3 bg-yellow-50 border border-yellow-200 rounded-md">
+                    <div className="flex">
+                      <div className="flex-shrink-0">
+                        <FileText className="w-5 h-5 text-yellow-400" />
+                      </div>
+                      <div className="ml-3">
+                        <h4 className="text-sm font-medium text-yellow-800">
+                          Warning: Book is used in Custom Orders
+                        </h4>
+                        <p className="text-sm text-yellow-700 mt-1">
+                          This book is referenced by {bookToDelete.customOrderItems.length} custom order item(s). 
+                          Deleting it will also remove those items from their custom orders.
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                )}
+                
                 <p className="text-sm text-gray-500 mt-2">
                   This will remove the book from your library and all associated reading progress.
                 </p>
