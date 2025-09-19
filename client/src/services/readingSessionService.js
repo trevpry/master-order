@@ -55,6 +55,14 @@ class ReadingSessionService {
         customOrderItemId: params.customOrderItemId || null
       };
 
+      // Handle History Plus context for chapters and sections
+      if (params.historyPlusContext) {
+        const context = params.historyPlusContext;
+        // Create History Plus seriesTitle format: HISTORY_PLUS:eventId:contentType:contentId:eventTitle
+        requestBody.seriesTitle = `HISTORY_PLUS:${context.eventId}:${context.contentType}:${context.contentId}:${context.eventTitle}`;
+        console.log('📖 Creating History Plus reading session with context:', requestBody.seriesTitle);
+      }
+
       // Add comic-specific fields if this is a comic
       if (params.mediaType === 'comic') {
         requestBody.comicSeries = params.comicSeries;
@@ -118,14 +126,20 @@ class ReadingSessionService {
    */
   async stopSession(progressData = {}) {
     try {
+      console.log('📡 ReadingSessionService.stopSession called with:', progressData);
+      
+      const requestBody = {
+        progress: progressData
+      };
+      
+      console.log('📡 Sending request body:', JSON.stringify(requestBody, null, 2));
+      
       const response = await fetch(`${this.baseUrl}/reading/stop`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'
         },
-        body: JSON.stringify({
-          progress: progressData
-        })
+        body: JSON.stringify(requestBody)
       });
 
       const data = await response.json();

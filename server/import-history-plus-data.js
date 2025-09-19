@@ -956,7 +956,6 @@ class HistoryPlusDataImporter {
               data: {
                 bookId: unifiedBook.id,
                 eventId: validEventId,
-                linkType: 'FEATURED_IN', // Default link type
                 createdAt: new Date()
               }
             });
@@ -1452,7 +1451,7 @@ class HistoryPlusDataImporter {
           bookId: unifiedBookId,
           isCompleted: isCompleted,
           completedAt: isCompleted && cleanRecord.readDate ? new Date(cleanRecord.readDate) : null,
-          progressPercentage: isCompleted ? 100.0 : 0.0
+          percentRead: isCompleted ? 100.0 : 0.0
         };
         
         if (existingCompletion && this.forceImport) {
@@ -1514,7 +1513,7 @@ class HistoryPlusDataImporter {
         }
         
         // Check if completion already exists
-        const existingCompletion = await this.targetPrisma.bookCompletion.findFirst({
+        const existingCompletion = await this.targetPrisma.chapterCompletion.findFirst({
           where: {
             chapterId: unifiedChapterId
           }
@@ -1528,10 +1527,10 @@ class HistoryPlusDataImporter {
           continue;
         }
         
-        // Get the book ID for this chapter to ensure proper completion tracking
+        // Verify the chapter exists in the unified system
         const chapter = await this.targetPrisma.bookChapter.findUnique({
           where: { id: unifiedChapterId },
-          select: { bookId: true }
+          select: { id: true }
         });
         
         if (!chapter) {
@@ -1542,23 +1541,21 @@ class HistoryPlusDataImporter {
         
         // Prepare completion data
         const completionData = {
-          bookId: chapter.bookId,
           chapterId: unifiedChapterId,
           isCompleted: isCompleted,
-          completedAt: isCompleted && cleanRecord.readDate ? new Date(cleanRecord.readDate) : null,
-          progressPercentage: isCompleted ? 100.0 : 0.0
+          completedAt: isCompleted && cleanRecord.readDate ? new Date(cleanRecord.readDate) : null
         };
         
         if (existingCompletion && this.forceImport) {
           // Update existing completion
-          await this.targetPrisma.bookCompletion.update({
+          await this.targetPrisma.chapterCompletion.update({
             where: { id: existingCompletion.id },
             data: completionData
           });
           console.log(`   🔄 Updated chapter completion for chapter ID ${unifiedChapterId} (completed: ${isCompleted})`);
         } else {
           // Create new completion
-          await this.targetPrisma.bookCompletion.create({
+          await this.targetPrisma.chapterCompletion.create({
             data: completionData
           });
           console.log(`   ✅ Created chapter completion for chapter ID ${unifiedChapterId} (completed: ${isCompleted})`);
@@ -1608,7 +1605,7 @@ class HistoryPlusDataImporter {
         }
         
         // Check if completion already exists
-        const existingCompletion = await this.targetPrisma.bookCompletion.findFirst({
+        const existingCompletion = await this.targetPrisma.sectionCompletion.findFirst({
           where: {
             sectionId: unifiedSectionId
           }
@@ -1622,42 +1619,35 @@ class HistoryPlusDataImporter {
           continue;
         }
         
-        // Get the book and chapter IDs for this section to ensure proper completion tracking
+        // Verify the section exists in the unified system
         const section = await this.targetPrisma.bookSection.findUnique({
           where: { id: unifiedSectionId },
-          include: {
-            chapter: {
-              select: { bookId: true }
-            }
-          }
+          select: { id: true }
         });
         
-        if (!section || !section.chapter) {
-          console.warn(`   ⚠️  Section ${unifiedSectionId} or its chapter not found in unified system, skipping`);
+        if (!section) {
+          console.warn(`   ⚠️  Section ${unifiedSectionId} not found in unified system, skipping`);
           skippedCount++;
           continue;
         }
         
         // Prepare completion data
         const completionData = {
-          bookId: section.chapter.bookId,
-          chapterId: section.chapterId,
           sectionId: unifiedSectionId,
           isCompleted: isCompleted,
-          completedAt: isCompleted && cleanRecord.readDate ? new Date(cleanRecord.readDate) : null,
-          progressPercentage: isCompleted ? 100.0 : 0.0
+          completedAt: isCompleted && cleanRecord.readDate ? new Date(cleanRecord.readDate) : null
         };
         
         if (existingCompletion && this.forceImport) {
           // Update existing completion
-          await this.targetPrisma.bookCompletion.update({
+          await this.targetPrisma.sectionCompletion.update({
             where: { id: existingCompletion.id },
             data: completionData
           });
           console.log(`   🔄 Updated section completion for section ID ${unifiedSectionId} (completed: ${isCompleted})`);
         } else {
           // Create new completion
-          await this.targetPrisma.bookCompletion.create({
+          await this.targetPrisma.sectionCompletion.create({
             data: completionData
           });
           console.log(`   ✅ Created section completion for section ID ${unifiedSectionId} (completed: ${isCompleted})`);

@@ -141,14 +141,6 @@ const HistoryPlusHome = () => {
                   </div>
                 </Link>
                 
-                <Link to="/history-plus/books" className="action-card">
-                  <span className="action-icon">📚</span>
-                  <div className="action-content">
-                    <h3>Books</h3>
-                    <p>Manage your book collection</p>
-                  </div>
-                </Link>
-                
                 <button 
                   className="action-card"
                   onClick={() => setCurrentView('events')}
@@ -230,21 +222,6 @@ const HistoryPlusHome = () => {
                       <h4>{event.title}</h4>
                       <p>{event.category} • {event.startDate}</p>
                       {event.details && <p className="result-details">{event.details.substring(0, 100)}...</p>}
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {searchResults.books?.length > 0 && (
-              <div className="search-section">
-                <h3>Books ({searchResults.books.length})</h3>
-                <div className="search-results-grid">
-                  {searchResults.books.map(book => (
-                    <div key={book.id} className="search-result-card">
-                      <h4>{book.title}</h4>
-                      <p>by {book.author}</p>
-                      {book.event && <p className="result-event">Event: {book.event.title}</p>}
                     </div>
                   ))}
                 </div>

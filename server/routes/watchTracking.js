@@ -374,7 +374,9 @@ router.post('/reading/pause', asyncHandler(async (req, res) => {
 // Stop the active reading session
 router.post('/reading/stop', asyncHandler(async (req, res) => {
   console.log('Attempting to stop reading session...');
+  console.log('🔍 Request body received:', JSON.stringify(req.body, null, 2));
   const { progress } = req.body;
+  console.log('🔍 Extracted progress:', progress);
   
   // Find the active reading session
   const activeSession = await watchLogService.getActiveReadingSession();
@@ -392,54 +394,159 @@ router.post('/reading/stop', asyncHandler(async (req, res) => {
   const completedSession = await watchLogService.stopReading(activeSession.id);
   
   // Update reading progress if provided and session wasn't deleted
-  if (progress && !completedSession.deleted && activeSession.customOrderItemId) {
-    console.log('Updating reading progress for item:', activeSession.customOrderItemId, progress);
+  if (progress && !completedSession.deleted) {
+    console.log('Updating reading progress for session. Progress data:', progress);
+    console.log('Session details - customOrderItemId:', activeSession.customOrderItemId, 'seriesTitle:', activeSession.seriesTitle);
     
     try {
-      // Get the CustomOrderItem to find the associated bookId and mediaType
-      const customOrderItem = await prisma.customOrderItem.findUnique({
-        where: { id: activeSession.customOrderItemId },
-        select: { 
-          bookId: true,
-          title: true,
-          mediaType: true
-        }
-      });
-
-      if (!customOrderItem) {
-        console.error('CustomOrderItem not found:', activeSession.customOrderItemId);
-        throw new Error('CustomOrderItem not found');
-      }
-
-      // Handle progress updates based on media type
-      if (customOrderItem.mediaType === 'book' && customOrderItem.bookId) {
-        // Books: Use unified BookCompletion system
-        console.log('Updating unified BookCompletion for book:', customOrderItem.bookId);
+      // Check if this is a History Plus chapter/section session
+      const isHistoryPlusSession = activeSession.seriesTitle && activeSession.seriesTitle.startsWith('HISTORY_PLUS:');
+      
+      if (isHistoryPlusSession) {
+        console.log('🏛️ Detected History Plus reading session - processing chapter/section progress...');
         
-        const sessionData = {};
-        
-        if (progress.currentPage !== undefined && progress.currentPage > 0) {
-          sessionData.currentPage = progress.currentPage;
-        }
-        
-        const readPercentage = progress.readPercentage !== undefined ? progress.readPercentage : progress.percentComplete;
-        if (readPercentage !== undefined && readPercentage >= 0 && readPercentage <= 100) {
-          sessionData.percentRead = readPercentage;
+        // Parse History Plus context from seriesTitle format: HISTORY_PLUS:eventId:contentType:contentId:eventTitle
+        const contextParts = activeSession.seriesTitle.split(':');
+        if (contextParts.length >= 4) {
+          const [prefix, eventId, contentType, contentId, ...eventTitleParts] = contextParts;
+          console.log(`📖 History Plus context: contentType=${contentType}, contentId=${contentId}`);
           
-          // Mark as completed if 100%
-          if (readPercentage === 100) {
-            sessionData.isCompleted = true;
-            console.log('Marking book as completed (100% reading progress)');
+          // For chapters and sections, update the parent book's progress
+          if (contentType === 'chapter' || contentType === 'section') {
+            let parentBookId = null;
+            
+            if (contentType === 'chapter') {
+              // Get the book ID from the chapter
+              const chapter = await prisma.bookChapter.findUnique({
+                where: { id: parseInt(contentId) },
+                select: { bookId: true }
+              });
+              parentBookId = chapter?.bookId;
+              console.log(`📖 Found parent book ID ${parentBookId} for chapter ${contentId}`);
+            } else if (contentType === 'section') {
+              // Get the book ID from the section via chapter
+              const section = await prisma.bookSection.findUnique({
+                where: { id: parseInt(contentId) },
+                include: { chapter: { select: { bookId: true } } }
+              });
+              parentBookId = section?.chapter?.bookId;
+              console.log(`📖 Found parent book ID ${parentBookId} for section ${contentId}`);
+            }
+            
+            if (parentBookId) {
+              console.log(`📚 Updating parent book ${parentBookId} progress from ${contentType} reading session`);
+              
+              const sessionData = {};
+              
+              if (progress.currentPage !== undefined && progress.currentPage > 0) {
+                sessionData.currentPage = progress.currentPage;
+              }
+              
+              const readPercentage = progress.readPercentage !== undefined ? progress.readPercentage : progress.percentComplete;
+              if (readPercentage !== undefined && readPercentage >= 0 && readPercentage <= 100) {
+                sessionData.percentRead = readPercentage;
+                
+                // Mark as completed if 100%
+                if (readPercentage === 100) {
+                  sessionData.isCompleted = true;
+                  console.log('Marking parent book as completed (100% reading progress)');
+                }
+              }
+              
+              // Update the unified BookCompletion system for the parent book
+              await bookCompletionService.updateProgressFromSession(parentBookId, sessionData);
+              console.log(`✅ Updated parent book ${parentBookId} progress from History Plus ${contentType} session`);
+              
+              // Also mark the specific chapter/section as completed if 100%
+              if (readPercentage === 100) {
+                if (contentType === 'chapter') {
+                  await bookCompletionService.markChapterCompleted(parseInt(contentId));
+                  console.log(`✅ Marked chapter ${contentId} as completed`);
+                } else if (contentType === 'section') {
+                  await bookCompletionService.markSectionCompleted(parseInt(contentId));
+                  console.log(`✅ Marked section ${contentId} as completed`);
+                }
+              }
+            } else {
+              console.warn(`⚠️ Could not find parent book ID for ${contentType} ${contentId}`);
+            }
+          } else if (contentType === 'book') {
+            // Direct book reading session - update the book itself
+            const bookId = parseInt(contentId);
+            console.log(`📚 Updating direct book ${bookId} progress from History Plus book session`);
+            
+            const sessionData = {};
+            
+            if (progress.currentPage !== undefined && progress.currentPage > 0) {
+              sessionData.currentPage = progress.currentPage;
+            }
+            
+            const readPercentage = progress.readPercentage !== undefined ? progress.readPercentage : progress.percentComplete;
+            if (readPercentage !== undefined && readPercentage >= 0 && readPercentage <= 100) {
+              sessionData.percentRead = readPercentage;
+              
+              // Mark as completed if 100%
+              if (readPercentage === 100) {
+                sessionData.isCompleted = true;
+                console.log('Marking book as completed (100% reading progress)');
+              }
+            }
+            
+            // Update the unified BookCompletion system
+            await bookCompletionService.updateProgressFromSession(bookId, sessionData);
+            console.log(`✅ Updated book ${bookId} progress from History Plus book session`);
           }
+        } else {
+          console.warn('⚠️ Invalid History Plus context format in seriesTitle:', activeSession.seriesTitle);
         }
+      } else if (activeSession.customOrderItemId) {
+        // Regular custom order session - use existing logic
+        console.log('📦 Processing regular custom order reading session...');
         
-        if (progress.totalPages !== undefined && progress.totalPages > 0) {
-          sessionData.totalPages = progress.totalPages;
+        // Get the CustomOrderItem to find the associated bookId and mediaType
+        const customOrderItem = await prisma.customOrderItem.findUnique({
+          where: { id: activeSession.customOrderItemId },
+          select: { 
+            bookId: true,
+            title: true,
+            mediaType: true
+          }
+        });
+
+        if (!customOrderItem) {
+          console.error('CustomOrderItem not found:', activeSession.customOrderItemId);
+          throw new Error('CustomOrderItem not found');
         }
 
-        // Update the unified BookCompletion system
-        await bookCompletionService.updateProgressFromSession(customOrderItem.bookId, sessionData);
-        console.log('Unified BookCompletion updated successfully for book:', customOrderItem.bookId);
+        // Handle progress updates based on media type
+        if (customOrderItem.mediaType === 'book' && customOrderItem.bookId) {
+          // Books: Use unified BookCompletion system
+          console.log('Updating unified BookCompletion for book:', customOrderItem.bookId);
+          
+          const sessionData = {};
+          
+          if (progress.currentPage !== undefined && progress.currentPage > 0) {
+            sessionData.currentPage = progress.currentPage;
+          }
+          
+          const readPercentage = progress.readPercentage !== undefined ? progress.readPercentage : progress.percentComplete;
+          if (readPercentage !== undefined && readPercentage >= 0 && readPercentage <= 100) {
+            sessionData.percentRead = readPercentage;
+            
+            // Mark as completed if 100%
+            if (readPercentage === 100) {
+              sessionData.isCompleted = true;
+              console.log('Marking book as completed (100% reading progress)');
+            }
+          }
+          
+          if (progress.totalPages !== undefined && progress.totalPages > 0) {
+            sessionData.totalPages = progress.totalPages;
+          }
+
+          // Update the unified BookCompletion system
+          await bookCompletionService.updateProgressFromSession(customOrderItem.bookId, sessionData);
+          console.log('Unified BookCompletion updated successfully for book:', customOrderItem.bookId);
         
         // Ensure Book record has correct pageCount (migrate from CustomOrderItem if needed)
         if (progress.totalPages !== undefined && progress.totalPages > 0) {
@@ -508,6 +615,9 @@ router.post('/reading/stop', asyncHandler(async (req, res) => {
         });
         
         console.log('Updated CustomOrderItem isWatched status');
+      }
+      } else {
+        console.log('⚠️ No customOrderItemId found - skipping custom order progress updates');
       }
     } catch (progressError) {
       console.error('Error updating reading progress:', progressError);

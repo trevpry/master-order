@@ -176,57 +176,6 @@ router.get('/events/:id/progress', asyncHandler(async (req, res) => {
 }));
 
 // ==========================================
-// BOOKS ROUTES
-// ==========================================
-
-// GET /api/history-plus/books
-router.get('/books', asyncHandler(async (req, res) => {
-  const books = await historyPlusService.getAllBooks();
-  sendSuccess(res, { books });
-}));
-
-// GET /api/history-plus/events/:eventId/books
-router.get('/events/:eventId/books', asyncHandler(async (req, res) => {
-  const books = await historyPlusService.getBooksByEvent(req.params.eventId);
-  sendSuccess(res, books);
-}));
-
-// GET /api/history-plus/books/:id
-router.get('/books/:id', asyncHandler(async (req, res) => {
-  const book = await historyPlusService.getBookById(req.params.id);
-  if (!book) {
-    return sendBadRequest(res, 'Book not found');
-  }
-  sendSuccess(res, book);
-}));
-
-// POST /api/history-plus/books
-router.post('/books', asyncHandler(async (req, res) => {
-  validateRequiredFields(req.body, ['title', 'author']);
-  
-  const book = await historyPlusService.createBook(req.body);
-  sendSuccess(res, book);
-}));
-
-// PUT /api/history-plus/books/:id
-router.put('/books/:id', asyncHandler(async (req, res) => {
-  const book = await historyPlusService.updateBook(req.params.id, req.body);
-  sendSuccess(res, book);
-}));
-
-// DELETE /api/history-plus/books/:id
-router.delete('/books/:id', asyncHandler(async (req, res) => {
-  await historyPlusService.deleteBook(req.params.id);
-  sendSuccess(res, { message: 'Book deleted successfully' });
-}));
-
-// POST /api/history-plus/books/:id/toggle-read
-router.post('/books/:id/toggle-read', asyncHandler(async (req, res) => {
-  const read = await historyPlusService.toggleBookRead(req.params.id);
-  sendSuccess(res, read);
-}));
-
-// ==========================================
 // CHAPTERS ROUTES
 // ==========================================
 

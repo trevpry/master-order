@@ -1,4 +1,5 @@
 const { PrismaClient } = require('@prisma/client');
+const BookCompletionService = require('./BookCompletionService');
 
 /**
  * History Plus Service - Business logic for historical content management
@@ -7,6 +8,7 @@ const { PrismaClient } = require('@prisma/client');
 class HistoryPlusService {
   constructor() {
     this.prisma = new PrismaClient();
+    this.completionService = new BookCompletionService(this.prisma);
   }
 
   // ==========================================
@@ -17,32 +19,42 @@ class HistoryPlusService {
     const events = await this.prisma.historicalEvent.findMany({
       where: { hidden: false },
       include: {
-        books: {
+        // NEW: Unified book system relationships only
+        bookLinks: {
           include: {
-            chapters: {
+            book: {
               include: {
-                sections: true,
-                user_chapter_reads: true
+                bookCompletions: {
+                  where: { userId: "default" }
+                },
+                chapters: {
+                  include: {
+                    sections: true
+                  }
+                }
               }
-            },
-            user_book_reads: true
+            }
           }
         },
-        chapters: {
+        bookChapters: {
           include: {
             book: true,
-            sections: true,
-            user_chapter_reads: true
+            chapterCompletions: {
+              where: { userId: "default" }
+            },
+            sections: true
           }
         },
-        sections: {
+        bookSections: {
           include: {
             chapter: {
               include: {
                 book: true
               }
             },
-            user_section_reads: true
+            sectionCompletions: {
+              where: { userId: "default" }
+            }
           }
         },
         videos: {
@@ -57,58 +69,82 @@ class HistoryPlusService {
     });
 
     // Map user_event_reviews to reviewed property for frontend compatibility
-    return events.map(event => ({
-      ...event,
-      reviewed: event.user_event_reviews?.reviewed || false,
-      videos: event.videos?.map(video => ({
-        ...video,
-        watched: video.user_video_watches?.watched || false
-      })) || [],
-      books: event.books?.map(book => ({
-        ...book,
-        read: book.user_book_reads?.read || false
-      })) || [],
-      chapters: event.chapters?.map(chapter => ({
+    return events.map(event => {
+      // Only use unified books now
+      const unifiedBooks = (event.bookLinks || []).map(bookLink => ({
+        ...bookLink.book,
+        read: bookLink.book.bookCompletions?.[0]?.isCompleted || false,
+        source: 'unified'
+      }));
+
+      // Only use unified chapters now
+      const unifiedChapters = (event.bookChapters || []).map(chapter => ({
         ...chapter,
-        read: chapter.user_chapter_reads?.read || false
-      })) || [],
-      sections: event.sections?.map(section => ({
+        read: chapter.chapterCompletions?.[0]?.isCompleted || false,
+        source: 'unified'
+      }));
+
+      // Only use unified sections now
+      const unifiedSections = (event.bookSections || []).map(section => ({
         ...section,
-        read: section.user_section_reads?.read || false
-      })) || []
-    }));
+        read: section.sectionCompletions?.[0]?.isCompleted || false,
+        source: 'unified'
+      }));
+
+      return {
+        ...event,
+        reviewed: event.user_event_reviews?.reviewed || false,
+        videos: event.videos?.map(video => ({
+          ...video,
+          watched: video.user_video_watches?.watched || false
+        })) || [],
+        books: unifiedBooks,
+        chapters: unifiedChapters,
+        sections: unifiedSections
+      };
+    });
   }
 
   async getEventById(id) {
     const event = await this.prisma.historicalEvent.findUnique({
       where: { id: parseInt(id) },
       include: {
-        books: {
+        // NEW: Unified book system relationships only
+        bookLinks: {
           include: {
-            chapters: {
+            book: {
               include: {
-                sections: true,
-                user_chapter_reads: true
+                bookCompletions: {
+                  where: { userId: "default" }
+                },
+                chapters: {
+                  include: {
+                    sections: true
+                  }
+                }
               }
-            },
-            user_book_reads: true
+            }
           }
         },
-        chapters: {
+        bookChapters: {
           include: {
             book: true,
-            sections: true,
-            user_chapter_reads: true
+            chapterCompletions: {
+              where: { userId: "default" }
+            },
+            sections: true
           }
         },
-        sections: {
+        bookSections: {
           include: {
             chapter: {
               include: {
                 book: true
               }
             },
-            user_section_reads: true
+            sectionCompletions: {
+              where: { userId: "default" }
+            }
           }
         },
         videos: {
@@ -123,6 +159,27 @@ class HistoryPlusService {
 
     if (!event) return null;
 
+    // Only use unified books now
+    const unifiedBooks = (event.bookLinks || []).map(bookLink => ({
+      ...bookLink.book,
+      read: bookLink.book.bookCompletions?.[0]?.isCompleted || false,
+      source: 'unified'
+    }));
+
+    // Only use unified chapters now
+    const unifiedChapters = (event.bookChapters || []).map(chapter => ({
+      ...chapter,
+      read: chapter.chapterCompletions?.[0]?.isCompleted || false,
+      source: 'unified'
+    }));
+
+    // Only use unified sections now
+    const unifiedSections = (event.bookSections || []).map(section => ({
+      ...section,
+      read: section.sectionCompletions?.[0]?.isCompleted || false,
+      source: 'unified'
+    }));
+
     // Map user_event_reviews to reviewed property for frontend compatibility
     return {
       ...event,
@@ -131,18 +188,9 @@ class HistoryPlusService {
         ...video,
         watched: video.user_video_watches?.watched || false
       })) || [],
-      books: event.books?.map(book => ({
-        ...book,
-        read: book.user_book_reads?.read || false
-      })) || [],
-      chapters: event.chapters?.map(chapter => ({
-        ...chapter,
-        read: chapter.user_chapter_reads?.read || false
-      })) || [],
-      sections: event.sections?.map(section => ({
-        ...section,
-        read: section.user_section_reads?.read || false
-      })) || []
+      books: unifiedBooks,
+      chapters: unifiedChapters,
+      sections: unifiedSections
     };
   }
 
@@ -255,23 +303,29 @@ class HistoryPlusService {
   }
 
   // ==========================================
-  // BOOKS & CHAPTERS
+  // VIDEOS & CHANNELS
   // ==========================================
 
-  async getAllBooks() {
+  async getVideosByEvent(eventId) {
     const books = await this.prisma.historyBook.findMany({
       include: {
         chapters: {
           include: {
             sections: {
               include: {
-                user_section_reads: true
+                sectionCompletions: {
+                  where: { userId: "default" }
+                }
               }
             },
-            user_chapter_reads: true
+            chapterCompletions: {
+              where: { userId: "default" }
+            }
           }
         },
-        user_book_reads: true,
+        bookCompletions: {
+          where: { userId: "default" }
+        },
         event: true
       },
       orderBy: { createdAt: 'desc' }
@@ -282,7 +336,7 @@ class HistoryPlusService {
       const chapters = book.chapters || [];
       const chaptersTotal = chapters.length;
       const chaptersRead = chapters.filter(chapter => 
-        chapter.user_chapter_reads && chapter.user_chapter_reads.read
+        chapter.chapterCompletions && chapter.chapterCompletions.length > 0 && chapter.chapterCompletions[0].isCompleted
       ).length;
       
       const sectionsTotal = chapters.reduce((sum, chapter) => {
@@ -292,12 +346,12 @@ class HistoryPlusService {
       const sectionsRead = chapters.reduce((sum, chapter) => {
         const sections = chapter.sections || [];
         return sum + sections.filter(section => 
-          section.user_section_reads && section.user_section_reads.read
+          section.sectionCompletions && section.sectionCompletions.length > 0 && section.sectionCompletions[0].isCompleted
         ).length;
       }, 0);
 
       const progressPercentage = sectionsTotal > 0 ? Math.round((sectionsRead / sectionsTotal) * 100) : 0;
-      const read = book.user_book_reads && book.user_book_reads.read;
+      const read = book.bookCompletions && book.bookCompletions.length > 0 && book.bookCompletions[0].isCompleted;
 
       return {
         ...book,
@@ -322,10 +376,14 @@ class HistoryPlusService {
         chapters: {
           include: {
             sections: true,
-            user_chapter_reads: true
+            chapterCompletions: {
+              where: { userId: "default" }
+            }
           }
         },
-        user_book_reads: true
+        bookCompletions: {
+          where: { userId: "default" }
+        }
       }
     });
   }
@@ -338,13 +396,19 @@ class HistoryPlusService {
           include: {
             sections: {
               include: {
-                user_section_reads: true
+                sectionCompletions: {
+                  where: { userId: "default" }
+                }
               }
             },
-            user_chapter_reads: true
+            chapterCompletions: {
+              where: { userId: "default" }
+            }
           }
         },
-        user_book_reads: true,
+        bookCompletions: {
+          where: { userId: "default" }
+        },
         event: true
       }
     });
@@ -357,12 +421,12 @@ class HistoryPlusService {
       const sections = chapter.sections || [];
       const sectionsWithReadStatus = sections.map(section => ({
         ...section,
-        read: section.user_section_reads && section.user_section_reads.read
+        read: section.sectionCompletions && section.sectionCompletions.length > 0 && section.sectionCompletions[0].isCompleted
       }));
 
       return {
         ...chapter,
-        read: chapter.user_chapter_reads && chapter.user_chapter_reads.read,
+        read: chapter.chapterCompletions && chapter.chapterCompletions.length > 0 && chapter.chapterCompletions[0].isCompleted,
         sections: sectionsWithReadStatus,
         _count: { sections: sectionsWithReadStatus.length }
       };
@@ -371,7 +435,7 @@ class HistoryPlusService {
     // Map book read status
     return {
       ...book,
-      read: book.user_book_reads && book.user_book_reads.read,
+      read: book.bookCompletions && book.bookCompletions.length > 0 && book.bookCompletions[0].isCompleted,
       chapters: chaptersWithReadStatus
     };
   }
@@ -457,10 +521,14 @@ class HistoryPlusService {
       include: {
         sections: {
           include: {
-            user_section_reads: true
+            sectionCompletions: {
+              where: { userId: "default" }
+            }
           }
         },
-        user_chapter_reads: true,
+        chapterCompletions: {
+          where: { userId: "default" }
+        },
         book: true,
         event: true
       }
@@ -472,13 +540,13 @@ class HistoryPlusService {
     const sections = chapter.sections || [];
     const sectionsWithReadStatus = sections.map(section => ({
       ...section,
-      read: section.user_section_reads && section.user_section_reads.read
+      read: section.sectionCompletions && section.sectionCompletions.length > 0 && section.sectionCompletions[0].isCompleted
     }));
 
     // Map chapter read status
     return {
       ...chapter,
-      read: chapter.user_chapter_reads && chapter.user_chapter_reads.read,
+      read: chapter.chapterCompletions && chapter.chapterCompletions.length > 0 && chapter.chapterCompletions[0].isCompleted,
       sections: sectionsWithReadStatus
     };
   }
@@ -895,14 +963,37 @@ class HistoryPlusService {
           videos: {
             include: { user_video_watches: true }
           },
-          books: {
-            include: { user_book_reads: true }
+          // NEW: Unified book system relationships only
+          bookLinks: {
+            include: {
+              book: {
+                include: { 
+                  bookCompletions: {
+                    where: { userId: "default" }
+                  }
+                }
+              }
+            }
           },
-          chapters: {
-            include: { user_chapter_reads: true }
+          bookChapters: {
+            include: { 
+              chapterCompletions: {
+                where: { userId: "default" }
+              },
+              book: true  // Include parent book for cover art and author
+            }
           },
-          sections: {
-            include: { user_section_reads: true }
+          bookSections: {
+            include: { 
+              sectionCompletions: {
+                where: { userId: "default" }
+              },
+              chapter: {
+                include: {
+                  book: true  // Include parent book for cover art and author
+                }
+              }
+            }
           },
           user_event_reviews: true
         }
@@ -918,28 +1009,29 @@ class HistoryPlusService {
         !video.user_video_watches || !video.user_video_watches.watched
       );
       
-      // Check for any unread books
-      const unreadBooks = event.books.filter(book =>
-        !book.user_book_reads || !book.user_book_reads.read
+      // Check for any unread unified books (via bookLinks)
+      const unreadUnifiedBooks = event.bookLinks.filter(bookLink =>
+        !bookLink.book.bookCompletions?.[0]?.isCompleted
       );
       
-      // Check for any unread chapters
-      const unreadChapters = event.chapters.filter(chapter =>
-        !chapter.user_chapter_reads || !chapter.user_chapter_reads.read
+      // Check for any unread unified chapters
+      const unreadUnifiedChapters = event.bookChapters.filter(chapter =>
+        !chapter.chapterCompletions?.[0]?.isCompleted
       );
       
-      // Check for any unread sections
-      const unreadSections = event.sections.filter(section =>
-        !section.user_section_reads || !section.user_section_reads.read
+      // Check for any unread unified sections
+      const unreadUnifiedSections = event.bookSections.filter(section =>
+        !section.sectionCompletions?.[0]?.isCompleted
       );
       
-      const totalUnconsumed = unwatchedVideos.length + unreadBooks.length + unreadChapters.length + unreadSections.length;
+      // Calculate totals
+      const totalUnconsumed = unwatchedVideos.length + unreadUnifiedBooks.length + unreadUnifiedChapters.length + unreadUnifiedSections.length;
       
       console.log(`📊 Event "${event.title}" status:`, {
         unwatchedVideos: unwatchedVideos.length,
-        unreadBooks: unreadBooks.length, 
-        unreadChapters: unreadChapters.length,
-        unreadSections: unreadSections.length,
+        unreadBooks: unreadUnifiedBooks.length,
+        unreadChapters: unreadUnifiedChapters.length,
+        unreadSections: unreadUnifiedSections.length,
         totalUnconsumed
       });
       
@@ -959,101 +1051,101 @@ class HistoryPlusService {
   }
 
   async markBookRead(bookId) {
-    return await this.prisma.user_book_reads.upsert({
-      where: { bookId: parseInt(bookId) },
-      update: { read: true, readAt: new Date() },
-      create: { 
-        bookId: parseInt(bookId), 
-        read: true, 
-        readAt: new Date() 
-      }
-    });
+    return await this.completionService.markBookCompleted(parseInt(bookId));
   }
 
   async toggleBookRead(bookId) {
-    const existing = await this.prisma.user_book_reads.findUnique({
-      where: { bookId: parseInt(bookId) }
-    });
-
-    if (existing) {
-      return await this.prisma.user_book_reads.update({
-        where: { bookId: parseInt(bookId) },
-        data: { read: !existing.read, readAt: existing.read ? null : new Date() }
+    const bookIdInt = parseInt(bookId);
+    
+    // Get current completion status
+    const currentCompletion = await this.completionService.getOrCreateBookCompletion(bookIdInt);
+    const isCurrentlyCompleted = currentCompletion && currentCompletion.isCompleted;
+    
+    if (isCurrentlyCompleted) {
+      // Mark as not completed
+      return await this.completionService.updateBookProgress(bookIdInt, {
+        isCompleted: false,
+        percentRead: 0
       });
     } else {
-      return await this.prisma.user_book_reads.create({
-        data: { 
-          bookId: parseInt(bookId), 
-          read: true, 
-          readAt: new Date() 
-        }
-      });
+      // Mark as completed
+      return await this.completionService.markBookCompleted(bookIdInt);
     }
   }
 
   async markChapterRead(chapterId) {
-    return await this.prisma.user_chapter_reads.upsert({
-      where: { chapterId: parseInt(chapterId) },
-      update: { read: true, readAt: new Date() },
-      create: { 
-        chapterId: parseInt(chapterId), 
-        read: true, 
-        readAt: new Date() 
-      }
-    });
+    return await this.completionService.markChapterCompleted(parseInt(chapterId));
   }
 
   async toggleChapterRead(chapterId) {
-    const existing = await this.prisma.user_chapter_reads.findUnique({
-      where: { chapterId: parseInt(chapterId) }
-    });
-
-    if (existing) {
-      return await this.prisma.user_chapter_reads.update({
-        where: { chapterId: parseInt(chapterId) },
-        data: { read: !existing.read, readAt: existing.read ? null : new Date() }
-      });
-    } else {
-      return await this.prisma.user_chapter_reads.create({
-        data: { 
-          chapterId: parseInt(chapterId), 
-          read: true, 
-          readAt: new Date() 
+    const chapterIdInt = parseInt(chapterId);
+    
+    // Get current completion status
+    const currentCompletion = await this.completionService.getChapterCompletion(chapterIdInt);
+    const isCurrentlyCompleted = currentCompletion && currentCompletion.isCompleted;
+    
+    if (isCurrentlyCompleted) {
+      // Mark as not completed by creating/updating with isCompleted: false
+      return await this.prisma.chapterCompletion.upsert({
+        where: {
+          chapterId_userId: {
+            chapterId: chapterIdInt,
+            userId: "default"
+          }
+        },
+        create: {
+          chapterId: chapterIdInt,
+          userId: "default",
+          isCompleted: false,
+          completedAt: null
+        },
+        update: {
+          isCompleted: false,
+          completedAt: null,
+          updatedAt: new Date()
         }
       });
+    } else {
+      // Mark as completed
+      return await this.completionService.markChapterCompleted(chapterIdInt);
     }
   }
 
   async markSectionRead(sectionId) {
-    return await this.prisma.user_section_reads.upsert({
-      where: { sectionId: parseInt(sectionId) },
-      update: { read: true, readAt: new Date() },
-      create: { 
-        sectionId: parseInt(sectionId), 
-        read: true, 
-        readAt: new Date() 
-      }
-    });
+    return await this.completionService.markSectionCompleted(parseInt(sectionId));
   }
 
   async toggleSectionRead(sectionId) {
-    const existing = await this.prisma.user_section_reads.findUnique({
-      where: { sectionId: parseInt(sectionId) }
-    });
-
-    if (existing) {
-      return await this.prisma.user_section_reads.update({
-        where: { sectionId: parseInt(sectionId) },
-        data: { read: !existing.read, readAt: existing.read ? null : new Date() }
-      });
-    } else {
-      return await this.prisma.user_section_reads.create({
-        data: { 
-          sectionId: parseInt(sectionId), 
-          read: true, 
-          readAt: new Date() 
+    const sectionIdInt = parseInt(sectionId);
+    
+    // Get current completion status
+    const currentCompletion = await this.completionService.getSectionCompletion(sectionIdInt);
+    const isCurrentlyCompleted = currentCompletion && currentCompletion.isCompleted;
+    
+    if (isCurrentlyCompleted) {
+      // Mark as not completed by creating/updating with isCompleted: false
+      return await this.prisma.sectionCompletion.upsert({
+        where: {
+          sectionId_userId: {
+            sectionId: sectionIdInt,
+            userId: "default"
+          }
+        },
+        create: {
+          sectionId: sectionIdInt,
+          userId: "default",
+          isCompleted: false,
+          completedAt: null
+        },
+        update: {
+          isCompleted: false,
+          completedAt: null,
+          updatedAt: new Date()
         }
       });
+    } else {
+      // Mark as completed
+      return await this.completionService.markSectionCompleted(sectionIdInt);
     }
   }
 
@@ -1068,18 +1160,19 @@ class HistoryPlusService {
     let totalItems = 0;
     let completedItems = 0;
 
-    // Count books and their completion status
-    for (const book of event.books) {
+    // Count books and their completion status through bookLinks
+    for (const bookLink of event.bookLinks || []) {
+      const book = bookLink.book;
       totalItems++;
-      if (book.user_book_reads.length > 0 && book.user_book_reads[0].read) {
+      if (book.bookCompletions && book.bookCompletions.length > 0 && book.bookCompletions[0].isCompleted) {
         completedItems++;
       }
     }
 
     // Count videos and their completion status
-    for (const video of event.videos) {
+    for (const video of event.videos || []) {
       totalItems++;
-      if (video.user_video_watches.length > 0 && video.user_video_watches[0].watched) {
+      if (video.user_video_watches && video.user_video_watches.length > 0 && video.user_video_watches[0].watched) {
         completedItems++;
       }
     }
@@ -1103,16 +1196,22 @@ class HistoryPlusService {
     const videos = await this.prisma.historyVideo.count();
     const chapters = await this.prisma.historyChapter.count();
 
-    const completedBooks = await this.prisma.user_book_reads.count({
-      where: { read: true }
+    const completedBooks = await this.prisma.bookCompletion.count({
+      where: { 
+        isCompleted: true,
+        userId: "default"
+      }
     });
 
     const completedVideos = await this.prisma.user_video_watches.count({
       where: { watched: true }
     });
 
-    const completedChapters = await this.prisma.user_chapter_reads.count({
-      where: { read: true }
+    const completedChapters = await this.prisma.chapterCompletion.count({
+      where: { 
+        isCompleted: true,
+        userId: "default"
+      }
     });
 
     return {
@@ -1256,38 +1355,28 @@ class HistoryPlusService {
       const events = await this.prisma.historicalEvent.findMany({
         where: { hidden: false },
         include: {
-          books: {
+          // Unified book system relationships only
+          bookLinks: {
             include: {
-              chapters: {
+              book: {
                 include: {
-                  sections: {
-                    include: {
-                      user_section_reads: true
-                    }
-                  },
-                  user_chapter_reads: true
+                  bookCompletions: true
                 }
-              },
-              user_book_reads: true
+              }
             }
           },
-          chapters: {
+          bookChapters: {
             include: {
-              sections: {
-                include: {
-                  user_section_reads: true
-                }
-              },
-              user_chapter_reads: true,
-              book: true
+              chapterCompletions: true,
+              book: true  // Include parent book for cover art and author
             }
           },
-          sections: {
+          bookSections: {
             include: {
-              user_section_reads: true,
+              sectionCompletions: true,
               chapter: {
                 include: {
-                  book: true
+                  book: true  // Include parent book for cover art and author
                 }
               }
             }
@@ -1310,8 +1399,6 @@ class HistoryPlusService {
       });
 
       console.log(`🔍 Checking ${sortedEvents.length} events for unreviewed content...`);
-      
-      console.log(`� Checking ${sortedEvents.length} events for unreviewed content...`);
       
       // Find the first event with actual unreviewed content
       for (const event of sortedEvents) {
@@ -1354,48 +1441,30 @@ class HistoryPlusService {
         !video.user_video_watches || !video.user_video_watches.watched
       );
       
-      // Check for any unread books
-      const unreadBooks = event.books.filter(book =>
-        !book.user_book_reads || !book.user_book_reads.read
+      // Check for any unread unified books (via bookLinks)
+      const unreadUnifiedBooks = (event.bookLinks || []).filter(bookLink =>
+        !bookLink.book.bookCompletions?.[0]?.isCompleted
       );
       
-      // Check for any unread chapters (direct event chapters)
-      const unreadChapters = event.chapters.filter(chapter =>
-        !chapter.user_chapter_reads || !chapter.user_chapter_reads.read
+      // Check for any unread unified chapters
+      const unreadUnifiedChapters = (event.bookChapters || []).filter(chapter =>
+        !chapter.chapterCompletions?.[0]?.isCompleted
       );
       
-      // Check for any unread sections (direct event sections)
-      const unreadSections = event.sections.filter(section =>
-        !section.user_section_reads || !section.user_section_reads.read
+      // Check for any unread unified sections
+      const unreadUnifiedSections = (event.bookSections || []).filter(section =>
+        !section.sectionCompletions?.[0]?.isCompleted
       );
       
-      // Also check for unread chapters within books and sections within chapters
-      const unreadBookChapters = event.books.flatMap(book => 
-        book.chapters?.filter(chapter => !chapter.user_chapter_reads || !chapter.user_chapter_reads.read) || []
-      );
-      
-      const unreadChapterSections = event.chapters.flatMap(chapter =>
-        chapter.sections?.filter(section => !section.user_section_reads || !section.user_section_reads.read) || []
-      );
-      
-      const unreadBookChapterSections = event.books.flatMap(book =>
-        book.chapters?.flatMap(chapter =>
-          chapter.sections?.filter(section => !section.user_section_reads || !section.user_section_reads.read) || []
-        ) || []
-      );
-      
-      const totalUnwatched = unwatchedVideos.length + unreadBooks.length + unreadChapters.length + 
-                            unreadSections.length + unreadBookChapters.length + unreadChapterSections.length + 
-                            unreadBookChapterSections.length;
+      // Calculate total unwatched content
+      const totalUnwatched = unwatchedVideos.length + unreadUnifiedBooks.length + 
+                           unreadUnifiedChapters.length + unreadUnifiedSections.length;
       
       console.log(`📊 Event "${event.title}" unwatched content:`, {
         videos: unwatchedVideos.length,
-        books: unreadBooks.length,
-        chapters: unreadChapters.length,
-        sections: unreadSections.length,
-        bookChapters: unreadBookChapters.length,
-        chapterSections: unreadChapterSections.length,
-        bookChapterSections: unreadBookChapterSections.length,
+        books: unreadUnifiedBooks.length,
+        chapters: unreadUnifiedChapters.length,
+        sections: unreadUnifiedSections.length,
         total: totalUnwatched
       });
       
@@ -1426,13 +1495,14 @@ class HistoryPlusService {
 
   /**
    * Check if an event has any unreviewed content
+   * Updated to use unified book system
    */
   async hasUnreviewedContent(event) {
     console.log(`  🔍 Checking event "${event.title}" for unreviewed content:`);
-    console.log(`    📺 Videos: ${event.videos.length}, 📚 Books: ${event.books.length}, 📖 Chapters: ${event.chapters.length}, 📄 Sections: ${event.sections.length}`);
+    console.log(`    📺 Videos: ${event.videos?.length || 0}, 📚 Book Links: ${event.bookLinks?.length || 0}, 📖 Chapters: ${event.bookChapters?.length || 0}, 📄 Sections: ${event.bookSections?.length || 0}`);
     
     // Check videos
-    for (const video of event.videos) {
+    for (const video of event.videos || []) {
       const watchRecord = video.user_video_watches;
       console.log(`    📺 Video "${video.title}":`, {
         hasWatchRecord: !!watchRecord,
@@ -1448,32 +1518,30 @@ class HistoryPlusService {
       }
     }
 
-    // Check books
-    for (const book of event.books) {
-      const readRecord = book.user_book_reads;
-      const unreviewed = !readRecord || readRecord.length === 0 || !readRecord[0]?.read;
-      console.log(`    📚 Book "${book.title}": ${unreviewed ? 'UNREVIEWED' : 'reviewed'}`);
-      if (unreviewed) {
+    // Check books via bookLinks
+    for (const bookLink of event.bookLinks || []) {
+      const book = bookLink.book;
+      const isCompleted = book.bookCompletions && book.bookCompletions.length > 0 && book.bookCompletions[0].isCompleted;
+      console.log(`    📚 Book "${book.title}": ${!isCompleted ? 'UNREVIEWED' : 'reviewed'}`);
+      if (!isCompleted) {
         return true;
       }
     }
 
     // Check chapters
-    for (const chapter of event.chapters) {
-      const readRecord = chapter.user_chapter_reads;
-      const unreviewed = !readRecord || readRecord.length === 0 || !readRecord[0]?.read;
-      console.log(`    📖 Chapter "${chapter.title}": ${unreviewed ? 'UNREVIEWED' : 'reviewed'}`);
-      if (unreviewed) {
+    for (const chapter of event.bookChapters || []) {
+      const isCompleted = chapter.chapterCompletions && chapter.chapterCompletions.length > 0 && chapter.chapterCompletions[0].isCompleted;
+      console.log(`    📖 Chapter "${chapter.title}": ${!isCompleted ? 'UNREVIEWED' : 'reviewed'}`);
+      if (!isCompleted) {
         return true;
       }
     }
 
     // Check sections
-    for (const section of event.sections) {
-      const readRecord = section.user_section_reads;
-      const unreviewed = !readRecord || readRecord.length === 0 || !readRecord[0]?.read;
-      console.log(`    📄 Section "${section.title}": ${unreviewed ? 'UNREVIEWED' : 'reviewed'}`);
-      if (unreviewed) {
+    for (const section of event.bookSections || []) {
+      const isCompleted = section.sectionCompletions && section.sectionCompletions.length > 0 && section.sectionCompletions[0].isCompleted;
+      console.log(`    📄 Section "${section.title}": ${!isCompleted ? 'UNREVIEWED' : 'reviewed'}`);
+      if (!isCompleted) {
         return true;
       }
     }
@@ -1506,8 +1574,10 @@ class HistoryPlusService {
         }
       });
 
-      event.books?.forEach(book => {
-        const isRead = book.user_book_reads && book.user_book_reads.read;
+      // Unified book system - check bookLinks
+      event.bookLinks?.forEach(bookLink => {
+        const book = bookLink.book;
+        const isRead = book.bookCompletions?.[0]?.isCompleted;
         if (!isRead) {
           availableContent.push({
             type: 'book',
@@ -1527,60 +1597,71 @@ class HistoryPlusService {
         }
       });
 
-      event.chapters?.forEach(chapter => {
-        const isRead = chapter.user_chapter_reads && chapter.user_chapter_reads.read;
+      // Unified book system - check bookChapters directly linked to events
+      event.bookChapters?.forEach(chapter => {
+        const isRead = chapter.chapterCompletions?.[0]?.isCompleted;
         if (!isRead) {
+          // Get parent book information if available
+          const parentBook = chapter.book;
+          
           availableContent.push({
             type: 'chapter',
             content: chapter,
-            title: `${chapter.book?.title || 'Unknown Book'} - Chapter ${chapter.chapterNumber || ''}: ${chapter.title}`,
+            title: `${parentBook?.title || 'Unknown Book'} - Chapter ${chapter.chapterNumber || ''}: ${chapter.title}`,
             description: chapter.description || '',
-            // Book-specific fields with chapter details
-            bookTitle: chapter.book?.title || 'Unknown Book',
-            bookAuthor: chapter.book?.author || 'Unknown Author',
-            bookYear: chapter.book?.publishYear,
-            bookIsbn: chapter.book?.isbn,
-            bookPublisher: chapter.book?.publisher,
-            bookPageCount: chapter.book?.pageCount,
-            bookCoverUrl: chapter.book?.coverUrl,
-            bookDescription: chapter.book?.description,
             // Chapter-specific details
             chapterNumber: chapter.chapterNumber || 0,
             chapterTitle: chapter.title,
             chapterDescription: chapter.description,
             pageStart: chapter.pageStart,
-            pageEnd: chapter.pageEnd
+            pageEnd: chapter.pageEnd,
+            // Parent book information for cover art and author
+            bookTitle: parentBook?.title || 'Unknown Book',
+            bookAuthor: parentBook?.author || 'Unknown Author',
+            bookYear: parentBook?.publishYear,
+            bookIsbn: parentBook?.isbn,
+            bookPublisher: parentBook?.publisher,
+            bookPageCount: parentBook?.pageCount,
+            bookCoverUrl: parentBook?.coverUrl,
+            bookDescription: parentBook?.description
           });
         }
       });
 
-      event.sections?.forEach(section => {
-        const isRead = section.user_section_reads && section.user_section_reads.read;
+      // Unified book system - check bookSections directly linked to events
+      event.bookSections?.forEach(section => {
+        const isRead = section.sectionCompletions?.[0]?.isCompleted;
         if (!isRead) {
+          // Get parent chapter and book information if available
+          const parentChapter = section.chapter;
+          const parentBook = parentChapter?.book;
+          
           availableContent.push({
             type: 'section',
             content: section,
-            title: `${section.chapter?.book?.title || 'Unknown Book'} - Chapter ${section.chapter?.chapterNumber || ''}: ${section.chapter?.title || 'Unknown Chapter'} - Section ${section.sectionNumber || ''}: ${section.title}`,
+            title: `${parentBook?.title || 'Unknown Book'} - Chapter ${parentChapter?.chapterNumber || ''}: ${parentChapter?.title || 'Unknown Chapter'} - Section ${section.sectionNumber || ''}: ${section.title}`,
             description: section.description || '',
-            // Book-specific fields with section details
-            bookTitle: section.chapter?.book?.title || 'Unknown Book',
-            bookAuthor: section.chapter?.book?.author || 'Unknown Author',
-            bookYear: section.chapter?.book?.publishYear,
-            bookIsbn: section.chapter?.book?.isbn,
-            bookPublisher: section.chapter?.book?.publisher,
-            bookPageCount: section.chapter?.book?.pageCount,
-            bookCoverUrl: section.chapter?.book?.coverUrl,
-            bookDescription: section.chapter?.book?.description,
-            // Chapter details
-            chapterNumber: section.chapter?.chapterNumber || 0,
-            chapterTitle: section.chapter?.title || 'Unknown Chapter',
-            chapterDescription: section.chapter?.description,
-            // Section-specific details
+            // Section details
             sectionNumber: section.sectionNumber || 0,
             sectionTitle: section.title,
             sectionDescription: section.description,
-            pageStart: section.pageStart,
-            pageEnd: section.pageEnd
+            sectionPageStart: section.pageStart,
+            sectionPageEnd: section.pageEnd,
+            // Parent chapter information
+            chapterNumber: parentChapter?.chapterNumber || 0,
+            chapterTitle: parentChapter?.title || 'Unknown Chapter',
+            chapterDescription: parentChapter?.description,
+            pageStart: parentChapter?.pageStart,
+            pageEnd: parentChapter?.pageEnd,
+            // Parent book information for cover art and author
+            bookTitle: parentBook?.title || 'Unknown Book',
+            bookAuthor: parentBook?.author || 'Unknown Author',
+            bookYear: parentBook?.publishYear,
+            bookIsbn: parentBook?.isbn,
+            bookPublisher: parentBook?.publisher,
+            bookPageCount: parentBook?.pageCount,
+            bookCoverUrl: parentBook?.coverUrl,
+            bookDescription: parentBook?.description
           });
         }
       });

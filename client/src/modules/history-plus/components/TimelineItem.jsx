@@ -186,16 +186,19 @@ const TimelineItem = ({
             {localEvent.books && localEvent.books.length > 0 && (
               <span className="flex items-center gap-1 px-2 py-1 text-blue-700 rounded bg-blue-50">
                 📚 {localEvent.books.length} book{localEvent.books.length !== 1 ? 's' : ''}
+                {localEvent.books.some(book => book.read) && <span className="flex-shrink-0 text-green-600">✓</span>}
               </span>
             )}
             {localEvent.chapters && localEvent.chapters.length > 0 && (
               <span className="flex items-center gap-1 px-2 py-1 text-purple-700 rounded bg-purple-50">
                 📝 {localEvent.chapters.length} chapter{localEvent.chapters.length !== 1 ? 's' : ''}
+                {localEvent.chapters.some(chapter => chapter.read) && <span className="flex-shrink-0 text-green-600">✓</span>}
               </span>
             )}
             {localEvent.sections && localEvent.sections.length > 0 && (
               <span className="flex items-center gap-1 px-2 py-1 text-green-700 rounded bg-green-50">
                 📄 {localEvent.sections.length} section{localEvent.sections.length !== 1 ? 's' : ''}
+                {localEvent.sections.some(section => section.read) && <span className="flex-shrink-0 text-green-600">✓</span>}
               </span>
             )}
           </div>
@@ -375,11 +378,11 @@ const TimelineItem = ({
                   <div
                     key={chapter.id}
                     className={`flex items-center justify-start gap-2 p-3 text-xs border-green-200 h-auto min-h-[2.5rem] rounded ${
-                      chapter.user_chapter_reads?.read 
+                      chapter.read 
                         ? 'text-green-800 bg-green-100' 
                         : 'text-green-700 bg-green-50'
                     }`}
-                    title={`${chapter.title} from ${chapter.book?.title}${chapter.user_chapter_reads?.read ? ' (Read)' : ' (Unread)'}`}
+                    title={`${chapter.title} from ${chapter.book?.title}${chapter.read ? ' (Read)' : ' (Unread)'}`}
                   >
                     <span className="flex-shrink-0">📝</span>
                     <div className="flex-1 text-left leading-tight">
@@ -387,7 +390,7 @@ const TimelineItem = ({
                       <div className="text-gray-600 text-xs">{chapter.book?.title}</div>
                     </div>
                     <div className="flex items-center gap-1">
-                      {chapter.user_chapter_reads?.read && <span className="flex-shrink-0 text-green-600">✓</span>}
+                      {chapter.read && <span className="flex-shrink-0 text-green-600">✓</span>}
                     </div>
                   </div>
                 ))}
@@ -410,11 +413,11 @@ const TimelineItem = ({
                   <div
                     key={section.id}
                     className={`flex items-center justify-start gap-2 p-3 text-xs border-purple-200 h-auto min-h-[2.5rem] rounded ${
-                      section.user_section_reads?.read 
+                      section.read 
                         ? 'text-purple-800 bg-purple-100' 
                         : 'text-purple-700 bg-purple-50'
                     }`}
-                    title={`${section.title} from ${section.chapter?.book?.title}${section.user_section_reads?.read ? ' (Read)' : ' (Unread)'}`}
+                    title={`${section.title} from ${section.chapter?.book?.title}${section.read ? ' (Read)' : ' (Unread)'}`}
                   >
                     <span className="flex-shrink-0">📄</span>
                     <div className="flex-1 text-left leading-tight">
@@ -422,7 +425,7 @@ const TimelineItem = ({
                       <div className="text-gray-600 text-xs">{section.chapter?.title} - {section.chapter?.book?.title}</div>
                     </div>
                     <div className="flex items-center gap-1">
-                      {section.user_section_reads?.read && <span className="flex-shrink-0 text-green-600">✓</span>}
+                      {section.read && <span className="flex-shrink-0 text-green-600">✓</span>}
                     </div>
                   </div>
                 ))}

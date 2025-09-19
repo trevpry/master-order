@@ -106,13 +106,6 @@ const SideMenu = ({ isMobile, closeMobileMenu }) => {
       isSubmenu: true
     },
     {
-      path: '/history-plus/books',
-      icon: '📖',
-      label: 'Books',
-      description: 'Reading progress',
-      isSubmenu: true
-    },
-    {
       path: '/history-plus/videos',
       icon: '🎥',
       label: 'Videos',

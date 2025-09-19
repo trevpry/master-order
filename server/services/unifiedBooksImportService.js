@@ -20,6 +20,7 @@ class UnifiedBooksImportService {
       booksSkipped: 0,
       chaptersSkipped: 0,
       sectionsSkipped: 0,
+      bookLinksCreated: 0,
       errors: []
     };
   }
@@ -152,6 +153,39 @@ class UnifiedBooksImportService {
         }
 
         this.stats.booksImported++;
+
+        // Handle event linking for books
+        if (record.eventId && record.eventId !== 'null') {
+          const event = await this.prisma.historicalEvent.findUnique({
+            where: { id: parseInt(record.eventId) }
+          });
+          
+          if (event) {
+            // Check if this book-event link already exists
+            const existingLink = await this.prisma.historyBookLink.findFirst({
+              where: {
+                bookId: book.id,
+                eventId: event.id
+              }
+            });
+
+            if (!existingLink) {
+              // Create HistoryBookLink to connect book to timeline event
+              await this.prisma.historyBookLink.create({
+                data: {
+                  bookId: book.id,
+                  eventId: event.id
+                }
+              });
+              this.stats.bookLinksCreated++;
+              console.log(`   🔗 Linked book "${book.title}" to event "${event.title}"`);
+            } else {
+              console.log(`   ⏭️  Book "${book.title}" already linked to event "${event.title}"`);
+            }
+          } else {
+            console.log(`   ⚠️  Event ID ${record.eventId} not found for book "${book.title}"`);
+          }
+        }
 
         // Store mapping for chapters/sections import
         if (!this.bookIdMapping) {
@@ -388,6 +422,7 @@ class UnifiedBooksImportService {
     console.log(`📚 Books: ${this.stats.booksImported} imported, ${this.stats.booksSkipped} skipped`);
     console.log(`📖 Chapters: ${this.stats.chaptersImported} imported, ${this.stats.chaptersSkipped} skipped`);
     console.log(`📄 Sections: ${this.stats.sectionsImported} imported, ${this.stats.sectionsSkipped} skipped`);
+    console.log(`🔗 Book-Event Links: ${this.stats.bookLinksCreated} created`);
     
     if (this.stats.errors.length > 0) {
       console.log(`❌ Errors: ${this.stats.errors.length}`);

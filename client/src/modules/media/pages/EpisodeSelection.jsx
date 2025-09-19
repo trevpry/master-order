@@ -1046,7 +1046,14 @@ function Home() {
       console.log('Using OpenLibrary artwork:', media.bookCoverUrl);
       return `${config.apiBaseUrl}/api/openlibrary-artwork?url=${encodeURIComponent(media.bookCoverUrl)}`;
     }
-      // For short stories, use story cover or fallback to containing book's cover
+
+    // For chapters and sections, use parent book cover artwork
+    if ((media?.type === 'chapter' || media?.type === 'section') && media?.bookCoverUrl) {
+      console.log('Using parent book cover artwork for', media.type + ':', media.bookCoverUrl);
+      return `${config.apiBaseUrl}/api/openlibrary-artwork?url=${encodeURIComponent(media.bookCoverUrl)}`;
+    }
+
+    // For short stories, use story cover or fallback to containing book's cover
     if (media?.type === 'shortstory') {
       if (media?.storyCoverUrl) {
         console.log('Using short story cover artwork:', media.storyCoverUrl);
@@ -1285,6 +1292,7 @@ function Home() {
               <div className="media-display-container">                <div className="media-artwork-responsive">                  {(() => {                    // Check if we have any artwork to display - handle empty strings as falsy
                     const hasComicArt = selectedMedia.type === 'comic' && selectedMedia.comicDetails?.coverUrl;
                     const hasBookArt = selectedMedia.type === 'book' && selectedMedia.bookCoverUrl;
+                    const hasChapterArt = (selectedMedia.type === 'chapter' || selectedMedia.type === 'section') && selectedMedia.bookCoverUrl;
                     const hasStoryArt = selectedMedia.type === 'shortstory' && 
                       (selectedMedia.storyCoverUrl && selectedMedia.storyCoverUrl.trim() !== '') || 
                       (selectedMedia.containedInBookDetails?.coverUrl && selectedMedia.containedInBookDetails.coverUrl.trim() !== '');
@@ -1294,17 +1302,19 @@ function Home() {
                     const isWebVideo = selectedMedia.type === 'webvideo';
                     const isYouTubeVideo = isWebVideo && selectedMedia.webUrl && selectedMedia.webUrl.includes('youtube.com');
                     
-                    const hasAnyArtwork = !isWebVideo && (hasComicArt || hasBookArt || hasStoryArt || hasTvdbArt || hasPlexArt);
+                    const hasAnyArtwork = !isWebVideo && (hasComicArt || hasBookArt || hasChapterArt || hasStoryArt || hasTvdbArt || hasPlexArt);
                     
                     // Debug logging
                     console.log('ARTWORK DEBUG:');
                     console.log('- Media type:', selectedMedia.type);
+                    console.log('- bookCoverUrl:', `"${selectedMedia.bookCoverUrl}"`);
                     console.log('- storyCoverUrl:', `"${selectedMedia.storyCoverUrl}"`);
                     console.log('- containedInBookDetails:', selectedMedia.containedInBookDetails);
                     console.log('- thumb:', `"${selectedMedia.thumb}"`);
                     console.log('- art:', `"${selectedMedia.art}"`);
                     console.log('- hasComicArt:', hasComicArt);
                     console.log('- hasBookArt:', hasBookArt);
+                    console.log('- hasChapterArt:', hasChapterArt);
                     console.log('- hasStoryArt:', hasStoryArt);
                     console.log('- hasTvdbArt:', hasTvdbArt);
                     console.log('- hasPlexArt:', hasPlexArt);

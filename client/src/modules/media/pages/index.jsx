@@ -402,7 +402,13 @@ function MediaHome() {
 
       if (response.ok) {
         setSelectedMedia(null);
-        setError('Item marked as watched! Getting next item...');
+        
+        // Use appropriate terminology based on content type
+        const successMessage = selectedMedia.orderType === 'HISTORY_PLUS' && ['book', 'chapter', 'section'].includes(selectedMedia.type)
+          ? 'Item marked as read! Getting next item...'
+          : 'Item marked as watched! Getting next item...';
+        
+        setError(successMessage);
         
         // Clear cached data since we're getting a new item
         try {
@@ -555,14 +561,35 @@ function MediaHome() {
     setReadingActionLoading('start');
     try {
       // Prepare parameters for the modular reading service
-      const sessionParams = {
+      let sessionParams = {
         mediaType: selectedMedia.type,
         title: selectedMedia.title || selectedMedia.storyTitle || selectedMedia.comicSeries,
         customOrderItemId: selectedMedia.customOrderItemId || selectedMedia.ratingKey
       };
 
+      // Handle History Plus chapters and sections - create session on parent book
+      if (selectedMedia.type === 'chapter' || selectedMedia.type === 'section') {
+        sessionParams = {
+          mediaType: 'book', // Always create session as book type
+          title: selectedMedia.bookTitle || 'Unknown Book',
+          customOrderItemId: selectedMedia.content?.id, // Use the content ID for tracking
+          // Add History Plus specific fields for context
+          bookAuthor: selectedMedia.bookAuthor,
+          bookYear: selectedMedia.bookYear,
+          historyPlusContext: {
+            contentType: selectedMedia.type,
+            contentId: selectedMedia.content?.id,
+            eventId: selectedMedia.eventId,
+            eventTitle: selectedMedia.eventTitle,
+            chapterNumber: selectedMedia.chapterNumber,
+            chapterTitle: selectedMedia.chapterTitle,
+            sectionNumber: selectedMedia.sectionNumber,
+            sectionTitle: selectedMedia.sectionTitle
+          }
+        };
+      }
       // Add comic-specific handling
-      if (selectedMedia.type === 'comic') {
+      else if (selectedMedia.type === 'comic') {
         sessionParams.comicSeries = selectedMedia.comicSeries;
         sessionParams.comicIssue = selectedMedia.comicIssue;
         sessionParams.seriesTitle = selectedMedia.comicSeries;
@@ -574,7 +601,13 @@ function MediaHome() {
       const session = await readingSessionService.startSession(sessionParams);
       setReadingSession(session);
       setReadingTimer(0);
-      toast.success('📚 Started reading session!', {
+      
+      // Show appropriate toast message based on content type
+      const toastMessage = selectedMedia.type === 'chapter' || selectedMedia.type === 'section'
+        ? `📚 Started reading session for "${selectedMedia.bookTitle}"!`
+        : '📚 Started reading session!';
+      
+      toast.success(toastMessage, {
         duration: 2000,
         position: 'top-right'
       });
@@ -617,6 +650,7 @@ function MediaHome() {
 
   const handleReadingProgressSubmit = async (e) => {
     e.preventDefault();
+    console.log('📝 Form submitted with readingProgress state:', readingProgress);
     stopReadingSession();
   };
 
@@ -628,21 +662,48 @@ function MediaHome() {
       let progressData = {};
 
       console.log('🔍 Reading Progress Debug:');
+      console.log('- Full readingProgress state:', readingProgress);
       console.log('- inputType:', readingProgress.inputType);
       console.log('- currentPage:', readingProgress.currentPage);
       console.log('- totalPages:', readingProgress.totalPages);
       console.log('- readPercentage:', readingProgress.readPercentage);
 
-      if (readingProgress.inputType === 'page' && readingProgress.currentPage) {
-        progressData.currentPage = parseInt(readingProgress.currentPage);
-        if (readingProgress.totalPages) {
+      if (readingProgress.inputType === 'page') {
+        // Handle different page input scenarios
+        if (readingProgress.currentPage && parseInt(readingProgress.currentPage) > 0) {
+          // User entered current page - normal scenario
+          console.log('📄 Processing page-based progress with current page...');
+          progressData.currentPage = parseInt(readingProgress.currentPage);
+          console.log('📄 Set currentPage to:', progressData.currentPage);
+          if (readingProgress.totalPages) {
+            progressData.totalPages = parseInt(readingProgress.totalPages);
+            console.log('📄 Set totalPages to:', progressData.totalPages);
+          }
+        } else if (readingProgress.totalPages && parseInt(readingProgress.totalPages) > 0) {
+          // User only entered total pages - assume they finished the book/content
+          console.log('📄 User entered only total pages - assuming 100% completion...');
+          progressData.currentPage = parseInt(readingProgress.totalPages);
           progressData.totalPages = parseInt(readingProgress.totalPages);
+          progressData.percentComplete = 100;
+          console.log('📄 Set currentPage to total pages:', progressData.currentPage);
+          console.log('📄 Set totalPages to:', progressData.totalPages);
+          console.log('📄 Set percentComplete to: 100%');
+        } else {
+          console.log('⚠️ No valid page data entered in page mode');
         }
       } else if (readingProgress.inputType === 'percentage' && readingProgress.readPercentage) {
+        console.log('📊 Processing percentage-based progress...');
         progressData.percentComplete = parseFloat(readingProgress.readPercentage);
+        console.log('📊 Set percentComplete to:', progressData.percentComplete);
+      } else {
+        console.log('⚠️ No valid progress data found!');
+        console.log('⚠️ Conditions checked:');
+        console.log('  - Page mode with current page:', readingProgress.inputType === 'page' && readingProgress.currentPage);
+        console.log('  - Page mode with total pages only:', readingProgress.inputType === 'page' && readingProgress.totalPages && !readingProgress.currentPage);
+        console.log('  - Percentage mode valid:', readingProgress.inputType === 'percentage' && readingProgress.readPercentage);
       }
 
-      console.log('📤 Sending progressData:', progressData);
+      console.log('📤 Final progressData being sent:', progressData);
 
       const completedSession = await readingSessionService.stopSession(progressData);
       setReadingSession(null);
@@ -849,7 +910,14 @@ function MediaHome() {
       console.log('Using OpenLibrary artwork:', media.bookCoverUrl);
       return `${config.apiBaseUrl}/api/openlibrary-artwork?url=${encodeURIComponent(media.bookCoverUrl)}`;
     }
-      // For short stories, use story cover or fallback to containing book's cover
+
+    // For chapters and sections, use parent book cover artwork
+    if ((media?.type === 'chapter' || media?.type === 'section') && media?.bookCoverUrl) {
+      console.log('Using parent book cover artwork for', media.type + ':', media.bookCoverUrl);
+      return `${config.apiBaseUrl}/api/openlibrary-artwork?url=${encodeURIComponent(media.bookCoverUrl)}`;
+    }
+
+    // For short stories, use story cover or fallback to containing book's cover
     if (media?.type === 'shortstory') {
       if (media?.storyCoverUrl) {
         console.log('Using short story cover artwork:', media.storyCoverUrl);
@@ -918,7 +986,8 @@ function MediaHome() {
 
             {selectedMedia && (
               <div className="button-group">
-                {(selectedMedia.customOrderItemId || selectedMedia.orderType === 'TV_GENERAL' || selectedMedia.orderType === 'MOVIES_GENERAL') && (
+                {((selectedMedia.customOrderItemId || selectedMedia.orderType === 'TV_GENERAL' || selectedMedia.orderType === 'MOVIES_GENERAL') ||
+                  (selectedMedia.orderType === 'HISTORY_PLUS' && ['webvideo', 'book', 'chapter', 'section'].includes(selectedMedia.type))) && (
                   <Button
                     onClick={markAsWatched}
                     disabled={markingWatched}
@@ -928,7 +997,7 @@ function MediaHome() {
                       minWidth: '40px',
                       padding: '8px 12px'
                     }}
-                    title="Mark as Watched"
+                    title={selectedMedia.orderType === 'HISTORY_PLUS' && ['chapter', 'section'].includes(selectedMedia.type) ? "Mark as Read" : "Mark as Watched"}
                   >
                     {markingWatched ? '⏳' : '✓'}
                   </Button>
@@ -950,8 +1019,8 @@ function MediaHome() {
                   </Button>
                 )}
 
-                {/* Reading controls for books, comics, and short stories */}
-                {['book', 'comic', 'shortstory'].includes(selectedMedia.type) && (
+                {/* Reading controls for books, comics, short stories, and History Plus chapters/sections */}
+                {['book', 'comic', 'shortstory', 'chapter', 'section'].includes(selectedMedia.type) && (
                   <div className="button-group">
                     {/* Reading timer display */}
                     {readingSession && (
@@ -1095,6 +1164,7 @@ function MediaHome() {
                     // Check if we have any artwork to display - handle empty strings as falsy
                     const hasComicArt = selectedMedia.type === 'comic' && selectedMedia.comicDetails?.coverUrl;
                     const hasBookArt = selectedMedia.type === 'book' && selectedMedia.bookCoverUrl;
+                    const hasChapterArt = (selectedMedia.type === 'chapter' || selectedMedia.type === 'section') && selectedMedia.bookCoverUrl;
                     const hasStoryArt = selectedMedia.type === 'shortstory' &&
                       (selectedMedia.storyCoverUrl && selectedMedia.storyCoverUrl.trim() !== '') ||
                       (selectedMedia.containedInBookDetails?.coverUrl && selectedMedia.containedInBookDetails.coverUrl.trim() !== '');
@@ -1105,17 +1175,19 @@ function MediaHome() {
                     const isWebVideo = selectedMedia.type === 'webvideo';
                     const isYouTubeVideo = isWebVideo && selectedMedia.webUrl && selectedMedia.webUrl.includes('youtube.com');
 
-                    const hasAnyArtwork = !isWebVideo && (hasComicArt || hasBookArt || hasStoryArt || hasTvdbArt || hasPlexArt);
+                    const hasAnyArtwork = !isWebVideo && (hasComicArt || hasBookArt || hasChapterArt || hasStoryArt || hasTvdbArt || hasPlexArt);
 
                     // Debug logging
                     console.log('ARTWORK DEBUG:');
                     console.log('- Media type:', selectedMedia.type);
+                    console.log('- bookCoverUrl:', `"${selectedMedia.bookCoverUrl}"`);
                     console.log('- storyCoverUrl:', `"${selectedMedia.storyCoverUrl}"`);
                     console.log('- containedInBookDetails:', selectedMedia.containedInBookDetails);
                     console.log('- thumb:', `"${selectedMedia.thumb}"`);
                     console.log('- art:', `"${selectedMedia.art}"`);
                     console.log('- hasComicArt:', hasComicArt);
                     console.log('- hasBookArt:', hasBookArt);
+                    console.log('- hasChapterArt:', hasChapterArt);
                     console.log('- hasStoryArt:', hasStoryArt);
                     console.log('- hasTvdbArt:', hasTvdbArt);
                     console.log('- hasPlexArt:', hasPlexArt);
@@ -1438,18 +1510,19 @@ function MediaHome() {
 
               <div className="form-actions">
                 <Button type="submit" className="primary" disabled={readingActionLoading === 'stop'}>
-                  {readingActionLoading === 'stop' ? 'Saving...' : 'Save Progress & Stop Reading'}
+                  {readingActionLoading === 'stop' ? 'Saving...' : '💾 Save Progress & Stop Reading'}
                 </Button>
                 <Button
                   type="button"
                   onClick={() => {
+                    console.log('🚫 User clicked Skip & Stop Reading - no progress will be saved');
                     setShowReadingProgressModal(false);
                     stopReadingSession(); // Stop without saving progress
                   }}
                   className="secondary"
                   disabled={readingActionLoading === 'stop'}
                 >
-                  Skip & Stop Reading
+                  Skip Progress & Stop Reading
                 </Button>
               </div>
             </form>
