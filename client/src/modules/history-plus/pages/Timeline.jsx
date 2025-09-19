@@ -286,10 +286,10 @@ const Timeline = () => {
     }
 
     setImporting(true);
-    setImportStatus({ type: 'info', message: 'Starting books import to unified Books system...' });
+    setImportStatus({ type: 'info', message: 'Starting full History Plus import...' });
 
     try {
-      const response = await fetch('/api/unified-books/import', {
+      const response = await fetch('/api/history-plus/import-data', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -361,10 +361,10 @@ const Timeline = () => {
     }
 
     setImporting(true);
-    setImportStatus({ type: 'info', message: 'Starting books import to unified Books system...' });
+    setImportStatus({ type: 'info', message: 'Starting full History Plus import...' });
 
     try {
-      const response = await fetch('/api/unified-books/import', {
+      const response = await fetch('/api/history-plus/import-data', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

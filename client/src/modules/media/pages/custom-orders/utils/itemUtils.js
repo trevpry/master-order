@@ -72,7 +72,30 @@ export const getItemArtworkUrl = (item) => {
     return null;
   }
   
-  // Check if we have cached artwork first
+  // Check for linked unified book artwork first (highest priority)
+  if (item.book && item.mediaType === 'book') {
+    // Linked unified book has its own cached artwork
+    if (item.book.localArtworkPath) {
+      const filename = item.book.localArtworkPath.includes('\\') || item.book.localArtworkPath.includes('/') 
+        ? item.book.localArtworkPath.split(/[\\\/]/).pop() 
+        : item.book.localArtworkPath;
+      
+      const cacheBuster = item.book.artworkLastCached ? `?v=${encodeURIComponent(item.book.artworkLastCached)}` : '';
+      return `${config.apiBaseUrl}/api/artwork/${filename}${cacheBuster}`;
+    }
+    
+    // Linked book has cover URL
+    if (item.book.coverUrl) {
+      return `${config.apiBaseUrl}/api/openlibrary/artwork?url=${encodeURIComponent(item.book.coverUrl)}`;
+    }
+    
+    // Linked book has original artwork URL
+    if (item.book.originalArtworkUrl) {
+      return `${config.apiBaseUrl}/api/openlibrary/artwork?url=${encodeURIComponent(item.book.originalArtworkUrl)}`;
+    }
+  }
+  
+  // Check if we have cached artwork (custom order item level)
   if (item.localArtworkPath) {
     // Extract just the filename from the full path
     const filename = item.localArtworkPath.includes('\\') || item.localArtworkPath.includes('/') 

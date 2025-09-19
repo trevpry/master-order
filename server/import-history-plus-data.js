@@ -10,9 +10,15 @@ const fs = require('fs');
 const path = require('path');
 const readline = require('readline');
 
+// Import unified book service for integration
+const BookService = require('./services/BookService');
+const BookCompletionService = require('./services/BookCompletionService');
+
 class HistoryPlusDataImporter {
   constructor(options = {}) {
     this.targetPrisma = null;
+    this.bookService = null; // Will be initialized after Prisma connection
+    this.completionService = null; // Will be initialized after Prisma connection
     this.importDir = options.importDir || path.join(__dirname, '..', 'history-plus-export');
     this.importLog = [];
     this.databaseType = null;
@@ -78,6 +84,10 @@ class HistoryPlusDataImporter {
       datasources: { db: { url: process.env.DATABASE_URL } }
     });
     
+    // Initialize BookService with the Prisma client
+    this.bookService = new BookService(this.targetPrisma);
+    this.completionService = new BookCompletionService(this.targetPrisma);
+    
     // Test connection with database-specific query
     try {
       if (this.databaseType === 'postgresql') {
@@ -87,6 +97,7 @@ class HistoryPlusDataImporter {
         await this.targetPrisma.$queryRaw`SELECT 1`;
       }
       console.log(`✅ Connected to ${this.databaseType.toUpperCase()} database`);
+      console.log(`📚 Unified BookService initialized for books integration`);
     } catch (error) {
       throw new Error(`❌ Database connection failed: ${error.message}`);
     }
@@ -842,7 +853,7 @@ class HistoryPlusDataImporter {
   }
 
   async importHistoryBooks() {
-    console.log('📥 Importing History Books...');
+    console.log('📥 Importing Books to Unified Books System...');
     
     const records = await this.loadCSVFile('history_books.csv');
     if (records.length === 0) return;
@@ -853,243 +864,278 @@ class HistoryPlusDataImporter {
     const validEventIds = new Set(existingEvents.map(e => e.id));
     console.log(`   Found ${validEventIds.size} events for validation`);
     
-    const transformedRecords = records.map(record => {
-      const cleanRecord = this.cleanRecord(record);
-      
-      // Validate eventId foreign key
-      const eventId = cleanRecord.eventId && cleanRecord.eventId.trim() !== '' ? parseInt(cleanRecord.eventId) : null;
-      const validEventId = eventId && validEventIds.has(eventId) ? eventId : null;
-      
-      if (eventId && !validEventId) {
-        console.log(`   ⚠️  Book ${cleanRecord.id} references non-existent eventId ${eventId}, setting to null`);
-      }
-      
-      return {
-        ...cleanRecord,
-        id: parseInt(cleanRecord.id),
-        publishYear: cleanRecord.publishYear && cleanRecord.publishYear.trim() !== '' ? parseInt(cleanRecord.publishYear) : null,
-        pageCount: cleanRecord.pageCount && cleanRecord.pageCount.trim() !== '' ? parseInt(cleanRecord.pageCount) : null,
-        eventId: validEventId,
-        createdAt: new Date(cleanRecord.createdAt),
-        updatedAt: new Date(cleanRecord.updatedAt),
-      };
-    });
-
-    // Build mapping for books based on unique identifiers
-    await this.buildBookIdMapping(transformedRecords);
+    let successCount = 0;
+    let skippedCount = 0;
+    let errorCount = 0;
     
-    const { existing, new: newRecords } = await this.checkExistingRecords('historyBook', transformedRecords);
-    
-    if (newRecords.length === 0) {
-      console.log('   All records already exist, skipping');
-      this.stats.skipped += existing.length;
-      return;
-    }
-    
-    try {
-      // Use individual creates to preserve IDs (like videos and events)
-      let successCount = 0;
-      console.log(`   Creating ${newRecords.length} books individually to preserve IDs...`);
-      
-      for (const record of newRecords) {
-        try {
-          await this.targetPrisma.historyBook.create({
-            data: record
-          });
-          successCount++;
-          if (successCount <= 3) {
-            console.log(`   ✅ Successfully created book ${record.id}: ${record.title}`);
-            if (record.eventId) {
-              console.log(`      🔗 With eventId: ${record.eventId}`);
-            }
-          }
-        } catch (createError) {
-          console.error(`❌ Failed to create book ${record.id}:`, createError.message);
-          console.error('   Record data:', JSON.stringify(record, null, 2));
-          this.stats.errors++;
+    for (const record of records) {
+      try {
+        const cleanRecord = this.cleanRecord(record);
+        
+        // Validate eventId foreign key
+        const eventId = cleanRecord.eventId && cleanRecord.eventId.trim() !== '' ? parseInt(cleanRecord.eventId) : null;
+        const validEventId = eventId && validEventIds.has(eventId) ? eventId : null;
+        
+        if (eventId && !validEventId) {
+          console.log(`   ⚠️  Book ${cleanRecord.id} references non-existent eventId ${eventId}, will create without event link`);
         }
+        
+        // Check if book already exists in unified system
+        const existingBook = await this.targetPrisma.book.findFirst({
+          where: {
+            OR: [
+              cleanRecord.isbn ? { isbn: cleanRecord.isbn } : {},
+              { title: cleanRecord.title, author: cleanRecord.author }
+            ].filter(condition => Object.keys(condition).length > 0)
+          }
+        });
+        
+        if (existingBook && !this.forceImport) {
+          console.log(`   ⏭️  Book already exists in unified system: "${cleanRecord.title}" (ID: ${existingBook.id})`);
+          // Map the old History Plus book ID to the existing unified book ID
+          this.idMappings.books.set(parseInt(cleanRecord.id), existingBook.id);
+          skippedCount++;
+          continue;
+        }
+        
+        // Prepare book data for unified system
+        const bookData = {
+          title: cleanRecord.title || 'Unknown Title',
+          author: cleanRecord.author || null,
+          isbn: cleanRecord.isbn || null,
+          publisher: cleanRecord.publisher || null,
+          publishYear: cleanRecord.publishYear && cleanRecord.publishYear.trim() !== '' ? parseInt(cleanRecord.publishYear) : null,
+          description: cleanRecord.description || null,
+          coverUrl: cleanRecord.coverUrl || null,
+          pageCount: cleanRecord.pageCount && cleanRecord.pageCount.trim() !== '' ? parseInt(cleanRecord.pageCount) : null,
+          isHistoryPlusBook: true, // Mark as History Plus book
+          originalHistoryBookId: parseInt(cleanRecord.id), // Preserve original ID for reference
+          source: 'history-plus-import'
+        };
+        
+        let unifiedBook;
+        if (existingBook && this.forceImport) {
+          // Update existing book
+          unifiedBook = await this.bookService.updateBook(existingBook.id, bookData);
+          console.log(`   🔄 Updated unified book: "${unifiedBook.title}" (ID: ${unifiedBook.id})`);
+        } else {
+          // Create new unified book
+          unifiedBook = await this.bookService.createBook(bookData);
+          console.log(`   ✅ Created unified book: "${unifiedBook.title}" (ID: ${unifiedBook.id})`);
+        }
+        
+        // Map the old History Plus book ID to the new unified book ID
+        this.idMappings.books.set(parseInt(cleanRecord.id), unifiedBook.id);
+        
+        // Create link to historical event if needed
+        if (validEventId) {
+          try {
+            await this.targetPrisma.historyBookLink.create({
+              data: {
+                bookId: unifiedBook.id,
+                eventId: validEventId,
+                linkType: 'FEATURED_IN', // Default link type
+                createdAt: new Date()
+              }
+            });
+            console.log(`      🔗 Linked to historical event: ${validEventId}`);
+          } catch (linkError) {
+            console.warn(`   ⚠️  Failed to link book ${unifiedBook.id} to event ${validEventId}:`, linkError.message);
+          }
+        }
+        
+        successCount++;
+        
+      } catch (error) {
+        console.error(`❌ Failed to import book from record:`, error.message);
+        console.error('   Record data:', JSON.stringify(record, null, 2));
+        errorCount++;
       }
-      
-      console.log(`✅ Imported ${successCount} history books`);
-      
-      // Update mappings for newly imported records
-      await this.updateBookIdMappingAfterImport(newRecords);
-      
-      this.stats.imported += successCount;
-      this.stats.skipped += existing.length;
-    } catch (error) {
-      console.error('❌ Error importing history books:', error.message);
-      this.stats.errors += newRecords.length;
     }
+    
+    console.log(`✅ Unified Books Import Complete:`);
+    console.log(`   📚 Created/Updated: ${successCount} books`);
+    console.log(`   ⏭️  Skipped: ${skippedCount} books`);
+    console.log(`   ❌ Errors: ${errorCount} books`);
+    
+    this.stats.imported += successCount;
+    this.stats.skipped += skippedCount;
+    this.stats.errors += errorCount;
   }
 
   async importHistoryChapters() {
-    console.log('📥 Importing History Chapters...');
+    console.log('📥 Importing Chapters to Unified Books System...');
     
     const records = await this.loadCSVFile('history_chapters.csv');
     if (records.length === 0) return;
     
-    // Validate existing events for foreign key validation
-    console.log('🔍 Checking existing events for foreign key validation...');
-    const existingEvents = await this.targetPrisma.historicalEvent.findMany({ select: { id: true } });
-    const validEventIds = new Set(existingEvents.map(e => e.id));
-    console.log(`   Found ${validEventIds.size} events for validation`);
+    let successCount = 0;
+    let skippedCount = 0;
+    let errorCount = 0;
     
-    const transformedRecords = records.map(record => {
-      const cleanRecord = this.cleanRecord(record);
-      
-      // Validate eventId foreign key
-      const eventId = cleanRecord.eventId && cleanRecord.eventId.trim() !== '' ? parseInt(cleanRecord.eventId) : null;
-      const validEventId = eventId && validEventIds.has(eventId) ? eventId : null;
-      
-      if (eventId && !validEventId) {
-        console.log(`   ⚠️  Chapter ${cleanRecord.id} references non-existent eventId ${eventId}, setting to null`);
-      }
-      
-      return {
-        id: parseInt(cleanRecord.id),
-        title: cleanRecord.title,
-        chapterNumber: parseInt(cleanRecord.chapterNumber),
-        description: cleanRecord.description,
-        pageStart: cleanRecord.pageStart && cleanRecord.pageStart.trim() !== '' ? parseInt(cleanRecord.pageStart) : null,
-        pageEnd: cleanRecord.pageEnd && cleanRecord.pageEnd.trim() !== '' ? parseInt(cleanRecord.pageEnd) : null,
-        bookId: this.idMappings.books.get(parseInt(cleanRecord.bookId)) || parseInt(cleanRecord.bookId),
-        eventId: validEventId,
-        createdAt: new Date(cleanRecord.createdAt),
-        updatedAt: new Date(cleanRecord.updatedAt),
-      };
-    });
-
-    await this.buildChapterIdMapping(transformedRecords);
-
-    const { existing, new: newRecords } = await this.checkExistingRecords('historyChapter', transformedRecords);
-    
-    if (newRecords.length === 0) {
-      console.log('   All records already exist, skipping');
-      this.stats.skipped += existing.length;
-      return;
-    }
-    
-    try {
-      // Use individual creates to preserve IDs (like videos and events)
-      let successCount = 0;
-      console.log(`   Creating ${newRecords.length} chapters individually to preserve IDs...`);
-      
-      for (const record of newRecords) {
-        try {
-          await this.targetPrisma.historyChapter.create({
-            data: record
-          });
-          successCount++;
-          if (successCount <= 3) {
-            console.log(`   ✅ Successfully created chapter ${record.id}: ${record.title}`);
-            if (record.eventId) {
-              console.log(`      🔗 With eventId: ${record.eventId}`);
-            }
-          }
-        } catch (createError) {
-          console.error(`❌ Failed to create chapter ${record.id}:`, createError.message);
-          console.error('   Record data:', JSON.stringify(record, null, 2));
-          this.stats.errors++;
+    for (const record of records) {
+      try {
+        const cleanRecord = this.cleanRecord(record);
+        
+        // Get the mapped unified book ID
+        const originalBookId = parseInt(cleanRecord.bookId);
+        const unifiedBookId = this.idMappings.books.get(originalBookId);
+        
+        if (!unifiedBookId) {
+          console.warn(`   ⚠️  Chapter ${cleanRecord.id} references unmapped bookId ${originalBookId}, skipping`);
+          skippedCount++;
+          continue;
         }
+        
+        // Check if chapter already exists in unified system
+        const existingChapter = await this.targetPrisma.bookChapter.findFirst({
+          where: {
+            bookId: unifiedBookId,
+            chapterNumber: parseInt(cleanRecord.chapterNumber)
+          }
+        });
+        
+        if (existingChapter && !this.forceImport) {
+          console.log(`   ⏭️  Chapter already exists: "${cleanRecord.title}" (Book ID: ${unifiedBookId})`);
+          this.idMappings.chapters.set(parseInt(cleanRecord.id), existingChapter.id);
+          skippedCount++;
+          continue;
+        }
+        
+        // Prepare chapter data for unified system
+        const chapterData = {
+          title: cleanRecord.title || `Chapter ${cleanRecord.chapterNumber}`,
+          chapterNumber: parseInt(cleanRecord.chapterNumber),
+          description: cleanRecord.description || null,
+          pageStart: cleanRecord.pageStart && cleanRecord.pageStart.trim() !== '' ? parseInt(cleanRecord.pageStart) : null,
+          pageEnd: cleanRecord.pageEnd && cleanRecord.pageEnd.trim() !== '' ? parseInt(cleanRecord.pageEnd) : null,
+          bookId: unifiedBookId
+        };
+        
+        let unifiedChapter;
+        if (existingChapter && this.forceImport) {
+          // Update existing chapter
+          unifiedChapter = await this.targetPrisma.bookChapter.update({
+            where: { id: existingChapter.id },
+            data: chapterData
+          });
+          console.log(`   🔄 Updated chapter: "${unifiedChapter.title}" (ID: ${unifiedChapter.id})`);
+        } else {
+          // Create new chapter
+          unifiedChapter = await this.targetPrisma.bookChapter.create({
+            data: chapterData
+          });
+          console.log(`   ✅ Created chapter: "${unifiedChapter.title}" (ID: ${unifiedChapter.id})`);
+        }
+        
+        // Map the old chapter ID to the new unified chapter ID
+        this.idMappings.chapters.set(parseInt(cleanRecord.id), unifiedChapter.id);
+        
+        successCount++;
+        
+      } catch (error) {
+        console.error(`❌ Failed to import chapter from record:`, error.message);
+        console.error('   Record data:', JSON.stringify(record, null, 2));
+        errorCount++;
       }
-      
-      console.log(`✅ Imported ${successCount} history chapters`);
-      
-      // Update mappings for newly imported records
-      await this.updateChapterIdMappingAfterImport(newRecords);
-      
-      this.stats.imported += successCount;
-      this.stats.skipped += existing.length;
-    } catch (error) {
-      console.error('❌ Error importing history chapters:', error.message);
-      this.stats.errors += newRecords.length;
     }
+    
+    console.log(`✅ Unified Chapters Import Complete:`);
+    console.log(`   📖 Created/Updated: ${successCount} chapters`);
+    console.log(`   ⏭️  Skipped: ${skippedCount} chapters`);
+    console.log(`   ❌ Errors: ${errorCount} chapters`);
+    
+    this.stats.imported += successCount;
+    this.stats.skipped += skippedCount;
+    this.stats.errors += errorCount;
   }
 
   async importHistorySections() {
-    console.log('📥 Importing History Sections...');
+    console.log('📥 Importing Sections to Unified Books System...');
     
     const records = await this.loadCSVFile('history_sections.csv');
     if (records.length === 0) return;
 
-    // Validate existing events for foreign key validation
-    console.log('🔍 Checking existing events for foreign key validation...');
-    const existingEvents = await this.targetPrisma.historicalEvent.findMany({ select: { id: true } });
-    const validEventIds = new Set(existingEvents.map(e => e.id));
-    console.log(`   Found ${validEventIds.size} events for validation`);
-
-    const transformedRecords = records.map(record => {
-      const cleanRecord = this.cleanRecord(record);
-      
-      // Validate eventId foreign key
-      const eventId = cleanRecord.eventId && cleanRecord.eventId.trim() !== '' ? parseInt(cleanRecord.eventId) : null;
-      const validEventId = eventId && validEventIds.has(eventId) ? eventId : null;
-      
-      if (eventId && !validEventId) {
-        console.log(`   ⚠️  Section ${cleanRecord.id} references non-existent eventId ${eventId}, setting to null`);
-      }
-      
-      return {
-        id: parseInt(cleanRecord.id),
-        title: cleanRecord.title,
-        sectionNumber: parseInt(cleanRecord.sectionNumber),
-        description: cleanRecord.description,
-        pageStart: cleanRecord.pageStart && cleanRecord.pageStart.trim() !== '' ? parseInt(cleanRecord.pageStart) : null,
-        pageEnd: cleanRecord.pageEnd && cleanRecord.pageEnd.trim() !== '' ? parseInt(cleanRecord.pageEnd) : null,
-        content: cleanRecord.content,
-        chapterId: this.idMappings.chapters.get(parseInt(cleanRecord.chapterId)) || parseInt(cleanRecord.chapterId),
-        eventId: validEventId,
-        createdAt: new Date(cleanRecord.createdAt),
-        updatedAt: new Date(cleanRecord.updatedAt),
-      };
-    });
-
-    await this.buildSectionIdMapping(transformedRecords);
+    let successCount = 0;
+    let skippedCount = 0;
+    let errorCount = 0;
     
-    const { existing, new: newRecords } = await this.checkExistingRecords('historySection', transformedRecords);
-    
-    if (newRecords.length === 0) {
-      console.log('   All records already exist, skipping');
-      this.stats.skipped += existing.length;
-      return;
-    }
-    
-    try {
-      // Use individual creates to preserve IDs (like videos and events)
-      let successCount = 0;
-      console.log(`   Creating ${newRecords.length} sections individually to preserve IDs...`);
-      
-      for (const record of newRecords) {
-        try {
-          await this.targetPrisma.historySection.create({
-            data: record
-          });
-          successCount++;
-          if (successCount <= 3) {
-            console.log(`   ✅ Successfully created section ${record.id}: ${record.title}`);
-            if (record.eventId) {
-              console.log(`      🔗 With eventId: ${record.eventId}`);
-            }
-          }
-        } catch (createError) {
-          console.error(`❌ Failed to create section ${record.id}:`, createError.message);
-          console.error('   Record data:', JSON.stringify(record, null, 2));
-          this.stats.errors++;
+    for (const record of records) {
+      try {
+        const cleanRecord = this.cleanRecord(record);
+        
+        // Get the mapped unified chapter ID
+        const originalChapterId = parseInt(cleanRecord.chapterId);
+        const unifiedChapterId = this.idMappings.chapters.get(originalChapterId);
+        
+        if (!unifiedChapterId) {
+          console.warn(`   ⚠️  Section ${cleanRecord.id} references unmapped chapterId ${originalChapterId}, skipping`);
+          skippedCount++;
+          continue;
         }
+        
+        // Check if section already exists in unified system
+        const existingSection = await this.targetPrisma.bookSection.findFirst({
+          where: {
+            chapterId: unifiedChapterId,
+            sectionNumber: parseInt(cleanRecord.sectionNumber)
+          }
+        });
+        
+        if (existingSection && !this.forceImport) {
+          console.log(`   ⏭️  Section already exists: "${cleanRecord.title}" (Chapter ID: ${unifiedChapterId})`);
+          this.idMappings.sections.set(parseInt(cleanRecord.id), existingSection.id);
+          skippedCount++;
+          continue;
+        }
+        
+        // Prepare section data for unified system
+        const sectionData = {
+          title: cleanRecord.title || `Section ${cleanRecord.sectionNumber}`,
+          sectionNumber: parseInt(cleanRecord.sectionNumber),
+          description: cleanRecord.description || null,
+          pageStart: cleanRecord.pageStart && cleanRecord.pageStart.trim() !== '' ? parseInt(cleanRecord.pageStart) : null,
+          pageEnd: cleanRecord.pageEnd && cleanRecord.pageEnd.trim() !== '' ? parseInt(cleanRecord.pageEnd) : null,
+          content: cleanRecord.content || null,
+          chapterId: unifiedChapterId
+        };
+        
+        let unifiedSection;
+        if (existingSection && this.forceImport) {
+          // Update existing section
+          unifiedSection = await this.targetPrisma.bookSection.update({
+            where: { id: existingSection.id },
+            data: sectionData
+          });
+          console.log(`   🔄 Updated section: "${unifiedSection.title}" (ID: ${unifiedSection.id})`);
+        } else {
+          // Create new section
+          unifiedSection = await this.targetPrisma.bookSection.create({
+            data: sectionData
+          });
+          console.log(`   ✅ Created section: "${unifiedSection.title}" (ID: ${unifiedSection.id})`);
+        }
+        
+        // Map the old section ID to the new unified section ID
+        this.idMappings.sections.set(parseInt(cleanRecord.id), unifiedSection.id);
+        
+        successCount++;
+        
+      } catch (error) {
+        console.error(`❌ Failed to import section from record:`, error.message);
+        console.error('   Record data:', JSON.stringify(record, null, 2));
+        errorCount++;
       }
-      
-      console.log(`✅ Imported ${successCount} history sections`);
-      
-      // Update mappings for newly imported records
-      await this.updateSectionIdMappingAfterImport(newRecords);
-      
-      this.stats.imported += successCount;
-      this.stats.skipped += existing.length;
-    } catch (error) {
-      console.error('❌ Error importing history sections:', error.message);
-      this.stats.errors += newRecords.length;
     }
+    
+    console.log(`✅ Unified Sections Import Complete:`);
+    console.log(`   📄 Created/Updated: ${successCount} sections`);
+    console.log(`   ⏭️  Skipped: ${skippedCount} sections`);
+    console.log(`   ❌ Errors: ${errorCount} sections`);
+    
+    this.stats.imported += successCount;
+    this.stats.skipped += skippedCount;
+    this.stats.errors += errorCount;
   }
 
   async importHistoryChannels() {
@@ -1323,243 +1369,277 @@ class HistoryPlusDataImporter {
   }
 
   async importUserBookReads() {
-    console.log('📥 Importing User Book Reads...');
+    console.log('📥 Importing Book Reading Progress to Unified System...');
 
     const records = await this.loadCSVFile('user_book_reads.csv');
     if (records.length === 0) return;
 
-    // Transform records to match database schema (remove userId field)
-    const transformedRecords = records.map(record => {
-      const { userId, ...cleanRecord } = record; // Remove userId field
-      return {
-        id: cleanRecord.id,
-        bookId: parseInt(cleanRecord.bookId),
-        read: cleanRecord.read === true || cleanRecord.read === 'true',
-        readAt: cleanRecord.readDate ? new Date(cleanRecord.readDate) : null,
-        createdAt: new Date(cleanRecord.createdAt),
-        updatedAt: new Date(cleanRecord.updatedAt)
-      };
-    });
+    let successCount = 0;
+    let skippedCount = 0;
+    let errorCount = 0;
 
-    const { existing, new: newRecords } = await this.checkExistingRecords('user_book_reads', transformedRecords);
-
-    if (newRecords.length === 0) {
-      console.log('   All records already exist, skipping');
-      this.stats.skipped += existing.length;
-      return;
+    for (const record of records) {
+      try {
+        const cleanRecord = this.cleanRecord(record);
+        
+        // Get the mapped unified book ID
+        const originalBookId = parseInt(cleanRecord.bookId);
+        const unifiedBookId = this.idMappings.books.get(originalBookId);
+        
+        if (!unifiedBookId) {
+          console.warn(`   ⚠️  Book read record references unmapped bookId ${originalBookId}, skipping`);
+          skippedCount++;
+          continue;
+        }
+        
+        // Check if completion already exists
+        const existingCompletion = await this.targetPrisma.bookCompletion.findFirst({
+          where: {
+            bookId: unifiedBookId
+          }
+        });
+        
+        const isCompleted = cleanRecord.read === true || cleanRecord.read === 'true';
+        
+        if (existingCompletion && !this.forceImport) {
+          console.log(`   ⏭️  Book completion already exists for book ID ${unifiedBookId}`);
+          skippedCount++;
+          continue;
+        }
+        
+        // Prepare completion data
+        const completionData = {
+          bookId: unifiedBookId,
+          isCompleted: isCompleted,
+          completedAt: isCompleted && cleanRecord.readDate ? new Date(cleanRecord.readDate) : null,
+          progressPercentage: isCompleted ? 100.0 : 0.0
+        };
+        
+        if (existingCompletion && this.forceImport) {
+          // Update existing completion
+          await this.targetPrisma.bookCompletion.update({
+            where: { id: existingCompletion.id },
+            data: completionData
+          });
+          console.log(`   🔄 Updated book completion for book ID ${unifiedBookId} (completed: ${isCompleted})`);
+        } else {
+          // Create new completion
+          await this.targetPrisma.bookCompletion.create({
+            data: completionData
+          });
+          console.log(`   ✅ Created book completion for book ID ${unifiedBookId} (completed: ${isCompleted})`);
+        }
+        
+        successCount++;
+        
+      } catch (error) {
+        console.error(`❌ Failed to import book read record:`, error.message);
+        console.error('   Record data:', JSON.stringify(record, null, 2));
+        errorCount++;
+      }
     }
-
-    try {
-      const result = await this.targetPrisma.user_book_reads.createMany({
-        data: newRecords,
-        ...this.getCreateManyOptions()
-      });
-
-      console.log(`✅ Imported ${result.count} user book reads`);
-      this.stats.imported += result.count;
-      this.stats.skipped += existing.length;
-    } catch (error) {
-      console.error('❌ Error importing user book reads:', error.message);
-      console.error('   First record sample:', JSON.stringify(newRecords[0], null, 2));
-      this.stats.errors += newRecords.length;
-    }
+    
+    console.log(`✅ Unified Book Completions Import Complete:`);
+    console.log(`   📊 Created/Updated: ${successCount} completions`);
+    console.log(`   ⏭️  Skipped: ${skippedCount} completions`);
+    console.log(`   ❌ Errors: ${errorCount} completions`);
+    
+    this.stats.imported += successCount;
+    this.stats.skipped += skippedCount;
+    this.stats.errors += errorCount;
   }
 
   async importUserChapterReads() {
-    console.log('📥 Importing User Chapter Reads...');
+    console.log('📥 Importing Chapter Reading Progress to Unified System...');
 
     const records = await this.loadCSVFile('user_chapter_reads.csv');
     if (records.length === 0) return;
 
-    // Transform records to match database schema and use mapped chapter IDs
-    const transformedRecords = [];
-    const skippedRecords = [];
-    
+    let successCount = 0;
+    let skippedCount = 0;
+    let errorCount = 0;
+
     for (const record of records) {
-      const { userId, ...cleanRecord } = record; // Remove userId field
-      const oldChapterId = parseInt(cleanRecord.chapterId);
-      const mappedChapterId = this.idMappings.chapters.get(oldChapterId);
-      
-      if (mappedChapterId) {
-        transformedRecords.push({
-          id: cleanRecord.id,
-          chapterId: mappedChapterId,
-          read: cleanRecord.read === true || cleanRecord.read === 'true',
-          readAt: cleanRecord.readDate ? new Date(cleanRecord.readDate) : null,
-          createdAt: new Date(cleanRecord.createdAt),
-          updatedAt: new Date(cleanRecord.updatedAt)
+      try {
+        const cleanRecord = this.cleanRecord(record);
+        
+        // Get the mapped unified chapter ID
+        const originalChapterId = parseInt(cleanRecord.chapterId);
+        const unifiedChapterId = this.idMappings.chapters.get(originalChapterId);
+        
+        if (!unifiedChapterId) {
+          console.warn(`   ⚠️  Chapter read record references unmapped chapterId ${originalChapterId}, skipping`);
+          skippedCount++;
+          continue;
+        }
+        
+        // Check if completion already exists
+        const existingCompletion = await this.targetPrisma.bookCompletion.findFirst({
+          where: {
+            chapterId: unifiedChapterId
+          }
         });
-      } else {
-        skippedRecords.push({
-          id: cleanRecord.id,
-          oldChapterId: oldChapterId,
-          reason: 'Chapter not found in target database'
+        
+        const isCompleted = cleanRecord.read === true || cleanRecord.read === 'true';
+        
+        if (existingCompletion && !this.forceImport) {
+          console.log(`   ⏭️  Chapter completion already exists for chapter ID ${unifiedChapterId}`);
+          skippedCount++;
+          continue;
+        }
+        
+        // Get the book ID for this chapter to ensure proper completion tracking
+        const chapter = await this.targetPrisma.bookChapter.findUnique({
+          where: { id: unifiedChapterId },
+          select: { bookId: true }
         });
+        
+        if (!chapter) {
+          console.warn(`   ⚠️  Chapter ${unifiedChapterId} not found in unified system, skipping`);
+          skippedCount++;
+          continue;
+        }
+        
+        // Prepare completion data
+        const completionData = {
+          bookId: chapter.bookId,
+          chapterId: unifiedChapterId,
+          isCompleted: isCompleted,
+          completedAt: isCompleted && cleanRecord.readDate ? new Date(cleanRecord.readDate) : null,
+          progressPercentage: isCompleted ? 100.0 : 0.0
+        };
+        
+        if (existingCompletion && this.forceImport) {
+          // Update existing completion
+          await this.targetPrisma.bookCompletion.update({
+            where: { id: existingCompletion.id },
+            data: completionData
+          });
+          console.log(`   🔄 Updated chapter completion for chapter ID ${unifiedChapterId} (completed: ${isCompleted})`);
+        } else {
+          // Create new completion
+          await this.targetPrisma.bookCompletion.create({
+            data: completionData
+          });
+          console.log(`   ✅ Created chapter completion for chapter ID ${unifiedChapterId} (completed: ${isCompleted})`);
+        }
+        
+        successCount++;
+        
+      } catch (error) {
+        console.error(`❌ Failed to import chapter read record:`, error.message);
+        console.error('   Record data:', JSON.stringify(record, null, 2));
+        errorCount++;
       }
     }
-
-    console.log(`   Mapped ${transformedRecords.length} chapter reads, skipped ${skippedRecords.length} (unmappable chapters)`);
     
-    if (skippedRecords.length > 0) {
-      console.log(`   ⚠️  Skipped chapter reads for missing chapters: ${skippedRecords.slice(0, 5).map(r => r.oldChapterId).join(', ')}${skippedRecords.length > 5 ? '...' : ''}`);
-    }
-
-    if (transformedRecords.length === 0) {
-      console.log('   No mappable chapter reads to import');
-      this.stats.skipped += records.length;
-      return;
-    }
-
-    const { existing, new: newRecords } = await this.checkExistingRecords('user_chapter_reads', transformedRecords);
-
-    if (newRecords.length === 0) {
-      console.log('   All records already exist, skipping');
-      this.stats.skipped += existing.length;
-      return;
-    }
-
-    try {
-      const result = await this.targetPrisma.user_chapter_reads.createMany({
-        data: newRecords,
-        ...this.getCreateManyOptions()
-      });
-
-      console.log(`✅ Imported ${result.count} user chapter reads`);
-      this.stats.imported += result.count;
-      this.stats.skipped += existing.length + skippedRecords.length;
-    } catch (error) {
-      console.error('❌ Error importing user chapter reads:', error.message);
-      console.error('   First record sample:', JSON.stringify(newRecords[0], null, 2));
-      this.stats.errors += newRecords.length;
-    }
+    console.log(`✅ Unified Chapter Completions Import Complete:`);
+    console.log(`   📊 Created/Updated: ${successCount} completions`);
+    console.log(`   ⏭️  Skipped: ${skippedCount} completions`);
+    console.log(`   ❌ Errors: ${errorCount} completions`);
+    
+    this.stats.imported += successCount;
+    this.stats.skipped += skippedCount;
+    this.stats.errors += errorCount;
   }
 
   async importUserSectionReads() {
-    console.log('📥 Importing User Section Reads...');
+    console.log('📥 Importing Section Reading Progress to Unified System...');
 
     const records = await this.loadCSVFile('user_section_reads.csv');
     if (records.length === 0) return;
 
-    // Transform records to match database schema and use mapped section IDs
-    const transformedRecords = [];
-    const skippedRecords = [];
-    
+    let successCount = 0;
+    let skippedCount = 0;
+    let errorCount = 0;
+
     for (const record of records) {
-      const { userId, ...cleanRecord } = record; // Remove userId field
-      const oldSectionId = parseInt(cleanRecord.sectionId);
-      const mappedSectionId = this.idMappings.sections.get(oldSectionId);
-      
-      if (mappedSectionId) {
-        transformedRecords.push({
-          id: cleanRecord.id,
-          sectionId: mappedSectionId,
-          read: cleanRecord.read === true || cleanRecord.read === 'true',
-          readAt: cleanRecord.readDate ? new Date(cleanRecord.readDate) : null,
-          createdAt: new Date(cleanRecord.createdAt),
-          updatedAt: new Date(cleanRecord.updatedAt)
+      try {
+        const cleanRecord = this.cleanRecord(record);
+        
+        // Get the mapped unified section ID
+        const originalSectionId = parseInt(cleanRecord.sectionId);
+        const unifiedSectionId = this.idMappings.sections.get(originalSectionId);
+        
+        if (!unifiedSectionId) {
+          console.warn(`   ⚠️  Section read record references unmapped sectionId ${originalSectionId}, skipping`);
+          skippedCount++;
+          continue;
+        }
+        
+        // Check if completion already exists
+        const existingCompletion = await this.targetPrisma.bookCompletion.findFirst({
+          where: {
+            sectionId: unifiedSectionId
+          }
         });
-      } else {
-        skippedRecords.push({
-          id: cleanRecord.id,
-          oldSectionId: oldSectionId,
-          reason: 'Section not found in target database'
+        
+        const isCompleted = cleanRecord.read === true || cleanRecord.read === 'true';
+        
+        if (existingCompletion && !this.forceImport) {
+          console.log(`   ⏭️  Section completion already exists for section ID ${unifiedSectionId}`);
+          skippedCount++;
+          continue;
+        }
+        
+        // Get the book and chapter IDs for this section to ensure proper completion tracking
+        const section = await this.targetPrisma.bookSection.findUnique({
+          where: { id: unifiedSectionId },
+          include: {
+            chapter: {
+              select: { bookId: true }
+            }
+          }
         });
+        
+        if (!section || !section.chapter) {
+          console.warn(`   ⚠️  Section ${unifiedSectionId} or its chapter not found in unified system, skipping`);
+          skippedCount++;
+          continue;
+        }
+        
+        // Prepare completion data
+        const completionData = {
+          bookId: section.chapter.bookId,
+          chapterId: section.chapterId,
+          sectionId: unifiedSectionId,
+          isCompleted: isCompleted,
+          completedAt: isCompleted && cleanRecord.readDate ? new Date(cleanRecord.readDate) : null,
+          progressPercentage: isCompleted ? 100.0 : 0.0
+        };
+        
+        if (existingCompletion && this.forceImport) {
+          // Update existing completion
+          await this.targetPrisma.bookCompletion.update({
+            where: { id: existingCompletion.id },
+            data: completionData
+          });
+          console.log(`   🔄 Updated section completion for section ID ${unifiedSectionId} (completed: ${isCompleted})`);
+        } else {
+          // Create new completion
+          await this.targetPrisma.bookCompletion.create({
+            data: completionData
+          });
+          console.log(`   ✅ Created section completion for section ID ${unifiedSectionId} (completed: ${isCompleted})`);
+        }
+        
+        successCount++;
+        
+      } catch (error) {
+        console.error(`❌ Failed to import section read record:`, error.message);
+        console.error('   Record data:', JSON.stringify(record, null, 2));
+        errorCount++;
       }
     }
-
-    console.log(`   Mapped ${transformedRecords.length} section reads, skipped ${skippedRecords.length} (unmappable sections)`);
     
-    if (skippedRecords.length > 0) {
-      console.log(`   ⚠️  Skipped section reads for missing sections: ${skippedRecords.slice(0, 5).map(r => r.oldSectionId).join(', ')}${skippedRecords.length > 5 ? '...' : ''}`);
-    }
-
-    if (transformedRecords.length === 0) {
-      console.log('   No mappable section reads to import');
-      this.stats.skipped += records.length;
-      return;
-    }
-
-    const { existing, new: newRecords } = await this.checkExistingRecords('user_section_reads', transformedRecords);
-
-    if (newRecords.length === 0) {
-      console.log('   All records already exist, skipping');
-      this.stats.skipped += existing.length;
-      return;
-    }
-
-    try {
-      const result = await this.targetPrisma.user_section_reads.createMany({
-        data: newRecords,
-        ...this.getCreateManyOptions()
-      });
-
-      console.log(`✅ Imported ${result.count} user section reads`);
-      this.stats.imported += result.count;
-      this.stats.skipped += existing.length + skippedRecords.length;
-    } catch (error) {
-      console.error('❌ Error importing user section reads:', error.message);
-      console.error('   First record sample:', JSON.stringify(newRecords[0], null, 2));
-      this.stats.errors += newRecords.length;
-    }
-  }
-
-  async importUserReads() {
-    console.log('📥 Importing User Read Statuses...');
-
-    const bookReads = await this.loadCSVFile('user_book_reads.csv');
-    const chapterReads = await this.loadCSVFile('user_chapter_reads.csv');
-    const sectionReads = await this.loadCSVFile('user_section_reads.csv');
-
-    // Import Book Reads
-    if (bookReads.length > 0) {
-      const transformed = bookReads.map(r => {
-        const clean = this.cleanRecord(r);
-        return {
-          id: clean.id,
-          bookId: this.idMappings.books.get(parseInt(clean.bookId)) || parseInt(clean.bookId),
-          read: clean.read === 'true' || clean.read === true,
-          readAt: clean.readDate ? new Date(clean.readDate) : null,
-          createdAt: new Date(clean.createdAt),
-          updatedAt: new Date(clean.updatedAt),
-        };
-      });
-      await this.targetPrisma.user_book_reads.createMany({ data: transformed, skipDuplicates: true });
-      console.log(`✅ Processed ${transformed.length} book read statuses.`);
-    }
-
-    // Import Chapter Reads
-    if (chapterReads.length > 0) {
-      const transformed = chapterReads.map(r => {
-        const clean = this.cleanRecord(r);
-        return {
-          id: clean.id,
-          chapterId: this.idMappings.chapters.get(parseInt(clean.chapterId)) || parseInt(clean.chapterId),
-          read: clean.read === 'true' || clean.read === true,
-          readAt: clean.readDate ? new Date(clean.readDate) : null,
-          createdAt: new Date(clean.createdAt),
-          updatedAt: new Date(clean.updatedAt),
-        };
-      });
-      await this.targetPrisma.user_chapter_reads.createMany({ data: transformed, skipDuplicates: true });
-      console.log(`✅ Processed ${transformed.length} chapter read statuses.`);
-    }
-
-    // Import Section Reads
-    if (sectionReads.length > 0) {
-      const transformed = sectionReads.map(r => {
-        const clean = this.cleanRecord(r);
-        return {
-          id: clean.id,
-          sectionId: this.idMappings.sections.get(parseInt(clean.sectionId)) || parseInt(clean.sectionId),
-          read: clean.read === 'true' || clean.read === true,
-          readAt: clean.readDate ? new Date(clean.readDate) : null,
-          createdAt: new Date(clean.createdAt),
-          updatedAt: new Date(clean.updatedAt),
-        };
-      });
-      await this.targetPrisma.user_section_reads.createMany({ data: transformed, skipDuplicates: true });
-      console.log(`✅ Processed ${transformed.length} section read statuses.`);
-    }
+    console.log(`✅ Unified Section Completions Import Complete:`);
+    console.log(`   📊 Created/Updated: ${successCount} completions`);
+    console.log(`   ⏭️  Skipped: ${skippedCount} completions`);
+    console.log(`   ❌ Errors: ${errorCount} completions`);
+    
+    this.stats.imported += successCount;
+    this.stats.skipped += skippedCount;
+    this.stats.errors += errorCount;
   }
 
   async importAll() {

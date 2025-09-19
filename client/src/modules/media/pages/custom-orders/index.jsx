@@ -2752,6 +2752,57 @@ function CustomOrders() {
     }
   };
 
+  const handleManualBookCreate = async (orderId, bookData) => {
+    try {
+      setMessage('Creating book in unified library...');
+
+      // First, create the book in the unified Book table
+      const createBookResponse = await fetch('/api/books', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          title: bookData.bookTitle,
+          author: bookData.bookAuthor,
+          publishYear: bookData.bookYear,
+          isbn: bookData.bookIsbn,
+          pageCount: bookData.bookPageCount,
+          publisher: 'Manual Entry',
+          source: 'manual'
+        }),
+      });
+
+      if (!createBookResponse.ok) {
+        throw new Error('Failed to create book in unified library');
+      }
+
+      const bookResult = await createBookResponse.json();
+      if (!bookResult.success) {
+        throw new Error(bookResult.error || 'Failed to create book');
+      }
+
+      const unifiedBook = bookResult.data;
+
+      // Now add the book to the custom order, linking to the unified book
+      const orderItemData = {
+        ...bookData,
+        bookId: unifiedBook.id // Link to the unified book
+      };
+
+      const success = await handleAddMediaToOrder(orderId, orderItemData);
+      
+      if (success !== false) {
+        setShowBookForm(false);
+        setBookFormData({ title: '', author: '', year: '', isbn: '', pageCount: '' });
+        setMessage(`Book "${unifiedBook.title}" created and added to order!`);
+      }
+    } catch (error) {
+      console.error('Error creating manual book:', error);
+      setMessage(`Error creating book: ${error.message}`);
+    }
+  };
+
   const handleSearchBooks = async (e) => {
     e.preventDefault();
     
@@ -3802,6 +3853,7 @@ function CustomOrders() {
         }}
         onSubmit={handleSearchBooks}
         onSelectBook={handleSelectBook}
+        onManualBookCreate={handleManualBookCreate}
         onAddMediaToOrder={handleAddMediaToOrder}
       />
 

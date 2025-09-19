@@ -36,7 +36,8 @@ import {
   Filter,
   SortAsc,
   Eye,
-  Download
+  Download,
+  Trash2
 } from 'lucide-react';
 import readingSessionService from '../services/readingSessionService';
 
@@ -73,6 +74,11 @@ const Books = () => {
   const [reselectingBook, setReselectingBook] = useState(null);
   const [bookSearchResults, setBookSearchResults] = useState([]);
   const [bookSearchLoading, setBookSearchLoading] = useState(false);
+  
+  // Delete confirmation state
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [bookToDelete, setBookToDelete] = useState(null);
+  
   const [bookFormData, setBookFormData] = useState({
     title: '',
     author: '',
@@ -185,6 +191,41 @@ const Books = () => {
       console.error('Error fetching book details:', err);
       setError(`Failed to fetch book details: ${err.message}`);
     }
+  };
+
+  const deleteBook = async (bookId) => {
+    try {
+      const response = await fetch(`/api/books/${bookId}`, {
+        method: 'DELETE'
+      });
+      const data = await response.json();
+      
+      if (data.success) {
+        // Remove book from the list
+        setBooks(books.filter(book => book.id !== bookId));
+        // Clear selected book if it was the deleted one
+        if (selectedBook?.id === bookId) {
+          setSelectedBook(null);
+        }
+        setShowDeleteConfirm(false);
+        setBookToDelete(null);
+      } else {
+        throw new Error(data.error || 'Failed to delete book');
+      }
+    } catch (err) {
+      console.error('Error deleting book:', err);
+      setError(`Failed to delete book: ${err.message}`);
+    }
+  };
+
+  const confirmDelete = (book) => {
+    setBookToDelete(book);
+    setShowDeleteConfirm(true);
+  };
+
+  const cancelDelete = () => {
+    setShowDeleteConfirm(false);
+    setBookToDelete(null);
   };
 
   // ==========================================
@@ -450,17 +491,31 @@ const Books = () => {
     return (
     <div 
       key={book.id} 
-      className={`bg-white rounded-lg shadow-md p-4 hover:shadow-lg transition-shadow cursor-pointer relative ${isCompleted ? 'ring-2 ring-green-200' : ''}`}
-      onClick={() => fetchBookDetails(book.id)}
+      className={`bg-white rounded-lg shadow-md p-4 hover:shadow-lg transition-shadow relative group ${isCompleted ? 'ring-2 ring-green-200' : ''}`}
     >
       {/* Completion indicator */}
       {isCompleted && (
-        <div className="absolute top-2 right-2 bg-green-500 text-white rounded-full p-1">
+        <div className="absolute top-2 right-2 bg-green-500 text-white rounded-full p-1 z-10">
           <CheckCircle className="w-4 h-4" />
         </div>
       )}
       
-      <div className="flex items-start space-x-4">
+      {/* Delete button */}
+      <button
+        onClick={(e) => {
+          e.stopPropagation();
+          confirmDelete(book);
+        }}
+        className="absolute top-2 left-2 p-1 text-red-500 hover:bg-red-100 rounded-full opacity-0 group-hover:opacity-100 transition-opacity z-10"
+        title="Delete book"
+      >
+        <Trash2 className="w-4 h-4" />
+      </button>
+      
+      <div 
+        className="flex items-start space-x-4 cursor-pointer"
+        onClick={() => fetchBookDetails(book.id)}
+      >
         {book.coverUrl && (
           <img 
             src={book.coverUrl} 
@@ -1078,6 +1133,50 @@ const Books = () => {
               >
                 Cancel
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Confirmation Modal */}
+      {showDeleteConfirm && bookToDelete && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-lg shadow-xl max-w-md w-full">
+            <div className="p-6">
+              <div className="flex items-center mb-4">
+                <div className="flex-shrink-0 w-10 h-10 bg-red-100 rounded-full flex items-center justify-center">
+                  <Trash2 className="w-5 h-5 text-red-600" />
+                </div>
+                <div className="ml-4">
+                  <h3 className="text-lg font-medium text-gray-900">Delete Book</h3>
+                  <p className="text-sm text-gray-500">This action cannot be undone.</p>
+                </div>
+              </div>
+              
+              <div className="mb-6">
+                <p className="text-gray-700">
+                  Are you sure you want to delete "<strong>{bookToDelete.title}</strong>"
+                  {bookToDelete.author && <span> by {bookToDelete.author}</span>}?
+                </p>
+                <p className="text-sm text-gray-500 mt-2">
+                  This will remove the book from your library and all associated reading progress.
+                </p>
+              </div>
+              
+              <div className="flex justify-end space-x-3">
+                <button
+                  onClick={cancelDelete}
+                  className="px-4 py-2 text-gray-700 bg-gray-200 rounded-lg hover:bg-gray-300"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={() => deleteBook(bookToDelete.id)}
+                  className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700"
+                >
+                  Delete Book
+                </button>
+              </div>
             </div>
           </div>
         </div>
