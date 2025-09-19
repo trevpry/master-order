@@ -562,6 +562,39 @@ router.post('/:bookId/chapters/:chapterId/sections/:sectionId/complete', asyncHa
   sendSuccess(res, result);
 }));
 
+/**
+ * POST /api/books/:id/toggle-complete
+ * Toggle book completion status
+ */
+router.post('/:id/toggle-complete', asyncHandler(async (req, res) => {
+  const { id } = req.params;
+
+  const result = await integrationService.toggleContentCompletion('book', parseInt(id));
+  sendSuccess(res, result);
+}));
+
+/**
+ * POST /api/books/:bookId/chapters/:chapterId/toggle-complete
+ * Toggle chapter completion status
+ */
+router.post('/:bookId/chapters/:chapterId/toggle-complete', asyncHandler(async (req, res) => {
+  const { chapterId } = req.params;
+
+  const result = await integrationService.toggleContentCompletion('chapter', parseInt(chapterId));
+  sendSuccess(res, result);
+}));
+
+/**
+ * POST /api/books/:bookId/chapters/:chapterId/sections/:sectionId/toggle-complete
+ * Toggle section completion status
+ */
+router.post('/:bookId/chapters/:chapterId/sections/:sectionId/toggle-complete', asyncHandler(async (req, res) => {
+  const { sectionId } = req.params;
+
+  const result = await integrationService.toggleContentCompletion('section', parseInt(sectionId));
+  sendSuccess(res, result);
+}));
+
 // ==========================================
 // READING SESSION ENDPOINTS
 // ==========================================

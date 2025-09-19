@@ -306,6 +306,131 @@ class BookCompletionService {
   }
 
   // ==========================================
+  // TOGGLE COMPLETION METHODS
+  // ==========================================
+
+  /**
+   * Toggle book completion status
+   * @param {number} bookId - Book ID
+   * @param {string} userId - User ID
+   * @returns {Promise<Object>} Updated completion record
+   */
+  async toggleBookCompletion(bookId, userId = null) {
+    try {
+      const normalizedUserId = this.normalizeUserId(userId);
+      
+      // Get current completion status
+      const currentCompletion = await this.getOrCreateBookCompletion(bookId, normalizedUserId);
+      const isCurrentlyCompleted = currentCompletion && currentCompletion.isCompleted;
+      
+      if (isCurrentlyCompleted) {
+        // Mark as not completed
+        return await this.updateBookProgress(bookId, {
+          isCompleted: false,
+          percentRead: 0,
+          completedAt: null
+        }, normalizedUserId);
+      } else {
+        // Mark as completed
+        return await this.markBookCompleted(bookId, normalizedUserId);
+      }
+    } catch (error) {
+      console.error(`Error toggling book ${bookId} completion:`, error);
+      throw new Error(`Failed to toggle book completion: ${error.message}`);
+    }
+  }
+
+  /**
+   * Toggle chapter completion status
+   * @param {number} chapterId - Chapter ID
+   * @param {string} userId - User ID
+   * @returns {Promise<Object>} Updated completion record
+   */
+  async toggleChapterCompletion(chapterId, userId = null) {
+    try {
+      const normalizedUserId = this.normalizeUserId(userId);
+      
+      // Get current completion status
+      const currentCompletion = await this.getChapterCompletion(chapterId, normalizedUserId);
+      const isCurrentlyCompleted = currentCompletion && currentCompletion.isCompleted;
+      
+      if (isCurrentlyCompleted) {
+        // Mark as not completed
+        return await this.prisma.chapterCompletion.upsert({
+          where: {
+            chapterId_userId: {
+              chapterId,
+              userId: normalizedUserId
+            }
+          },
+          create: {
+            chapterId,
+            userId: normalizedUserId,
+            isCompleted: false,
+            completedAt: null
+          },
+          update: {
+            isCompleted: false,
+            completedAt: null,
+            updatedAt: new Date()
+          }
+        });
+      } else {
+        // Mark as completed
+        return await this.markChapterCompleted(chapterId, normalizedUserId);
+      }
+    } catch (error) {
+      console.error(`Error toggling chapter ${chapterId} completion:`, error);
+      throw new Error(`Failed to toggle chapter completion: ${error.message}`);
+    }
+  }
+
+  /**
+   * Toggle section completion status
+   * @param {number} sectionId - Section ID
+   * @param {string} userId - User ID
+   * @returns {Promise<Object>} Updated completion record
+   */
+  async toggleSectionCompletion(sectionId, userId = null) {
+    try {
+      const normalizedUserId = this.normalizeUserId(userId);
+      
+      // Get current completion status
+      const currentCompletion = await this.getSectionCompletion(sectionId, normalizedUserId);
+      const isCurrentlyCompleted = currentCompletion && currentCompletion.isCompleted;
+      
+      if (isCurrentlyCompleted) {
+        // Mark as not completed
+        return await this.prisma.sectionCompletion.upsert({
+          where: {
+            sectionId_userId: {
+              sectionId,
+              userId: normalizedUserId
+            }
+          },
+          create: {
+            sectionId,
+            userId: normalizedUserId,
+            isCompleted: false,
+            completedAt: null
+          },
+          update: {
+            isCompleted: false,
+            completedAt: null,
+            updatedAt: new Date()
+          }
+        });
+      } else {
+        // Mark as completed
+        return await this.markSectionCompleted(sectionId, normalizedUserId);
+      }
+    } catch (error) {
+      console.error(`Error toggling section ${sectionId} completion:`, error);
+      throw new Error(`Failed to toggle section completion: ${error.message}`);
+    }
+  }
+
+  // ==========================================
   // PROGRESS CALCULATION
   // ==========================================
 

@@ -71,15 +71,52 @@ function createActivityTrackingRoutes(prisma) {
 
       console.log(`🔲 Mark watched request - itemId: ${itemId}, mediaType: ${mediaType}, title: ${title}`);
 
-      // Check if this is a History Plus video ID
-      if (String(itemId).startsWith('history-plus-video-')) {
-        console.log('🎓 Detected History Plus video, routing to History Plus completion endpoint');
+      // Check if this is a History Plus content ID
+      if (String(itemId).startsWith('history-plus-')) {
+        console.log('🎓 Detected History Plus content, routing to appropriate History Plus completion endpoint');
         
-        // Extract the actual video ID from the history-plus-video-{id} format
-        const historyPlusVideoId = String(itemId).replace('history-plus-video-', '');
+        let historyPlusId, contentType, endpointPath;
+        
+        if (String(itemId).startsWith('history-plus-video-')) {
+          // Extract the actual video ID from the history-plus-video-{id} format
+          historyPlusId = String(itemId).replace('history-plus-video-', '');
+          contentType = 'video';
+          endpointPath = `videos/${historyPlusId}/complete`;
+        } else if (String(itemId).startsWith('history-plus-section-')) {
+          // Extract the actual section ID from the history-plus-section-{id} format
+          historyPlusId = String(itemId).replace('history-plus-section-', '');
+          contentType = 'section';
+          endpointPath = `sections/${historyPlusId}/read`;
+        } else if (String(itemId).startsWith('history-plus-chapter-')) {
+          // Extract the actual chapter ID from the history-plus-chapter-{id} format
+          historyPlusId = String(itemId).replace('history-plus-chapter-', '');
+          contentType = 'chapter';
+          endpointPath = `chapters/${historyPlusId}/read`;
+        } else if (String(itemId).startsWith('history-plus-book-')) {
+          // Extract the actual book ID from the history-plus-book-{id} format
+          historyPlusId = String(itemId).replace('history-plus-book-', '');
+          contentType = 'book';
+          endpointPath = `books/${historyPlusId}/read`;
+        } else {
+          console.error('❌ Unknown History Plus content type:', itemId);
+          return res.status(400).json({
+            type: 'MARK_WATCHED_ERROR',
+            data: {
+              success: false,
+              itemId: itemId,
+              title: title,
+              mediaType: mediaType,
+              error: 'Unknown History Plus content type',
+              details: 'History Plus item ID format not recognized',
+              timestamp: new Date().toISOString()
+            }
+          });
+        }
+        
+        console.log(`🎓 Processing History Plus ${contentType} with ID: ${historyPlusId}`);
         
         const baseUrl = getAndroidApiBaseUrl();
-        const completeResponse = await fetch(`${baseUrl}/api/history-plus/videos/${historyPlusVideoId}/complete`, {
+        const completeResponse = await fetch(`${baseUrl}/api/history-plus/${endpointPath}`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json'
@@ -88,25 +125,26 @@ function createActivityTrackingRoutes(prisma) {
 
         if (!completeResponse.ok) {
           const errorData = await completeResponse.json();
-          console.error('Failed to complete History Plus video:', errorData);
+          console.error(`Failed to complete History Plus ${contentType}:`, errorData);
 
           return res.status(completeResponse.status).json({
             type: 'MARK_WATCHED_ERROR',
             data: {
               success: false,
               itemId: itemId,
-              historyPlusVideoId: historyPlusVideoId,
+              historyPlusId: historyPlusId,
+              contentType: contentType,
               title: title,
               mediaType: mediaType,
-              error: errorData.error || 'Failed to complete History Plus video',
-              details: errorData.details || 'Check that the History Plus video exists',
+              error: errorData.error || `Failed to complete History Plus ${contentType}`,
+              details: errorData.details || `Check that the History Plus ${contentType} exists`,
               timestamp: new Date().toISOString()
             }
           });
         }
 
         const completeData = await completeResponse.json();
-        console.log('✅ History Plus video completed successfully:', JSON.stringify(completeData, null, 2));
+        console.log(`✅ History Plus ${contentType} completed successfully:`, JSON.stringify(completeData, null, 2));
 
         // Success response in Android format
         return res.json({
@@ -114,10 +152,11 @@ function createActivityTrackingRoutes(prisma) {
           data: {
             success: true,
             itemId: itemId,
-            historyPlusVideoId: historyPlusVideoId,
+            historyPlusId: historyPlusId,
+            contentType: contentType,
             title: title,
-            mediaType: mediaType || 'webvideo',
-            message: `Successfully completed History Plus video "${title}"`,
+            mediaType: mediaType || 'book',
+            message: `Successfully completed History Plus ${contentType} "${title}"`,
             watchLogCreated: true,
             historyPlusCompleted: true,
             timestamp: new Date().toISOString()

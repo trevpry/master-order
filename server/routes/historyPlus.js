@@ -384,6 +384,12 @@ router.post('/books/:id/read', asyncHandler(async (req, res) => {
   sendSuccess(res, read);
 }));
 
+// POST /api/history-plus/books/:id/toggle-read
+router.post('/books/:id/toggle-read', asyncHandler(async (req, res) => {
+  const read = await historyPlusService.toggleBookRead(req.params.id);
+  sendSuccess(res, read);
+}));
+
 // POST /api/history-plus/chapters/:id/read (legacy endpoint)
 router.post('/chapters/:id/read', asyncHandler(async (req, res) => {
   const read = await historyPlusService.markChapterRead(req.params.id);

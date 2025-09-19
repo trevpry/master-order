@@ -1055,22 +1055,8 @@ class HistoryPlusService {
   }
 
   async toggleBookRead(bookId) {
-    const bookIdInt = parseInt(bookId);
-    
-    // Get current completion status
-    const currentCompletion = await this.completionService.getOrCreateBookCompletion(bookIdInt);
-    const isCurrentlyCompleted = currentCompletion && currentCompletion.isCompleted;
-    
-    if (isCurrentlyCompleted) {
-      // Mark as not completed
-      return await this.completionService.updateBookProgress(bookIdInt, {
-        isCompleted: false,
-        percentRead: 0
-      });
-    } else {
-      // Mark as completed
-      return await this.completionService.markBookCompleted(bookIdInt);
-    }
+    // Use the unified BookCompletionService toggle method
+    return await this.completionService.toggleBookCompletion(parseInt(bookId));
   }
 
   async markChapterRead(chapterId) {
@@ -1078,37 +1064,8 @@ class HistoryPlusService {
   }
 
   async toggleChapterRead(chapterId) {
-    const chapterIdInt = parseInt(chapterId);
-    
-    // Get current completion status
-    const currentCompletion = await this.completionService.getChapterCompletion(chapterIdInt);
-    const isCurrentlyCompleted = currentCompletion && currentCompletion.isCompleted;
-    
-    if (isCurrentlyCompleted) {
-      // Mark as not completed by creating/updating with isCompleted: false
-      return await this.prisma.chapterCompletion.upsert({
-        where: {
-          chapterId_userId: {
-            chapterId: chapterIdInt,
-            userId: "default"
-          }
-        },
-        create: {
-          chapterId: chapterIdInt,
-          userId: "default",
-          isCompleted: false,
-          completedAt: null
-        },
-        update: {
-          isCompleted: false,
-          completedAt: null,
-          updatedAt: new Date()
-        }
-      });
-    } else {
-      // Mark as completed
-      return await this.completionService.markChapterCompleted(chapterIdInt);
-    }
+    // Use the unified BookCompletionService toggle method
+    return await this.completionService.toggleChapterCompletion(parseInt(chapterId));
   }
 
   async markSectionRead(sectionId) {
@@ -1116,37 +1073,8 @@ class HistoryPlusService {
   }
 
   async toggleSectionRead(sectionId) {
-    const sectionIdInt = parseInt(sectionId);
-    
-    // Get current completion status
-    const currentCompletion = await this.completionService.getSectionCompletion(sectionIdInt);
-    const isCurrentlyCompleted = currentCompletion && currentCompletion.isCompleted;
-    
-    if (isCurrentlyCompleted) {
-      // Mark as not completed by creating/updating with isCompleted: false
-      return await this.prisma.sectionCompletion.upsert({
-        where: {
-          sectionId_userId: {
-            sectionId: sectionIdInt,
-            userId: "default"
-          }
-        },
-        create: {
-          sectionId: sectionIdInt,
-          userId: "default",
-          isCompleted: false,
-          completedAt: null
-        },
-        update: {
-          isCompleted: false,
-          completedAt: null,
-          updatedAt: new Date()
-        }
-      });
-    } else {
-      // Mark as completed
-      return await this.completionService.markSectionCompleted(sectionIdInt);
-    }
+    // Use the unified BookCompletionService toggle method
+    return await this.completionService.toggleSectionCompletion(parseInt(sectionId));
   }
 
   // ==========================================

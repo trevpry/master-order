@@ -298,28 +298,65 @@ const Books = () => {
     }
   };
 
-  const markAsCompleted = async (type, id) => {
+  const toggleCompletion = async (type, id) => {
     try {
       let url;
-      switch (type) {
-        case 'book':
-          url = `/api/books/${id}/complete`;
-          break;
-        case 'chapter':
-          url = `/api/books/${selectedBook.id}/chapters/${id}/complete`;
-          break;
-        case 'section':
-          // Find the chapter that contains this section
-          const containingChapter = selectedBook.chapters?.find(chapter => 
-            chapter.sections?.some(section => section.id === id)
-          );
-          if (!containingChapter) {
-            throw new Error('Could not find chapter containing this section');
-          }
-          url = `/api/books/${selectedBook.id}/chapters/${containingChapter.id}/sections/${id}/complete`;
-          break;
-        default:
-          throw new Error('Invalid completion type');
+      let isHistoryPlus = false;
+      
+      // Determine if this specific content is History Plus by checking for event associations
+      if (type === 'book' && selectedBook) {
+        // For books, check if ANY chapter has an event (indicating this is a History Plus book)
+        isHistoryPlus = selectedBook.chapters && selectedBook.chapters.some(chapter => chapter.event);
+      } else if (type === 'chapter' && selectedBook) {
+        // For chapters, check if THIS specific chapter has an event
+        const chapter = selectedBook.chapters?.find(c => c.id === id);
+        isHistoryPlus = chapter && chapter.event;
+      } else if (type === 'section' && selectedBook) {
+        // For sections, check if the parent chapter has an event
+        const parentChapter = selectedBook.chapters?.find(chapter => 
+          chapter.sections?.some(section => section.id === id)
+        );
+        isHistoryPlus = parentChapter && parentChapter.event;
+      }
+
+      // Choose endpoint based on whether it's History Plus content
+      if (isHistoryPlus) {
+        // Use History Plus toggle endpoints (which now use unified completion system)
+        switch (type) {
+          case 'book':
+            url = `/api/history-plus/books/${id}/toggle-read`;
+            break;
+          case 'chapter':
+            url = `/api/history-plus/chapters/${id}/toggle-read`;
+            break;
+          case 'section':
+            url = `/api/history-plus/sections/${id}/toggle-read`;
+            break;
+          default:
+            throw new Error('Invalid completion type');
+        }
+      } else {
+        // Use regular books toggle endpoints
+        switch (type) {
+          case 'book':
+            url = `/api/books/${id}/toggle-complete`;
+            break;
+          case 'chapter':
+            url = `/api/books/${selectedBook.id}/chapters/${id}/toggle-complete`;
+            break;
+          case 'section':
+            // Find the chapter that contains this section
+            const containingChapter = selectedBook.chapters?.find(chapter => 
+              chapter.sections?.some(section => section.id === id)
+            );
+            if (!containingChapter) {
+              throw new Error('Could not find chapter containing this section');
+            }
+            url = `/api/books/${selectedBook.id}/chapters/${containingChapter.id}/sections/${id}/toggle-complete`;
+            break;
+          default:
+            throw new Error('Invalid completion type');
+        }
       }
 
       const response = await fetch(url, {
@@ -337,11 +374,11 @@ const Books = () => {
         }
         fetchBooks();
       } else {
-        throw new Error(data.error || 'Failed to mark as completed');
+        throw new Error(data.error || 'Failed to toggle completion');
       }
     } catch (err) {
-      console.error('Error marking as completed:', err);
-      setError(`Failed to mark as completed: ${err.message}`);
+      console.error('Error toggling completion:', err);
+      setError(`Failed to toggle completion: ${err.message}`);
     }
   };
 
@@ -485,8 +522,11 @@ const Books = () => {
   };
 
   const renderBookCard = (book) => {
-    // Check if the book is completed
-    const isCompleted = book.bookCompletions && book.bookCompletions.some(completion => completion.isCompleted);
+    // Check if the book is completed for the current user ("default")
+    const userBookCompletion = book.bookCompletions && book.bookCompletions.find(completion => 
+      completion.userId === "default"
+    );
+    const isCompleted = userBookCompletion && userBookCompletion.isCompleted;
     
     return (
     <div 
@@ -692,11 +732,11 @@ const Books = () => {
             )}
             
             <button
-              onClick={() => markAsCompleted('book', selectedBook.id)}
+              onClick={() => toggleCompletion('book', selectedBook.id)}
               className="flex items-center px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
             >
               <CheckCircle className="w-4 h-4 mr-2" />
-              Mark Complete
+              Toggle Complete
             </button>
             
             <button
@@ -724,8 +764,11 @@ const Books = () => {
             <h3 className="text-xl font-bold text-gray-900 mb-4">Chapters</h3>
             <div className="space-y-3">
               {selectedBook.chapters.map(chapter => {
-                // Check if the chapter is completed
-                const isChapterCompleted = chapter.chapterCompletions && chapter.chapterCompletions.some(completion => completion.isCompleted);
+                // Check if the chapter is completed for the current user ("default")
+                const userCompletion = chapter.chapterCompletions && chapter.chapterCompletions.find(completion => 
+                  completion.userId === "default"
+                );
+                const isChapterCompleted = userCompletion && userCompletion.isCompleted;
                 
                 return (
                 <div key={chapter.id} className={`border rounded-lg p-4 hover:bg-gray-50 ${isChapterCompleted ? 'bg-green-50 border-green-200' : ''}`}>
@@ -767,9 +810,9 @@ const Books = () => {
                       </button>
                       
                       <button
-                        onClick={() => markAsCompleted('chapter', chapter.id)}
+                        onClick={() => toggleCompletion('chapter', chapter.id)}
                         className="p-2 text-blue-600 hover:bg-blue-100 rounded"
-                        title="Mark chapter as complete"
+                        title="Toggle chapter completion"
                       >
                         <CheckCircle className="w-4 h-4" />
                       </button>
@@ -819,9 +862,9 @@ const Books = () => {
                             </button>
                             
                             <button
-                              onClick={() => markAsCompleted('section', section.id)}
+                              onClick={() => toggleCompletion('section', section.id)}
                               className="p-1 text-blue-600 hover:bg-blue-100 rounded"
-                              title="Mark section as complete"
+                              title="Toggle section completion"
                             >
                               <CheckCircle className="w-3 h-3" />
                             </button>

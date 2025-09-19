@@ -249,6 +249,33 @@ class BookIntegrationService {
     }
   }
 
+  /**
+   * Toggle completion status for book content
+   * @param {string} type - Content type ('book', 'chapter', 'section')
+   * @param {number} id - Content ID
+   * @returns {Promise<Object>} Completion result
+   */
+  async toggleContentCompletion(type, id) {
+    try {
+      switch (type) {
+        case 'book':
+          return await this.completionService.toggleBookCompletion(id);
+        
+        case 'chapter':
+          return await this.completionService.toggleChapterCompletion(id);
+        
+        case 'section':
+          return await this.completionService.toggleSectionCompletion(id);
+        
+        default:
+          throw new Error(`Invalid content type: ${type}`);
+      }
+    } catch (error) {
+      console.error('Error toggling content completion:', error);
+      throw new Error(`Failed to toggle completion: ${error.message}`);
+    }
+  }
+
   // ==========================================
   // READING SESSION INTEGRATION
   // ==========================================
