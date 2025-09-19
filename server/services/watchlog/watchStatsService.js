@@ -300,9 +300,11 @@ class WatchStatsService {
    * @returns {Promise<Object>} Today's watch statistics
    */
   async getTodayStats() {
-    const { getSettings } = require('../../databaseUtils');
-    const settings = await getSettings();
-    const timezone = settings?.timezone || 'UTC';
+    // Get timezone from Eddie settings instead of media settings
+    const eddieSettings = await this.prisma.eddieSettings.findUnique({
+      where: { id: 1 }
+    });
+    const timezone = eddieSettings?.timezone || 'UTC';
     
     // Get what "today" means in the configured timezone
     const todayInConfiguredTZ = new Date().toLocaleDateString('en-CA', { timeZone: timezone }); // YYYY-MM-DD

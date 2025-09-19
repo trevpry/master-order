@@ -166,9 +166,10 @@ class BookCompletionService {
    * Mark chapter as completed
    * @param {number} chapterId - Chapter ID
    * @param {string} userId - User ID
+   * @param {boolean} skipSectionUpdate - Skip auto-updating sections to prevent infinite recursion
    * @returns {Promise<Object>} Chapter completion record
    */
-  async markChapterCompleted(chapterId, userId = null) {
+  async markChapterCompleted(chapterId, userId = null, skipSectionUpdate = false) {
     try {
       const normalizedUserId = this.normalizeUserId(userId);
       
@@ -192,13 +193,15 @@ class BookCompletionService {
         }
       });
 
-      // Auto-mark all sections in this chapter as completed
-      const sections = await this.prisma.bookSection.findMany({
-        where: { chapterId }
-      });
+      // Auto-mark all sections in this chapter as completed (only if not already in section update)
+      if (!skipSectionUpdate) {
+        const sections = await this.prisma.bookSection.findMany({
+          where: { chapterId }
+        });
 
-      for (const section of sections) {
-        await this.markSectionCompleted(section.id, userId);
+        for (const section of sections) {
+          await this.markSectionCompleted(section.id, userId, true); // Pass skipChapterUpdate = true
+        }
       }
 
       // Update book progress
@@ -244,9 +247,10 @@ class BookCompletionService {
    * Mark section as completed
    * @param {number} sectionId - Section ID
    * @param {string} userId - User ID
+   * @param {boolean} skipChapterUpdate - Skip chapter progress update to prevent infinite recursion
    * @returns {Promise<Object>} Section completion record
    */
-  async markSectionCompleted(sectionId, userId = null) {
+  async markSectionCompleted(sectionId, userId = null, skipChapterUpdate = false) {
     try {
       const normalizedUserId = this.normalizeUserId(userId);
       
@@ -270,8 +274,10 @@ class BookCompletionService {
         }
       });
 
-      // Update chapter progress
-      await this.updateChapterProgressFromSections(sectionId, userId);
+      // Update chapter progress (only if not already in chapter update)
+      if (!skipChapterUpdate) {
+        await this.updateChapterProgressFromSections(sectionId, userId);
+      }
 
       console.log(`✅ Marked section ${sectionId} as completed`);
       return completion;
@@ -640,9 +646,9 @@ class BookCompletionService {
       if (section) {
         const chapterProgress = await this.calculateChapterProgress(section.chapterId, userId);
         
-        // If chapter is 100% complete, mark it as completed
+        // If chapter is 100% complete, mark it as completed (with skipSectionUpdate to prevent recursion)
         if (chapterProgress === 100) {
-          await this.markChapterCompleted(section.chapterId, userId);
+          await this.markChapterCompleted(section.chapterId, userId, true);
         }
       }
     } catch (error) {

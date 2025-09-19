@@ -823,8 +823,8 @@ const Books = () => {
                   {chapter.sections && chapter.sections.length > 0 && (
                     <div className="mt-3 ml-4 space-y-2">
                       {chapter.sections.map(section => {
-                        // Check if the section is completed
-                        const isSectionCompleted = section.isCompleted;
+                        // Check if the section is completed (user-specific completion)
+                        const isSectionCompleted = section.completion && section.completion.some(c => c.userId === 'default');
                         
                         return (
                         <div key={section.id} className={`flex items-center justify-between p-2 rounded ${isSectionCompleted ? 'bg-green-100 border border-green-200' : 'bg-gray-50'}`}>
