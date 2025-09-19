@@ -227,16 +227,27 @@ function createContentDiscoveryRoutes(services) {
           };
         } else {
           // Non-webvideo History Plus content (books, chapters, sections)
-          // Format book/chapter/section content for reading interface
+          // Format as custom order book item for compatibility with regular reading endpoints
+          const artworkUrl = upNextData.bookCoverUrl || '';
+          
           androidResponse = {
-            type: 'HISTORY_PLUS_CONTENT',
+            type: 'PLAY_CUSTOM_ORDER_ITEM',
             data: {
-              orderType: upNextData.orderType,
-              type: upNextData.type,
-              content: upNextData.content,
+              id: `history-plus-${upNextData.type}-${upNextData.content?.id || 'unknown'}`,
               title: upNextData.title,
-              description: upNextData.description || '',
-              // Book information fields
+              type: 'book', // Always treat as book for reading interface
+              orderName: 'History Plus Reading',
+              summary: upNextData.description || '',
+              duration: 0,
+              localArtworkPath: artworkUrl,
+              artworkUrl: artworkUrl,
+              streamUrl: null, // Books don't stream
+              ratingKey: null,
+              plexId: null,
+              webUrl: null,
+              customOrderId: 'history-plus',
+              customOrderItemId: `hp-${upNextData.type}-${upNextData.content?.id || 'unknown'}`,
+              // Book-specific fields for reading
               bookTitle: upNextData.bookTitle,
               bookAuthor: upNextData.bookAuthor,
               bookYear: upNextData.bookYear,
@@ -262,11 +273,19 @@ function createContentDiscoveryRoutes(services) {
                 pageStart: upNextData.pageStart,
                 pageEnd: upNextData.pageEnd
               }),
-              // History Plus specific context
-              eventId: upNextData.eventId,
-              eventTitle: upNextData.eventTitle,
-              eventTitleWithDates: upNextData.eventTitleWithDates,
-              eventDate: upNextData.eventDate
+              // History Plus specific context - preserved for reading session creation
+              historyPlus: {
+                orderType: upNextData.orderType,
+                contentType: upNextData.type,
+                eventId: upNextData.eventId,
+                eventTitle: upNextData.eventTitle,
+                eventTitleWithDates: upNextData.eventTitleWithDates,
+                eventDate: upNextData.eventDate,
+                contentId: upNextData.content?.id,
+                chapterId: upNextData.content?.chapterId || upNextData.content?.chapter?.id,
+                sectionId: upNextData.type === 'section' ? upNextData.content?.id : null,
+                bookId: upNextData.content?.bookId || upNextData.content?.book?.id || upNextData.content?.chapter?.book?.id
+              }
             }
           };
         }

@@ -120,21 +120,150 @@ function createGalleryPlaylistRoutes(prisma) {
   });
 
   // Android Playlist Endpoint - Get Random Playlist Track
-  router.get('/playlist/:playlistName/random-track', async (req, res) => {
+  router.get('/playlist/:playlistName?/random-track', async (req, res) => {
     console.log('📱 Android app requesting random playlist track...');
     
     try {
       const { playlistName } = req.params;
       
+      // If no playlist name provided, default to Classical section
       if (!playlistName) {
-        return res.status(400).json({
-          type: 'RANDOM_TRACK_ERROR',
-          data: {
-            error: 'Playlist name required',
-            message: 'Playlist name is required as URL parameter',
-            timestamp: new Date().toISOString()
+        console.log('📱 No playlist name provided, selecting random track from Classical section...');
+        
+        try {
+          // Get all tracks from Classical section (sectionKey: '4')
+          const classicalTracks = await prisma.plexTrack.findMany({
+            where: {
+              librarySection: {
+                sectionKey: '4'
+              }
+            },
+            include: {
+              librarySection: true,
+              album: {
+                include: {
+                  artist: true
+                }
+              }
+            }
+          });
+          
+          if (classicalTracks.length === 0) {
+            return res.json({
+              type: 'RANDOM_TRACK_ERROR',
+              data: {
+                error: 'No classical tracks found',
+                message: 'Classical music section contains no tracks',
+                section: 'Classical',
+                timestamp: new Date().toISOString()
+              }
+            });
           }
-        });
+          
+          // Select random track from Classical section
+          const randomIndex = Math.floor(Math.random() * classicalTracks.length);
+          const randomTrack = classicalTracks[randomIndex];
+          
+          console.log(`📱 Selected random classical track: "${randomTrack.title}" by ${randomTrack.album?.artist?.title || randomTrack.originalTitle || 'Unknown'}`);
+          
+          // Get Plex settings for stream URL generation
+          const settings = await prisma.settings.findFirst();
+          const baseUrl = getAndroidApiBaseUrl();
+          
+          let streamUrl = null;
+          let artworkUrl = null;
+          let plexUrl = settings?.plexUrl || null;
+          
+          // Generate stream URL by fetching media part from Plex API
+          if (settings?.plexUrl && settings?.plexToken && randomTrack.ratingKey) {
+            try {
+              console.log(`📱 Fetching Plex metadata for classical track ${randomTrack.ratingKey}...`);
+              const trackResponse = await fetch(`${settings.plexUrl}/library/metadata/${randomTrack.ratingKey}?X-Plex-Token=${settings.plexToken}`, {
+                headers: {
+                  'Accept': 'application/json'
+                }
+              });
+              
+              if (trackResponse.ok) {
+                const trackData = await trackResponse.json();
+                const plexTrackMetadata = trackData.MediaContainer?.Metadata?.[0];
+                
+                // Get the actual media part for streaming
+                const mediaPart = plexTrackMetadata?.Media?.[0]?.Part?.[0];
+                if (mediaPart && mediaPart.key) {
+                  streamUrl = `${settings.plexUrl}${mediaPart.key}?X-Plex-Token=${settings.plexToken}`;
+                  console.log(`📱 ✅ Generated stream URL from media part: ${streamUrl}`);
+                } else {
+                  console.warn(`📱 ❌ No media part found for classical track ${randomTrack.ratingKey}`);
+                }
+                
+                // Generate artwork URL with fallback hierarchy
+                if (plexTrackMetadata?.thumb) {
+                  artworkUrl = plexTrackMetadata.thumb.startsWith('http') 
+                    ? plexTrackMetadata.thumb 
+                    : `${settings.plexUrl}${plexTrackMetadata.thumb}?X-Plex-Token=${settings.plexToken}`;
+                } else if (plexTrackMetadata?.parentThumb) {
+                  artworkUrl = plexTrackMetadata.parentThumb.startsWith('http')
+                    ? plexTrackMetadata.parentThumb
+                    : `${settings.plexUrl}${plexTrackMetadata.parentThumb}?X-Plex-Token=${settings.plexToken}`;
+                } else if (plexTrackMetadata?.grandparentThumb) {
+                  artworkUrl = plexTrackMetadata.grandparentThumb.startsWith('http')
+                    ? plexTrackMetadata.grandparentThumb
+                    : `${settings.plexUrl}${plexTrackMetadata.grandparentThumb}?X-Plex-Token=${settings.plexToken}`;
+                }
+              } else {
+                console.warn(`📱 ❌ Failed to fetch Plex metadata for classical track ${randomTrack.ratingKey}:`, trackResponse.status);
+              }
+            } catch (error) {
+              console.error(`📱 ❌ Error fetching Plex metadata for classical track ${randomTrack.ratingKey}:`, error);
+            }
+          }
+          
+          const androidResponse = {
+            type: 'RANDOM_TRACK_SUCCESS',
+            data: {
+              success: true,
+              playlistName: 'Classical',
+              playlistType: 'section',
+              playlistId: '4',
+              playlistDescription: 'Random track from Classical music section',
+              track: {
+                ratingKey: randomTrack.ratingKey,
+                title: randomTrack.title,
+                artist: randomTrack.album?.artist?.title || randomTrack.originalTitle || 'Unknown Artist',
+                album: randomTrack.album?.title || 'Unknown Album',
+                duration: randomTrack.duration || 0,
+                type: randomTrack.type || 'track',
+                streamUrl: streamUrl,
+                artworkUrl: artworkUrl,
+                plexUrl: plexUrl,
+                year: randomTrack.album?.year ? parseInt(randomTrack.album.year) : null,
+                index: randomTrack.index ? parseInt(randomTrack.index) : null,
+                parentIndex: randomTrack.album?.index ? parseInt(randomTrack.album.index) : null,
+                rating: randomTrack.rating ? parseFloat(randomTrack.rating) : null,
+                addedAt: randomTrack.addedAt ? randomTrack.addedAt.toISOString() : null
+              },
+              totalTracks: classicalTracks.length,
+              timestamp: new Date().toISOString()
+            }
+          };
+          
+          console.log('✅ Random classical track selected:', JSON.stringify(androidResponse, null, 2));
+          return res.json(androidResponse);
+          
+        } catch (error) {
+          console.error('❌ Error getting random track from Classical section:', error);
+          return res.status(500).json({
+            type: 'RANDOM_TRACK_ERROR',
+            data: {
+              success: false,
+              error: 'Internal server error',
+              details: error.message,
+              section: 'Classical',
+              timestamp: new Date().toISOString()
+            }
+          });
+        }
       }
       
       console.log(`📱 Looking for playlist: "${playlistName}"`);

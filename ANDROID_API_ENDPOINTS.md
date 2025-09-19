@@ -148,44 +148,25 @@ Currently, no authentication is required for these endpoints. They are designed 
 }
 ```
 
-**History Plus Content Response**:
+**History Plus Custom Order Response**:
 ```json
 {
-  "type": "HISTORY_PLUS_CONTENT",
+  "type": "PLAY_CUSTOM_ORDER_ITEM",
   "data": {
-    "orderType": "HISTORY_PLUS",
-    "type": "section",
-    "content": {
-      "id": 136,
-      "title": "Pepi I Pyramid Texts",
-      "sectionNumber": 3,
-      "description": null,
-      "pageStart": null,
-      "pageEnd": null,
-      "chapterId": 75,
-      "eventId": 533,
-      "chapter": {
-        "id": 75,
-        "title": "From the Pyramid Texts",
-        "chapterNumber": 3,
-        "pageStart": 29,
-        "pageEnd": 50,
-        "bookId": 3,
-        "book": {
-          "id": 3,
-          "title": "Ancient Egyptian Literature",
-          "author": null,
-          "isbn": null,
-          "publisher": null,
-          "publishYear": null,
-          "description": null,
-          "coverUrl": null,
-          "pageCount": null
-        }
-      }
-    },
+    "id": 136,
     "title": "Ancient Egyptian Literature - Chapter 3: From the Pyramid Texts - Section 3: Pepi I Pyramid Texts",
-    "description": "",
+    "type": "section",
+    "orderName": "History Plus Content",
+    "summary": "",
+    "duration": 0,
+    "localArtworkPath": null,
+    "artworkUrl": null,
+    "streamUrl": "",
+    "ratingKey": null,
+    "plexId": null,
+    "webUrl": null,
+    "customOrderId": null,
+    "customOrderItemId": null,
     "bookTitle": "Ancient Egyptian Literature",
     "bookAuthor": "Unknown Author",
     "bookYear": null,
@@ -205,13 +186,30 @@ Currently, no authentication is required for these endpoints. They are designed 
     "eventId": 533,
     "eventTitle": "Reign of Pharaoh Pepi I",
     "eventTitleWithDates": "Reign of Pharaoh Pepi I (2331 BCE - 2287 BCE)",
-    "eventDate": "-2331-01-01"
+    "eventDate": "-2331-01-01",
+    "historyPlus": {
+      "orderType": "HISTORY_PLUS",
+      "type": "section",
+      "content": {
+        "id": 136,
+        "title": "Pepi I Pyramid Texts",
+        "sectionNumber": 3,
+        "description": null,
+        "pageStart": null,
+        "pageEnd": null,
+        "content": null,
+        "isCompleted": false,
+        "chapterId": 75,
+        "createdAt": "2024-11-15T20:45:12.000Z",
+        "updatedAt": "2024-11-15T20:45:12.000Z"
+      }
+    }
   }
 }
 ```
 
 **Response Fields**:
-- `type`: Indicates the content type (`PLAY_TV_EPISODE`, `PLAY_MOVIE`, `PLAY_CUSTOM_ORDER_ITEM`, or `HISTORY_PLUS_CONTENT`)
+- `type`: Indicates the content type (`PLAY_TV_EPISODE`, `PLAY_MOVIE`, or `PLAY_CUSTOM_ORDER_ITEM`)
 - TV Episode Fields:
   - `ratingKey`: Plex rating key for the specific episode (not the series)
   - `episodeRatingKey`: Explicit episode-specific rating key for direct episode playback
@@ -285,37 +283,15 @@ Currently, no authentication is required for these endpoints. They are designed 
     - `sectionDescription`: Section description (if reading section)
     - `pageStart`: Starting page number (if applicable)
     - `pageEnd`: Ending page number (if applicable)
-- History Plus Content Fields:
-  - `orderType`: Always "HISTORY_PLUS" for this response type
-  - `type`: Content type ("book", "chapter", "section", or "video")
-  - `content`: Raw content object with full relational data
-  - `title`: Formatted hierarchical title (e.g., "Book - Chapter X: Title - Section Y: Title")
-  - `description`: Content description
-  - Book information (available for all content types):
-    - `bookTitle`: Title of the book
-    - `bookAuthor`: Author of the book
-    - `bookYear`: Publication year
-    - `bookIsbn`: ISBN number
-    - `bookPublisher`: Publisher name
-    - `bookPageCount`: Total pages in book
-    - `bookCoverUrl`: Book cover image URL
-    - `bookDescription`: Book description
-  - Chapter information (available for chapter and section types):
-    - `chapterNumber`: Chapter number within the book
-    - `chapterTitle`: Chapter title
-    - `chapterDescription`: Chapter description
-  - Section information (available for section type only):
-    - `sectionNumber`: Section number within the chapter
-    - `sectionTitle`: Section title
-    - `sectionDescription`: Section description
-  - Page information (when available):
-    - `pageStart`: Starting page number
-    - `pageEnd`: Ending page number
-  - Historical context:
+  - History Plus fields (only included for History Plus content returned as custom order items):
     - `eventId`: History Plus event ID
     - `eventTitle`: Event title
     - `eventTitleWithDates`: Event title with historical dates
     - `eventDate`: Historical date of the event
+    - `historyPlus`: Object containing original History Plus content data
+      - `orderType`: Always "HISTORY_PLUS" for this content
+      - `type`: Content type ("book", "chapter", "section")
+      - `content`: Raw content object with full relational data
 
 **Content Selection Logic**: The endpoint uses the same logic as the web interface to determine what content to return based on current settings and order type configuration.
 
@@ -1386,14 +1362,14 @@ GET /api/android/gallery/vacation%20photos/random-image
 
 ### 2. Get Random Playlist Track
 
-**Endpoint**: `GET /api/android/playlist/:playlistName/random-track`
+**Endpoint**: `GET /api/android/playlist/:playlistName?/random-track`
 
-**Description**: Returns a random track from the specified playlist with full Plex streaming capabilities. Searches both Plex playlists and custom playlists for exact name matches. Includes the complete Plex streaming URL that can be played directly on Android devices, along with comprehensive artwork metadata and track information.
+**Description**: Returns a random track from the specified playlist or from the Classical music section if no playlist is specified. When a playlist name is provided, searches both Plex playlists and custom playlists for exact name matches. When no playlist name is provided, defaults to selecting a random track from the "Classical" music section. Includes the complete Plex streaming URL that can be played directly on Android devices, along with comprehensive artwork metadata and track information.
 
 **Parameters**:
-- `playlistName` (URL parameter): Name of the playlist to search for
+- `playlistName` (URL parameter, optional): Name of the playlist to search for. If omitted, returns a random track from the Classical music section.
 
-**Response Format**:
+**Response Format (Playlist)**:
 ```json
 {
   "type": "RANDOM_TRACK_SUCCESS",
@@ -1425,6 +1401,38 @@ GET /api/android/gallery/vacation%20photos/random-image
 }
 ```
 
+**Response Format (Classical Section - No Playlist)**:
+```json
+{
+  "type": "RANDOM_TRACK_SUCCESS",
+  "data": {
+    "success": true,
+    "playlistName": "Classical",
+    "playlistType": "section",
+    "playlistId": "4",
+    "playlistDescription": "Random track from Classical music section",
+    "track": {
+      "ratingKey": "143528",
+      "title": "206 - Act II - Scene 5",
+      "artist": "Pfitzner, Hans",
+      "album": "Das Herz",
+      "duration": 183719,
+      "type": "track",
+      "streamUrl": "http://192.168.1.119:32400/library/parts/165761/1284346867/file.mp3?X-Plex-Token=Bazf-s9L36e4roJGMhHs",
+      "artworkUrl": "http://192.168.1.119:32400/library/metadata/143510/thumb/1725490956?X-Plex-Token=Bazf-s9L36e4roJGMhHs",
+      "plexUrl": "http://192.168.1.119:32400",
+      "year": null,
+      "index": 6,
+      "parentIndex": 1,
+      "rating": null,
+      "addedAt": "2024-09-04T23:02:31Z"
+    },
+    "totalTracks": 42248,
+    "timestamp": "2025-09-19T21:22:42.652Z"
+  }
+}
+```
+
 **Error Response**:
 ```json
 {
@@ -1438,16 +1446,20 @@ GET /api/android/gallery/vacation%20photos/random-image
 }
 ```
 
-**Example Request**:
+**Example Requests**:
 ```
+# Get random track from specific playlist
 GET /api/android/playlist/rock%20classics/random-track
+
+# Get random track from Classical section (no playlist name)
+GET /api/android/playlist/random-track
 ```
 
 **Response Fields**:
 - `success`: Boolean indicating successful operation
-- `playlistName`: Name of the playlist containing the track
-- `playlistType`: Type of playlist (`plex` or `custom`)
-- `playlistId`: Unique identifier for the playlist (ratingKey for Plex, database ID for custom)
+- `playlistName`: Name of the playlist containing the track, or "Classical" for section-based selection
+- `playlistType`: Type of playlist (`plex`, `custom`, or `section` for Classical music section)
+- `playlistId`: Unique identifier for the playlist (ratingKey for Plex, database ID for custom, section key for Classical)
 - `playlistDescription`: Playlist description or summary (may be null)
 - `track`: Object containing complete track metadata:
   - `ratingKey`: Plex rating key for the track (for streaming)
@@ -1464,7 +1476,7 @@ GET /api/android/playlist/rock%20classics/random-track
   - `parentIndex`: Disc number (for multi-disc albums)
   - `rating`: Track rating (from Plex metadata)
   - `addedAt`: When the track was added to the playlist
-- `totalTracks`: Total number of tracks available in the playlist
+- `totalTracks`: Total number of tracks available in the playlist or Classical section
 - `timestamp`: ISO timestamp of the response
 
 **Example Response**:

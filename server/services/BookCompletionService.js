@@ -85,6 +85,22 @@ class BookCompletionService {
     try {
       const normalizedUserId = this.normalizeUserId(userId);
       
+      // Prepare update data, only including defined values
+      const updateData = {};
+      if (progressData.currentPage !== undefined) {
+        updateData.currentPage = progressData.currentPage;
+      }
+      if (progressData.percentRead !== undefined) {
+        updateData.percentRead = progressData.percentRead;
+      }
+      if (progressData.isCompleted !== undefined) {
+        updateData.isCompleted = progressData.isCompleted;
+        updateData.completedAt = progressData.isCompleted ? new Date() : null;
+      }
+      
+      // Always update the updatedAt timestamp
+      updateData.updatedAt = new Date();
+      
       const completion = await this.prisma.bookCompletion.upsert({
         where: {
           bookId_userId: {
@@ -100,16 +116,10 @@ class BookCompletionService {
           isCompleted: progressData.isCompleted || false,
           completedAt: progressData.isCompleted ? new Date() : null
         },
-        update: {
-          currentPage: progressData.currentPage,
-          percentRead: progressData.percentRead,
-          isCompleted: progressData.isCompleted,
-          completedAt: progressData.isCompleted ? new Date() : null,
-          updatedAt: new Date()
-        }
+        update: updateData
       });
 
-      console.log(`📊 Updated book progress: ${completion.percentRead}% (Page ${completion.currentPage})`);
+      console.log(`📊 Updated book progress: ${completion.percentRead}% (Page ${completion.currentPage}), isCompleted: ${completion.isCompleted}`);
       return completion;
     } catch (error) {
       console.error(`Error updating book progress for ${bookId}:`, error);
@@ -531,41 +541,75 @@ class BookCompletionService {
       console.log(`🔍 updateProgressFromSession: bookId=${bookId}, sessionData=`, sessionData);
       const progressData = {};
 
-      if (sessionData.currentPage) {
-        progressData.currentPage = sessionData.currentPage;
-        
-        // Calculate percentage if we know total pages
-        console.log(`📖 Looking up book ${bookId} for page count...`);
+      // First, handle totalPages if provided - update Book.pageCount if needed
+      if (sessionData.totalPages && sessionData.totalPages > 0) {
+        console.log(`📖 Checking if Book ${bookId} needs pageCount update...`);
         const book = await this.prisma.book.findUnique({
           where: { id: bookId },
-          select: { 
-            pageCount: true
-          }
+          select: { pageCount: true }
         });
-        console.log(`📖 Found book:`, book);
-
-        // Use book.pageCount (unified system)
-        const totalPages = book?.pageCount;
         
-        if (totalPages && totalPages > 0) {
-          const calculatedPercent = Math.min(
-            Math.round((sessionData.currentPage / totalPages) * 100),
-            100
-          );
-          progressData.percentRead = calculatedPercent;
-          console.log(`📊 Calculated percentage: ${sessionData.currentPage}/${totalPages} = ${calculatedPercent}%`);
-        } else {
-          console.log(`⚠️ No pageCount found for book ${bookId} (book.pageCount: ${book?.pageCount})`);
+        if (book && !book.pageCount) {
+          await this.prisma.book.update({
+            where: { id: bookId },
+            data: { pageCount: sessionData.totalPages }
+          });
+          console.log(`📚 Updated Book ${bookId} pageCount to ${sessionData.totalPages}`);
         }
       }
 
+      // Handle currentPage
+      if (sessionData.currentPage !== undefined && sessionData.currentPage >= 0) {
+        progressData.currentPage = sessionData.currentPage;
+        
+        // Calculate percentage if we have currentPage and can determine total pages
+        if (sessionData.currentPage > 0) {
+          let totalPages = null;
+          
+          // Try sessionData.totalPages first (from the calling code)
+          if (sessionData.totalPages && sessionData.totalPages > 0) {
+            totalPages = sessionData.totalPages;
+            console.log(`📊 Using provided totalPages: ${totalPages}`);
+          } else {
+            // Fallback to book.pageCount
+            console.log(`📖 Looking up book ${bookId} for page count...`);
+            const book = await this.prisma.book.findUnique({
+              where: { id: bookId },
+              select: { pageCount: true }
+            });
+            console.log(`📖 Found book:`, book);
+            totalPages = book?.pageCount;
+          }
+          
+          if (totalPages && totalPages > 0) {
+            const calculatedPercent = Math.min(
+              Math.round((sessionData.currentPage / totalPages) * 100),
+              100
+            );
+            
+            // Only use calculated percentage if percentRead is not explicitly provided
+            if (sessionData.percentRead === undefined) {
+              progressData.percentRead = calculatedPercent;
+              console.log(`📊 Calculated percentage: ${sessionData.currentPage}/${totalPages} = ${calculatedPercent}%`);
+            } else {
+              console.log(`📊 Ignoring calculated percentage (${calculatedPercent}%) - using provided percentRead`);
+            }
+          } else {
+            console.log(`⚠️ No pageCount found for book ${bookId} - cannot calculate percentage from currentPage`);
+          }
+        }
+      }
+
+      // Handle percentRead (this takes precedence over calculated percentage)
       if (sessionData.percentRead !== undefined) {
         progressData.percentRead = sessionData.percentRead;
         console.log(`📊 Using provided percentRead: ${sessionData.percentRead}%`);
       }
 
+      // Handle completion status
       if (sessionData.isCompleted !== undefined) {
         progressData.isCompleted = sessionData.isCompleted;
+        console.log(`📚 Setting isCompleted to: ${sessionData.isCompleted}`);
       }
 
       console.log(`📊 Final progressData:`, progressData);

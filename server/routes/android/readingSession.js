@@ -27,11 +27,57 @@ function createReadingSessionRoutes(prisma) {
     console.log('📱 Request body received:', JSON.stringify(req.body, null, 2));
     console.log('📱 Request headers:', JSON.stringify(req.headers, null, 2));
     
-    const { mediaType, title, seriesTitle, customOrderItemId, id } = req.body;
+    const { mediaType, title, seriesTitle, customOrderItemId, id, historyPlus } = req.body;
 
     // The Android app might send the custom order item ID as either 'customOrderItemId' or 'id'
     const actualCustomOrderItemId = customOrderItemId || id;
 
+    // Check if this is a History Plus reading session
+    const isHistoryPlusSession = historyPlus && historyPlus.orderType === 'HISTORY_PLUS';
+    
+    console.log(`📱 Session type: ${isHistoryPlusSession ? 'History Plus' : 'Regular'}`);
+    
+    if (isHistoryPlusSession) {
+      console.log('📚 History Plus session detected:', historyPlus);
+      
+      // For History Plus sessions, we need different validation and handling
+      if (!historyPlus.eventId || !historyPlus.contentType || !historyPlus.contentId) {
+        return sendBadRequest(res, 'History Plus sessions require eventId, contentType, and contentId');
+      }
+      
+      // Create a special History Plus reading session
+      const historyPlusSeriesTitle = `HISTORY_PLUS:${historyPlus.eventId}:${historyPlus.contentType}:${historyPlus.contentId}:${historyPlus.eventTitle || title}`;
+      
+      console.log(`📚 Starting History Plus reading session: ${historyPlusSeriesTitle}`);
+      
+      const readingSession = await watchLogService.startReading({
+        mediaType: mediaType,
+        title: title,
+        seriesTitle: historyPlusSeriesTitle,
+        customOrderItemId: null // No customOrderItemId for History Plus
+      });
+      
+      const androidResponse = {
+        type: 'READING_SESSION_STARTED',
+        data: {
+          success: true,
+          sessionId: readingSession.id,
+          title: title,
+          mediaType: mediaType,
+          customOrderItemId: null, // History Plus doesn't use custom order items
+          historyPlus: historyPlus, // Return the History Plus context
+          startedAt: readingSession.startedAt,
+          isPaused: readingSession.isPaused || false,
+          message: `Started History Plus reading session for "${title}"`,
+          timestamp: new Date().toISOString()
+        }
+      };
+
+      console.log('✅ History Plus reading session start successful:', JSON.stringify(androidResponse, null, 2));
+      return sendSuccess(res, androidResponse.data);
+    }
+
+    // Regular reading session logic (for custom order items)
     // Validate required fields
     if (!mediaType || !title) {
       return sendBadRequest(res, 'mediaType and title are required');
@@ -175,9 +221,6 @@ function createReadingSessionRoutes(prisma) {
     
     const { progress } = req.body;
 
-    // Check if this will result in 100% completion for better response handling
-    const willMarkAsRead = progress?.readPercentage === 100;
-
     // Get active reading session
     const activeSession = await watchLogService.getActiveReadingSession();
     
@@ -185,11 +228,14 @@ function createReadingSessionRoutes(prisma) {
       return sendBadRequest(res, 'No active reading session found');
     }
 
-    console.log('Stopping session with ID:', activeSession.id);
+    // Check if this is a History Plus session
+    const isHistoryPlusSession = activeSession.seriesTitle && activeSession.seriesTitle.startsWith('HISTORY_PLUS:');
+    
+    console.log(`📱 Session type: ${isHistoryPlusSession ? 'History Plus' : 'Regular'}, seriesTitle: ${activeSession.seriesTitle}`);
 
     // Stop the reading session
     const stoppedSession = await watchLogService.stopReading(activeSession.id);
-    
+
     // Handle different scenarios based on session outcome
     if (stoppedSession.deleted) {
       // Session was deleted due to being under 1 minute
@@ -209,6 +255,129 @@ function createReadingSessionRoutes(prisma) {
       
       return sendSuccess(res, androidResponse.data);
     }
+
+    if (isHistoryPlusSession) {
+      console.log('📚 Processing History Plus reading session stop...');
+      
+      // Parse History Plus context from seriesTitle
+      const contextParts = activeSession.seriesTitle.split(':');
+      if (contextParts.length >= 4) {
+        const [prefix, eventId, contentType, contentId] = contextParts;
+        
+        console.log(`📚 History Plus context: eventId=${eventId}, contentType=${contentType}, contentId=${contentId}`);
+        
+        // Update progress in the unified book system if we have progress data
+        let actuallyMarkedAsRead = false;
+        let finalProgressData = null;
+        
+        if (progress) {
+          console.log('📚 Processing History Plus reading progress:', progress);
+          
+          try {
+            // For History Plus sessions, we need to update the underlying book completion
+            // We can get the book ID from the content hierarchy
+            let bookId = null;
+            
+            if (contentType === 'book') {
+              bookId = parseInt(contentId);
+            } else if (contentType === 'chapter') {
+              const chapter = await prisma.bookChapter.findUnique({
+                where: { id: parseInt(contentId) },
+                select: { bookId: true }
+              });
+              bookId = chapter?.bookId;
+            } else if (contentType === 'section') {
+              const section = await prisma.bookSection.findUnique({
+                where: { id: parseInt(contentId) },
+                include: { chapter: { select: { bookId: true } } }
+              });
+              bookId = section?.chapter?.bookId;
+            }
+            
+            if (bookId) {
+              console.log(`📚 Updating History Plus book ${bookId} progress...`);
+              
+              const sessionData = {};
+              
+              if (progress.currentPage !== undefined && progress.currentPage >= 0) {
+                sessionData.currentPage = progress.currentPage;
+              }
+              
+              if (progress.readPercentage !== undefined && progress.readPercentage >= 0 && progress.readPercentage <= 100) {
+                sessionData.percentRead = progress.readPercentage;
+                
+                if (progress.readPercentage === 100) {
+                  sessionData.isCompleted = true;
+                  actuallyMarkedAsRead = true;
+                  console.log('📚 Marking History Plus book as completed (100% reading progress)');
+                }
+              }
+              
+              if (progress.totalPages !== undefined && progress.totalPages > 0) {
+                sessionData.totalPages = progress.totalPages;
+              }
+              
+              // Update the unified BookCompletion system
+              await bookCompletionService.updateProgressFromSession(bookId, sessionData);
+              console.log('📚 History Plus book completion updated successfully');
+              
+              // Also mark specific chapter/section as completed if 100%
+              if (progress.readPercentage === 100) {
+                if (contentType === 'chapter') {
+                  await bookCompletionService.markChapterCompleted(parseInt(contentId));
+                  console.log(`✅ Marked History Plus chapter ${contentId} as completed`);
+                } else if (contentType === 'section') {
+                  await bookCompletionService.markSectionCompleted(parseInt(contentId));
+                  console.log(`✅ Marked History Plus section ${contentId} as completed`);
+                }
+              }
+              
+              finalProgressData = {
+                currentPage: progress.currentPage,
+                totalPages: progress.totalPages,
+                readPercentage: progress.readPercentage
+              };
+            } else {
+              console.log('⚠️ Could not determine book ID for History Plus content');
+            }
+          } catch (progressError) {
+            console.error('Error updating History Plus reading progress:', progressError);
+          }
+        }
+        
+        // Return History Plus specific response
+        const androidResponse = {
+          type: 'READING_SESSION_STOPPED',
+          data: {
+            success: true,
+            sessionId: stoppedSession.id,
+            title: activeSession.title,
+            mediaType: activeSession.mediaType,
+            duration: stoppedSession.duration,
+            totalActiveTime: stoppedSession.totalTime,
+            progressUpdated: finalProgressData ? true : false,
+            progress: finalProgressData || progress || null,
+            markedAsRead: actuallyMarkedAsRead,
+            message: actuallyMarkedAsRead
+              ? `Completed reading "${activeSession.title}" and marked as read`
+              : `Stopped History Plus reading session for "${activeSession.title}"`,
+            completedAt: stoppedSession.endTime,
+            timestamp: new Date().toISOString()
+          }
+        };
+
+        console.log('✅ History Plus reading session stop successful:', JSON.stringify(androidResponse, null, 2));
+        return sendSuccess(res, androidResponse.data);
+      } else {
+        console.log('⚠️ Invalid History Plus seriesTitle format');
+      }
+    }
+
+    // Regular custom order reading session logic continues below...
+    // Check if this will result in 100% completion for better response handling
+    const willMarkAsRead = progress?.readPercentage === 100;
+
+    console.log('Stopping session with ID:', activeSession.id);
 
     // Update reading progress if provided and custom order item exists
     let actuallyMarkedAsRead = false;
@@ -315,6 +484,7 @@ function createReadingSessionRoutes(prisma) {
             // Mark as completed if 100%
             if (finalReadPercentage === 100) {
               sessionData.isCompleted = true;
+              actuallyMarkedAsRead = true; // Update flag for unified system completion
               console.log('📚 Marking book as completed in unified system (100% reading progress)');
             }
           }
@@ -324,8 +494,14 @@ function createReadingSessionRoutes(prisma) {
           }
 
           // Update the unified BookCompletion system
-          await bookCompletionService.updateProgressFromSession(existingItem.bookId, sessionData);
+          const bookCompletionResult = await bookCompletionService.updateProgressFromSession(existingItem.bookId, sessionData);
           console.log('📚 Unified BookCompletion updated successfully for book:', existingItem.bookId);
+          
+          // Double-check if book was actually marked as completed by the service
+          if (bookCompletionResult?.isCompleted && finalReadPercentage === 100) {
+            actuallyMarkedAsRead = true;
+            console.log('📚 Confirmed: Book marked as completed in unified system');
+          }
           
           // Ensure Book record has correct pageCount
           if (totalPages !== undefined && totalPages > 0) {
