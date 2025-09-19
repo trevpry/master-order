@@ -269,43 +269,85 @@ class BookService {
   }
 
   /**
-   * Delete book and all related data
+   * Delete book and all related data (chapters, sections, completions)
    * @param {number} bookId - Book ID
    * @returns {Promise<boolean>} Success status
    */
   async deleteBook(bookId) {
     try {
-      // Get details about referencing items before deletion
-      const referencingItems = await this.prisma.customOrderItem.findMany({
-        where: { bookId },
+      // Get book details and related data counts for logging
+      const bookWithRelations = await this.prisma.book.findUnique({
+        where: { id: bookId },
         include: {
-          customOrder: {
-            select: { name: true }
+          chapters: {
+            include: {
+              sections: true,
+              chapterCompletions: true
+            }
+          },
+          bookCompletions: true,
+          customOrderItems: {
+            include: {
+              customOrder: {
+                select: { name: true }
+              }
+            }
           }
         }
       });
 
-      if (referencingItems.length > 0) {
-        console.log(`📋 Book ${bookId} is referenced by ${referencingItems.length} custom order items. Deleting them first...`);
+      if (!bookWithRelations) {
+        throw new Error(`Book with ID ${bookId} not found`);
+      }
+
+      console.log(`🗑️ Starting deletion of book: "${bookWithRelations.title}" (ID: ${bookId})`);
+
+      // Count related data for logging
+      const chapterCount = bookWithRelations.chapters.length;
+      const sectionCount = bookWithRelations.chapters.reduce((total, chapter) => total + chapter.sections.length, 0);
+      const chapterCompletionCount = bookWithRelations.chapters.reduce((total, chapter) => total + chapter.chapterCompletions.length, 0);
+      const sectionCompletionCount = bookWithRelations.chapters.reduce((total, chapter) => 
+        total + chapter.sections.reduce((sectionTotal, section) => sectionTotal + (section.sectionCompletions?.length || 0), 0), 0);
+      const bookCompletionCount = bookWithRelations.bookCompletions.length;
+      const customOrderItemCount = bookWithRelations.customOrderItems.length;
+
+      console.log(`� Related data to delete:
+        - Chapters: ${chapterCount}
+        - Sections: ${sectionCount}
+        - Book completions: ${bookCompletionCount}
+        - Chapter completions: ${chapterCompletionCount}
+        - Section completions: ${sectionCompletionCount}
+        - Custom order items: ${customOrderItemCount}`);
+
+      // Handle custom order items first
+      if (customOrderItemCount > 0) {
+        console.log(`📋 Book is referenced by ${customOrderItemCount} custom order items. Deleting them first...`);
         
         // Delete all custom order items that reference this book
         await this.prisma.customOrderItem.deleteMany({
           where: { bookId }
         });
         
-        console.log(`✅ Deleted ${referencingItems.length} custom order items that referenced book ${bookId}`);
+        console.log(`✅ Deleted ${customOrderItemCount} custom order items that referenced book ${bookId}`);
         
         // Log which custom orders were affected
-        const affectedOrders = [...new Set(referencingItems.map(item => item.customOrder.name))];
+        const affectedOrders = [...new Set(bookWithRelations.customOrderItems.map(item => item.customOrder.name))];
         console.log(`📝 Affected custom orders: ${affectedOrders.join(', ')}`);
       }
 
-      // Delete the book (this will also cascade delete chapters, sections, and completions due to Prisma schema)
+      // Delete the book (this will cascade delete all chapters, sections, and completions)
       await this.prisma.book.delete({
         where: { id: bookId }
       });
 
-      console.log(`✅ Deleted book (ID: ${bookId}) and all related data`);
+      console.log(`✅ Successfully deleted book "${bookWithRelations.title}" (ID: ${bookId}) and all related data:
+        - ${chapterCount} chapters
+        - ${sectionCount} sections  
+        - ${bookCompletionCount} book completions
+        - ${chapterCompletionCount} chapter completions
+        - ${sectionCompletionCount} section completions
+        - ${customOrderItemCount} custom order items`);
+
       return true;
     } catch (error) {
       console.error(`Error deleting book ${bookId}:`, error);

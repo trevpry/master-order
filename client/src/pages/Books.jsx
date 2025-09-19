@@ -700,6 +700,15 @@ const Books = () => {
             </button>
             
             <button
+              onClick={() => confirmDelete(selectedBook)}
+              className="flex items-center px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700"
+              title="Delete this book"
+            >
+              <Trash2 className="w-4 h-4 mr-2" />
+              Delete Book
+            </button>
+            
+            <button
               onClick={() => handleReselectBook(selectedBook)}
               className="flex items-center px-4 py-2 bg-yellow-600 text-white rounded-lg hover:bg-yellow-700"
             >
