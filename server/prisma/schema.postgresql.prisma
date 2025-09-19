@@ -33,6 +33,7 @@ model Settings {
   komgaApiKey                       String?
   stashUrl                          String?
   stashApiKey                       String?
+  rawgApiKey                        String?
   createdAt                         DateTime  @default(now())
   updatedAt                         DateTime  @updatedAt
 }
@@ -145,11 +146,15 @@ model CustomOrderItem {
   // NEW: Reference to unified books table
   bookId                  Int?
   
+  // NEW: Reference to unified video games table
+  gameId                  Int?
+  
   customOrder             CustomOrder       @relation(fields: [customOrderId], references: [id], onDelete: Cascade)
   referencedCustomOrder   CustomOrder?      @relation("SubOrderReference", fields: [referencedCustomOrderId], references: [id])
   storyContainedInBook    CustomOrderItem?  @relation("StoryInBook", fields: [storyContainedInBookId], references: [id])
   containedStories        CustomOrderItem[] @relation("StoryInBook")
   book                    Book?             @relation(fields: [bookId], references: [id])
+  game                    VideoGame?        @relation(fields: [gameId], references: [id])
   watchLogs               WatchLog[]
 }
 
@@ -1923,4 +1928,70 @@ model HistoryBookLink {
   @@unique([bookId, eventId])
   @@index([bookId])
   @@index([eventId])
+}
+
+// =====================================
+// VIDEO GAME LIBRARY SYSTEM
+// =====================================
+// Unified video game library, similar to Book system
+
+model VideoGame {
+  id                  Int       @id @default(autoincrement())
+  title               String
+  developer           String?
+  publisher           String?
+  releaseDate         DateTime?
+  description         String?
+  platforms           String?   // JSON array of platforms
+  genres              String?   // JSON array of genres
+  rating              Float?    // RAWG rating
+  metacriticRating    Int?      // Metacritic score
+  rawgId              Int?      @unique  // RAWG API ID
+  rawgSlug            String?   @unique  // RAWG slug
+  rawgUrl             String?   // RAWG page URL
+  
+  // Artwork caching (consistent with existing pattern)
+  coverUrl            String?
+  artworkLastCached   DateTime?
+  artworkMimeType     String?
+  localArtworkPath    String?
+  originalArtworkUrl  String?
+  
+  // Additional metadata
+  esrbRating          String?   // ESRB rating (E, T, M, etc.)
+  playtimeHours       Int?      // Average playtime in hours
+  website             String?   // Official website
+  webvideoUrl         String?   // Associated webvideo URL (e.g., gameplay video, trailer)
+  
+  // Metadata
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+  
+  // Relations
+  customOrderItems    CustomOrderItem[]  // Games referenced by custom orders
+  gameCompletions     GameCompletion[]   // Completion tracking
+  
+  @@index([rawgId])
+  @@index([rawgSlug])
+  @@index([title])
+  @@index([platforms])
+  @@index([genres])
+}
+
+// Game completion tracking
+model GameCompletion {
+  id              Int       @id @default(autoincrement())
+  gameId          Int
+  userId          String?   // For future multi-user support, nullable for now
+  isCompleted     Boolean   @default(false)
+  hoursPlayed     Float?    // Hours played
+  percentComplete Float?    // Completion percentage
+  completedAt     DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  
+  game            VideoGame @relation(fields: [gameId], references: [id], onDelete: Cascade)
+  
+  @@unique([gameId, userId])
+  @@index([gameId])
 }

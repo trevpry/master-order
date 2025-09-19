@@ -33,6 +33,7 @@ const settingsLegacyRedirectsRoutes = require('./routes/settingsLegacyRedirects'
 const weatherRoutes = require('./routes/weather');
 const historyPlusRoutes = require('./routes/historyPlus');
 const unifiedBooksRoutes = require('./routes/unifiedBooks');
+const rawgRoutes = require('./routes/rawg');
 const importDataRoutes = require('./routes/importData');
 
 // Import utility functions
@@ -402,6 +403,9 @@ app.use('/api/history-plus', historyPlusRoutes);
 
 // Unified Books API routes
 app.use('/api/unified-books', unifiedBooksRoutes);
+
+// RAWG Video Games API routes
+app.use('/api/rawg', rawgRoutes);
 
 // Import Data API routes
 app.use('/api/import', importDataRoutes);

@@ -83,11 +83,6 @@ export const getItemArtworkUrl = (item) => {
     const cacheBuster = item.artworkLastCached ? `?v=${encodeURIComponent(item.artworkLastCached)}` : '';
     const artworkUrl = `${config.apiBaseUrl}/api/artwork/${filename}${cacheBuster}`;
     
-    // Debug logging for comics with same artwork issue
-    if (item.mediaType === 'comic') {
-      console.log(`Comic artwork - ${item.comicSeries} #${item.comicIssue}: ${filename} -> ${artworkUrl}`);
-    }
-    
     return artworkUrl;
   }
   
@@ -99,6 +94,12 @@ export const getItemArtworkUrl = (item) => {
         return `${config.apiBaseUrl}/api/comicvine/artwork?url=${encodeURIComponent(item.originalArtworkUrl)}`;
       case 'book':
         return `${config.apiBaseUrl}/api/openlibrary/artwork?url=${encodeURIComponent(item.originalArtworkUrl)}`;
+      case 'game':
+        // For games, use RAWG artwork proxy or direct URL
+        if (item.originalArtworkUrl.startsWith('http')) {
+          return `${config.apiBaseUrl}/api/rawg/artwork?url=${encodeURIComponent(item.originalArtworkUrl)}`;
+        }
+        return item.originalArtworkUrl;
       case 'shortstory':
         if (item.originalArtworkUrl.startsWith('http')) {
           return `${config.apiBaseUrl}/api/openlibrary/artwork?url=${encodeURIComponent(item.originalArtworkUrl)}`;

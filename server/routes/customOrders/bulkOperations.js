@@ -55,7 +55,14 @@ function createBulkOperationsRoutes(prisma, services) {
       storyCoverUrl,
       webTitle,
       webUrl,
-      webDescription
+      webDescription,
+      // Game fields
+      gameTitle,
+      gameId,
+      // Reference fields
+      bookId,
+      // Artwork fields
+      originalArtworkUrl
     } = req.body;
 
     console.log(mediaType);
@@ -71,8 +78,8 @@ function createBulkOperationsRoutes(prisma, services) {
       if (!plexKey && !title) {
         return sendBadRequest(res, 'For movies: either plexKey (for existing Plex movies) OR title (for movies not yet in Plex) is required');
       }
-    } else if (mediaType === 'comic' || mediaType === 'book' || mediaType === 'shortstory' || mediaType === 'webvideo') {
-      // Comics, books, short stories, and web videos don't require plexKey
+    } else if (mediaType === 'comic' || mediaType === 'book' || mediaType === 'shortstory' || mediaType === 'webvideo' || mediaType === 'game') {
+      // Comics, books, short stories, web videos, and games don't require plexKey
       console.log(`Processing ${mediaType} without plexKey requirement`);
     } else {
       // For other media types, plexKey is still required
@@ -127,6 +134,15 @@ function createBulkOperationsRoutes(prisma, services) {
             webUrl: webUrl
           }
         });
+      } else if (mediaType === 'game') {
+        existingItem = await prisma.customOrderItem.findFirst({
+          where: {
+            customOrderId: parseInt(id),
+            mediaType: 'game',
+            title: title,
+            gameId: gameId ? parseInt(gameId) : null
+          }
+        });
       } else {
         existingItem = await prisma.customOrderItem.findFirst({
           where: {
@@ -175,7 +191,7 @@ function createBulkOperationsRoutes(prisma, services) {
           customTitle: customTitle || null,
           comicVineId: comicVineId || null,  // Store as string (URL), not integer
           comicVineDetailsJson: comicVineDetailsJson || null,
-          originalArtworkUrl: comicCoverUrl || comicVineMetadata.comicCoverUrl || null,
+          originalArtworkUrl: originalArtworkUrl || comicCoverUrl || comicVineMetadata.comicCoverUrl || storyCoverUrl || null,
           // ComicVine extracted metadata
           comicVineSeriesId: comicVineMetadata.comicVineSeriesId || null,
           comicVineIssueId: comicVineMetadata.comicVineIssueId || null,
@@ -196,7 +212,10 @@ function createBulkOperationsRoutes(prisma, services) {
           // Web video fields
           webTitle: webTitle || null,
           webUrl: webUrl || null,
-          webDescription: webDescription || null
+          webDescription: webDescription || null,
+          // Book and Game references
+          bookId: bookId ? parseInt(bookId) : null,
+          gameId: gameId ? parseInt(gameId) : null
         }
       });
 
@@ -231,6 +250,40 @@ function createBulkOperationsRoutes(prisma, services) {
         } catch (error) {
           console.warn(`⚠️ Failed to create unified Book record for "${bookTitle}":`, error.message);
           // Don't fail the CustomOrderItem creation if Book creation fails
+        }
+      }
+
+      // Create unified VideoGame record for game items
+      if (mediaType === 'game' && (gameTitle || title)) {
+        try {
+          const RawgService = require('../../services/rawgService');
+          const rawgService = new RawgService();
+          
+          const gameData = {
+            title: gameTitle || title,
+            webvideoUrl: webUrl || null,
+            // Additional fields can be populated from RAWG API later
+            description: webDescription || null
+          };
+
+          // Create or find existing VideoGame record
+          const game = await rawgService.createGame(gameData);
+          
+          // Update the CustomOrderItem to reference the unified VideoGame
+          await prisma.customOrderItem.update({
+            where: { id: item.id },
+            data: { gameId: game.id }
+          });
+
+          console.log(`🎮 Created/linked unified VideoGame record for CustomOrderItem: "${gameData.title}" (Game ID: ${game.id})`);
+          
+          // If there's a webvideo URL, also log it
+          if (webUrl) {
+            console.log(`🔗 Associated webvideo URL: ${webUrl}`);
+          }
+        } catch (error) {
+          console.warn(`⚠️ Failed to create unified VideoGame record for "${gameTitle || title}":`, error.message);
+          // Don't fail the CustomOrderItem creation if VideoGame creation fails
         }
       }
 

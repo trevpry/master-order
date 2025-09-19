@@ -20,6 +20,7 @@ function Settings() {
   const [komgaUrl, setKomgaUrl] = useState('');
   const [stashApiKey, setStashApiKey] = useState('');
   const [stashUrl, setStashUrl] = useState('');
+  const [rawgApiKey, setRawgApiKey] = useState('');
   // Percentage states
   const [tvGeneralPercent, setTvGeneralPercent] = useState(50);
   const [moviesGeneralPercent, setMoviesGeneralPercent] = useState(50);
@@ -133,6 +134,7 @@ function Settings() {
           setKomgaUrl(settings.komgaUrl || '');
           setStashApiKey(settings.stashApiKey || '');
           setStashUrl(settings.stashUrl || '');
+          setRawgApiKey(settings.rawgApiKey || '');
           setSelectedPlayer(settings.selectedPlayer || '');
           setSelectedPlexUser(settings.selectedPlexUser || '');
           setTvGeneralPercent(settings.tvGeneralPercent ?? 50);
@@ -489,6 +491,7 @@ function Settings() {
           komgaUrl,
           stashApiKey,
           stashUrl,
+          rawgApiKey,
           plexToken,
           plexUrl,
           tvdbApiKey,
@@ -780,6 +783,19 @@ function Settings() {
                     value={stashApiKey}
                     onChange={(e) => setStashApiKey(e.target.value)}
                     placeholder="Enter API key if authentication is enabled"
+                    className="api-input compact"
+                  />
+                </div>
+
+                <div className="config-field compact">
+                  <label htmlFor="rawg_api_key">RAWG API Key:</label>
+                  <input 
+                    type="text" 
+                    id="rawg_api_key"
+                    name="rawg_api_key"
+                    value={rawgApiKey}
+                    onChange={(e) => setRawgApiKey(e.target.value)}
+                    placeholder="Enter RAWG API key for video game data"
                     className="api-input compact"
                   />
                 </div>

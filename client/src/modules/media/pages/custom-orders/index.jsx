@@ -1162,6 +1162,17 @@ function CustomOrders() {
         requestBody.webTitle = mediaItem.webTitle;
         requestBody.webUrl = mediaItem.webUrl;
         requestBody.webDescription = mediaItem.webDescription;
+      } else if (mediaType === 'game') {
+        requestBody.gameTitle = mediaItem.gameTitle;
+        requestBody.gameId = mediaItem.gameId;
+        // Include artwork URL for games
+        if (mediaItem.originalArtworkUrl) {
+          requestBody.originalArtworkUrl = mediaItem.originalArtworkUrl;
+        }
+        // Include webvideo URL for games
+        if (mediaItem.webvideoUrl) {
+          requestBody.webUrl = mediaItem.webvideoUrl;
+        }
       } else if (mediaType === 'episode') {
         // Handle episodes (both Plex and non-Plex)
         if (mediaItem.ratingKey) {
@@ -1461,6 +1472,8 @@ function CustomOrders() {
           mediaType = 'movie';
         } else if (mediaType === 'web') {
           mediaType = 'webvideo';
+        } else if (mediaType === 'video game') {
+          mediaType = 'game';
         }
         
         // Initialize comic-specific fields
@@ -1830,6 +1843,97 @@ function CustomOrders() {
               webUrl: item.url,
               webDescription: null
             };
+          } else if (item.mediaType === 'game') {
+            // For video games, search RAWG API to find and import the game
+            console.log(`Searching RAWG for game: ${item.title}`);
+            
+            try {
+              const rawgResponse = await fetch(`${config.apiBaseUrl}/api/rawg/search?query=${encodeURIComponent(item.title)}`);
+              
+              if (rawgResponse.ok) {
+                const rawgResponseData = await rawgResponse.json();
+                const rawgResults = rawgResponseData.data || [];
+                console.log(`Found ${rawgResults.length} RAWG results for "${item.title}"`);
+                
+                if (rawgResults.length > 0) {
+                  // Use the first (best) match from RAWG
+                  const selectedGame = rawgResults[0];
+                  console.log(`✓ Using RAWG match: "${selectedGame.name}" (ID: ${selectedGame.id})`);
+                  
+                  // Import the game from RAWG to get full metadata
+                  const importResponse = await fetch(`${config.apiBaseUrl}/api/rawg/import/${selectedGame.id}`, {
+                    method: 'POST',
+                    headers: {
+                      'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                      webvideoUrl: item.url || null // Include webvideo URL if provided
+                    })
+                  });
+                  
+                  if (importResponse.ok) {
+                    const importResponseData = await importResponse.json();
+                    const importedGame = importResponseData.data;
+                    console.log(`✓ Game imported from RAWG with full metadata`);
+                    
+                    // Create targetMedia using the imported game data
+                    targetMedia = {
+                      title: importedGame.title,
+                      type: 'game',
+                      gameTitle: importedGame.title,
+                      gameId: importedGame.id,
+                      webvideoUrl: item.url || null,
+                      originalArtworkUrl: importedGame.coverUrl || importedGame.originalArtworkUrl || null
+                    };
+                  } else {
+                    console.log(`Failed to import game from RAWG, using basic data`);
+                    // Fallback to basic game data if import fails
+                    targetMedia = {
+                      title: item.title,
+                      type: 'game',
+                      gameTitle: item.title,
+                      gameId: null,
+                      webvideoUrl: item.url || null
+                    };
+                  }
+                } else {
+                  console.log(`No RAWG results found for "${item.title}", using basic data`);
+                  // No RAWG results found, use basic game data
+                  targetMedia = {
+                    title: item.title,
+                    type: 'game',
+                    gameTitle: item.title,
+                    gameId: null,
+                    webvideoUrl: item.url || null
+                  };
+                }
+              } else {
+                console.log(`RAWG search failed, using basic data`);
+                // RAWG search failed, use basic game data
+                targetMedia = {
+                  title: item.title,
+                  type: 'game',
+                  gameTitle: item.title,
+                  gameId: null,
+                  webvideoUrl: item.url || null
+                };
+              }
+              
+              // Add delay to avoid overwhelming RAWG API
+              console.log('⏳ Pausing 2 seconds to avoid RAWG rate limiting...');
+              await new Promise(resolve => setTimeout(resolve, 2000));
+              
+            } catch (error) {
+              console.error('Error searching RAWG:', error);
+              // Fallback to basic game data on error
+              targetMedia = {
+                title: item.title,
+                type: 'game',
+                gameTitle: item.title,
+                gameId: null,
+                webvideoUrl: item.url || null
+              };
+            }
           } else {
             // For movies and TV episodes, search Plex
             let searchQuery = item.seriesOrMovie;
@@ -3288,7 +3392,8 @@ function CustomOrders() {
                        item.mediaType === 'comic' ? '📚' :
                        item.mediaType === 'book' ? '📖' :
                        item.mediaType === 'shortstory' ? '📖' : 
-                       item.mediaType === 'webvideo' ? '🎬' : '📄'}
+                       item.mediaType === 'webvideo' ? '🎬' : 
+                       item.mediaType === 'game' ? '🎮' : '📄'}
                     </div>
                     {/* Expand/Collapse indicator */}
                     <div className="expand-indicator">
@@ -3430,6 +3535,11 @@ function CustomOrders() {
                         </p>
                       )}
                       {item.mediaType === 'webvideo' && (
+                        <p className="item-series">
+                          {item.webUrl && <a href={item.webUrl} target="_blank" rel="noopener noreferrer">🔗 Open Video</a>}
+                        </p>
+                      )}
+                      {item.mediaType === 'game' && (
                         <p className="item-series">
                           {item.webUrl && <a href={item.webUrl} target="_blank" rel="noopener noreferrer">🔗 Open Video</a>}
                         </p>

@@ -191,6 +191,13 @@ const SideMenu = ({ isMobile, closeMobileMenu }) => {
       isSubmenu: true
     },
     {
+      path: '/media/games',
+      icon: '🎮',
+      label: 'Video Games',
+      description: 'Game library',
+      isSubmenu: true
+    },
+    {
       path: '/media/comics',
       icon: '📖',
       label: 'Comics',

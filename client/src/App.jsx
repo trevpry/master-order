@@ -17,6 +17,7 @@ import Stash from './modules/media/pages/Stash';
 import Music from './modules/media/pages/music/index';
 import Backgrounds from './modules/media/pages/backgrounds/index';
 import Books from './pages/Books'; // Unified Books component
+import VideoGames from './pages/VideoGames'; // Video Games component
 
 // Eddie Module Components (placeholders for now)
 import TasksHome from './modules/tasks/pages/TasksHome';
@@ -49,6 +50,7 @@ function App() {
           <Route path="/media/music" element={<Music />} />
           <Route path="/media/backgrounds" element={<Backgrounds />} />
           <Route path="/media/books" element={<Books />} />
+          <Route path="/media/games" element={<VideoGames />} />
           <Route path="/media/comics" element={<div><h1>Comics</h1><p>Coming Soon</p></div>} />
           <Route path="/media/settings" element={<Settings />} />
           
