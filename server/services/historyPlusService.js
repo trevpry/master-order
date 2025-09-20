@@ -1011,17 +1011,17 @@ class HistoryPlusService {
       
       // Check for any unread unified books (via bookLinks)
       const unreadUnifiedBooks = event.bookLinks.filter(bookLink =>
-        !bookLink.book.bookCompletions?.[0]?.isCompleted
+        !bookLink.book.bookCompletions?.length || !bookLink.book.bookCompletions[0]?.isCompleted
       );
       
       // Check for any unread unified chapters
       const unreadUnifiedChapters = event.bookChapters.filter(chapter =>
-        !chapter.chapterCompletions?.[0]?.isCompleted
+        !chapter.chapterCompletions?.length || !chapter.chapterCompletions[0]?.isCompleted
       );
       
       // Check for any unread unified sections
       const unreadUnifiedSections = event.bookSections.filter(section =>
-        !section.sectionCompletions?.[0]?.isCompleted
+        !section.sectionCompletions?.length || !section.sectionCompletions[0]?.isCompleted
       );
       
       // Calculate totals

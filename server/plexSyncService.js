@@ -881,11 +881,12 @@ class PlexSyncService {
           for (const artist of artists) {
             validIds.artists.add(artist.ratingKey);
             
-            // Get albums for this artist
-            const albumsData = await this.makeRequest(`/library/metadata/${artist.ratingKey}/children`);
-            const albums = albumsData.MediaContainer?.Metadata || [];
+            // Get albums for this artist using hybrid approach (same as sync)
+            // 1. Get albums from artist's children endpoint
+            const childrenData = await this.makeRequest(`/library/metadata/${artist.ratingKey}/children`);
+            const childrenAlbums = childrenData.MediaContainer?.Metadata || [];
             
-            for (const album of albums) {
+            for (const album of childrenAlbums) {
               validIds.albums.add(album.ratingKey);
               
               // Get tracks for this album
@@ -896,6 +897,43 @@ class PlexSyncService {
                 validIds.tracks.add(track.ratingKey);
               }
             }
+          }
+          
+          // 2. Also scan section for albums by parentRatingKey (same as sync)
+          console.log(`🧹 Section-level album scan for cleanup in section ${section.key}...`);
+          const pageSize = 500;
+          let start = 0;
+          let totalProcessed = 0;
+          let totalSize = 0;
+
+          while (true) {
+            const page = await this.makeRequest(`/library/sections/${section.key}/all?type=9&X-Plex-Container-Start=${start}&X-Plex-Container-Size=${pageSize}`);
+            const pageAlbums = page.MediaContainer?.Metadata || [];
+            if (!totalSize) totalSize = page.MediaContainer?.totalSize || 0;
+
+            if (pageAlbums.length === 0) break;
+
+            for (const album of pageAlbums) {
+              // Only include albums that belong to artists we've identified
+              if (validIds.artists.has(album.parentRatingKey)) {
+                validIds.albums.add(album.ratingKey);
+                
+                // Get tracks for this album
+                const tracksData = await this.makeRequest(`/library/metadata/${album.ratingKey}/children`);
+                const tracks = tracksData.MediaContainer?.Metadata || [];
+                
+                for (const track of tracks) {
+                  validIds.tracks.add(track.ratingKey);
+                }
+              }
+            }
+            
+            totalProcessed += pageAlbums.length;
+            if (totalSize > 0 && totalProcessed >= totalSize) {
+              break;
+            }
+            
+            start += pageSize;
           }
         }
       }
