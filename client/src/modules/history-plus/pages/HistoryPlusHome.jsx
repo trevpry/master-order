@@ -162,6 +162,14 @@ const HistoryPlusHome = () => {
                     <p>Create a new historical event</p>
                   </div>
                 </button>
+                
+                <Link to="/history-plus/categories" className="action-card">
+                  <span className="action-icon">🏷️</span>
+                  <div className="action-content">
+                    <h3>Manage Categories</h3>
+                    <p>Create and edit event categories</p>
+                  </div>
+                </Link>
               </div>
             </div>
 

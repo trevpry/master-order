@@ -1245,26 +1245,73 @@ class HistoryPlusService {
   // Categories methods
   async getCategories() {
     try {
-      // For now, return hardcoded categories
-      // In the future, this could be made configurable
-      return [
-        { id: 1, name: 'Ancient History', color: '#8B5CF6' },
-        { id: 2, name: 'Medieval History', color: '#059669' },
-        { id: 3, name: 'Renaissance', color: '#DC2626' },
-        { id: 4, name: 'Modern History', color: '#2563EB' },
-        { id: 5, name: 'World War I', color: '#B45309' },
-        { id: 6, name: 'World War II', color: '#7C2D12' },
-        { id: 7, name: 'Cold War', color: '#374151' },
-        { id: 8, name: 'Science & Technology', color: '#0891B2' },
-        { id: 9, name: 'Philosophy', color: '#7C3AED' },
-        { id: 10, name: 'Literature', color: '#BE185D' },
-        { id: 11, name: 'Art & Culture', color: '#EA580C' },
-        { id: 12, name: 'Politics', color: '#DC2626' },
-        { id: 13, name: 'Religion', color: '#059669' },
-        { id: 14, name: 'Economics', color: '#0D9488' }
-      ];
+      return await this.prisma.historyCategory.findMany({
+        orderBy: { name: 'asc' }
+      });
     } catch (error) {
       console.error('Error getting categories:', error);
+      throw error;
+    }
+  }
+
+  async createCategory(categoryData) {
+    try {
+      return await this.prisma.historyCategory.create({
+        data: {
+          name: categoryData.name,
+          description: categoryData.description || null,
+          color: categoryData.color || '#3B82F6'
+        }
+      });
+    } catch (error) {
+      if (error.code === 'P2002') {
+        throw new Error('A category with this name already exists');
+      }
+      console.error('Error creating category:', error);
+      throw error;
+    }
+  }
+
+  async updateCategory(id, updateData) {
+    try {
+      return await this.prisma.historyCategory.update({
+        where: { id: parseInt(id) },
+        data: {
+          ...(updateData.name && { name: updateData.name }),
+          ...(updateData.description !== undefined && { description: updateData.description || null }),
+          ...(updateData.color && { color: updateData.color })
+        }
+      });
+    } catch (error) {
+      if (error.code === 'P2002') {
+        throw new Error('A category with this name already exists');
+      } else if (error.code === 'P2025') {
+        throw new Error('Category not found');
+      }
+      console.error('Error updating category:', error);
+      throw error;
+    }
+  }
+
+  async deleteCategory(id) {
+    try {
+      // Check if any events use this category
+      const eventsCount = await this.prisma.historicalEvent.count({
+        where: { category: { equals: await this.prisma.historyCategory.findUnique({ where: { id: parseInt(id) } }).then(cat => cat?.name) } }
+      });
+
+      if (eventsCount > 0) {
+        throw new Error(`Cannot delete category: ${eventsCount} events are using this category`);
+      }
+
+      return await this.prisma.historyCategory.delete({
+        where: { id: parseInt(id) }
+      });
+    } catch (error) {
+      if (error.code === 'P2025') {
+        throw new Error('Category not found');
+      }
+      console.error('Error deleting category:', error);
       throw error;
     }
   }

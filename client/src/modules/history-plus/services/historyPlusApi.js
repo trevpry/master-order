@@ -377,6 +377,38 @@ export class HistoryPlusApiService {
     return response.json();
   }
 
+  static async createCategory(categoryData) {
+    const response = await fetch(`${API_BASE}/categories`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(categoryData)
+    });
+    if (!response.ok) throw new Error('Failed to create category');
+    return response.json();
+  }
+
+  static async updateCategory(id, updateData) {
+    const response = await fetch(`${API_BASE}/categories/${id}`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(updateData)
+    });
+    if (!response.ok) throw new Error('Failed to update category');
+    return response.json();
+  }
+
+  static async deleteCategory(id) {
+    const response = await fetch(`${API_BASE}/categories/${id}`, {
+      method: 'DELETE'
+    });
+    if (!response.ok) throw new Error('Failed to delete category');
+    return response.json();
+  }
+
   // ==========================================
   // STATISTICS & SEARCH
   // ==========================================
@@ -445,4 +477,7 @@ export const historyPlusApi = {
   getVideoStats: HistoryPlusApiService.getVideoStatistics, // Alias for Videos component
   searchContent: HistoryPlusApiService.searchContent,
   getCategories: HistoryPlusApiService.getCategories,
+  createCategory: HistoryPlusApiService.createCategory,
+  updateCategory: HistoryPlusApiService.updateCategory,
+  deleteCategory: HistoryPlusApiService.deleteCategory,
 };

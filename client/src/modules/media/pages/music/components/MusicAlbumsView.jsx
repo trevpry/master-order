@@ -10,12 +10,16 @@ const MusicAlbumsView = ({
   playlists,
   extractingMetadata,
   metadataResults,
+  playlistFilter,
   onSelectAlbum, 
   onLoadMoreAlbums,
   onGoBackToArtists,
   onAddAlbumToCustomPlaylist,
-  onExtractAlbumMetadata
+  onExtractAlbumMetadata,
+  onPlaylistFilterChange
 }) => {
+  const customPlaylists = playlists?.filter(p => p.type === 'custom') || [];
+
   return (
     <div className="albums-section">
       <div className="section-header">
@@ -30,6 +34,50 @@ const MusicAlbumsView = ({
           {selectedArtist ? `Albums by ${selectedArtist.title}` : 'All Albums'}
         </h2>
       </div>
+      
+      {/* Playlist Filter */}
+      {!selectedArtist && customPlaylists.length > 0 && (
+        <div className="filter-section" style={{ 
+          marginBottom: '20px', 
+          padding: '15px', 
+          backgroundColor: '#f8f9fa', 
+          borderRadius: '8px',
+          border: '1px solid #e9ecef'
+        }}>
+          <label style={{ 
+            display: 'block', 
+            marginBottom: '8px', 
+            fontWeight: '600',
+            color: '#495057' 
+          }}>
+            Filter by Custom Playlist:
+          </label>
+          <select 
+            value={playlistFilter || ''} 
+            onChange={(e) => onPlaylistFilterChange(e.target.value)}
+            style={{
+              padding: '8px 12px',
+              borderRadius: '6px',
+              border: '1px solid #ced4da',
+              backgroundColor: 'white',
+              minWidth: '200px',
+              fontSize: '14px'
+            }}
+          >
+            <option value="">All Albums</option>
+            {customPlaylists.map(playlist => (
+              <option key={`in-${playlist.id}`} value={`in-${playlist.id}`}>
+                In "{playlist.name}"
+              </option>
+            ))}
+            {customPlaylists.map(playlist => (
+              <option key={`not-in-${playlist.id}`} value={`not-in-${playlist.id}`}>
+                NOT in "{playlist.name}"
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
       <div className="albums-grid">
         {albums.length === 0 ? (
           <div className="empty-state">

@@ -435,6 +435,25 @@ router.get('/categories', asyncHandler(async (req, res) => {
   sendSuccess(res, categories);
 }));
 
+// POST /api/history-plus/categories
+router.post('/categories', asyncHandler(async (req, res) => {
+  validateRequiredFields(req.body, ['name', 'color']);
+  const category = await historyPlusService.createCategory(req.body);
+  sendSuccess(res, category);
+}));
+
+// PUT /api/history-plus/categories/:id
+router.put('/categories/:id', asyncHandler(async (req, res) => {
+  const category = await historyPlusService.updateCategory(req.params.id, req.body);
+  sendSuccess(res, category);
+}));
+
+// DELETE /api/history-plus/categories/:id
+router.delete('/categories/:id', asyncHandler(async (req, res) => {
+  await historyPlusService.deleteCategory(req.params.id);
+  sendSuccess(res, { message: 'Category deleted successfully' });
+}));
+
 // POST /api/history-plus/import-data
 router.post('/import-data', asyncHandler(async (req, res) => {
   console.log('🔄 Starting History Plus data import via API...');

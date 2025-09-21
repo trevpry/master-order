@@ -30,6 +30,7 @@ import HistoryPlusHome from './modules/history-plus/pages/HistoryPlusHome';
 import Timeline from './modules/history-plus/pages/Timeline';
 import Videos from './modules/history-plus/pages/Videos';
 import Channels from './modules/history-plus/pages/Channels';
+import Categories from './modules/history-plus/pages/Categories';
 
 function App() {
   return (
@@ -72,6 +73,7 @@ function App() {
           <Route path="/history-plus/timeline" element={<Timeline />} />
           <Route path="/history-plus/videos" element={<Videos />} />
           <Route path="/history-plus/channels" element={<Channels />} />
+          <Route path="/history-plus/categories" element={<Categories />} />
           <Route path="/eddie-settings" element={<EddieSettings />} />
         </Routes>
       </Layout>

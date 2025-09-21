@@ -46,6 +46,7 @@ const Music = () => {
   
   const [searchQuery, setSearchQuery] = useState(searchParams.get('search') || '');
   const [selectedSection, setSelectedSection] = useState(searchParams.get('section') || 'all');
+  const [playlistFilter, setPlaylistFilter] = useState(searchParams.get('playlistFilter') || '');
   
   const [extractingMetadata, setExtractingMetadata] = useState(new Set());
   const [metadataResults, setMetadataResults] = useState({});
@@ -587,11 +588,21 @@ const Music = () => {
       setAlbumsLoading(true);
       
       const currentSection = sectionOverride !== null ? sectionOverride : selectedSection;
+      const currentPlaylistFilter = searchParams.get('playlistFilter') || '';
       
-      console.log('loadAlbums called with:', { page, replace, sectionOverride, currentSection, searchQuery });
+      console.log('loadAlbums called with:', { page, replace, sectionOverride, currentSection, searchQuery, currentPlaylistFilter });
       
       let url;
-      if (searchQuery.trim()) {
+      
+      // Handle playlist filtering first
+      if (currentPlaylistFilter) {
+        const [filterType, playlistId] = currentPlaylistFilter.split('-');
+        if (filterType === 'in') {
+          url = `${config.apiBaseUrl}/api/music/albums/playlist/${playlistId}?page=${page}&limit=20`;
+        } else if (filterType === 'not') {
+          url = `${config.apiBaseUrl}/api/music/albums/not-in-playlist/${playlistId}?page=${page}&limit=20`;
+        }
+      } else if (searchQuery.trim()) {
         // For search, respect the selected section
         if (currentSection !== 'all') {
           url = `${config.apiBaseUrl}/api/music/albums/section/${currentSection}?search=${encodeURIComponent(searchQuery)}&page=${page}&limit=20`;
@@ -818,9 +829,28 @@ const Music = () => {
     }
   };
 
+  const handlePlaylistFilterChange = async (filterValue) => {
+    console.log('handlePlaylistFilterChange called with:', filterValue);
+    
+    setPlaylistFilter(filterValue);
+    updateUrlParams({ playlistFilter: filterValue || null }, true);
+
+    // If we're currently viewing albums, reload with the new filter
+    if (activeView === 'albums') {
+      try {
+        console.log('Reloading albums for playlist filter:', filterValue);
+        await loadAlbums(1, true);
+      } catch (err) {
+        console.error('Error applying playlist filter:', err);
+        setError(err.message);
+      }
+    }
+  };
+
   const selectArtist = async (artist) => {
     setSelectedArtist(artist);
-    navigateToView('albums', { artist: artist.ratingKey });
+    setPlaylistFilter(''); // Clear playlist filter when selecting an artist
+    navigateToView('albums', { artist: artist.ratingKey, playlistFilter: null });
     
     try {
       const [albumsRes, tracksRes] = await Promise.all([
@@ -880,9 +910,10 @@ const Music = () => {
 
   // Navigation helpers
   const goBackToArtists = () => {
-    navigateToView('artists');
+    navigateToView('artists', { playlistFilter: null }); // Clear playlist filter when going back to artists
     setSelectedArtist(null);
     setSelectedAlbum(null);
+    setPlaylistFilter('');
   };
 
   const goBackToAlbums = () => {
@@ -1275,7 +1306,8 @@ const Music = () => {
         message += `\nErrors: ${errors.join(', ')}`;
       }
 
-      alert(message);
+      // Log the result instead of showing alert
+      console.log(message);
       
       if (addedCount > 0) {
         // Refresh playlists to show updated track count
@@ -1460,11 +1492,13 @@ const Music = () => {
             playlists={playlists}
             extractingMetadata={extractingMetadata}
             metadataResults={metadataResults}
+            playlistFilter={searchParams.get('playlistFilter') || ''}
             onSelectAlbum={selectAlbum}
             onLoadMoreAlbums={loadMoreAlbums}
             onGoBackToArtists={goBackToArtists}
             onAddAlbumToCustomPlaylist={addAlbumToCustomPlaylist}
             onExtractAlbumMetadata={extractAlbumMetadata}
+            onPlaylistFilterChange={handlePlaylistFilterChange}
           />
         )}
 

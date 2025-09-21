@@ -13,15 +13,64 @@ const EventForm = ({ event, categories, onSave, onCancel }) => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
+  // Debug: Log formData whenever it changes
+  useEffect(() => {
+    console.log('Form data updated:', formData);
+  }, [formData]);
+
+  // Helper function to check if a date is BCE (negative year)
+  const isBCEDate = (dateString) => {
+    return dateString && dateString.startsWith('-');
+  };
+
+  // Helper function to convert date to YYYY-MM-DD format for HTML date inputs
+  const formatDateForInput = (dateString) => {
+    if (!dateString) return '';
+    
+    try {
+      // Handle various date formats
+      let date;
+      
+      // Check if it's a BCE date (starts with -)
+      if (dateString.startsWith('-')) {
+        return dateString; // Keep BCE dates as-is for text input
+      }
+      
+      // Check if it's already in YYYY-MM-DD format
+      if (/^\d{4}-\d{2}-\d{2}$/.test(dateString)) {
+        return dateString;
+      }
+      
+      // Try to parse as regular date and convert to YYYY-MM-DD
+      date = new Date(dateString);
+      if (!isNaN(date.getTime())) {
+        return date.toISOString().split('T')[0];
+      }
+      
+      // If all else fails, return as-is
+      return dateString;
+    } catch (error) {
+      console.warn('Error formatting date:', dateString, error);
+      return dateString;
+    }
+  };
+
   // Initialize form data when event changes
   useEffect(() => {
     if (event) {
+      console.log('Populating form with event data:', event);
+      console.log('Event category:', event.category);
+      console.log('Available categories:', categories.map(c => c.name));
+      
+      const formattedStartDate = formatDateForInput(event.startDate);
+      const formattedEndDate = formatDateForInput(event.endDate);
+      
       setFormData({
         title: event.title || '',
         details: event.details || '',
         category: event.category || '',
-        startDate: event.startDate || '',
-        endDate: event.endDate || '',
+        startDate: formattedStartDate || '',
+        endDate: formattedEndDate || '',
         reviewed: event.reviewed || false
       });
     } else {
@@ -34,7 +83,7 @@ const EventForm = ({ event, categories, onSave, onCancel }) => {
         reviewed: false
       });
     }
-  }, [event]);
+  }, [event, categories]); // Added categories as dependency
 
   const handleInputChange = (e) => {
     const { name, value, type, checked } = e.target;
@@ -148,6 +197,12 @@ const EventForm = ({ event, categories, onSave, onCancel }) => {
               className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
             >
               <option value="">Select a category</option>
+              {/* Show current category if it's not in the standard list */}
+              {formData.category && !categories.some(cat => cat.name === formData.category) && (
+                <option value={formData.category}>
+                  {formData.category} (current)
+                </option>
+              )}
               {categories.map((category) => (
                 <option key={category.id} value={category.name}>
                   {category.name}
@@ -163,13 +218,14 @@ const EventForm = ({ event, categories, onSave, onCancel }) => {
                 Start Date *
               </label>
               <input
-                type="date"
+                type={isBCEDate(formData.startDate) ? "text" : "date"}
                 id="startDate"
                 name="startDate"
                 value={formData.startDate}
                 onChange={handleInputChange}
                 required
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                placeholder={isBCEDate(formData.startDate) ? "e.g., -2331-01-01 for 2331 BCE" : ""}
               />
               <p className="text-xs text-gray-500 mt-1">
                 For BCE dates, use negative years (e.g., -0500-01-01 for 500 BCE)
@@ -181,12 +237,13 @@ const EventForm = ({ event, categories, onSave, onCancel }) => {
                 End Date
               </label>
               <input
-                type="date"
+                type={isBCEDate(formData.endDate) ? "text" : "date"}
                 id="endDate"
                 name="endDate"
                 value={formData.endDate}
                 onChange={handleInputChange}
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                placeholder={isBCEDate(formData.endDate) ? "e.g., -2287-01-01 for 2287 BCE" : "Leave empty for single-day events"}
               />
               <p className="text-xs text-gray-500 mt-1">
                 Leave empty for single-day events

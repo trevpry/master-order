@@ -325,6 +325,122 @@ router.get('/albums/:ratingKey', asyncHandler(async (req, res) => {
   res.json(album);
 }));
 
+// Music Albums - By Custom Playlist (albums that have tracks in the playlist)
+router.get('/albums/playlist/:playlistId', asyncHandler(async (req, res) => {
+  const { playlistId } = req.params;
+  const { page = 1, limit = 20 } = req.query;
+  const pageNum = parseInt(page);
+  const limitNum = parseInt(limit);
+  const offset = (pageNum - 1) * limitNum;
+
+  // Get unique albums that have tracks in this custom playlist
+  const albumsWithTracks = await prisma.plexAlbum.findMany({
+    where: {
+      tracks: {
+        some: {
+          ratingKey: {
+            in: await prisma.customPlaylistTrack.findMany({
+              where: { playlistId: parseInt(playlistId) },
+              select: { ratingKey: true }
+            }).then(tracks => tracks.map(t => t.ratingKey))
+          }
+        }
+      }
+    },
+    orderBy: { title: 'asc' },
+    skip: offset,
+    take: limitNum,
+    include: {
+      artist: true,
+      librarySection: true
+    }
+  });
+
+  // Get total count for pagination
+  const totalCount = await prisma.plexAlbum.count({
+    where: {
+      tracks: {
+        some: {
+          ratingKey: {
+            in: await prisma.customPlaylistTrack.findMany({
+              where: { playlistId: parseInt(playlistId) },
+              select: { ratingKey: true }
+            }).then(tracks => tracks.map(t => t.ratingKey))
+          }
+        }
+      }
+    }
+  });
+
+  res.json({
+    albums: albumsWithTracks,
+    page: pageNum,
+    limit: limitNum,
+    totalPages: Math.ceil(totalCount / limitNum),
+    totalAlbums: totalCount
+  });
+}));
+
+// Music Albums - NOT in Custom Playlist (albums that have NO tracks in the playlist)
+router.get('/albums/not-in-playlist/:playlistId', asyncHandler(async (req, res) => {
+  const { playlistId } = req.params;
+  const { page = 1, limit = 20 } = req.query;
+  const pageNum = parseInt(page);
+  const limitNum = parseInt(limit);
+  const offset = (pageNum - 1) * limitNum;
+
+  // Get track rating keys that are in this playlist
+  const playlistTrackRatingKeys = await prisma.customPlaylistTrack.findMany({
+    where: { playlistId: parseInt(playlistId) },
+    select: { ratingKey: true }
+  }).then(tracks => tracks.map(t => t.ratingKey));
+
+  // Get albums that have NO tracks in the playlist
+  const albumsNotInPlaylist = await prisma.plexAlbum.findMany({
+    where: {
+      NOT: {
+        tracks: {
+          some: {
+            ratingKey: {
+              in: playlistTrackRatingKeys
+            }
+          }
+        }
+      }
+    },
+    orderBy: { title: 'asc' },
+    skip: offset,
+    take: limitNum,
+    include: {
+      artist: true,
+      librarySection: true
+    }
+  });
+
+  // Get total count for pagination
+  const totalCount = await prisma.plexAlbum.count({
+    where: {
+      NOT: {
+        tracks: {
+          some: {
+            ratingKey: {
+              in: playlistTrackRatingKeys
+            }
+          }
+        }
+      }
+    }
+  });
+
+  res.json({
+    albums: albumsNotInPlaylist,
+    page: pageNum,
+    limit: limitNum,
+    totalPages: Math.ceil(totalCount / limitNum),
+    totalAlbums: totalCount
+  });
+}));
+
 // Extract File Metadata from Album
 router.post('/albums/:ratingKey/extract-file-metadata', asyncHandler(async (req, res) => {
   const { ratingKey } = req.params;

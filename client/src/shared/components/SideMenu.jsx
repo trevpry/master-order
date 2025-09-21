@@ -120,6 +120,13 @@ const SideMenu = ({ isMobile, closeMobileMenu }) => {
       isSubmenu: true
     },
     {
+      path: '/history-plus/categories',
+      icon: '🏷️',
+      label: 'Categories',
+      description: 'Event categories',
+      isSubmenu: true
+    },
+    {
       path: '/eddie-settings',
       icon: '⚙️',
       label: 'Settings',
@@ -315,32 +322,54 @@ const SideMenu = ({ isMobile, closeMobileMenu }) => {
                       <span className="menu-icon">{item.icon}</span>
                     </Link>
                   ) : (
-                    // When expanded, make it a toggle button
-                    <div 
-                      className={`menu-link history-header-link ${
-                        location.pathname.startsWith('/history-plus') ? 'active' : ''
-                      }`}
-                      title={item.label}
-                      onClick={toggleHistoryMenu}
-                      style={{ cursor: 'pointer' }}
-                    >
-                      <span className="menu-icon">{item.icon}</span>
-                      <div className="menu-text">
-                        <span className="menu-label">{item.label}</span>
-                        <span className="menu-description">{item.description}</span>
-                      </div>
-                      <span className="collapse-arrow">
+                    // When expanded, make it clickable for navigation with toggle arrow
+                    <div className="history-header-container">
+                      <Link 
+                        to={item.path} 
+                        className={`menu-link history-header-link ${
+                          location.pathname.startsWith('/history-plus') ? 'active' : ''
+                        }`}
+                        title={item.label}
+                        onClick={handleMenuItemClick()}
+                        style={{ flex: 1, textDecoration: 'none' }}
+                      >
+                        <span className="menu-icon">{item.icon}</span>
+                        <div className="menu-text">
+                          <span className="menu-label">{item.label}</span>
+                          <span className="menu-description">{item.description}</span>
+                        </div>
+                      </Link>
+                      <button 
+                        className="submenu-toggle"
+                        onClick={toggleHistoryMenu}
+                        title="Toggle submenu"
+                        style={{ 
+                          background: 'none', 
+                          border: 'none', 
+                          color: 'inherit', 
+                          cursor: 'pointer',
+                          padding: '4px 8px',
+                          fontSize: '12px'
+                        }}
+                      >
                         {isHistoryCollapsed ? '▼' : '▲'}
-                      </span>
+                      </button>
                     </div>
                   )}
                 </li>
               );
             }
             
-            // Handle submenu items - hide them when collapsed
+            // Handle submenu items - hide them when collapsed or when their parent is collapsed
             if (item.isSubmenu) {
-              if (isCollapsed || isMediaCollapsed || isHistoryCollapsed) {
+              // Determine which parent this submenu belongs to
+              const isMediaSubmenu = item.path.startsWith('/media/');
+              const isHistorySubmenu = item.path.startsWith('/history-plus/');
+              
+              // Hide if sidebar is collapsed or if the specific parent is collapsed
+              if (isCollapsed || 
+                  (isMediaSubmenu && isMediaCollapsed) || 
+                  (isHistorySubmenu && isHistoryCollapsed)) {
                 return null;
               }
             }
