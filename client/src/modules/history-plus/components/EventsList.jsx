@@ -1,7 +1,45 @@
 import React from 'react';
+import AICategorization from './AICategorization';
 import './EventsList.css';
 
 const EventsList = ({ events, onEventSelect, onEventsUpdate }) => {
+  // Check if an event needs AI categorization
+  const needsAICategorization = (event) => {
+    // Check if event has no category or has a generic/unassigned category
+    const unassignedCategories = ['Unassigned', 'General', 'Uncategorized', '', null, undefined];
+    const hasUnassignedCategory = unassignedCategories.includes(event.category);
+    
+    // Check if event has YouTube videos that could be analyzed
+    const hasYouTubeVideos = event.videos && event.videos.some(video => 
+      video.url && video.url.includes('youtube.com')
+    );
+    
+    return hasUnassignedCategory && hasYouTubeVideos;
+  };
+
+  const handleAICategorizationSuccess = (eventId, data) => {
+    console.log('✅ AI categorization successful for event:', eventId, data);
+    
+    // If a category was applied, refresh the events list
+    if (data.applied || data.updatedEvent) {
+      if (onEventsUpdate) {
+        onEventsUpdate();
+      }
+    }
+  };
+
+  const handleAICategorizationError = (eventId, error) => {
+    console.error('❌ AI categorization failed for event:', eventId, error);
+  };
+
+  const handleEventCardClick = (event, e) => {
+    // Don't trigger event selection if clicking on AI categorization area
+    if (e.target.closest('.ai-categorization')) {
+      e.stopPropagation();
+      return;
+    }
+    onEventSelect(event);
+  };
   if (!events || events.length === 0) {
     return (
       <div className="events-list">
@@ -37,7 +75,7 @@ const EventsList = ({ events, onEventSelect, onEventsUpdate }) => {
           <div 
             key={event.id} 
             className="event-card"
-            onClick={() => onEventSelect(event)}
+            onClick={(e) => handleEventCardClick(event, e)}
           >
             <div className="event-header">
               <h3 className="event-title">{event.title}</h3>
@@ -73,6 +111,21 @@ const EventsList = ({ events, onEventSelect, onEventsUpdate }) => {
                 </div>
               )}
             </div>
+
+            {/* AI Categorization for unassigned events */}
+            {needsAICategorization(event) && (
+              <div className="ai-categorization-section">
+                <AICategorization
+                  variant="event"
+                  eventId={event.id}
+                  eventTitle={event.title}
+                  currentCategory={event.category}
+                  onSuccess={(data) => handleAICategorizationSuccess(event.id, data)}
+                  onError={(error) => handleAICategorizationError(event.id, error)}
+                  className="event-ai-categorization"
+                />
+              </div>
+            )}
           </div>
         ))}
       </div>

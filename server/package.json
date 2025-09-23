@@ -26,6 +26,7 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
+    "@google/genai": "^1.20.0",
     "@prisma/client": "^6.8.2",
     "axios": "^1.9.0",
     "cors": "^2.8.5",

@@ -795,20 +795,20 @@ class PlexSyncService {
       console.log('🧹 Step 1: Collecting valid entity IDs from Plex...');
       const validPlexIds = await this.getAllValidPlexEntityIds();
 
-      // Step 2: Clean up main content entities in dependency order
-      console.log('🧹 Step 2: Cleaning main content entities...');
-      results.episodes += await this.cleanupOrphanedEpisodes(validPlexIds.episodes);
-      results.seasons += await this.cleanupOrphanedSeasons(validPlexIds.seasons);
-      results.shows += await this.cleanupOrphanedShows(validPlexIds.shows);
-      results.movies += await this.cleanupOrphanedMovies(validPlexIds.movies);
-      results.tracks += await this.cleanupOrphanedTracks(validPlexIds.tracks);
-      results.albums += await this.cleanupOrphanedAlbums(validPlexIds.albums);
-      results.artists += await this.cleanupOrphanedArtists(validPlexIds.artists);
-      results.playlists += await this.cleanupOrphanedPlaylists(validPlexIds.playlists);
+      // Step 2: Mark removed content entities (don't delete for stats purposes)
+      console.log('🧹 Step 2: Marking removed content entities...');
+      results.episodes += await this.markRemovedEpisodes(validPlexIds.episodes);
+      results.seasons += await this.markRemovedSeasons(validPlexIds.seasons);
+      results.shows += await this.markRemovedShows(validPlexIds.shows);
+      results.movies += await this.markRemovedMovies(validPlexIds.movies);
+      results.tracks += await this.markRemovedTracks(validPlexIds.tracks);
+      results.albums += await this.markRemovedAlbums(validPlexIds.albums);
+      results.artists += await this.markRemovedArtists(validPlexIds.artists);
+      results.playlists += await this.markRemovedPlaylists(validPlexIds.playlists);
 
-      // Step 3: Clean up orphaned complex fields
-      console.log('🧹 Step 3: Cleaning orphaned complex fields...');
-      results.complexFields += await this.cleanupOrphanedComplexFields();
+      // Step 3: Clean up complex fields for items that no longer exist in Plex
+      console.log('🧹 Step 3: Cleaning complex fields for deleted Plex items...');
+      results.complexFields += await this.cleanupComplexFieldsForDeletedItems(validPlexIds);
 
       const totalCleaned = Object.values(results).reduce((sum, count) => sum + count, 0);
       console.log(`✅ Plex cleanup completed! Removed ${totalCleaned} orphaned entities:`, results);
@@ -963,185 +963,200 @@ class PlexSyncService {
     }
   }
 
-  async cleanupOrphanedEpisodes(validEpisodeIds) {
+  async markRemovedEpisodes(validEpisodeIds) {
     const localEpisodes = await prisma.plexEpisode.findMany({
-      select: { ratingKey: true }
+      select: { ratingKey: true },
+      where: { removed: false }
     });
 
-    let removed = 0;
+    let marked = 0;
     for (const episode of localEpisodes) {
       if (!validEpisodeIds.has(episode.ratingKey)) {
-        // Clear complex fields first
-        await this.clearComplexFields(episode.ratingKey, 'episode');
-        // Delete the episode
-        await prisma.plexEpisode.delete({ where: { ratingKey: episode.ratingKey } });
-        removed++;
+        // Mark episode as removed instead of deleting
+        await prisma.plexEpisode.update({ 
+          where: { ratingKey: episode.ratingKey },
+          data: { removed: true }
+        });
+        marked++;
       }
     }
 
-    if (removed > 0) {
-      console.log(`🗑️ Removed ${removed} orphaned episodes`);
+    if (marked > 0) {
+      console.log(`� Marked ${marked} episodes as removed`);
     }
-    return removed;
+    return marked;
   }
 
-  async cleanupOrphanedSeasons(validSeasonIds) {
+  async markRemovedSeasons(validSeasonIds) {
     const localSeasons = await prisma.plexSeason.findMany({
-      select: { ratingKey: true }
+      select: { ratingKey: true },
+      where: { removed: false }
     });
 
-    let removed = 0;
+    let marked = 0;
     for (const season of localSeasons) {
       if (!validSeasonIds.has(season.ratingKey)) {
-        // Clear complex fields first
-        await this.clearComplexFields(season.ratingKey, 'season');
-        // Delete the season
-        await prisma.plexSeason.delete({ where: { ratingKey: season.ratingKey } });
-        removed++;
+        // Mark season as removed instead of deleting
+        await prisma.plexSeason.update({ 
+          where: { ratingKey: season.ratingKey },
+          data: { removed: true }
+        });
+        marked++;
       }
     }
 
-    if (removed > 0) {
-      console.log(`🗑️ Removed ${removed} orphaned seasons`);
+    if (marked > 0) {
+      console.log(`� Marked ${marked} seasons as removed`);
     }
-    return removed;
+    return marked;
   }
 
-  async cleanupOrphanedShows(validShowIds) {
+  async markRemovedShows(validShowIds) {
     const localShows = await prisma.plexTVShow.findMany({
-      select: { ratingKey: true }
+      select: { ratingKey: true },
+      where: { removed: false }
     });
 
-    let removed = 0;
+    let marked = 0;
     for (const show of localShows) {
       if (!validShowIds.has(show.ratingKey)) {
-        // Clear complex fields first
-        await this.clearComplexFields(show.ratingKey, 'show');
-        // Delete the show
-        await prisma.plexTVShow.delete({ where: { ratingKey: show.ratingKey } });
-        removed++;
+        // Mark show as removed instead of deleting
+        await prisma.plexTVShow.update({ 
+          where: { ratingKey: show.ratingKey },
+          data: { removed: true }
+        });
+        marked++;
       }
     }
 
-    if (removed > 0) {
-      console.log(`🗑️ Removed ${removed} orphaned TV shows`);
+    if (marked > 0) {
+      console.log(`� Marked ${marked} TV shows as removed`);
     }
-    return removed;
+    return marked;
   }
 
-  async cleanupOrphanedMovies(validMovieIds) {
+  async markRemovedMovies(validMovieIds) {
     const localMovies = await prisma.plexMovie.findMany({
-      select: { ratingKey: true }
+      select: { ratingKey: true },
+      where: { removed: false }
     });
 
-    let removed = 0;
+    let marked = 0;
     for (const movie of localMovies) {
       if (!validMovieIds.has(movie.ratingKey)) {
-        // Clear complex fields first
-        await this.clearComplexFields(movie.ratingKey, 'movie');
-        // Delete the movie
-        await prisma.plexMovie.delete({ where: { ratingKey: movie.ratingKey } });
-        removed++;
+        // Mark movie as removed instead of deleting
+        await prisma.plexMovie.update({ 
+          where: { ratingKey: movie.ratingKey },
+          data: { removed: true }
+        });
+        marked++;
       }
     }
 
-    if (removed > 0) {
-      console.log(`🗑️ Removed ${removed} orphaned movies`);
+    if (marked > 0) {
+      console.log(`🎬 Marked ${marked} movies as removed`);
     }
-    return removed;
+    return marked;
   }
 
-  async cleanupOrphanedTracks(validTrackIds) {
+  async markRemovedTracks(validTrackIds) {
     const localTracks = await prisma.plexTrack.findMany({
-      select: { ratingKey: true }
+      select: { ratingKey: true },
+      where: { removed: false }
     });
 
-    let removed = 0;
+    let marked = 0;
     for (const track of localTracks) {
       if (!validTrackIds.has(track.ratingKey)) {
-        await prisma.plexTrack.delete({ where: { ratingKey: track.ratingKey } });
-        removed++;
+        await prisma.plexTrack.update({ 
+          where: { ratingKey: track.ratingKey },
+          data: { removed: true }
+        });
+        marked++;
       }
     }
 
-    if (removed > 0) {
-      console.log(`🗑️ Removed ${removed} orphaned tracks`);
+    if (marked > 0) {
+      console.log(`🎵 Marked ${marked} tracks as removed`);
     }
-    return removed;
+    return marked;
   }
 
-  async cleanupOrphanedAlbums(validAlbumIds) {
+  async markRemovedAlbums(validAlbumIds) {
     const localAlbums = await prisma.plexAlbum.findMany({
-      select: { ratingKey: true }
+      select: { ratingKey: true },
+      where: { removed: false }
     });
 
-    let removed = 0;
+    let marked = 0;
     for (const album of localAlbums) {
       if (!validAlbumIds.has(album.ratingKey)) {
-        await prisma.plexAlbum.delete({ where: { ratingKey: album.ratingKey } });
-        removed++;
+        await prisma.plexAlbum.update({ 
+          where: { ratingKey: album.ratingKey },
+          data: { removed: true }
+        });
+        marked++;
       }
     }
 
-    if (removed > 0) {
-      console.log(`🗑️ Removed ${removed} orphaned albums`);
+    if (marked > 0) {
+      console.log(`🎵 Marked ${marked} albums as removed`);
     }
-    return removed;
+    return marked;
   }
 
-  async cleanupOrphanedArtists(validArtistIds) {
+  async markRemovedArtists(validArtistIds) {
     const localArtists = await prisma.plexArtist.findMany({
-      select: { ratingKey: true }
+      select: { ratingKey: true },
+      where: { removed: false }
     });
 
-    let removed = 0;
+    let marked = 0;
     for (const artist of localArtists) {
       if (!validArtistIds.has(artist.ratingKey)) {
-        await prisma.plexArtist.delete({ where: { ratingKey: artist.ratingKey } });
-        removed++;
+        await prisma.plexArtist.update({ 
+          where: { ratingKey: artist.ratingKey },
+          data: { removed: true }
+        });
+        marked++;
       }
     }
 
-    if (removed > 0) {
-      console.log(`🗑️ Removed ${removed} orphaned artists`);
+    if (marked > 0) {
+      console.log(`🎵 Marked ${marked} artists as removed`);
     }
-    return removed;
+    return marked;
   }
 
-  async cleanupOrphanedPlaylists(validPlaylistIds) {
+  async markRemovedPlaylists(validPlaylistIds) {
     const localPlaylists = await prisma.plexPlaylist.findMany({
-      select: { ratingKey: true }
+      select: { ratingKey: true },
+      where: { removed: false }
     });
 
-    let removed = 0;
+    let marked = 0;
     for (const playlist of localPlaylists) {
       if (!validPlaylistIds.has(playlist.ratingKey)) {
-        await prisma.plexPlaylist.delete({ where: { ratingKey: playlist.ratingKey } });
-        removed++;
+        await prisma.plexPlaylist.update({ 
+          where: { ratingKey: playlist.ratingKey },
+          data: { removed: true }
+        });
+        marked++;
       }
     }
 
-    if (removed > 0) {
-      console.log(`🗑️ Removed ${removed} orphaned playlists`);
+    if (marked > 0) {
+      console.log(`� Marked ${marked} playlists as removed`);
     }
-    return removed;
+    return marked;
   }
 
-  async cleanupOrphanedComplexFields() {
+  async cleanupComplexFieldsForDeletedItems(validPlexIds) {
     let totalRemoved = 0;
     
-    // Get all existing main entity rating keys
-    const existingShows = await prisma.plexTVShow.findMany({ select: { ratingKey: true } });
-    const existingSeasons = await prisma.plexSeason.findMany({ select: { ratingKey: true } });
-    const existingEpisodes = await prisma.plexEpisode.findMany({ select: { ratingKey: true } });
-    const existingMovies = await prisma.plexMovie.findMany({ select: { ratingKey: true } });
-    
-    const validShowKeys = new Set(existingShows.map(s => s.ratingKey));
-    const validSeasonKeys = new Set(existingSeasons.map(s => s.ratingKey));
-    const validEpisodeKeys = new Set(existingEpisodes.map(e => e.ratingKey));
-    const validMovieKeys = new Set(existingMovies.map(m => m.ratingKey));
+    console.log('🧹 Cleaning complex fields for items deleted from Plex...');
 
-    // Clean up complex fields for non-existent movies
+    // Clean up complex fields for movies that don't exist in Plex anymore
     const movieComplexFields = [
       { model: prisma.plexDirector, field: 'movieRatingKey' },
       { model: prisma.plexGenre, field: 'movieRatingKey' },
@@ -1161,15 +1176,20 @@ class PlexSyncService {
       try {
         const orphanedRecords = await model.findMany({
           select: { [field]: true },
-          distinct: [field]
+          distinct: [field],
+          where: {
+            [field]: { not: null }
+          }
         });
         
         for (const record of orphanedRecords) {
-          if (!validMovieKeys.has(record[field])) {
+          // Only delete if the movie doesn't exist in Plex anymore
+          if (!validPlexIds.movies.has(record[field])) {
             const deleted = await model.deleteMany({
               where: { [field]: record[field] }
             });
             totalRemoved += deleted.count;
+            console.log(`🗑️ Removed ${deleted.count} ${model.name} records for deleted movie ${record[field]}`);
           }
         }
       } catch (error) {
@@ -1177,63 +1197,7 @@ class PlexSyncService {
       }
     }
 
-    // Clean up complex fields for non-existent shows
-    const showComplexFields = [
-      { model: prisma.plexGenre, field: 'showRatingKey' },
-      { model: prisma.plexGuid, field: 'showRatingKey' },
-      { model: prisma.plexImage, field: 'showRatingKey' },
-      { model: prisma.plexUltraBlurColor, field: 'showRatingKey' },
-      { model: prisma.plexLabel, field: 'showRatingKey' }
-    ];
-
-    for (const { model, field } of showComplexFields) {
-      try {
-        const orphanedRecords = await model.findMany({
-          select: { [field]: true },
-          distinct: [field]
-        });
-        
-        for (const record of orphanedRecords) {
-          if (record[field] && !validShowKeys.has(record[field])) {
-            const deleted = await model.deleteMany({
-              where: { [field]: record[field] }
-            });
-            totalRemoved += deleted.count;
-          }
-        }
-      } catch (error) {
-        console.warn(`Error cleaning up ${model.name} for shows:`, error.message);
-      }
-    }
-
-    // Clean up complex fields for non-existent seasons
-    const seasonComplexFields = [
-      { model: prisma.plexGuid, field: 'seasonRatingKey' },
-      { model: prisma.plexImage, field: 'seasonRatingKey' },
-      { model: prisma.plexUltraBlurColor, field: 'seasonRatingKey' }
-    ];
-
-    for (const { model, field } of seasonComplexFields) {
-      try {
-        const orphanedRecords = await model.findMany({
-          select: { [field]: true },
-          distinct: [field]
-        });
-        
-        for (const record of orphanedRecords) {
-          if (record[field] && !validSeasonKeys.has(record[field])) {
-            const deleted = await model.deleteMany({
-              where: { [field]: record[field] }
-            });
-            totalRemoved += deleted.count;
-          }
-        }
-      } catch (error) {
-        console.warn(`Error cleaning up ${model.name} for seasons:`, error.message);
-      }
-    }
-
-    // Clean up complex fields for non-existent episodes
+    // Clean up complex fields for episodes that don't exist in Plex anymore
     const episodeComplexFields = [
       { model: prisma.plexDirector, field: 'episodeRatingKey' },
       { model: prisma.plexWriter, field: 'episodeRatingKey' },
@@ -1249,15 +1213,20 @@ class PlexSyncService {
       try {
         const orphanedRecords = await model.findMany({
           select: { [field]: true },
-          distinct: [field]
+          distinct: [field],
+          where: {
+            [field]: { not: null }
+          }
         });
         
         for (const record of orphanedRecords) {
-          if (record[field] && !validEpisodeKeys.has(record[field])) {
+          // Only delete if the episode doesn't exist in Plex anymore
+          if (!validPlexIds.episodes.has(record[field])) {
             const deleted = await model.deleteMany({
               where: { [field]: record[field] }
             });
             totalRemoved += deleted.count;
+            console.log(`🗑️ Removed ${deleted.count} ${model.name} records for deleted episode ${record[field]}`);
           }
         }
       } catch (error) {
@@ -1265,8 +1234,44 @@ class PlexSyncService {
       }
     }
 
+    // Clean up complex fields for shows that don't exist in Plex anymore
+    const showComplexFields = [
+      { model: prisma.plexGenre, field: 'showRatingKey' },
+      { model: prisma.plexGuid, field: 'showRatingKey' },
+      { model: prisma.plexImage, field: 'showRatingKey' },
+      { model: prisma.plexUltraBlurColor, field: 'showRatingKey' },
+      { model: prisma.plexLabel, field: 'showRatingKey' }
+    ];
+
+    for (const { model, field } of showComplexFields) {
+      try {
+        const orphanedRecords = await model.findMany({
+          select: { [field]: true },
+          distinct: [field],
+          where: {
+            [field]: { not: null }
+          }
+        });
+        
+        for (const record of orphanedRecords) {
+          // Only delete if the show doesn't exist in Plex anymore
+          if (!validPlexIds.shows.has(record[field])) {
+            const deleted = await model.deleteMany({
+              where: { [field]: record[field] }
+            });
+            totalRemoved += deleted.count;
+            console.log(`🗑️ Removed ${deleted.count} ${model.name} records for deleted show ${record[field]}`);
+          }
+        }
+      } catch (error) {
+        console.warn(`Error cleaning up ${model.name} for shows:`, error.message);
+      }
+    }
+
     if (totalRemoved > 0) {
-      console.log(`🗑️ Removed ${totalRemoved} orphaned complex field records`);
+      console.log(`🗑️ Total removed ${totalRemoved} complex field records for items deleted from Plex`);
+    } else {
+      console.log(`✅ No orphaned complex fields found - all items still exist in Plex`);
     }
     
     return totalRemoved;

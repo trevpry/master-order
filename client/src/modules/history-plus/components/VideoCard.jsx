@@ -1,4 +1,5 @@
 import React from 'react';
+import VideoAIAssignment from './VideoAIAssignment';
 
 const VideoCard = ({ 
   video, 
@@ -6,6 +7,8 @@ const VideoCard = ({
   onToggleAssignLater, 
   onEdit, 
   onDelete,
+  onAssignToEvent,
+  onCreateNewEvent,
   isEditing,
   editFormData,
   events,
@@ -149,6 +152,13 @@ const VideoCard = ({
               🗑️ Delete
             </button>
           </div>
+
+          {/* AI Assignment Component */}
+          <VideoAIAssignment
+            video={video}
+            onAssignToEvent={onAssignToEvent}
+            onCreateNewEvent={onCreateNewEvent}
+          />
         </div>
       </div>
     </div>

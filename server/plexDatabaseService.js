@@ -64,6 +64,7 @@ class PlexDatabaseService {
   async getAllTVShows() {
     try {
       return await this.prisma.plexTVShow.findMany({
+        where: { removed: false },
         include: {
           section: true
         }
@@ -77,7 +78,10 @@ class PlexDatabaseService {
   async getTVShowsBySection(sectionKey) {
     try {
       return await this.prisma.plexTVShow.findMany({
-        where: { sectionKey },
+        where: { 
+          sectionKey,
+          removed: false 
+        },
         include: {
           section: true
         }
@@ -101,7 +105,8 @@ class PlexDatabaseService {
         where: {
           collections: {
             contains: collectionName
-          }
+          },
+          removed: false
         },
         include: {
           section: true
@@ -117,6 +122,7 @@ class PlexDatabaseService {
   async getAllMovies() {
     try {
       return await this.prisma.plexMovie.findMany({
+        where: { removed: false },
         include: {
           section: true
         }
@@ -131,7 +137,10 @@ class PlexDatabaseService {
   async getMoviesBySection(sectionKey) {
     try {
       return await this.prisma.plexMovie.findMany({
-        where: { sectionKey },
+        where: { 
+          sectionKey,
+          removed: false 
+        },
         include: {
           section: true
         }
@@ -149,7 +158,8 @@ class PlexDatabaseService {
         where: {
           collections: {
             contains: collectionName
-          }
+          },
+          removed: false
         },
         include: {
           section: true
@@ -200,9 +210,14 @@ class PlexDatabaseService {
   async getSeasonsByShowRatingKey(showRatingKey) {
     try {
       return await this.prisma.plexSeason.findMany({
-        where: { showRatingKey },
+        where: { 
+          showRatingKey,
+          removed: false 
+        },
         include: {
-          episodes: true
+          episodes: {
+            where: { removed: false }
+          }
         },
         orderBy: { index: 'asc' }
       });
@@ -216,7 +231,10 @@ class PlexDatabaseService {
   async getEpisodesBySeasonRatingKey(seasonRatingKey) {
     try {
       return await this.prisma.plexEpisode.findMany({
-        where: { seasonRatingKey },
+        where: { 
+          seasonRatingKey,
+          removed: false 
+        },
         orderBy: { index: 'asc' }
       });
     } catch (error) {
@@ -803,6 +821,7 @@ class PlexDatabaseService {
   async getAllArtists(limit, offset) {
     try {
       const query = {
+        where: { removed: false },
         include: {
           librarySection: true
         },
@@ -827,7 +846,9 @@ class PlexDatabaseService {
   // Get total count of artists
   async getArtistsCount() {
     try {
-      return await this.prisma.plexArtist.count();
+      return await this.prisma.plexArtist.count({
+        where: { removed: false }
+      });
     } catch (error) {
       console.error('Error fetching artists count:', error);
       throw error;
@@ -1001,6 +1022,7 @@ class PlexDatabaseService {
   async getAllAlbums(limit, offset) {
     try {
       const query = {
+        where: { removed: false },
         include: {
           librarySection: true,
           artist: true
@@ -1206,6 +1228,7 @@ class PlexDatabaseService {
   async getAllTracks(limit, offset) {
     try {
       const query = {
+        where: { removed: false },
         include: {
           librarySection: true,
           album: {
@@ -1624,6 +1647,7 @@ class PlexDatabaseService {
   async getAllPlaylists() {
     try {
       return await this.prisma.plexPlaylist.findMany({
+        where: { removed: false },
         include: {
           librarySection: true,
           items: {

@@ -238,6 +238,49 @@ const Videos = () => {
     });
   };
 
+  // AI Assignment Handlers
+  const handleAssignToEvent = async (videoId, eventId) => {
+    try {
+      const response = await fetch(`/api/history-plus/ai/assign-video-to-event`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ videoId, eventId }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`Failed to assign video: ${response.statusText}`);
+      }
+
+      await fetchData(); // Refresh data
+    } catch (error) {
+      console.error('Error assigning video to event:', error);
+      alert('Failed to assign video to event');
+    }
+  };
+
+  const handleCreateNewEvent = async (videoId, eventSuggestion) => {
+    try {
+      const response = await fetch(`/api/history-plus/ai/create-event-for-video`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ videoId, eventSuggestion }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`Failed to create event: ${response.statusText}`);
+      }
+
+      await fetchData(); // Refresh data
+    } catch (error) {
+      console.error('Error creating new event for video:', error);
+      alert('Failed to create new event');
+    }
+  };
+
   return (
     <div className="container p-6 mx-auto">
       <h1 className="mb-4 text-4xl font-bold text-gray-800">Video Library</h1>
@@ -432,6 +475,8 @@ const Videos = () => {
             onDelete={handleDelete}
             onToggleWatch={handleToggleWatch}
             onToggleAssignLater={handleToggleAssignLater}
+            onAssignToEvent={handleAssignToEvent}
+            onCreateNewEvent={handleCreateNewEvent}
           />
         ))}
         

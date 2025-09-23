@@ -215,6 +215,7 @@ model PlexTVShow {
   skipCount       Int?
   type            String?
   viewCount       Int?
+  removed         Boolean              @default(false)
   genres          PlexGenre[]
   guids           PlexGuid[]
   images          PlexImage[]
@@ -253,6 +254,7 @@ model PlexSeason {
   type                String?
   updatedAt_plex      Int?
   viewCount           Int?
+  removed             Boolean              @default(false)
   episodes            PlexEpisode[]
   guids               PlexGuid[]
   images              PlexImage[]
@@ -297,6 +299,7 @@ model PlexEpisode {
   titleSort             String?
   type                  String?
   updatedAt_plex        Int?
+  removed               Boolean              @default(false)
   directors             PlexDirector[]
   season                PlexSeason           @relation(fields: [seasonRatingKey], references: [ratingKey])
   guids                 PlexGuid[]
@@ -345,6 +348,7 @@ model PlexMovie {
   tagline               String?
   titleSort             String?
   type                  String?
+  removed               Boolean              @default(false)
   countries             PlexCountry[]
   directors             PlexDirector[]
   genres                PlexGenre[]
@@ -675,6 +679,7 @@ model PlexArtist {
   updatedAt        DateTime?
   librarySectionID Int?
   collections      String?
+  removed          Boolean             @default(false)
   albums           PlexAlbum[]
   librarySection   PlexLibrarySection? @relation(fields: [librarySectionID], references: [id])
 
@@ -701,6 +706,7 @@ model PlexAlbum {
   updatedAt             DateTime?
   librarySectionID      Int?
   collections           String?
+  removed               Boolean             @default(false)
   artist                PlexArtist?         @relation(fields: [parentRatingKey], references: [ratingKey])
   librarySection        PlexLibrarySection? @relation(fields: [librarySectionID], references: [id])
   tracks                PlexTrack[]
@@ -743,6 +749,7 @@ model PlexTrack {
   skipCount            Int?
   userRating           Float?
   viewCount            Int?
+  removed              Boolean             @default(false)
   album                PlexAlbum?          @relation(fields: [parentRatingKey], references: [ratingKey])
   librarySection       PlexLibrarySection? @relation(fields: [librarySectionID], references: [id])
 

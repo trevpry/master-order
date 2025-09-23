@@ -170,6 +170,74 @@
   font-size: 1rem;
 }
 
+/* AI Categorization Section */
+.ai-categorization-section {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid rgba(75, 85, 99, 0.3);
+}
+
+.event-ai-categorization .ai-categorize-button {
+  font-size: 12px;
+  padding: 6px 10px;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+}
+
+.event-ai-categorization .ai-result {
+  background: rgba(102, 126, 234, 0.08);
+  border-color: rgba(102, 126, 234, 0.25);
+  margin-top: 8px;
+  padding: 10px;
+}
+
+.event-ai-categorization .result-header {
+  margin-bottom: 8px;
+}
+
+.event-ai-categorization .confidence-badge {
+  font-size: 10px;
+  padding: 3px 6px;
+}
+
+.event-ai-categorization .suggestion-content {
+  margin-bottom: 8px;
+}
+
+.event-ai-categorization .suggested-category,
+.event-ai-categorization .reasoning,
+.event-ai-categorization .alternative {
+  margin-bottom: 6px;
+  font-size: 12px;
+}
+
+.event-ai-categorization .result-actions {
+  margin-bottom: 6px;
+}
+
+.event-ai-categorization .apply-category-button,
+.event-ai-categorization .toggle-details-button {
+  font-size: 11px;
+  padding: 5px 10px;
+}
+
+/* Visual indicator for events that can be AI categorized */
+.event-card:has(.ai-categorization-section) {
+  border-left: 3px solid #667eea;
+  position: relative;
+}
+
+.event-card:has(.ai-categorization-section)::before {
+  content: "🤖";
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  font-size: 12px;
+  opacity: 0.6;
+  background: rgba(102, 126, 234, 0.1);
+  padding: 2px 4px;
+  border-radius: 3px;
+}
+
 /* Responsive adjustments */
 @media (max-width: 768px) {
   .events-grid {

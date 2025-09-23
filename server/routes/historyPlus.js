@@ -674,4 +674,333 @@ router.get('/import-status', asyncHandler(async (req, res) => {
   }
 }));
 
+// ==========================================
+// AI CATEGORIZATION ROUTES
+// ==========================================
+
+// POST /api/history-plus/ai/categorize-youtube
+router.post('/ai/categorize-youtube', asyncHandler(async (req, res) => {
+  const GeminiService = require('../services/GeminiService');
+  const geminiService = new GeminiService();
+
+  validateRequiredFields(req.body, ['youtubeUrl']);
+  
+  // Check if AI service is available
+  if (!geminiService.isAvailable()) {
+    const status = geminiService.getStatus();
+    return sendBadRequest(res, 'AI categorization service is not available', { 
+      error: 'Service unavailable',
+      details: status 
+    });
+  }
+
+  const { youtubeUrl } = req.body;
+
+  try {
+    // Get available categories
+    const categories = await historyPlusService.getCategories();
+    
+    if (!categories || categories.length === 0) {
+      return sendBadRequest(res, 'No categories available for AI analysis');
+    }
+
+    // Perform AI categorization
+    const result = await geminiService.categorizeYouTubeContent(youtubeUrl, categories);
+    
+    sendSuccess(res, {
+      message: 'YouTube content analyzed successfully',
+      youtubeUrl: youtubeUrl,
+      categorization: result,
+      availableCategories: categories.length
+    });
+
+  } catch (error) {
+    console.error('❌ AI categorization error:', error);
+    sendServerError(res, 'AI categorization failed', error.message);
+  }
+}));
+
+// POST /api/history-plus/ai/categorize-event
+router.post('/ai/categorize-event/:eventId', asyncHandler(async (req, res) => {
+  const GeminiService = require('../services/GeminiService');
+  const geminiService = new GeminiService();
+
+  // Check if AI service is available
+  if (!geminiService.isAvailable()) {
+    const status = geminiService.getStatus();
+    return sendBadRequest(res, 'AI categorization service is not available', {
+      error: 'Service unavailable', 
+      details: status
+    });
+  }
+
+  const { eventId } = req.params;
+
+  try {
+    // Get the event with its videos
+    const event = await historyPlusService.getEventById(eventId);
+    if (!event) {
+      return sendBadRequest(res, 'Event not found');
+    }
+
+    // Find YouTube videos associated with this event
+    const youtubeVideos = (event.videos || []).filter(video => 
+      video.url && video.url.includes('youtube.com')
+    );
+
+    if (youtubeVideos.length === 0) {
+      return sendBadRequest(res, 'No YouTube videos found for this event');
+    }
+
+    // Get available categories
+    const categories = await historyPlusService.getCategories();
+    
+    if (!categories || categories.length === 0) {
+      return sendBadRequest(res, 'No categories available for AI analysis');
+    }
+
+    // Use the first YouTube video for categorization
+    const primaryVideo = youtubeVideos[0];
+    const result = await geminiService.categorizeYouTubeContent(primaryVideo.url, categories);
+    
+    // If AI suggests a category and confidence is high enough, optionally auto-update
+    const { autoApply = false, confidenceThreshold = 0.7 } = req.body;
+    let updatedEvent = event;
+    
+    if (autoApply && result.success && result.confidence >= confidenceThreshold && result.suggestedCategoryId) {
+      // Update the event's category
+      updatedEvent = await historyPlusService.updateEvent(eventId, {
+        category: result.suggestedCategory,
+        categoryId: result.suggestedCategoryId
+      });
+      
+      console.log(`✅ Auto-applied AI category "${result.suggestedCategory}" to event "${event.title}"`);
+    }
+
+    sendSuccess(res, {
+      message: 'Event analyzed successfully',
+      event: {
+        id: event.id,
+        title: event.title,
+        currentCategory: event.category
+      },
+      analyzedVideo: {
+        url: primaryVideo.url,
+        title: primaryVideo.title
+      },
+      categorization: result,
+      autoApplied: autoApply && result.success && result.confidence >= confidenceThreshold,
+      updatedEvent: updatedEvent !== event ? updatedEvent : null
+    });
+
+  } catch (error) {
+    console.error('❌ Event AI categorization error:', error);
+    sendServerError(res, 'Event AI categorization failed', error.message);
+  }
+}));
+
+// GET /api/history-plus/ai/status
+router.get('/ai/status', asyncHandler(async (req, res) => {
+  const GeminiService = require('../services/GeminiService');
+  const geminiService = new GeminiService();
+
+  const status = geminiService.getStatus();
+  
+  sendSuccess(res, {
+    service: 'Gemini AI Integration',
+    status: status,
+    features: {
+      youtubeAnalysis: status.available,
+      eventCategorization: status.available,
+      contentAnalysis: status.available
+    },
+    model: status.model,
+    ready: status.available
+  });
+}));
+
+// POST /api/history-plus/ai/analyze-content
+router.post('/ai/analyze-content', asyncHandler(async (req, res) => {
+  const GeminiService = require('../services/GeminiService');
+  const geminiService = new GeminiService();
+
+  validateRequiredFields(req.body, ['content']);
+  
+  // Check if AI service is available
+  if (!geminiService.isAvailable()) {
+    const status = geminiService.getStatus();
+    return sendBadRequest(res, 'AI service is not available', { 
+      error: 'Service unavailable',
+      details: status 
+    });
+  }
+
+  const { content, context = '' } = req.body;
+
+  try {
+    const result = await geminiService.analyzeContent(content, context);
+    
+    sendSuccess(res, {
+      message: 'Content analyzed successfully',
+      analysis: result,
+      inputContent: content.substring(0, 100) + (content.length > 100 ? '...' : ''),
+      context: context
+    });
+
+  } catch (error) {
+    console.error('❌ Content analysis error:', error);
+    sendServerError(res, 'Content analysis failed', error.message);
+  }
+}));
+
+// POST /api/history-plus/ai/categorize-video/:videoId
+router.post('/ai/categorize-video/:videoId', asyncHandler(async (req, res) => {
+  const GeminiService = require('../services/GeminiService');
+  const geminiService = new GeminiService();
+
+  // Check if AI service is available
+  if (!geminiService.isAvailable()) {
+    const status = geminiService.getStatus();
+    return sendBadRequest(res, 'AI categorization service is not available', {
+      error: 'Service unavailable',
+      details: status
+    });
+  }
+
+  const { videoId } = req.params;
+  const { preview } = req.query; // Check if this is a preview request
+
+  try {
+    // Get the video
+    const video = await historyPlusService.getVideoById(videoId);
+    if (!video) {
+      return sendBadRequest(res, 'Video not found');
+    }
+
+    // Check if it's a YouTube video
+    if (!video.url || !video.url.includes('youtube.com')) {
+      return sendBadRequest(res, 'Video must be a YouTube video for AI analysis');
+    }
+
+    // Check if video is already assigned to an event
+    if (video.eventId) {
+      return sendBadRequest(res, 'Video is already assigned to an event');
+    }
+
+    // Get available events and categories for suggestions
+    const [events, categories] = await Promise.all([
+      historyPlusService.getAllEvents(),
+      historyPlusService.getCategories()
+    ]);
+
+    if (!categories || categories.length === 0) {
+      return sendBadRequest(res, 'No categories available for AI analysis');
+    }
+
+    // If preview mode, return the prompt data instead of calling AI
+    if (preview === 'true') {
+      const promptData = {
+        videoUrl: video.url,
+        videoTitle: video.title,
+        videoDescription: video.description,
+        events: (events || []).slice(0, 20).map(event => ({
+          title: event.title,
+          startDate: event.startDate,
+          endDate: event.endDate,
+          category: event.category
+        })),
+        categories: (categories || []).map(cat => ({
+          name: cat.name,
+          description: cat.description
+        })),
+        fullPrompt: geminiService.buildVideoAssignmentPrompt(
+          video.url,
+          video.title || '',
+          video.description || '',
+          events || [],
+          categories || []
+        )
+      };
+
+      return sendSuccess(res, promptData);
+    }
+
+    // Use AI to analyze the video and suggest event assignment or new event creation
+    const result = await geminiService.categorizeVideoForEventAssignment(
+      video.url, 
+      video.title || '', 
+      video.description || '',
+      events || [], 
+      categories || []
+    );
+    
+    sendSuccess(res, {
+      message: 'Video analyzed successfully',
+      video: {
+        id: video.id,
+        title: video.title,
+        url: video.url,
+        currentAssignment: video.eventId ? 'assigned' : 'unassigned'
+      },
+      suggestion: result,
+      availableEvents: (events || []).length,
+      availableCategories: (categories || []).length
+    });
+
+  } catch (error) {
+    console.error('❌ Video AI categorization error:', error);
+    sendServerError(res, 'Video AI categorization failed', error.message);
+  }
+}));
+
+// POST /api/history-plus/ai/assign-video-to-event
+router.post('/ai/assign-video-to-event', asyncHandler(async (req, res) => {
+  validateRequiredFields(req.body, ['videoId', 'eventId']);
+  
+  const { videoId, eventId } = req.body;
+
+  try {
+    // Update video to assign it to the event
+    const updatedVideo = await historyPlusService.updateVideo(videoId, {
+      eventId: eventId
+    });
+    
+    sendSuccess(res, {
+      message: 'Video assigned to event successfully',
+      video: updatedVideo
+    });
+
+  } catch (error) {
+    console.error('❌ Error assigning video to event:', error);
+    sendServerError(res, 'Failed to assign video to event', error.message);
+  }
+}));
+
+// POST /api/history-plus/ai/create-event-for-video
+router.post('/ai/create-event-for-video', asyncHandler(async (req, res) => {
+  validateRequiredFields(req.body, ['videoId', 'eventData']);
+  
+  const { videoId, eventData } = req.body;
+
+  try {
+    // Create new event
+    const newEvent = await historyPlusService.createEvent(eventData);
+    
+    // Assign video to the new event
+    const updatedVideo = await historyPlusService.updateVideo(videoId, {
+      eventId: newEvent.id
+    });
+    
+    sendSuccess(res, {
+      message: 'New event created and video assigned successfully',
+      event: newEvent,
+      video: updatedVideo
+    });
+
+  } catch (error) {
+    console.error('❌ Error creating event for video:', error);
+    sendServerError(res, 'Failed to create event for video', error.message);
+  }
+}));
+
 module.exports = router;
