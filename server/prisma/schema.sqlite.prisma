@@ -34,6 +34,7 @@ model Settings {
   stashUrl                          String?
   stashApiKey                       String?
   rawgApiKey                        String?
+  geminiApiKey                      String?
   createdAt                         DateTime  @default(now())
   updatedAt                         DateTime  @updatedAt
 }

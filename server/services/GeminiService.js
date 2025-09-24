@@ -8,17 +8,24 @@ class GeminiService {
   constructor() {
     this.ai = null;
     this.initialized = false;
-    this.init();
+    this.initPromise = this.init();
   }
 
   /**
    * Initialize the Gemini AI client
+   * Checks database settings first, then falls back to environment variables
    */
-  init() {
+  async init() {
     try {
-      const apiKey = process.env.GEMINI_API_KEY;
+      let apiKey = await this.getApiKeyFromSettings();
+      
+      // Fall back to environment variable if not in settings
       if (!apiKey) {
-        console.warn('⚠️ GEMINI_API_KEY not found in environment variables. AI categorization features will be disabled.');
+        apiKey = process.env.GEMINI_API_KEY;
+      }
+      
+      if (!apiKey) {
+        console.warn('⚠️ GEMINI_API_KEY not found in settings or environment variables. AI categorization features will be disabled.');
         return;
       }
 
@@ -32,9 +39,31 @@ class GeminiService {
   }
 
   /**
+   * Get Gemini API key from database settings
+   */
+  async getApiKeyFromSettings() {
+    try {
+      const { PrismaClient } = require('@prisma/client');
+      const prisma = new PrismaClient();
+      
+      const settings = await prisma.settings.findUnique({
+        where: { id: 1 },
+        select: { geminiApiKey: true }
+      });
+      
+      await prisma.$disconnect();
+      return settings?.geminiApiKey || null;
+    } catch (error) {
+      console.error('❌ Error fetching Gemini API key from settings:', error);
+      return null;
+    }
+  }
+
+  /**
    * Check if the service is ready to use
    */
-  isAvailable() {
+  async isAvailable() {
+    await this.initPromise;
     return this.initialized && this.ai;
   }
 

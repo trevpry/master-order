@@ -256,7 +256,7 @@ router.post('/ai/categorize-youtube', asyncHandler(async (req, res) => {
   validateRequiredFields(req.body, ['youtubeUrl']);
   
   // Check if AI service is available
-  if (!geminiService.isAvailable()) {
+  if (!(await geminiService.isAvailable())) {
     const status = geminiService.getStatus();
     return sendBadRequest(res, 'AI categorization service is not available', { 
       error: 'Service unavailable',
@@ -296,7 +296,7 @@ router.post('/ai/categorize-event/:eventId', asyncHandler(async (req, res) => {
   const geminiService = new GeminiService();
 
   // Check if AI service is available
-  if (!geminiService.isAvailable()) {
+  if (!(await geminiService.isAvailable())) {
     const status = geminiService.getStatus();
     return sendBadRequest(res, 'AI categorization service is not available', {
       error: 'Service unavailable', 
@@ -397,7 +397,7 @@ router.post('/ai/analyze-content', asyncHandler(async (req, res) => {
   validateRequiredFields(req.body, ['content']);
   
   // Check if AI service is available
-  if (!geminiService.isAvailable()) {
+  if (!(await geminiService.isAvailable())) {
     const status = geminiService.getStatus();
     return sendBadRequest(res, 'AI service is not available', { 
       error: 'Service unavailable',
@@ -429,7 +429,7 @@ router.post('/ai/categorize-video/:videoId', asyncHandler(async (req, res) => {
   const geminiService = new GeminiService();
 
   // Check if AI service is available
-  if (!geminiService.isAvailable()) {
+  if (!(await geminiService.isAvailable())) {
     const status = geminiService.getStatus();
     return sendBadRequest(res, 'AI categorization service is not available', {
       error: 'Service unavailable',

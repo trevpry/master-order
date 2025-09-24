@@ -21,6 +21,7 @@ function Settings() {
   const [stashApiKey, setStashApiKey] = useState('');
   const [stashUrl, setStashUrl] = useState('');
   const [rawgApiKey, setRawgApiKey] = useState('');
+  const [geminiApiKey, setGeminiApiKey] = useState('');
   // Percentage states
   const [tvGeneralPercent, setTvGeneralPercent] = useState(50);
   const [moviesGeneralPercent, setMoviesGeneralPercent] = useState(50);
@@ -135,6 +136,7 @@ function Settings() {
           setStashApiKey(settings.stashApiKey || '');
           setStashUrl(settings.stashUrl || '');
           setRawgApiKey(settings.rawgApiKey || '');
+          setGeminiApiKey(settings.geminiApiKey || '');
           setSelectedPlayer(settings.selectedPlayer || '');
           setSelectedPlexUser(settings.selectedPlexUser || '');
           setTvGeneralPercent(settings.tvGeneralPercent ?? 50);
@@ -492,6 +494,7 @@ function Settings() {
           stashApiKey,
           stashUrl,
           rawgApiKey,
+          geminiApiKey,
           plexToken,
           plexUrl,
           tvdbApiKey,
@@ -798,6 +801,22 @@ function Settings() {
                     placeholder="Enter RAWG API key for video game data"
                     className="api-input compact"
                   />
+                </div>
+
+                <div className="config-field compact">
+                  <label htmlFor="gemini_api_key">Gemini AI API Key:</label>
+                  <input 
+                    type="text" 
+                    id="gemini_api_key"
+                    name="gemini_api_key"
+                    value={geminiApiKey}
+                    onChange={(e) => setGeminiApiKey(e.target.value)}
+                    placeholder="Enter Gemini API key for AI categorization"
+                    className="api-input compact"
+                  />
+                  <small className="field-note">
+                    Get your API key from: <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener noreferrer">https://aistudio.google.com/apikey</a>
+                  </small>
                 </div>
 
                 <div className="config-field compact">
