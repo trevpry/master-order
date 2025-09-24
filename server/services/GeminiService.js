@@ -1,4 +1,4 @@
-const { GoogleGenAI } = require('@google/genai');
+const { GoogleGenerativeAI } = require('@google/generative-ai');
 
 /**
  * Gemini AI Service - Handles AI categorization and content analysis
@@ -22,7 +22,7 @@ class GeminiService {
         return;
       }
 
-      this.ai = new GoogleGenAI({ apiKey });
+      this.ai = new GoogleGenerativeAI(apiKey);
       this.initialized = true;
       console.log('✅ Gemini AI Service initialized successfully');
     } catch (error) {
@@ -64,21 +64,20 @@ class GeminiService {
       // Build the categorization prompt
       const prompt = this.buildCategorizationPrompt(youtubeUrl, videoId, availableCategories);
       
-      // Generate response using the new API
-      const response = await this.ai.models.generateContent({
-        model: 'gemini-2.5-flash',
-        contents: prompt,
-        config: {
-          temperature: 0.1, // Low temperature for consistent categorization
-          maxOutputTokens: 1024,
-          thinkingConfig: {
-            thinkingBudget: 0 // Disable thinking for faster response
-          }
+      // Generate response using Flash model matching web interface quality
+      const model = this.ai.getGenerativeModel({ 
+        model: 'gemini-1.5-flash',
+        generationConfig: {
+          temperature: 1.0, // Max temperature for creative responses like web interface
+          maxOutputTokens: 8192,
         }
       });
+      
+      const response = await model.generateContent(prompt);
 
       // Parse the structured response
-      return this.parseCategorizationResponse(response.text, availableCategories);
+      const responseText = response.response.text();
+      return this.parseCategorizationResponse(responseText, availableCategories);
 
     } catch (error) {
       console.error('❌ Error during YouTube content categorization:', error);
@@ -209,41 +208,40 @@ Requirements:
 
   /**
    * Analyze a video and suggest event assignment or new event creation
-   * @param {string} youtubeUrl - The YouTube URL to analyze
+   * @param {string} videoUrl - The video URL to analyze (YouTube, Wondrium, etc.)
    * @param {string} videoTitle - Video title for context
    * @param {string} videoDescription - Video description for context
    * @param {Array} availableEvents - List of existing events
    * @param {Array} availableCategories - List of available categories
    * @returns {Promise<Object>} - Analysis result with assignment suggestion
    */
-  async categorizeVideoForEventAssignment(youtubeUrl, videoTitle = '', videoDescription = '', availableEvents = [], availableCategories = []) {
+  async categorizeVideoForEventAssignment(videoUrl, videoTitle = '', videoDescription = '', availableEvents = [], availableCategories = []) {
     if (!this.isAvailable()) {
       throw new Error('Gemini AI Service is not available. Please check your API key configuration.');
     }
 
-    if (!youtubeUrl || !youtubeUrl.includes('youtube.com')) {
-      throw new Error('Invalid YouTube URL provided');
+    if (!videoUrl) {
+      throw new Error('Video URL is required for analysis');
     }
 
     try {
       // Build the assignment analysis prompt
-      const prompt = this.buildVideoAssignmentPrompt(youtubeUrl, videoTitle, videoDescription, availableEvents, availableCategories);
+      const prompt = this.buildVideoAssignmentPrompt(videoUrl, videoTitle, videoDescription, availableEvents, availableCategories);
       
-      // Generate response using the new API
-      const response = await this.ai.models.generateContent({
-        model: 'gemini-2.5-flash',
-        contents: prompt,
-        config: {
-          temperature: 0.2, // Slightly higher for more creative suggestions
-          maxOutputTokens: 1024,
-          thinkingConfig: {
-            thinkingBudget: 0
-          }
+      // Generate response using Flash model matching web interface quality
+      const model = this.ai.getGenerativeModel({ 
+        model: 'gemini-1.5-flash',
+        generationConfig: {
+          temperature: 1.0, // Max temperature for creative responses like web interface
+          maxOutputTokens: 8192,
         }
       });
+      
+      const response = await model.generateContent(prompt);
 
       // Parse the structured response
-      return this.parseVideoAssignmentResponse(response.text, availableEvents, availableCategories);
+      const responseText = response.response.text();
+      return this.parseVideoAssignmentResponse(responseText, availableEvents, availableCategories);
 
     } catch (error) {
       console.error('❌ Error during video assignment analysis:', error);
@@ -253,15 +251,15 @@ Requirements:
 
   /**
    * Build the AI prompt for video-to-event assignment
-   * @param {string} youtubeUrl - YouTube URL
+   * @param {string} videoUrl - Video URL (YouTube, Wondrium, etc.)
    * @param {string} videoTitle - Video title
    * @param {string} videoDescription - Video description
    * @param {Array} events - Available events
    * @param {Array} categories - Available categories
    * @returns {string} - Formatted prompt
    */
-  buildVideoAssignmentPrompt(youtubeUrl, videoTitle, videoDescription, events, categories) {
-    const eventsList = events.slice(0, 20).map(event => // Limit to 20 events to avoid token limits
+  buildVideoAssignmentPrompt(videoUrl, videoTitle, videoDescription, events, categories) {
+    const eventsList = events.map(event => 
       `- "${event.title}" (${event.startDate} - ${event.endDate || 'Ongoing'}) - Category: ${event.category}`
     ).join('\n');
 
@@ -269,9 +267,9 @@ Requirements:
       `- "${cat.name}": ${cat.description || 'Historical category'}`
     ).join('\n');
 
-    return `You are an expert historian and content analyst. Your task is to analyze a YouTube video and determine how it should be assigned to historical events.
+    return `You are an expert historian and content analyst. Your task is to analyze an educational video and determine how it should be assigned to historical events.
 
-YouTube URL: ${youtubeUrl}
+Video URL: ${videoUrl}
 ${videoTitle ? `Video Title: ${videoTitle}` : ''}
 ${videoDescription ? `Video Description: ${videoDescription}` : ''}
 
@@ -284,14 +282,37 @@ ${categoryList}
 Please analyze this video and determine the BEST action:
 
 1. **ASSIGN_TO_EXISTING**: If this video clearly belongs to an existing event
-2. **CREATE_NEW_EVENT**: If this video represents a new historical topic/event
+2. **CREATE_NEW_EVENT**: If this video represents a new historical topic/event. The event should be as specific as possible and be a single event, but broad enough for additional videos to be assigned to it later. If the video covers a more focused event within a larger event, suggest a new event for the more focused event. For example, a video on a specific battle would create an event for that battle, not the war in which the battle took place.
 3. **UNCERTAIN**: If you cannot determine with reasonable confidence
+
+## CATEGORY SELECTION GUIDELINES (CRITICAL - READ CAREFULLY):
+
+**WHEN TO USE EXISTING CATEGORIES:**
+- If ANY existing category reasonably encompasses the video's historical topic
+- Use broad existing categories even if they're not perfect matches
+- Examples:
+  - Ancient Roman battle → Use "Ancient History" or "Military History"
+  - Medieval trade routes → Use "Medieval History" or "Economic History"
+  - World War 2 specific campaign → Use "World War II" or "20th Century"
+  - Renaissance art/culture → Use "Renaissance" or "Cultural History"
+
+**WHEN TO CREATE NEW CATEGORIES (ONLY):**
+- The video's topic represents a MAJOR historical domain that is completely missing
+- No existing category can reasonably accommodate the content
+- The new category would be broad enough for multiple future events
+- Examples where NEW categories would be appropriate:
+  - Indigenous American civilizations (if no "Pre-Columbian History" exists)
+  - African kingdoms and empires (if no "African History" exists)
+  - Scientific revolution topics (if no "History of Science" exists)
+  - Religious history topics (if no "Religious History" exists)
+
+**CRITICAL RULE**: Prefer existing categories unless absolutely necessary. Only create new categories for major historical domains that are genuinely missing.
 
 Respond ONLY with a valid JSON object in this exact format:
 {
   "action": "ASSIGN_TO_EXISTING" | "CREATE_NEW_EVENT" | "UNCERTAIN",
   "confidence": 0.85,
-  "reasoning": "Brief explanation of the decision",
+  "reasoning": "Brief explanation of the decision and category choice rationale",
   "existingEventTitle": "EXACT_EVENT_TITLE_IF_ASSIGNING",
   "newEventSuggestion": {
     "title": "Suggested event title",
@@ -300,6 +321,10 @@ Respond ONLY with a valid JSON object in this exact format:
     "category": "EXACT_CATEGORY_NAME",
     "details": "Brief description"
   },
+  "newCategorySuggestion": {
+    "name": "New Category Name", 
+    "description": "Brief description explaining why this new category is necessary"
+  },
   "alternativeAction": "Alternative suggestion if confidence is medium"
 }
 
@@ -307,7 +332,9 @@ Requirements:
 - action MUST be one of the three options above
 - confidence should be between 0.0 and 1.0
 - existingEventTitle MUST exactly match one from the list (only if action is ASSIGN_TO_EXISTING)
-- newEventSuggestion.category MUST exactly match one from the categories list
+- For CREATE_NEW_EVENT with EXISTING category: newEventSuggestion.category MUST exactly match one from the categories list, newCategorySuggestion should be null
+- For CREATE_NEW_EVENT with NEW category: newEventSuggestion.category should match newCategorySuggestion.name, include both fields with clear justification
+- STRONGLY PREFER existing categories - only suggest new categories for major missing historical domains
 - newEventSuggestion should be null if action is ASSIGN_TO_EXISTING
 - existingEventTitle should be null if action is CREATE_NEW_EVENT
 - Return ONLY the JSON object, no additional text`;
@@ -368,17 +395,35 @@ Requirements:
       if ((parsed.action === 'CREATE_NEW_EVENT' || result.action === 'CREATE_NEW_EVENT') && parsed.newEventSuggestion) {
         const suggestion = parsed.newEventSuggestion;
         
-        // Validate category exists
-        const categoryExists = availableCategories.find(cat => cat.name === suggestion.category);
-        
-        result.newEventSuggestion = {
-          title: suggestion.title || 'New Historical Event',
-          startDate: suggestion.startDate || new Date().getFullYear().toString(),
-          endDate: suggestion.endDate || null,
-          category: categoryExists ? suggestion.category : availableCategories[0]?.name || 'General',
-          details: suggestion.details || 'Event created from video analysis',
-          categoryId: categoryExists ? categoryExists.id : availableCategories[0]?.id
-        };
+        // Check if AI suggested a new category
+        if (parsed.newCategorySuggestion && parsed.newCategorySuggestion.name) {
+          result.newCategorySuggestion = {
+            name: parsed.newCategorySuggestion.name,
+            description: parsed.newCategorySuggestion.description || 'Category created from video analysis'
+          };
+          
+          result.newEventSuggestion = {
+            title: suggestion.title || 'New Historical Event',
+            startDate: suggestion.startDate || new Date().getFullYear().toString(),
+            endDate: suggestion.endDate || null,
+            category: parsed.newCategorySuggestion.name,
+            details: suggestion.details || 'Event created from video analysis',
+            requiresNewCategory: true
+          };
+        } else {
+          // Use existing category
+          const categoryExists = availableCategories.find(cat => cat.name === suggestion.category);
+          
+          result.newEventSuggestion = {
+            title: suggestion.title || 'New Historical Event',
+            startDate: suggestion.startDate || new Date().getFullYear().toString(),
+            endDate: suggestion.endDate || null,
+            category: categoryExists ? suggestion.category : availableCategories[0]?.name || 'General',
+            details: suggestion.details || 'Event created from video analysis',
+            categoryId: categoryExists ? categoryExists.id : availableCategories[0]?.id,
+            requiresNewCategory: false
+          };
+        }
       }
 
       return result;

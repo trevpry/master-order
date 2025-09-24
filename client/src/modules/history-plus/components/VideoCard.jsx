@@ -84,8 +84,9 @@ const VideoCard = ({
             {video.type && (
               <span className="flex items-center gap-1">
                 {video.type === 'youtube' && '📺'}
-                {video.type === 'educational' && '📚'}
+                {video.type === 'great-courses-plus' && '📚'}
                 {video.type === 'Great Courses' && '🎓'}
+                {video.type === 'educational' && '📚'}
                 {video.type === 'other' && '🔗'}
                 {video.type}
               </span>

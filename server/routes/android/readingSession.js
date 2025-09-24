@@ -423,12 +423,39 @@ function createReadingSessionRoutes(prisma) {
           
           finalReadPercentage = progress.readPercentage !== undefined ? progress.readPercentage : calculatedReadPercentage;
           
-          // Mark as read if 100% (will be handled in unified system)
-          if (finalReadPercentage === 100) {
+          // Debug logging for Android percentage values
+          console.log(`📊 Debug - Raw progress.readPercentage: ${progress.readPercentage} (type: ${typeof progress.readPercentage})`);
+          console.log(`📊 Debug - Final read percentage: ${finalReadPercentage} (type: ${typeof finalReadPercentage})`);
+          
+          // Convert to number if needed and handle different formats from Android
+          let normalizedPercentage = null;
+          if (finalReadPercentage !== null && finalReadPercentage !== undefined) {
+            // Convert to number if it's a string
+            normalizedPercentage = typeof finalReadPercentage === 'string' ? parseFloat(finalReadPercentage) : finalReadPercentage;
+            
+            // Handle cases where Android might send 1.0 to mean 100%
+            if (normalizedPercentage > 0 && normalizedPercentage <= 1) {
+              normalizedPercentage = normalizedPercentage * 100;
+              console.log(`📊 Converted decimal percentage ${finalReadPercentage} to ${normalizedPercentage}%`);
+            }
+            
+            // Round to handle floating point precision issues
+            normalizedPercentage = Math.round(normalizedPercentage * 100) / 100;
+            console.log(`📊 Normalized percentage: ${normalizedPercentage}%`);
+          }
+          
+          // Mark as read if 100% (with tolerance for floating point issues)
+          const isComplete = normalizedPercentage !== null && normalizedPercentage >= 99.95; // Allow slight precision errors
+          if (isComplete) {
             updateData.isWatched = true;
             actuallyMarkedAsRead = true;
-            console.log('📚 Will mark book as read in unified system (100% completion)');
+            console.log(`✅ Will mark book as read in unified system (${normalizedPercentage}% completion >= 99.95%)`);
+          } else if (normalizedPercentage !== null) {
+            console.log(`📊 Book not marked as read - completion is ${normalizedPercentage}% (needs >= 99.95%)`);
           }
+          
+          // Update finalReadPercentage with normalized value for response
+          finalReadPercentage = normalizedPercentage;
         } else {
           // FOR COMICS/OTHER: Comics don't use the unified book system
           console.log('📖 Processing comic/other media progress update - unified system not applicable for comics');
@@ -446,12 +473,39 @@ function createReadingSessionRoutes(prisma) {
           
           finalReadPercentage = progress.readPercentage !== undefined ? progress.readPercentage : calculatedReadPercentage;
           
-          // Mark comic as read if 100%
-          if (finalReadPercentage === 100) {
+          // Debug logging for Android percentage values
+          console.log(`📊 Debug - Raw progress.readPercentage: ${progress.readPercentage} (type: ${typeof progress.readPercentage})`);
+          console.log(`📊 Debug - Final read percentage: ${finalReadPercentage} (type: ${typeof finalReadPercentage})`);
+          
+          // Convert to number if needed and handle different formats from Android
+          let normalizedPercentage = null;
+          if (finalReadPercentage !== null && finalReadPercentage !== undefined) {
+            // Convert to number if it's a string
+            normalizedPercentage = typeof finalReadPercentage === 'string' ? parseFloat(finalReadPercentage) : finalReadPercentage;
+            
+            // Handle cases where Android might send 1.0 to mean 100%
+            if (normalizedPercentage > 0 && normalizedPercentage <= 1) {
+              normalizedPercentage = normalizedPercentage * 100;
+              console.log(`📊 Converted decimal percentage ${finalReadPercentage} to ${normalizedPercentage}%`);
+            }
+            
+            // Round to handle floating point precision issues
+            normalizedPercentage = Math.round(normalizedPercentage * 100) / 100;
+            console.log(`📊 Normalized percentage: ${normalizedPercentage}%`);
+          }
+          
+          // Mark comic as read if 100% (with tolerance for floating point issues)
+          const isComplete = normalizedPercentage !== null && normalizedPercentage >= 99.95; // Allow slight precision errors
+          if (isComplete) {
             updateData.isWatched = true;
             actuallyMarkedAsRead = true;
-            console.log('Marking comic as read/watched (100% completion)');
+            console.log(`✅ Marking comic as read/watched (${normalizedPercentage}% completion >= 99.95%)`);
+          } else if (normalizedPercentage !== null) {
+            console.log(`📊 Comic not marked as read - completion is ${normalizedPercentage}% (needs >= 99.95%)`);
           }
+          
+          // Update finalReadPercentage with normalized value for response
+          finalReadPercentage = normalizedPercentage;
         }
         
         // Apply updates to CustomOrderItem only for comics/other media (not books)
@@ -481,11 +535,11 @@ function createReadingSessionRoutes(prisma) {
           if (finalReadPercentage !== null && finalReadPercentage >= 0 && finalReadPercentage <= 100) {
             sessionData.percentRead = finalReadPercentage;
             
-            // Mark as completed if 100%
-            if (finalReadPercentage === 100) {
+            // Use normalized percentage for completion checking
+            if (isComplete) {
               sessionData.isCompleted = true;
               actuallyMarkedAsRead = true; // Update flag for unified system completion
-              console.log('📚 Marking book as completed in unified system (100% reading progress)');
+              console.log('📚 Marking book as completed in unified system (normalized percentage >= 99.95%:', normalizedPercentage + '%)');
             }
           }
           

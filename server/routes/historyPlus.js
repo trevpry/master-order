@@ -877,9 +877,9 @@ router.post('/ai/categorize-video/:videoId', asyncHandler(async (req, res) => {
       return sendBadRequest(res, 'Video not found');
     }
 
-    // Check if it's a YouTube video
-    if (!video.url || !video.url.includes('youtube.com')) {
-      return sendBadRequest(res, 'Video must be a YouTube video for AI analysis');
+    // Check if it's a valid video URL
+    if (!video.url) {
+      return sendBadRequest(res, 'Video must have a valid URL for AI analysis');
     }
 
     // Check if video is already assigned to an event
@@ -903,7 +903,7 @@ router.post('/ai/categorize-video/:videoId', asyncHandler(async (req, res) => {
         videoUrl: video.url,
         videoTitle: video.title,
         videoDescription: video.description,
-        events: (events || []).slice(0, 20).map(event => ({
+        events: (events || []).map(event => ({
           title: event.title,
           startDate: event.startDate,
           endDate: event.endDate,
@@ -960,9 +960,10 @@ router.post('/ai/assign-video-to-event', asyncHandler(async (req, res) => {
   const { videoId, eventId } = req.body;
 
   try {
-    // Update video to assign it to the event
+    // Update video to assign it to the event with AI flag
     const updatedVideo = await historyPlusService.updateVideo(videoId, {
-      eventId: eventId
+      eventId: eventId,
+      assignedByAI: true
     });
     
     sendSuccess(res, {
@@ -983,18 +984,56 @@ router.post('/ai/create-event-for-video', asyncHandler(async (req, res) => {
   const { videoId, eventData } = req.body;
 
   try {
-    // Create new event
-    const newEvent = await historyPlusService.createEvent(eventData);
+    // Check if category exists, create if needed (handle AI-suggested categories)
+    let categoryName = eventData.category;
+    let categoryCreated = false;
+    let newCategoryData = null;
     
-    // Assign video to the new event
+    if (categoryName) {
+      const existingCategories = await historyPlusService.getCategories();
+      const categoryExists = existingCategories.some(cat => cat.name === categoryName);
+      
+      if (!categoryExists) {
+        // Create new category with AI-suggested description if available
+        const categoryDescription = eventData.newCategoryDescription || 
+          req.body.newCategorySuggestion?.description || 
+          `AI-generated category: ${categoryName}`;
+          
+        newCategoryData = await historyPlusService.createCategory({
+          name: categoryName,
+          description: categoryDescription
+        });
+        console.log(`✅ Created new AI-suggested category: ${categoryName}`);
+        categoryCreated = true;
+      }
+    }
+
+    // Only pass allowed fields for event creation
+    const cleanEventData = {
+      title: eventData.title,
+      startDate: eventData.startDate,
+      endDate: eventData.endDate || null,
+      details: eventData.details || null,
+      category: eventData.category
+    };
+
+    // Create new event
+    const newEvent = await historyPlusService.createEvent(cleanEventData);
+    
+    // Assign video to the new event with AI flag
     const updatedVideo = await historyPlusService.updateVideo(videoId, {
-      eventId: newEvent.id
+      eventId: newEvent.id,
+      assignedByAI: true
     });
     
     sendSuccess(res, {
-      message: 'New event created and video assigned successfully',
+      message: categoryCreated ? 
+        'New category and event created, video assigned successfully' : 
+        'New event created and video assigned successfully',
       event: newEvent,
-      video: updatedVideo
+      video: updatedVideo,
+      categoryCreated: categoryCreated,
+      newCategory: newCategoryData
     });
 
   } catch (error) {

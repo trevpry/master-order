@@ -13,6 +13,7 @@ const Videos = () => {
   const [filter, setFilter] = useState('all');
   const [typeFilter, setTypeFilter] = useState('all');
   const [assignmentFilter, setAssignmentFilter] = useState('all');
+  const [aiAssignmentFilter, setAiAssignmentFilter] = useState('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
   const [videosPerPage] = useState(20);
@@ -112,16 +113,24 @@ const Videos = () => {
       return false;
     }
 
-    // Assignment filter
-    if (assignmentFilter === 'assigned' && (!video.eventId && !video.channelId)) {
+    // Assignment filter (based on eventId only - channelId doesn't determine assignment)
+    if (assignmentFilter === 'assigned' && !video.eventId) {
       return false;
     }
-    if (assignmentFilter === 'unassigned' && (video.eventId || video.channelId)) {
+    if (assignmentFilter === 'unassigned' && video.eventId) {
       return false;
     }
 
     // Type filter
     if (typeFilter !== 'all' && video.type !== typeFilter) {
+      return false;
+    }
+
+    // AI Assignment filter
+    if (aiAssignmentFilter === 'ai-assigned' && !video.assignedByAI) {
+      return false;
+    }
+    if (aiAssignmentFilter === 'manual-assigned' && video.assignedByAI) {
       return false;
     }
 
@@ -134,6 +143,142 @@ const Videos = () => {
     (currentPage - 1) * videosPerPage,
     currentPage * videosPerPage
   );
+
+  // Calculate type counts for filter buttons (considering current filters)
+  const getTypeCount = (type) => {
+    if (!Array.isArray(videos)) return 0;
+    return videos.filter(video => {
+      // Apply search filter
+      if (searchQuery && !video.title.toLowerCase().includes(searchQuery.toLowerCase())) {
+        return false;
+      }
+      
+      // Apply main status filter (watch status, assign later)
+      if (filter === 'watched' && !(video.user_video_watches && video.user_video_watches.watched)) {
+        return false;
+      }
+      if (filter === 'unwatched' && (video.user_video_watches && video.user_video_watches.watched)) {
+        return false;
+      }
+      if (filter === 'assignLater' && !video.assignLater) {
+        return false;
+      }
+      if (filter === 'notAssignLater' && video.assignLater) {
+        return false;
+      }
+      
+      // Apply assignment filter (based on eventId only - channelId doesn't determine assignment)
+      if (assignmentFilter === 'assigned' && !video.eventId) {
+        return false;
+      }
+      if (assignmentFilter === 'unassigned' && video.eventId) {
+        return false;
+      }
+      
+      // Apply AI assignment filter
+      if (aiAssignmentFilter === 'ai-assigned' && !video.assignedByAI) {
+        return false;
+      }
+      if (aiAssignmentFilter === 'manual-assigned' && video.assignedByAI) {
+        return false;
+      }
+      
+      // Check type match
+      return video.type === type;
+    }).length;
+  };
+
+  // Calculate assignment counts for filter buttons (considering current filters)
+  const getAssignmentCount = (assignmentType) => {
+    if (!Array.isArray(videos)) return 0;
+    return videos.filter(video => {
+      // Apply search filter
+      if (searchQuery && !video.title.toLowerCase().includes(searchQuery.toLowerCase())) {
+        return false;
+      }
+      
+      // Apply main status filter
+      if (filter === 'watched' && !(video.user_video_watches && video.user_video_watches.watched)) {
+        return false;
+      }
+      if (filter === 'unwatched' && (video.user_video_watches && video.user_video_watches.watched)) {
+        return false;
+      }
+      if (filter === 'assignLater' && !video.assignLater) {
+        return false;
+      }
+      if (filter === 'notAssignLater' && video.assignLater) {
+        return false;
+      }
+      
+      // Apply type filter
+      if (typeFilter !== 'all' && video.type !== typeFilter) {
+        return false;
+      }
+      
+      // Apply AI assignment filter
+      if (aiAssignmentFilter === 'ai-assigned' && !video.assignedByAI) {
+        return false;
+      }
+      if (aiAssignmentFilter === 'manual-assigned' && video.assignedByAI) {
+        return false;
+      }
+      
+      // Check assignment match (based on eventId only - channelId doesn't determine assignment)
+      if (assignmentType === 'assigned') {
+        return video.eventId;
+      } else if (assignmentType === 'unassigned') {
+        return !video.eventId;
+      }
+      return true;
+    }).length;
+  };
+
+  // Calculate AI assignment counts for filter buttons (considering current filters)
+  const getAiAssignmentCount = (aiAssignmentType) => {
+    if (!Array.isArray(videos)) return 0;
+    return videos.filter(video => {
+      // Apply search filter
+      if (searchQuery && !video.title.toLowerCase().includes(searchQuery.toLowerCase())) {
+        return false;
+      }
+      
+      // Apply main status filter
+      if (filter === 'watched' && !(video.user_video_watches && video.user_video_watches.watched)) {
+        return false;
+      }
+      if (filter === 'unwatched' && (video.user_video_watches && video.user_video_watches.watched)) {
+        return false;
+      }
+      if (filter === 'assignLater' && !video.assignLater) {
+        return false;
+      }
+      if (filter === 'notAssignLater' && video.assignLater) {
+        return false;
+      }
+      
+      // Apply assignment filter
+      if (assignmentFilter === 'assigned' && !video.eventId) {
+        return false;
+      }
+      if (assignmentFilter === 'unassigned' && video.eventId) {
+        return false;
+      }
+      
+      // Apply type filter
+      if (typeFilter !== 'all' && video.type !== typeFilter) {
+        return false;
+      }
+      
+      // Check AI assignment match
+      if (aiAssignmentType === 'ai-assigned') {
+        return video.assignedByAI;
+      } else if (aiAssignmentType === 'manual-assigned') {
+        return !video.assignedByAI;
+      }
+      return true;
+    }).length;
+  };
 
   // Handler functions
   const handleEdit = (video) => {
@@ -267,14 +412,20 @@ const Videos = () => {
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ videoId, eventSuggestion }),
+        body: JSON.stringify({ videoId, eventData: eventSuggestion }),
       });
 
       if (!response.ok) {
         throw new Error(`Failed to create event: ${response.statusText}`);
       }
 
-      await fetchData(); // Refresh data
+      // Event created successfully - try to refresh data but don't fail if refresh fails
+      try {
+        await fetchData(); // Refresh data
+      } catch (refreshError) {
+        console.warn('Event created successfully, but failed to refresh data:', refreshError);
+        // Don't throw - the event creation was successful
+      }
     } catch (error) {
       console.error('Error creating new event for video:', error);
       alert('Failed to create new event');
@@ -385,7 +536,7 @@ const Videos = () => {
             assignmentFilter === 'all' ? 'bg-blue-500 text-white border-blue-500' : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
           }`}
         >
-          All
+          All ({getAssignmentCount('assigned') + getAssignmentCount('unassigned')})
         </button>
         <button
           onClick={() => setAssignmentFilter('assigned')}
@@ -393,7 +544,7 @@ const Videos = () => {
             assignmentFilter === 'assigned' ? 'bg-blue-500 text-white border-blue-500' : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
           }`}
         >
-          Assigned
+          Assigned ({getAssignmentCount('assigned')})
         </button>
         <button
           onClick={() => setAssignmentFilter('unassigned')}
@@ -401,7 +552,36 @@ const Videos = () => {
             assignmentFilter === 'unassigned' ? 'bg-blue-500 text-white border-blue-500' : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
           }`}
         >
-          Unassigned ({stats.unassigned})
+          Unassigned ({getAssignmentCount('unassigned')})
+        </button>
+      </div>
+
+      {/* AI Assignment Filter */}
+      <div className="flex flex-wrap gap-2 mb-4">
+        <span className="self-center mr-2 text-sm font-medium text-gray-700">AI Assignment:</span>
+        <button
+          onClick={() => setAiAssignmentFilter('all')}
+          className={`px-3 py-1 text-sm rounded-lg border transition-colors ${
+            aiAssignmentFilter === 'all' ? 'bg-purple-500 text-white border-purple-500' : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
+          }`}
+        >
+          All ({getAiAssignmentCount('ai-assigned') + getAiAssignmentCount('manual-assigned')})
+        </button>
+        <button
+          onClick={() => setAiAssignmentFilter('ai-assigned')}
+          className={`px-3 py-1 text-sm rounded-lg border transition-colors ${
+            aiAssignmentFilter === 'ai-assigned' ? 'bg-purple-500 text-white border-purple-500' : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
+          }`}
+        >
+          🤖 AI Assigned ({getAiAssignmentCount('ai-assigned')})
+        </button>
+        <button
+          onClick={() => setAiAssignmentFilter('manual-assigned')}
+          className={`px-3 py-1 text-sm rounded-lg border transition-colors ${
+            aiAssignmentFilter === 'manual-assigned' ? 'bg-purple-500 text-white border-purple-500' : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
+          }`}
+        >
+          👤 Manual Assigned ({getAiAssignmentCount('manual-assigned')})
         </button>
       </div>
 
@@ -414,7 +594,7 @@ const Videos = () => {
             typeFilter === 'all' ? 'bg-blue-500 text-white border-blue-500' : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
           }`}
         >
-          All Types ({Array.isArray(videos) ? videos.length : 0})
+          All Types ({getTypeCount('youtube') + getTypeCount('great-courses-plus') + getTypeCount('Great Courses')})
         </button>
         <button
           onClick={() => setTypeFilter('youtube')}
@@ -422,15 +602,15 @@ const Videos = () => {
             typeFilter === 'youtube' ? 'bg-blue-500 text-white border-blue-500' : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
           }`}
         >
-          📺 YouTube
+          📺 YouTube ({getTypeCount('youtube')})
         </button>
         <button
-          onClick={() => setTypeFilter('educational')}
+          onClick={() => setTypeFilter('great-courses-plus')}
           className={`px-3 py-1 text-sm rounded-lg border transition-colors ${
-            typeFilter === 'educational' ? 'bg-blue-500 text-white border-blue-500' : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
+            typeFilter === 'great-courses-plus' ? 'bg-blue-500 text-white border-blue-500' : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
           }`}
         >
-          📚 Educational
+          📚 Great Courses Plus ({getTypeCount('great-courses-plus')})
         </button>
         <button
           onClick={() => setTypeFilter('Great Courses')}
@@ -438,15 +618,7 @@ const Videos = () => {
             typeFilter === 'Great Courses' ? 'bg-blue-500 text-white border-blue-500' : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
           }`}
         >
-          🎓 Great Courses
-        </button>
-        <button
-          onClick={() => setTypeFilter('other')}
-          className={`px-3 py-1 text-sm rounded-lg border transition-colors ${
-            typeFilter === 'other' ? 'bg-blue-500 text-white border-blue-500' : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
-          }`}
-        >
-          🔗 Other
+          🎓 Great Courses ({getTypeCount('Great Courses')})
         </button>
       </div>
 

@@ -12,6 +12,9 @@ const VideoAIAssignment = ({
   const [showResult, setShowResult] = useState(false);
   const [showPromptModal, setShowPromptModal] = useState(false);
   const [promptData, setPromptData] = useState(null);
+  const [showAIResult, setShowAIResult] = useState(false);
+  const [aiResponse, setAiResponse] = useState(null);
+  const [isCallingAI, setIsCallingAI] = useState(false);
 
   const handleAnalyzeVideo = async () => {
     if (!video?.url) {
@@ -38,7 +41,7 @@ const VideoAIAssignment = ({
       }
 
       const result = await response.json();
-      setPromptData(result);
+      setPromptData(result.data);
       setShowPromptModal(true);
 
     } catch (error) {
@@ -49,27 +52,116 @@ const VideoAIAssignment = ({
     }
   };
 
-  const handleAssignToExistingEvent = async () => {
-    if (!aiResult?.existingEvent) return;
+  const handleCallGeminiAPI = async () => {
+    if (!video?.id) {
+      setError('No video ID available for analysis');
+      return;
+    }
+
+    setIsCallingAI(true);
+    setError(null);
+    setShowPromptModal(false);
 
     try {
-      await onAssignToEvent(video.id, aiResult.existingEvent.id);
-      setShowResult(false);
-      setAiResult(null);
+      // Make the actual AI call without preview parameter
+      const response = await fetch(`/api/history-plus/ai/categorize-video/${video.id}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      });
+
+      if (!response.ok) {
+        throw new Error(`Failed to analyze video: ${response.statusText}`);
+      }
+
+      const result = await response.json();
+      setAiResponse(result.data);
+      setShowAIResult(true);
+
     } catch (error) {
-      setError('Failed to assign video to event');
+      console.error('AI analysis error:', error);
+      setError(error.message || 'Failed to analyze video with AI');
+    } finally {
+      setIsCallingAI(false);
+    }
+  };
+
+  const handleAssignToExistingEvent = async () => {
+    if (!aiResponse?.suggestion?.existingEventTitle) return;
+
+    try {
+      // Get all events to find the ID by title
+      const eventsResponse = await fetch('/api/history-plus/events');
+      if (!eventsResponse.ok) {
+        throw new Error('Failed to fetch events');
+      }
+      
+      const eventsResult = await eventsResponse.json();
+      const events = eventsResult.data || eventsResult;
+      const targetEvent = events.find(event => event.title === aiResponse.suggestion.existingEventTitle);
+      
+      if (!targetEvent) {
+        setError('Could not find the specified event');
+        return;
+      }
+
+      const response = await fetch('/api/history-plus/ai/assign-video-to-event', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          videoId: video.id,
+          eventId: targetEvent.id
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`Failed to assign video: ${response.statusText}`);
+      }
+
+      setShowAIResult(false);
+      setAiResponse(null);
+      // Refresh parent component if needed
+      if (onAssignToEvent) {
+        onAssignToEvent(video.id, targetEvent.id);
+      }
+    } catch (error) {
+      console.error('Assignment error:', error);
+      setError(error.message || 'Failed to assign video to event');
     }
   };
 
   const handleCreateNewEvent = async () => {
-    if (!aiResult?.newEventSuggestion) return;
+    if (!aiResponse?.suggestion?.newEventSuggestion) return;
 
     try {
-      await onCreateNewEvent(video.id, aiResult.newEventSuggestion);
-      setShowResult(false);
-      setAiResult(null);
+      const response = await fetch('/api/history-plus/ai/create-event-for-video', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          videoId: video.id,
+          eventData: aiResponse.suggestion.newEventSuggestion
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`Failed to create event: ${response.statusText}`);
+      }
+
+      const result = await response.json();
+      setShowAIResult(false);
+      setAiResponse(null);
+      // Refresh parent component if needed
+      if (onCreateNewEvent) {
+        onCreateNewEvent(video.id, result.data.event);
+      }
     } catch (error) {
-      setError('Failed to create new event');
+      console.error('Event creation error:', error);
+      setError(error.message || 'Failed to create new event');
     }
   };
 
@@ -83,9 +175,9 @@ const VideoAIAssignment = ({
     }
   };
 
-  const isUnassignedYouTubeVideo = video?.url?.includes('youtube.com') && !video?.eventId;
+  const isUnassignedVideo = video?.url && !video?.eventId;
 
-  if (!isUnassignedYouTubeVideo) {
+  if (!isUnassignedVideo) {
     return null;
   }
 
@@ -114,6 +206,13 @@ const VideoAIAssignment = ({
         <div className="flex items-center gap-2 text-sm text-blue-700">
           <div className="animate-spin h-4 w-4 border-2 border-blue-600 border-t-transparent rounded-full"></div>
           <span>Generating AI prompt preview...</span>
+        </div>
+      )}
+
+      {isCallingAI && (
+        <div className="flex items-center gap-2 text-sm text-green-700">
+          <div className="animate-spin h-4 w-4 border-2 border-green-600 border-t-transparent rounded-full"></div>
+          <span>Calling Gemini AI for analysis...</span>
         </div>
       )}
 
@@ -196,15 +295,102 @@ const VideoAIAssignment = ({
                 Close
               </button>
               <button
-                onClick={() => {
-                  setShowPromptModal(false);
-                  // Here we could add actual AI call in the future
-                  setError('AI analysis temporarily disabled - showing prompt preview only');
-                }}
-                className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors"
+                onClick={handleCallGeminiAPI}
+                disabled={isCallingAI}
+                className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
               >
-                🚀 Would Call Gemini API
+                {isCallingAI ? '🤔 Analyzing...' : '🚀 Call Gemini API'}
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* AI Result Modal */}
+      {showAIResult && aiResponse && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-lg max-w-2xl w-full max-h-[90vh] overflow-hidden flex flex-col">
+            <div className="p-4 border-b border-gray-200 flex justify-between items-center">
+              <h3 className="text-lg font-semibold text-gray-900">🤖 AI Analysis Result</h3>
+              <button
+                onClick={() => setShowAIResult(false)}
+                className="text-gray-400 hover:text-gray-600 text-2xl font-bold"
+              >
+                ×
+              </button>
+            </div>
+            
+            <div className="flex-1 overflow-y-auto p-4">
+              <div className="space-y-4">
+                <div className="bg-blue-50 p-3 rounded border border-blue-200">
+                  <h4 className="font-medium text-blue-900 mb-2">📊 Analysis Summary</h4>
+                  <div className="text-sm space-y-2">
+                    <div><strong>Action:</strong> <span className="font-mono bg-gray-100 px-2 py-1 rounded">{aiResponse.suggestion?.action}</span></div>
+                    <div><strong>Confidence:</strong> {Math.round((aiResponse.suggestion?.confidence || 0) * 100)}%</div>
+                    <div><strong>Reasoning:</strong> {aiResponse.suggestion?.reasoning}</div>
+                  </div>
+                </div>
+
+                {aiResponse.suggestion?.action === 'ASSIGN_TO_EXISTING' && aiResponse.suggestion?.existingEventTitle && (
+                  <div className="bg-green-50 p-3 rounded border border-green-200">
+                    <h4 className="font-medium text-green-900 mb-2">📚 Suggested Existing Event</h4>
+                    <div className="text-sm">
+                      <strong>Event:</strong> {aiResponse.suggestion.existingEventTitle}
+                    </div>
+                  </div>
+                )}
+
+                {aiResponse.suggestion?.action === 'CREATE_NEW_EVENT' && aiResponse.suggestion?.newEventSuggestion && (
+                  <div className="bg-purple-50 p-3 rounded border border-purple-200">
+                    <h4 className="font-medium text-purple-900 mb-2">✨ Suggested New Event</h4>
+                    <div className="text-sm space-y-1">
+                      <div><strong>Title:</strong> {aiResponse.suggestion.newEventSuggestion.title}</div>
+                      <div><strong>Start Date:</strong> {aiResponse.suggestion.newEventSuggestion.startDate}</div>
+                      {aiResponse.suggestion.newEventSuggestion.endDate && (
+                        <div><strong>End Date:</strong> {aiResponse.suggestion.newEventSuggestion.endDate}</div>
+                      )}
+                      <div><strong>Category:</strong> {aiResponse.suggestion.newEventSuggestion.category}</div>
+                      {aiResponse.suggestion.newEventSuggestion.details && (
+                        <div><strong>Details:</strong> {aiResponse.suggestion.newEventSuggestion.details}</div>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {aiResponse.suggestion?.alternativeAction && (
+                  <div className="bg-yellow-50 p-3 rounded border border-yellow-200">
+                    <h4 className="font-medium text-yellow-900 mb-2">💡 Alternative Suggestion</h4>
+                    <div className="text-sm">
+                      {aiResponse.suggestion.alternativeAction}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+            
+            <div className="p-4 border-t border-gray-200 flex justify-end gap-3">
+              <button
+                onClick={() => setShowAIResult(false)}
+                className="px-4 py-2 bg-gray-500 text-white rounded hover:bg-gray-600 transition-colors"
+              >
+                Close
+              </button>
+              {aiResponse.suggestion?.action === 'ASSIGN_TO_EXISTING' && (
+                <button
+                  onClick={handleAssignToExistingEvent}
+                  className="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700 transition-colors"
+                >
+                  ✅ Assign to Event
+                </button>
+              )}
+              {aiResponse.suggestion?.action === 'CREATE_NEW_EVENT' && (
+                <button
+                  onClick={handleCreateNewEvent}
+                  className="px-4 py-2 bg-purple-600 text-white rounded hover:bg-purple-700 transition-colors"
+                >
+                  ✨ Create New Event
+                </button>
+              )}
             </div>
           </div>
         </div>
