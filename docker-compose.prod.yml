@@ -19,6 +19,8 @@ services:
       - PORT=3001
       # External IP for Android API responses - UPDATE THIS FOR YOUR NETWORK
       - "EXTERNAL_IP=192.168.1.119"
+      # Gemini AI API Key for AI categorization features
+      - "GEMINI_API_KEY=AIzaSyAdXnyNUU6VYg8_ERsb9N5MxyowhAMJlFU"
     restart: unless-stopped
     networks:
       - master-order-network

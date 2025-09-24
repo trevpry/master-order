@@ -49,6 +49,8 @@ services:
       # - PLEX_TOKEN=your-plex-token
       # - TVDB_API_KEY=your-tvdb-api-key
       # - COMICVINE_API_KEY=your-comicvine-api-key
+      # Gemini AI API Key for AI categorization features
+      - "GEMINI_API_KEY=AIzaSyAdXnyNUU6VYg8_ERsb9N5MxyowhAMJlFU"
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:3001/api/health"]
       interval: 30s
