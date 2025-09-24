@@ -105,6 +105,43 @@ router.get('/search-with-issues', asyncHandler(async (req, res) => {
   
   console.log(`ComicVine search: Found ${filteredSeries.length} series with issue #${issueNumber} for "${query}"`);
   
+  // Sort results by relevance, prioritizing exact title matches, volume year, and title similarity
+  if (filteredSeries.length > 1) {
+    filteredSeries.sort((a, b) => {
+      const queryLower = query.toLowerCase();
+      const aName = a.series.name.toLowerCase();
+      const bName = b.series.name.toLowerCase();
+      
+      // 1. Exact title match (highest priority)
+      const aExact = aName === queryLower;
+      const bExact = bName === queryLower;
+      if (aExact && !bExact) return -1;
+      if (!aExact && bExact) return 1;
+      
+      // 2. Title contains query (second priority)
+      const aContains = aName.includes(queryLower);
+      const bContains = bName.includes(queryLower);
+      if (aContains && !bContains) return -1;
+      if (!aContains && bContains) return 1;
+      
+      // 3. Title starts with query (third priority)
+      const aStarts = aName.startsWith(queryLower);
+      const bStarts = bName.startsWith(queryLower);
+      if (aStarts && !bStarts) return -1;
+      if (!aStarts && bStarts) return 1;
+      
+      // 4. Volume year consideration (fourth priority) - prefer older/original series
+      const aYear = parseInt(a.series.start_year) || 9999;
+      const bYear = parseInt(b.series.start_year) || 9999;
+      if (aYear !== bYear) return aYear - bYear; // Earlier years first
+      
+      // 5. Title length (shorter titles often more accurate)
+      return aName.length - bName.length;
+    });
+    
+    console.log(`📊 [ComicVine] Sorted ${filteredSeries.length} results by relevance. Top result: "${filteredSeries[0].series.name}" (${filteredSeries[0].series.start_year})`);
+  }
+  
   res.json(filteredSeries);
 }));
 

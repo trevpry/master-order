@@ -48,7 +48,8 @@ class ActivityStatsService {
         include: {
           customOrderItem: {
             include: {
-              customOrder: true
+              customOrder: true,
+              book: true  // Include linked book data for author information
             }
           }
         }
@@ -157,7 +158,8 @@ class ActivityStatsService {
         include: {
           customOrderItem: {
             include: {
-              customOrder: true
+              customOrder: true,
+              book: true  // Include linked book data for author information
             }
           }
         }
@@ -504,7 +506,10 @@ class ActivityStatsService {
             
             // Extract author from various possible fields
             let authorName = 'Unknown Author';
-            if (item.bookAuthor) {
+            // Check linked book data first (most reliable source)
+            if (item.book && item.book.author) {
+              authorName = item.book.author;
+            } else if (item.bookAuthor) {
               authorName = item.bookAuthor;
             } else if (log.bookAuthor) {
               authorName = log.bookAuthor;
@@ -900,35 +905,49 @@ class ActivityStatsService {
 
           // Process character data for comics
           if (log.customOrderItem?.comicCharacters) {
+            let characterNames = [];
+            
+            // Try to parse as JSON first (ComicVine format)
             try {
               const characters = JSON.parse(log.customOrderItem.comicCharacters);
-              characters.forEach(character => {
-                if (character.name && character.name.trim()) {
-                  const characterName = character.name.trim();
-                  
-                  if (!comicCharacterStats[characterName]) {
-                    comicCharacterStats[characterName] = {
-                      name: characterName,
-                      totalReadTime: 0,
-                      comicCount: 0,
-                      comics: []
-                    };
-                  }
-
-                  comicCharacterStats[characterName].totalReadTime += comicReadTime;
-                  comicCharacterStats[characterName].comicCount++;
-                  comicCharacterStats[characterName].comics.push({
-                    title: log.title,
-                    series: log.customOrderItem.comicSeries || 'Unknown Series',
-                    issue: log.customOrderItem.comicIssue || 'Unknown Issue',
-                    publisher: log.customOrderItem.comicPublisher || 'Unknown Publisher',
-                    readTime: comicReadTime
-                  });
-                }
-              });
+              if (Array.isArray(characters)) {
+                characterNames = characters
+                  .filter(character => character.name && character.name.trim())
+                  .map(character => character.name.trim());
+              }
             } catch (error) {
-              console.warn('Error parsing comic characters JSON:', error);
+              // If JSON parsing fails, try comma-separated string format
+              try {
+                characterNames = log.customOrderItem.comicCharacters
+                  .split(',')
+                  .map(name => name.trim())
+                  .filter(name => name && name !== '');
+              } catch (stringError) {
+                console.warn('Error parsing comic characters:', error);
+              }
             }
+            
+            // Process each character name
+            characterNames.forEach(characterName => {
+              if (!comicCharacterStats[characterName]) {
+                comicCharacterStats[characterName] = {
+                  name: characterName,
+                  totalReadTime: 0,
+                  comicCount: 0,
+                  comics: []
+                };
+              }
+
+              comicCharacterStats[characterName].totalReadTime += comicReadTime;
+              comicCharacterStats[characterName].comicCount++;
+              comicCharacterStats[characterName].comics.push({
+                title: log.title,
+                series: log.customOrderItem.comicSeries || 'Unknown Series',
+                issue: log.customOrderItem.comicIssue || 'Unknown Issue',
+                publisher: log.customOrderItem.comicPublisher || 'Unknown Publisher',
+                readTime: comicReadTime
+              });
+            });
           }
         });
 

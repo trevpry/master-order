@@ -170,6 +170,19 @@ function createBulkOperationsRoutes(prisma, services) {
 
       // Extract ComicVine metadata if available
       const comicVineMetadata = extractComicVineMetadata(comicVineDetailsJson);
+      
+      // Log character extraction for debugging
+      if (mediaType === 'comic' && comicVineDetailsJson) {
+        console.log(`📊 [BULK IMPORT] Comic: "${title}" - Characters extracted: ${comicVineMetadata.comicCharacters ? 'YES' : 'NO'}`);
+        if (comicVineMetadata.comicCharacters) {
+          try {
+            const characterData = JSON.parse(comicVineMetadata.comicCharacters);
+            console.log(`📊 [BULK IMPORT] Character count: ${characterData.length}`);
+          } catch (e) {
+            console.log(`📊 [BULK IMPORT] Character data format: ${typeof comicVineMetadata.comicCharacters}`);
+          }
+        }
+      }
 
       // Create the item
       const item = await prisma.customOrderItem.create({

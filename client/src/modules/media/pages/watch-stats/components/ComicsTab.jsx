@@ -3,6 +3,11 @@ import StatItem from './shared/StatItem';
 import ToggleButtonGroup from './shared/ToggleButtonGroup';
 
 const ComicsTab = ({ comicStats, formatDateWithTimezone, publisherSortBy, setPublisherSortBy, characterSortBy, setCharacterSortBy }) => {
+  // Debug logging
+  console.log('ComicsTab - comicStats:', comicStats);
+  console.log('ComicsTab - characterBreakdown exists:', !!comicStats?.totalStats?.characterBreakdown);
+  console.log('ComicsTab - characterBreakdown:', comicStats?.totalStats?.characterBreakdown);
+  
   return (
     <div className="tab-content">
       {comicStats ? (
@@ -118,6 +123,7 @@ const ComicsTab = ({ comicStats, formatDateWithTimezone, publisherSortBy, setPub
           )}
 
           {/* Character Breakdown */}
+          {console.log('Checking characterBreakdown condition:', !!comicStats.totalStats?.characterBreakdown)}
           {comicStats.totalStats?.characterBreakdown && (
             <div className="stats-card">
               <div className="breakdown-header">
@@ -144,6 +150,8 @@ const ComicsTab = ({ comicStats, formatDateWithTimezone, publisherSortBy, setPub
                 };
                 
                 const characterData = getCharacterData();
+                console.log('Character data:', characterData);
+                console.log('Character sort by:', characterSortBy);
                 
                 return characterData.length > 0 ? (
                   <div className="time-breakdown">
