@@ -410,6 +410,34 @@ export class HistoryPlusApiService {
   }
 
   // ==========================================
+  // SCRAPING
+  // ==========================================
+
+  static async scrapeChannelVideos(channelUrl, channelId = null) {
+    const response = await fetch('/api/scraping/channel-videos', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ channelUrl, channelId })
+    });
+    if (!response.ok) throw new Error('Failed to scrape channel videos');
+    return response.json();
+  }
+
+  static async getChannelInfo(channelUrl) {
+    const response = await fetch('/api/scraping/channel-info', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ channelUrl })
+    });
+    if (!response.ok) throw new Error('Failed to get channel info');
+    return response.json();
+  }
+
+  // ==========================================
   // STATISTICS & SEARCH
   // ==========================================
 
@@ -480,4 +508,7 @@ export const historyPlusApi = {
   createCategory: HistoryPlusApiService.createCategory,
   updateCategory: HistoryPlusApiService.updateCategory,
   deleteCategory: HistoryPlusApiService.deleteCategory,
+  // Scraping methods
+  scrapeChannelVideos: HistoryPlusApiService.scrapeChannelVideos,
+  getChannelInfo: HistoryPlusApiService.getChannelInfo,
 };

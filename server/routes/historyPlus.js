@@ -553,6 +553,9 @@ router.post('/ai/create-event-for-video', asyncHandler(async (req, res) => {
   
   const { videoId, eventData } = req.body;
 
+  console.log('📝 Creating event for video:', videoId);
+  console.log('📝 Event data received:', JSON.stringify(eventData, null, 2));
+
   try {
     // Check if category exists, create if needed (handle AI-suggested categories)
     let categoryName = eventData.category;
@@ -578,7 +581,7 @@ router.post('/ai/create-event-for-video', asyncHandler(async (req, res) => {
       }
     }
 
-    // Only pass allowed fields for event creation
+    // Only pass allowed fields for event creation - explicitly exclude id
     const cleanEventData = {
       title: eventData.title,
       startDate: eventData.startDate,
@@ -586,6 +589,9 @@ router.post('/ai/create-event-for-video', asyncHandler(async (req, res) => {
       details: eventData.details || null,
       category: eventData.category
     };
+    
+    // Ensure no id field is passed (it should be auto-generated)
+    delete cleanEventData.id;
 
     // Create new event
     const newEvent = await historyPlusService.createEvent(cleanEventData);

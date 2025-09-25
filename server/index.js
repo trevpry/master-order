@@ -35,6 +35,7 @@ const historyPlusRoutes = require('./routes/historyPlus');
 const unifiedBooksRoutes = require('./routes/unifiedBooks');
 const rawgRoutes = require('./routes/rawg');
 const importDataRoutes = require('./routes/importData');
+const scrapingRoutes = require('./routes/scraping');
 
 // Import utility functions
 const { generateOptimizedClips, simpleHash, getUploadDirectory } = require('./utils/utilities');
@@ -400,6 +401,9 @@ app.use('/api/weather', weatherRoutes);
 
 // History Plus API routes
 app.use('/api/history-plus', historyPlusRoutes);
+
+// Scraping API routes
+app.use('/api/scraping', scrapingRoutes);
 
 // Unified Books API routes
 app.use('/api/unified-books', unifiedBooksRoutes);

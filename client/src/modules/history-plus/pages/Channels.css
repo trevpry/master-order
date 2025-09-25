@@ -338,3 +338,83 @@
     gap: 0.5rem;
   }
 }
+
+/* Scraping Progress Styles */
+.scraping-progress {
+  margin: 1rem 0;
+  padding: 1rem;
+  background: #f8fafc;
+  border-radius: 0.5rem;
+  border: 1px solid #e2e8f0;
+}
+
+.progress-indicator {
+  font-size: 0.875rem;
+}
+
+.progress-indicator.initializing,
+.progress-indicator.launching,
+.progress-indicator.navigating,
+.progress-indicator.scrolling,
+.progress-indicator.extracting,
+.progress-indicator.processing {
+  color: #3b82f6;
+}
+
+.progress-indicator.completed {
+  color: #10b981;
+}
+
+.progress-indicator.error {
+  color: #ef4444;
+}
+
+.progress-header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+}
+
+.progress-stage {
+  font-weight: 600;
+}
+
+.spinner {
+  width: 16px;
+  height: 16px;
+  border: 2px solid #e5e7eb;
+  border-top: 2px solid #3b82f6;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+.progress-message {
+  color: #6b7280;
+  margin-bottom: 0.5rem;
+}
+
+.progress-stats {
+  color: #4b5563;
+  font-size: 0.75rem;
+  font-family: monospace;
+}
+
+.btn-primary {
+  background-color: #3b82f6;
+  color: white;
+}
+
+.btn-primary:hover:not(:disabled) {
+  background-color: #2563eb;
+}
+
+.btn-primary:disabled {
+  background-color: #9ca3af;
+  cursor: not-allowed;
+}

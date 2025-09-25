@@ -17,6 +17,8 @@ const Channels = () => {
     subscriberCount: '',
     verified: false
   });
+  const [scrapingProgress, setScrapingProgress] = useState({});
+  const [scrapingResults, setScrapingResults] = useState({});
 
   useEffect(() => {
     fetchChannels();
@@ -107,6 +109,63 @@ const Channels = () => {
       subscriberCount: '',
       verified: false
     });
+  };
+
+  const handleScrapeChannel = async (channel) => {
+    if (!channel.channelUrl) {
+      alert('Channel URL is required for scraping');
+      return;
+    }
+
+    // Initialize progress for this channel
+    setScrapingProgress(prev => ({
+      ...prev,
+      [channel.id]: {
+        isRunning: true,
+        stage: 'initializing',
+        message: 'Starting scraper...',
+        videosFound: 0,
+        videosProcessed: 0,
+        videosAdded: 0,
+        videosSkipped: 0
+      }
+    }));
+
+    try {
+      const result = await historyPlusApi.scrapeChannelVideos(channel.channelUrl, channel.id);
+      
+      // Update final progress
+      setScrapingProgress(prev => ({
+        ...prev,
+        [channel.id]: {
+          isRunning: false,
+          stage: 'completed',
+          message: `Completed: ${result.data.videosAdded} added, ${result.data.videosSkipped} skipped`,
+          ...result.data
+        }
+      }));
+
+      // Store results
+      setScrapingResults(prev => ({
+        ...prev,
+        [channel.id]: result.data
+      }));
+
+      // Refresh channels to update video counts
+      fetchChannels();
+
+    } catch (error) {
+      console.error('Scraping failed:', error);
+      setScrapingProgress(prev => ({
+        ...prev,
+        [channel.id]: {
+          isRunning: false,
+          stage: 'error',
+          message: `Failed: ${error.message}`,
+          error: error.message
+        }
+      }));
+    }
   };
 
   const handleInputChange = (e) => {
@@ -308,6 +367,40 @@ const Channels = () => {
                 </div>
               </div>
 
+              {/* Scraping Progress */}
+              {scrapingProgress[channel.id] && (
+                <div className="scraping-progress">
+                  <div className={`progress-indicator ${scrapingProgress[channel.id].stage}`}>
+                    <div className="progress-header">
+                      <span className="progress-stage">
+                        {scrapingProgress[channel.id].stage === 'initializing' && '🔧 Initializing'}
+                        {scrapingProgress[channel.id].stage === 'launching' && '🚀 Launching Browser'}
+                        {scrapingProgress[channel.id].stage === 'navigating' && '🌍 Loading Page'}
+                        {scrapingProgress[channel.id].stage === 'scrolling' && '📜 Scrolling'}
+                        {scrapingProgress[channel.id].stage === 'extracting' && '🔍 Extracting URLs'}
+                        {scrapingProgress[channel.id].stage === 'processing' && '⚙️ Processing Videos'}
+                        {scrapingProgress[channel.id].stage === 'completed' && '✅ Completed'}
+                        {scrapingProgress[channel.id].stage === 'error' && '❌ Error'}
+                      </span>
+                      {scrapingProgress[channel.id].isRunning && (
+                        <div className="spinner"></div>
+                      )}
+                    </div>
+                    <div className="progress-message">
+                      {scrapingProgress[channel.id].message}
+                    </div>
+                    {scrapingProgress[channel.id].videosFound > 0 && (
+                      <div className="progress-stats">
+                        Found: {scrapingProgress[channel.id].videosFound} | 
+                        Processed: {scrapingProgress[channel.id].videosProcessed || 0} | 
+                        Added: {scrapingProgress[channel.id].videosAdded || 0} | 
+                        Skipped: {scrapingProgress[channel.id].videosSkipped || 0}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
               <div className="channel-actions">
                 <button
                   className="btn btn-outline"
@@ -315,6 +408,14 @@ const Channels = () => {
                   disabled={editingChannel?.id === channel.id}
                 >
                   Edit
+                </button>
+                <button
+                  className="btn btn-outline btn-primary"
+                  onClick={() => handleScrapeChannel(channel)}
+                  disabled={scrapingProgress[channel.id]?.isRunning || !channel.channelUrl}
+                  title={!channel.channelUrl ? 'Channel URL required for scraping' : 'Scrape all videos from this channel'}
+                >
+                  {scrapingProgress[channel.id]?.isRunning ? '🔄 Scraping...' : '🕷️ Scrape Videos'}
                 </button>
                 <button
                   className="btn btn-outline btn-danger"

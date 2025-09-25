@@ -195,9 +195,42 @@ class HistoryPlusService {
   }
 
   async createEvent(eventData) {
-    return await this.prisma.historicalEvent.create({
-      data: eventData
-    });
+    // Ensure no id field is passed to prevent unique constraint errors
+    const { id, ...cleanData } = eventData;
+    
+    if (id !== undefined) {
+      console.warn('⚠️ Attempting to create event with explicit id, removing it:', id);
+    }
+    
+    try {
+      return await this.prisma.historicalEvent.create({
+        data: cleanData
+      });
+    } catch (error) {
+      // Handle PostgreSQL sequence sync issues (P2002 unique constraint on id)
+      if (error.code === 'P2002' && error.meta?.target?.includes('id')) {
+        console.log('🔧 PostgreSQL sequence sync issue detected, attempting to fix...');
+        
+        // Try to sync the sequence by finding the max ID and resetting it
+        try {
+          await this.prisma.$executeRaw`
+            SELECT setval('public."HistoricalEvent_id_seq"', COALESCE((SELECT MAX(id) FROM "HistoricalEvent"), 1), true);
+          `;
+          console.log('✅ Sequence synced, retrying event creation...');
+          
+          // Retry the creation after sequence sync
+          return await this.prisma.historicalEvent.create({
+            data: cleanData
+          });
+        } catch (seqError) {
+          console.error('❌ Failed to sync sequence:', seqError);
+          // If sequence sync fails, throw the original error
+          throw error;
+        }
+      }
+      // Re-throw any other errors
+      throw error;
+    }
   }
 
   async updateEvent(id, updateData) {
