@@ -15,6 +15,7 @@ const VideoAIAssignment = ({
   const [showAIResult, setShowAIResult] = useState(false);
   const [aiResponse, setAiResponse] = useState(null);
   const [isCallingAI, setIsCallingAI] = useState(false);
+  const [isCreatingEvent, setIsCreatingEvent] = useState(false);
   const [showJsonImport, setShowJsonImport] = useState(false);
   const [jsonInput, setJsonInput] = useState('');
 
@@ -136,9 +137,14 @@ const VideoAIAssignment = ({
   };
 
   const handleCreateNewEvent = async () => {
-    if (!aiResponse?.suggestion?.newEventSuggestion) return;
+    if (!aiResponse?.suggestion?.newEventSuggestion || isCreatingEvent) return;
+
+    console.log('🚀 Starting event creation for video:', video.id);
 
     try {
+      setIsCreatingEvent(true);
+      setError(null);
+      
       const response = await fetch('/api/history-plus/ai/create-event-for-video', {
         method: 'POST',
         headers: {
@@ -155,15 +161,20 @@ const VideoAIAssignment = ({
       }
 
       const result = await response.json();
+      console.log('✅ Event creation successful:', result);
+      
       setShowAIResult(false);
       setAiResponse(null);
-      // Refresh parent component if needed
+      
+      // Notify parent component to refresh data (not to create another event!)
       if (onCreateNewEvent) {
-        onCreateNewEvent(video.id, result.data.event);
+        onCreateNewEvent(video.id, result.data.event, { skipApiCall: true });
       }
     } catch (error) {
       console.error('Event creation error:', error);
       setError(error.message || 'Failed to create new event');
+    } finally {
+      setIsCreatingEvent(false);
     }
   };
 
@@ -214,7 +225,7 @@ const VideoAIAssignment = ({
       } else {
         throw new Error('Invalid JSON format: missing action field');
       }
-
+      
       // Set the AI response as if it came from the API
       setAiResponse(normalizedResponse);
       setShowJsonImport(false);
@@ -464,9 +475,14 @@ const VideoAIAssignment = ({
               {aiResponse.suggestion?.action === 'CREATE_NEW_EVENT' && (
                 <button
                   onClick={handleCreateNewEvent}
-                  className="px-4 py-2 bg-purple-600 text-white rounded hover:bg-purple-700 transition-colors"
+                  disabled={isCreatingEvent}
+                  className={`px-4 py-2 text-white rounded transition-colors ${
+                    isCreatingEvent 
+                      ? 'bg-purple-400 cursor-not-allowed' 
+                      : 'bg-purple-600 hover:bg-purple-700'
+                  }`}
                 >
-                  ✨ Create New Event
+                  {isCreatingEvent ? '⏳ Creating Event...' : '✨ Create New Event'}
                 </button>
               )}
             </div>

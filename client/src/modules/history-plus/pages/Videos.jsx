@@ -405,8 +405,16 @@ const Videos = () => {
     }
   };
 
-  const handleCreateNewEvent = async (videoId, eventSuggestion) => {
+  const handleCreateNewEvent = async (videoId, eventSuggestion, options = {}) => {
     try {
+      // If skipApiCall is true, this is just a notification to refresh data
+      if (options.skipApiCall) {
+        console.log('🔄 Event created by child component, refreshing data...');
+        await fetchData(); // Just refresh data
+        return;
+      }
+
+      // Otherwise, make the API call (for direct parent usage)
       const response = await fetch(`/api/history-plus/ai/create-event-for-video`, {
         method: 'POST',
         headers: {

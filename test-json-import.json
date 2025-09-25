@@ -1,0 +1,14 @@
+{
+  "action": "CREATE_NEW_EVENT",
+  "confidence": 0.95,
+  "reasoning": "This video discusses a specific historical event that deserves its own dedicated event entry.",
+  "existingEventTitle": null,
+  "newEventSuggestion": {
+    "title": "Test JSON Import Event",
+    "startDate": "2024-01-01",
+    "endDate": "2024-01-31",
+    "category": "Test Category JSON",
+    "details": "This is a test event created via JSON import to debug duplicate creation issue."
+  },
+  "alternativeAction": null
+}

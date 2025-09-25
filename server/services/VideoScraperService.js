@@ -124,7 +124,7 @@ class VideoScraperService {
 
       console.log(`Fetching videos from: ${videosUrl}`);
 
-      // Production-optimized Puppeteer configuration
+      // Environment-optimized Puppeteer configuration
       const puppeteerConfig = {
         headless: true,
         args: [
@@ -135,19 +135,36 @@ class VideoScraperService {
           '--disable-features=VizDisplayCompositor',
           '--disable-gpu',
           '--no-first-run',
-          '--no-zygote',
-          '--single-process',
           '--disable-background-timer-throttling',
           '--disable-backgrounding-occluded-windows',
           '--disable-renderer-backgrounding',
           '--disable-web-security',
-          '--disable-features=site-per-process',
           '--memory-pressure-off',
           '--max_old_space_size=4096'
         ],
-        timeout: 30000,
-        protocolTimeout: 30000
+        timeout: 60000,
+        protocolTimeout: 60000,
+        ignoreDefaultArgs: ['--disable-extensions'],
+        defaultViewport: null
       };
+
+      // Windows-specific adjustments
+      if (process.platform === 'win32' && process.env.NODE_ENV === 'development') {
+        // Remove problematic args for Windows development
+        puppeteerConfig.args = puppeteerConfig.args.filter(arg => 
+          !['--no-zygote', '--single-process'].includes(arg)
+        );
+        // Add Windows-friendly args
+        puppeteerConfig.args.push(
+          '--disable-web-security',
+          '--disable-features=site-per-process',
+          '--ignore-certificate-errors',
+          '--allow-running-insecure-content'
+        );
+      } else if (process.env.NODE_ENV === 'production') {
+        // Production optimizations
+        puppeteerConfig.args.push('--no-zygote', '--single-process');
+      }
 
       console.log('Environment:', process.env.NODE_ENV);
       console.log('Platform:', process.platform);
@@ -190,17 +207,34 @@ class VideoScraperService {
 
       console.log('Loading page...');
       
-      // Enhanced navigation with retry logic
+      // Enhanced navigation with retry logic and frame detachment handling
       let navigationAttempts = 0;
-      const maxNavigationAttempts = 3;
+      const maxNavigationAttempts = 5;
       
       while (navigationAttempts < maxNavigationAttempts) {
         try {
+          // Create new page if current one is detached
+          if (page.isClosed() || navigationAttempts > 0) {
+            if (!page.isClosed()) {
+              await page.close();
+            }
+            page = await browser.newPage();
+            
+            // Re-setup page after recreation
+            await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
+            await page.setViewport({ width: 1920, height: 1080 });
+            page.setDefaultNavigationTimeout(60000);
+            page.setDefaultTimeout(45000);
+          }
+          
           await page.goto(videosUrl, { 
-            waitUntil: 'domcontentloaded',
-            timeout: 45000 
+            waitUntil: ['domcontentloaded', 'networkidle0'],
+            timeout: 60000 
           });
+          
+          console.log('✅ Successfully navigated to channel page');
           break;
+          
         } catch (navigationError) {
           navigationAttempts++;
           console.log(`Navigation attempt ${navigationAttempts} failed:`, navigationError.message);
@@ -209,18 +243,38 @@ class VideoScraperService {
             throw new Error(`Failed to navigate after ${maxNavigationAttempts} attempts: ${navigationError.message}`);
           }
           
-          await new Promise(resolve => setTimeout(resolve, 3000));
+          // Longer wait between retries for frame detachment issues
+          await new Promise(resolve => setTimeout(resolve, 5000));
         }
       }
 
-      // Wait for initial content with error handling
-      try {
-        await page.waitForSelector('ytd-rich-grid-media, ytd-video-renderer, #contents', { timeout: 30000 });
-      } catch (selectorError) {
-        console.log('Initial selector wait failed, continuing anyway:', selectorError.message);
+      // Wait for initial content with multiple selector strategies
+      let contentLoaded = false;
+      const selectors = [
+        'ytd-rich-grid-media',
+        'ytd-video-renderer', 
+        '#contents',
+        '[role="main"]',
+        'ytd-browse'
+      ];
+      
+      for (const selector of selectors) {
+        try {
+          await page.waitForSelector(selector, { timeout: 15000 });
+          console.log(`✅ Found content with selector: ${selector}`);
+          contentLoaded = true;
+          break;
+        } catch (selectorError) {
+          console.log(`⏭️ Selector ${selector} not found, trying next...`);
+        }
       }
       
-      await new Promise(resolve => setTimeout(resolve, 5000));
+      if (!contentLoaded) {
+        console.log('⚠️ No expected selectors found, but continuing...');
+      }
+      
+      // Wait for page to stabilize
+      await new Promise(resolve => setTimeout(resolve, 8000));
 
       if (progressCallback) {
         progressCallback({ stage: 'scrolling', message: 'Scrolling to load all videos...' });
@@ -238,46 +292,73 @@ class VideoScraperService {
         try {
           // Check if page is still connected
           if (page.isClosed()) {
-            throw new Error('Page was closed during scrolling');
+            console.log('Page was closed during scrolling, stopping...');
+            break;
           }
           
-          // Gentle scroll to bottom
-          await page.evaluate(() => {
-            return new Promise((resolve) => {
-              try {
-                window.scrollTo(0, document.body.scrollHeight);
-                setTimeout(resolve, 500);
-              } catch (e) {
-                resolve();
-              }
-            });
-          });
-          
-          await new Promise(resolve => setTimeout(resolve, 2000));
-          
-          // Check current video count
-          const currentVideoCount = await page.evaluate(() => {
-            try {
-              const links = document.querySelectorAll('a[href*="/watch?v="]');
-              const uniqueVideos = new Set();
-              links.forEach(link => {
+          // Gentle scroll to bottom with error handling
+          try {
+            await page.evaluate(() => {
+              return new Promise((resolve) => {
                 try {
-                  const href = link.getAttribute('href');
-                  if (href && href.includes('/watch?v=')) {
-                    const videoIdMatch = href.match(/[?&]v=([a-zA-Z0-9_-]{11})/);
-                    if (videoIdMatch && videoIdMatch[1]) {
-                      uniqueVideos.add(videoIdMatch[1]);
-                    }
-                  }
+                  const scrollHeight = Math.max(
+                    document.body.scrollHeight,
+                    document.documentElement.scrollHeight
+                  );
+                  window.scrollTo({
+                    top: scrollHeight,
+                    behavior: 'smooth'
+                  });
+                  setTimeout(resolve, 1000);
                 } catch (e) {
-                  // Skip this link if error
+                  console.log('Scroll eval error:', e.message);
+                  resolve();
                 }
               });
-              return uniqueVideos.size;
-            } catch (e) {
-              return 0;
+            });
+          } catch (scrollEvalError) {
+            console.log('Scroll evaluation failed:', scrollEvalError.message);
+            // Try alternative scroll method
+            try {
+              await page.keyboard.press('End');
+            } catch (keyError) {
+              console.log('Keyboard scroll fallback failed');
             }
-          });
+          }
+          
+          await new Promise(resolve => setTimeout(resolve, 3000));
+          
+          // Check current video count with retry logic
+          let currentVideoCount = 0;
+          try {
+            currentVideoCount = await page.evaluate(() => {
+              try {
+                const links = document.querySelectorAll('a[href*="/watch?v="]');
+                const uniqueVideos = new Set();
+                links.forEach(link => {
+                  try {
+                    const href = link.getAttribute('href');
+                    if (href && href.includes('/watch?v=')) {
+                      const videoIdMatch = href.match(/[?&]v=([a-zA-Z0-9_-]{11})/);
+                      if (videoIdMatch && videoIdMatch[1]) {
+                        uniqueVideos.add(videoIdMatch[1]);
+                      }
+                    }
+                  } catch (e) {
+                    // Skip this link if error
+                  }
+                });
+                return uniqueVideos.size;
+              } catch (e) {
+                console.log('Video count evaluation error:', e.message);
+                return 0;
+              }
+            });
+          } catch (evalError) {
+            console.log('Failed to evaluate video count:', evalError.message);
+            // If evaluation fails, assume no progress and continue
+            currentVideoCount = lastVideoCount;
+          }
           
           console.log(`Scroll ${scrollCount + 1}: Found ${currentVideoCount} unique videos`);
           
@@ -396,9 +477,13 @@ class VideoScraperService {
       // Process each video URL
       for (let i = 0; i < videoUrls.length; i++) {
         const videoUrl = videoUrls[i];
+        
         try {
+          // Create a fresh Prisma client instance for this iteration
+          const prismaClient = new PrismaClient();
+          
           // Check if video already exists in database
-          const existingVideo = await this.prisma.video.findUnique({
+          const existingVideo = await prismaClient.historyVideo.findUnique({
             where: { url: videoUrl }
           });
 
@@ -431,13 +516,13 @@ class VideoScraperService {
           // Find or create the channel
           let channel = null;
           if (channelId) {
-            channel = await this.prisma.channel.findUnique({
+            channel = await this.prisma.historyChannel.findUnique({
               where: { id: parseInt(channelId) }
             });
           }
 
           // Create the video record
-          await this.prisma.video.create({
+          await this.prisma.historyVideo.create({
             data: {
               title: metadata.title,
               url: videoUrl,

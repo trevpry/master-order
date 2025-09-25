@@ -553,8 +553,13 @@ router.post('/ai/create-event-for-video', asyncHandler(async (req, res) => {
   
   const { videoId, eventData } = req.body;
 
-  console.log('📝 Creating event for video:', videoId);
+  console.log('� === CREATE EVENT FOR VIDEO STARTED ===');
+  console.log('�📝 Creating event for video:', videoId);
   console.log('📝 Event data received:', JSON.stringify(eventData, null, 2));
+  console.log('📝 Request timestamp:', new Date().toISOString());
+  
+  const requestId = Math.random().toString(36).substr(2, 9);
+  console.log(`🔍 Request ID: ${requestId}`);
 
   try {
     // Check if category exists, create if needed (handle AI-suggested categories)
@@ -594,13 +599,19 @@ router.post('/ai/create-event-for-video', asyncHandler(async (req, res) => {
     delete cleanEventData.id;
 
     // Create new event
+    console.log(`🎯 [${requestId}] About to create event with data:`, JSON.stringify(cleanEventData, null, 2));
     const newEvent = await historyPlusService.createEvent(cleanEventData);
+    console.log(`✅ [${requestId}] Event created successfully:`, { id: newEvent.id, title: newEvent.title });
     
     // Assign video to the new event with AI flag
+    console.log(`🔗 [${requestId}] About to assign video ${videoId} to event ${newEvent.id}`);
     const updatedVideo = await historyPlusService.updateVideo(videoId, {
       eventId: newEvent.id,
       assignedByAI: true
     });
+    console.log(`✅ [${requestId}] Video assigned successfully:`, { videoId: updatedVideo.id, eventId: updatedVideo.eventId });
+    
+    console.log(`🎉 === CREATE EVENT FOR VIDEO COMPLETED [${requestId}] ===`);
     
     sendSuccess(res, {
       message: categoryCreated ? 

@@ -202,10 +202,14 @@ class HistoryPlusService {
       console.warn('⚠️ Attempting to create event with explicit id, removing it:', id);
     }
     
+    console.log('🏗️ HistoryPlusService.createEvent called with:', JSON.stringify(cleanData, null, 2));
+    
     try {
-      return await this.prisma.historicalEvent.create({
+      const result = await this.prisma.historicalEvent.create({
         data: cleanData
       });
+      console.log('🎯 Event created in database:', { id: result.id, title: result.title });
+      return result;
     } catch (error) {
       // Handle PostgreSQL sequence sync issues (P2002 unique constraint on id)
       if (error.code === 'P2002' && error.meta?.target?.includes('id')) {
@@ -703,6 +707,23 @@ class HistoryPlusService {
         cleanUpdateData.event = {
           connect: { id: eventId }
         };
+        
+        // When assigning a video to an event that has been marked as reviewed, mark that event as unreviewed
+        const existingReview = await this.prisma.user_event_reviews.findUnique({
+          where: { eventId: eventId }
+        });
+        
+        if (existingReview && existingReview.reviewed) {
+          console.log(`📝 Video being assigned to reviewed event ${eventId}, marking event as unreviewed`);
+          await this.prisma.user_event_reviews.update({
+            where: { eventId: eventId },
+            data: { 
+              reviewed: false,
+              reviewedAt: null,
+              updatedAt: new Date()
+            }
+          });
+        }
       } else {
         cleanUpdateData.event = {
           disconnect: true
