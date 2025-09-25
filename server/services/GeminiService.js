@@ -93,9 +93,9 @@ class GeminiService {
       // Build the categorization prompt
       const prompt = this.buildCategorizationPrompt(youtubeUrl, videoId, availableCategories);
       
-      // Generate response using Flash model matching web interface quality
+      // Generate response using latest Flash model matching web interface quality
       const model = this.ai.getGenerativeModel({ 
-        model: 'gemini-1.5-flash',
+        model: 'gemini-2.5-flash',
         generationConfig: {
           temperature: 1.0, // Max temperature for creative responses like web interface
           maxOutputTokens: 8192,
@@ -259,7 +259,7 @@ Requirements:
       
       // Generate response using Flash model matching web interface quality
       const model = this.ai.getGenerativeModel({ 
-        model: 'gemini-1.5-flash',
+        model: 'gemini-2.5-flash',
         generationConfig: {
           temperature: 1.0, // Max temperature for creative responses like web interface
           maxOutputTokens: 8192,

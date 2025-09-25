@@ -15,6 +15,8 @@ const VideoAIAssignment = ({
   const [showAIResult, setShowAIResult] = useState(false);
   const [aiResponse, setAiResponse] = useState(null);
   const [isCallingAI, setIsCallingAI] = useState(false);
+  const [showJsonImport, setShowJsonImport] = useState(false);
+  const [jsonInput, setJsonInput] = useState('');
 
   const handleAnalyzeVideo = async () => {
     if (!video?.url) {
@@ -165,6 +167,66 @@ const VideoAIAssignment = ({
     }
   };
 
+  const handleCopyPrompt = async () => {
+    if (!promptData?.fullPrompt) return;
+    
+    try {
+      await navigator.clipboard.writeText(promptData.fullPrompt);
+      // Could add a temporary success message here
+      console.log('AI prompt copied to clipboard');
+    } catch (error) {
+      console.error('Failed to copy prompt:', error);
+      setError('Failed to copy prompt to clipboard');
+    }
+  };
+
+  const handleJsonImport = () => {
+    setShowPromptModal(false);
+    setShowJsonImport(true);
+  };
+
+  const handleProcessImportedJson = async () => {
+    if (!jsonInput.trim()) {
+      setError('Please enter valid JSON response');
+      return;
+    }
+
+    try {
+      const parsedJson = JSON.parse(jsonInput.trim());
+      
+      // Handle both formats: direct Gemini response or wrapped in suggestion object
+      let normalizedResponse;
+      if (parsedJson.suggestion) {
+        // Already in expected format
+        normalizedResponse = parsedJson;
+      } else if (parsedJson.action) {
+        // Direct Gemini format - wrap it in a suggestion object
+        normalizedResponse = {
+          suggestion: {
+            action: parsedJson.action,
+            confidence: parsedJson.confidence,
+            reasoning: parsedJson.reasoning,
+            existingEventTitle: parsedJson.existingEventTitle,
+            newEventSuggestion: parsedJson.newEventSuggestion,
+            alternativeAction: parsedJson.alternativeAction
+          }
+        };
+      } else {
+        throw new Error('Invalid JSON format: missing action field');
+      }
+
+      // Set the AI response as if it came from the API
+      setAiResponse(normalizedResponse);
+      setShowJsonImport(false);
+      setJsonInput('');
+      setShowAIResult(true);
+
+    } catch (error) {
+      console.error('JSON import error:', error);
+      setError(error.message || 'Failed to parse JSON response');
+    }
+  };
+
   const getConfidenceBadge = (confidence) => {
     if (confidence >= 0.8) {
       return <span className="px-2 py-1 text-xs font-medium bg-green-100 text-green-800 rounded">High Confidence</span>;
@@ -287,20 +349,36 @@ const VideoAIAssignment = ({
               </div>
             </div>
             
-            <div className="p-4 border-t border-gray-200 flex justify-end gap-3">
-              <button
-                onClick={() => setShowPromptModal(false)}
-                className="px-4 py-2 bg-gray-500 text-white rounded hover:bg-gray-600 transition-colors"
-              >
-                Close
-              </button>
-              <button
-                onClick={handleCallGeminiAPI}
-                disabled={isCallingAI}
-                className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-              >
-                {isCallingAI ? '🤔 Analyzing...' : '🚀 Call Gemini API'}
-              </button>
+            <div className="p-4 border-t border-gray-200 flex justify-between items-center">
+              <div className="flex gap-3">
+                <button
+                  onClick={handleCopyPrompt}
+                  className="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700 transition-colors"
+                >
+                  📋 Copy AI Prompt
+                </button>
+                <button
+                  onClick={handleJsonImport}
+                  className="px-4 py-2 bg-purple-600 text-white rounded hover:bg-purple-700 transition-colors"
+                >
+                  📥 Import JSON
+                </button>
+              </div>
+              <div className="flex gap-3">
+                <button
+                  onClick={() => setShowPromptModal(false)}
+                  className="px-4 py-2 bg-gray-500 text-white rounded hover:bg-gray-600 transition-colors"
+                >
+                  Close
+                </button>
+                <button
+                  onClick={handleCallGeminiAPI}
+                  disabled={isCallingAI}
+                  className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                >
+                  {isCallingAI ? '🤔 Analyzing...' : '🚀 Call Gemini API'}
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -391,6 +469,73 @@ const VideoAIAssignment = ({
                   ✨ Create New Event
                 </button>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* JSON Import Modal */}
+      {showJsonImport && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-lg max-w-2xl w-full max-h-[90vh] overflow-hidden flex flex-col">
+            <div className="p-4 border-b border-gray-200 flex justify-between items-center">
+              <h3 className="text-lg font-semibold text-gray-900">📥 Import AI JSON Response</h3>
+              <button
+                onClick={() => setShowJsonImport(false)}
+                className="text-gray-400 hover:text-gray-600 text-2xl font-bold"
+              >
+                ×
+              </button>
+            </div>
+            
+            <div className="flex-1 p-4">
+              <div className="space-y-4">
+                <div className="text-sm text-gray-600">
+                  <p className="mb-2">Paste the JSON response from Gemini AI here:</p>
+                  <div className="bg-blue-50 p-3 rounded border border-blue-200">
+                    <h4 className="font-medium text-blue-900 mb-2">Expected JSON Format (Direct from Gemini):</h4>
+                    <pre className="text-xs font-mono whitespace-pre-wrap text-blue-800">
+{`{
+  "action": "ASSIGN_TO_EXISTING" | "CREATE_NEW_EVENT" | "UNCERTAIN",
+  "confidence": 0.95,
+  "reasoning": "Analysis explanation...",
+  "existingEventTitle": "Event Name", // for ASSIGN_TO_EXISTING
+  "newEventSuggestion": { // for CREATE_NEW_EVENT
+    "title": "German Rearmament under the Weimar Republic",
+    "startDate": "1918-11-11",
+    "endDate": "1933-01-30",
+    "category": "Modern History 2",
+    "details": "Event details..."
+  },
+  "alternativeAction": null
+}`}
+                    </pre>
+                  </div>
+                </div>
+                
+                <textarea
+                  value={jsonInput}
+                  onChange={(e) => setJsonInput(e.target.value)}
+                  placeholder="Paste your Gemini AI JSON response here..."
+                  className="w-full h-64 p-3 border border-gray-300 rounded font-mono text-sm resize-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                />
+              </div>
+            </div>
+            
+            <div className="p-4 border-t border-gray-200 flex justify-end gap-3">
+              <button
+                onClick={() => setShowJsonImport(false)}
+                className="px-4 py-2 bg-gray-500 text-white rounded hover:bg-gray-600 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleProcessImportedJson}
+                disabled={!jsonInput.trim()}
+                className="px-4 py-2 bg-purple-600 text-white rounded hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              >
+                🚀 Process JSON
+              </button>
             </div>
           </div>
         </div>
