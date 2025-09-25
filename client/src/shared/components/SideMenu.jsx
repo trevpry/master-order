@@ -127,6 +127,13 @@ const SideMenu = ({ isMobile, closeMobileMenu }) => {
       isSubmenu: true
     },
     {
+      path: '/history-plus/courses',
+      icon: '🎓',
+      label: 'Courses',
+      description: 'Great Courses Plus',
+      isSubmenu: true
+    },
+    {
       path: '/eddie-settings',
       icon: '⚙️',
       label: 'Settings',

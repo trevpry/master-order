@@ -32,6 +32,7 @@ const searchDebugRoutes = require('./routes/searchDebug');
 const settingsLegacyRedirectsRoutes = require('./routes/settingsLegacyRedirects');
 const weatherRoutes = require('./routes/weather');
 const historyPlusRoutes = require('./routes/historyPlus');
+const coursesRoutes = require('./routes/courses');
 const unifiedBooksRoutes = require('./routes/unifiedBooks');
 const rawgRoutes = require('./routes/rawg');
 const importDataRoutes = require('./routes/importData');
@@ -401,6 +402,9 @@ app.use('/api/weather', weatherRoutes);
 
 // History Plus API routes
 app.use('/api/history-plus', historyPlusRoutes);
+
+// Courses API routes
+app.use('/api/courses', coursesRoutes);
 
 // Scraping API routes
 app.use('/api/scraping', scrapingRoutes);

@@ -53,6 +53,22 @@ const validateRequiredFields = (fields, errorMessage) => {
 };
 
 /**
+ * Direct validation for required fields (throws error instead of middleware)
+ * Used directly in asyncHandler-wrapped routes
+ * @param {Object} data - Data object to validate (usually req.body)
+ * @param {Array} fields - Array of required field names
+ * @throws {Error} If validation fails
+ */
+const validateRequiredFieldsDirect = (data, fields) => {
+  const fieldsArray = Array.isArray(fields) ? fields : [fields];
+  const missing = fieldsArray.filter(field => !data[field]);
+  
+  if (missing.length > 0) {
+    throw new Error(`Missing required fields: ${missing.join(', ')}`);
+  }
+};
+
+/**
  * Validates media type for reading operations
  * Allows: book, comic, shortstory
  */
@@ -230,6 +246,7 @@ module.exports = {
   // Individual validators
   validateMediaTypeAndTitle,
   validateRequiredFields,
+  validateRequiredFieldsDirect,
   validateReadingMediaType,
   validateViewingMediaType,
   validateEpisodeMovieMediaType,
