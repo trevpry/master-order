@@ -594,7 +594,10 @@ class HistoryPlusService {
 
   async getVideosByEvent(eventId) {
     return await this.prisma.historyVideo.findMany({
-      where: { eventId: parseInt(eventId) },
+      where: { 
+        eventId: parseInt(eventId),
+        deleted: false
+      },
       include: {
         channel: true,
         user_video_watches: true
@@ -604,7 +607,10 @@ class HistoryPlusService {
 
   async getVideoById(id) {
     return await this.prisma.historyVideo.findUnique({
-      where: { id: parseInt(id) },
+      where: { 
+        id: parseInt(id),
+        deleted: false
+      },
       include: {
         channel: true,
         user_video_watches: true,
@@ -615,6 +621,9 @@ class HistoryPlusService {
 
   async getAllVideos() {
     return await this.prisma.historyVideo.findMany({
+      where: {
+        deleted: false
+      },
       include: {
         channel: true,
         user_video_watches: true,
@@ -743,20 +752,19 @@ class HistoryPlusService {
   }
 
   async deleteVideo(id) {
-    // First delete any related user_video_watches
-    await this.prisma.user_video_watches.deleteMany({
-      where: { videoId: parseInt(id) }
-    });
-    
-    return await this.prisma.historyVideo.delete({
-      where: { id: parseInt(id) }
+    // Soft delete - mark video as deleted instead of removing from database
+    return await this.prisma.historyVideo.update({
+      where: { id: parseInt(id) },
+      data: { deleted: true }
     });
   }
 
   async getAllChannels() {
     return await this.prisma.historyChannel.findMany({
       include: {
-        videos: true
+        videos: {
+          where: { deleted: false }
+        }
       }
     });
   }
@@ -772,7 +780,9 @@ class HistoryPlusService {
       where: { id: parseInt(id) },
       data: updateData,
       include: {
-        videos: true
+        videos: {
+          where: { deleted: false }
+        }
       }
     });
   }
@@ -793,7 +803,9 @@ class HistoryPlusService {
     return await this.prisma.historyChannel.findUnique({
       where: { id: parseInt(id) },
       include: {
-        videos: true
+        videos: {
+          where: { deleted: false }
+        }
       }
     });
   }
@@ -1279,6 +1291,7 @@ class HistoryPlusService {
       }),
       this.prisma.historyVideo.findMany({
         where: {
+          deleted: false,
           OR: [
             { title: { contains: query } },
             { description: { contains: query } },

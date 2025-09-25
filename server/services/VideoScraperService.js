@@ -31,13 +31,104 @@ class VideoScraperService {
   }
 
   /**
+   * Decode HTML entities and properly handle Unicode characters
+   */
+  decodeHtmlEntities(text) {
+    if (!text) return text;
+    
+    // Decode common HTML entities
+    const entities = {
+      '&amp;': '&',
+      '&lt;': '<',
+      '&gt;': '>',
+      '&quot;': '"',
+      '&#39;': "'",
+      '&apos;': "'",
+      '&hellip;': '…',
+      '&ndash;': '–',
+      '&mdash;': '—',
+      '&lsquo;': '\u2018',
+      '&rsquo;': '\u2019',
+      '&ldquo;': '\u201C',
+      '&rdquo;': '\u201D',
+      '&nbsp;': ' ',
+      '&bull;': '•',
+      '&copy;': '©',
+      '&reg;': '®',
+      '&trade;': '™',
+      '&euro;': '€',
+      '&pound;': '£',
+      '&yen;': '¥',
+      '&cent;': '¢',
+      '&sect;': '§',
+      '&para;': '¶',
+      '&middot;': '·',
+      '&raquo;': '»',
+      '&laquo;': '«',
+      '&agrave;': 'à',
+      '&aacute;': 'á',
+      '&acirc;': 'â',
+      '&atilde;': 'ã',
+      '&auml;': 'ä',
+      '&aring;': 'å',
+      '&aelig;': 'æ',
+      '&ccedil;': 'ç',
+      '&egrave;': 'è',
+      '&eacute;': 'é',
+      '&ecirc;': 'ê',
+      '&euml;': 'ë',
+      '&igrave;': 'ì',
+      '&iacute;': 'í',
+      '&icirc;': 'î',
+      '&iuml;': 'ï',
+      '&eth;': 'ð',
+      '&ntilde;': 'ñ',
+      '&ograve;': 'ò',
+      '&oacute;': 'ó',
+      '&ocirc;': 'ô',
+      '&otilde;': 'õ',
+      '&ouml;': 'ö',
+      '&oslash;': 'ø',
+      '&ugrave;': 'ù',
+      '&uacute;': 'ú',
+      '&ucirc;': 'û',
+      '&uuml;': 'ü',
+      '&yacute;': 'ý',
+      '&thorn;': 'þ',
+      '&yuml;': 'ÿ'
+    };
+    
+    let decoded = text;
+    
+    // Replace named entities
+    for (const [entity, char] of Object.entries(entities)) {
+      decoded = decoded.replace(new RegExp(entity, 'g'), char);
+    }
+    
+    // Decode numeric entities (&#123; and &#x1A;)
+    decoded = decoded.replace(/&#(\d+);/g, (match, dec) => {
+      return String.fromCharCode(parseInt(dec, 10));
+    });
+    
+    decoded = decoded.replace(/&#x([0-9a-fA-F]+);/g, (match, hex) => {
+      return String.fromCharCode(parseInt(hex, 16));
+    });
+    
+    return decoded;
+  }
+
+  /**
    * Get video metadata using basic fetch (fallback if YouTube API is not available)
+   * Enhanced with proper Unicode and HTML entity handling
    */
   async getVideoMetadata(videoUrl) {
     try {
       const response = await fetch(videoUrl, {
         headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+          'Accept-Language': 'en-US,en;q=0.5',
+          'Accept-Encoding': 'gzip, deflate, br'
         }
       });
 
@@ -46,14 +137,48 @@ class VideoScraperService {
         return null;
       }
 
-      const html = await response.text();
+      // Ensure we get the response as UTF-8 text
+      const buffer = await response.arrayBuffer();
+      const html = new TextDecoder('utf-8').decode(buffer);
       
-      // Extract basic metadata from HTML
-      const titleMatch = html.match(/<title>([^<]+)<\/title>/);
-      const title = titleMatch ? titleMatch[1].replace(' - YouTube', '').trim() : null;
+      // Extract basic metadata from HTML with better Unicode support
+      // Use non-greedy matching and handle potential Unicode characters
+      const titleMatch = html.match(/<title[^>]*>([^<]*?)<\/title>/i);
+      let title = titleMatch ? titleMatch[1] : null;
+      
+      if (title) {
+        // Remove " - YouTube" suffix and decode HTML entities
+        title = title.replace(/ - YouTube$/i, '').trim();
+        title = this.decodeHtmlEntities(title);
+        
+        // Additional cleanup for any remaining artifacts
+        title = title.replace(/^\s+|\s+$/g, ''); // Trim whitespace
+        title = title.replace(/\s+/g, ' '); // Normalize multiple spaces
+      }
 
-      const descriptionMatch = html.match(/<meta name="description" content="([^"]+)"/);
-      const description = descriptionMatch ? descriptionMatch[1] : '';
+      // Extract description with similar handling
+      const descriptionMatch = html.match(/<meta\s+name="description"\s+content="([^"]*?)"/i);
+      let description = descriptionMatch ? descriptionMatch[1] : '';
+      
+      if (description) {
+        description = this.decodeHtmlEntities(description);
+      }
+
+      // Also try to extract from JSON-LD if available (more reliable for Unicode)
+      const jsonLdMatch = html.match(/<script[^>]*type="application\/ld\+json"[^>]*>([^<]*?)<\/script>/i);
+      if (jsonLdMatch) {
+        try {
+          const jsonData = JSON.parse(jsonLdMatch[1]);
+          if (jsonData.name && !title) {
+            title = jsonData.name;
+          }
+          if (jsonData.description && !description) {
+            description = jsonData.description;
+          }
+        } catch (jsonError) {
+          // Ignore JSON parsing errors, fall back to regex extraction
+        }
+      }
 
       return {
         title,
@@ -621,16 +746,27 @@ class VideoScraperService {
         throw new Error(`Failed to fetch channel: ${response.status}`);
       }
 
-      const html = await response.text();
+      // Ensure we get the response as UTF-8 text
+      const buffer = await response.arrayBuffer();
+      const html = new TextDecoder('utf-8').decode(buffer);
       
-      // Extract channel information using regex (simple approach)
-      const titleMatch = html.match(/<title>([^<]+)<\/title>/);
-      const channelName = titleMatch ? titleMatch[1].replace(' - YouTube', '').trim() : 'Unknown Channel';
+      // Extract channel information with proper Unicode support
+      const titleMatch = html.match(/<title[^>]*>([^<]*?)<\/title>/i);
+      let channelName = titleMatch ? titleMatch[1] : 'Unknown Channel';
+      
+      if (channelName && channelName !== 'Unknown Channel') {
+        channelName = channelName.replace(/ - YouTube$/i, '').trim();
+        channelName = this.decodeHtmlEntities(channelName);
+      }
 
-      const descriptionMatch = html.match(/<meta name="description" content="([^"]+)"/);
-      const channelDescription = descriptionMatch ? descriptionMatch[1] : '';
+      const descriptionMatch = html.match(/<meta\s+name="description"\s+content="([^"]*?)"/i);
+      let channelDescription = descriptionMatch ? descriptionMatch[1] : '';
+      
+      if (channelDescription) {
+        channelDescription = this.decodeHtmlEntities(channelDescription);
+      }
 
-      const imageMatch = html.match(/<meta property="og:image" content="([^"]+)"/);
+      const imageMatch = html.match(/<meta\s+property="og:image"\s+content="([^"]+)"/i);
       const channelImage = imageMatch ? imageMatch[1] : '';
 
       return {

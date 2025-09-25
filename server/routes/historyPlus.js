@@ -1028,7 +1028,9 @@ router.get('/import-status', asyncHandler(async (req, res) => {
     
     // Check if we have existing History Plus data
     const historicalEventCount = await prisma.historicalEvent.count();
-    const historyVideoCount = await prisma.historyVideo.count();
+    const historyVideoCount = await prisma.historyVideo.count({
+      where: { deleted: false }
+    });
     const historyBookCount = await prisma.historyBook.count();
     
     const totalRecords = historicalEventCount + historyVideoCount + historyBookCount;

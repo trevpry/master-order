@@ -1,4 +1,5 @@
 import React from 'react';
+import SearchableEventSelect from './SearchableEventSelect';
 
 const VideoForm = ({
   formData,
@@ -10,12 +11,17 @@ const VideoForm = ({
   isEditing = false
 }) => {
   return (
-    <div className="bg-blue-50 border border-blue-200 rounded-lg p-6 mb-6">
-      <h3 className="text-lg font-semibold text-blue-800 mb-4">
-        {isEditing ? 'Edit Video' : 'Add New Video'}
-      </h3>
-      
-      <form onSubmit={onSubmit} className="space-y-4">
+    <div className="modal-overlay" onClick={onCancel}>
+      <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+        <div className="modal-header">
+          <h3>{isEditing ? 'Edit Video' : 'Add New Video'}</h3>
+          <button className="close-modal" onClick={onCancel}>
+            ✕
+          </button>
+        </div>
+        
+        <div className="modal-body">
+          <form id="video-form" onSubmit={onSubmit} className="space-y-4">
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {/* Title */}
           <div>
@@ -112,20 +118,13 @@ const VideoForm = ({
             <label htmlFor="eventId" className="block text-sm font-medium text-gray-700 mb-1">
               Event
             </label>
-            <select
-              id="eventId"
-              name="eventId"
+            <SearchableEventSelect
+              events={events || []}
               value={formData.eventId}
               onChange={onInputChange}
-              className="w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
-            >
-              <option value="">Select an event...</option>
-              {events?.map((event) => (
-                <option key={event.id} value={event.id}>
-                  {event.title}
-                </option>
-              ))}
-            </select>
+              placeholder="Search and select an event..."
+              className="w-full"
+            />
           </div>
         </div>
 
@@ -176,23 +175,29 @@ const VideoForm = ({
           </label>
         </div>
 
-        {/* Form Actions */}
-        <div className="flex gap-2 pt-4">
-          <button
-            type="submit"
-            className="px-4 py-2 bg-blue-500 text-white rounded-md hover:bg-blue-600 transition-colors"
-          >
-            {isEditing ? 'Update Video' : 'Add Video'}
-          </button>
-          <button
-            type="button"
-            onClick={onCancel}
-            className="px-4 py-2 bg-gray-500 text-white rounded-md hover:bg-gray-600 transition-colors"
-          >
-            Cancel
-          </button>
+        </form>
         </div>
-      </form>
+        
+        {/* Modal Footer */}
+        <div className="modal-footer">
+          <div className="flex gap-2 justify-end">
+            <button
+              type="button"
+              onClick={onCancel}
+              className="px-4 py-2 bg-gray-500 text-white rounded-md hover:bg-gray-600 transition-colors"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              form="video-form"
+              className="px-4 py-2 bg-blue-500 text-white rounded-md hover:bg-blue-600 transition-colors"
+            >
+              {isEditing ? 'Update Video' : 'Add Video'}
+            </button>
+          </div>
+        </div>
+      </div>
     </div>
   );
 };

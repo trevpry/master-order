@@ -1575,6 +1575,7 @@ model HistoryVideo {
   assignLater        Boolean             @default(false)
   assignedByAI       Boolean             @default(false)
   status             String?
+  deleted            Boolean             @default(false)
   event              HistoricalEvent?    @relation(fields: [eventId], references: [id], onDelete: Cascade)
   channel            HistoryChannel?     @relation(fields: [channelId], references: [id])
   user_video_watches user_video_watches?
