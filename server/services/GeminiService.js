@@ -521,6 +521,221 @@ Respond in a clear, structured format.`;
   }
 
   /**
+   * Build a course analysis prompt for manual Gemini use
+   * @param {Object} course - Course object with title, instructor, description, etc.
+   * @param {Array} lectures - Array of lecture objects with title, order, description
+   * @param {string} guidebookContent - Text content extracted from course guidebook PDF
+   * @param {Array} availableEvents - List of existing events
+   * @param {Array} availableCategories - List of available categories
+   * @returns {string} - Complete prompt for manual Gemini input
+   */
+  buildCourseAssignmentPrompt(course, lectures, guidebookContent, availableEvents, availableCategories) {
+    const eventsList = availableEvents.map(event => 
+      `- "${event.title}" (${event.startDate} - ${event.endDate || 'Ongoing'}) - Category: ${event.category}`
+    ).join('\n');
+
+    const categoryList = availableCategories.map(cat => 
+      `- "${cat.name}": ${cat.description || 'Historical category'}`
+    ).join('\n');
+
+    const lecturesList = lectures
+      .sort((a, b) => (a.order || 0) - (b.order || 0))
+      .map(lecture => 
+        `${lecture.order || 'N/A'}. ${lecture.title}${lecture.description ? ` - ${lecture.description}` : ''}`
+      ).join('\n');
+
+    const guidebookSection = guidebookContent ? `
+Course Guidebook Content:
+${guidebookContent.substring(0, 8000)}${guidebookContent.length > 8000 ? '...[content truncated]' : ''}
+` : 'No guidebook content available.';
+
+    return `You are an expert historian and educational content analyst. Your task is to analyze a complete course and assign each lecture to appropriate historical events, creating new events as needed for chronological accuracy.
+
+COURSE INFORMATION:
+Title: ${course.title}
+Instructor: ${course.instructor || 'Unknown'}
+Category: ${course.category || 'General'}
+Description: ${course.description || 'No description available'}
+
+COURSE LECTURES (${lectures.length} total):
+${lecturesList}
+
+${guidebookSection}
+
+EXISTING HISTORICAL EVENTS:
+${eventsList || 'No existing events'}
+
+AVAILABLE CATEGORIES:
+${categoryList}
+
+ANALYSIS REQUIREMENTS:
+
+1. **CHRONOLOGICAL ORDERING**: Lectures should be assigned to events in chronological order. The first lecture should be assigned to the earliest historical period/event, and subsequent lectures should follow historical progression.
+
+2. **EVENT ASSIGNMENT STRATEGY**:
+   - **ASSIGN_TO_EXISTING**: If a lecture clearly belongs to an existing event
+   - **CREATE_NEW_EVENT**: If a lecture requires a new historical event (preferred for specificity)
+   - **SKIP**: If a lecture is introductory/summary and doesn't fit a specific historical period
+
+3. **EVENT GRANULARITY**: Create specific, focused events rather than broad ones. For example:
+   - Instead of "Roman Empire" → "Fall of the Western Roman Empire (476 CE)"
+   - Instead of "World War II" → "Battle of Stalingrad (1942-1943)"
+   - Instead of "Medieval Period" → "The Crusades (1095-1291)"
+
+4. **CATEGORY GUIDELINES**:
+   - **USE EXISTING CATEGORIES** whenever possible
+   - Only suggest NEW categories for major missing historical domains
+   - Match the course's general subject area when possible
+
+5. **GUIDEBOOK INTEGRATION**: Use the guidebook content to:
+   - Understand the specific historical focus of each lecture
+   - Identify precise dates and events covered
+   - Determine the chronological flow of the course
+
+Respond with a JSON object containing an array of suggestions for each lecture:
+
+{
+  "courseAnalysis": {
+    "title": "${course.title}",
+    "totalLectures": ${lectures.length},
+    "recommendedStrategy": "Brief overview of the chronological approach"
+  },
+  "suggestions": [
+    {
+      "lectureNumber": 1,
+      "lectureTitle": "Exact lecture title",
+      "action": "ASSIGN_TO_EXISTING" | "CREATE_NEW_EVENT" | "SKIP",
+      "confidence": 85,
+      "reasoning": "Why this assignment makes sense chronologically",
+      "existingEventTitle": "Exact title if assigning to existing",
+      "newEventSuggestion": {
+        "title": "Specific event title",
+        "startDate": "YYYY-MM-DD or YYYY",
+        "endDate": "YYYY-MM-DD or YYYY or null",
+        "category": "EXACT_CATEGORY_NAME",
+        "details": "Brief description focusing on what makes this event specific"
+      }
+    }
+  ],
+  "newCategorySuggestions": [
+    {
+      "name": "New Category Name",
+      "description": "Why this category is needed"
+    }
+  ]
+}
+
+CRITICAL REQUIREMENTS:
+- Include ALL ${lectures.length} lectures in the suggestions array
+- Maintain chronological order (lecture 1 = earliest event, lecture N = latest event)
+- Prefer creating NEW specific events over using broad existing ones
+- Use guidebook content to determine precise historical periods
+- Each lecture should have a clear historical timeframe assignment
+- Return ONLY the JSON object, no additional text`;
+  }
+
+  /**
+   * Parse and validate course assignment response from manual Gemini input
+   * @param {string} responseText - JSON response from Gemini
+   * @param {Array} lectures - Original lectures array for validation
+   * @param {Array} availableEvents - Available events for validation
+   * @param {Array} availableCategories - Available categories for validation
+   * @returns {Object} - Parsed and validated response
+   */
+  parseCourseAssignmentResponse(responseText, lectures, availableEvents, availableCategories) {
+    try {
+      // Clean the response (remove any markdown or extra text)
+      const cleanedText = responseText.replace(/```json|```/g, '').trim();
+      const parsed = JSON.parse(cleanedText);
+
+      // Validate the response structure
+      if (!parsed.suggestions || !Array.isArray(parsed.suggestions)) {
+        throw new Error('Invalid response structure: missing suggestions array');
+      }
+
+      // Validate we have suggestions for all lectures
+      if (parsed.suggestions.length !== lectures.length) {
+        console.warn(`⚠️ Suggestion count (${parsed.suggestions.length}) doesn't match lecture count (${lectures.length})`);
+      }
+
+      const validActions = ['ASSIGN_TO_EXISTING', 'CREATE_NEW_EVENT', 'SKIP'];
+      
+      const validatedSuggestions = parsed.suggestions.map((suggestion, index) => {
+        // Validate action type
+        if (!validActions.includes(suggestion.action)) {
+          console.warn(`⚠️ Invalid action for lecture ${suggestion.lectureNumber}: ${suggestion.action}, defaulting to CREATE_NEW_EVENT`);
+          suggestion.action = 'CREATE_NEW_EVENT';
+        }
+
+        // Validate confidence
+        suggestion.confidence = Math.max(0, Math.min(100, suggestion.confidence || 50));
+
+        // Validate existing event assignment
+        if (suggestion.action === 'ASSIGN_TO_EXISTING' && suggestion.existingEventTitle) {
+          const matchingEvent = availableEvents.find(event => event.title === suggestion.existingEventTitle);
+          if (!matchingEvent) {
+            console.warn(`⚠️ Unknown event "${suggestion.existingEventTitle}" for lecture ${suggestion.lectureNumber}, converting to CREATE_NEW_EVENT`);
+            suggestion.action = 'CREATE_NEW_EVENT';
+            suggestion.confidence = Math.max(30, suggestion.confidence - 20);
+          } else {
+            suggestion.existingEvent = matchingEvent;
+          }
+        }
+
+        // Validate new event suggestion
+        if (suggestion.action === 'CREATE_NEW_EVENT' && suggestion.newEventSuggestion) {
+          const newEvent = suggestion.newEventSuggestion;
+          
+          // Ensure required fields
+          newEvent.title = newEvent.title || `Event for Lecture ${suggestion.lectureNumber}`;
+          newEvent.startDate = newEvent.startDate || new Date().getFullYear().toString();
+          newEvent.details = newEvent.details || 'Event created from course analysis';
+          
+          // Validate category
+          const categoryExists = availableCategories.find(cat => cat.name === newEvent.category);
+          if (!categoryExists && availableCategories.length > 0) {
+            console.warn(`⚠️ Unknown category "${newEvent.category}" for lecture ${suggestion.lectureNumber}, using first available category`);
+            newEvent.category = availableCategories[0].name;
+            newEvent.categoryId = availableCategories[0].id;
+          } else if (categoryExists) {
+            newEvent.categoryId = categoryExists.id;
+          }
+        }
+
+        return suggestion;
+      });
+
+      return {
+        courseAnalysis: parsed.courseAnalysis || {
+          title: lectures[0]?.course?.title || 'Course Analysis',
+          totalLectures: lectures.length,
+          recommendedStrategy: 'Chronological assignment to specific historical events'
+        },
+        suggestions: validatedSuggestions,
+        newCategorySuggestions: parsed.newCategorySuggestions || [],
+        success: true
+      };
+
+    } catch (error) {
+      console.error('❌ Failed to parse course assignment response:', error);
+      console.log('Raw response:', responseText);
+      
+      // Return a safe fallback
+      return {
+        courseAnalysis: {
+          title: 'Parse Error',
+          totalLectures: lectures.length,
+          recommendedStrategy: 'Manual assignment recommended due to parse error'
+        },
+        suggestions: [],
+        newCategorySuggestions: [],
+        success: false,
+        error: error.message
+      };
+    }
+  }
+
+  /**
    * Health check for the service
    * @returns {Object} - Service status
    */

@@ -1,13 +1,16 @@
 const express = require('express');
 const router = express.Router();
 const path = require('path');
+const fs = require('fs').promises;
 const { PrismaClient } = require('@prisma/client');
 const CourseScrapingService = require('../services/CourseScrapingService');
+const GeminiService = require('../services/GeminiService');
 const { asyncHandler, sendSuccess, sendBadRequest, sendServerError } = require('../utils/responses');
 const { validateRequiredFieldsDirect } = require('../middleware/validation');
 
 const prisma = new PrismaClient();
 const courseScrapingService = new CourseScrapingService();
+const geminiService = new GeminiService();
 
 // ==========================================
 // COURSE CRUD OPERATIONS
@@ -499,6 +502,240 @@ router.get('/statistics', asyncHandler(async (req, res) => {
       category: cat.category,
       count: cat._count.category
     }))
+  });
+}));
+
+// ==========================================
+// COURSE AI ANALYSIS
+// ==========================================
+
+// POST /api/courses/:id/ai-analyze - Generate AI prompt or process response for course analysis
+router.post('/:id/ai-analyze', asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  const { preview } = req.query;
+  
+  // Get course with videos
+  const course = await prisma.historyCourse.findUnique({
+    where: { id: parseInt(id) },
+    include: {
+      videos: {
+        orderBy: [
+          { order: 'asc' },
+          { createdAt: 'asc' }
+        ]
+      }
+    }
+  });
+  
+  if (!course) {
+    return sendBadRequest(res, 'Course not found');
+  }
+  
+  // Get existing events and categories
+  const [events, categories] = await Promise.all([
+    prisma.historicalEvent.findMany({
+      select: {
+        id: true,
+        title: true,
+        startDate: true,
+        endDate: true,
+        category: true
+      },
+      orderBy: { startDate: 'asc' }
+    }),
+    prisma.historicalCategory.findMany({
+      select: {
+        id: true,
+        name: true,
+        description: true
+      },
+      orderBy: { name: 'asc' }
+    })
+  ]);
+  
+  // Read guidebook content if available
+  let guidebookContent = '';
+  if (course.guidebook) {
+    try {
+      const guidebooksDir = path.join(__dirname, '..', 'guidebooks');
+      const guidebookPath = path.join(guidebooksDir, path.basename(course.guidebook));
+      
+      // For now, we'll indicate guidebook is available but not parse PDF content
+      // In a full implementation, you'd use a PDF parser here
+      guidebookContent = `[Guidebook available: ${path.basename(course.guidebook)}]\nContent would be extracted from PDF for AI analysis.`;
+    } catch (error) {
+      console.warn('Could not read guidebook:', error.message);
+      guidebookContent = '[Guidebook file not accessible]';
+    }
+  }
+  
+  if (preview === 'true') {
+    // Generate prompt for manual use
+    const fullPrompt = geminiService.buildCourseAssignmentPrompt(
+      course,
+      course.videos,
+      guidebookContent,
+      events,
+      categories
+    );
+    
+    sendSuccess(res, {
+      course: {
+        id: course.id,
+        title: course.title,
+        instructor: course.instructor,
+        category: course.category
+      },
+      lectureCount: course.videos.length,
+      hasGuidebook: !!course.guidebook,
+      fullPrompt
+    });
+  } else {
+    // This would be for processing a manual response
+    // For now, return an error since this should be handled by the assignment endpoint
+    return sendBadRequest(res, 'Direct AI processing not supported. Use preview mode to get prompt, then use assignment endpoint with response.');
+  }
+}));
+
+// POST /api/courses/:id/ai-assign-lectures - Process Gemini response and assign lectures to events
+router.post('/:id/ai-assign-lectures', asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  const { suggestions } = req.body;
+  
+  if (!suggestions || !Array.isArray(suggestions)) {
+    return sendBadRequest(res, 'Invalid suggestions data');
+  }
+  
+  // Get course with videos
+  const course = await prisma.historyCourse.findUnique({
+    where: { id: parseInt(id) },
+    include: {
+      videos: {
+        orderBy: [
+          { order: 'asc' },
+          { createdAt: 'asc' }
+        ]
+      }
+    }
+  });
+  
+  if (!course) {
+    return sendBadRequest(res, 'Course not found');
+  }
+  
+  // Get existing events and categories for validation
+  const [events, categories] = await Promise.all([
+    prisma.historicalEvent.findMany({
+      select: {
+        id: true,
+        title: true,
+        startDate: true,
+        endDate: true,
+        category: true
+      }
+    }),
+    prisma.historicalCategory.findMany({
+      select: {
+        id: true,
+        name: true,
+        description: true
+      }
+    })
+  ]);
+  
+  // Parse and validate the suggestions
+  const validatedResponse = geminiService.parseCourseAssignmentResponse(
+    JSON.stringify({ suggestions }),
+    course.videos,
+    events,
+    categories
+  );
+  
+  if (!validatedResponse.success) {
+    return sendServerError(res, `Failed to process suggestions: ${validatedResponse.error}`);
+  }
+  
+  const results = {
+    processedLectures: 0,
+    createdEvents: 0,
+    assignedToExisting: 0,
+    skipped: 0,
+    errors: []
+  };
+  
+  // Process each suggestion
+  for (const suggestion of validatedResponse.suggestions) {
+    try {
+      const lecture = course.videos.find(v => v.order === suggestion.lectureNumber);
+      if (!lecture) {
+        results.errors.push(`Lecture ${suggestion.lectureNumber} not found`);
+        continue;
+      }
+      
+      if (suggestion.action === 'SKIP') {
+        results.skipped++;
+        continue;
+      }
+      
+      let eventId;
+      
+      if (suggestion.action === 'ASSIGN_TO_EXISTING' && suggestion.existingEvent) {
+        // Assign to existing event
+        eventId = suggestion.existingEvent.id;
+        results.assignedToExisting++;
+      } else if (suggestion.action === 'CREATE_NEW_EVENT' && suggestion.newEventSuggestion) {
+        // Create new event
+        const newEventData = suggestion.newEventSuggestion;
+        
+        // Create new category if needed (though we prefer existing ones)
+        let categoryId = newEventData.categoryId;
+        if (!categoryId && newEventData.category) {
+          const category = categories.find(c => c.name === newEventData.category);
+          categoryId = category ? category.id : categories[0]?.id;
+        }
+        
+        const newEvent = await prisma.historicalEvent.create({
+          data: {
+            title: newEventData.title,
+            startDate: newEventData.startDate,
+            endDate: newEventData.endDate,
+            category: newEventData.category,
+            categoryId: categoryId,
+            details: newEventData.details,
+            source: `Created from course: ${course.title}`,
+            confidence: suggestion.confidence || 50
+          }
+        });
+        
+        eventId = newEvent.id;
+        results.createdEvents++;
+      }
+      
+      if (eventId) {
+        // Create link between course video and historical event
+        await prisma.historicalEventVideo.create({
+          data: {
+            eventId: eventId,
+            videoId: lecture.id,
+            videoType: 'great-courses-plus',
+            notes: `Assigned from course AI analysis: ${suggestion.reasoning || 'AI suggestion'}`
+          }
+        });
+        
+        results.processedLectures++;
+      }
+      
+    } catch (error) {
+      console.error(`Error processing lecture ${suggestion.lectureNumber}:`, error);
+      results.errors.push(`Lecture ${suggestion.lectureNumber}: ${error.message}`);
+    }
+  }
+  
+  sendSuccess(res, {
+    message: 'Course lectures processed for event assignment',
+    results,
+    courseId: course.id,
+    courseTitle: course.title
   });
 }));
 

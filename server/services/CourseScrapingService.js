@@ -18,15 +18,37 @@ class CourseScrapingService {
   async scrapeCourses(url) {
     try {
       console.log(`🔍 Fetching page: ${url}`);
+      console.log(`🔧 Environment: ${process.env.NODE_ENV || 'development'}`);
+      console.log(`🔧 Platform: ${process.platform}`);
       
-      const response = await fetch(url, {
-        headers: {
-          'User-Agent': this.userAgent
+      // Add timeout for production reliability
+      const controller = new AbortController();
+      const timeout = setTimeout(() => {
+        controller.abort();
+      }, 30000); // 30 second timeout
+
+      let response;
+      try {
+        response = await fetch(url, {
+          headers: {
+            'User-Agent': this.userAgent,
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'
+          },
+          signal: controller.signal
+        });
+      } catch (fetchError) {
+        clearTimeout(timeout);
+        if (fetchError.name === 'AbortError') {
+          throw new Error(`Request timeout after 30 seconds for URL: ${url}`);
+        } else {
+          throw new Error(`Failed to fetch webpage: ${fetchError.message}`);
         }
-      });
+      } finally {
+        clearTimeout(timeout);
+      }
 
       if (!response.ok) {
-        throw new Error(`Failed to fetch webpage: ${response.status}`);
+        throw new Error(`Failed to fetch webpage: ${response.status} ${response.statusText}`);
       }
 
       const html = await response.text();
@@ -312,15 +334,38 @@ class CourseScrapingService {
   async extractCourseInfo(courseUrl) {
     try {
       console.log(`🔍 Fetching course info from: ${courseUrl}`);
+      console.log(`🔧 Environment: ${process.env.NODE_ENV || 'development'}`);
+      console.log(`🔧 Platform: ${process.platform}`);
       
-      const response = await fetch(courseUrl, {
-        headers: {
-          'User-Agent': this.userAgent
+      // Add timeout for production reliability
+      const controller = new AbortController();
+      const timeout = setTimeout(() => {
+        controller.abort();
+      }, 30000); // 30 second timeout
+
+      let response;
+      try {
+        response = await fetch(courseUrl, {
+          headers: {
+            'User-Agent': this.userAgent,
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'
+          },
+          signal: controller.signal
+        });
+      } catch (fetchError) {
+        clearTimeout(timeout);
+        if (fetchError.name === 'AbortError') {
+          console.log(`❌ Request timeout after 30 seconds for: ${courseUrl}`);
+        } else {
+          console.log(`❌ Failed to fetch course page: ${fetchError.message}`);
         }
-      });
+        return null;
+      } finally {
+        clearTimeout(timeout);
+      }
 
       if (!response.ok) {
-        console.log(`❌ Failed to fetch course page: ${response.status}`);
+        console.log(`❌ Failed to fetch course page: ${response.status} ${response.statusText}`);
         return null;
       }
 
@@ -423,15 +468,37 @@ class CourseScrapingService {
   async scrapeVideosForCourse(course) {
     try {
       console.log(`🎥 Scraping videos for course: ${course.title}`);
+      console.log(`🔧 Environment: ${process.env.NODE_ENV || 'development'}`);
+      console.log(`🔧 Platform: ${process.platform}`);
       
-      const response = await fetch(course.url, {
-        headers: {
-          'User-Agent': this.userAgent
+      // Add timeout for production reliability
+      const controller = new AbortController();
+      const timeout = setTimeout(() => {
+        controller.abort();
+      }, 30000); // 30 second timeout
+
+      let response;
+      try {
+        response = await fetch(course.url, {
+          headers: {
+            'User-Agent': this.userAgent,
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'
+          },
+          signal: controller.signal
+        });
+      } catch (fetchError) {
+        clearTimeout(timeout);
+        if (fetchError.name === 'AbortError') {
+          throw new Error(`Request timeout after 30 seconds for course: ${course.title}`);
+        } else {
+          throw new Error(`Failed to fetch course page: ${fetchError.message}`);
         }
-      });
+      } finally {
+        clearTimeout(timeout);
+      }
 
       if (!response.ok) {
-        throw new Error(`Failed to fetch course page: ${response.status}`);
+        throw new Error(`Failed to fetch course page: ${response.status} ${response.statusText}`);
       }
 
       const html = await response.text();
@@ -521,53 +588,136 @@ class CourseScrapingService {
   async downloadGuidebook(course, guidebookUrl) {
     try {
       console.log(`📖 Downloading guidebook for course: ${course.title}`);
+      console.log(`🔧 Environment: ${process.env.NODE_ENV || 'development'}`);
+      console.log(`🔧 Platform: ${process.platform}`);
       
-      // Create guidebooks directory if it doesn't exist
+      // Create guidebooks directory if it doesn't exist - use async operations for production
       const guidebooksDir = path.join(__dirname, '..', 'guidebooks');
-      if (!fs.existsSync(guidebooksDir)) {
-        fs.mkdirSync(guidebooksDir, { recursive: true });
+      
+      try {
+        // Use async fs operations for better production compatibility
+        const fsPromises = require('fs').promises;
+        await fsPromises.access(guidebooksDir);
+      } catch (error) {
+        // Directory doesn't exist, create it
+        try {
+          const fsPromises = require('fs').promises;
+          await fsPromises.mkdir(guidebooksDir, { recursive: true });
+          console.log(`📁 Created guidebooks directory: ${guidebooksDir}`);
+        } catch (mkdirError) {
+          console.error(`❌ Failed to create guidebooks directory:`, mkdirError);
+          return null;
+        }
       }
 
-      // Generate safe filename from course title
+      // Generate safe filename from course title with better sanitization
       const safeTitle = course.title
-        .replace(/[^\w\s-]/g, '') // Remove special characters
+        .replace(/[^\w\s.-]/g, '') // Remove unsafe characters but keep periods and hyphens
         .replace(/\s+/g, '-') // Replace spaces with hyphens
-        .toLowerCase();
+        .replace(/-+/g, '-') // Replace multiple hyphens with single hyphen
+        .toLowerCase()
+        .substring(0, 100); // Limit filename length for filesystem compatibility
       
       const filename = `${safeTitle}-guidebook.pdf`;
       const filepath = path.join(guidebooksDir, filename);
 
-      // Download the file
-      const response = await fetch(guidebookUrl, {
-        headers: {
-          'User-Agent': this.userAgent
+      // Check if file already exists
+      try {
+        const fsPromises = require('fs').promises;
+        await fsPromises.access(filepath);
+        console.log(`📖 Guidebook already exists: ${filename}`);
+        return `/guidebooks/${filename}`;
+      } catch (error) {
+        // File doesn't exist, proceed with download
+      }
+
+      console.log(`📥 Fetching guidebook from: ${guidebookUrl}`);
+      
+      // Download the file with timeout and better error handling
+      const controller = new AbortController();
+      const timeout = setTimeout(() => {
+        controller.abort();
+      }, 30000); // 30 second timeout
+
+      let response;
+      try {
+        response = await fetch(guidebookUrl, {
+          headers: {
+            'User-Agent': this.userAgent,
+            'Accept': 'application/pdf,*/*'
+          },
+          signal: controller.signal
+        });
+      } catch (fetchError) {
+        clearTimeout(timeout);
+        if (fetchError.name === 'AbortError') {
+          console.log(`❌ Guidebook download timeout after 30 seconds`);
+        } else {
+          console.log(`❌ Failed to fetch guidebook: ${fetchError.message}`);
         }
-      });
+        return null;
+      } finally {
+        clearTimeout(timeout);
+      }
 
       if (!response.ok) {
-        console.log(`❌ Failed to download guidebook: ${response.status}`);
+        console.log(`❌ Failed to download guidebook: ${response.status} ${response.statusText}`);
         return null;
       }
 
       // Check if it's actually a PDF
       const contentType = response.headers.get('content-type');
-      if (!contentType || !contentType.includes('pdf')) {
+      const contentLength = response.headers.get('content-length');
+      
+      console.log(`📄 Response info: ${contentType}, ${contentLength} bytes`);
+      
+      if (!contentType || !contentType.toLowerCase().includes('pdf')) {
         console.log(`⚠️ Guidebook URL does not point to a PDF file: ${contentType}`);
         return null;
       }
 
-      // Write the file
-      const arrayBuffer = await response.arrayBuffer();
-      const buffer = Buffer.from(arrayBuffer);
-      fs.writeFileSync(filepath, buffer);
+      // Validate file size (avoid downloading huge files)
+      if (contentLength && parseInt(contentLength) > 50 * 1024 * 1024) { // 50MB limit
+        console.log(`⚠️ Guidebook file too large: ${contentLength} bytes`);
+        return null;
+      }
 
-      console.log(`✅ Downloaded guidebook: ${filename}`);
-      
-      // Return relative path for storage in database
-      return `/guidebooks/${filename}`;
+      // Write the file using async operations
+      try {
+        const arrayBuffer = await response.arrayBuffer();
+        const buffer = Buffer.from(arrayBuffer);
+        
+        const fsPromises = require('fs').promises;
+        await fsPromises.writeFile(filepath, buffer);
+        
+        console.log(`✅ Downloaded guidebook: ${filename} (${buffer.length} bytes)`);
+        
+        // Return relative path for storage in database
+        return `/guidebooks/${filename}`;
+        
+      } catch (writeError) {
+        console.error(`❌ Failed to write guidebook file:`, writeError);
+        
+        // Try to clean up partial file
+        try {
+          const fsPromises = require('fs').promises;
+          await fsPromises.unlink(filepath);
+        } catch (unlinkError) {
+          // Ignore cleanup errors
+        }
+        
+        return null;
+      }
 
     } catch (error) {
       console.error(`❌ Error downloading guidebook for ${course.title}:`, error);
+      console.error(`❌ Error stack:`, error.stack);
+      console.error(`❌ Environment info:`, {
+        NODE_ENV: process.env.NODE_ENV,
+        platform: process.platform,
+        guidebookUrl,
+        coursTitle: course.title
+      });
       return null;
     }
   }

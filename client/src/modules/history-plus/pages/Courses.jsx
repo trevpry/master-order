@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { HistoryPlusApiService } from '../services/historyPlusApi';
+import CourseAIAssignment from '../components/CourseAIAssignment';
 
 const Courses = () => {
   const [courses, setCourses] = useState([]);
@@ -25,6 +26,10 @@ const Courses = () => {
   const [availableHistoryVideos, setAvailableHistoryVideos] = useState([]);
   const [showVideoLinking, setShowVideoLinking] = useState(false);
   const [linkingLoading, setLinkingLoading] = useState(false);
+  
+  // AI assignment state
+  const [selectedAiCourse, setSelectedAiCourse] = useState(null);
+  const [showAiAssignment, setShowAiAssignment] = useState(false);
   
   // Local state for UI
   const [addedCourses, setAddedCourses] = useState(() => {
@@ -210,6 +215,22 @@ const Courses = () => {
     } finally {
       setLinkingLoading(false);
     }
+  };
+
+  // Handle opening AI assignment modal
+  const handleOpenAiAssignment = async (course) => {
+    setSelectedAiCourse(course);
+    setShowAiAssignment(true);
+  };
+
+  // Handle AI assignment completion
+  const handleAiAssignmentComplete = async (courseId, result) => {
+    console.log('AI assignment completed for course:', courseId, result);
+    // Refresh courses if needed
+    await loadCourses();
+    // Close modal
+    setShowAiAssignment(false);
+    setSelectedAiCourse(null);
   };
 
   // Handle linking existing video
@@ -658,6 +679,15 @@ const Courses = () => {
                           )}
                         </button>
                         
+                        {isAdded && videoCount > 0 && (
+                          <button
+                            onClick={() => handleOpenAiAssignment(course)}
+                            className="w-full bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700 text-white text-xs py-2 px-3 rounded font-medium"
+                          >
+                            🤖 AI Course Analysis
+                          </button>
+                        )}
+                        
                         <p className="text-xs text-gray-500 text-center px-2">
                           {isAdded 
                             ? "Link course lectures to existing great-courses-plus videos or create new ones"
@@ -817,6 +847,36 @@ const Courses = () => {
                   })}
                 </div>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Course AI Assignment Modal */}
+      {showAiAssignment && selectedAiCourse && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-lg max-w-5xl w-full max-h-[95vh] overflow-hidden">
+            <div className="p-4 border-b bg-gradient-to-r from-indigo-600 to-purple-600 text-white">
+              <div className="flex justify-between items-center">
+                <h2 className="text-xl font-semibold">
+                  AI Analysis: {selectedAiCourse.title}
+                </h2>
+                <button
+                  onClick={() => setShowAiAssignment(false)}
+                  className="text-white hover:text-gray-200"
+                >
+                  ✕
+                </button>
+              </div>
+            </div>
+            
+            <div className="p-6 overflow-y-auto max-h-[calc(95vh-120px)]">
+              <CourseAIAssignment
+                course={selectedAiCourse}
+                onAssignToEvent={handleAiAssignmentComplete}
+                onCreateNewEvent={handleAiAssignmentComplete}
+                className="w-full"
+              />
             </div>
           </div>
         </div>

@@ -200,6 +200,7 @@ class VideoScraperService {
   async scrapeChannelVideos(channelUrl, channelId = null, progressCallback = null) {
     let browser = null;
     let page = null;
+    let browserPath = null; // Declare at method scope for error handling
     
     try {
       if (!channelUrl) {
@@ -251,9 +252,9 @@ class VideoScraperService {
 
       console.log(`Fetching videos from: ${videosUrl}`);
 
-      // Environment-optimized Puppeteer configuration
+      // Environment-optimized Puppeteer configuration with enhanced Docker/Unraid support
       const puppeteerConfig = {
-        headless: true,
+        headless: 'new', // Use new headless mode for better stability
         args: [
           '--no-sandbox', 
           '--disable-setuid-sandbox', 
@@ -261,22 +262,41 @@ class VideoScraperService {
           '--disable-blink-features=AutomationControlled',
           '--disable-features=VizDisplayCompositor',
           '--disable-gpu',
+          '--disable-gpu-sandbox',
+          '--disable-software-rasterizer',
           '--no-first-run',
           '--disable-background-timer-throttling',
           '--disable-backgrounding-occluded-windows',
           '--disable-renderer-backgrounding',
           '--disable-web-security',
+          '--disable-features=TranslateUI',
+          '--disable-extensions',
+          '--disable-plugins',
+          '--disable-default-apps',
+          '--disable-background-networking',
+          '--disable-sync',
+          '--metrics-recording-only',
+          '--mute-audio',
+          '--no-zygote',
+          '--single-process',
           '--memory-pressure-off',
-          '--max_old_space_size=4096'
+          '--max_old_space_size=4096',
+          '--disable-ipc-flooding-protection',
+          '--disable-hang-monitor',
+          '--disable-prompt-on-repost',
+          '--disable-domain-reliability',
+          '--disable-component-extensions-with-background-pages'
         ],
-        timeout: 60000,
-        protocolTimeout: 60000,
-        ignoreDefaultArgs: ['--disable-extensions'],
-        defaultViewport: null
+        timeout: 90000, // Increased timeout for slower environments
+        protocolTimeout: 90000,
+        ignoreDefaultArgs: ['--disable-extensions', '--enable-automation'],
+        defaultViewport: { width: 1280, height: 720 }, // Fixed viewport for consistency
+        handleSIGINT: false,
+        handleSIGTERM: false,
+        handleSIGHUP: false
       };
       
       // Try to get browser executable path
-      let browserPath = null;
       try {
         // Try Puppeteer's default path first
         browserPath = puppeteer.executablePath();
@@ -352,70 +372,159 @@ class VideoScraperService {
       }
 
       console.log('Launching browser...');
-      try {
-        browser = await puppeteer.launch(puppeteerConfig);
-      } catch (launchError) {
-        console.error('❌ Initial browser launch failed:', launchError.message);
-        
-        // Try with minimal configuration as fallback
-        console.log('🔄 Attempting fallback launch with minimal configuration...');
-        const fallbackConfig = {
-          headless: true,
-          args: [
-            '--no-sandbox',
-            '--disable-setuid-sandbox',
-            '--disable-dev-shm-usage',
-            '--disable-gpu',
-            '--no-zygote',
-            '--single-process',
-            '--disable-background-timer-throttling',
-            '--disable-backgrounding-occluded-windows',
-            '--disable-renderer-backgrounding',
-            '--disable-extensions',
-            '--disable-plugins',
-            '--disable-default-apps',
-            '--disable-sync',
-            '--metrics-recording-only',
-            '--mute-audio',
-            '--no-first-run',
-            '--safebrowsing-disable-auto-update',
-            '--disable-background-networking'
-          ]
-        };
-        
-        if (browserPath) {
-          fallbackConfig.executablePath = browserPath;
-        }
+      let launchAttempt = 0;
+      const maxLaunchAttempts = 3;
+      
+      while (launchAttempt < maxLaunchAttempts && !browser) {
+        launchAttempt++;
+        console.log(`🚀 Browser launch attempt ${launchAttempt}/${maxLaunchAttempts}`);
         
         try {
-          browser = await puppeteer.launch(fallbackConfig);
-          console.log('✅ Fallback browser launch successful');
-        } catch (fallbackError) {
-          console.error('❌ Fallback browser launch also failed:', fallbackError.message);
-          throw new Error(`Both primary and fallback browser launches failed. Primary: ${launchError.message}, Fallback: ${fallbackError.message}`);
+          // Add delay between attempts
+          if (launchAttempt > 1) {
+            console.log(`⏱️ Waiting 2 seconds before retry attempt...`);
+            await new Promise(resolve => setTimeout(resolve, 2000));
+          }
+          
+          browser = await puppeteer.launch(puppeteerConfig);
+          console.log('✅ Browser launched successfully');
+          break;
+          
+        } catch (launchError) {
+          console.error(`❌ Browser launch attempt ${launchAttempt} failed:`, launchError.message);
+          
+          if (launchAttempt === maxLaunchAttempts) {
+            // Final fallback with ultra-minimal configuration
+            console.log('🔄 Attempting final fallback with ultra-minimal configuration...');
+            const ultraMinimalConfig = {
+              headless: 'new',
+              args: [
+                '--no-sandbox',
+                '--disable-setuid-sandbox',
+                '--disable-dev-shm-usage',
+                '--disable-gpu',
+                '--no-zygote',
+                '--single-process',
+                '--disable-extensions',
+                '--disable-plugins',
+                '--disable-web-security',
+                '--disable-features=VizDisplayCompositor',
+                '--disable-background-networking',
+                '--disable-background-timer-throttling',
+                '--disable-backgrounding-occluded-windows',
+                '--disable-renderer-backgrounding',
+                '--disable-hang-monitor',
+                '--disable-prompt-on-repost',
+                '--disable-ipc-flooding-protection',
+                '--disable-domain-reliability',
+                '--disable-component-extensions-with-background-pages',
+                '--no-first-run',
+                '--mute-audio'
+              ],
+              timeout: 120000,
+              protocolTimeout: 120000,
+              ignoreDefaultArgs: ['--disable-extensions', '--enable-automation'],
+              defaultViewport: { width: 1280, height: 720 },
+              handleSIGINT: false,
+              handleSIGTERM: false,
+              handleSIGHUP: false
+            };
+            
+            if (browserPath) {
+              ultraMinimalConfig.executablePath = browserPath;
+            }
+            
+            try {
+              browser = await puppeteer.launch(ultraMinimalConfig);
+              console.log('✅ Ultra-minimal fallback browser launch successful');
+            } catch (fallbackError) {
+              console.error('❌ All browser launch attempts failed:', fallbackError.message);
+              console.error('❌ Environment diagnostics:', {
+                NODE_ENV: process.env.NODE_ENV,
+                platform: process.platform,
+                browserPath: browserPath || 'not found',
+                puppeteerExecutablePath: process.env.PUPPETEER_EXECUTABLE_PATH,
+                chromeBin: process.env.CHROME_BIN,
+                availableMemory: process.memoryUsage(),
+                dockerContainer: !!process.env.DOCKER_CONTAINER || process.env.NODE_ENV === 'production'
+              });
+              throw new Error(`All browser launch attempts failed. Final error: ${fallbackError.message}`);
+            }
+          }
         }
       }
-      page = await browser.newPage();
+      // Create new page with enhanced error handling
+      let pageCreationAttempts = 0;
+      const maxPageAttempts = 3;
       
-      // Enhanced error handling for page events
+      while (pageCreationAttempts < maxPageAttempts && !page) {
+        pageCreationAttempts++;
+        console.log(`📄 Page creation attempt ${pageCreationAttempts}/${maxPageAttempts}`);
+        
+        try {
+          page = await browser.newPage();
+          console.log('✅ Page created successfully');
+          break;
+        } catch (pageError) {
+          console.error(`❌ Page creation attempt ${pageCreationAttempts} failed:`, pageError.message);
+          
+          if (pageCreationAttempts < maxPageAttempts) {
+            console.log('⏱️ Waiting 1 second before page creation retry...');
+            await new Promise(resolve => setTimeout(resolve, 1000));
+          } else {
+            throw new Error(`Failed to create page after ${maxPageAttempts} attempts: ${pageError.message}`);
+          }
+        }
+      }
+      
+      // Enhanced error handling for page events with better logging
       page.on('error', error => {
-        console.error('Page error:', error);
+        console.error('🚨 Page error event:', error.message);
+        console.error('🚨 Page error stack:', error.stack);
       });
       
       page.on('pageerror', error => {
-        console.error('Page error (pageerror):', error);
+        console.error('🚨 Page JavaScript error:', error.message);
       });
       
       page.on('requestfailed', request => {
-        console.log('Request failed:', request.url(), request.failure()?.errorText);
+        const failure = request.failure();
+        console.log(`🚫 Request failed: ${request.url()} - ${failure?.errorText || 'Unknown error'}`);
       });
       
-      // Set browser settings with timeouts
-      await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
-      await page.setViewport({ width: 1920, height: 1080 });
+      page.on('disconnect', () => {
+        console.warn('⚠️ Page disconnected');
+      });
       
-      page.setDefaultNavigationTimeout(45000);
-      page.setDefaultTimeout(30000);
+      page.on('close', () => {
+        console.log('📄 Page closed');
+      });
+      
+      // Set browser settings with conservative timeouts for production
+      const userAgent = 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
+      
+      try {
+        await page.setUserAgent(userAgent);
+        console.log('✅ User agent set successfully');
+      } catch (uaError) {
+        console.warn('⚠️ Failed to set user agent:', uaError.message);
+      }
+      
+      try {
+        await page.setViewport({ width: 1280, height: 720 });
+        console.log('✅ Viewport set successfully');
+      } catch (vpError) {
+        console.warn('⚠️ Failed to set viewport:', vpError.message);
+      }
+      
+      // Set conservative timeouts for production stability
+      const navigationTimeout = process.env.NODE_ENV === 'production' ? 120000 : 60000;
+      const defaultTimeout = process.env.NODE_ENV === 'production' ? 90000 : 45000;
+      
+      page.setDefaultNavigationTimeout(navigationTimeout);
+      page.setDefaultTimeout(defaultTimeout);
+      
+      console.log(`⏱️ Timeouts set - Navigation: ${navigationTimeout}ms, Default: ${defaultTimeout}ms`);
       
       if (progressCallback) {
         progressCallback({ stage: 'navigating', message: 'Loading channel page...' });
@@ -423,77 +532,140 @@ class VideoScraperService {
 
       console.log('Loading page...');
       
-      // Enhanced navigation with retry logic and frame detachment handling
+      // Enhanced navigation with production-optimized retry logic
       let navigationAttempts = 0;
-      const maxNavigationAttempts = 5;
+      const maxNavigationAttempts = process.env.NODE_ENV === 'production' ? 7 : 5;
+      let navigationSuccess = false;
       
-      while (navigationAttempts < maxNavigationAttempts) {
+      while (navigationAttempts < maxNavigationAttempts && !navigationSuccess) {
+        navigationAttempts++;
+        console.log(`🌐 Navigation attempt ${navigationAttempts}/${maxNavigationAttempts}: ${videosUrl}`);
+        
         try {
-          // Create new page if current one is detached
-          if (page.isClosed() || navigationAttempts > 0) {
-            if (!page.isClosed()) {
-              await page.close();
-            }
+          // Check if page is still valid before navigation
+          if (page.isClosed()) {
+            console.log('📄 Page is closed, creating new page...');
             page = await browser.newPage();
             
-            // Re-setup page after recreation
-            await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
-            await page.setViewport({ width: 1920, height: 1080 });
-            page.setDefaultNavigationTimeout(60000);
-            page.setDefaultTimeout(45000);
+            // Re-setup page with production-optimized settings
+            await page.setUserAgent(userAgent);
+            await page.setViewport({ width: 1280, height: 720 });
+            page.setDefaultNavigationTimeout(navigationTimeout);
+            page.setDefaultTimeout(defaultTimeout);
+            
+            // Re-add event listeners
+            page.on('error', error => console.error('🚨 Page error (recreated):', error.message));
+            page.on('pageerror', error => console.error('🚨 Page JS error (recreated):', error.message));
+            page.on('disconnect', () => console.warn('⚠️ Page disconnected (recreated)'));
           }
           
-          console.log(`🌐 Navigation attempt ${navigationAttempts + 1}: Going to ${videosUrl}`);
-          
-          // Use more conservative navigation strategy for production
+          // Progressive navigation strategy based on attempt number
+          let navigationOptions;
           if (process.env.NODE_ENV === 'production') {
-            await page.goto(videosUrl, { 
-              waitUntil: 'domcontentloaded',
-              timeout: 45000 
-            });
+            // Production: Very conservative approach
+            navigationOptions = {
+              waitUntil: navigationAttempts <= 2 ? 'domcontentloaded' : 'load',
+              timeout: Math.min(60000 + (navigationAttempts * 15000), 120000) // Increase timeout with attempts
+            };
           } else {
-            await page.goto(videosUrl, { 
-              waitUntil: ['domcontentloaded', 'networkidle2'],
-              timeout: 60000 
-            });
+            // Development: More flexible
+            navigationOptions = {
+              waitUntil: navigationAttempts <= 2 ? ['domcontentloaded', 'networkidle2'] : 'domcontentloaded',
+              timeout: 60000 + (navigationAttempts * 10000)
+            };
           }
           
-          console.log('🌐 Page loaded, waiting for content...');
+          console.log(`📋 Navigation options: ${JSON.stringify(navigationOptions)}`);
+          
+          // Add extra delay for later attempts to avoid overwhelming the browser
+          if (navigationAttempts > 2) {
+            const delay = (navigationAttempts - 2) * 2000;
+            console.log(`⏱️ Adding ${delay}ms delay before navigation...`);
+            await new Promise(resolve => setTimeout(resolve, delay));
+          }
+          
+          await page.goto(videosUrl, navigationOptions);
+          
+          // Verify navigation actually worked
+          const currentUrl = await page.url();
+          if (!currentUrl.includes('youtube.com')) {
+            throw new Error(`Navigation failed: ended up at ${currentUrl} instead of YouTube`);
+          }
           
           console.log('✅ Successfully navigated to channel page');
-          break;
+          console.log(`📍 Current URL: ${currentUrl}`);
+          navigationSuccess = true;
           
         } catch (navigationError) {
-          navigationAttempts++;
-          console.log(`Navigation attempt ${navigationAttempts} failed:`, navigationError.message);
+          console.error(`❌ Navigation attempt ${navigationAttempts} failed:`, navigationError.message);
+          console.error(`❌ Error type: ${navigationError.name}`);
+          
+          // Log additional context for debugging
+          if (navigationError.message.includes('Target closed')) {
+            console.error('🎯 Target closed error detected - browser connection issue');
+          } else if (navigationError.message.includes('timeout')) {
+            console.error('⏱️ Timeout error detected - page loading too slow');
+          } else if (navigationError.message.includes('net::')) {
+            console.error('🌐 Network error detected - connection issue');
+          }
           
           if (navigationAttempts >= maxNavigationAttempts) {
+            console.error('❌ All navigation attempts exhausted');
+            console.error('❌ Final error details:', {
+              message: navigationError.message,
+              stack: navigationError.stack,
+              attempt: navigationAttempts,
+              maxAttempts: maxNavigationAttempts,
+              environment: process.env.NODE_ENV,
+              platform: process.platform,
+              browserPath: browserPath || 'default',
+              url: videosUrl
+            });
             throw new Error(`Failed to navigate after ${maxNavigationAttempts} attempts: ${navigationError.message}`);
           }
           
-          // Longer wait between retries for frame detachment issues
-          await new Promise(resolve => setTimeout(resolve, 5000));
+          // Progressive backoff delay
+          const backoffDelay = Math.min(5000 * navigationAttempts, 20000);
+          console.log(`⏱️ Waiting ${backoffDelay}ms before retry...`);
+          await new Promise(resolve => setTimeout(resolve, backoffDelay));
         }
       }
 
-      // Wait for initial content with multiple selector strategies
+      // Wait for initial content with enhanced selector strategies and timeouts
       let contentLoaded = false;
-      const selectors = [
-        'ytd-rich-grid-media',
-        'ytd-video-renderer', 
-        '#contents',
-        '[role="main"]',
-        'ytd-browse'
+      const contentTimeout = process.env.NODE_ENV === 'production' ? 30000 : 20000;
+      
+      // Progressive selector strategy - start with most specific, fall back to general
+      const selectorGroups = [
+        // Primary video content selectors
+        ['ytd-rich-grid-media', 'ytd-video-renderer'],
+        // Fallback content containers
+        ['#contents', '[role="main"]'],
+        // General page structure
+        ['ytd-browse', 'ytd-page-manager', '#page-manager'],
+        // Last resort - any YouTube content
+        ['[id*="content"]', '[class*="content"]']
       ];
       
-      for (const selector of selectors) {
-        try {
-          await page.waitForSelector(selector, { timeout: 15000 });
-          console.log(`✅ Found content with selector: ${selector}`);
-          contentLoaded = true;
-          break;
-        } catch (selectorError) {
-          console.log(`⏭️ Selector ${selector} not found, trying next...`);
+      console.log('🔍 Waiting for page content to load...');
+      
+      for (let groupIndex = 0; groupIndex < selectorGroups.length && !contentLoaded; groupIndex++) {
+        const selectors = selectorGroups[groupIndex];
+        console.log(`📋 Trying selector group ${groupIndex + 1}/${selectorGroups.length}: [${selectors.join(', ')}]`);
+        
+        for (const selector of selectors) {
+          try {
+            console.log(`🎯 Waiting for selector: ${selector}`);
+            await page.waitForSelector(selector, { 
+              timeout: contentTimeout,
+              visible: false // Don't require visibility, just presence in DOM
+            });
+            console.log(`✅ Found content with selector: ${selector}`);
+            contentLoaded = true;
+            break;
+          } catch (selectorError) {
+            console.log(`⏭️ Selector ${selector} not found, trying next...`);
+          }
         }
       }
       
@@ -816,12 +988,47 @@ class VideoScraperService {
         channelUrl
       });
       
-      // Clean up browser if still open
+      // Enhanced browser cleanup for production stability
+      if (page && !page.isClosed()) {
+        try {
+          console.log('🧹 Closing page...');
+          await page.close();
+        } catch (pageCloseError) {
+          console.error('⚠️ Error closing page:', pageCloseError.message);
+        }
+      }
+      
       if (browser) {
         try {
+          console.log('🧹 Closing browser...');
+          // Get all pages first to close them individually
+          const pages = await browser.pages();
+          for (const p of pages) {
+            if (!p.isClosed()) {
+              try {
+                await p.close();
+              } catch (e) {
+                console.warn('⚠️ Error closing individual page:', e.message);
+              }
+            }
+          }
+          
+          // Close the browser
           await browser.close();
-        } catch (closeError) {
-          console.error('Error closing browser:', closeError);
+          console.log('✅ Browser closed successfully');
+        } catch (browserCloseError) {
+          console.error('⚠️ Error closing browser:', browserCloseError.message);
+          
+          // Force kill browser process if needed
+          try {
+            const browserProcess = browser.process();
+            if (browserProcess && !browserProcess.killed) {
+              console.log('🔪 Force killing browser process...');
+              browserProcess.kill('SIGKILL');
+            }
+          } catch (killError) {
+            console.error('⚠️ Error force killing browser:', killError.message);
+          }
         }
       }
       
