@@ -212,6 +212,8 @@ class VideoScraperService {
       }
 
       console.log(`Starting to scrape videos from channel: ${channelUrl}`);
+      console.log(`🔧 Environment: ${process.env.NODE_ENV || 'development'}`);
+      console.log(`🔧 Platform: ${process.platform}`);
       
       if (progressCallback) {
         progressCallback({ stage: 'initializing', message: 'Setting up browser...' });
@@ -365,7 +367,19 @@ class VideoScraperService {
             '--disable-dev-shm-usage',
             '--disable-gpu',
             '--no-zygote',
-            '--single-process'
+            '--single-process',
+            '--disable-background-timer-throttling',
+            '--disable-backgrounding-occluded-windows',
+            '--disable-renderer-backgrounding',
+            '--disable-extensions',
+            '--disable-plugins',
+            '--disable-default-apps',
+            '--disable-sync',
+            '--metrics-recording-only',
+            '--mute-audio',
+            '--no-first-run',
+            '--safebrowsing-disable-auto-update',
+            '--disable-background-networking'
           ]
         };
         
@@ -373,8 +387,13 @@ class VideoScraperService {
           fallbackConfig.executablePath = browserPath;
         }
         
-        browser = await puppeteer.launch(fallbackConfig);
-        console.log('✅ Fallback browser launch successful');
+        try {
+          browser = await puppeteer.launch(fallbackConfig);
+          console.log('✅ Fallback browser launch successful');
+        } catch (fallbackError) {
+          console.error('❌ Fallback browser launch also failed:', fallbackError.message);
+          throw new Error(`Both primary and fallback browser launches failed. Primary: ${launchError.message}, Fallback: ${fallbackError.message}`);
+        }
       }
       page = await browser.newPage();
       
@@ -424,10 +443,22 @@ class VideoScraperService {
             page.setDefaultTimeout(45000);
           }
           
-          await page.goto(videosUrl, { 
-            waitUntil: ['domcontentloaded', 'networkidle0'],
-            timeout: 60000 
-          });
+          console.log(`🌐 Navigation attempt ${navigationAttempts + 1}: Going to ${videosUrl}`);
+          
+          // Use more conservative navigation strategy for production
+          if (process.env.NODE_ENV === 'production') {
+            await page.goto(videosUrl, { 
+              waitUntil: 'domcontentloaded',
+              timeout: 45000 
+            });
+          } else {
+            await page.goto(videosUrl, { 
+              waitUntil: ['domcontentloaded', 'networkidle2'],
+              timeout: 60000 
+            });
+          }
+          
+          console.log('🌐 Page loaded, waiting for content...');
           
           console.log('✅ Successfully navigated to channel page');
           break;
@@ -774,7 +805,16 @@ class VideoScraperService {
       };
 
     } catch (error) {
-      console.error('Error scraping channel videos:', error);
+      console.error('❌ Error scraping channel videos:', error.message);
+      console.error('❌ Error stack:', error.stack);
+      console.error('❌ Environment info:', {
+        NODE_ENV: process.env.NODE_ENV,
+        platform: process.platform,
+        browserPath: browserPath || 'not found',
+        hasPage: !!page,
+        hasBrowser: !!browser,
+        channelUrl
+      });
       
       // Clean up browser if still open
       if (browser) {
