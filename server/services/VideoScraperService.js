@@ -272,6 +272,45 @@ class VideoScraperService {
         ignoreDefaultArgs: ['--disable-extensions'],
         defaultViewport: null
       };
+      
+      // Try to get browser executable path
+      let browserPath = null;
+      try {
+        // Try Puppeteer's default path first
+        browserPath = puppeteer.executablePath();
+        console.log('Found Puppeteer browser at:', browserPath);
+      } catch (error) {
+        console.log('Could not get Puppeteer executable path:', error.message);
+        
+        // Fallback paths for common Linux environments
+        const fallbackPaths = [
+          '/usr/bin/google-chrome',
+          '/usr/bin/google-chrome-stable',
+          '/usr/bin/chromium',
+          '/usr/bin/chromium-browser',
+          '/snap/bin/chromium',
+          process.env.CHROME_BIN,
+          process.env.PUPPETEER_EXECUTABLE_PATH
+        ].filter(Boolean);
+        
+        for (const path of fallbackPaths) {
+          try {
+            const fs = require('fs');
+            if (fs.existsSync(path)) {
+              browserPath = path;
+              console.log('Found fallback browser at:', browserPath);
+              break;
+            }
+          } catch (e) {
+            // Continue checking other paths
+          }
+        }
+      }
+      
+      // Set the executable path if found
+      if (browserPath) {
+        puppeteerConfig.executablePath = browserPath;
+      }
 
       // Windows-specific adjustments
       if (process.platform === 'win32' && process.env.NODE_ENV === 'development') {
@@ -293,9 +332,17 @@ class VideoScraperService {
 
       console.log('Environment:', process.env.NODE_ENV);
       console.log('Platform:', process.platform);
+      console.log('Browser executable:', puppeteerConfig.executablePath || 'default');
       
       if (process.env.NODE_ENV === 'production') {
-        console.log('Production mode: Using Puppeteer default browser discovery');
+        console.log('Production mode: Enhanced browser detection');
+        
+        // Additional production safety checks
+        if (!browserPath) {
+          console.warn('⚠️ No browser executable found. This may cause launch failures.');
+          console.log('Consider installing Chrome: apt-get update && apt-get install -y google-chrome-stable');
+          console.log('Or set PUPPETEER_EXECUTABLE_PATH environment variable');
+        }
       }
 
       if (progressCallback) {
@@ -303,7 +350,32 @@ class VideoScraperService {
       }
 
       console.log('Launching browser...');
-      browser = await puppeteer.launch(puppeteerConfig);
+      try {
+        browser = await puppeteer.launch(puppeteerConfig);
+      } catch (launchError) {
+        console.error('❌ Initial browser launch failed:', launchError.message);
+        
+        // Try with minimal configuration as fallback
+        console.log('🔄 Attempting fallback launch with minimal configuration...');
+        const fallbackConfig = {
+          headless: true,
+          args: [
+            '--no-sandbox',
+            '--disable-setuid-sandbox',
+            '--disable-dev-shm-usage',
+            '--disable-gpu',
+            '--no-zygote',
+            '--single-process'
+          ]
+        };
+        
+        if (browserPath) {
+          fallbackConfig.executablePath = browserPath;
+        }
+        
+        browser = await puppeteer.launch(fallbackConfig);
+        console.log('✅ Fallback browser launch successful');
+      }
       page = await browser.newPage();
       
       // Enhanced error handling for page events

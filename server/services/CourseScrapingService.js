@@ -1,5 +1,7 @@
 const cheerio = require('cheerio');
 const { PrismaClient } = require('@prisma/client');
+const fs = require('fs');
+const path = require('path');
 
 const prisma = new PrismaClient();
 
@@ -132,6 +134,16 @@ class CourseScrapingService {
             continue;
           }
 
+          // Download guidebook if available
+          let guidebookPath = null;
+          if (courseInfo.guidebookUrl) {
+            console.log(`📖 Attempting to download guidebook from: ${courseInfo.guidebookUrl}`);
+            guidebookPath = await this.downloadGuidebook({
+              title: courseInfo.title,
+              id: 'temp' // Temporary since we don't have the ID yet
+            }, courseInfo.guidebookUrl);
+          }
+
           // Create course in database
           const course = await prisma.historyCourse.create({
             data: {
@@ -141,11 +153,15 @@ class CourseScrapingService {
               instructor: courseInfo.instructor,
               thumbnail: courseInfo.thumbnail || 'https://img.youtube.com/vi/dQw4w9WgXcQ/mqdefault.jpg',
               description: courseInfo.description ? courseInfo.description.substring(0, 500) : null,
+              guidebook: guidebookPath,
               completed: false
             }
           });
 
           console.log(`✅ Added course: ${course.title}`);
+          if (guidebookPath) {
+            console.log(`📖 Guidebook saved: ${guidebookPath}`);
+          }
           coursesAdded++;
 
           // Add a small delay to be respectful to the server
@@ -247,6 +263,16 @@ class CourseScrapingService {
         };
       }
 
+      // Download guidebook if available
+      let guidebookPath = null;
+      if (courseInfo.guidebookUrl) {
+        console.log(`📖 Attempting to download guidebook from: ${courseInfo.guidebookUrl}`);
+        guidebookPath = await this.downloadGuidebook({
+          title: courseInfo.title,
+          id: 'temp' // Temporary since we don't have the ID yet
+        }, courseInfo.guidebookUrl);
+      }
+
       // Create course in database
       const course = await prisma.historyCourse.create({
         data: {
@@ -256,11 +282,15 @@ class CourseScrapingService {
           instructor: courseInfo.instructor,
           thumbnail: courseInfo.thumbnail || 'https://img.youtube.com/vi/dQw4w9WgXcQ/mqdefault.jpg',
           description: courseInfo.description ? courseInfo.description.substring(0, 500) : null,
+          guidebook: guidebookPath,
           completed: false
         }
       });
 
       console.log(`✅ Added single course: ${course.title}`);
+      if (guidebookPath) {
+        console.log(`📖 Guidebook saved: ${guidebookPath}`);
+      }
 
       return {
         success: true,
@@ -351,6 +381,19 @@ class CourseScrapingService {
                       $('.instructor').text().trim() ||
                       'The Great Courses';
 
+    // Extract guidebook URL
+    const guidebookElement = $('.guidebook-btn, a.guidebook-btn, [class*="guidebook-btn"]').first();
+    let guidebookUrl = null;
+    if (guidebookElement.length > 0) {
+      guidebookUrl = guidebookElement.attr('href');
+      // Make URL absolute if it's relative
+      if (guidebookUrl && guidebookUrl.startsWith('/')) {
+        const baseUrlObj = new URL(courseUrl);
+        guidebookUrl = `${baseUrlObj.protocol}//${baseUrlObj.host}${guidebookUrl}`;
+      }
+      console.log(`📖 Found guidebook: ${guidebookUrl}`);
+    }
+
     // Determine category based on URL or page content
     let category = 'General';
     if (courseUrl.includes('history') || title.toLowerCase().includes('history')) {
@@ -369,7 +412,8 @@ class CourseScrapingService {
       title,
       description,
       instructor,
-      category
+      category,
+      guidebookUrl
     };
   }
 
@@ -425,23 +469,27 @@ class CourseScrapingService {
       // Create videos in database
       for (const videoData of videos) {
         try {
-          // Check if video already exists
+          // Check if HistoryCourseVideo already exists
           const existingVideo = await prisma.historyCourseVideo.findUnique({
             where: { url: videoData.url }
           });
 
           if (existingVideo) {
-            console.log(`⏭️  Video already exists: ${videoData.title}`);
+            console.log(`⏭️  Course video already exists: ${videoData.title}`);
             videosSkipped++;
             continue;
           }
 
-          await prisma.historyCourseVideo.create({
+          // Create the HistoryCourseVideo
+          const courseVideo = await prisma.historyCourseVideo.create({
             data: {
               ...videoData,
               watched: false
             }
           });
+
+          // Now check if a corresponding HistoryVideo exists or should be created
+          await this.linkOrCreateHistoryVideo(courseVideo, course);
 
           console.log(`✅ Added video: ${videoData.title}`);
           videosAdded++;
@@ -464,6 +512,129 @@ class CourseScrapingService {
     } catch (error) {
       console.error('❌ Error scraping course videos:', error);
       throw new Error(`Failed to scrape course videos: ${error.message}`);
+    }
+  }
+
+  /**
+   * Download guidebook PDF for a course
+   */
+  async downloadGuidebook(course, guidebookUrl) {
+    try {
+      console.log(`📖 Downloading guidebook for course: ${course.title}`);
+      
+      // Create guidebooks directory if it doesn't exist
+      const guidebooksDir = path.join(__dirname, '..', 'guidebooks');
+      if (!fs.existsSync(guidebooksDir)) {
+        fs.mkdirSync(guidebooksDir, { recursive: true });
+      }
+
+      // Generate safe filename from course title
+      const safeTitle = course.title
+        .replace(/[^\w\s-]/g, '') // Remove special characters
+        .replace(/\s+/g, '-') // Replace spaces with hyphens
+        .toLowerCase();
+      
+      const filename = `${safeTitle}-guidebook.pdf`;
+      const filepath = path.join(guidebooksDir, filename);
+
+      // Download the file
+      const response = await fetch(guidebookUrl, {
+        headers: {
+          'User-Agent': this.userAgent
+        }
+      });
+
+      if (!response.ok) {
+        console.log(`❌ Failed to download guidebook: ${response.status}`);
+        return null;
+      }
+
+      // Check if it's actually a PDF
+      const contentType = response.headers.get('content-type');
+      if (!contentType || !contentType.includes('pdf')) {
+        console.log(`⚠️ Guidebook URL does not point to a PDF file: ${contentType}`);
+        return null;
+      }
+
+      // Write the file
+      const arrayBuffer = await response.arrayBuffer();
+      const buffer = Buffer.from(arrayBuffer);
+      fs.writeFileSync(filepath, buffer);
+
+      console.log(`✅ Downloaded guidebook: ${filename}`);
+      
+      // Return relative path for storage in database
+      return `/guidebooks/${filename}`;
+
+    } catch (error) {
+      console.error(`❌ Error downloading guidebook for ${course.title}:`, error);
+      return null;
+    }
+  }
+
+  /**
+   * Link or create a HistoryVideo for a course video
+   */
+  async linkOrCreateHistoryVideo(courseVideo, course) {
+    try {
+      // First, try to find an existing HistoryVideo that might match this course video
+      // We'll search by courseTitle and lecture number first
+      let existingHistoryVideo = null;
+
+      if (courseVideo.order) {
+        existingHistoryVideo = await prisma.historyVideo.findFirst({
+          where: {
+            courseTitle: course.title,
+            lectureNumber: courseVideo.order,
+            deleted: false
+          }
+        });
+      }
+
+      // If no match by course title and lecture number, try to find by similar title
+      if (!existingHistoryVideo) {
+        existingHistoryVideo = await prisma.historyVideo.findFirst({
+          where: {
+            title: {
+              contains: courseVideo.title
+            },
+            courseTitle: course.title,
+            deleted: false
+          }
+        });
+      }
+
+      if (existingHistoryVideo) {
+        // Update the existing HistoryVideo with course information
+        await prisma.historyVideo.update({
+          where: { id: existingHistoryVideo.id },
+          data: { 
+            courseTitle: course.title,
+            lectureNumber: courseVideo.order
+          }
+        });
+        console.log(`🔗 Updated existing HistoryVideo: ${existingHistoryVideo.title}`);
+      } else {
+        // Create a new HistoryVideo
+        const historyVideoData = {
+          title: courseVideo.title,
+          url: courseVideo.url,
+          type: 'great-courses-plus',
+          description: courseVideo.description,
+          courseTitle: course.title,
+          lectureNumber: courseVideo.order,
+          assignedByAI: true
+        };
+
+        await prisma.historyVideo.create({
+          data: historyVideoData
+        });
+        console.log(`🆕 Created new HistoryVideo: ${courseVideo.title}`);
+      }
+
+    } catch (error) {
+      console.error(`❌ Error linking/creating HistoryVideo for ${courseVideo.title}:`, error);
+      // Don't throw error here as we don't want to fail the whole course import
     }
   }
 }

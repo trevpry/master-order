@@ -39,7 +39,7 @@ RUN npm run build
 # Production stage
 FROM node:20-alpine AS production
 
-# Install runtime dependencies
+# Install runtime dependencies including Chrome for Puppeteer
 RUN apk add --no-cache \
     python3 \
     make \
@@ -49,6 +49,12 @@ RUN apk add --no-cache \
     su-exec \
     postgresql-client \
     netcat-openbsd \
+    chromium \
+    nss \
+    freetype \
+    harfbuzz \
+    ca-certificates \
+    ttf-freefont \
     && rm -rf /var/cache/apk/*
 
 # Create app directory
@@ -92,6 +98,9 @@ RUN mkdir -p /app/data /app/server/artwork-cache /app/server/temp-uploads /app/l
 # Set up environment
 ENV NODE_ENV=production
 ENV PORT=3001
+# Set Puppeteer to use system-installed Chromium
+ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
+ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium-browser
 
 # Expose port
 EXPOSE 3001

@@ -1673,6 +1673,7 @@ model HistoryCourse {
   instructor  String?
   thumbnail   String?
   description String?
+  guidebook   String?
   completed   Boolean              @default(false)
   createdAt   DateTime             @default(now())
   updatedAt   DateTime             @updatedAt

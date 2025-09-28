@@ -51,12 +51,12 @@ server/
 **CRITICAL**: When modifying database schema, ALL THREE files must be updated:
 ```bash
 # 1. Edit schema.prisma
-# 2. Synchronize schemas
-cp server/prisma/schema.prisma server/prisma/schema.sqlite.prisma
-cp server/prisma/schema.prisma server/prisma/schema.postgresql.prisma
+# 2. Synchronize schemas (run from server folder)
+cp prisma/schema.prisma prisma/schema.sqlite.prisma
+cp prisma/schema.prisma prisma/schema.postgresql.prisma
 # 3. Update PostgreSQL provider
-sed -i 's/provider = "sqlite"/provider = "postgresql"/' server/prisma/schema.postgresql.prisma
-# 4. Generate and migrate
+sed -i 's/provider = "sqlite"/provider = "postgresql"/' prisma/schema.postgresql.prisma
+# 4. Generate Prisma client and migrate (MUST run from server folder)
 npx prisma generate && npx prisma migrate dev --name "description"
 ```
 

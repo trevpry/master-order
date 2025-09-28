@@ -321,7 +321,23 @@ const Videos = () => {
   const handleToggleAssignLater = async (videoId, assignLater) => {
     try {
       await historyPlusApi.updateVideo(videoId, { assignLater: !assignLater });
-      await fetchData(); // Refresh data
+      
+      // Update the specific video in state instead of fetching all data
+      setVideos(prevVideos => 
+        prevVideos.map(video => 
+          video.id === videoId 
+            ? { ...video, assignLater: !assignLater }
+            : video
+        )
+      );
+      
+      // Update stats to reflect the change
+      setStats(prevStats => ({
+        ...prevStats,
+        assignLater: !assignLater 
+          ? prevStats.assignLater + 1 
+          : prevStats.assignLater - 1
+      }));
     } catch (error) {
       console.error('Error toggling assign later status:', error);
       alert('Failed to update assign later status');

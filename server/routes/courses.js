@@ -1,5 +1,6 @@
 const express = require('express');
 const router = express.Router();
+const path = require('path');
 const { PrismaClient } = require('@prisma/client');
 const CourseScrapingService = require('../services/CourseScrapingService');
 const { asyncHandler, sendSuccess, sendBadRequest, sendServerError } = require('../utils/responses');
@@ -288,6 +289,184 @@ router.post('/:id/scrape-videos', asyncHandler(async (req, res) => {
 }));
 
 // ==========================================
+// VIDEO LINKING OPERATIONS
+// ==========================================
+
+// GET /api/courses/:id/videos - Get videos for a course with linking status
+router.get('/:id/videos', asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  
+  const course = await prisma.historyCourse.findUnique({
+    where: { id: parseInt(id) },
+    include: {
+      videos: {
+        orderBy: { order: 'asc' }
+      }
+    }
+  });
+  
+  if (!course) {
+    return sendBadRequest(res, 'Course not found');
+  }
+  
+  // Get HistoryVideos linked to this course by courseTitle
+  const linkedHistoryVideos = await prisma.historyVideo.findMany({
+    where: {
+      courseTitle: course.title,
+      deleted: false
+    },
+    orderBy: { lectureNumber: 'asc' }
+  });
+  
+  // Also get all available HistoryVideos that could be linked
+  const availableHistoryVideos = await prisma.historyVideo.findMany({
+    where: {
+      type: 'great-courses-plus',
+      deleted: false,
+      OR: [
+        { courseTitle: null },
+        { courseTitle: course.title }
+      ]
+    },
+    orderBy: { title: 'asc' }
+  });
+  
+  sendSuccess(res, {
+    course: {
+      ...course,
+      historyVideos: linkedHistoryVideos
+    },
+    availableHistoryVideos
+  });
+}));
+
+// POST /api/courses/:courseId/videos/:videoId/link - Link existing HistoryVideo to course lecture
+router.post('/:courseId/videos/:videoId/link', asyncHandler(async (req, res) => {
+  const { courseId, videoId } = req.params;
+  const { historyVideoId } = req.body;
+  
+  validateRequiredFieldsDirect(req.body, ['historyVideoId']);
+  
+  const course = await prisma.historyCourse.findUnique({
+    where: { id: parseInt(courseId) }
+  });
+  
+  if (!course) {
+    return sendBadRequest(res, 'Course not found');
+  }
+  
+  const courseVideo = await prisma.historyCourseVideo.findUnique({
+    where: { id: parseInt(videoId) }
+  });
+  
+  if (!courseVideo) {
+    return sendBadRequest(res, 'Course video not found');
+  }
+  
+  const historyVideo = await prisma.historyVideo.findUnique({
+    where: { id: parseInt(historyVideoId) }
+  });
+  
+  if (!historyVideo) {
+    return sendBadRequest(res, 'History video not found');
+  }
+  
+  // Update the HistoryVideo to link it to this course
+  await prisma.historyVideo.update({
+    where: { id: parseInt(historyVideoId) },
+    data: {
+      courseTitle: course.title,
+      lectureNumber: courseVideo.order
+    }
+  });
+  
+  sendSuccess(res, { message: 'Video linked successfully' });
+}));
+
+// POST /api/courses/:courseId/videos/:videoId/create - Create new HistoryVideo for course lecture
+router.post('/:courseId/videos/:videoId/create', asyncHandler(async (req, res) => {
+  const { courseId, videoId } = req.params;
+  const { title, url, description } = req.body;
+  
+  validateRequiredFieldsDirect(req.body, ['title', 'url']);
+  
+  const course = await prisma.historyCourse.findUnique({
+    where: { id: parseInt(courseId) }
+  });
+  
+  if (!course) {
+    return sendBadRequest(res, 'Course not found');
+  }
+  
+  const courseVideo = await prisma.historyCourseVideo.findUnique({
+    where: { id: parseInt(videoId) }
+  });
+  
+  if (!courseVideo) {
+    return sendBadRequest(res, 'Course video not found');
+  }
+  
+  // Create new HistoryVideo
+  const historyVideo = await prisma.historyVideo.create({
+    data: {
+      title: title || courseVideo.title,
+      url,
+      type: 'great-courses-plus',
+      description: description || courseVideo.description,
+      courseTitle: course.title,
+      lectureNumber: courseVideo.order,
+      assignedByAI: false
+    }
+  });
+  
+  sendSuccess(res, { 
+    message: 'History video created successfully',
+    historyVideo 
+  });
+}));
+
+// DELETE /api/courses/:courseId/videos/:videoId/unlink - Unlink HistoryVideo from course
+router.delete('/:courseId/videos/:videoId/unlink', asyncHandler(async (req, res) => {
+  const { courseId, videoId } = req.params;
+  
+  const courseVideo = await prisma.historyCourseVideo.findUnique({
+    where: { id: parseInt(videoId) }
+  });
+  
+  if (!courseVideo) {
+    return sendBadRequest(res, 'Course video not found');
+  }
+  
+  // Find linked HistoryVideo by courseTitle and lecture number
+  const course = await prisma.historyCourse.findUnique({
+    where: { id: parseInt(courseId) }
+  });
+  
+  if (!course) {
+    return sendBadRequest(res, 'Course not found');
+  }
+  
+  const historyVideo = await prisma.historyVideo.findFirst({
+    where: {
+      courseTitle: course.title,
+      lectureNumber: courseVideo.order
+    }
+  });
+  
+  if (historyVideo) {
+    await prisma.historyVideo.update({
+      where: { id: historyVideo.id },
+      data: {
+        courseTitle: null,
+        lectureNumber: null
+      }
+    });
+  }
+  
+  sendSuccess(res, { message: 'Video unlinked successfully' });
+}));
+
+// ==========================================
 // STATISTICS
 // ==========================================
 
@@ -321,6 +500,43 @@ router.get('/statistics', asyncHandler(async (req, res) => {
       count: cat._count.category
     }))
   });
+}));
+
+// ==========================================
+// GUIDEBOOK SERVING
+// ==========================================
+
+// GET /api/courses/guidebooks/:filename - Serve guidebook files
+router.get('/guidebooks/:filename', asyncHandler(async (req, res) => {
+  const { filename } = req.params;
+  
+  // Security check: prevent directory traversal
+  if (filename.includes('..') || filename.includes('/') || filename.includes('\\')) {
+    return sendBadRequest(res, 'Invalid filename');
+  }
+  
+  // Ensure it's a PDF file
+  if (!filename.endsWith('.pdf')) {
+    return sendBadRequest(res, 'Only PDF files are allowed');
+  }
+  
+  const guidebooksDir = path.join(__dirname, '..', 'guidebooks');
+  const filepath = path.join(guidebooksDir, filename);
+  
+  // Check if file exists
+  try {
+    const fs = require('fs').promises;
+    await fs.access(filepath);
+  } catch (error) {
+    return sendBadRequest(res, 'Guidebook not found');
+  }
+  
+  // Set appropriate headers for PDF
+  res.setHeader('Content-Type', 'application/pdf');
+  res.setHeader('Content-Disposition', `inline; filename="${filename}"`);
+  
+  // Send the file
+  res.sendFile(filepath);
 }));
 
 module.exports = router;

@@ -19,6 +19,13 @@ const Courses = () => {
   const [newCourseUrl, setNewCourseUrl] = useState('');
   const [isScrapingCourses, setIsScrapingCourses] = useState(false);
   
+  // Video linking state
+  const [selectedCourse, setSelectedCourse] = useState(null);
+  const [courseVideos, setCourseVideos] = useState([]);
+  const [availableHistoryVideos, setAvailableHistoryVideos] = useState([]);
+  const [showVideoLinking, setShowVideoLinking] = useState(false);
+  const [linkingLoading, setLinkingLoading] = useState(false);
+  
   // Local state for UI
   const [addedCourses, setAddedCourses] = useState(() => {
     const saved = localStorage.getItem('addedCourses');
@@ -181,6 +188,85 @@ const Courses = () => {
       alert(`❌ Failed to process course from URL.\n\nError: ${error.message}`);
     } finally {
       setIsScrapingCourses(false);
+    }
+  };
+
+  // Handle opening video linking modal
+  const handleOpenVideoLinking = async (course) => {
+    try {
+      setLinkingLoading(true);
+      const response = await fetch(`/api/courses/${course.id}/videos`);
+      
+      if (!response.ok) throw new Error('Failed to fetch course videos');
+      
+      const result = await response.json();
+      setSelectedCourse(result.data.course);
+      setCourseVideos(result.data.course.videos || []);
+      setAvailableHistoryVideos(result.data.availableHistoryVideos || []);
+      setShowVideoLinking(true);
+    } catch (error) {
+      console.error('Error loading course videos:', error);
+      alert(`Failed to load course videos: ${error.message}`);
+    } finally {
+      setLinkingLoading(false);
+    }
+  };
+
+  // Handle linking existing video
+  const handleLinkVideo = async (courseVideoId, historyVideoId) => {
+    try {
+      const response = await fetch(`/api/courses/${selectedCourse.id}/videos/${courseVideoId}/link`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ historyVideoId })
+      });
+      
+      if (!response.ok) throw new Error('Failed to link video');
+      
+      // Refresh the course videos
+      await handleOpenVideoLinking(selectedCourse);
+      alert('Video linked successfully!');
+    } catch (error) {
+      console.error('Error linking video:', error);
+      alert(`Failed to link video: ${error.message}`);
+    }
+  };
+
+  // Handle creating new video
+  const handleCreateVideo = async (courseVideoId, videoData) => {
+    try {
+      const response = await fetch(`/api/courses/${selectedCourse.id}/videos/${courseVideoId}/create`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(videoData)
+      });
+      
+      if (!response.ok) throw new Error('Failed to create video');
+      
+      // Refresh the course videos
+      await handleOpenVideoLinking(selectedCourse);
+      alert('New video created successfully!');
+    } catch (error) {
+      console.error('Error creating video:', error);
+      alert(`Failed to create video: ${error.message}`);
+    }
+  };
+
+  // Handle unlinking video
+  const handleUnlinkVideo = async (courseVideoId) => {
+    try {
+      const response = await fetch(`/api/courses/${selectedCourse.id}/videos/${courseVideoId}/unlink`, {
+        method: 'DELETE'
+      });
+      
+      if (!response.ok) throw new Error('Failed to unlink video');
+      
+      // Refresh the course videos
+      await handleOpenVideoLinking(selectedCourse);
+      alert('Video unlinked successfully!');
+    } catch (error) {
+      console.error('Error unlinking video:', error);
+      alert(`Failed to unlink video: ${error.message}`);
     }
   };
 
@@ -520,6 +606,20 @@ const Courses = () => {
                         </div>
                       </div>
 
+                      {/* Guidebook Link */}
+                      {course.guidebook && (
+                        <div className="mt-2">
+                          <a
+                            href={`/api/courses${course.guidebook}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center text-green-600 hover:text-green-800 text-sm font-medium"
+                          >
+                            📖 Download Guidebook
+                          </a>
+                        </div>
+                      )}
+
                       {/* Action Buttons */}
                       <div className="mt-4 pt-3 border-t border-gray-100 space-y-2">
                         {!isAdded && (
@@ -541,9 +641,26 @@ const Courses = () => {
                           </button>
                         )}
                         
+                        <button
+                          onClick={() => handleOpenVideoLinking(course)}
+                          disabled={linkingLoading}
+                          className="w-full bg-purple-600 hover:bg-purple-700 text-white text-xs py-2 px-3 rounded font-medium disabled:bg-gray-400"
+                        >
+                          {linkingLoading ? (
+                            <>
+                              <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-white mr-2 inline-block"></div>
+                              Loading...
+                            </>
+                          ) : (
+                            <>
+                              🔗 Link Videos
+                            </>
+                          )}
+                        </button>
+                        
                         <p className="text-xs text-gray-500 text-center px-2">
                           {isAdded 
-                            ? "Course videos have been added to your library"
+                            ? "Link course lectures to existing great-courses-plus videos or create new ones"
                             : "Scrape all lectures from this course and add them to your video library"
                           }
                         </p>
@@ -600,6 +717,110 @@ const Courses = () => {
           </>
         )}
       </div>
+
+      {/* Video Linking Modal */}
+      {showVideoLinking && selectedCourse && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-lg max-w-4xl w-full max-h-[90vh] overflow-hidden">
+            <div className="p-6 border-b">
+              <div className="flex justify-between items-center">
+                <h2 className="text-xl font-semibold">
+                  Link Videos: {selectedCourse.title}
+                </h2>
+                <button
+                  onClick={() => setShowVideoLinking(false)}
+                  className="text-gray-500 hover:text-gray-700"
+                >
+                  ✕
+                </button>
+              </div>
+            </div>
+            
+            <div className="p-6 overflow-y-auto max-h-[calc(90vh-120px)]">
+              {courseVideos.length === 0 ? (
+                <p className="text-gray-500 text-center py-8">
+                  No course videos found. Please scrape videos first.
+                </p>
+              ) : (
+                <div className="space-y-4">
+                  {courseVideos.map((video) => {
+                    const linkedHistoryVideo = selectedCourse.historyVideos?.find(
+                      hv => hv.lectureNumber === video.order
+                    );
+                    
+                    return (
+                      <div key={video.id} className="border rounded-lg p-4">
+                        <div className="flex justify-between items-start mb-3">
+                          <div className="flex-1">
+                            <h3 className="font-medium text-gray-900">{video.title}</h3>
+                            {video.description && (
+                              <p className="text-sm text-gray-600 mt-1">{video.description}</p>
+                            )}
+                          </div>
+                          
+                          {linkedHistoryVideo ? (
+                            <div className="ml-4 flex items-center space-x-2">
+                              <span className="text-green-600 text-sm">
+                                ✅ Linked to: {linkedHistoryVideo.title}
+                              </span>
+                              <button
+                                onClick={() => handleUnlinkVideo(video.id)}
+                                className="text-red-600 hover:text-red-800 text-sm px-2 py-1 border border-red-300 rounded"
+                              >
+                                Unlink
+                              </button>
+                            </div>
+                          ) : (
+                            <div className="ml-4 space-y-2">
+                              <div className="flex items-center space-x-2">
+                                <select
+                                  onChange={(e) => {
+                                    if (e.target.value) {
+                                      handleLinkVideo(video.id, parseInt(e.target.value));
+                                      e.target.value = '';
+                                    }
+                                  }}
+                                  className="text-sm border border-gray-300 rounded px-2 py-1"
+                                  defaultValue=""
+                                >
+                                  <option value="">Select existing video...</option>
+                                  {availableHistoryVideos.map((hv) => (
+                                    <option key={hv.id} value={hv.id}>
+                                      {hv.title}
+                                    </option>
+                                  ))}
+                                </select>
+                              </div>
+                              
+                              <div className="text-sm text-gray-500">or</div>
+                              
+                              <button
+                                onClick={() => {
+                                  const url = prompt('Enter video URL:');
+                                  if (url) {
+                                    handleCreateVideo(video.id, {
+                                      title: video.title,
+                                      url: url,
+                                      description: video.description
+                                    });
+                                  }
+                                }}
+                                className="text-blue-600 hover:text-blue-800 text-sm px-2 py-1 border border-blue-300 rounded"
+                              >
+                                Create New Video
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
