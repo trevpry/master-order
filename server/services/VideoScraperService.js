@@ -118,6 +118,51 @@ class VideoScraperService {
   }
 
   /**
+   * Normalize YouTube URL to a standard format for duplicate detection
+   * Converts various YouTube URL formats to the standard watch format
+   */
+  normalizeYouTubeURL(url) {
+    if (!url || typeof url !== 'string') {
+      return url;
+    }
+
+    try {
+      // Extract video ID from various YouTube URL formats
+      let videoId = null;
+      
+      // Handle youtu.be short URLs: https://youtu.be/VIDEO_ID (with optional parameters)
+      const youtuBeMatch = url.match(/(?:youtu\.be\/)([a-zA-Z0-9_-]{11})(?:[?&].*)?/);
+      if (youtuBeMatch) {
+        videoId = youtuBeMatch[1];
+      }
+      
+      // Handle youtube.com watch URLs: https://www.youtube.com/watch?v=VIDEO_ID (with optional parameters)
+      const watchMatch = url.match(/(?:youtube\.com\/watch\?.*v=)([a-zA-Z0-9_-]{11})(?:[&].*)?/);
+      if (watchMatch) {
+        videoId = watchMatch[1];
+      }
+      
+      // Handle youtube.com embed URLs: https://www.youtube.com/embed/VIDEO_ID (with optional parameters)
+      const embedMatch = url.match(/(?:youtube\.com\/embed\/)([a-zA-Z0-9_-]{11})(?:[?&].*)?/);
+      if (embedMatch) {
+        videoId = embedMatch[1];
+      }
+      
+      // If we found a video ID, return normalized URL
+      if (videoId) {
+        return `https://www.youtube.com/watch?v=${videoId}`;
+      }
+      
+      // If no match found, return original URL
+      return url;
+      
+    } catch (error) {
+      console.warn(`Error normalizing YouTube URL: ${url}`, error);
+      return url;
+    }
+  }
+
+  /**
    * SAFE database sequence diagnostic - READ-ONLY analysis of sequence state
    * This addresses production-specific unique constraint errors on the id field
    * GUARANTEED ZERO DATA LOSS - only reads, never modifies data
@@ -1378,12 +1423,16 @@ class VideoScraperService {
         const videoUrl = videoUrls[i];
         
         try {
-          // Check if video already exists in database  
+          // Normalize the video URL to prevent duplicates with different URL formats
+          const normalizedVideoUrl = this.normalizeYouTubeURL(videoUrl);
+          
+          // Check if video already exists in database using normalized URL
           const existingVideo = await this.prisma.historyVideo.findUnique({
-            where: { url: videoUrl }
+            where: { url: normalizedVideoUrl }
           });
 
           if (existingVideo) {
+            console.log(`⏭️ Video already exists (normalized): ${normalizedVideoUrl}`);
             videosSkipped++;
             videosProcessed++;
             
@@ -1422,7 +1471,7 @@ class VideoScraperService {
             await this.prisma.historyVideo.create({
               data: {
                 title: metadata.title,
-                url: videoUrl,
+                url: normalizedVideoUrl,
                 description: metadata.description || '',
                 duration: metadata.duration || '',
                 type: 'youtube',
@@ -1434,19 +1483,19 @@ class VideoScraperService {
           } catch (createError) {
             // Handle unique constraint errors (likely database sequence corruption)
             if (createError.message && createError.message.includes('Unique constraint failed')) {
-              console.warn(`Unique constraint error for video: ${videoUrl} - ${createError.message}`);
+              console.warn(`Unique constraint error for video: ${normalizedVideoUrl} - ${createError.message}`);
               console.warn('This may indicate database auto-increment sequence corruption in production');
               
               // Try to handle gracefully - check if it's a URL duplicate
               const existingVideo = await this.prisma.historyVideo.findUnique({
-                where: { url: videoUrl }
+                where: { url: normalizedVideoUrl }
               });
               
               if (existingVideo) {
-                console.log(`Video already exists in database: ${videoUrl}`);
+                console.log(`Video already exists in database: ${normalizedVideoUrl}`);
                 videosSkipped++;
               } else {
-                console.error(`Unique constraint error on non-URL field for: ${videoUrl}`);
+                console.error(`Unique constraint error on non-URL field for: ${normalizedVideoUrl}`);
                 console.error('Database auto-increment sequence may need to be reset');
                 errors++;
               }
