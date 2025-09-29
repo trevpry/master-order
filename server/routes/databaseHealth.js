@@ -106,4 +106,50 @@ router.post('/emergency-reset', async (req, res) => {
   }
 });
 
+/**
+ * DIRECT fix for production - bypasses all analysis and just fixes the sequence
+ */
+router.post('/direct-fix', async (req, res) => {
+  try {
+    console.log('🔧 DIRECT sequence fix requested - bypassing analysis');
+    
+    const prisma = require('../prismaClient');
+    
+    // Get max ID directly
+    const maxIdResult = await prisma.historyVideo.aggregate({
+      _max: { id: true }
+    });
+    
+    const maxId = maxIdResult._max.id || 0;
+    const safeNextValue = maxId + 1;
+    
+    console.log(`📊 Direct fix: Max ID = ${maxId}, Setting sequence to ${safeNextValue}`);
+    
+    // PostgreSQL direct sequence fix
+    await prisma.$executeRaw`
+      SELECT setval(pg_get_serial_sequence('"HistoryVideo"', 'id'), ${safeNextValue}, false)
+    `;
+    
+    console.log('✅ Direct sequence fix completed');
+    
+    res.json({
+      success: true,
+      method: 'direct-fix',
+      maxId,
+      nextValue: safeNextValue,
+      message: `Sequence fixed directly. Next ID will be: ${safeNextValue}`,
+      timestamp: new Date().toISOString()
+    });
+    
+  } catch (error) {
+    console.error('❌ Direct fix failed:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message,
+      method: 'direct-fix',
+      timestamp: new Date().toISOString()
+    });
+  }
+});
+
 module.exports = router;

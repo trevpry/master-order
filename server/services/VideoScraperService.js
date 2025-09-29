@@ -192,15 +192,12 @@ class VideoScraperService {
       let sequenceResult = null;
       let workingSequenceName = null;
       
-      for (const sequenceName of possibleSequenceNames) {
+        for (const sequenceName of possibleSequenceNames) {
         try {
           console.log(`Trying sequence name: ${sequenceName}`);
-          sequenceResult = await this.prisma.$queryRaw`
-            SELECT last_value, is_called 
-            FROM ${this.prisma.Prisma.raw(sequenceName)}
-          `;
-          
-          if (sequenceResult && sequenceResult.length > 0) {
+          sequenceResult = await this.prisma.$queryRaw(
+            `SELECT last_value, is_called FROM ${sequenceName}`
+          );          if (sequenceResult && sequenceResult.length > 0) {
             workingSequenceName = sequenceName;
             console.log(`✅ Found working sequence: ${sequenceName}`);
             break;
@@ -216,7 +213,7 @@ class VideoScraperService {
         try {
           console.log('Trying currval approach...');
           const currvalResult = await this.prisma.$queryRaw`
-            SELECT currval(pg_get_serial_sequence('HistoryVideo', 'id')) as current_value
+            SELECT currval(pg_get_serial_sequence('"HistoryVideo"', 'id')) as current_value
           `;
           
           if (currvalResult && currvalResult.length > 0) {
@@ -404,9 +401,9 @@ class VideoScraperService {
         
         // Method 1: Direct setval with identified sequence name
         try {
-          await this.prisma.$executeRaw`
-            SELECT setval(${this.prisma.Prisma.raw(`'${sequenceName}'`)}, ${safeNextValue}, false)
-          `;
+          await this.prisma.$executeRaw(
+            `SELECT setval('${sequenceName}', ${safeNextValue}, false)`
+          );
           repairSuccess = true;
           repairMethod = 'setval_direct';
           console.log(`✅ Sequence repaired using direct setval`);
@@ -416,7 +413,7 @@ class VideoScraperService {
           // Method 2: Use pg_get_serial_sequence approach
           try {
             await this.prisma.$executeRaw`
-              SELECT setval(pg_get_serial_sequence('HistoryVideo', 'id'), ${safeNextValue}, false)
+              SELECT setval(pg_get_serial_sequence('"HistoryVideo"', 'id'), ${safeNextValue}, false)
             `;
             repairSuccess = true;
             repairMethod = 'setval_pg_get_serial';
@@ -434,14 +431,14 @@ class VideoScraperService {
         // Verify the fix worked
         let verifyResult = null;
         try {
-          verifyResult = await this.prisma.$queryRaw`
-            SELECT last_value, is_called FROM ${this.prisma.Prisma.raw(sequenceName)}
-          `;
+          verifyResult = await this.prisma.$queryRaw(
+            `SELECT last_value, is_called FROM ${sequenceName}`
+          );
         } catch (verifyError) {
           // Try alternative verification
           try {
             const currvalResult = await this.prisma.$queryRaw`
-              SELECT currval(pg_get_serial_sequence('HistoryVideo', 'id')) as current_value
+              SELECT currval(pg_get_serial_sequence('"HistoryVideo"', 'id')) as current_value
             `;
             const currentValue = parseInt(currvalResult[0].current_value);
             verifyResult = [{ last_value: currentValue, is_called: true }];
@@ -536,7 +533,7 @@ class VideoScraperService {
         // Try the most reliable PostgreSQL sequence reset method
         try {
           await this.prisma.$executeRaw`
-            SELECT setval(pg_get_serial_sequence('HistoryVideo', 'id'), ${safeNextValue}, false)
+            SELECT setval(pg_get_serial_sequence('"HistoryVideo"', 'id'), ${safeNextValue}, false)
           `;
           
           console.log('✅ PostgreSQL sequence reset successful');
@@ -700,9 +697,22 @@ class VideoScraperService {
       const sequenceHealth = await this.checkDatabaseSequenceHealth();
       console.log(`📊 Database sequence health check: ${sequenceHealth.healthy ? '✅ HEALTHY' : '⚠️  NEEDS ATTENTION'}`);
       
-      if (!sequenceHealth.healthy && sequenceHealth.recommendation) {
-        console.log(`📋 Recommendation: ${sequenceHealth.recommendation}`);
-        console.log(`🛡️  Running in SAFE MODE - no automatic fixes applied`);
+      if (!sequenceHealth.healthy) {
+        console.log(`📋 Recommendation: ${sequenceHealth.recommendation || 'Sequence needs attention'}`);
+        console.log(`� ATTEMPTING AUTOMATIC SEQUENCE FIX...`);
+        
+        try {
+          const fixResult = await this.emergencySequenceReset();
+          if (fixResult.success) {
+            console.log(`✅ SEQUENCE AUTOMATICALLY FIXED: ${fixResult.message}`);
+          } else {
+            console.log(`❌ Automatic fix failed: ${fixResult.error}`);
+            console.log(`🛡️  Continuing with manual error handling`);
+          }
+        } catch (fixError) {
+          console.log(`❌ Automatic fix error: ${fixError.message}`);
+          console.log(`🛡️  Continuing with manual error handling`);
+        }
       }
       
       if (progressCallback) {
