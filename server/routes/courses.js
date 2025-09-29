@@ -163,12 +163,38 @@ router.put('/:id', asyncHandler(async (req, res) => {
 // DELETE /api/courses/:id - Delete a course
 router.delete('/:id', asyncHandler(async (req, res) => {
   const { id } = req.params;
+  const courseId = parseInt(id);
   
-  await prisma.historyCourse.delete({
-    where: { id: parseInt(id) }
+  // Get the course first to get its title for cleanup
+  const course = await prisma.historyCourse.findUnique({
+    where: { id: courseId },
+    include: { videos: true }
   });
   
-  sendSuccess(res, { message: 'Course deleted successfully' });
+  if (!course) {
+    return sendBadRequest(res, 'Course not found');
+  }
+  
+  // Delete associated historyVideo records that were created from this course's assignment
+  // These are identified by courseTitle matching the course title and assignedByAI = true
+  const deletedHistoryVideos = await prisma.historyVideo.deleteMany({
+    where: {
+      courseTitle: course.title,
+      assignedByAI: true
+    }
+  });
+  
+  console.log(`🧹 Cleaned up ${deletedHistoryVideos.count} historyVideo records for course: ${course.title}`);
+  
+  // Delete the course (this will cascade delete historyCourseVideo records)
+  await prisma.historyCourse.delete({
+    where: { id: courseId }
+  });
+  
+  sendSuccess(res, { 
+    message: 'Course deleted successfully',
+    cleanedUpVideos: deletedHistoryVideos.count
+  });
 }));
 
 // ==========================================
@@ -243,11 +269,36 @@ router.put('/videos/:videoId', asyncHandler(async (req, res) => {
 router.delete('/videos/:videoId', asyncHandler(async (req, res) => {
   const { videoId } = req.params;
   
+  // Get the video first to get its URL for cleanup
+  const courseVideo = await prisma.historyCourseVideo.findUnique({
+    where: { id: parseInt(videoId) }
+  });
+  
+  if (!courseVideo) {
+    return sendBadRequest(res, 'Course video not found');
+  }
+  
+  // Delete associated historyVideo record if it exists (from AI assignment)
+  const deletedHistoryVideo = await prisma.historyVideo.deleteMany({
+    where: {
+      url: courseVideo.url,
+      assignedByAI: true
+    }
+  });
+  
+  if (deletedHistoryVideo.count > 0) {
+    console.log(`🧹 Cleaned up historyVideo record for: ${courseVideo.title}`);
+  }
+  
+  // Delete the course video
   await prisma.historyCourseVideo.delete({
     where: { id: parseInt(videoId) }
   });
   
-  sendSuccess(res, { message: 'Video deleted successfully' });
+  sendSuccess(res, { 
+    message: 'Video deleted successfully',
+    cleanedUpLinkedVideo: deletedHistoryVideo.count > 0
+  });
 }));
 
 // ==========================================
@@ -543,7 +594,7 @@ router.post('/:id/ai-analyze', asyncHandler(async (req, res) => {
       },
       orderBy: { startDate: 'asc' }
     }),
-    prisma.historicalCategory.findMany({
+    prisma.historyCategory.findMany({
       select: {
         id: true,
         name: true,
@@ -634,7 +685,7 @@ router.post('/:id/ai-assign-lectures', asyncHandler(async (req, res) => {
         category: true
       }
     }),
-    prisma.historicalCategory.findMany({
+    prisma.historyCategory.findMany({
       select: {
         id: true,
         name: true,
@@ -687,12 +738,7 @@ router.post('/:id/ai-assign-lectures', asyncHandler(async (req, res) => {
         // Create new event
         const newEventData = suggestion.newEventSuggestion;
         
-        // Create new category if needed (though we prefer existing ones)
-        let categoryId = newEventData.categoryId;
-        if (!categoryId && newEventData.category) {
-          const category = categories.find(c => c.name === newEventData.category);
-          categoryId = category ? category.id : categories[0]?.id;
-        }
+        // Note: Using category name directly since HistoricalEvent only has category field, not categoryId
         
         const newEvent = await prisma.historicalEvent.create({
           data: {
@@ -700,10 +746,7 @@ router.post('/:id/ai-assign-lectures', asyncHandler(async (req, res) => {
             startDate: newEventData.startDate,
             endDate: newEventData.endDate,
             category: newEventData.category,
-            categoryId: categoryId,
-            details: newEventData.details,
-            source: `Created from course: ${course.title}`,
-            confidence: suggestion.confidence || 50
+            details: newEventData.details
           }
         });
         
@@ -712,15 +755,39 @@ router.post('/:id/ai-assign-lectures', asyncHandler(async (req, res) => {
       }
       
       if (eventId) {
-        // Create link between course video and historical event
-        await prisma.historicalEventVideo.create({
-          data: {
-            eventId: eventId,
-            videoId: lecture.id,
-            videoType: 'great-courses-plus',
-            notes: `Assigned from course AI analysis: ${suggestion.reasoning || 'AI suggestion'}`
+        // Create a corresponding HistoryVideo entry for the course video so it appears in the Videos page
+        // This is how the existing system links videos to events
+        try {
+          await prisma.historyVideo.create({
+            data: {
+              title: lecture.title,
+              url: lecture.url,
+              type: 'great-courses-plus',
+              eventId: eventId,
+              courseTitle: course.title,
+              lectureNumber: lecture.order,
+              description: lecture.description || `Lecture ${lecture.order} from ${course.title}`,
+              assignedByAI: true
+            }
+          });
+          console.log(`✅ Created HistoryVideo link for lecture ${suggestion.lectureNumber}: ${lecture.title} -> Event ${eventId}`);
+        } catch (error) {
+          // If URL already exists, update the existing record
+          if (error.code === 'P2002') {
+            await prisma.historyVideo.update({
+              where: { url: lecture.url },
+              data: {
+                eventId: eventId,
+                assignedByAI: true,
+                courseTitle: course.title,
+                lectureNumber: lecture.order
+              }
+            });
+            console.log(`✅ Updated existing HistoryVideo link for lecture ${suggestion.lectureNumber}: ${lecture.title} -> Event ${eventId}`);
+          } else {
+            throw error;
           }
-        });
+        }
         
         results.processedLectures++;
       }

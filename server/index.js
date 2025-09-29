@@ -17,6 +17,7 @@ const locationsRoutes = require('./routes/locations');
 const settingsRoutes = require('./routes/settings');
 const artworkRoutes = require('./routes/artwork');
 const healthRoutes = require('./routes/health');
+const databaseHealthRoutes = require('./routes/databaseHealth');
 const plexRoutes = require('./routes/plex');
 const createStashRouter = require('./routes/stash');
 const comicvineRoutes = require('./routes/comicvine');
@@ -249,6 +250,9 @@ app.use('/api/artwork', artworkRoutes);
 
 // Health & Monitoring API routes
 app.use('/api/health', healthRoutes);
+
+// Database Health & Diagnostics API routes (SAFE - READ-ONLY)
+app.use('/api/database-health', databaseHealthRoutes);
 
 // Plex Integration API routes
 app.use('/api/plex', plexRoutes);

@@ -118,6 +118,286 @@ class VideoScraperService {
   }
 
   /**
+   * SAFE database sequence diagnostic - READ-ONLY analysis of sequence state
+   * This addresses production-specific unique constraint errors on the id field
+   * GUARANTEED ZERO DATA LOSS - only reads, never modifies data
+   */
+  async checkDatabaseSequenceHealth() {
+    try {
+      console.log('🔍 SAFE MODE: Analyzing database sequence health (READ-ONLY)...');
+      
+      // SAFE: Get record count and max ID (READ-ONLY operations)
+      const [recordCount, maxIdResult] = await Promise.all([
+        this.prisma.historyVideo.count(),
+        this.prisma.historyVideo.aggregate({
+          _max: { id: true }
+        })
+      ]);
+      
+      const maxId = maxIdResult._max.id || 0;
+      console.log(`📊 HistoryVideo table stats: ${recordCount} records, max ID: ${maxId}`);
+      
+      // SAFE: Detect database type (READ-ONLY)
+      const databaseUrl = process.env.DATABASE_URL || '';
+      const isPostgreSQL = databaseUrl.startsWith('postgresql://') || databaseUrl.startsWith('postgres://');
+      const dbType = isPostgreSQL ? 'PostgreSQL' : 'SQLite';
+      
+      console.log(`🗄️  Database type: ${dbType}`);
+      
+      if (isPostgreSQL) {
+        return await this._analyzePostgreSQLSequence(maxId, recordCount);
+      } else {
+        return await this._analyzeSQLiteSequence(maxId, recordCount);
+      }
+      
+    } catch (error) {
+      console.error('❌ Error during sequence health check:', error);
+      return { 
+        safe: true, 
+        error: error.message, 
+        recommendation: 'Error occurred during read-only analysis' 
+      };
+    }
+  }
+
+  /**
+   * SAFE PostgreSQL sequence analysis (READ-ONLY)
+   */
+  async _analyzePostgreSQLSequence(maxId, recordCount) {
+    try {
+      // SAFE: Verify sequence exists (READ-ONLY)
+      const sequenceExists = await this.prisma.$queryRaw`
+        SELECT sequence_name 
+        FROM information_schema.sequences 
+        WHERE sequence_name = 'HistoryVideo_id_seq'
+      `;
+      
+      if (sequenceExists.length === 0) {
+        return {
+          safe: true,
+          issue: 'No sequence found',
+          recommendation: 'Table may be new or use different naming convention',
+          database: 'postgresql'
+        };
+      }
+      
+      // SAFE: Check sequence current value (READ-ONLY)
+      const sequenceResult = await this.prisma.$queryRaw`
+        SELECT last_value, is_called, increment_by, max_value, min_value
+        FROM "HistoryVideo_id_seq"
+      `;
+      
+      if (sequenceResult.length === 0) {
+        return {
+          safe: true,
+          issue: 'Cannot read sequence state',
+          recommendation: 'Sequence exists but state is unreadable',
+          database: 'postgresql'
+        };
+      }
+      
+      const { last_value, is_called, increment_by, max_value, min_value } = sequenceResult[0];
+      const effectiveCurrentValue = is_called ? last_value : last_value - increment_by;
+      const nextValue = is_called ? last_value + increment_by : last_value;
+      
+      console.log(`🔍 PostgreSQL Sequence Analysis:`);
+      console.log(`   Last Value: ${last_value}`);
+      console.log(`   Is Called: ${is_called}`);
+      console.log(`   Effective Current: ${effectiveCurrentValue}`);
+      console.log(`   Next Value: ${nextValue}`);
+      console.log(`   Max ID in table: ${maxId}`);
+      
+      const isHealthy = nextValue > maxId;
+      const wouldCauseConflict = nextValue <= maxId;
+      
+      return {
+        safe: true,
+        healthy: isHealthy,
+        database: 'postgresql',
+        analysis: {
+          recordCount,
+          maxId,
+          sequenceLastValue: last_value,
+          sequenceIsCalled: is_called,
+          effectiveCurrentValue,
+          nextValue,
+          wouldCauseConflict
+        },
+        recommendation: wouldCauseConflict 
+          ? `⚠️  SEQUENCE OUT OF SYNC: Next ID (${nextValue}) would conflict with existing data (max: ${maxId}). Sequence needs update.`
+          : `✅ SEQUENCE HEALTHY: Next ID (${nextValue}) is safely above max data ID (${maxId})`
+      };
+      
+    } catch (error) {
+      return {
+        safe: true,
+        error: `PostgreSQL analysis failed: ${error.message}`,
+        recommendation: 'Could not analyze PostgreSQL sequence',
+        database: 'postgresql'
+      };
+    }
+  }
+
+  /**
+   * SAFE SQLite sequence analysis (READ-ONLY)
+   */
+  async _analyzeSQLiteSequence(maxId, recordCount) {
+    try {
+      // SAFE: Check SQLite sequence (READ-ONLY)
+      const sequenceResult = await this.prisma.$queryRaw`
+        SELECT seq FROM sqlite_sequence WHERE name = 'HistoryVideo'
+      `;
+      
+      if (sequenceResult.length === 0) {
+        return {
+          safe: true,
+          issue: 'No SQLite sequence record found',
+          recommendation: 'Table may be new or never had auto-increment inserts',
+          database: 'sqlite'
+        };
+      }
+      
+      const currentSeq = sequenceResult[0].seq;
+      const nextValue = currentSeq + 1;
+      const isHealthy = nextValue > maxId;
+      const wouldCauseConflict = nextValue <= maxId;
+      
+      console.log(`🔍 SQLite Sequence Analysis:`);
+      console.log(`   Current Sequence: ${currentSeq}`);
+      console.log(`   Next Value: ${nextValue}`);
+      console.log(`   Max ID in table: ${maxId}`);
+      
+      return {
+        safe: true,
+        healthy: isHealthy,
+        database: 'sqlite',
+        analysis: {
+          recordCount,
+          maxId,
+          currentSequence: currentSeq,
+          nextValue,
+          wouldCauseConflict
+        },
+        recommendation: wouldCauseConflict
+          ? `⚠️  SEQUENCE OUT OF SYNC: Next ID (${nextValue}) would conflict with existing data (max: ${maxId}). Sequence needs update.`
+          : `✅ SEQUENCE HEALTHY: Next ID (${nextValue}) is safely above max data ID (${maxId})`
+      };
+      
+    } catch (error) {
+      return {
+        safe: true,
+        error: `SQLite analysis failed: ${error.message}`,
+        recommendation: 'Could not analyze SQLite sequence',
+        database: 'sqlite'
+      };
+    }
+  }
+
+  /**
+   * SAFE sequence repair method - ONLY call after manual verification
+   * This method includes additional safety checks and can only fix sequences that are clearly out of sync
+   * 
+   * @param {boolean} confirmSafeToFix - Must be explicitly set to true to execute
+   * @returns {Object} Result of the fix operation
+   */
+  async repairDatabaseSequence(confirmSafeToFix = false) {
+    if (!confirmSafeToFix) {
+      return {
+        success: false,
+        error: 'Safety confirmation required. Set confirmSafeToFix=true to execute repair.',
+        recommendation: 'First run checkDatabaseSequenceHealth() to analyze the issue.'
+      };
+    }
+
+    try {
+      console.log('🔧 REPAIR MODE: Attempting to fix database sequence...');
+      
+      // First, do a fresh health check
+      const healthCheck = await this.checkDatabaseSequenceHealth();
+      
+      if (healthCheck.healthy) {
+        return {
+          success: false,
+          message: 'Sequence is healthy - no repair needed',
+          healthCheck
+        };
+      }
+
+      if (!healthCheck.analysis || healthCheck.error) {
+        return {
+          success: false,
+          error: 'Cannot repair - health check failed or returned no analysis data',
+          healthCheck
+        };
+      }
+
+      const { maxId, database } = healthCheck.analysis;
+      const safeNextValue = maxId + 1;
+
+      console.log(`🔧 Proceeding with repair: Setting next sequence value to ${safeNextValue}`);
+
+      if (database === 'postgresql') {
+        // PostgreSQL sequence repair
+        await this.prisma.$executeRaw`
+          SELECT setval('"HistoryVideo_id_seq"', ${safeNextValue}, false)
+        `;
+        
+        // Verify the fix worked
+        const verifyResult = await this.prisma.$queryRaw`
+          SELECT last_value, is_called FROM "HistoryVideo_id_seq"
+        `;
+        
+        const nextValueAfterFix = verifyResult[0].is_called ? 
+          verifyResult[0].last_value + 1 : verifyResult[0].last_value;
+
+        return {
+          success: true,
+          database: 'postgresql',
+          repairApplied: {
+            targetNextValue: safeNextValue,
+            actualNextValue: nextValueAfterFix,
+            verificationPassed: nextValueAfterFix === safeNextValue
+          },
+          message: `PostgreSQL sequence repaired. Next ID will be: ${nextValueAfterFix}`
+        };
+
+      } else {
+        // SQLite sequence repair
+        await this.prisma.$executeRaw`
+          UPDATE sqlite_sequence SET seq = ${maxId} WHERE name = 'HistoryVideo'
+        `;
+        
+        // Verify the fix worked
+        const verifyResult = await this.prisma.$queryRaw`
+          SELECT seq FROM sqlite_sequence WHERE name = 'HistoryVideo'
+        `;
+        
+        const actualSeq = verifyResult[0].seq;
+        const nextValueAfterFix = actualSeq + 1;
+
+        return {
+          success: true,
+          database: 'sqlite',
+          repairApplied: {
+            targetNextValue: safeNextValue,
+            actualNextValue: nextValueAfterFix,
+            verificationPassed: nextValueAfterFix === safeNextValue
+          },
+          message: `SQLite sequence repaired. Next ID will be: ${nextValueAfterFix}`
+        };
+      }
+
+    } catch (error) {
+      console.error('❌ Sequence repair failed:', error);
+      return {
+        success: false,
+        error: `Repair failed: ${error.message}`,
+        recommendation: 'Manual database intervention may be required'
+      };
+    }
+  }
+
+  /**
    * Get video metadata using basic fetch (fallback if YouTube API is not available)
    * Enhanced with proper Unicode and HTML entity handling
    */
@@ -215,6 +495,15 @@ class VideoScraperService {
       console.log(`Starting to scrape videos from channel: ${channelUrl}`);
       console.log(`🔧 Environment: ${process.env.NODE_ENV || 'development'}`);
       console.log(`🔧 Platform: ${process.platform}`);
+      
+      // SAFE: Check database sequence health before starting (READ-ONLY analysis)
+      const sequenceHealth = await this.checkDatabaseSequenceHealth();
+      console.log(`📊 Database sequence health check: ${sequenceHealth.healthy ? '✅ HEALTHY' : '⚠️  NEEDS ATTENTION'}`);
+      
+      if (!sequenceHealth.healthy && sequenceHealth.recommendation) {
+        console.log(`📋 Recommendation: ${sequenceHealth.recommendation}`);
+        console.log(`🛡️  Running in SAFE MODE - no automatic fixes applied`);
+      }
       
       if (progressCallback) {
         progressCallback({ stage: 'initializing', message: 'Setting up browser...' });
@@ -921,20 +1210,45 @@ class VideoScraperService {
             });
           }
 
-          // Create the video record
-          await this.prisma.historyVideo.create({
-            data: {
-              title: metadata.title,
-              url: videoUrl,
-              description: metadata.description || '',
-              duration: metadata.duration || '',
-              type: 'youtube',
-              thumbnailUrl: metadata.thumbnailUrl || '',
-              channelId: channel ? channel.id : null
+          // Create the video record with unique constraint error handling
+          try {
+            await this.prisma.historyVideo.create({
+              data: {
+                title: metadata.title,
+                url: videoUrl,
+                description: metadata.description || '',
+                duration: metadata.duration || '',
+                type: 'youtube',
+                thumbnailUrl: metadata.thumbnailUrl || '',
+                channelId: channel ? channel.id : null
+              }
+            });
+            videosAdded++;
+          } catch (createError) {
+            // Handle unique constraint errors (likely database sequence corruption)
+            if (createError.message && createError.message.includes('Unique constraint failed')) {
+              console.warn(`Unique constraint error for video: ${videoUrl} - ${createError.message}`);
+              console.warn('This may indicate database auto-increment sequence corruption in production');
+              
+              // Try to handle gracefully - check if it's a URL duplicate
+              const existingVideo = await this.prisma.historyVideo.findUnique({
+                where: { url: videoUrl }
+              });
+              
+              if (existingVideo) {
+                console.log(`Video already exists in database: ${videoUrl}`);
+                videosSkipped++;
+              } else {
+                console.error(`Unique constraint error on non-URL field for: ${videoUrl}`);
+                console.error('Database auto-increment sequence may need to be reset');
+                errors++;
+              }
+            } else {
+              // Re-throw other errors
+              throw createError;
             }
-          });
-
-          videosAdded++;
+          }
+          
           videosProcessed++;
 
           if (progressCallback) {

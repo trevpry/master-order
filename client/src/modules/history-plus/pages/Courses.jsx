@@ -227,7 +227,7 @@ const Courses = () => {
   const handleAiAssignmentComplete = async (courseId, result) => {
     console.log('AI assignment completed for course:', courseId, result);
     // Refresh courses if needed
-    await loadCourses();
+    await fetchCourses();
     // Close modal
     setShowAiAssignment(false);
     setSelectedAiCourse(null);

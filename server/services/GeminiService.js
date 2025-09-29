@@ -575,9 +575,17 @@ ANALYSIS REQUIREMENTS:
 2. **EVENT ASSIGNMENT STRATEGY**:
    - **ASSIGN_TO_EXISTING**: If a lecture clearly belongs to an existing event
    - **CREATE_NEW_EVENT**: If a lecture requires a new historical event (preferred for specificity)
-   - **SKIP**: If a lecture is introductory/summary and doesn't fit a specific historical period
+   - **PAIR_WITH_NEXT**: For analytical/concept/introductory lectures that should be grouped with the next specific historical event
 
-3. **EVENT GRANULARITY**: Create specific, focused events rather than broad ones. For example:
+3. **PAIRING GUIDELINES FOR INTRODUCTORY LECTURES**:
+   - Introductory lectures like "Why we study...", "Introduction to...", "Overview of..." should use PAIR_WITH_NEXT
+   - The paired lectures will be assigned to the SAME historical event as the next specific lecture
+   - Examples:
+     * Lecture 1: "Why we study Ancient Egypt" (PAIR_WITH_NEXT) + Lecture 2: "Pre-Dynastic Egypt" → Both assigned to "Pre-Dynastic Egypt" event
+     * Lecture 5: "Understanding Medieval Society" (PAIR_WITH_NEXT) + Lecture 6: "The Black Death" → Both assigned to "The Black Death" event
+   - This ensures NO lectures are skipped while maintaining chronological accuracy
+
+4. **EVENT GRANULARITY**: Create specific, focused events rather than broad ones. For example:
    - Instead of "Roman Empire" → "Fall of the Western Roman Empire (476 CE)"
    - Instead of "World War II" → "Battle of Stalingrad (1942-1943)"
    - Instead of "Medieval Period" → "The Crusades (1095-1291)"
@@ -604,10 +612,11 @@ Respond with a JSON object containing an array of suggestions for each lecture:
     {
       "lectureNumber": 1,
       "lectureTitle": "Exact lecture title",
-      "action": "ASSIGN_TO_EXISTING" | "CREATE_NEW_EVENT" | "SKIP",
+      "action": "ASSIGN_TO_EXISTING" | "CREATE_NEW_EVENT" | "PAIR_WITH_NEXT",
       "confidence": 85,
-      "reasoning": "Why this assignment makes sense chronologically",
+      "reasoning": "Why this assignment makes sense chronologically. For PAIR_WITH_NEXT: explain why this introductory lecture belongs with the next specific event",
       "existingEventTitle": "Exact title if assigning to existing",
+      "pairedWithLecture": "Number of the next lecture this should be paired with (only for PAIR_WITH_NEXT)",
       "newEventSuggestion": {
         "title": "Specific event title",
         "startDate": "YYYY-MM-DD or YYYY",
@@ -626,11 +635,13 @@ Respond with a JSON object containing an array of suggestions for each lecture:
 }
 
 CRITICAL REQUIREMENTS:
-- Include ALL ${lectures.length} lectures in the suggestions array
+- **NO LECTURES SHALL BE SKIPPED**: Include ALL ${lectures.length} lectures in the suggestions array
+- **PAIRING STRATEGY**: For analytical/concept/introductory lectures (like "Why we study Ancient Egypt", "Introduction to...", "Overview of..."), use "PAIR_WITH_NEXT" action to group them with the next specific historical event
+- **EXAMPLE PAIRING**: If Lecture 1 is "Why we study Ancient Egypt" and Lecture 2 is "Pre-Dynastic Egypt", both should be assigned to the same "Pre-Dynastic Egypt" event
 - Maintain chronological order (lecture 1 = earliest event, lecture N = latest event)
 - Prefer creating NEW specific events over using broad existing ones
 - Use guidebook content to determine precise historical periods
-- Each lecture should have a clear historical timeframe assignment
+- Each lecture must have a clear historical timeframe assignment - no exceptions
 - Return ONLY the JSON object, no additional text`;
   }
 
@@ -658,7 +669,7 @@ CRITICAL REQUIREMENTS:
         console.warn(`⚠️ Suggestion count (${parsed.suggestions.length}) doesn't match lecture count (${lectures.length})`);
       }
 
-      const validActions = ['ASSIGN_TO_EXISTING', 'CREATE_NEW_EVENT', 'SKIP'];
+      const validActions = ['ASSIGN_TO_EXISTING', 'CREATE_NEW_EVENT', 'PAIR_WITH_NEXT'];
       
       const validatedSuggestions = parsed.suggestions.map((suggestion, index) => {
         // Validate action type
@@ -682,8 +693,25 @@ CRITICAL REQUIREMENTS:
           }
         }
 
+        // Validate PAIR_WITH_NEXT action
+        if (suggestion.action === 'PAIR_WITH_NEXT') {
+          if (!suggestion.pairedWithLecture) {
+            console.warn(`⚠️ PAIR_WITH_NEXT action for lecture ${suggestion.lectureNumber} missing pairedWithLecture, converting to CREATE_NEW_EVENT`);
+            suggestion.action = 'CREATE_NEW_EVENT';
+            suggestion.confidence = Math.max(30, suggestion.confidence - 20);
+          } else {
+            // Validate that the paired lecture exists
+            const pairedLecture = lectures.find(lec => (lec.order || lec.id) == suggestion.pairedWithLecture);
+            if (!pairedLecture) {
+              console.warn(`⚠️ Invalid pairedWithLecture ${suggestion.pairedWithLecture} for lecture ${suggestion.lectureNumber}, converting to CREATE_NEW_EVENT`);
+              suggestion.action = 'CREATE_NEW_EVENT';
+              suggestion.confidence = Math.max(30, suggestion.confidence - 20);
+            }
+          }
+        }
+
         // Validate new event suggestion
-        if (suggestion.action === 'CREATE_NEW_EVENT' && suggestion.newEventSuggestion) {
+        if ((suggestion.action === 'CREATE_NEW_EVENT' || suggestion.action === 'PAIR_WITH_NEXT') && suggestion.newEventSuggestion) {
           const newEvent = suggestion.newEventSuggestion;
           
           // Ensure required fields
@@ -696,9 +724,6 @@ CRITICAL REQUIREMENTS:
           if (!categoryExists && availableCategories.length > 0) {
             console.warn(`⚠️ Unknown category "${newEvent.category}" for lecture ${suggestion.lectureNumber}, using first available category`);
             newEvent.category = availableCategories[0].name;
-            newEvent.categoryId = availableCategories[0].id;
-          } else if (categoryExists) {
-            newEvent.categoryId = categoryExists.id;
           }
         }
 
