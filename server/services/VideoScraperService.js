@@ -1,9 +1,9 @@
 const puppeteer = require('puppeteer');
-const { PrismaClient } = require('@prisma/client');
+const prisma = require('../prismaClient'); // Use shared Prisma client
 
 class VideoScraperService {
   constructor() {
-    this.prisma = new PrismaClient();
+    this.prisma = prisma; // Use shared instance to avoid connection pool exhaustion
   }
 
   /**
@@ -165,63 +165,118 @@ class VideoScraperService {
    */
   async _analyzePostgreSQLSequence(maxId, recordCount) {
     try {
-      // SAFE: Verify sequence exists (READ-ONLY)
-      const sequenceExists = await this.prisma.$queryRaw`
-        SELECT sequence_name 
-        FROM information_schema.sequences 
-        WHERE sequence_name = 'HistoryVideo_id_seq'
-      `;
+      console.log('🔍 Attempting PostgreSQL sequence analysis...');
       
-      if (sequenceExists.length === 0) {
+      // SAFE: First, let's find what sequences exist for this table
+      let sequenceExists = [];
+      try {
+        sequenceExists = await this.prisma.$queryRaw`
+          SELECT sequence_name, sequence_schema
+          FROM information_schema.sequences 
+          WHERE sequence_name LIKE '%HistoryVideo%' OR sequence_name LIKE '%historyvideo%'
+        `;
+        console.log(`Found sequences: ${JSON.stringify(sequenceExists)}`);
+      } catch (seqError) {
+        console.log(`Sequence lookup failed: ${seqError.message}`);
+      }
+      
+      // Try multiple possible sequence names
+      const possibleSequenceNames = [
+        'HistoryVideo_id_seq',
+        'historyvideo_id_seq', 
+        '"HistoryVideo_id_seq"',
+        'public.HistoryVideo_id_seq',
+        'public."HistoryVideo_id_seq"'
+      ];
+      
+      let sequenceResult = null;
+      let workingSequenceName = null;
+      
+      for (const sequenceName of possibleSequenceNames) {
+        try {
+          console.log(`Trying sequence name: ${sequenceName}`);
+          sequenceResult = await this.prisma.$queryRaw`
+            SELECT last_value, is_called 
+            FROM ${this.prisma.Prisma.raw(sequenceName)}
+          `;
+          
+          if (sequenceResult && sequenceResult.length > 0) {
+            workingSequenceName = sequenceName;
+            console.log(`✅ Found working sequence: ${sequenceName}`);
+            break;
+          }
+        } catch (seqError) {
+          console.log(`Sequence ${sequenceName} failed: ${seqError.message}`);
+          continue;
+        }
+      }
+      
+      if (!sequenceResult || sequenceResult.length === 0) {
+        // Try a different approach - use currval if available
+        try {
+          console.log('Trying currval approach...');
+          const currvalResult = await this.prisma.$queryRaw`
+            SELECT currval(pg_get_serial_sequence('HistoryVideo', 'id')) as current_value
+          `;
+          
+          if (currvalResult && currvalResult.length > 0) {
+            const currentValue = parseInt(currvalResult[0].current_value);
+            const nextValue = currentValue + 1;
+            const wouldCauseConflict = nextValue <= maxId;
+            
+            return {
+              safe: true,
+              healthy: !wouldCauseConflict,
+              database: 'postgresql',
+              analysis: {
+                recordCount,
+                maxId,
+                currentSequenceValue: currentValue,
+                nextValue,
+                wouldCauseConflict,
+                method: 'currval'
+              },
+              recommendation: wouldCauseConflict 
+                ? `⚠️  SEQUENCE OUT OF SYNC: Next ID (${nextValue}) would conflict with existing data (max: ${maxId}). Sequence needs update.`
+                : `✅ SEQUENCE HEALTHY: Next ID (${nextValue}) is safely above max data ID (${maxId})`
+            };
+          }
+        } catch (currvalError) {
+          console.log(`Currval approach failed: ${currvalError.message}`);
+        }
+        
         return {
           safe: true,
-          issue: 'No sequence found',
-          recommendation: 'Table may be new or use different naming convention',
-          database: 'postgresql'
+          issue: 'Could not find or access sequence',
+          recommendation: `Unable to analyze sequence. Available sequences: ${JSON.stringify(sequenceExists)}`,
+          database: 'postgresql',
+          sequencesFound: sequenceExists
         };
       }
       
-      // SAFE: Check sequence current value (READ-ONLY)
-      const sequenceResult = await this.prisma.$queryRaw`
-        SELECT last_value, is_called, increment_by, max_value, min_value
-        FROM "HistoryVideo_id_seq"
-      `;
+      const { last_value, is_called } = sequenceResult[0];
+      const nextValue = is_called ? parseInt(last_value) + 1 : parseInt(last_value);
+      const wouldCauseConflict = nextValue <= maxId;
       
-      if (sequenceResult.length === 0) {
-        return {
-          safe: true,
-          issue: 'Cannot read sequence state',
-          recommendation: 'Sequence exists but state is unreadable',
-          database: 'postgresql'
-        };
-      }
-      
-      const { last_value, is_called, increment_by, max_value, min_value } = sequenceResult[0];
-      const effectiveCurrentValue = is_called ? last_value : last_value - increment_by;
-      const nextValue = is_called ? last_value + increment_by : last_value;
-      
-      console.log(`🔍 PostgreSQL Sequence Analysis:`);
+      console.log(`🔍 PostgreSQL Sequence Analysis (${workingSequenceName}):`);
       console.log(`   Last Value: ${last_value}`);
       console.log(`   Is Called: ${is_called}`);
-      console.log(`   Effective Current: ${effectiveCurrentValue}`);
       console.log(`   Next Value: ${nextValue}`);
       console.log(`   Max ID in table: ${maxId}`);
-      
-      const isHealthy = nextValue > maxId;
-      const wouldCauseConflict = nextValue <= maxId;
+      console.log(`   Would Cause Conflict: ${wouldCauseConflict}`);
       
       return {
         safe: true,
-        healthy: isHealthy,
+        healthy: !wouldCauseConflict,
         database: 'postgresql',
         analysis: {
           recordCount,
           maxId,
-          sequenceLastValue: last_value,
+          sequenceLastValue: parseInt(last_value),
           sequenceIsCalled: is_called,
-          effectiveCurrentValue,
           nextValue,
-          wouldCauseConflict
+          wouldCauseConflict,
+          sequenceName: workingSequenceName
         },
         recommendation: wouldCauseConflict 
           ? `⚠️  SEQUENCE OUT OF SYNC: Next ID (${nextValue}) would conflict with existing data (max: ${maxId}). Sequence needs update.`
@@ -229,10 +284,11 @@ class VideoScraperService {
       };
       
     } catch (error) {
+      console.error('PostgreSQL sequence analysis error:', error);
       return {
         safe: true,
         error: `PostgreSQL analysis failed: ${error.message}`,
-        recommendation: 'Could not analyze PostgreSQL sequence',
+        recommendation: 'Could not analyze PostgreSQL sequence - see logs for details',
         database: 'postgresql'
       };
     }
@@ -337,18 +393,72 @@ class VideoScraperService {
       console.log(`🔧 Proceeding with repair: Setting next sequence value to ${safeNextValue}`);
 
       if (database === 'postgresql') {
-        // PostgreSQL sequence repair
-        await this.prisma.$executeRaw`
-          SELECT setval('"HistoryVideo_id_seq"', ${safeNextValue}, false)
-        `;
+        // PostgreSQL sequence repair using the sequence name from analysis
+        const sequenceName = healthCheck.analysis.sequenceName || 'HistoryVideo_id_seq';
+        
+        console.log(`🔧 Repairing PostgreSQL sequence: ${sequenceName}`);
+        
+        // Try multiple repair approaches
+        let repairSuccess = false;
+        let repairMethod = null;
+        
+        // Method 1: Direct setval with identified sequence name
+        try {
+          await this.prisma.$executeRaw`
+            SELECT setval(${this.prisma.Prisma.raw(`'${sequenceName}'`)}, ${safeNextValue}, false)
+          `;
+          repairSuccess = true;
+          repairMethod = 'setval_direct';
+          console.log(`✅ Sequence repaired using direct setval`);
+        } catch (directError) {
+          console.log(`Direct setval failed: ${directError.message}`);
+          
+          // Method 2: Use pg_get_serial_sequence approach
+          try {
+            await this.prisma.$executeRaw`
+              SELECT setval(pg_get_serial_sequence('HistoryVideo', 'id'), ${safeNextValue}, false)
+            `;
+            repairSuccess = true;
+            repairMethod = 'setval_pg_get_serial';
+            console.log(`✅ Sequence repaired using pg_get_serial_sequence`);
+          } catch (serialError) {
+            console.log(`pg_get_serial_sequence failed: ${serialError.message}`);
+            throw new Error(`Both repair methods failed: ${directError.message} | ${serialError.message}`);
+          }
+        }
+        
+        if (!repairSuccess) {
+          throw new Error('All PostgreSQL sequence repair methods failed');
+        }
         
         // Verify the fix worked
-        const verifyResult = await this.prisma.$queryRaw`
-          SELECT last_value, is_called FROM "HistoryVideo_id_seq"
-        `;
+        let verifyResult = null;
+        try {
+          verifyResult = await this.prisma.$queryRaw`
+            SELECT last_value, is_called FROM ${this.prisma.Prisma.raw(sequenceName)}
+          `;
+        } catch (verifyError) {
+          // Try alternative verification
+          try {
+            const currvalResult = await this.prisma.$queryRaw`
+              SELECT currval(pg_get_serial_sequence('HistoryVideo', 'id')) as current_value
+            `;
+            const currentValue = parseInt(currvalResult[0].current_value);
+            verifyResult = [{ last_value: currentValue, is_called: true }];
+          } catch (currvalError) {
+            console.warn(`Could not verify sequence repair: ${verifyError.message}`);
+            return {
+              success: true,
+              database: 'postgresql',
+              warning: 'Repair completed but verification failed',
+              repairMethod,
+              message: `PostgreSQL sequence repair attempted. Could not verify result.`
+            };
+          }
+        }
         
         const nextValueAfterFix = verifyResult[0].is_called ? 
-          verifyResult[0].last_value + 1 : verifyResult[0].last_value;
+          parseInt(verifyResult[0].last_value) + 1 : parseInt(verifyResult[0].last_value);
 
         return {
           success: true,
@@ -356,9 +466,11 @@ class VideoScraperService {
           repairApplied: {
             targetNextValue: safeNextValue,
             actualNextValue: nextValueAfterFix,
-            verificationPassed: nextValueAfterFix === safeNextValue
+            verificationPassed: nextValueAfterFix === safeNextValue,
+            sequenceName,
+            repairMethod
           },
-          message: `PostgreSQL sequence repaired. Next ID will be: ${nextValueAfterFix}`
+          message: `PostgreSQL sequence repaired using ${repairMethod}. Next ID will be: ${nextValueAfterFix}`
         };
 
       } else {
@@ -393,6 +505,94 @@ class VideoScraperService {
         success: false,
         error: `Repair failed: ${error.message}`,
         recommendation: 'Manual database intervention may be required'
+      };
+    }
+  }
+
+  /**
+   * EMERGENCY: Quick sequence fix for immediate production issues
+   * This bypasses health checks and directly sets the sequence to a safe value
+   */
+  async emergencySequenceReset() {
+    try {
+      console.log('🚨 EMERGENCY SEQUENCE RESET: Getting current max ID...');
+      
+      const maxIdResult = await this.prisma.historyVideo.aggregate({
+        _max: { id: true }
+      });
+      
+      const maxId = maxIdResult._max.id || 0;
+      const safeNextValue = maxId + 1;
+      
+      console.log(`📊 Max ID found: ${maxId}, setting sequence to: ${safeNextValue}`);
+      
+      // Detect database type
+      const databaseUrl = process.env.DATABASE_URL || '';
+      const isPostgreSQL = databaseUrl.startsWith('postgresql://') || databaseUrl.startsWith('postgres://');
+      
+      if (isPostgreSQL) {
+        console.log('🔧 PostgreSQL emergency repair...');
+        
+        // Try the most reliable PostgreSQL sequence reset method
+        try {
+          await this.prisma.$executeRaw`
+            SELECT setval(pg_get_serial_sequence('HistoryVideo', 'id'), ${safeNextValue}, false)
+          `;
+          
+          console.log('✅ PostgreSQL sequence reset successful');
+          return {
+            success: true,
+            database: 'postgresql',
+            maxId,
+            nextValue: safeNextValue,
+            message: `Emergency PostgreSQL sequence reset complete. Next ID: ${safeNextValue}`
+          };
+          
+        } catch (pgError) {
+          console.error('❌ PostgreSQL emergency reset failed:', pgError.message);
+          return {
+            success: false,
+            database: 'postgresql',
+            error: pgError.message,
+            maxId,
+            recommendation: 'Manual database intervention required'
+          };
+        }
+      } else {
+        console.log('🔧 SQLite emergency repair...');
+        
+        try {
+          await this.prisma.$executeRaw`
+            UPDATE sqlite_sequence SET seq = ${maxId} WHERE name = 'HistoryVideo'
+          `;
+          
+          console.log('✅ SQLite sequence reset successful');
+          return {
+            success: true,
+            database: 'sqlite',
+            maxId,
+            nextValue: safeNextValue,
+            message: `Emergency SQLite sequence reset complete. Next ID: ${safeNextValue}`
+          };
+          
+        } catch (sqliteError) {
+          console.error('❌ SQLite emergency reset failed:', sqliteError.message);
+          return {
+            success: false,
+            database: 'sqlite',
+            error: sqliteError.message,
+            maxId,
+            recommendation: 'Manual database intervention required'
+          };
+        }
+      }
+      
+    } catch (error) {
+      console.error('❌ Emergency sequence reset failed:', error);
+      return {
+        success: false,
+        error: error.message,
+        recommendation: 'Could not complete emergency reset'
       };
     }
   }
@@ -1168,11 +1368,8 @@ class VideoScraperService {
         const videoUrl = videoUrls[i];
         
         try {
-          // Create a fresh Prisma client instance for this iteration
-          const prismaClient = new PrismaClient();
-          
-          // Check if video already exists in database
-          const existingVideo = await prismaClient.historyVideo.findUnique({
+          // Check if video already exists in database  
+          const existingVideo = await this.prisma.historyVideo.findUnique({
             where: { url: videoUrl }
           });
 
