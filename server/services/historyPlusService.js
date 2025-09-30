@@ -1071,9 +1071,10 @@ class HistoryPlusService {
       }
       
       // Check for any unwatched videos
-      const unwatchedVideos = event.videos.filter(video => 
-        !video.user_video_watches || !video.user_video_watches.watched
-      );
+      const unwatchedVideos = event.videos.filter(video => {
+        const watchRecord = video.user_video_watches;
+        return !watchRecord || watchRecord.length === 0 || !watchRecord[0]?.watched;
+      });
       
       // Check for any unread unified books (via bookLinks)
       const unreadUnifiedBooks = event.bookLinks.filter(bookLink =>
@@ -1433,11 +1434,11 @@ class HistoryPlusService {
         }
       });
 
-      // Sort events chronologically by converting string dates to Date objects
+      // Sort events chronologically by parsing dates to numeric values
       const sortedEvents = events.sort((a, b) => {
         const dateA = this.parseHistoricalDate(a.startDate);
         const dateB = this.parseHistoricalDate(b.startDate);
-        return dateA.getTime() - dateB.getTime();
+        return dateA - dateB;
       });
 
       console.log(`🔍 Checking ${sortedEvents.length} events for unreviewed content...`);
@@ -1447,19 +1448,22 @@ class HistoryPlusService {
         const isEventReviewed = event.user_event_reviews && event.user_event_reviews.reviewed;
         console.log(`📅 Event: "${event.title}" (${event.startDate}) - Marked as reviewed: ${isEventReviewed}`);
         
-        if (!isEventReviewed) {
-          // Check if this event actually has unwatched/unread content
-          const hasUnwatchedContent = await this.checkEventHasUnwatchedContent(event);
-          
-          if (hasUnwatchedContent) {
-            console.log(`✅ Selected event with unwatched content: "${event.title}"`);
-            return event;
-          } else {
+        // Always check if this event has unwatched/unread content (regardless of review status)
+        const hasUnwatchedContent = await this.checkEventHasUnwatchedContent(event);
+        
+        if (hasUnwatchedContent) {
+          console.log(`✅ Selected event with unwatched content: "${event.title}"`);
+          return event;
+        } else {
+          // Event has no unwatched content
+          if (!isEventReviewed) {
             // Event has no unwatched content but isn't marked as reviewed - mark it as reviewed
             console.log(`🔄 Event "${event.title}" has no unwatched content, marking as reviewed and continuing...`);
             await this.markEventReviewed(event.id, true);
-            // Continue to next event
+          } else {
+            console.log(`⏭️ Event "${event.title}" already reviewed and has no unwatched content, continuing...`);
           }
+          // Continue to next event
         }
       }
 
@@ -1479,9 +1483,10 @@ class HistoryPlusService {
   async checkEventHasUnwatchedContent(event) {
     try {
       // Check for any unwatched videos
-      const unwatchedVideos = event.videos.filter(video => 
-        !video.user_video_watches || !video.user_video_watches.watched
-      );
+      const unwatchedVideos = event.videos.filter(video => {
+        const watchRecord = video.user_video_watches;
+        return !watchRecord || watchRecord.length === 0 || !watchRecord[0]?.watched;
+      });
       
       // Check for any unread unified books (via bookLinks)
       const unreadUnifiedBooks = (event.bookLinks || []).filter(bookLink =>
@@ -1518,20 +1523,32 @@ class HistoryPlusService {
   }
 
   /**
-   * Parse historical date string (e.g., "-2334-01-01") to Date object
+   * Parse historical date string (e.g., "-700000-01-01") to numeric value for sorting
    */
   parseHistoricalDate(dateString) {
-    if (!dateString) return new Date(0);
+    if (!dateString) return 0;
     
-    // Handle BCE dates (negative years)
+    // Handle BCE dates (negative years in our format: "-YYYY...-MM-DD")
     if (dateString.startsWith('-')) {
-      const withoutMinus = dateString.substring(1);
-      const [year, month, day] = withoutMinus.split('-').map(num => parseInt(num, 10));
-      // For BCE dates, we use negative years and adjust for JavaScript Date behavior
-      return new Date(-year + 1, (month || 1) - 1, day || 1);
+      const firstDashIndex = dateString.indexOf('-', 1);
+      const yearStr = firstDashIndex > 1 ? dateString.slice(1, firstDashIndex) : dateString.slice(1, 5);
+      const year = parseInt(yearStr);
+      const remainingDate = firstDashIndex > 1 ? dateString.slice(firstDashIndex) : dateString.slice(5);
+      const month = parseInt(remainingDate.slice(1, 3)) || 1;
+      const day = parseInt(remainingDate.slice(4, 6)) || 1;
+      
+      // For BCE, convert to negative number for sorting (higher BCE numbers = earlier in time)
+      return -(year * 10000 + month * 100 + day);
     } else {
-      // CE dates
-      return new Date(dateString);
+      // Handle CE dates (positive years: "YYYY...-MM-DD")
+      const firstDashIndex = dateString.indexOf('-');
+      const yearStr = firstDashIndex > 0 ? dateString.slice(0, firstDashIndex) : dateString.slice(0, 4);
+      const year = parseInt(yearStr);
+      const month = parseInt(dateString.slice(firstDashIndex + 1, firstDashIndex + 3)) || 1;
+      const day = parseInt(dateString.slice(firstDashIndex + 4, firstDashIndex + 6)) || 1;
+      
+      // For CE, use positive number (normal chronological order)
+      return year * 10000 + month * 100 + day;
     }
   }
 

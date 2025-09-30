@@ -3602,6 +3602,11 @@ function CustomOrders() {
                         <span className={`item-status ${item.isWatched ? 'watched' : 'unwatched'}`}>
                           {item.isWatched ? 'Watched' : 'Unwatched'}
                         </span>
+                        {item.mediaType === 'book' && item.book && (
+                          <span className={`item-owned ${item.book.owned ? 'owned' : 'not-owned'}`}>
+                            {item.book.owned ? '📖 Owned' : '📖 Not Owned'}
+                          </span>
+                        )}
                       </div>
 
                       {/* Reading Progress Display */}

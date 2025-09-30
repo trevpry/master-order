@@ -53,7 +53,8 @@ const Books = () => {
     author: '',
     genre: '',
     completed: '',
-    hasChapters: ''
+    hasChapters: '',
+    owned: ''
   });
   const [sortBy, setSortBy] = useState('title');
   const [sortOrder, setSortOrder] = useState('asc');
@@ -226,6 +227,35 @@ const Books = () => {
   const cancelDelete = () => {
     setShowDeleteConfirm(false);
     setBookToDelete(null);
+  };
+
+  const toggleOwnedStatus = async (bookId, currentStatus) => {
+    try {
+      const response = await fetch(`/api/books/${bookId}/owned`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ owned: !currentStatus })
+      });
+      const data = await response.json();
+      
+      if (data.success) {
+        // Update the book in the list
+        setBooks(books.map(book => 
+          book.id === bookId ? { ...book, owned: !currentStatus } : book
+        ));
+        // Update selected book if it's the same
+        if (selectedBook?.id === bookId) {
+          setSelectedBook({ ...selectedBook, owned: !currentStatus });
+        }
+      } else {
+        throw new Error(data.error || 'Failed to update owned status');
+      }
+    } catch (err) {
+      console.error('Error updating owned status:', err);
+      setError(`Failed to update owned status: ${err.message}`);
+    }
   };
 
   // ==========================================
@@ -527,30 +557,50 @@ const Books = () => {
       completion.userId === "default"
     );
     const isCompleted = userBookCompletion && userBookCompletion.isCompleted;
+    const isOwned = book.owned;
     
     return (
     <div 
       key={book.id} 
-      className={`bg-white rounded-lg shadow-md p-4 hover:shadow-lg transition-shadow relative group ${isCompleted ? 'ring-2 ring-green-200' : ''}`}
+      className={`bg-white rounded-lg shadow-md p-4 hover:shadow-lg transition-shadow relative group ${isCompleted ? 'ring-2 ring-green-200' : ''} ${isOwned ? 'border-l-4 border-l-blue-500' : ''}`}
     >
-      {/* Completion indicator */}
-      {isCompleted && (
-        <div className="absolute top-2 right-2 bg-green-500 text-white rounded-full p-1 z-10">
-          <CheckCircle className="w-4 h-4" />
-        </div>
-      )}
+      {/* Status indicators */}
+      <div className="absolute top-2 right-2 flex gap-1 z-10">
+        {isOwned && (
+          <div className="bg-blue-500 text-white rounded-full p-1" title="Owned">
+            <Bookmark className="w-4 h-4" />
+          </div>
+        )}
+        {isCompleted && (
+          <div className="bg-green-500 text-white rounded-full p-1" title="Completed">
+            <CheckCircle className="w-4 h-4" />
+          </div>
+        )}
+      </div>
       
-      {/* Delete button */}
-      <button
-        onClick={(e) => {
-          e.stopPropagation();
-          confirmDelete(book);
-        }}
-        className="absolute top-2 left-2 p-1 text-red-500 hover:bg-red-100 rounded-full opacity-0 group-hover:opacity-100 transition-opacity z-10"
-        title="Delete book"
-      >
-        <Trash2 className="w-4 h-4" />
-      </button>
+      {/* Action buttons */}
+      <div className="absolute top-2 left-2 flex flex-col gap-1 opacity-0 group-hover:opacity-100 transition-opacity z-10">
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            toggleOwnedStatus(book.id, isOwned);
+          }}
+          className={`p-1 rounded-full ${isOwned ? 'text-blue-600 bg-blue-100 hover:bg-blue-200' : 'text-gray-500 bg-gray-100 hover:bg-gray-200'}`}
+          title={isOwned ? "Mark as not owned" : "Mark as owned"}
+        >
+          <Bookmark className="w-4 h-4" />
+        </button>
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            confirmDelete(book);
+          }}
+          className="p-1 text-red-500 hover:bg-red-100 rounded-full"
+          title="Delete book"
+        >
+          <Trash2 className="w-4 h-4" />
+        </button>
+      </div>
       
       <div 
         className="flex items-start space-x-4 cursor-pointer"
@@ -575,12 +625,20 @@ const Books = () => {
             <p className="text-xs text-gray-500">{book.publishYear}</p>
           )}
           
-          {isCompleted && (
-            <div className="flex items-center mt-1">
-              <CheckCircle className="w-3 h-3 text-green-600 mr-1" />
-              <span className="text-xs text-green-600 font-medium">Completed</span>
-            </div>
-          )}
+          <div className="flex items-center gap-3 mt-1">
+            {isOwned && (
+              <div className="flex items-center">
+                <Bookmark className="w-3 h-3 text-blue-600 mr-1" />
+                <span className="text-xs text-blue-600 font-medium">Owned</span>
+              </div>
+            )}
+            {isCompleted && (
+              <div className="flex items-center">
+                <CheckCircle className="w-3 h-3 text-green-600 mr-1" />
+                <span className="text-xs text-green-600 font-medium">Completed</span>
+              </div>
+            )}
+          </div>
           
           {book.progress && renderProgressBar(book.progress)}
           
@@ -640,6 +698,26 @@ const Books = () => {
               {selectedBook.description && (
                 <p className="text-gray-700 mb-4">{selectedBook.description}</p>
               )}
+              
+              {/* Owned Status */}
+              <div className="flex items-center gap-4 mb-4">
+                <div className="flex items-center gap-2">
+                  <Bookmark className={`w-5 h-5 ${selectedBook.owned ? 'text-blue-600' : 'text-gray-400'}`} />
+                  <span className={`font-medium ${selectedBook.owned ? 'text-blue-600' : 'text-gray-600'}`}>
+                    {selectedBook.owned ? 'Owned' : 'Not Owned'}
+                  </span>
+                </div>
+                <button
+                  onClick={() => toggleOwnedStatus(selectedBook.id, selectedBook.owned)}
+                  className={`px-3 py-1 rounded-full text-sm font-medium transition-colors ${
+                    selectedBook.owned 
+                      ? 'bg-blue-100 text-blue-800 hover:bg-blue-200' 
+                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                  }`}
+                >
+                  {selectedBook.owned ? 'Mark as Not Owned' : 'Mark as Owned'}
+                </button>
+              </div>
               
               <div className="grid grid-cols-2 gap-4 text-sm text-gray-600 mb-4">
                 {selectedBook.publisher && (
@@ -981,6 +1059,16 @@ const Books = () => {
               
               <select
                 className="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                value={filters.owned}
+                onChange={(e) => setFilters({...filters, owned: e.target.value})}
+              >
+                <option value="">All Ownership</option>
+                <option value="true">Owned</option>
+                <option value="false">Not Owned</option>
+              </select>
+              
+              <select
+                className="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
                 value={sortBy}
                 onChange={(e) => setSortBy(e.target.value)}
               >
@@ -988,6 +1076,7 @@ const Books = () => {
                 <option value="author">Sort by Author</option>
                 <option value="publishYear">Sort by Year</option>
                 <option value="createdAt">Sort by Added</option>
+                <option value="owned">Sort by Owned Status</option>
               </select>
             </div>
           </div>

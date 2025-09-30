@@ -105,6 +105,7 @@ router.get('/', asyncHandler(async (req, res) => {
     publisher,
     completed,
     hasChapters,
+    owned,
     eventId,
     page = 1,
     limit = 20,
@@ -123,7 +124,8 @@ router.get('/', asyncHandler(async (req, res) => {
       year: year ? parseInt(year) : undefined,
       publisher,
       completed: completed !== undefined ? completed === 'true' : undefined,
-      hasChapters: hasChapters !== undefined ? hasChapters === 'true' : undefined
+      hasChapters: hasChapters !== undefined ? hasChapters === 'true' : undefined,
+      owned: owned !== undefined ? owned === 'true' : undefined
     }
   };
 
@@ -380,6 +382,22 @@ router.put('/:id', asyncHandler(async (req, res) => {
   const updateData = req.body;
 
   const book = await bookService.updateBook(parseInt(id), updateData);
+  sendSuccess(res, book);
+}));
+
+/**
+ * PUT /api/books/:id/owned
+ * Update book owned status
+ */
+router.put('/:id/owned', asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  const { owned } = req.body;
+
+  if (typeof owned !== 'boolean') {
+    return sendBadRequest(res, 'owned must be a boolean value');
+  }
+
+  const book = await bookService.updateBook(parseInt(id), { owned });
   sendSuccess(res, book);
 }));
 
