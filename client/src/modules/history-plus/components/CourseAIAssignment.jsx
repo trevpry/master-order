@@ -362,22 +362,80 @@ const CourseAIAssignment = ({
                           <h5 className="font-medium text-gray-900">
                             Lecture {suggestion.lectureNumber}: {suggestion.lectureTitle}
                           </h5>
-                          <span className="text-xs text-blue-600 bg-blue-100 px-2 py-1 rounded">
-                            {suggestion.confidence}% confidence
-                          </span>
+                          <div className="flex items-center gap-2">
+                            <span className="text-xs text-blue-600 bg-blue-100 px-2 py-1 rounded">
+                              {suggestion.confidence}% confidence
+                            </span>
+                            {/* Action Type Badge */}
+                            {suggestion.action === 'ASSIGN_TO_EXISTING' ? (
+                              <span className="text-xs text-green-700 bg-green-100 px-2 py-1 rounded font-medium">
+                                📚 Existing Event
+                              </span>
+                            ) : suggestion.action === 'CREATE_NEW_EVENT' ? (
+                              <span className="text-xs text-purple-700 bg-purple-100 px-2 py-1 rounded font-medium">
+                                ✨ New Event
+                              </span>
+                            ) : (
+                              <span className="text-xs text-gray-700 bg-gray-100 px-2 py-1 rounded font-medium">
+                                ❓ Unknown
+                              </span>
+                            )}
+                          </div>
                         </div>
                         
-                        <div className="text-sm text-gray-700 mb-2">
-                          <strong>Assigned Event:</strong> {suggestion.eventTitle}
-                        </div>
+                        {/* Existing Event Details */}
+                        {suggestion.action === 'ASSIGN_TO_EXISTING' && (
+                          <div className="bg-green-50 p-3 rounded border border-green-200 mb-2">
+                            <div className="text-sm text-gray-700 mb-1">
+                              <strong>Assigned Event:</strong> {suggestion.existingEventTitle || suggestion.eventTitle}
+                            </div>
+                            {suggestion.existingEventCategory && (
+                              <div className="text-sm text-gray-700 mb-1">
+                                <strong>Category:</strong> {suggestion.existingEventCategory}
+                              </div>
+                            )}
+                            {(suggestion.existingEventStartDate || suggestion.existingEventEndDate) && (
+                              <div className="text-sm text-gray-700 mb-1">
+                                <strong>Time Period:</strong> {suggestion.existingEventStartDate} - {suggestion.existingEventEndDate}
+                              </div>
+                            )}
+                          </div>
+                        )}
                         
-                        <div className="text-sm text-gray-700 mb-2">
-                          <strong>Category:</strong> {suggestion.category}
-                        </div>
+                        {/* New Event Details */}
+                        {suggestion.action === 'CREATE_NEW_EVENT' && suggestion.newEventSuggestion && (
+                          <div className="bg-purple-50 p-3 rounded border border-purple-200 mb-2">
+                            <div className="text-sm text-gray-700 mb-1">
+                              <strong>New Event Title:</strong> {suggestion.newEventSuggestion.title}
+                            </div>
+                            <div className="text-sm text-gray-700 mb-1">
+                              <strong>Category:</strong> {suggestion.newEventSuggestion.category}
+                            </div>
+                            <div className="text-sm text-gray-700 mb-1">
+                              <strong>Time Period:</strong> {suggestion.newEventSuggestion.startDate} - {suggestion.newEventSuggestion.endDate}
+                            </div>
+                            {suggestion.newEventSuggestion.details && (
+                              <div className="text-sm text-gray-700">
+                                <strong>Details:</strong> {suggestion.newEventSuggestion.details}
+                              </div>
+                            )}
+                          </div>
+                        )}
                         
-                        <div className="text-sm text-gray-700 mb-2">
-                          <strong>Time Period:</strong> {suggestion.startDate} - {suggestion.endDate}
-                        </div>
+                        {/* Fallback for other formats or missing action */}
+                        {!suggestion.action && (
+                          <div className="bg-yellow-50 p-3 rounded border border-yellow-200 mb-2">
+                            <div className="text-sm text-gray-700 mb-1">
+                              <strong>Event:</strong> {suggestion.eventTitle || suggestion.newEventSuggestion?.title}
+                            </div>
+                            <div className="text-sm text-gray-700 mb-1">
+                              <strong>Category:</strong> {suggestion.category || suggestion.newEventSuggestion?.category}
+                            </div>
+                            <div className="text-sm text-gray-700 mb-1">
+                              <strong>Time Period:</strong> {suggestion.startDate || suggestion.newEventSuggestion?.startDate} - {suggestion.endDate || suggestion.newEventSuggestion?.endDate}
+                            </div>
+                          </div>
+                        )}
                         
                         {suggestion.reasoning && (
                           <div className="text-xs text-gray-600 bg-white p-2 rounded border">

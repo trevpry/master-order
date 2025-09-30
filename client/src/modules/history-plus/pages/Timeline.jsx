@@ -12,19 +12,24 @@ const Timeline = () => {
     
     const dateString = String(dateInput);
     
-    // Handle BCE dates (negative years in our format: "-YYYY-MM-DD")
+    // Handle BCE dates (negative years in our format: "-YYYY...-MM-DD")
     if (dateString.startsWith('-')) {
-      const year = parseInt(dateString.slice(1, 5));
-      const month = parseInt(dateString.slice(6, 8)) || 1;
-      const day = parseInt(dateString.slice(9, 11)) || 1;
+      const firstDashIndex = dateString.indexOf('-', 1);
+      const yearStr = firstDashIndex > 1 ? dateString.slice(1, firstDashIndex) : dateString.slice(1, 5);
+      const year = parseInt(yearStr);
+      const remainingDate = firstDashIndex > 1 ? dateString.slice(firstDashIndex) : dateString.slice(5);
+      const month = parseInt(remainingDate.slice(1, 3)) || 1;
+      const day = parseInt(remainingDate.slice(4, 6)) || 1;
       
       // For BCE, convert to negative number for sorting (higher BCE numbers = earlier in time)
       return -(year * 10000 + month * 100 + day);
     } else {
-      // Handle CE dates (positive years: "YYYY-MM-DD")
-      const year = parseInt(dateString.slice(0, 4));
-      const month = parseInt(dateString.slice(5, 7)) || 1;
-      const day = parseInt(dateString.slice(8, 10)) || 1;
+      // Handle CE dates (positive years: "YYYY...-MM-DD")
+      const firstDashIndex = dateString.indexOf('-');
+      const yearStr = firstDashIndex > 0 ? dateString.slice(0, firstDashIndex) : dateString.slice(0, 4);
+      const year = parseInt(yearStr);
+      const month = parseInt(dateString.slice(firstDashIndex + 1, firstDashIndex + 3)) || 1;
+      const day = parseInt(dateString.slice(firstDashIndex + 4, firstDashIndex + 6)) || 1;
       
       // For CE, use positive number (normal chronological order)
       return year * 10000 + month * 100 + day;

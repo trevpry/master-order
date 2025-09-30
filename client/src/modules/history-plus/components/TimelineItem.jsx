@@ -91,10 +91,24 @@ const TimelineItem = ({
     ];
     
     if (dateString.startsWith('-')) {
-      // BCE date
-      const year = parseInt(dateString.slice(1, 5)).toString(); // Remove leading zeros
-      const month = dateString.slice(6, 8);
-      const day = dateString.slice(9, 11);
+      // BCE date - handle both full format (-YYYY-MM-DD) and year-only format (-YYYY)
+      const firstDashIndex = dateString.indexOf('-', 1);
+      let yearStr, remainingDate, month = '01', day = '01';
+      
+      if (firstDashIndex > 1) {
+        // Full format: -YYYY...-MM-DD
+        yearStr = dateString.slice(1, firstDashIndex);
+        remainingDate = dateString.slice(firstDashIndex);
+        month = remainingDate.slice(1, 3) || '01';
+        day = remainingDate.slice(4, 6) || '01';
+      } else {
+        // Year-only format: -YYYY...
+        yearStr = dateString.slice(1);
+        month = '01';
+        day = '01';
+      }
+      
+      const year = parseInt(yearStr).toLocaleString(); // Format with commas
       
       if (day && day !== '01') {
         const monthName = monthNames[parseInt(month) - 1];
@@ -106,10 +120,23 @@ const TimelineItem = ({
         return `${year} BCE`;
       }
     } else {
-      // CE date
-      const year = parseInt(dateString.slice(0, 4)).toString(); // Remove leading zeros
-      const month = dateString.slice(5, 7);
-      const day = dateString.slice(8, 10);
+      // CE date - handle both full format (YYYY-MM-DD) and year-only format (YYYY)
+      const firstDashIndex = dateString.indexOf('-');
+      let yearStr, month = '01', day = '01';
+      
+      if (firstDashIndex > 0) {
+        // Full format: YYYY-MM-DD or YYYY...-MM-DD
+        yearStr = dateString.slice(0, firstDashIndex);
+        month = dateString.slice(firstDashIndex + 1, firstDashIndex + 3) || '01';
+        day = dateString.slice(firstDashIndex + 4, firstDashIndex + 6) || '01';
+      } else {
+        // Year-only format: YYYY...
+        yearStr = dateString;
+        month = '01';
+        day = '01';
+      }
+      
+      const year = parseInt(yearStr).toLocaleString(); // Format with commas
       
       if (day && day !== '01') {
         const monthName = monthNames[parseInt(month) - 1];

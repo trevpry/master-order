@@ -225,10 +225,10 @@ const EventForm = ({ event, categories, onSave, onCancel }) => {
                 onChange={handleInputChange}
                 required
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                placeholder={isBCEDate(formData.startDate) ? "e.g., -2331-01-01 for 2331 BCE" : ""}
+                placeholder={isBCEDate(formData.startDate) ? "e.g., -4200000-01-01 for 4,200,000 BCE" : ""}
               />
               <p className="text-xs text-gray-500 mt-1">
-                For BCE dates, use negative years (e.g., -0500-01-01 for 500 BCE)
+                For BCE dates, use negative years (e.g., -4200000-01-01 for 4,200,000 BCE)
               </p>
             </div>
 
