@@ -163,6 +163,49 @@ function createStashIntegrationRoutes(prisma) {
       
       const clip = nextClipData.clip;
       const scene = clip.scene;
+
+      // Enrich with full parent scene metadata (including tags, performers, studio) for Android client
+      let fullScene = null;
+      try {
+        fullScene = await prisma.stashScene.findUnique({
+          where: { id: scene.id },
+          include: {
+            performers: {
+              include: {
+                performer: {
+                  select: {
+                    id: true,
+                    name: true,
+                    image: true,
+                    gender: true,
+                    rating: true
+                  }
+                }
+              }
+            },
+            tags: {
+              include: {
+                tag: {
+                  select: {
+                    id: true,
+                    name: true,
+                    description: true
+                  }
+                }
+              }
+            },
+            studioObject: {
+              select: {
+                id: true,
+                name: true,
+                image: true
+              }
+            }
+          }
+        });
+      } catch (sceneMetaError) {
+        console.warn('⚠️ Failed to load full scene metadata for Android enrichment:', sceneMetaError.message);
+      }
       
       // Get Stash URL for stream URL
       const settings = await prisma.settings.findFirst();
@@ -218,6 +261,7 @@ function createStashIntegrationRoutes(prisma) {
         data: {
           url: stashUrl ? `${stashUrl}/scene/${scene.id}/stream` : '',
           title: title,
+            // Basic playback / clip data
           performers: performers,
           studio: studio,
           duration: clip.duration || 60,
@@ -225,7 +269,44 @@ function createStashIntegrationRoutes(prisma) {
           endTime: clip.endTime || 60,
           clipId: clip.id,
           sceneId: scene?.id || '',
-          clipIndex: clip.clipIndex || 0
+          clipIndex: clip.clipIndex || 0,
+          // Full scene metadata enrichment
+          scene: fullScene ? {
+            id: fullScene.id,
+            title: fullScene.title,
+            details: fullScene.details,
+            date: fullScene.date,
+            rating: fullScene.rating,
+            organized: fullScene.organized,
+            path: fullScene.path,
+            duration: fullScene.duration,
+            fileSize: fullScene.fileSize,
+            resolution: fullScene.resolution,
+            width: fullScene.width,
+            height: fullScene.height,
+            frameRate: fullScene.frameRate,
+            codec: fullScene.codec,
+            userRating: fullScene.userRating,
+            favorite: fullScene.favorite,
+            playCount: fullScene.playCount,
+            studio: fullScene.studioObject ? {
+              id: fullScene.studioObject.id,
+              name: fullScene.studioObject.name,
+              image: fullScene.studioObject.image
+            } : null,
+            performers: fullScene.performers?.map(p => ({
+              id: p.performer.id,
+              name: p.performer.name,
+              image: p.performer.image,
+              gender: p.performer.gender,
+              rating: p.performer.rating
+            })) || [],
+            tags: fullScene.tags?.map(t => ({
+              id: t.tag.id,
+              name: t.tag.name,
+              description: t.tag.description
+            })) || []
+          } : null
         }
       };
       

@@ -108,6 +108,87 @@ Currently, no authentication is required for these endpoints. They are designed 
 }
 ```
 
+---
+
+### Delete Stash Scene By Clip ID (Android Only)
+
+**Endpoint**: `POST /api/android/stash/clip/delete`
+
+**Description**: Deletes the entire Stash scene associated with a provided `clipId`. This removes the scene and all its clips locally and (if Stash is configured) attempts remote deletion through the Stash GraphQL API. This is useful when the Android client only has a reference to a clip but needs to purge the parent scene.
+
+**Request Body**:
+```json
+{
+  "clipId": 1234,
+  "deleteFile": true,
+  "deleteGenerated": true
+}
+```
+- `clipId` (required, number): The ID of the clip whose parent scene will be deleted.
+- `deleteFile` (optional, boolean, default: true): Whether the underlying media file should be deleted remotely in Stash.
+- `deleteGenerated` (optional, boolean, default: true): Whether to delete generated assets (thumbnails, previews) in Stash.
+
+**Successful Response**:
+```json
+{
+  "type": "STASH_SCENE_DELETED",
+  "data": {
+    "clipId": 1234,
+    "sceneId": "6c9d6d5b-...",
+    "local": {
+      "sceneDeleted": true,
+      "clipsDeleted": 12
+    },
+    "remote": {
+      "attempted": true,
+      "success": true,
+      "deleted": true,
+      "message": "Scene deleted successfully from Stash"
+    },
+    "message": "Scene deleted locally and remotely",
+    "timestamp": "2025-10-03T12:34:56.000Z"
+  }
+}
+```
+
+**Error Response (Clip Not Found)**:
+```json
+{
+  "type": "STASH_SCENE_DELETE_ERROR",
+  "data": {
+    "success": false,
+    "error": "CLIP_NOT_FOUND",
+    "message": "Clip 9999 not found",
+    "timestamp": "2025-10-03T12:34:56.000Z"
+  }
+}
+```
+
+**Error Response (Remote Failure)**:
+```json
+{
+  "type": "STASH_SCENE_DELETED",
+  "data": {
+    "clipId": 1234,
+    "sceneId": "6c9d6d5b-...",
+    "local": { "sceneDeleted": true, "clipsDeleted": 12 },
+    "remote": {
+      "attempted": true,
+      "success": false,
+      "error": "Stash API request failed: 500"
+    },
+    "message": "Scene deleted locally; remote deletion skipped or failed",
+    "timestamp": "2025-10-03T12:34:56.000Z"
+  }
+}
+```
+
+**Notes**:
+- Remote deletion only runs if Stash URL is configured in settings.
+- Local deletion removes all related clips first, then the scene.
+- This endpoint is idempotent in practice for local deletions—subsequent calls with the same clipId after deletion will return a CLIP_NOT_FOUND error.
+
+
 **Custom Order Book Response**:
 ```json
 {
@@ -150,6 +231,220 @@ Currently, no authentication is required for these endpoints. They are designed 
 
 **History Plus Custom Order Response**:
 ```json
+### Stash Clip Playback (Enhanced Scene Metadata)
+
+When the Android endpoint `GET /api/android/stash/next` returns a `PLAY_CLIP` response, it now includes a `scene` object with full parent scene metadata (performers, studio, tags, technical attributes) in addition to the core clip playback fields.
+
+Example:
+```json
+{
+  "type": "PLAY_CLIP",
+  "data": {
+    "url": "http://stash.local/scene/abcd-1234/stream",
+    "title": "Sample Scene Title",
+    "performers": "Performer A, Performer B",
+    "studio": "Studio Name",
+    "duration": 60,
+    "startTime": 0,
+    "endTime": 60,
+    "clipId": 42,
+    "sceneId": "abcd-1234",
+    "clipIndex": 3,
+    "scene": {
+      "id": "abcd-1234",
+      "title": "Sample Scene Title",
+      "details": "Extended description...",
+      "date": "2025-09-14",
+      "rating": 80,
+      "organized": false,
+      "path": "/media/scenes/sample.mp4",
+      "duration": 1800,
+      "fileSize": 1234567890,
+      "resolution": "1920x1080",
+      "width": 1920,
+      "height": 1080,
+      "frameRate": 29.97,
+      "codec": "h264",
+      "userRating": 4.5,
+      "favorite": false,
+      "playCount": 2,
+      "studio": { "id": "studio-1", "name": "Studio Name", "image": null },
+      "performers": [
+        { "id": "perf-1", "name": "Performer A", "image": null, "gender": "F", "rating": 4 },
+        { "id": "perf-2", "name": "Performer B", "image": null, "gender": "M", "rating": 5 }
+      ],
+      "tags": [
+        { "id": "tag-1", "name": "Outdoor", "description": null },
+        { "id": "tag-2", "name": "HD", "description": "High Definition" }
+      ]
+    }
+  }
+}
+```
+
+If full scene metadata cannot be loaded (e.g., transient DB issue) the `scene` field may be `null` while core clip playback still succeeds.
+
+---
+
+### Stash Tag Hierarchy & Management (Android Only)
+
+Provides hierarchical tag data plus basic create/delete operations for Stash tags.
+
+#### Get Tag Hierarchy
+**Endpoint**: `GET /api/android/stash/tags`
+
+Query Params:
+- `counts=true` (optional) include usage counts (scenes, performers, images, galleries, clips)
+
+Response:
+```json
+{
+  "type": "STASH_TAG_HIERARCHY",
+  "data": {
+    "total": 42,
+    "roots": [ { "id": "uuid-root", "name": "Root Tag", "children": [...], "parents": [] } ],
+    "tags": [ { "id": "uuid", "name": "Tag", "parents": [], "children": [], "counts": { "scenes": 5, "performers": 2, "images": 0, "galleries": 0, "clips": 12 } } ],
+    "timestamp": "2025-10-03T12:34:56.000Z"
+  }
+}
+```
+
+#### Create Tag
+**Endpoint**: `POST /api/android/stash/tags`
+
+Body:
+```json
+{
+  "name": "New Tag",
+  "description": "Optional description",
+  "parentIds": ["existing-parent-uuid"]
+}
+```
+
+Success:
+```json
+{
+  "type": "STASH_TAG_CREATED",
+  "data": { "tag": { "id": "generated-uuid", "name": "New Tag", "description": "Optional description" }, "timestamp": "..." }
+}
+```
+
+#### Delete Tag
+**Endpoint**: `DELETE /api/android/stash/tags/:id`
+
+Success:
+```json
+{ "type": "STASH_TAG_DELETED", "data": { "id": "deleted-uuid", "timestamp": "..." } }
+```
+
+Errors:
+```json
+{ "type": "STASH_TAG_DELETE_ERROR", "data": { "success": false, "error": "NOT_FOUND", "message": "Tag not found", "timestamp": "..." } }
+```
+
+Notes:
+- Hierarchy is derived via `StashTagHierarchy` relations (parent->child edges).
+- Deletion cascades through hierarchy links and aliases by schema constraints.
+- Creation allows optional immediate parent connections through `parentIds`.
+
+---
+
+### Stash Clip Tag Assignment (Android Only)
+
+Wraps existing web API endpoints for adding/removing tags from a clip, providing standardized Android response types.
+
+#### Add Tags to a Clip
+**Endpoint**: `POST /api/android/stash/clip/:clipId/tags`
+
+Body:
+```json
+{ "tagIds": ["uuid-tag-1", "uuid-tag-2"] }
+```
+
+Success:
+```json
+{
+  "type": "STASH_CLIP_TAGS_ADDED",
+  "data": {
+    "clipId": 42,
+    "addedCount": 2,
+    "tags": [ { "id": "uuid-tag-1", "tagId": "uuid-tag-1", "tag": { "id": "uuid-tag-1", "name": "Action" } } ],
+    "raw": { /* upstream response */ },
+    "timestamp": "..." 
+  }
+}
+```
+
+Errors:
+```json
+{ "type": "STASH_CLIP_TAG_ERROR", "data": { "success": false, "error": "INVALID_TAG_IDS", "message": "tagIds must be a non-empty array", "timestamp": "..." } }
+```
+
+#### Remove Tag from a Clip
+**Endpoint**: `DELETE /api/android/stash/clip/:clipId/tags/:tagId`
+
+Success:
+```json
+{
+  "type": "STASH_CLIP_TAG_REMOVED",
+  "data": { "clipId": 42, "tagId": "uuid-tag-1", "raw": { /* upstream */ }, "timestamp": "..." }
+}
+```
+
+Errors:
+```json
+{ "type": "STASH_CLIP_TAG_DELETE_ERROR", "data": { "success": false, "error": "UPSTREAM_FAILED", "message": "Tag not associated with this clip", "timestamp": "..." } }
+```
+
+Notes:
+- Upstream logic ensures idempotency by skipping existing associations.
+- `addedCount` may be 0 if all provided tags were already linked.
+- Uses internal server-to-server call to `/api/stash/clips/:id/tags` for consistency.
+
+---
+
+### Stash Performer Detail (Android Only)
+
+**Endpoint**: `GET /api/android/stash/performer/:id`
+
+Returns full performer metadata including tags, a limited recent scene list, and associated images with proxied URLs.
+
+Example Response:
+```json
+{
+  "type": "STASH_PERFORMER_DETAIL",
+  "data": {
+    "id": "perf-uuid",
+    "name": "Performer Name",
+    "gender": "F",
+    "birthdate": "1995-04-12",
+    "details": "Biography / scraped details...",
+    "rating": 4,
+    "ethnicity": "European",
+    "country": "USA",
+    "hair_color": "Blonde",
+    "height": "170 cm",
+    "weight": "55 kg",
+    "measurements": "34C-24-35",
+    "favorite": false,
+    "image": "/path/to/image.jpg",
+    "imageUrl": "http://localhost:3001/api/stash-image-proxy/%2Fpath%2Fto%2Fimage.jpg",
+    "instagram": null,
+    "twitter": null,
+    "url": null,
+    "tags": [ { "id": "tag-uuid", "name": "Action" } ],
+    "scenes": [ { "id": "scene-uuid", "title": "Scene Title", "date": "2025-09-03", "studio": "Studio Name", "rating": 80, "duration": 1800 } ],
+    "images": [ { "id": "img-uuid", "title": "Promo Shot", "path": "/image/path.jpg", "rating": 80, "galleryId": "gallery-uuid", "url": "http://localhost:3001/api/stash-image-proxy/%2Fimage%2Fpath.jpg" } ],
+    "timestamp": "2025-10-03T12:34:56.000Z"
+  }
+}
+```
+
+Notes:
+- `scenes` limited to 24 and `images` limited to 50 for payload size.
+- `imageUrl` and each image's `url` use the image proxy endpoint for consistent client consumption.
+- Fields mirror those stored in the Stash performer schema for parity with web interface.
+
 {
   "type": "PLAY_CUSTOM_ORDER_ITEM",
   "data": {

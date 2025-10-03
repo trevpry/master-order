@@ -19,6 +19,10 @@ const createPlaybackControlRoutes = require('./playbackControl');
 const createReadingSessionRoutes = require('./readingSession');
 const createHistoryPlusReadingSessionRoutes = require('./historyPlusReadingSession');
 const createStashIntegrationRoutes = require('./stashIntegration');
+const createStashSceneDeletionRoutes = require('./stashSceneDeletion');
+const createStashTagRoutes = require('./stashTags');
+const createStashClipTagRoutes = require('./stashClipTags');
+const createStashPerformerRoutes = require('./stashPerformer');
 const createViewingSessionRoutes = require('./viewingSession');
 const createGalleryPlaylistRoutes = require('./galleryPlaylist');
 const createWeatherRoutes = require('./weather');
@@ -67,6 +71,18 @@ function createAndroidRouter(options = {}) {
   
   // Stash integration
   router.use('/', createStashIntegrationRoutes(prisma));
+
+  // Stash scene deletion by clipId
+  router.use('/', createStashSceneDeletionRoutes(prisma));
+
+  // Stash tag management (hierarchy + CRUD)
+  router.use('/', createStashTagRoutes());
+
+  // Stash clip tag assignment
+  router.use('/', createStashClipTagRoutes());
+
+  // Stash performer detail
+  router.use('/', createStashPerformerRoutes());
   
   // Viewing session management
   router.use('/', createViewingSessionRoutes(prisma));
@@ -77,7 +93,7 @@ function createAndroidRouter(options = {}) {
   // Weather services
   router.use('/', createWeatherRoutes());
   
-  console.log('Android router: All 9 modules mounted successfully');
+  console.log('Android router: All 13 modules mounted successfully');
   
   return router;
 }
