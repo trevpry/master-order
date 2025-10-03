@@ -14,6 +14,7 @@ import MediaHome from './modules/media/pages/index';
 import CustomOrders from './modules/media/pages/custom-orders/index';
 import WatchStats from './modules/media/pages/watch-stats/index';
 import Stash from './modules/media/pages/Stash';
+import PerformerDetail from './modules/media/pages/stash/PerformerDetail';
 import Music from './modules/media/pages/music/index';
 import Backgrounds from './modules/media/pages/backgrounds/index';
 import Books from './pages/Books'; // Unified Books component
@@ -48,6 +49,7 @@ function App() {
           <Route path="/media/custom-orders/:orderId" element={<CustomOrders />} />
           <Route path="/media/watch-stats" element={<WatchStats />} />
           <Route path="/media/stash" element={<Stash />} />
+          <Route path="/media/stash/performer/:id" element={<PerformerDetail />} />
           <Route path="/media/music" element={<Music />} />
           <Route path="/media/backgrounds" element={<Backgrounds />} />
           <Route path="/media/books" element={<Books />} />
@@ -60,6 +62,7 @@ function App() {
           <Route path="/custom-orders/:orderId" element={<CustomOrders />} />
           <Route path="/watch-stats" element={<WatchStats />} />
           <Route path="/stash" element={<Stash />} />
+          <Route path="/stash/performer/:id" element={<PerformerDetail />} />
           <Route path="/music" element={<Music />} />
           <Route path="/backgrounds" element={<Backgrounds />} />
           <Route path="/settings" element={<Settings />} />

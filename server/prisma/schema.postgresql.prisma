@@ -829,21 +829,34 @@ model StashSceneWatchHistory {
 }
 
 model StashClip {
-  id          Int        @id @default(autoincrement())
+  id          Int             @id @default(autoincrement())
   sceneId     String
   clipIndex   Int
   startTime   Float
   endTime     Float
   duration    Float
-  watched     Boolean    @default(false)
+  watched     Boolean         @default(false)
   watchedAt   DateTime?
-  createdAt   DateTime   @default(now())
+  createdAt   DateTime        @default(now())
   title       String?
-  markerBased Boolean    @default(false)
-  scene       StashScene @relation(fields: [sceneId], references: [id], onDelete: Cascade)
+  markerBased Boolean         @default(false)
+  scene       StashScene      @relation(fields: [sceneId], references: [id], onDelete: Cascade)
+  tags        StashClipTag[]
 
   @@unique([sceneId, clipIndex])
   @@map("StashClip")
+}
+
+model StashClipTag {
+  id        Int      @id @default(autoincrement())
+  clipId    Int
+  tagId     String
+  createdAt DateTime @default(now())
+  clip      StashClip @relation(fields: [clipId], references: [id], onDelete: Cascade)
+  tag       StashTag  @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@unique([clipId, tagId])
+  @@map("StashClipTag")
 }
 
 model StashMarker {
@@ -870,10 +883,13 @@ model StashPerformer {
   favorite        Boolean                 @default(false)
   ignore_auto_tag Boolean                 @default(false)
   birthdate       String?
+  death_date      String?
   ethnicity       String?
   country         String?
   eye_color       String?
+  hair_color      String?
   height          String?
+  weight          String?
   measurements    String?
   fake_tits       String?
   career_length   String?
@@ -883,6 +899,9 @@ model StashPerformer {
   instagram       String?
   twitter         String?
   url             String?
+  gender          String?
+  details         String?
+  rating          Int?
   createdAt       DateTime                @default(now())
   updatedAt       DateTime                @updatedAt
   lastSyncedAt    DateTime                @default(now())
@@ -910,19 +929,53 @@ model StashStudio {
 }
 
 model StashTag {
-  id           String              @id
-  name         String              @unique
-  description  String?
-  image        String?
-  createdAt    DateTime            @default(now())
-  updatedAt    DateTime            @updatedAt
-  lastSyncedAt DateTime            @default(now())
-  galleries    StashGalleryTag[]
-  images       StashImageTag[]
-  performers   StashPerformerTag[]
-  scenes       StashSceneTag[]
+  id            String              @id
+  name          String              @unique
+  description   String?
+  image         String?
+  favorite      Boolean             @default(false)
+  ignoreAutoTag Boolean             @default(false)
+  createdAt     DateTime            @default(now())
+  updatedAt     DateTime            @updatedAt
+  lastSyncedAt  DateTime            @default(now())
+  
+  // Content relations
+  galleries     StashGalleryTag[]
+  images        StashImageTag[]
+  performers    StashPerformerTag[]
+  scenes        StashSceneTag[]
+  clips         StashClipTag[]
+  
+  // Tag hierarchy relations
+  parentTags    StashTagHierarchy[] @relation("ChildTag")
+  childTags     StashTagHierarchy[] @relation("ParentTag")
+  
+  // Tag aliases
+  aliases       StashTagAlias[]
 
   @@map("StashTag")
+}
+
+model StashTagAlias {
+  id        String   @id @default(uuid())
+  tagId     String
+  alias     String
+  tag       StashTag @relation(fields: [tagId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@unique([tagId, alias])
+  @@map("StashTagAlias")
+}
+
+model StashTagHierarchy {
+  parentTagId String
+  childTagId  String
+  parentTag   StashTag @relation("ParentTag", fields: [parentTagId], references: [id], onDelete: Cascade)
+  childTag    StashTag @relation("ChildTag", fields: [childTagId], references: [id], onDelete: Cascade)
+  createdAt   DateTime @default(now())
+
+  @@id([parentTagId, childTagId])
+  @@map("StashTagHierarchy")
 }
 
 model StashScenePerformer {

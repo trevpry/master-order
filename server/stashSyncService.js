@@ -850,10 +850,13 @@ class StashSyncService {
             favorite
             ignore_auto_tag
             birthdate
+            death_date
             ethnicity
             country
             eye_color
+            hair_color
             height_cm
+            weight
             measurements
             fake_tits
             career_length
@@ -863,7 +866,14 @@ class StashSyncService {
             instagram
             twitter
             url
+            gender
+            details
+            rating100
             scene_count
+            stash_ids {
+              endpoint
+              stash_id
+            }
             tags {
               id
               name
@@ -914,10 +924,13 @@ class StashSyncService {
           favorite: performer.favorite || false,
           ignore_auto_tag: performer.ignore_auto_tag || false,
           birthdate: performer.birthdate || null,
+          death_date: performer.death_date || null,
           ethnicity: performer.ethnicity || null,
           country: performer.country || null,
           eye_color: performer.eye_color || null,
+          hair_color: performer.hair_color || null,
           height: performer.height_cm ? `${performer.height_cm} cm` : null,
+          weight: (typeof performer.weight === 'number') ? `${performer.weight}` : (performer.weight || null),
           measurements: performer.measurements || null,
           fake_tits: performer.fake_tits || null,
           career_length: performer.career_length || null,
@@ -927,6 +940,9 @@ class StashSyncService {
           instagram: performer.instagram || null,
           twitter: performer.twitter || null,
           url: performer.url || null,
+          gender: performer.gender || null,
+          details: performer.details || null,
+          rating: performer.rating100 ? Math.round(performer.rating100 / 20) : null,
           lastSyncedAt: new Date()
         };
 
@@ -1059,6 +1075,17 @@ class StashSyncService {
             name
             description
             image_path
+            aliases
+            favorite
+            ignore_auto_tag
+            parents {
+              id
+              name
+            }
+            children {
+              id
+              name
+            }
           }
         }
       }
@@ -1088,15 +1115,156 @@ class StashSyncService {
           name: tag.name || '',
           description: tag.description || null,
           image: tag.image_path || null,
+          favorite: tag.favorite || false,
+          ignoreAutoTag: tag.ignore_auto_tag || false,
           lastSyncedAt: new Date()
         };
 
-        // Upsert tag
+        // Upsert tag - but first handle potential name conflicts
+        // Check if there's another tag with the same name but different ID
+        const existingTagWithName = await prisma.stashTag.findUnique({
+          where: { name: tag.name }
+        });
+        
+        if (existingTagWithName && existingTagWithName.id !== tag.id) {
+          console.log(`⚠️  Name conflict: Tag ${tag.id} has name "${tag.name}", but tag ${existingTagWithName.id} already exists with that name. Deleting old tag.`);
+          
+          // Delete the conflicting tag and all its relationships
+          await prisma.stashTagAlias.deleteMany({
+            where: { tagId: existingTagWithName.id }
+          });
+          
+          await prisma.stashTagHierarchy.deleteMany({
+            where: {
+              OR: [
+                { parentTagId: existingTagWithName.id },
+                { childTagId: existingTagWithName.id }
+              ]
+            }
+          });
+          
+          await prisma.stashSceneTag.deleteMany({
+            where: { tagId: existingTagWithName.id }
+          });
+          await prisma.stashPerformerTag.deleteMany({
+            where: { tagId: existingTagWithName.id }
+          });
+          await prisma.stashGalleryTag.deleteMany({
+            where: { tagId: existingTagWithName.id }
+          });
+          await prisma.stashImageTag.deleteMany({
+            where: { tagId: existingTagWithName.id }
+          });
+          
+          await prisma.stashTag.delete({
+            where: { id: existingTagWithName.id }
+          });
+        }
+        
         const syncedTag = await prisma.stashTag.upsert({
           where: { id: tag.id },
           update: tagData,
           create: tagData
         });
+        
+        // Sync tag aliases
+        if (tag.aliases && tag.aliases.length > 0) {
+          // Remove existing aliases
+          await prisma.stashTagAlias.deleteMany({
+            where: { tagId: tag.id }
+          });
+          
+          // Create new aliases
+          await prisma.stashTagAlias.createMany({
+            data: tag.aliases.map(alias => ({
+              tagId: tag.id,
+              alias: alias
+            }))
+          });
+        }
+        
+        // Sync tag hierarchy (parent-child relationships)
+        // Handle parent relationships
+        if (tag.parents && tag.parents.length > 0) {
+          // Remove existing parent relationships
+          await prisma.stashTagHierarchy.deleteMany({
+            where: { childTagId: tag.id }
+          });
+          
+          // Create new parent relationships
+          const validParents = tag.parents.filter(parent => parent && parent.id);
+          if (validParents.length > 0) {
+            // Check which parent tags exist in database
+            const existingParents = await prisma.stashTag.findMany({
+              where: {
+                id: { in: validParents.map(p => p.id) }
+              },
+              select: { id: true }
+            });
+            const existingParentIds = new Set(existingParents.map(p => p.id));
+            
+            // Only create relationships for existing parent tags
+            const validRelationships = validParents
+              .filter(parent => existingParentIds.has(parent.id))
+              .map(parent => ({
+                parentTagId: parent.id,
+                childTagId: tag.id
+              }));
+            
+            if (validRelationships.length > 0) {
+              await prisma.stashTagHierarchy.createMany({
+                data: validRelationships
+              });
+            }
+            
+            // Log skipped relationships
+            const skippedCount = validParents.length - validRelationships.length;
+            if (skippedCount > 0) {
+              console.log(`⚠️  Skipped ${skippedCount} parent relationships for tag ${tag.id} (parent tags not yet synced)`);
+            }
+          }
+        }
+        
+        // Handle child relationships
+        if (tag.children && tag.children.length > 0) {
+          // Remove existing child relationships
+          await prisma.stashTagHierarchy.deleteMany({
+            where: { parentTagId: tag.id }
+          });
+          
+          // Create new child relationships
+          const validChildren = tag.children.filter(child => child && child.id);
+          if (validChildren.length > 0) {
+            // Check which child tags exist in database
+            const existingChildren = await prisma.stashTag.findMany({
+              where: {
+                id: { in: validChildren.map(c => c.id) }
+              },
+              select: { id: true }
+            });
+            const existingChildIds = new Set(existingChildren.map(c => c.id));
+            
+            // Only create relationships for existing child tags
+            const validRelationships = validChildren
+              .filter(child => existingChildIds.has(child.id))
+              .map(child => ({
+                parentTagId: tag.id,
+                childTagId: child.id
+              }));
+            
+            if (validRelationships.length > 0) {
+              await prisma.stashTagHierarchy.createMany({
+                data: validRelationships
+              });
+            }
+            
+            // Log skipped relationships
+            const skippedCount = validChildren.length - validRelationships.length;
+            if (skippedCount > 0) {
+              console.log(`⚠️  Skipped ${skippedCount} child relationships for tag ${tag.id} (child tags not yet synced)`);
+            }
+          }
+        }
         
         syncedTags.push(syncedTag);
       }
@@ -1805,6 +1973,61 @@ class StashSyncService {
     } catch (error) {
       console.error('Error during hidden galleries cleanup:', error);
       throw error;
+    }
+  }
+
+  /**
+   * Delete a scene from Stash
+   * @param {string} sceneId - The ID of the scene to delete
+   * @param {boolean} deleteFile - Whether to delete the actual file (default: false)
+   * @param {boolean} deleteGenerated - Whether to delete generated files like thumbnails (default: true)
+   * @returns {Promise<Object>} Result object with success status
+   */
+  async deleteScene(sceneId, deleteFile = false, deleteGenerated = true) {
+    try {
+      await this.ensureConfigLoaded();
+      
+      console.log(`🗑️ Deleting scene ${sceneId} from Stash (deleteFile: ${deleteFile}, deleteGenerated: ${deleteGenerated})`);
+      
+      // GraphQL mutation to delete a scene
+      const mutation = `
+        mutation SceneDestroy($id: ID!, $delete_file: Boolean, $delete_generated: Boolean) {
+          sceneDestroy(input: {
+            id: $id
+            delete_file: $delete_file
+            delete_generated: $delete_generated
+          })
+        }
+      `;
+      
+      const variables = {
+        id: sceneId,
+        delete_file: deleteFile,
+        delete_generated: deleteGenerated
+      };
+      
+      const result = await this.makeGraphQLRequest(mutation, variables);
+      
+      if (result && result.sceneDestroy !== undefined) {
+        console.log(`✅ Scene ${sceneId} deleted from Stash successfully`);
+        return {
+          success: true,
+          deleted: result.sceneDestroy
+        };
+      } else {
+        console.error('❌ Unexpected response from Stash delete mutation:', result);
+        return {
+          success: false,
+          error: 'Unexpected response from Stash API'
+        };
+      }
+      
+    } catch (error) {
+      console.error(`❌ Error deleting scene ${sceneId} from Stash:`, error);
+      return {
+        success: false,
+        error: error.message
+      };
     }
   }
 }

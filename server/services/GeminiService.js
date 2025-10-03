@@ -310,7 +310,7 @@ ${categoryList}
 
 Analyze the video transcript to identify a specific, narrow period of time and its corresponding events, which may be within a larger, ongoing event or period. If no existing event or category is a suitable match for this specific period, create a new event that is narrowly focused on the dates and topics discussed. Additionally, if the general subject of the conflict (e.g., a specific war or historical period) is not represented by an existing category, propose a new category to encompass it.
 
-1. **ASSIGN_TO_EXISTING**: If this video clearly belongs to an existing event
+1. **ASSIGN_TO_EXISTING**: Ifbeing sure to write modular and reusable code, with clear component separation, reusing existing code where available. always refer to copilot-instructions this video clearly belongs to an existing event
 2. **CREATE_NEW_EVENT**: If this video represents a new historical topic/event. The event should be as specific as possible and be a single event, but broad enough for additional videos to be assigned to it later. If the video covers a more focused event within a larger event, suggest a new event for the more focused event. For example, a video on a specific battle would create an event for that battle, not the war in which the battle took place.
 3. **UNCERTAIN**: If you cannot determine with reasonable confidence
 

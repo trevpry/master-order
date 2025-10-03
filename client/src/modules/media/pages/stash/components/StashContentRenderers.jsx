@@ -1,4 +1,5 @@
 import React from 'react';
+import { Link } from 'react-router-dom';
 import { formatDuration, formatTime } from '../../../../../utils/timeUtils';
 import { getSceneDisplayTitle, getSceneImageUrl, formatDate } from '../../../utils/stashUtils';
 
@@ -62,11 +63,21 @@ const StashContentRenderers = ({
                   <div className="meta-item">
                     <span className="meta-icon">👤</span>
                     <span>
-                      {scene.performers.map(p => {
-                        if (typeof p === 'string') return p;
-                        if (p.performer) return p.performer.name;
-                        return p.name || p;
-                      }).slice(0, 3).join(', ')}
+                      {scene.performers.slice(0, 3).map((p, idx) => {
+                        const id = p?.performer?.id || p?.id;
+                        const name = (typeof p === 'string') ? p : (p?.performer?.name || p?.name || p);
+                        const content = id ? (
+                          <Link key={id} to={`/media/stash/performer/${id}`}>{name}</Link>
+                        ) : (
+                          <span key={idx}>{name}</span>
+                        );
+                        return (
+                          <React.Fragment key={id || idx}>
+                            {idx > 0 && ', '}
+                            {content}
+                          </React.Fragment>
+                        );
+                      })}
                       {scene.performers.length > 3 && ` +${scene.performers.length - 3} more`}
                     </span>
                   </div>
@@ -102,7 +113,7 @@ const StashContentRenderers = ({
     return (
       <div className="content-grid performers-grid">
         {performers.map((performer) => (
-          <div key={performer.id} className="content-card performer-card">
+          <Link key={performer.id} to={`/media/stash/performer/${performer.id}`} className="content-card performer-card" style={{ textDecoration: 'none', color: 'inherit' }}>
             <div className="performer-image">
               {performer.image ? (
                 <img
@@ -151,7 +162,7 @@ const StashContentRenderers = ({
                 )}
               </div>
             </div>
-          </div>
+          </Link>
         ))}
       </div>
     );
@@ -217,25 +228,136 @@ const StashContentRenderers = ({
 
   const renderTags = () => {
     const tags = data.tags || [];
+    const [expandedTags, setExpandedTags] = React.useState(new Set());
     
-    return (
-      <div className="content-grid tags-grid">
-        {tags.map((tag) => (
-          <div key={tag.id} className="content-card tag-card">
-            <div className="tag-content">
-              <div className="tag-header">
-                <h3 className="content-title">{tag.name}</h3>
-                {tag.scene_count && (
-                  <span className="tag-count">{tag.scene_count}</span>
-                )}
+    const toggleTag = (tagId) => {
+      setExpandedTags(prev => {
+        const newSet = new Set(prev);
+        if (newSet.has(tagId)) {
+          newSet.delete(tagId);
+        } else {
+          newSet.add(tagId);
+        }
+        return newSet;
+      });
+    };
+    
+    const renderTagCard = (tag, level = 0, parentExpanded = true) => {
+      if (!parentExpanded && level > 0) return null;
+      
+      const isExpanded = expandedTags.has(tag.id);
+      const hasChildren = tag.children && tag.children.length > 0;
+      
+      return (
+        <React.Fragment key={tag.id}>
+          <div 
+            className={`content-card tag-card-enhanced ${tag.favorite ? 'favorite-tag' : ''}`}
+            style={{ marginLeft: `${level * 1.5}rem` }}
+          >
+            {/* Tag Image/Icon */}
+            <div className="tag-visual">
+              {tag.image ? (
+                <img 
+                  src={tag.image} 
+                  alt={tag.name}
+                  className="tag-image"
+                  onError={(e) => {
+                    e.target.style.display = 'none';
+                    e.target.nextSibling.style.display = 'flex';
+                  }}
+                />
+              ) : null}
+              <div 
+                className="tag-icon-fallback" 
+                style={{ display: tag.image ? 'none' : 'flex' }}
+              >
+                🏷️
               </div>
               
+              {/* Favorite Badge */}
+              {tag.favorite && (
+                <div className="tag-favorite-badge" title="Favorite Tag">
+                  ⭐
+                </div>
+              )}
+            </div>
+
+            {/* Tag Content */}
+            <div className="tag-content-enhanced">
+              {/* Header with Name, Counts, and Expand Button */}
+              <div className="tag-header-enhanced">
+                <div className="tag-name-row">
+                  <h3 className="tag-name" title={tag.name}>{tag.name}</h3>
+                  {hasChildren && (
+                    <button 
+                      className="tag-expand-button"
+                      onClick={() => toggleTag(tag.id)}
+                      title={isExpanded ? 'Collapse children' : 'Expand children'}
+                    >
+                      {isExpanded ? '▼' : '▶'}
+                    </button>
+                  )}
+                </div>
+                <div className="tag-stats">
+                  {tag.scene_count > 0 && (
+                    <span className="stat-badge scene-badge" title="Scenes">
+                      🎬 {tag.scene_count}
+                    </span>
+                  )}
+                  {tag.performer_count > 0 && (
+                    <span className="stat-badge performer-badge" title="Performers">
+                      👤 {tag.performer_count}
+                    </span>
+                  )}
+                  {hasChildren && (
+                    <span className="stat-badge children-badge" title="Child Tags">
+                      📂 {tag.child_count}
+                    </span>
+                  )}
+                </div>
+              </div>
+
+              {/* Description */}
               {tag.description && (
-                <p className="tag-description">{tag.description}</p>
+                <p className="tag-description-enhanced" title={tag.description}>
+                  {tag.description}
+                </p>
+              )}
+
+              {/* Aliases */}
+              {tag.aliases && tag.aliases.length > 0 && (
+                <div className="tag-aliases">
+                  <span className="aliases-label">Aliases:</span>
+                  <div className="aliases-list">
+                    {tag.aliases.slice(0, 3).map((alias, idx) => (
+                      <span key={idx} className="alias-chip" title={alias}>
+                        {alias}
+                      </span>
+                    ))}
+                    {tag.aliases.length > 3 && (
+                      <span className="alias-chip more" title={`+${tag.aliases.length - 3} more`}>
+                        +{tag.aliases.length - 3}
+                      </span>
+                    )}
+                  </div>
+                </div>
               )}
             </div>
           </div>
-        ))}
+          
+          {/* Render children if expanded */}
+          {hasChildren && isExpanded && (
+            <div className="tag-children-container">
+              {tag.children.map(child => renderTagCard(child, level + 1, true))}
+            </div>
+          )}
+        </React.Fragment>
+      );
+    };
+    
+    return (
+      <div className="content-grid tags-grid-hierarchical">
+        {tags.map((tag) => renderTagCard(tag, 0, true))}
       </div>
     );
   };
@@ -285,6 +407,37 @@ const StashContentRenderers = ({
                   <div className="clip-studio">
                     <span className="meta-icon">🏢</span>
                     <span>{clip.scene.studioObject.name}</span>
+                  </div>
+                )}
+                
+                {clip.tags && clip.tags.length > 0 && (
+                  <div className="clip-tags">
+                    <span className="meta-icon">🏷️</span>
+                    <div className="clip-tag-list">
+                      {clip.tags.slice(0, 5).map(tagRelation => (
+                        <span 
+                          key={tagRelation.tag.id} 
+                          className={`clip-tag-badge ${tagRelation.tag.favorite ? 'favorite' : ''}`}
+                          title={tagRelation.tag.name}
+                          style={{
+                            backgroundColor: '#ffffff',
+                            color: '#000000',
+                            border: '2px solid #000000',
+                            padding: '4px 8px',
+                            borderRadius: '4px',
+                            fontSize: '14px',
+                            fontWeight: '900',
+                            textShadow: 'none',
+                            fontFamily: 'system-ui, -apple-system, sans-serif'
+                          }}
+                        >
+                          {tagRelation.tag.name}
+                        </span>
+                      ))}
+                      {clip.tags.length > 5 && (
+                        <span className="clip-tag-more">+{clip.tags.length - 5} more</span>
+                      )}
+                    </div>
                   </div>
                 )}
               </div>

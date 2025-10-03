@@ -573,10 +573,13 @@ class StashSyncServiceOptimized {
             favorite
             ignore_auto_tag
             birthdate
+            death_date
             ethnicity
             country
             eye_color
+            hair_color
             height_cm
+            weight
             measurements
             fake_tits
             career_length
@@ -586,7 +589,14 @@ class StashSyncServiceOptimized {
             instagram
             twitter
             url
+            gender
+            details
+            rating100
             scene_count
+            stash_ids {
+              endpoint
+              stash_id
+            }
             tags {
               id
               name
@@ -634,6 +644,11 @@ class StashSyncServiceOptimized {
             favorite: performer.favorite || false,
             ignore_auto_tag: performer.ignore_auto_tag || false,
             birthdate: performer.birthdate || null,
+            death_date: performer.death_date || null,
+            hair_color: performer.hair_color || null,
+            weight: (typeof performer.weight === 'number') ? `${performer.weight}` : (performer.weight || null),
+            gender: performer.gender || null,
+            details: performer.details || null,
             ethnicity: performer.ethnicity || null,
             country: performer.country || null,
             eye_color: performer.eye_color || null,
@@ -647,6 +662,7 @@ class StashSyncServiceOptimized {
             instagram: performer.instagram || null,
             twitter: performer.twitter || null,
             url: performer.url || null,
+            rating: performer.rating100 ? Math.round(performer.rating100 / 20) : null,
             lastSyncedAt: new Date()
           };
           
@@ -849,6 +865,17 @@ class StashSyncServiceOptimized {
             name
             description
             image_path
+            aliases
+            favorite
+            ignore_auto_tag
+            parents {
+              id
+              name
+            }
+            children {
+              id
+              name
+            }
           }
         }
       }
@@ -874,19 +901,120 @@ class StashSyncServiceOptimized {
         return { tags: [], hasMore: false, totalCount: count };
       }
       
-      // Phase 1: Batch prepare all tag data
-      const tagData = tags.map(tag => ({
-        id: tag.id,
-        name: tag.name || '',
-        description: tag.description || null,
-        image: tag.image_path || null,
-        lastSyncedAt: new Date()
-      }));
+      // Phase 1: Batch prepare all tag data and deduplicate by name
+      const tagDataMap = new Map();
+      tags.forEach(tag => {
+        const name = tag.name || '';
+        // Keep the first occurrence of each unique name
+        if (!tagDataMap.has(name)) {
+          tagDataMap.set(name, {
+            id: tag.id,
+            name: name,
+            description: tag.description || null,
+            image: tag.image_path || null,
+            favorite: tag.favorite || false,
+            ignoreAutoTag: tag.ignore_auto_tag || false,
+            lastSyncedAt: new Date()
+          });
+        } else {
+          console.log(`⚠️  Skipping duplicate tag name: "${name}" (ID: ${tag.id})`);
+        }
+      });
+      
+      const tagData = Array.from(tagDataMap.values());
+      
+      if (tagData.length < tags.length) {
+        console.log(`⚠️  Deduplicated ${tags.length - tagData.length} duplicate tag names`);
+      }
       
       // Phase 2: Use database transaction with proper timeout
       const syncedTags = await prisma.$transaction(async (tx) => {
-        console.log(`🔧 Batch processing ${tagData.length} tags...`);
+        console.log(`🔧 Batch processing ${tagData.length} unique tags...`);
         
+        // Phase 2a: Handle name conflicts before upserting
+        // Find all existing tags that might have name conflicts
+        const existingTags = await tx.stashTag.findMany({
+          where: {
+            OR: [
+              { id: { in: tagData.map(t => t.id) } },
+              { name: { in: tagData.map(t => t.name) } }
+            ]
+          },
+          select: { id: true, name: true }
+        });
+        
+        // Build maps for conflict detection
+        const existingById = new Map(existingTags.map(t => [t.id, t.name]));
+        const existingByName = new Map(existingTags.map(t => [t.name, t.id]));
+        
+        // Identify and resolve conflicts
+        const conflictsToResolve = [];
+        for (const data of tagData) {
+          const oldName = existingById.get(data.id);
+          const conflictingId = existingByName.get(data.name);
+          
+          // Case 1: Tag name changed and new name conflicts with another tag
+          if (oldName && oldName !== data.name && conflictingId && conflictingId !== data.id) {
+            console.log(`⚠️  Name conflict: Tag ${data.id} renamed "${oldName}" → "${data.name}", but tag ${conflictingId} already has name "${data.name}"`);
+            conflictsToResolve.push({
+              type: 'rename_conflict',
+              deleteId: conflictingId,
+              updateId: data.id,
+              oldName,
+              newName: data.name
+            });
+          }
+          // Case 2: New tag's name conflicts with existing tag
+          else if (!oldName && conflictingId && conflictingId !== data.id) {
+            console.log(`⚠️  Name conflict: New tag ${data.id} has name "${data.name}", but tag ${conflictingId} already exists with that name`);
+            conflictsToResolve.push({
+              type: 'new_conflict',
+              deleteId: conflictingId,
+              newId: data.id,
+              name: data.name
+            });
+          }
+        }
+        
+        // Resolve conflicts by deleting the old tags that have conflicting names
+        if (conflictsToResolve.length > 0) {
+          const idsToDelete = [...new Set(conflictsToResolve.map(c => c.deleteId))];
+          console.log(`🗑️  Deleting ${idsToDelete.length} conflicting tags: ${idsToDelete.join(', ')}`);
+          
+          // Delete in correct order: aliases, hierarchy, then tags
+          await tx.stashTagAlias.deleteMany({
+            where: { tagId: { in: idsToDelete } }
+          });
+          
+          await tx.stashTagHierarchy.deleteMany({
+            where: {
+              OR: [
+                { parentTagId: { in: idsToDelete } },
+                { childTagId: { in: idsToDelete } }
+              ]
+            }
+          });
+          
+          // Also need to delete from junction tables
+          await tx.stashSceneTag.deleteMany({
+            where: { tagId: { in: idsToDelete } }
+          });
+          await tx.stashPerformerTag.deleteMany({
+            where: { tagId: { in: idsToDelete } }
+          });
+          await tx.stashGalleryTag.deleteMany({
+            where: { tagId: { in: idsToDelete } }
+          });
+          await tx.stashImageTag.deleteMany({
+            where: { tagId: { in: idsToDelete } }
+          });
+          
+          await tx.stashTag.deleteMany({
+            where: { id: { in: idsToDelete } }
+          });
+        }
+        
+        // Phase 2b: Now upsert tags without conflicts
         const upsertPromises = tagData.map(data =>
           tx.stashTag.upsert({
             where: { id: data.id },
@@ -895,7 +1023,109 @@ class StashSyncServiceOptimized {
           })
         );
         
-        return await Promise.all(upsertPromises);
+        const upsertedTags = await Promise.all(upsertPromises);
+        
+        // Create a set of processed tag IDs for filtering
+        const processedTagIds = new Set(tagData.map(t => t.id));
+        const tagsToProcess = tags.filter(tag => processedTagIds.has(tag.id));
+        
+        // Batch process aliases
+        console.log(`🔧 Processing tag aliases and hierarchy...`);
+        for (const tag of tagsToProcess) {
+          // Sync aliases
+          if (tag.aliases && tag.aliases.length > 0) {
+            await tx.stashTagAlias.deleteMany({
+              where: { tagId: tag.id }
+            });
+            
+            await tx.stashTagAlias.createMany({
+              data: tag.aliases.map(alias => ({
+                tagId: tag.id,
+                alias: alias
+              }))
+            });
+          }
+          
+          // Sync hierarchy - parent relationships
+          if (tag.parents && tag.parents.length > 0) {
+            await tx.stashTagHierarchy.deleteMany({
+              where: { childTagId: tag.id }
+            });
+            
+            const validParents = tag.parents.filter(parent => parent && parent.id);
+            if (validParents.length > 0) {
+              // Check which parent tags exist in database
+              const existingParents = await tx.stashTag.findMany({
+                where: {
+                  id: { in: validParents.map(p => p.id) }
+                },
+                select: { id: true }
+              });
+              const existingParentIds = new Set(existingParents.map(p => p.id));
+              
+              // Only create relationships for existing parent tags
+              const validRelationships = validParents
+                .filter(parent => existingParentIds.has(parent.id))
+                .map(parent => ({
+                  parentTagId: parent.id,
+                  childTagId: tag.id
+                }));
+              
+              if (validRelationships.length > 0) {
+                await tx.stashTagHierarchy.createMany({
+                  data: validRelationships
+                });
+              }
+              
+              // Log skipped relationships
+              const skippedCount = validParents.length - validRelationships.length;
+              if (skippedCount > 0) {
+                console.log(`⚠️  Skipped ${skippedCount} parent relationships for tag ${tag.id} (parent tags not yet synced)`);
+              }
+            }
+          }
+          
+          // Sync hierarchy - child relationships
+          if (tag.children && tag.children.length > 0) {
+            await tx.stashTagHierarchy.deleteMany({
+              where: { parentTagId: tag.id }
+            });
+            
+            const validChildren = tag.children.filter(child => child && child.id);
+            if (validChildren.length > 0) {
+              // Check which child tags exist in database
+              const existingChildren = await tx.stashTag.findMany({
+                where: {
+                  id: { in: validChildren.map(c => c.id) }
+                },
+                select: { id: true }
+              });
+              const existingChildIds = new Set(existingChildren.map(c => c.id));
+              
+              // Only create relationships for existing child tags
+              const validRelationships = validChildren
+                .filter(child => existingChildIds.has(child.id))
+                .map(child => ({
+                  parentTagId: tag.id,
+                  childTagId: child.id
+                }));
+              
+              if (validRelationships.length > 0) {
+                await tx.stashTagHierarchy.createMany({
+                  data: validRelationships
+                });
+              }
+              
+              // Log skipped relationships
+              const skippedCount = validChildren.length - validRelationships.length;
+              if (skippedCount > 0) {
+                console.log(`⚠️  Skipped ${skippedCount} child relationships for tag ${tag.id} (child tags not yet synced)`);
+              }
+            }
+          }
+        }
+        
+        return upsertedTags;
       }, {
         timeout: this.batchConfig.transactionTimeout // Configurable timeout
       });
@@ -2140,6 +2370,61 @@ class StashSyncServiceOptimized {
       removedClips: 0,
       message: 'zzHide cleanup disabled in optimized service'
     };
+  }
+
+  /**
+   * Delete a scene from Stash
+   * @param {string} sceneId - The ID of the scene to delete
+   * @param {boolean} deleteFile - Whether to delete the actual file (default: false)
+   * @param {boolean} deleteGenerated - Whether to delete generated files like thumbnails (default: true)
+   * @returns {Promise<Object>} Result object with success status
+   */
+  async deleteScene(sceneId, deleteFile = false, deleteGenerated = true) {
+    try {
+      await this.ensureConfigLoaded();
+      
+      console.log(`🗑️ Deleting scene ${sceneId} from Stash (deleteFile: ${deleteFile}, deleteGenerated: ${deleteGenerated})`);
+      
+      // GraphQL mutation to delete a scene
+      const mutation = `
+        mutation SceneDestroy($id: ID!, $delete_file: Boolean, $delete_generated: Boolean) {
+          sceneDestroy(input: {
+            id: $id
+            delete_file: $delete_file
+            delete_generated: $delete_generated
+          })
+        }
+      `;
+      
+      const variables = {
+        id: sceneId,
+        delete_file: deleteFile,
+        delete_generated: deleteGenerated
+      };
+      
+      const result = await this.makeGraphQLRequest(mutation, variables);
+      
+      if (result && result.sceneDestroy !== undefined) {
+        console.log(`✅ Scene ${sceneId} deleted from Stash successfully`);
+        return {
+          success: true,
+          deleted: result.sceneDestroy
+        };
+      } else {
+        console.error('❌ Unexpected response from Stash delete mutation:', result);
+        return {
+          success: false,
+          error: 'Unexpected response from Stash API'
+        };
+      }
+      
+    } catch (error) {
+      console.error(`❌ Error deleting scene ${sceneId} from Stash:`, error);
+      return {
+        success: false,
+        error: error.message
+      };
+    }
   }
 }
 

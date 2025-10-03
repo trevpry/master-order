@@ -23,7 +23,12 @@ const StashLibraryTab = ({
   runSync,
   goToPage,
   goToNextPage,
-  goToPreviousPage
+  goToPreviousPage,
+  tagFilter,
+  addTagFilter,
+  removeTagFilter,
+  clearTagFilter,
+  clipTags
 }) => {
   const tabLabels = {
     scenes: '🎬 Scenes',
@@ -132,6 +137,113 @@ const StashLibraryTab = ({
             </select>
           </div>
         </div>
+
+        {/* Tag Filter (only show for clips) */}
+        {libraryTab === 'clips' && (
+          <div className="tag-filter-section">
+            <div className="tag-filter-header">
+              <h4>🏷️ Filter by Tags</h4>
+              {tagFilter.length > 0 && (
+                <button 
+                  className="clear-tag-filter-btn"
+                  onClick={clearTagFilter}
+                  title="Clear all tag filters"
+                >
+                  Clear All ({tagFilter.length})
+                </button>
+              )}
+            </div>
+            
+            <div className="tag-filter-container">
+              {tagFilter.length > 0 && (
+                <div className="active-tag-filters">
+                  <span className="filter-label">Active filters:</span>
+                  {tagFilter.map(tagId => {
+                    const tag = clipTags?.find(t => t.id === tagId);
+                    return tag ? (
+                      <span 
+                        key={tagId} 
+                        className="active-tag-filter"
+                        style={{
+                          backgroundColor: '#000000',
+                          color: '#ffffff',
+                          border: '2px solid #000000',
+                          padding: '4px 8px',
+                          borderRadius: '4px',
+                          fontSize: '14px',
+                          fontWeight: '600',
+                          margin: '2px',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          fontFamily: 'system-ui, -apple-system, sans-serif'
+                        }}
+                      >
+                        {tag.name}
+                        <button 
+                          className="remove-tag-filter"
+                          onClick={() => removeTagFilter(tagId)}
+                          title={`Remove ${tag.name} filter`}
+                          style={{
+                            backgroundColor: 'transparent',
+                            color: '#ffffff',
+                            border: 'none',
+                            marginLeft: '4px',
+                            cursor: 'pointer',
+                            fontSize: '16px',
+                            fontWeight: 'bold',
+                            padding: '0'
+                          }}
+                        >
+                          ✕
+                        </button>
+                      </span>
+                    ) : null;
+                  })}
+                </div>
+              )}
+              
+              <div className="available-tags">
+                <span className="filter-label">Available tags:</span>
+                <div className="tag-list">
+                  {clipTags?.filter(tag => !tagFilter.includes(tag.id)).slice(0, 20).map(tag => (
+                    <button
+                      key={tag.id}
+                      className="tag-filter-option"
+                      onClick={() => addTagFilter(tag.id)}
+                      title={`Filter clips by ${tag.name} (${tag.clip_count} clips)`}
+                      style={{
+                        backgroundColor: '#ffffff',
+                        color: '#000000',
+                        border: '2px solid #000000',
+                        padding: '6px 12px',
+                        borderRadius: '4px',
+                        fontSize: '14px',
+                        fontWeight: '600',
+                        margin: '2px',
+                        cursor: 'pointer',
+                        fontFamily: 'system-ui, -apple-system, sans-serif'
+                      }}
+                    >
+                      {tag.name}
+                      {tag.clip_count > 0 && (
+                        <span 
+                          className="tag-count"
+                          style={{
+                            color: '#000000',
+                            fontWeight: '400',
+                            marginLeft: '4px'
+                          }}
+                        >
+                          ({tag.clip_count} clips)
+                        </span>
+                      )}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Content Area */}

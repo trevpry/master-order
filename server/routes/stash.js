@@ -735,7 +735,7 @@ router.get('/scenes/:id', asyncHandler(async (req, res) => {
 }));
 
 // POST /api/stash/scenes/:id/watched - Mark Stash scene as watched
-router.post('/scenes/:id/watched', validateRequiredFields('id', 'Invalid scene ID'), asyncHandler(async (req, res) => {
+router.post('/scenes/:id/watched', asyncHandler(async (req, res) => {
   const sceneId = req.params.id;
 
   // Update our local database
@@ -793,9 +793,13 @@ router.post('/scenes/:id/watched', validateRequiredFields('id', 'Invalid scene I
 router.delete('/scenes/:id', asyncHandler(async (req, res) => {
   try {
     const sceneId = req.params.id;
-    const { deleteFile = false } = req.query; // Query parameter to optionally delete the actual file
+    // Query parameters to control deletion behavior (default to deleting both file and generated content)
+    const { deleteFile = 'true', deleteGenerated = 'true' } = req.query;
     
-    console.log('🗑️ Deleting scene:', sceneId, 'deleteFile:', deleteFile);
+    const deleteFileBoolean = deleteFile === 'true';
+    const deleteGeneratedBoolean = deleteGenerated === 'true';
+    
+    console.log('🗑️ Deleting scene:', sceneId, 'deleteFile:', deleteFileBoolean, 'deleteGenerated:', deleteGeneratedBoolean);
 
   // Delete from local database first
   let localDeleted = false;
@@ -825,32 +829,115 @@ router.delete('/scenes/:id', asyncHandler(async (req, res) => {
     }
   }
 
-  // Delete from Stash itself
+  // Delete from Stash itself via direct GraphQL request
   let stashResult = null;
-  if (stashSyncService && stashSyncService.isConfigured()) {
-    console.log('🗑️ Deleting scene from Stash...');
-    stashResult = await stashSyncService.deleteScene(
-      sceneId, 
-      deleteFile === 'true', // Convert string to boolean
-      true // Always delete generated files (thumbnails, etc.)
-    );
+  try {
+    // Get Stash settings
+    const settings = await prisma.settings.findUnique({ where: { id: 1 } });
+    const stashUrl = settings?.stashUrl;
+    const stashApiKey = settings?.stashApiKey;
     
-    if (!stashResult.success) {
-      console.warn('Failed to delete scene from Stash:', stashResult.error);
+    if (!stashUrl) {
+      console.warn('⚠️ Stash URL not configured - scene deleted from local database only');
+      stashResult = {
+        success: false,
+        error: 'Stash URL not configured',
+        message: 'Scene deleted from local database. To delete from Stash, configure Stash URL in settings.'
+      };
     } else {
-      console.log('✅ Scene deleted from Stash successfully');
+      console.log('🗑️ Deleting scene from Stash via GraphQL...');
+      
+      // Make direct GraphQL mutation to Stash
+      const mutation = `
+        mutation SceneDestroy($id: ID!, $delete_file: Boolean, $delete_generated: Boolean) {
+          sceneDestroy(input: {
+            id: $id
+            delete_file: $delete_file
+            delete_generated: $delete_generated
+          })
+        }
+      `;
+      
+      const variables = {
+        id: sceneId,
+        delete_file: deleteFileBoolean,
+        delete_generated: deleteGeneratedBoolean
+      };
+      
+      const baseUrl = stashUrl.endsWith('/') ? stashUrl.slice(0, -1) : stashUrl;
+      const graphqlUrl = `${baseUrl}/graphql`;
+      
+      const headers = {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json'
+      };
+      
+      if (stashApiKey) {
+        headers['ApiKey'] = stashApiKey;
+      }
+      
+      const fetch = require('node-fetch');
+      const response = await fetch(graphqlUrl, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          query: mutation,
+          variables
+        })
+      });
+      
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('❌ Stash GraphQL request failed:', response.status, errorText);
+        stashResult = {
+          success: false,
+          error: `Stash API request failed: ${response.status}`,
+          message: 'Scene deleted from local database, but failed to delete from Stash.'
+        };
+      } else {
+        const jsonData = await response.json();
+        
+        if (jsonData.errors) {
+          console.error('❌ Stash GraphQL errors:', jsonData.errors);
+          stashResult = {
+            success: false,
+            error: `GraphQL errors: ${JSON.stringify(jsonData.errors)}`,
+            message: 'Scene deleted from local database, but Stash returned errors.'
+          };
+        } else if (jsonData.data && jsonData.data.sceneDestroy !== undefined) {
+          console.log('✅ Scene deleted from Stash successfully');
+          stashResult = {
+            success: true,
+            deleted: jsonData.data.sceneDestroy
+          };
+        } else {
+          console.warn('⚠️ Unexpected response from Stash:', jsonData);
+          stashResult = {
+            success: false,
+            error: 'Unexpected response from Stash API',
+            message: 'Scene deleted from local database, but Stash response was unexpected.'
+          };
+        }
+      }
     }
-  } else {
-    console.warn('Stash service not configured, skipping remote deletion');
+  } catch (stashError) {
+    console.error('❌ Error deleting from Stash:', stashError);
+    stashResult = {
+      success: false,
+      error: stashError.message
+    };
   }
 
   res.json({
     success: true,
-    message: 'Scene deletion completed',
+    message: stashResult?.success 
+      ? 'Scene deleted from both local database and Stash'
+      : 'Scene deleted from local database only',
     localDeleted,
     clipsDeleted,
     stashDeleted: stashResult?.success || false,
-    stashResult
+    stashResult,
+    warning: !stashResult?.success ? stashResult?.message || 'Scene not deleted from Stash - may need manual cleanup' : null
   });
   } catch (error) {
   console.error('Error deleting Stash scene:', error);
@@ -987,8 +1074,9 @@ router.get('/clips', asyncHandler(async (req, res) => {
   const limit = parseInt(req.query.limit) || parseInt(req.query.perPage) || 20;
   const search = req.query.search || '';
   const watchStatus = req.query.watched; // 'true', 'false', or undefined for all
+  const tags = req.query.tags; // comma-separated tag IDs
   const sortBy = req.query.sortBy || 'createdAt';
-  const sortDirection = req.query.sortDirection || 'desc';
+  const sortDirection = (req.query.sortDirection || 'desc').toLowerCase(); // Ensure lowercase for Prisma
   
   const offset = (page - 1) * limit;
   
@@ -999,8 +1087,7 @@ router.get('/clips', asyncHandler(async (req, res) => {
   if (search) {
     where.scene = {
       title: {
-        contains: search,
-        mode: 'insensitive'
+        contains: search
       }
     };
   }
@@ -1008,6 +1095,20 @@ router.get('/clips', asyncHandler(async (req, res) => {
   // Add watch status filter
   if (watchStatus !== undefined) {
     where.watched = watchStatus === 'true';
+  }
+  
+  // Add tag filter
+  if (tags) {
+    const tagIds = tags.split(',').map(id => id.trim()).filter(id => id && !isNaN(parseInt(id)));
+    if (tagIds.length > 0) {
+      where.tags = {
+        some: {
+          tagId: {
+            in: tagIds
+          }
+        }
+      };
+    }
   }
   
   // Build sort object
@@ -1025,6 +1126,17 @@ router.get('/clips', asyncHandler(async (req, res) => {
   const clips = await prisma.stashClip.findMany({
     where,
     include: {
+      tags: {
+        include: {
+          tag: {
+            select: {
+              id: true,
+              name: true,
+              favorite: true
+            }
+          }
+        }
+      },
       scene: {
         select: {
           id: true,
@@ -1200,6 +1312,34 @@ router.post('/clip-play', asyncHandler(async (req, res) => {
           path: true,
           duration: true
         }
+      },
+      tags: {
+        include: {
+          tag: {
+            include: {
+              parentTags: {
+                include: {
+                  parentTag: {
+                    select: {
+                      id: true,
+                      name: true
+                    }
+                  }
+                }
+              },
+              childTags: {
+                include: {
+                  childTag: {
+                    select: {
+                      id: true,
+                      name: true
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
       }
     }
   });
@@ -1261,6 +1401,34 @@ router.post('/clip-play', asyncHandler(async (req, res) => {
             title: true,
             path: true,
             duration: true
+          }
+        },
+        tags: {
+          include: {
+            tag: {
+              include: {
+                parentTags: {
+                  include: {
+                    parentTag: {
+                      select: {
+                        id: true,
+                        name: true
+                      }
+                    }
+                  }
+                },
+                childTags: {
+                  include: {
+                    childTag: {
+                      select: {
+                        id: true,
+                        name: true
+                      }
+                    }
+                  }
+                }
+              }
+            }
           }
         }
       }
@@ -1408,7 +1576,58 @@ router.get('/clips/next', asyncHandler(async (req, res) => {
           id: true,
           title: true,
           path: true,
-          duration: true
+          duration: true,
+          studio: true,
+          performers: {
+            include: {
+              performer: {
+                select: {
+                  id: true,
+                  name: true,
+                  image: true,
+                  disambiguation: true,
+                  favorite: true,
+                  url: true
+                }
+              }
+            }
+          },
+          tags: {
+            include: {
+              tag: {
+                include: {
+                  parentTags: {
+                    include: {
+                      parentTag: {
+                        select: {
+                          id: true,
+                          name: true
+                        }
+                      }
+                    }
+                  },
+                  childTags: {
+                    include: {
+                      childTag: {
+                        select: {
+                          id: true,
+                          name: true
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          studioObject: {
+            select: {
+              id: true,
+              name: true,
+              url: true,
+              image: true
+            }
+          }
         }
       }
     }
@@ -1471,7 +1690,86 @@ router.get('/clips/next', asyncHandler(async (req, res) => {
             id: true,
             title: true,
             path: true,
-            duration: true
+            duration: true,
+            studio: true,
+            performers: {
+              include: {
+                performer: {
+                  select: {
+                    id: true,
+                    name: true,
+                    image: true,
+                    disambiguation: true,
+                    favorite: true,
+                    url: true
+                  }
+                }
+              }
+            },
+            tags: {
+              include: {
+                tag: {
+                  include: {
+                    parentTags: {
+                      include: {
+                        parentTag: {
+                          select: {
+                            id: true,
+                            name: true
+                          }
+                        }
+                      }
+                    },
+                    childTags: {
+                      include: {
+                        childTag: {
+                          select: {
+                            id: true,
+                            name: true
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            },
+            studioObject: {
+              select: {
+                id: true,
+                name: true,
+                url: true,
+                image: true
+              }
+            }
+          }
+        },
+        tags: {
+          include: {
+            tag: {
+              include: {
+                parentTags: {
+                  include: {
+                    parentTag: {
+                      select: {
+                        id: true,
+                        name: true
+                      }
+                    }
+                  }
+                },
+                childTags: {
+                  include: {
+                    childTag: {
+                      select: {
+                        id: true,
+                        name: true
+                      }
+                    }
+                  }
+                }
+              }
+            }
           }
         }
       }
@@ -1507,6 +1805,15 @@ router.get('/clips/next', asyncHandler(async (req, res) => {
   });
   
   console.log(`✅ Next clip ${selectedClip.id} marked as watched`);
+  
+  // Debug: Log tag hierarchy data
+  if (selectedClip.scene?.tags && selectedClip.scene.tags.length > 0) {
+    console.log('🏷️ Scene tags with hierarchy:');
+    selectedClip.scene.tags.forEach(tagRelation => {
+      const tag = tagRelation.tag;
+      console.log(`  - ${tag.name}: parents=${tag.parentTags?.length || 0}, children=${tag.childTags?.length || 0}`);
+    });
+  }
   
   // Get current count of unwatched clips across all scenes
   const totalUnwatchedClips = await prisma.stashClip.count({
@@ -1696,6 +2003,64 @@ router.get('/performers', asyncHandler(async (req, res) => {
   });
 }));
 
+// GET /performers/:id - Single performer details
+router.get('/performers/:id', asyncHandler(async (req, res) => {
+  const { id } = req.params;
+
+  // Fetch performer with tags and a few recent scenes
+  const performer = await prisma.stashPerformer.findUnique({
+    where: { id },
+    include: {
+      tags: { include: { tag: true } },
+      scenes: {
+        include: {
+          scene: {
+            select: { id: true, title: true, date: true, studio: true, rating: true }
+          }
+        },
+        take: 12
+      }
+    }
+  });
+
+  if (!performer) {
+    return sendNotFound(res, 'Performer not found');
+  }
+
+  const data = {
+    id: performer.id,
+    name: performer.name,
+    disambiguation: performer.disambiguation,
+    alias: performer.alias,
+    favorite: performer.favorite,
+    ignore_auto_tag: performer.ignore_auto_tag,
+    birthdate: performer.birthdate,
+    death_date: performer.death_date,
+    gender: performer.gender,
+    details: performer.details,
+    rating: performer.rating,
+    ethnicity: performer.ethnicity,
+    country: performer.country,
+    eye_color: performer.eye_color,
+    hair_color: performer.hair_color,
+    height: performer.height,
+    weight: performer.weight,
+    measurements: performer.measurements,
+    fake_tits: performer.fake_tits,
+    career_length: performer.career_length,
+    tattoos: performer.tattoos,
+    piercings: performer.piercings,
+    image: performer.image,
+    instagram: performer.instagram,
+    twitter: performer.twitter,
+    url: performer.url,
+    tags: performer.tags.map(pt => ({ id: pt.tag.id, name: pt.tag.name })),
+    scenes: performer.scenes.map(ps => ps.scene)
+  };
+
+  return sendSuccess(res, data);
+}));
+
 // GET /studios - Stash studios endpoint
 router.get('/studios', asyncHandler(async (req, res) => {
   const { page = 1, perPage = 20, filter = '' } = req.query;
@@ -1752,27 +2117,36 @@ router.get('/studios', asyncHandler(async (req, res) => {
 
 // GET /tags - Stash tags endpoint
 router.get('/tags', asyncHandler(async (req, res) => {
-  const { page = 1, perPage = 20, filter = '' } = req.query;
+  const { page = 1, perPage = 20, filter = '', rootOnly = 'true' } = req.query;
   
   const skip = (parseInt(page) - 1) * parseInt(perPage);
   const take = parseInt(perPage);
   
-  // Build search filter
+  // Build search filter (SQLite doesn't support mode: 'insensitive', but contains is case-insensitive by default in SQLite)
   const searchFilter = filter ? {
     OR: [
-      { name: { contains: filter, mode: 'insensitive' } },
-      { description: { contains: filter, mode: 'insensitive' } }
+      { name: { contains: filter } },
+      { description: { contains: filter } }
     ]
   } : {};
   
+  // Add root-only filter if requested
+  const whereClause = { ...searchFilter };
+  if (rootOnly === 'true') {
+    // Only get tags that have no parents
+    whereClause.parentTags = {
+      none: {}
+    };
+  }
+  
   // Get total count
   const total = await prisma.stashTag.count({
-    where: searchFilter
+    where: whereClause
   });
   
-  // Get tags with usage counts
+  // Get tags with usage counts and hierarchy
   const tags = await prisma.stashTag.findMany({
-    where: searchFilter,
+    where: whereClause,
     include: {
       scenes: {
         select: {
@@ -1782,6 +2156,54 @@ router.get('/tags', asyncHandler(async (req, res) => {
       performers: {
         select: {
           performerId: true
+        }
+      },
+      parentTags: {
+        include: {
+          parentTag: {
+            select: {
+              id: true,
+              name: true
+            }
+          }
+        }
+      },
+      childTags: {
+        include: {
+          childTag: {
+            select: {
+              id: true,
+              name: true,
+              description: true,
+              image: true,
+              favorite: true,
+              scenes: {
+                select: {
+                  sceneId: true
+                }
+              },
+              performers: {
+                select: {
+                  performerId: true
+                }
+              },
+              childTags: {
+                include: {
+                  childTag: {
+                    select: {
+                      id: true,
+                      name: true
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      aliases: {
+        select: {
+          alias: true
         }
       }
     },
@@ -1796,8 +2218,25 @@ router.get('/tags', asyncHandler(async (req, res) => {
     name: tag.name,
     description: tag.description,
     image: tag.image,
+    favorite: tag.favorite,
+    ignoreAutoTag: tag.ignoreAutoTag,
     scene_count: tag.scenes.length,
-    performer_count: tag.performers.length
+    performer_count: tag.performers.length,
+    parent_count: tag.parentTags.length,
+    child_count: tag.childTags.length,
+    parents: tag.parentTags.map(pt => pt.parentTag),
+    children: tag.childTags.map(ct => ({
+      id: ct.childTag.id,
+      name: ct.childTag.name,
+      description: ct.childTag.description,
+      image: ct.childTag.image,
+      favorite: ct.childTag.favorite,
+      scene_count: ct.childTag.scenes.length,
+      performer_count: ct.childTag.performers.length,
+      child_count: ct.childTag.childTags.length,
+      children: ct.childTag.childTags.map(gct => gct.childTag)
+    })),
+    aliases: tag.aliases.map(a => a.alias)
   }));
   
   res.json({
@@ -2921,93 +3360,214 @@ router.post('/cleanup/test', asyncHandler(async (req, res) => {
   }
 }));
 
-// Get clips with pagination and filtering
-router.get('/clips', asyncHandler(async (req, res) => {
-  console.log('📋 Getting all clips with pagination...');
+// Get tags that are used on clips
+router.get('/clips/tags', asyncHandler(async (req, res) => {
+  console.log('🏷️ Getting tags used on clips...');
   
-  const page = parseInt(req.query.page) || 1;
-  const limit = parseInt(req.query.limit) || parseInt(req.query.perPage) || 20;
-  const search = req.query.search || '';
-  const watchStatus = req.query.watched; // 'true', 'false', or undefined for all
-  const sortBy = req.query.sortBy || 'createdAt';
-  const sortDirection = req.query.sortDirection || 'desc';
-  
-  const offset = (page - 1) * limit;
-  
-  // Build where clause
-  const where = {};
-  
-  // Add search filter
-  if (search) {
-    where.scene = {
-      title: {
-        contains: search
-      }
-    };
-  }
-  
-  // Add watch status filter
-  if (watchStatus !== undefined) {
-    where.watched = watchStatus === 'true';
-  }
-  
-  // Build sort object
-  const validSortFields = ['createdAt', 'sceneTitle', 'duration', 'startTime', 'watchedAt', 'clipIndex'];
-  const validatedSortBy = validSortFields.includes(sortBy) ? sortBy : 'createdAt';
-  
-  const orderBy = {};
-  if (validatedSortBy === 'sceneTitle') {
-    orderBy.scene = { title: sortDirection };
-  } else {
-    orderBy[validatedSortBy] = sortDirection;
-  }
-  
-  // Get clips with pagination
-  const clips = await prisma.stashClip.findMany({
-    where,
+  // Get all unique tags that are associated with clips
+  const clipTags = await prisma.stashClipTag.findMany({
     include: {
-      scene: {
+      tag: {
         select: {
           id: true,
-          title: true,
-          duration: true,
-          performers: {
-            select: {
-              performer: {
-                select: {
-                  name: true
+          name: true,
+          favorite: true
+        }
+      }
+    },
+    distinct: ['tagId']
+  });
+
+  // Transform to just the tag data with clip count
+  const tags = await Promise.all(
+    clipTags.map(async (clipTag) => {
+      // Count how many clips use this tag
+      const clipCount = await prisma.stashClipTag.count({
+        where: { tagId: clipTag.tagId }
+      });
+      
+      return {
+        ...clipTag.tag,
+        clip_count: clipCount
+      };
+    })
+  );
+
+  // Sort by clip count descending
+  tags.sort((a, b) => b.clip_count - a.clip_count);
+
+  console.log(`🏷️ Found ${tags.length} tags used on clips`);
+  
+  res.json({
+    success: true,
+    data: tags
+  });
+}));
+
+// Get clips with pagination and filtering
+
+
+// GET /clips/:id/tags - Get tags for a specific clip
+router.get('/clips/:id/tags', asyncHandler(async (req, res) => {
+  const clipId = parseInt(req.params.id);
+  
+  if (isNaN(clipId)) {
+    return sendBadRequest(res, 'Invalid clip ID');
+  }
+  
+  const clip = await prisma.stashClip.findUnique({
+    where: { id: clipId },
+    include: {
+      tags: {
+        include: {
+          tag: {
+            include: {
+              parentTags: {
+                include: {
+                  parentTag: {
+                    select: {
+                      id: true,
+                      name: true
+                    }
+                  }
+                }
+              },
+              childTags: {
+                include: {
+                  childTag: {
+                    select: {
+                      id: true,
+                      name: true
+                    }
+                  }
                 }
               }
-            }
-          },
-          studioObject: {
-            select: {
-              name: true
             }
           }
         }
       }
-    },
-    orderBy,
-    skip: offset,
-    take: limit
+    }
   });
   
-  // Get total count
-  const totalClips = await prisma.stashClip.count({ where });
-  const totalPages = Math.ceil(totalClips / limit);
-  
-  console.log(`📋 Found ${clips.length} clips (page ${page}/${totalPages})`);
+  if (!clip) {
+    return sendNotFound(res, 'Clip not found');
+  }
   
   res.json({
-    clips,
-    pagination: {
-      currentPage: page,
-      totalPages,
-      totalItems: totalClips,
-      itemsPerPage: limit,
-      hasMore: page < totalPages
+    clipId: clip.id,
+    tags: clip.tags
+  });
+}));
+
+// POST /clips/:id/tags - Add tags to a clip
+router.post('/clips/:id/tags', asyncHandler(async (req, res) => {
+  const clipId = parseInt(req.params.id);
+  const { tagIds } = req.body;
+  
+  if (isNaN(clipId)) {
+    return sendBadRequest(res, 'Invalid clip ID');
+  }
+  
+  if (!Array.isArray(tagIds) || tagIds.length === 0) {
+    return sendBadRequest(res, 'tagIds must be a non-empty array');
+  }
+  
+  // Verify clip exists
+  const clip = await prisma.stashClip.findUnique({
+    where: { id: clipId }
+  });
+  
+  if (!clip) {
+    return sendNotFound(res, 'Clip not found');
+  }
+  
+  // Verify all tags exist
+  const tags = await prisma.stashTag.findMany({
+    where: { id: { in: tagIds } }
+  });
+  
+  if (tags.length !== tagIds.length) {
+    return sendBadRequest(res, 'One or more tag IDs are invalid');
+  }
+  
+  // Create clip-tag associations (skip duplicates)
+  const createdTags = [];
+  for (const tagId of tagIds) {
+    const existing = await prisma.stashClipTag.findUnique({
+      where: {
+        clipId_tagId: {
+          clipId: clipId,
+          tagId: tagId
+        }
+      }
+    });
+    
+    if (!existing) {
+      const created = await prisma.stashClipTag.create({
+        data: {
+          clipId: clipId,
+          tagId: tagId
+        },
+        include: {
+          tag: true
+        }
+      });
+      createdTags.push(created);
     }
+  }
+  
+  console.log(`✅ Added ${createdTags.length} tags to clip ${clipId}`);
+  
+  res.json({
+    message: `Added ${createdTags.length} tag(s) to clip`,
+    clipId: clipId,
+    addedTags: createdTags
+  });
+}));
+
+// DELETE /clips/:id/tags/:tagId - Remove a tag from a clip
+router.delete('/clips/:id/tags/:tagId', asyncHandler(async (req, res) => {
+  const clipId = parseInt(req.params.id);
+  const { tagId } = req.params;
+  
+  if (isNaN(clipId)) {
+    return sendBadRequest(res, 'Invalid clip ID');
+  }
+  
+  if (!tagId) {
+    return sendBadRequest(res, 'Tag ID is required');
+  }
+  
+  // Check if association exists
+  const clipTag = await prisma.stashClipTag.findUnique({
+    where: {
+      clipId_tagId: {
+        clipId: clipId,
+        tagId: tagId
+      }
+    }
+  });
+  
+  if (!clipTag) {
+    return sendNotFound(res, 'Tag not associated with this clip');
+  }
+  
+  // Delete the association
+  await prisma.stashClipTag.delete({
+    where: {
+      clipId_tagId: {
+        clipId: clipId,
+        tagId: tagId
+      }
+    }
+  });
+  
+  console.log(`✅ Removed tag ${tagId} from clip ${clipId}`);
+  
+  res.json({
+    message: 'Tag removed from clip successfully',
+    clipId: clipId,
+    tagId: tagId
   });
 }));
 

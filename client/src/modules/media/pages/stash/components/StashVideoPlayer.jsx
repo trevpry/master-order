@@ -1,7 +1,19 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { formatDuration } from '../../../../../utils/timeUtils';
-import { getSceneDisplayTitle, getSceneImageUrl, isVideoFormatSupported } from '../../../utils/stashUtils';
+import { 
+  getSceneDisplayTitle, 
+  getSceneImageUrl, 
+  isVideoFormatSupported, 
+  getSceneFileName, 
+  getSceneTags,
+  getClipTags,
+  getSceneStudio,
+  getScenePerformers,
+  getTagParents,
+  getTagChildren
+} from '../../../utils/stashUtils';
 import config from '../../../../../config.js';
+import ClipTagManager from './ClipTagManager';
 
 const StashVideoPlayer = ({
   videoPlayer,
@@ -18,6 +30,54 @@ const StashVideoPlayer = ({
   mixedMode,
   MAX_AUTO_SKIP_RETRIES
 }) => {
+  // State for pause overlay
+  const [showPauseOverlay, setShowPauseOverlay] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [expandedPauseTags, setExpandedPauseTags] = useState(new Set());
+  const [showClipTagManager, setShowClipTagManager] = useState(false);
+  
+  // Helper function to check if a tag is already on the clip
+  const isTagOnClip = (tagId) => {
+    const clipTags = getClipTags(videoPlayer.clip);
+    return clipTags.some(tag => tag.id === tagId);
+  };
+  
+  // Helper function to toggle a tag on/off the clip
+  const toggleTagOnClip = async (tagId, isCurrentlyOnClip) => {
+    if (!videoPlayer.clip?.id) return;
+    
+    try {
+      if (isCurrentlyOnClip) {
+        // Remove tag from clip
+        const response = await fetch(`/api/stash/clips/${videoPlayer.clip.id}/tags/${tagId}`, {
+          method: 'DELETE',
+        });
+        if (!response.ok) throw new Error('Failed to remove tag');
+      } else {
+        // Add tag to clip
+        const response = await fetch(`/api/stash/clips/${videoPlayer.clip.id}/tags`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ tagIds: [tagId] }),
+        });
+        if (!response.ok) throw new Error('Failed to add tag');
+      }
+      
+      // Refresh clip tags
+      const refreshResponse = await fetch(`/api/stash/clips/${videoPlayer.clip.id}/tags`);
+      if (refreshResponse.ok) {
+        const data = await refreshResponse.json();
+        if (videoPlayer.clip) {
+          videoPlayer.clip.tags = data.tags;
+        }
+      }
+    } catch (error) {
+      console.error('Error toggling tag on clip:', error);
+      alert('Failed to update clip tag. Please try again.');
+    }
+  };
   // Helper function to mark a clip as watched
   const markClipAsWatched = async (clipId) => {
     try {
@@ -33,6 +93,59 @@ const StashVideoPlayer = ({
       }
     } catch (error) {
       console.error(`❌ Error marking clip ${clipId} as watched:`, error);
+    }
+  };
+
+  // Helper function to delete scene and all its clips
+  const deleteSceneAndClips = async () => {
+    if (!videoPlayer.scene?.id) return;
+    
+    const sceneId = videoPlayer.scene.id;
+    const sceneTitle = getSceneDisplayTitle(videoPlayer.scene);
+    
+    // Confirm deletion
+    if (!window.confirm(`Are you sure you want to delete "${sceneTitle}" and all its clips?\n\nThis will:\n• Delete the video file from disk\n• Delete all generated content (thumbnails, sprites, etc.)\n• Delete the scene from Stash database\n• Delete all clips from your local database\n\nThis action cannot be undone.`)) {
+      return;
+    }
+    
+    setIsDeleting(true);
+    
+    try {
+      console.log(`🗑️ Deleting scene ${sceneId} and all clips...`);
+      
+      const response = await fetch(`${config.apiBaseUrl}/api/stash/scenes/${sceneId}`, {
+        method: 'DELETE'
+      });
+      
+      const result = await response.json();
+      
+      if (response.ok) {
+        console.log(`✅ Successfully deleted scene and ${result.clipsDeleted} clips`);
+        
+        // Build detailed message
+        let message = `✅ Successfully deleted "${sceneTitle}"\n\n`;
+        message += `• Deleted ${result.clipsDeleted} clip${result.clipsDeleted !== 1 ? 's' : ''}\n`;
+        message += `• Removed from local database: ${result.localDeleted ? 'Yes' : 'No'}\n`;
+        message += `• Deleted from Stash: ${result.stashDeleted ? 'Yes' : 'No'}`;
+        
+        if (result.warning) {
+          message += `\n\n⚠️ ${result.warning}`;
+        }
+        
+        alert(message);
+        
+        // Close video player
+        setVideoPlayer({ isOpen: false, clip: null, scene: null, playbackInfo: null });
+        setShowPauseOverlay(false);
+      } else {
+        console.error('❌ Failed to delete scene:', result.error);
+        alert(`❌ Failed to delete scene: ${result.message || result.error}`);
+      }
+    } catch (error) {
+      console.error('❌ Error deleting scene:', error);
+      alert(`❌ Error deleting scene: ${error.message}`);
+    } finally {
+      setIsDeleting(false);
     }
   };
 
@@ -92,8 +205,10 @@ const StashVideoPlayer = ({
         event.preventDefault();
         if (video.paused) {
           video.play();
+          // Overlay will be hidden by onPlay event
         } else {
           video.pause();
+          // Overlay will be shown by onPause event which also clears timer
         }
         break;
       case 'f':
@@ -164,6 +279,11 @@ const StashVideoPlayer = ({
   };
 
   const handleVideoTimeUpdate = async (e) => {
+    // Don't advance to next clip if video is paused (pause overlay is showing)
+    if (showPauseOverlay) {
+      return;
+    }
+    
     // Only proceed if playbackInfo is available
     if (!videoPlayer.playbackInfo) {
       return;
@@ -411,7 +531,8 @@ const StashVideoPlayer = ({
 
         {/* Video Element */}
         {videoPlayer.scene ? (
-          <video
+          <>
+            <video
             className="clip-video-player"
             controls
             autoPlay
@@ -503,6 +624,75 @@ const StashVideoPlayer = ({
             onTimeUpdate={handleVideoTimeUpdate}
             onPause={() => {
               console.log('⏸️ Video paused');
+              const video = document.querySelector('.clip-video-player');
+              // Clear backup timer when paused to prevent automatic clip advancement
+              if (video && video.clipTimer) {
+                clearTimeout(video.clipTimer);
+                video.clipTimer = null;
+                console.log('🧹 Cleared backup timer on pause');
+              }
+              setShowPauseOverlay(true);
+            }}
+            onPlay={() => {
+              console.log('▶️ Video playing');
+              setShowPauseOverlay(false);
+              
+              // Restart backup timer if we're in clip mode and not in mixed mode
+              const video = document.querySelector('.clip-video-player');
+              if (video && videoPlayer.playbackInfo && !mixedMode) {
+                // Calculate remaining time for this clip
+                const currentTime = video.currentTime;
+                const clipEndTime = videoPlayer.playbackInfo.endTime;
+                const remainingTime = Math.max(0, (clipEndTime - currentTime) * 1000 + 2000); // Add 2 second buffer
+                
+                if (remainingTime > 0) {
+                  console.log(`⏱️ Restarting backup timer for ${remainingTime}ms`);
+                  
+                  const clipTimer = setTimeout(async () => {
+                    console.log('⏰ Backup timer triggered after resume - marking as watched and loading next clip...');
+                    
+                    // Mark current clip as watched before moving to next
+                    if (videoPlayer.clip?.id) {
+                      await markClipAsWatched(videoPlayer.clip.id);
+                    }
+                    
+                    try {
+                      const response = await fetch(`${config.apiBaseUrl}/api/stash/clips/next`);
+                      const result = await response.json();
+                      
+                      if (response.ok && result.clip && result.clip.scene) {
+                        // Check if video format is supported
+                        const filePath = result.clip.scene.path;
+                        
+                        if (!isVideoFormatSupported(filePath)) {
+                          const extension = filePath?.split('.').pop()?.toUpperCase() || 'Unknown';
+                          console.error(`🚫 Resume timer: Unsupported video format: ${extension}`);
+                          setVideoPlayer({ isOpen: false, clip: null, scene: null, playbackInfo: null });
+                          return;
+                        }
+                        
+                        console.log('🎯 Auto-loaded next clip via resume timer:', result.clip.scene.title);
+                        
+                        // Update video player with new clip
+                        setVideoPlayer({
+                          isOpen: true,
+                          clip: result.clip,
+                          scene: result.clip.scene,
+                          playbackInfo: result.playbackInfo
+                        });
+                      } else {
+                        console.error('❌ Invalid clip data received:', result);
+                        setVideoPlayer({ isOpen: false, clip: null, scene: null, playbackInfo: null });
+                      }
+                    } catch (error) {
+                      console.error('Error loading next clip via resume timer:', error);
+                      setVideoPlayer({ isOpen: false, clip: null, scene: null, playbackInfo: null });
+                    }
+                  }, remainingTime);
+                  
+                  video.clipTimer = clipTimer;
+                }
+              }
             }}
             onEnded={async () => {
               console.log('🏁 Video ended - marking as watched and loading next clip...');
@@ -560,12 +750,222 @@ const StashVideoPlayer = ({
           >
             Your browser does not support the video tag.
           </video>
+
+          {/* Pause Overlay with Delete Button */}
+          {showPauseOverlay && (
+            <div className="pause-overlay">
+              <div className="pause-overlay-content">
+                <div className="pause-icon">⏸️</div>
+                <h2>Paused</h2>
+                <p className="scene-title">{getSceneDisplayTitle(videoPlayer.scene)}</p>
+                
+                {/* File Name */}
+                {getSceneFileName(videoPlayer.scene) && (
+                  <p className="file-name">
+                    📁 {getSceneFileName(videoPlayer.scene)}
+                  </p>
+                )}
+                
+                {/* Studio */}
+                {getSceneStudio(videoPlayer.scene) && (
+                  <p className="scene-studio">
+                    🏢 {getSceneStudio(videoPlayer.scene).name}
+                  </p>
+                )}
+                
+                {/* Performers */}
+                {getScenePerformers(videoPlayer.scene).length > 0 && (
+                  <div className="scene-performers">
+                    <span className="performers-label">👥 </span>
+                    <span className="performers-list">
+                      {getScenePerformers(videoPlayer.scene).map((performer, index) => (
+                        <span key={performer.id}>
+                          {performer.name}
+                          {index < getScenePerformers(videoPlayer.scene).length - 1 && ', '}
+                        </span>
+                      ))}
+                    </span>
+                  </div>
+                )}
+                
+                {/* Clip Info */}
+                {videoPlayer.clip && (
+                  <p className="clip-info">Clip {videoPlayer.clip.clipIndex + 1}</p>
+                )}
+                
+                {/* Tags with Hierarchy - Root Tags Only with Expansion */}
+                {getSceneTags(videoPlayer.scene).length > 0 && (
+                  <div className="scene-tags-section">
+                    <div className="scene-tags-header">
+                      <h4>Scene Tags</h4>
+                      <span className="scene-tags-help">✓ Check to copy to clip</span>
+                    </div>
+                    <div className="scene-tags-hierarchical">
+                    {(() => {
+                      const allTags = getSceneTags(videoPlayer.scene);
+                      
+                      // Filter to only root tags (tags with no parents)
+                      const rootTags = allTags.filter(tag => {
+                        const tagObj = tag.tag || tag;
+                        const parents = getTagParents(tagObj);
+                        return parents.length === 0;
+                      });
+                      
+                      const toggleTagExpansion = (tagId) => {
+                        setExpandedPauseTags(prev => {
+                          const newSet = new Set(prev);
+                          if (newSet.has(tagId)) {
+                            newSet.delete(tagId);
+                          } else {
+                            newSet.add(tagId);
+                          }
+                          return newSet;
+                        });
+                      };
+                      
+                      const renderTagWithChildren = (tag, level = 0) => {
+                        const tagObj = tag.tag || tag;
+                        const children = getTagChildren(tagObj);
+                        const isExpanded = expandedPauseTags.has(tagObj.id);
+                        const hasChildren = children.length > 0;
+                        const isOnClip = isTagOnClip(tagObj.id);
+                        
+                        return (
+                          <div key={tagObj.id} className="pause-tag-item" style={{ marginLeft: `${level * 1.5}rem` }}>
+                            <div className="pause-tag-row">
+                              {hasChildren && (
+                                <button
+                                  className="tag-expand-button-small"
+                                  onClick={() => toggleTagExpansion(tagObj.id)}
+                                  title={isExpanded ? 'Collapse' : 'Expand children'}
+                                >
+                                  {isExpanded ? '▼' : '▶'}
+                                </button>
+                              )}
+                              
+                              {/* Checkbox to add/remove tag from clip */}
+                              <input
+                                type="checkbox"
+                                className="tag-clip-checkbox"
+                                checked={isOnClip}
+                                onChange={() => toggleTagOnClip(tagObj.id, isOnClip)}
+                                title={isOnClip ? 'Remove from clip' : 'Add to clip'}
+                              />
+                              
+                              <span 
+                                className={`tag-badge ${tag.favorite || tagObj.favorite ? 'tag-favorite' : ''} ${hasChildren ? 'tag-has-hierarchy' : ''} ${isOnClip ? 'tag-on-clip' : ''}`}
+                                title={tag.description || tagObj.description}
+                              >
+                                {tag.favorite || tagObj.favorite ? '⭐ ' : ''}{tagObj.name}
+                                {hasChildren && <span className="tag-child-count"> ({children.length})</span>}
+                                {isOnClip && <span className="tag-on-clip-icon"> ✓</span>}
+                              </span>
+                            </div>
+                            
+                            {/* Render children when expanded */}
+                            {isExpanded && hasChildren && (
+                              <div className="pause-tag-children">
+                                {children.map(child => {
+                                  // Find the full tag object from allTags
+                                  const childTagFull = allTags.find(t => (t.tag?.id || t.id) === child.id);
+                                  return renderTagWithChildren(childTagFull || child, level + 1);
+                                })}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      };
+                      
+                      return rootTags.map(tag => renderTagWithChildren(tag));
+                    })()}
+                    </div>
+                  </div>
+                )}
+                
+                {/* Clip-specific Tags */}
+                <div className="clip-tags-section">
+                  <div className="clip-tags-header">
+                    <h4>Clip Tags</h4>
+                    <button 
+                      className="manage-tags-btn"
+                      onClick={() => setShowClipTagManager(true)}
+                    >
+                      ⚙️ Manage Tags
+                    </button>
+                  </div>
+                  {(() => {
+                    const clipTags = getClipTags(videoPlayer.clip);
+                    return clipTags.length > 0 ? (
+                      <div className="clip-tags-list">
+                        {clipTags.map(tag => (
+                          <span 
+                            key={tag.id}
+                            className={`tag-badge clip-tag ${tag.favorite ? 'tag-favorite' : ''}`}
+                            title={tag.description}
+                          >
+                            {tag.favorite ? '⭐ ' : ''}{tag.name}
+                          </span>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="no-clip-tags">No clip-specific tags. Click "Manage Tags" to add some.</p>
+                    );
+                  })()}
+                </div>
+                
+                <div className="pause-actions">
+                  <button 
+                    className="pause-action-btn play-btn"
+                    onClick={() => {
+                      const video = document.querySelector('.clip-video-player');
+                      if (video) {
+                        video.play();
+                        setShowPauseOverlay(false);
+                      }
+                    }}
+                  >
+                    ▶️ Resume
+                  </button>
+                  <button 
+                    className="pause-action-btn delete-btn"
+                    onClick={deleteSceneAndClips}
+                    disabled={isDeleting}
+                  >
+                    {isDeleting ? '⏳ Deleting...' : '🗑️ Delete Scene & Clips'}
+                  </button>
+                </div>
+                <p className="pause-hint">Press Space to resume • Press ESC to close</p>
+              </div>
+            </div>
+          )}
+          </>
         ) : (
           <div className="video-loading">
             <p>⏳ Loading clip...</p>
           </div>
         )}
       </div>
+      
+      {/* Clip Tag Manager */}
+      <ClipTagManager
+        clip={videoPlayer.clip}
+        isVisible={showClipTagManager}
+        onClose={() => setShowClipTagManager(false)}
+        onTagsUpdated={() => {
+          // Refresh the clip data to get updated tags
+          if (videoPlayer.clip?.id) {
+            fetch(`/api/stash/clips/${videoPlayer.clip.id}/tags`)
+              .then(response => response.json())
+              .then(data => {
+                // Update the clip with new tags
+                if (videoPlayer.clip) {
+                  videoPlayer.clip.tags = data.tags;
+                }
+              })
+              .catch(error => console.error('Error refreshing clip tags:', error));
+          }
+        }}
+      />
     </div>
   );
 };

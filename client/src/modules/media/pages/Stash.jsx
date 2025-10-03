@@ -42,6 +42,8 @@ export default function Stash() {
   const [sortBy, setSortBy] = useState('date');
   const [sortDirection, setSortDirection] = useState('DESC');
   const [watchStatusFilter, setWatchStatusFilter] = useState('all');
+  const [tagFilter, setTagFilter] = useState([]);
+  const [clipTags, setClipTags] = useState([]);
   const [syncStatus, setSyncStatus] = useState({
     isRunning: false,
     lastSync: null,
@@ -134,7 +136,7 @@ export default function Stash() {
     }
   };
 
-  const loadData = useCallback(async (type = 'scenes', page = null) => {
+    const loadData = useCallback(async (type, page, overrideTagFilter = null) => {
     if (!connectionStatus.connected) return;
     
     // Use provided page or get current page for the tab type
@@ -147,10 +149,16 @@ export default function Stash() {
         page: currentPageForType.toString(),
         limit: '24',
         sort: sortBy,
-        direction: sortDirection,
-        search: searchQuery || '',
-        watched: watchStatusFilter !== 'all' ? watchStatusFilter : ''
+        direction: sortDirection
       });
+      
+      // Only add non-empty parameters
+      if (searchQuery) {
+        params.set('search', searchQuery);
+      }
+      if (watchStatusFilter !== 'all') {
+        params.set('watched', watchStatusFilter);
+      }
 
       switch (type) {
         case 'upnext':
@@ -169,6 +177,29 @@ export default function Stash() {
           endpoint = `/api/stash/tags?${params}`;
           break;
         case 'clips':
+          // Map frontend sort field to backend field for clips
+          const clipsSortMapping = {
+            'date': 'createdAt',
+            'title': 'sceneTitle',
+            'duration': 'duration',
+            'startTime': 'startTime',
+            'watchedAt': 'watchedAt',
+            'clipIndex': 'clipIndex'
+          };
+          const clipsSortBy = clipsSortMapping[sortBy] || 'createdAt';
+          params.set('sortBy', clipsSortBy); // Backend expects 'sortBy' not 'sort'
+          params.set('sortDirection', sortDirection); // Backend expects 'sortDirection' not 'direction'
+          params.delete('sort'); // Remove the incorrect 'sort' parameter
+          params.delete('direction'); // Remove the incorrect 'direction' parameter
+          
+          // Add tag filter parameters for clips
+          const activeTagFilter = overrideTagFilter !== null ? overrideTagFilter : tagFilter;
+          if (activeTagFilter.length > 0) {
+            params.append('tags', activeTagFilter.join(','));
+            console.log('🏷️ Loading clips with tag filter:', activeTagFilter);
+          } else {
+            console.log('📋 Loading all clips (no tag filter)');
+          }
           endpoint = `/api/stash/clips?${params}`;
           break;
         default:
@@ -178,6 +209,7 @@ export default function Stash() {
       console.log(`🔍 Loading ${type} data from:`, endpoint);
       const response = await fetch(`${config.apiBaseUrl}${endpoint}`);
       const result = await response.json();
+      console.log(`📦 Response for ${type}:`, result.data?.length || 0, 'items');
 
       if (result.success) {
         if (type === 'upnext') {
@@ -195,10 +227,18 @@ export default function Stash() {
             }
           }));
         } else {
-          setData(prev => ({
-            ...prev,
-            [type]: result.data || []
-          }));
+          console.log(`💾 Setting ${type} data:`, result.data?.length || 0, 'items');
+          if (type === 'clips' && result.data?.length > 0) {
+            console.log('🎬 First clip:', result.data[0]);
+          }
+          setData(prev => {
+            const newData = {
+              ...prev,
+              [type]: result.data || []
+            };
+            console.log(`📊 New ${type} state:`, newData[type]?.length || 0, 'items');
+            return newData;
+          });
           setPagination(prev => ({
             ...prev,
             [type]: {
@@ -222,7 +262,7 @@ export default function Stash() {
     } finally {
       setIsLoading(false);
     }
-  }, [connectionStatus.connected, sortBy, sortDirection, searchQuery, watchStatusFilter, currentPage]);
+  }, [connectionStatus.connected, sortBy, sortDirection, searchQuery, watchStatusFilter]);
 
   // Load all library tabs data
   const loadAllLibraryData = useCallback(async () => {
@@ -258,6 +298,14 @@ export default function Stash() {
             endpoint = `/api/stash/tags?${params}`;
             break;
           case 'clips':
+            // Map parameters for clips backend
+            params.set('sortBy', 'createdAt'); // Backend expects 'sortBy'
+            params.set('sortDirection', 'desc'); // Backend expects 'sortDirection'
+            params.delete('sort'); // Remove incorrect parameter
+            params.delete('direction'); // Remove incorrect parameter
+            if (tagFilter.length > 0) {
+              params.append('tags', tagFilter.join(','));
+            }
             endpoint = `/api/stash/clips?${params}`;
             break;
           default:
@@ -342,6 +390,57 @@ export default function Stash() {
       setSyncStatus(prev => ({ ...prev, message: 'Sync failed' }));
     } finally {
       setSyncStatus(prev => ({ ...prev, isRunning: false }));
+    }
+  };
+
+  // Tag filtering functions
+  const addTagFilter = (tagId) => {
+    console.log('➕ Adding tag filter:', tagId, 'Current filters:', tagFilter);
+    if (!tagFilter.includes(tagId)) {
+      const newTagFilter = [...tagFilter, tagId];
+      console.log('🔄 New tag filter:', newTagFilter, 'Loading clips...');
+      setTagFilter(newTagFilter);
+      if (libraryTab === 'clips') {
+        loadData('clips', 1, newTagFilter); // Reload clips with new filter
+      }
+    }
+  };
+
+  const removeTagFilter = (tagId) => {
+    const newTagFilter = tagFilter.filter(id => id !== tagId);
+    setTagFilter(newTagFilter);
+    if (libraryTab === 'clips') {
+      loadData('clips', 1, newTagFilter); // Reload clips with new filter
+    }
+  };
+
+  const clearTagFilter = () => {
+    setTagFilter([]);
+    if (libraryTab === 'clips') {
+      loadData('clips', 1, []); // Reload clips with cleared filter
+    }
+  };
+
+  // Reset tag filter when switching away from clips tab
+  const resetTagFilterOnTabChange = () => {
+    if (tagFilter.length > 0) {
+      setTagFilter([]);
+    }
+  };
+
+  // Load tags that are actually used on clips
+  const loadClipTags = async () => {
+    try {
+      const response = await fetch(`${config.apiBaseUrl}/api/stash/clips/tags`);
+      if (response.ok) {
+        const result = await response.json();
+        if (result.success) {
+          setClipTags(result.data || []);
+          console.log('🏷️ Loaded clip tags:', result.data?.length || 0);
+        }
+      }
+    } catch (error) {
+      console.error('❌ Error loading clip tags:', error);
     }
   };
 
@@ -681,6 +780,8 @@ export default function Stash() {
   // Effects
   useEffect(() => {
     checkConnectionStatus();
+    // Force clear any persisting tag filters on component mount
+    setTagFilter([]);
   }, []);
 
   useEffect(() => {
@@ -702,9 +803,23 @@ export default function Stash() {
 
   useEffect(() => {
     if (connectionStatus.connected) {
-      loadData(libraryTab, currentPage[libraryTab]);
+      loadData(libraryTab, 1); // Always start from page 1 when filters change
     }
-  }, [libraryTab, currentPage[libraryTab], sortBy, sortDirection, watchStatusFilter]);
+  }, [libraryTab, sortBy, sortDirection, watchStatusFilter, connectionStatus.connected]);
+
+  // Load clip tags when clips tab is selected
+  useEffect(() => {
+    if (connectionStatus.connected && libraryTab === 'clips') {
+      loadClipTags();
+    }
+  }, [libraryTab, connectionStatus.connected]);
+
+  // Clear tag filter when switching away from clips tab
+  useEffect(() => {
+    if (libraryTab !== 'clips' && tagFilter.length > 0) {
+      setTagFilter([]);
+    }
+  }, [libraryTab]);
 
   // Pre-load library data when connection is first established
   useEffect(() => {
@@ -843,6 +958,11 @@ export default function Stash() {
                 goToPage={goToPage}
                 goToNextPage={goToNextPage}
                 goToPreviousPage={goToPreviousPage}
+                tagFilter={tagFilter}
+                addTagFilter={addTagFilter}
+                removeTagFilter={removeTagFilter}
+                clearTagFilter={clearTagFilter}
+                clipTags={clipTags}
               />
             )}
 
