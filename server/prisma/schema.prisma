@@ -842,6 +842,7 @@ model StashClip {
   markerBased Boolean         @default(false)
   scene       StashScene      @relation(fields: [sceneId], references: [id], onDelete: Cascade)
   tags        StashClipTag[]
+  performerTags StashClipPerformerTag[]
 
   @@unique([sceneId, clipIndex])
   @@map("StashClip")
@@ -857,6 +858,20 @@ model StashClipTag {
 
   @@unique([clipId, tagId])
   @@map("StashClipTag")
+}
+
+model StashClipPerformerTag {
+  id          Int            @id @default(autoincrement())
+  clipId      Int
+  performerId String
+  tagId       String
+  createdAt   DateTime       @default(now())
+  clip        StashClip      @relation(fields: [clipId], references: [id], onDelete: Cascade)
+  performer   StashPerformer @relation(fields: [performerId], references: [id], onDelete: Cascade)
+  tag         StashTag       @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@unique([clipId, performerId, tagId])
+  @@map("StashClipPerformerTag")
 }
 
 model StashMarker {
@@ -909,6 +924,7 @@ model StashPerformer {
   images          StashImagePerformer[]
   tags            StashPerformerTag[]
   scenes          StashScenePerformer[]
+  clipTags        StashClipPerformerTag[]
 
   @@map("StashPerformer")
 }
@@ -945,6 +961,7 @@ model StashTag {
   performers    StashPerformerTag[]
   scenes        StashSceneTag[]
   clips         StashClipTag[]
+  clipPerformers StashClipPerformerTag[]
   
   // Tag hierarchy relations
   parentTags    StashTagHierarchy[] @relation("ChildTag")

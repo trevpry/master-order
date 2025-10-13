@@ -1677,8 +1677,16 @@ router.get('/clips/next', asyncHandler(async (req, res) => {
       data: clipsToCreate
     });
     
+    console.log('✨ Created clips for scene:', {
+      sceneId: selectedScene.id,
+      clipCount: clipsToCreate.length,
+      clipIndexes: clipsToCreate.map(c => c.clipIndex)
+    });
+    
     // Get a random generated clip
     const randomClipIndex = Math.floor(Math.random() * clipsToCreate.length);
+    console.log('🎲 Selecting random clip with index:', randomClipIndex);
+    
     selectedClip = await prisma.stashClip.findFirst({
       where: { 
         sceneId: selectedScene.id,
@@ -1804,7 +1812,13 @@ router.get('/clips/next', asyncHandler(async (req, res) => {
     }
   });
   
-  console.log(`✅ Next clip ${selectedClip.id} marked as watched`);
+  console.log(`✅ Next clip marked as watched:`, {
+    clipId: selectedClip.id,
+    sceneId: selectedClip.scene.id,
+    clipIndex: selectedClip.clipIndex,
+    startTime: selectedClip.startTime,
+    endTime: selectedClip.endTime
+  });
   
   // Debug: Log tag hierarchy data
   if (selectedClip.scene?.tags && selectedClip.scene.tags.length > 0) {
@@ -3411,6 +3425,12 @@ router.get('/clips/tags', asyncHandler(async (req, res) => {
 router.get('/clips/:id/tags', asyncHandler(async (req, res) => {
   const clipId = parseInt(req.params.id);
   
+  console.log('🏷️ GET /clips/:id/tags - Looking for clip:', {
+    rawId: req.params.id,
+    parsedId: clipId,
+    isNaN: isNaN(clipId)
+  });
+  
   if (isNaN(clipId)) {
     return sendBadRequest(res, 'Invalid clip ID');
   }
@@ -3449,6 +3469,12 @@ router.get('/clips/:id/tags', asyncHandler(async (req, res) => {
     }
   });
   
+  console.log('🔍 Clip lookup result:', {
+    clipId: clipId,
+    found: !!clip,
+    clipDbId: clip?.id
+  });
+  
   if (!clip) {
     return sendNotFound(res, 'Clip not found');
   }
@@ -3472,13 +3498,19 @@ router.post('/clips/:id/tags', asyncHandler(async (req, res) => {
     return sendBadRequest(res, 'tagIds must be a non-empty array');
   }
   
-  // Verify clip exists
-  const clip = await prisma.stashClip.findUnique({
+  // Verify clip exists, if not try to create it from scene data
+  let clip = await prisma.stashClip.findUnique({
     where: { id: clipId }
   });
   
   if (!clip) {
-    return sendNotFound(res, 'Clip not found');
+    console.log(`⚠️ Clip ${clipId} not found, attempting to create from scene data...`);
+    
+    // Try to find the clip's scene and clip data to create it
+    // This might happen when clips are generated on-the-fly
+    // For now, we'll return a 404 but log that we should create it
+    // In a future update, we could auto-create the clip here
+    return sendNotFound(res, 'Clip not found. Please ensure the clip has been generated and synced.');
   }
   
   // Verify all tags exist

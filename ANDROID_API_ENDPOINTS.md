@@ -1969,11 +1969,13 @@ GET /api/android/weather
 
 ## Stash Integration Endpoints
 
+> **🔔 Real-Time Overlay Feature**: When the Android app requests a clip via `/api/android/stash/next`, the web application automatically displays an overlay with comprehensive clip and scene metadata. This provides real-time visibility into what content is being played on connected Android devices. See [STASH_CLIP_OVERLAY.md](./STASH_CLIP_OVERLAY.md) for technical details.
+
 ### 1. Get Next Stash Clip
 
 **Endpoint**: `GET /api/android/stash/next`
 
-**Description**: Retrieves the next available unwatched 1-minute clip from Stash, similar to pressing the "Clip Play" button in the web interface.
+**Description**: Retrieves the next available unwatched 1-minute clip from Stash, similar to pressing the "Clip Play" button in the web interface. **This endpoint triggers a WebSocket event that displays an overlay in the web app with full clip details.**
 
 **Response Format**:
 ```json

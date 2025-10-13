@@ -19,6 +19,7 @@
     "leaflet": "^1.9.4",
     "lucide-react": "^0.511.0",
     "node-fetch": "^2.7.0",
+    "prop-types": "^15.8.1",
     "react": "^19.1.0",
     "react-chartjs-2": "^5.3.0",
     "react-dom": "^19.1.0",

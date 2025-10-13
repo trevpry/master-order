@@ -7,6 +7,10 @@ import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
 import Layout from './shared/components/Layout';
 import Dashboard from './Dashboard';
 import GlobalMusicPlayer from './components/GlobalMusicPlayer';
+import StashClipOverlay from './components/overlays/StashClipOverlay';
+
+// Custom Hooks
+import { useStashClipOverlay } from './hooks/useStashClipOverlay';
 
 // Media Module Components
 import Settings from './modules/media/pages/settings/index';
@@ -35,6 +39,9 @@ import Categories from './modules/history-plus/pages/Categories';
 import Courses from './modules/history-plus/pages/Courses';
 
 function App() {
+  // WebSocket hook for Stash clip overlay notifications
+  const { clipData, isOverlayVisible, closeOverlay } = useStashClipOverlay();
+  
   return (
     <Router>
       <Layout>
@@ -85,6 +92,14 @@ function App() {
       
       {/* Global Music Player - always available */}
       <GlobalMusicPlayer />
+      
+      {/* Stash Clip Overlay - shows when Android app requests a clip */}
+      {isOverlayVisible && clipData && (
+        <StashClipOverlay
+          clipData={clipData}
+          onClose={closeOverlay}
+        />
+      )}
     </Router>
   )
 }

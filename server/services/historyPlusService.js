@@ -1484,8 +1484,9 @@ class HistoryPlusService {
     try {
       // Check for any unwatched videos
       const unwatchedVideos = event.videos.filter(video => {
+        // user_video_watches is a single optional object, not an array
         const watchRecord = video.user_video_watches;
-        return !watchRecord || watchRecord.length === 0 || !watchRecord[0]?.watched;
+        return !watchRecord || !watchRecord.watched;
       });
       
       // Check for any unread unified books (via bookLinks)
@@ -1619,7 +1620,8 @@ class HistoryPlusService {
 
       // Collect only UNREVIEWED content
       event.videos?.forEach(video => {
-        const isWatched = video.user_video_watches && video.user_video_watches.watched;
+        // user_video_watches is a single optional object, not an array
+        const isWatched = video.user_video_watches?.watched;
         if (!isWatched) {
           availableContent.push({
             type: 'video',

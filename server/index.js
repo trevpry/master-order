@@ -227,7 +227,7 @@ console.log('Serving uploads from:', uploadsPath);
 
 // Load Android Companion App API routes BEFORE static files (modular architecture)
 const createAndroidRouter = require('./routes/android');
-const androidRouter = createAndroidRouter();
+const androidRouter = createAndroidRouter({ io });
 app.use('/api/android', androidRouter);
 
 // Dating API routes

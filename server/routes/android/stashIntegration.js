@@ -10,9 +10,10 @@ const { getAndroidApiBaseUrl, createAndroidResponse, createAndroidErrorResponse 
 /**
  * Create Stash integration routes for Android app
  * @param {PrismaClient} prisma - Database client instance
+ * @param {object} io - Socket.io instance for WebSocket events
  * @returns {express.Router} Configured router
  */
-function createStashIntegrationRoutes(prisma) {
+function createStashIntegrationRoutes(prisma, io) {
   const router = express.Router();
 
   // Get Random Stash Images
@@ -139,9 +140,12 @@ function createStashIntegrationRoutes(prisma) {
     
     try {
       const baseUrl = getAndroidApiBaseUrl();
+      const fetchUrl = `${baseUrl}/api/stash/clips/next`;
+      
+      console.log('🌐 Fetching clip from URL:', fetchUrl);
       
       // Get next clip using existing logic
-      const nextClipResponse = await fetch(`${baseUrl}/api/stash/clips/next`);
+      const nextClipResponse = await fetch(fetchUrl);
       
       if (!nextClipResponse.ok) {
         const errorText = await nextClipResponse.text();
@@ -154,6 +158,12 @@ function createStashIntegrationRoutes(prisma) {
       
       const nextClipData = await nextClipResponse.json();
       
+      console.log('📦 Received next clip data:', {
+        hasClip: !!nextClipData.clip,
+        clipId: nextClipData.clip?.id,
+        sceneId: nextClipData.clip?.scene?.id
+      });
+      
       if (!nextClipData || !nextClipData.clip) {
         return res.status(404).json({ 
           error: 'No clips available',
@@ -163,6 +173,18 @@ function createStashIntegrationRoutes(prisma) {
       
       const clip = nextClipData.clip;
       const scene = clip.scene;
+
+      // VERIFY: Check if clip actually exists in database
+      const clipVerification = await prisma.stashClip.findUnique({
+        where: { id: clip.id }
+      });
+      
+      console.log('🔍 Clip database verification:', {
+        clipId: clip.id,
+        existsInDb: !!clipVerification,
+        dbClipId: clipVerification?.id,
+        dbSceneId: clipVerification?.sceneId
+      });
 
       // Enrich with full parent scene metadata (including tags, performers, studio) for Android client
       let fullScene = null;
@@ -189,7 +211,12 @@ function createStashIntegrationRoutes(prisma) {
                   select: {
                     id: true,
                     name: true,
-                    description: true
+                    description: true,
+                    childTags: {
+                      select: {
+                        childTagId: true
+                      }
+                    }
                   }
                 }
               }
@@ -304,7 +331,8 @@ function createStashIntegrationRoutes(prisma) {
             tags: fullScene.tags?.map(t => ({
               id: t.tag.id,
               name: t.tag.name,
-              description: t.tag.description
+              description: t.tag.description,
+              hasChildren: t.tag.childTags && t.tag.childTags.length > 0
             })) || []
           } : null
         }
@@ -312,6 +340,16 @@ function createStashIntegrationRoutes(prisma) {
       
       console.log('📱 Next Stash clip sent to Android app:', JSON.stringify(androidResponse, null, 2));
       res.json(androidResponse);
+      
+      // Emit WebSocket event to web app for overlay display
+      if (io) {
+        console.log('🔔 Emitting stashClipRequested event with data:', {
+          clipId: androidResponse.data.clipId,
+          sceneId: androidResponse.data.sceneId,
+          hasScene: !!androidResponse.data.scene
+        });
+        io.emit('stashClipRequested', androidResponse.data);
+      }
       
     } catch (error) {
       console.error('❌ Error in Android Stash next endpoint:', error);

@@ -22,6 +22,7 @@ const createStashIntegrationRoutes = require('./stashIntegration');
 const createStashSceneDeletionRoutes = require('./stashSceneDeletion');
 const createStashTagRoutes = require('./stashTags');
 const createStashClipTagRoutes = require('./stashClipTags');
+const createStashClipPerformerTagRoutes = require('./stashClipPerformerTags');
 const createStashPerformerRoutes = require('./stashPerformer');
 const createViewingSessionRoutes = require('./viewingSession');
 const createGalleryPlaylistRoutes = require('./galleryPlaylist');
@@ -30,10 +31,12 @@ const createWeatherRoutes = require('./weather');
 /**
  * Create complete Android router with core modules
  * @param {object} options - Configuration options
+ * @param {object} options.io - Socket.io instance for WebSocket events
  * @returns {express.Router} Complete Android router
  */
 function createAndroidRouter(options = {}) {
   const router = express.Router();
+  const { io } = options;
   
   // Initialize database client
   const prisma = require('../../prismaClient');
@@ -70,7 +73,7 @@ function createAndroidRouter(options = {}) {
   router.use('/', createHistoryPlusReadingSessionRoutes(prisma));
   
   // Stash integration
-  router.use('/', createStashIntegrationRoutes(prisma));
+  router.use('/', createStashIntegrationRoutes(prisma, io));
 
   // Stash scene deletion by clipId
   router.use('/', createStashSceneDeletionRoutes(prisma));
@@ -80,6 +83,9 @@ function createAndroidRouter(options = {}) {
 
   // Stash clip tag assignment
   router.use('/', createStashClipTagRoutes());
+
+  // Stash clip-performer tag assignment (three-way relationship)
+  router.use('/', createStashClipPerformerTagRoutes(prisma));
 
   // Stash performer detail
   router.use('/', createStashPerformerRoutes());

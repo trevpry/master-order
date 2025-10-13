@@ -9,6 +9,13 @@
 function getAndroidApiBaseUrl() {
   const PORT = process.env.PORT || 3001;
   const externalIp = process.env.EXTERNAL_IP;
+  
+  // In development, always use localhost to avoid cross-database issues
+  if (process.env.NODE_ENV !== 'production') {
+    return `http://localhost:${PORT}`;
+  }
+  
+  // In production, use external IP if available
   return externalIp ? `http://${externalIp}:${PORT}` : `http://localhost:${PORT}`;
 }
 
