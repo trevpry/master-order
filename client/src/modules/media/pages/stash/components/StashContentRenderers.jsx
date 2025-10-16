@@ -64,10 +64,24 @@ const StashContentRenderers = ({
                     <span className="meta-icon">👤</span>
                     <span>
                       {scene.performers.slice(0, 3).map((p, idx) => {
-                        const id = p?.performer?.id || p?.id;
+                        const id = p?.performer?.id || p?.performerId || p?.id;
                         const name = (typeof p === 'string') ? p : (p?.performer?.name || p?.name || p);
+                        const tags = p?.tags || [];
+                        
+                        // Build display with tags
+                        const tagElements = tags.length > 0 ? (
+                          <span className="performer-tags" title={tags.map(t => t.tag.name).join(', ')}>
+                            ({tags.length} tag{tags.length !== 1 ? 's' : ''})
+                          </span>
+                        ) : null;
+                        
                         const content = id ? (
-                          <Link key={id} to={`/media/stash/performer/${id}`}>{name}</Link>
+                          <span key={id} className="performer-with-metadata">
+                            <Link to={`/media/stash/performer/${id}`}>
+                              {name}
+                            </Link>
+                            {tagElements}
+                          </span>
                         ) : (
                           <span key={idx}>{name}</span>
                         );

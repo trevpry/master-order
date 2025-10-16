@@ -439,7 +439,12 @@ router.get('/scenes', asyncHandler(async (req, res) => {
       include: {
         performers: {
           include: {
-            performer: true
+            performer: true,
+            tags: {
+              include: {
+                tag: true
+              }
+            }
           }
         },
         tags: {
@@ -486,7 +491,17 @@ router.get('/scenes', asyncHandler(async (req, res) => {
       },
       performers: scene.performers.map(sp => ({
         id: sp.performer.id,
-        name: sp.performer.name
+        performerId: sp.performerId,
+        name: sp.performer.name,
+        // Include scene-specific metadata from pivot table
+        notes: sp.notes,
+        tags: sp.tags.map(t => ({
+          tag: {
+            id: t.tag.id,
+            name: t.tag.name,
+            description: t.tag.description
+          }
+        }))
       })),
       tags: scene.tags.map(st => ({
         id: st.tag.id,
@@ -650,7 +665,12 @@ router.get('/scenes/:id', asyncHandler(async (req, res) => {
       include: {
         performers: {
           include: {
-            performer: true
+            performer: true,
+            tags: {
+              include: {
+                tag: true
+              }
+            }
           }
         },
         tags: {
@@ -701,6 +721,7 @@ router.get('/scenes/:id', asyncHandler(async (req, res) => {
       playDuration: scene.playDuration,
       performers: scene.performers.map(sp => ({
         id: sp.performer.id,
+        performerId: sp.performerId,
         name: sp.performer.name,
         disambiguation: sp.performer.disambiguation,
         alias: sp.performer.alias,
@@ -718,7 +739,16 @@ router.get('/scenes/:id', asyncHandler(async (req, res) => {
         image: sp.performer.image,
         instagram: sp.performer.instagram,
         twitter: sp.performer.twitter,
-        url: sp.performer.url
+        url: sp.performer.url,
+        // Include scene-specific metadata from pivot table
+        notes: sp.notes,
+        tags: sp.tags.map(t => ({
+          tag: {
+            id: t.tag.id,
+            name: t.tag.name,
+            description: t.tag.description
+          }
+        }))
       })),
       tags: scene.tags.map(st => ({
         id: st.tag.id,
@@ -2121,6 +2151,19 @@ router.get('/performers', asyncHandler(async (req, res) => {
       totalPages: Math.ceil(total / parseInt(perPage))
     }
   });
+}));
+
+/**
+ * GET /api/stash/performers/body-attributes
+ * Get all body attribute tags (children of "Body Attributes" parent tag)
+ * NOTE: This MUST come before /performers/:id to avoid route collision
+ */
+router.get('/performers/body-attributes', asyncHandler(async (req, res) => {
+  const ScenePerformerService = require('../services/scenePerformerService');
+  const scenePerformerService = new ScenePerformerService();
+  
+  const bodyTags = await scenePerformerService.getBodyAttributeTagsHierarchy();
+  sendSuccess(res, bodyTags);
 }));
 
 // GET /performers/:id - Single performer details
@@ -3708,6 +3751,10 @@ router.delete('/clips/:id/tags/:tagId', asyncHandler(async (req, res) => {
     tagId: tagId
   });
 }));
+
+  // Mount scene-performer metadata routes (mounted at router root, routes handle their own paths)
+  const scenePerformerRoutes = require('./stash/scenePerformers');
+  router.use(scenePerformerRoutes);
 
   return router;
 }

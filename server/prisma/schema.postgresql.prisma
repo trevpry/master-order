@@ -962,6 +962,7 @@ model StashTag {
   scenes        StashSceneTag[]
   clips         StashClipTag[]
   clipPerformers StashClipPerformerTag[]
+  scenePerformers StashScenePerformerTag[]
   
   // Tag hierarchy relations
   parentTags    StashTagHierarchy[] @relation("ChildTag")
@@ -998,11 +999,27 @@ model StashTagHierarchy {
 model StashScenePerformer {
   sceneId     String
   performerId String
-  performer   StashPerformer @relation(fields: [performerId], references: [id], onDelete: Cascade)
-  scene       StashScene     @relation(fields: [sceneId], references: [id], onDelete: Cascade)
+  performer   StashPerformer              @relation(fields: [performerId], references: [id], onDelete: Cascade)
+  scene       StashScene                  @relation(fields: [sceneId], references: [id], onDelete: Cascade)
+  // Scene-specific metadata
+  notes       String?                     // Scene-specific notes about performer
+  createdAt   DateTime                    @default(now())
+  updatedAt   DateTime                    @default(now()) @updatedAt
+  tags        StashScenePerformerTag[]    // Body attribute tags for this performer in this scene
 
   @@id([sceneId, performerId])
   @@map("StashScenePerformer")
+}
+
+model StashScenePerformerTag {
+  sceneId     String
+  performerId String
+  tagId       String
+  performer   StashScenePerformer @relation(fields: [sceneId, performerId], references: [sceneId, performerId], onDelete: Cascade)
+  tag         StashTag            @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@id([sceneId, performerId, tagId])
+  @@map("StashScenePerformerTag")
 }
 
 model StashSceneTag {

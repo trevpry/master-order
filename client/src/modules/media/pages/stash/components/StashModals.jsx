@@ -1,6 +1,7 @@
 import React from 'react';
 import { formatDuration } from '../../../../../utils/timeUtils';
 import { getSceneDisplayTitle } from '../../../utils/stashUtils';
+import ScenePerformerList from '../../../../../components/stash/ScenePerformerList';
 
 const StashModals = ({
   selectedScene,
@@ -49,14 +50,20 @@ const StashModals = ({
                       <span className="value">{selectedScene.rating}/5</span>
                     </div>
                   )}
-                  {selectedScene.performers && selectedScene.performers.length > 0 && (
-                    <div className="info-row">
+                  
+                  {/* Performers Section with Scene-Specific Metadata */}
+                  {selectedScene.id && (
+                    <div className="info-row performers-section">
                       <span className="label">👥 Performers:</span>
-                      <span className="value">
-                        {selectedScene.performers.map(p => p.name).join(', ')}
-                      </span>
+                      <div className="value performers-list-container">
+                        <ScenePerformerList 
+                          sceneId={selectedScene.id} 
+                          editable={true}
+                        />
+                      </div>
                     </div>
                   )}
+                  
                   {selectedScene.studio && (
                     <div className="info-row">
                       <span className="label">🏢 Studio:</span>
