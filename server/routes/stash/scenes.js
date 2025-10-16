@@ -685,4 +685,67 @@ router.get('/:id/clips', async (req, res) => {
   }
 });
 
+// PUT /scenes/:id/studio - Update a scene's studio
+router.put('/:id/studio', async (req, res) => {
+  try {
+    const sceneId = req.params.id;
+    const { studioId } = req.body;
+
+    if (!studioId) {
+      return res.status(400).json({ error: 'studioId is required' });
+    }
+
+    console.log(`🎬 Updating studio for scene ${sceneId} to studio ${studioId}`);
+    console.log(`   Scene ID type: ${typeof sceneId}, Studio ID type: ${typeof studioId}`);
+
+    // Update in Stash via GraphQL
+    const stashService = getActiveStashService();
+    let stashResult = { success: false, warning: null };
+    
+    if (stashService && stashService.isConfigured()) {
+      console.log('   🔄 Updating in Stash via GraphQL...');
+      stashResult = await stashService.updateSceneStudio(sceneId, studioId);
+      
+      if (!stashResult.success) {
+        console.warn('⚠️ Failed to update studio in Stash:', stashResult.error);
+        stashResult.warning = 'Studio updated locally but failed to update in Stash';
+      } else {
+        console.log('   ✅ Stash updated successfully');
+      }
+    } else {
+      console.warn('⚠️ Stash not configured, updating local database only');
+      stashResult.warning = 'Stash not configured - updated local database only';
+    }
+
+    // Update in local database
+    console.log('   💾 Updating in local database...');
+    const updatedScene = await prisma.stashScene.update({
+      where: { id: sceneId },
+      data: { studioId: studioId },
+      include: {
+        studioObject: true
+      }
+    });
+
+    console.log('✅ Scene studio updated successfully');
+    console.log('   Updated scene studio:', updatedScene.studioObject?.name);
+
+    res.json({
+      success: true,
+      scene: updatedScene,
+      stashUpdated: stashResult.success,
+      warning: stashResult.warning,
+      message: 'Studio updated successfully'
+    });
+
+  } catch (error) {
+    console.error('❌ Error updating scene studio:', error);
+    res.status(500).json({ 
+      error: error.message,
+      message: 'Failed to update scene studio'
+    });
+  }
+});
+
 module.exports = router;
+

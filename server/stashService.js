@@ -617,6 +617,54 @@ class StashService {
   }
 
   /**
+   * Update a scene's studio
+   * @param {string} sceneId - Scene ID
+   * @param {string} studioId - Studio ID to assign
+   * @returns {Promise<Object>} Update result
+   */
+  async updateSceneStudio(sceneId, studioId) {
+    try {
+      const mutation = `
+        mutation SceneUpdate($input: SceneUpdateInput!) {
+          sceneUpdate(input: $input) {
+            id
+            studio {
+              id
+              name
+              image_path
+            }
+          }
+        }
+      `;
+
+      const variables = {
+        input: {
+          id: sceneId,
+          studio_id: studioId
+        }
+      };
+
+      console.log('🎬 Updating scene studio in Stash:', { sceneId, studioId });
+
+      const data = await this.makeGraphQLRequest(mutation, variables);
+      console.log('✅ Scene studio updated in Stash successfully:', data.sceneUpdate);
+      
+      return {
+        success: true,
+        scene: data.sceneUpdate,
+        message: 'Scene studio updated successfully in Stash'
+      };
+    } catch (error) {
+      console.error('❌ Failed to update scene studio in Stash:', error.message);
+      return {
+        success: false,
+        error: error.message,
+        message: 'Failed to update scene studio in Stash'
+      };
+    }
+  }
+
+  /**
    * Search across multiple types (scenes, performers, studios, tags)
    * @param {string} query - Search query
    * @param {Array} types - Types to search (default: ['scene'])

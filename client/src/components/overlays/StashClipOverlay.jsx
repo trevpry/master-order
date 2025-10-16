@@ -17,10 +17,23 @@ const StashClipOverlay = ({ clipData, onClose }) => {
   const [loadingTags, setLoadingTags] = useState(true);
   const [addingTag, setAddingTag] = useState(null);
   const [showTagSelector, setShowTagSelector] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [showStudioSelector, setShowStudioSelector] = useState(false);
+  const [studios, setStudios] = useState([]);
+  const [studioSearchQuery, setStudioSearchQuery] = useState('');
+  const [loadingStudios, setLoadingStudios] = useState(false);
+  const [updatingStudio, setUpdatingStudio] = useState(false);
+  const [currentStudio, setCurrentStudio] = useState(null);
   
   if (!clipData) return null;
 
   const { scene, clipId } = clipData;
+  
+  // Initialize/reset current studio from scene data whenever scene changes
+  useEffect(() => {
+    // Always sync currentStudio with scene.studio (could be null)
+    setCurrentStudio(scene.studio || null);
+  }, [scene.studio, scene.id]); // Also depend on scene.id to catch scene changes
   
   // Debug: Log clipId when component receives data
   useEffect(() => {
@@ -145,6 +158,187 @@ const StashClipOverlay = ({ clipData, onClose }) => {
     }
   };
   
+  // Handle scene deletion
+  const handleDeleteScene = async () => {
+    if (!clipId) {
+      toast.error('No clip ID available', { duration: 4000, position: 'bottom-right' });
+      return;
+    }
+    
+    const sceneTitle = scene.title || 'this scene';
+    
+    // Confirm deletion
+    if (!window.confirm(
+      `Are you sure you want to delete "${sceneTitle}" and all its clips?\n\n` +
+      `This will:\n` +
+      `• Delete the video file from disk\n` +
+      `• Delete all generated content (thumbnails, sprites, etc.)\n` +
+      `• Delete the scene from Stash database\n` +
+      `• Delete all clips from your local database\n\n` +
+      `This action cannot be undone.`
+    )) {
+      return;
+    }
+    
+    setIsDeleting(true);
+    
+    try {
+      console.log(`🗑️ Deleting scene via clip ID ${clipId}...`);
+      
+      const response = await fetch(`${config.apiBaseUrl}/api/android/stash/clip/delete`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          clipId: clipId,
+          deleteFile: true,
+          deleteGenerated: true
+        })
+      });
+      
+      const result = await response.json();
+      
+      if (response.ok && result.type === 'STASH_SCENE_DELETED') {
+        console.log('✅ Successfully deleted scene:', result.data);
+        
+        const clipsDeleted = result.data.local?.clipsDeleted || 0;
+        const localDeleted = result.data.local?.sceneDeleted || false;
+        const remoteDeleted = result.data.remote?.success || false;
+        
+        // Build success message
+        let message = `✅ Successfully deleted "${sceneTitle}"\n\n`;
+        message += `• Deleted ${clipsDeleted} clip${clipsDeleted !== 1 ? 's' : ''}\n`;
+        message += `• Removed from local database: ${localDeleted ? 'Yes' : 'No'}\n`;
+        message += `• Deleted from Stash: ${remoteDeleted ? 'Yes' : 'No'}`;
+        
+        if (result.data.remote?.warning) {
+          message += `\n\n⚠️ ${result.data.remote.warning}`;
+        }
+        
+        toast.success(`Deleted "${sceneTitle}"`, {
+          duration: 5000,
+          position: 'bottom-right',
+        });
+        
+        alert(message);
+        
+        // Close the overlay
+        onClose();
+      } else {
+        console.error('❌ Failed to delete scene:', result);
+        const errorMessage = result.data?.message || result.message || 'Unknown error';
+        toast.error(`Failed to delete scene: ${errorMessage}`, {
+          duration: 5000,
+          position: 'bottom-right',
+        });
+        alert(`❌ Failed to delete scene: ${errorMessage}`);
+      }
+    } catch (error) {
+      console.error('❌ Error deleting scene:', error);
+      toast.error(`Error deleting scene: ${error.message}`, {
+        duration: 5000,
+        position: 'bottom-right',
+      });
+      alert(`❌ Error deleting scene: ${error.message}`);
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+  
+  // Search for studios
+  const searchStudios = async (query) => {
+    if (!query || query.trim().length < 2) {
+      setStudios([]);
+      return;
+    }
+    
+    try {
+      setLoadingStudios(true);
+      const response = await fetch(
+        `${config.apiBaseUrl}/api/stash/studios?filter=${encodeURIComponent(query)}&perPage=20`
+      );
+      
+      if (response.ok) {
+        const data = await response.json();
+        console.log('Studio search response:', data);
+        setStudios(data.data || []);
+      } else {
+        console.error('Studio search failed:', response.status);
+        toast.error('Failed to search studios');
+      }
+    } catch (error) {
+      console.error('Error searching studios:', error);
+      toast.error('Failed to search studios');
+    } finally {
+      setLoadingStudios(false);
+    }
+  };
+  
+  // Handle studio selection
+  const handleStudioSelect = async (studio) => {
+    if (!scene.id) {
+      toast.error('No scene ID available');
+      return;
+    }
+    
+    try {
+      setUpdatingStudio(true);
+      console.log(`Updating scene ${scene.id} with studio ${studio.id}`);
+      
+      const response = await fetch(
+        `${config.apiBaseUrl}/api/stash/scenes/${scene.id}/studio`,
+        {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ studioId: studio.id })
+        }
+      );
+      
+      const result = await response.json();
+      
+      if (response.ok) {
+        setCurrentStudio(studio);
+        setShowStudioSelector(false);
+        setStudioSearchQuery('');
+        setStudios([]);
+        
+        let message = `✅ Studio set to "${studio.name}"`;
+        if (result.warning) {
+          message += `\n\n⚠️ ${result.warning}`;
+        }
+        
+        toast.success(`Studio updated to "${studio.name}"`, {
+          duration: 4000,
+          position: 'bottom-right',
+        });
+        
+        if (result.warning) {
+          toast.warning(result.warning, {
+            duration: 6000,
+            position: 'bottom-right',
+          });
+        }
+      } else {
+        toast.error(result.message || 'Failed to update studio');
+      }
+    } catch (error) {
+      console.error('Error updating studio:', error);
+      toast.error('Failed to update studio');
+    } finally {
+      setUpdatingStudio(false);
+    }
+  };
+  
+  // Handle studio search input change
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      if (showStudioSelector && studioSearchQuery) {
+        searchStudios(studioSearchQuery);
+      }
+    }, 300);
+    
+    return () => clearTimeout(timer);
+  }, [studioSearchQuery, showStudioSelector]);
+  
   // Handle Escape key
   useEffect(() => {
     const handleKeyDown = (e) => {
@@ -214,11 +408,19 @@ const StashClipOverlay = ({ clipData, onClose }) => {
           <div>
             <h3 className="text-2xl font-semibold text-white mb-2">{scene.title}</h3>
             <div className="flex flex-wrap gap-3 text-sm">
-              {scene.studio && (
+              {currentStudio ? (
                 <span className="flex items-center gap-1 text-gray-300">
                   <span>🎬</span>
-                  <span>{scene.studio.name}</span>
+                  <span>{currentStudio.name}</span>
                 </span>
+              ) : (
+                <button
+                  onClick={() => setShowStudioSelector(true)}
+                  className="flex items-center gap-1 px-3 py-1 bg-yellow-900 bg-opacity-30 border border-yellow-600 text-yellow-300 rounded hover:bg-opacity-50 transition-colors"
+                >
+                  <span>🎬</span>
+                  <span>Add Studio</span>
+                </button>
               )}
               {scene.date && (
                 <span className="flex items-center gap-1 text-gray-300">
@@ -240,6 +442,19 @@ const StashClipOverlay = ({ clipData, onClose }) => {
               )}
             </div>
           </div>
+
+          {/* File Path */}
+          {scene.path && (
+            <div className="bg-gray-800 rounded-lg p-3">
+              <div className="flex items-start gap-2">
+                <span className="text-gray-400 text-sm flex-shrink-0 mt-0.5">📁</span>
+                <div className="flex-1 min-w-0">
+                  <p className="text-xs text-gray-400 uppercase font-semibold mb-1">File Location</p>
+                  <p className="text-sm text-gray-300 font-mono break-all">{scene.path}</p>
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* Description */}
           {scene.details && (
@@ -368,7 +583,15 @@ const StashClipOverlay = ({ clipData, onClose }) => {
         </div>
 
         {/* Footer */}
-        <div className="p-4 border-t border-gray-700 flex justify-end">
+        <div className="p-4 border-t border-gray-700 flex justify-between items-center">
+          <button
+            onClick={handleDeleteScene}
+            disabled={isDeleting}
+            className="px-6 py-2 bg-red-600 hover:bg-red-700 disabled:bg-red-800 disabled:cursor-not-allowed text-white rounded-lg transition-colors flex items-center gap-2"
+          >
+            <span>{isDeleting ? '⏳' : '🗑️'}</span>
+            <span>{isDeleting ? 'Deleting...' : 'Delete Scene & Clips'}</span>
+          </button>
           <button
             onClick={onClose}
             className="px-6 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors"
@@ -399,6 +622,87 @@ const StashClipOverlay = ({ clipData, onClose }) => {
           onTagsAdded={handleTagsAdded}
         />
       )}
+
+      {/* Studio Selector Modal */}
+      {showStudioSelector && (
+        <div className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-[60] p-4">
+          <div className="bg-gray-900 rounded-lg shadow-2xl max-w-2xl w-full border border-gray-700">
+            {/* Header */}
+            <div className="flex items-center justify-between p-4 border-b border-gray-700">
+              <h3 className="text-lg font-semibold text-white">Select Studio</h3>
+              <button
+                onClick={() => {
+                  setShowStudioSelector(false);
+                  setStudioSearchQuery('');
+                  setStudios([]);
+                }}
+                className="text-gray-400 hover:text-white transition-colors"
+              >
+                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+
+            {/* Search Input */}
+            <div className="p-4">
+              <input
+                type="text"
+                placeholder="Search for a studio..."
+                value={studioSearchQuery}
+                onChange={(e) => setStudioSearchQuery(e.target.value)}
+                className="w-full px-4 py-2 bg-gray-800 border border-gray-600 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:border-blue-500"
+                autoFocus
+              />
+            </div>
+
+            {/* Results */}
+            <div className="max-h-96 overflow-y-auto p-4 space-y-2">
+              {loadingStudios ? (
+                <div className="text-center text-gray-400 py-8">
+                  <div className="animate-spin inline-block w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full"></div>
+                  <p className="mt-2">Searching studios...</p>
+                </div>
+              ) : studios.length > 0 ? (
+                studios.map((studio) => (
+                  <button
+                    key={studio.id}
+                    onClick={() => handleStudioSelect(studio)}
+                    disabled={updatingStudio}
+                    className="w-full flex items-center gap-3 p-3 bg-gray-800 rounded-lg hover:bg-gray-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed text-left"
+                  >
+                    {studio.image && (
+                      <img
+                        src={studio.image}
+                        alt={studio.name}
+                        className="w-12 h-12 rounded object-cover"
+                        onError={(e) => e.target.style.display = 'none'}
+                      />
+                    )}
+                    <div className="flex-1">
+                      <div className="font-semibold text-white">{studio.name}</div>
+                      {studio.url && (
+                        <div className="text-sm text-gray-400">{studio.url}</div>
+                      )}
+                      {studio.scene_count !== undefined && (
+                        <div className="text-xs text-gray-500">{studio.scene_count} scenes</div>
+                      )}
+                    </div>
+                  </button>
+                ))
+              ) : studioSearchQuery.length >= 2 ? (
+                <div className="text-center text-gray-400 py-8">
+                  No studios found matching "{studioSearchQuery}"
+                </div>
+              ) : (
+                <div className="text-center text-gray-400 py-8">
+                  Type at least 2 characters to search
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
@@ -413,6 +717,7 @@ StashClipOverlay.propTypes = {
       date: PropTypes.string,
       rating: PropTypes.number,
       duration: PropTypes.number,
+      path: PropTypes.string,
       resolution: PropTypes.string,
       codec: PropTypes.string,
       fileSize: PropTypes.number,

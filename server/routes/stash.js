@@ -955,6 +955,112 @@ router.delete('/scenes/:id', asyncHandler(async (req, res) => {
   }
 }));
 
+// PUT /api/stash/scenes/:id/studio - Update a scene's studio
+router.put('/scenes/:id/studio', asyncHandler(async (req, res) => {
+  const sceneId = req.params.id;
+  const { studioId } = req.body;
+
+  if (!studioId) {
+    return sendBadRequest(res, 'studioId is required');
+  }
+
+  console.log(`🎬 Updating studio for scene ${sceneId} to studio ${studioId}`);
+  console.log(`   Scene ID type: ${typeof sceneId}, Studio ID type: ${typeof studioId}`);
+
+  // Get Stash settings for direct GraphQL access
+  const settings = await prisma.settings.findUnique({ where: { id: 1 } });
+  const stashUrl = settings?.stashUrl;
+  const stashApiKey = settings?.stashApiKey;
+  
+  let stashResult = { success: false, warning: null };
+  
+  if (!stashUrl) {
+    console.warn('⚠️ Stash URL not configured, updating local database only');
+    stashResult.warning = 'Stash not configured - updated local database only';
+  } else {
+    console.log('   🔄 Updating in Stash via GraphQL...');
+    
+    try {
+      // Make direct GraphQL mutation to Stash
+      const mutation = `
+        mutation SceneUpdate($input: SceneUpdateInput!) {
+          sceneUpdate(input: $input) {
+            id
+            studio {
+              id
+              name
+              image_path
+            }
+          }
+        }
+      `;
+      
+      const variables = {
+        input: {
+          id: sceneId,
+          studio_id: studioId
+        }
+      };
+      
+      console.log('   GraphQL mutation:', mutation);
+      console.log('   Variables:', variables);
+      
+      const headers = {
+        'Content-Type': 'application/json'
+      };
+      
+      if (stashApiKey) {
+        headers['ApiKey'] = stashApiKey;
+      }
+      
+      const response = await fetch(`${stashUrl}/graphql`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ query: mutation, variables })
+      });
+      
+      if (!response.ok) {
+        throw new Error(`Stash API error: ${response.status} ${response.statusText}`);
+      }
+      
+      const result = await response.json();
+      
+      if (result.errors && result.errors.length > 0) {
+        throw new Error(`GraphQL errors: ${result.errors.map(e => e.message).join(', ')}`);
+      }
+      
+      console.log('   ✅ Stash updated successfully:', result.data.sceneUpdate);
+      stashResult = { success: true };
+    } catch (error) {
+      console.error('❌ Failed to update studio in Stash:', error.message);
+      stashResult = {
+        success: false,
+        warning: `Studio updated locally but failed to update in Stash: ${error.message}`
+      };
+    }
+  }
+
+  // Update in local database
+  console.log('   💾 Updating in local database...');
+  const updatedScene = await prisma.stashScene.update({
+    where: { id: sceneId },
+    data: { studioId: studioId },
+    include: {
+      studioObject: true
+    }
+  });
+
+  console.log('✅ Scene studio updated successfully');
+  console.log('   Updated scene studio:', updatedScene.studioObject?.name);
+
+  sendSuccess(res, {
+    scene: updatedScene,
+    stashUpdated: stashResult.success,
+    warning: stashResult.warning,
+    message: 'Studio updated successfully'
+  });
+}));
+
 // POST /api/stash/scenes/:id/clips/generate - Generate clips for a scene
 router.post('/scenes/:id/clips/generate', asyncHandler(async (req, res) => {
   try {
@@ -2082,9 +2188,9 @@ router.get('/studios', asyncHandler(async (req, res) => {
   const skip = (parseInt(page) - 1) * parseInt(perPage);
   const take = parseInt(perPage);
   
-  // Build search filter
+  // Build search filter (SQLite doesn't support mode: 'insensitive', but contains is case-insensitive by default)
   const searchFilter = filter ? {
-    name: { contains: filter, mode: 'insensitive' }
+    name: { contains: filter }
   } : {};
   
   // Get total count

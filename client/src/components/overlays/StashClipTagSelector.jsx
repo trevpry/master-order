@@ -56,7 +56,28 @@ const StashClipTagSelector = ({ clipId, onClose, onTagsAdded }) => {
     console.log('Root tags found:', rootTags.length);
     console.log('Root tag names:', rootTags.map(t => t.name).slice(0, 10));
     
-    return rootTags;
+    return { rootTags, tagMap };
+  };
+
+  // Helper function to find all parent tags for a given tag
+  const findParentTags = (tagId, tagMap) => {
+    const parents = new Set();
+    const tag = tagMap.get(tagId);
+    
+    if (!tag) return parents;
+    
+    const parentsList = tag.parents || tag.parentTags || [];
+    parentsList.forEach(parentRef => {
+      const parentId = parentRef.id || parentRef.parentTagId || parentRef.parentTag?.id;
+      if (parentId) {
+        parents.add(parentId);
+        // Recursively find grandparents
+        const grandparents = findParentTags(parentId, tagMap);
+        grandparents.forEach(gp => parents.add(gp));
+      }
+    });
+    
+    return parents;
   };
 
   // Fetch all tags and existing clip tags on mount
@@ -96,17 +117,18 @@ const StashClipTagSelector = ({ clipId, onClose, onTagsAdded }) => {
         setAllTags(fetchedTags);
         
         // Build hierarchical structure
-        const hierarchy = buildTagHierarchy(fetchedTags);
-        console.log(`Built hierarchy with ${hierarchy.length} root tags`);
-        setTagHierarchy(hierarchy);
+        const { rootTags, tagMap } = buildTagHierarchy(fetchedTags);
+        console.log(`Built hierarchy with ${rootTags.length} root tags`);
+        setTagHierarchy(rootTags);
         
         // Fetch existing tags on this clip
-        const clipTagsResponse = await fetch(`${config.apiBaseUrl}/api/android/stash/clip/${clipId}/tags`);
+        const clipTagsResponse = await fetch(`${config.apiBaseUrl}/api/stash/clips/${clipId}/tags`);
         if (clipTagsResponse.ok) {
           const clipTagsData = await clipTagsResponse.json();
-          const existingTagIds = new Set(clipTagsData.tags?.map(t => t.id) || []);
+          // Extract tag IDs - response format: { tags: [{ tag: { id, name, ... } }] }
+          const existingTagIds = new Set(clipTagsData.tags?.map(t => t.tag.id) || []);
           setExistingTags(existingTagIds);
-          console.log(`Clip has ${existingTagIds.size} existing tags`);
+          console.log(`Clip has ${existingTagIds.size} existing tags:`, Array.from(existingTagIds));
         }
         
       } catch (error) {
@@ -188,18 +210,34 @@ const StashClipTagSelector = ({ clipId, onClose, onTagsAdded }) => {
     }
   };
 
+  // Helper function to check if a tag or its descendants contain existing tags
+  const hasExistingTagsInSubtree = (tag) => {
+    if (existingTags.has(tag.id)) {
+      return true;
+    }
+    if (tag.children && tag.children.length > 0) {
+      return tag.children.some(child => hasExistingTagsInSubtree(child));
+    }
+    return false;
+  };
+
   // Render a tag node and its children recursively
   const renderTagNode = (tag, depth = 0) => {
     const hasChildren = tag.children && tag.children.length > 0;
     const isExpanded = expandedTags.has(tag.id);
     const isSelected = selectedTags.includes(tag.id);
     const alreadyExists = existingTags.has(tag.id);
+    const hasExistingInChildren = hasChildren && !alreadyExists && hasExistingTagsInSubtree(tag);
     
     return (
       <div key={tag.id} className="select-none">
         <div 
-          className={`flex items-center gap-2 py-1 px-2 rounded hover:bg-gray-700 transition-colors ${
-            alreadyExists ? 'opacity-50' : ''
+          className={`flex items-center gap-2 py-1 px-2 rounded transition-colors ${
+            alreadyExists 
+              ? 'bg-green-900 bg-opacity-20' 
+              : hasExistingInChildren
+                ? 'bg-green-900 bg-opacity-10 hover:bg-gray-700'
+                : 'hover:bg-gray-700'
           }`}
           style={{ paddingLeft: `${depth * 20 + 8}px` }}
         >
@@ -207,7 +245,9 @@ const StashClipTagSelector = ({ clipId, onClose, onTagsAdded }) => {
           {hasChildren ? (
             <button
               onClick={() => toggleExpanded(tag.id)}
-              className="flex items-center justify-center w-5 h-5 text-gray-400 hover:text-white"
+              className={`flex items-center justify-center w-5 h-5 hover:text-white ${
+                hasExistingInChildren ? 'text-green-400' : 'text-gray-400'
+              }`}
             >
               {isExpanded ? '▼' : '▶'}
             </button>
@@ -232,9 +272,16 @@ const StashClipTagSelector = ({ clipId, onClose, onTagsAdded }) => {
             }`}>
               {(isSelected || alreadyExists) && '✓'}
             </span>
-            <span className={`${alreadyExists ? 'text-green-400' : 'text-gray-300'}`}>
+            <span className={`${
+              alreadyExists 
+                ? 'text-green-400 font-semibold' 
+                : hasExistingInChildren
+                  ? 'text-green-300'
+                  : 'text-gray-300'
+            }`}>
               {tag.name}
               {alreadyExists && ' (already added)'}
+              {hasExistingInChildren && !alreadyExists && ' ✦'}
             </span>
           </button>
         </div>
