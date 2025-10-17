@@ -2135,6 +2135,13 @@ class StashSyncService {
       if (updates.performerIds !== undefined && Array.isArray(updates.performerIds)) {
         input.performer_ids = updates.performerIds.map(id => String(id));
       }
+      if (updates.details !== undefined) input.details = updates.details;
+      if (updates.date !== undefined) input.date = updates.date;
+      if (updates.url !== undefined) {
+        // Convert single URL to urls array (url field is deprecated)
+        input.urls = [updates.url];
+      }
+      if (updates.coverImage !== undefined) input.cover_image = updates.coverImage;
 
       const variables = { input };
 

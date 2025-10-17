@@ -20,6 +20,7 @@ export default function StudioDetail() {
     totalPages: 1,
     perPage: 20
   });
+  const [filterNoPerformers, setFilterNoPerformers] = useState(false);
 
   useEffect(() => {
     const fetchStudio = async () => {
@@ -38,12 +39,12 @@ export default function StudioDetail() {
     fetchStudio();
   }, [id]);
 
-  // Load scenes when data is available
+  // Load scenes when data is available or filter changes
   useEffect(() => {
     if (data) {
       loadScenes();
     }
-  }, [scenesPage, data]);
+  }, [scenesPage, data, filterNoPerformers]);
 
   const loadScenes = async () => {
     setScenesLoading(true);
@@ -54,6 +55,10 @@ export default function StudioDetail() {
       params.set('sortBy', 'date');
       params.set('sortDirection', 'DESC');
       params.set('studio', data.name); // Filter by studio name
+      
+      if (filterNoPerformers) {
+        params.set('noPerformers', 'true');
+      }
 
       const response = await fetch(`${config.apiBaseUrl}/api/stash/scenes?${params}`);
       const result = await response.json();
@@ -120,7 +125,21 @@ export default function StudioDetail() {
 
       {/* Scenes Section */}
       <div className="section">
-        <h2>Scenes from this studio</h2>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+          <h2>Scenes from this studio</h2>
+          <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
+            <input
+              type="checkbox"
+              checked={filterNoPerformers}
+              onChange={(e) => {
+                setFilterNoPerformers(e.target.checked);
+                setScenesPage(1); // Reset to page 1 when filter changes
+              }}
+              style={{ cursor: 'pointer' }}
+            />
+            <span>Show only scenes with no performers</span>
+          </label>
+        </div>
         {scenesLoading ? (
           <div className="loading">
             <div className="spinner"></div>

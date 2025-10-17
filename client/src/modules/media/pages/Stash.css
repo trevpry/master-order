@@ -5543,6 +5543,13 @@ span.clip-tag-badge,
   position: relative;
 }
 
+.performer-status-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
 .performer-input {
   flex: 1;
 }
@@ -5562,6 +5569,28 @@ span.clip-tag-badge,
   background-color: #dc2626;
 }
 
+.btn-create-performer {
+  padding: 0.5rem 0.875rem;
+  background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+  color: white;
+  border: none;
+  border-radius: 0.375rem;
+  cursor: pointer;
+  font-size: 0.85rem;
+  font-weight: 600;
+  white-space: nowrap;
+  transition: transform 0.2s, opacity 0.2s;
+}
+
+.btn-create-performer:hover:not(:disabled) {
+  transform: translateY(-1px);
+}
+
+.btn-create-performer:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
 .add-performer-btn {
   padding: 0.5rem 1rem;
   background: linear-gradient(135deg, #10b981 0%, #059669 100%);
@@ -5576,6 +5605,42 @@ span.clip-tag-badge,
 
 .add-performer-btn:hover {
   transform: translateY(-1px);
+}
+
+/* Filename Input with Refresh Button */
+.filename-input-wrapper {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.filename-input {
+  flex: 1;
+}
+
+.btn-refresh {
+  padding: 0.75rem 1rem;
+  background: linear-gradient(135deg, #8b5cf6 0%, #7c3aed 100%);
+  color: white;
+  border: none;
+  border-radius: 0.5rem;
+  cursor: pointer;
+  font-size: 0.9rem;
+  font-weight: 600;
+  white-space: nowrap;
+  transition: transform 0.2s, opacity 0.2s;
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.btn-refresh:hover:not(:disabled) {
+  transform: translateY(-1px);
+}
+
+.btn-refresh:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .modal-actions {
@@ -5616,6 +5681,128 @@ span.clip-tag-badge,
 
 .btn-cancel:hover {
   background-color: #4b5563;
+}
+
+/* Scrape GEVI Button */
+.scrape-gevi-button {
+  margin-left: 1rem;
+  padding: 0.625rem 1.25rem;
+  background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+  color: white;
+  border: none;
+  border-radius: 0.5rem;
+  font-size: 0.95rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: transform 0.2s, box-shadow 0.2s;
+}
+
+.scrape-gevi-button:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(16, 185, 129, 0.3);
+}
+
+/* Scrape URL Modal */
+.scrape-url-modal {
+  max-width: 600px;
+  width: 90%;
+}
+
+.scrape-url-modal h3 {
+  color: #10b981;
+  margin-bottom: 1.5rem;
+  font-size: 1.5rem;
+}
+
+.scrape-url-input {
+  margin-bottom: 1.5rem;
+}
+
+.scrape-url-input label {
+  display: block;
+  color: #d1d5db;
+  font-weight: 600;
+  margin-bottom: 0.5rem;
+}
+
+.url-input {
+  width: 100%;
+  padding: 0.75rem;
+  background-color: #1f2937;
+  border: 1px solid #374151;
+  border-radius: 0.375rem;
+  color: white;
+  font-size: 0.95rem;
+  transition: border-color 0.2s;
+}
+
+.url-input:focus {
+  outline: none;
+  border-color: #10b981;
+}
+
+.url-input:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.help-text {
+  margin-top: 0.5rem;
+  color: #9ca3af;
+  font-size: 0.875rem;
+}
+
+/* Scrape Review Modal */
+.scrape-review-modal {
+  max-width: 700px;
+  width: 90%;
+  max-height: 90vh;
+  overflow-y: auto;
+}
+
+.scrape-review-modal h3 {
+  color: #10b981;
+  margin-bottom: 1rem;
+  font-size: 1.5rem;
+}
+
+.scrape-results {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+
+.scrape-source {
+  padding: 0.75rem;
+  background-color: #1f2937;
+  border-radius: 0.375rem;
+  border-left: 3px solid #10b981;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.source-label {
+  color: #9ca3af;
+  font-size: 0.875rem;
+}
+
+.source-url {
+  color: #10b981;
+  text-decoration: none;
+  font-weight: 600;
+  transition: color 0.2s;
+}
+
+.source-url:hover {
+  color: #34d399;
+  text-decoration: underline;
+}
+
+.details-textarea {
+  resize: vertical;
+  min-height: 100px;
+  font-family: inherit;
 }
 
 /* Pagination Styles */

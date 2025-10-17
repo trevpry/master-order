@@ -18,19 +18,23 @@ const prisma = require('../prismaClient');
 const StashSyncService = require('../stashSyncService');
 const StashSyncServiceOptimized = require('../stashSyncServiceOptimized');
 const StashBackgroundSyncService = require('../stashBackgroundSyncService');
+const GeviScraperService = require('../services/geviScraperService');
+const ActionCodeService = require('../services/actionCodeService');
 
 // Create a function that returns a router with io instance
 function createStashRouter(io) {
   const router = express.Router();
   
   // Import validation and response utilities
-  const { validateRequiredFields } = require('../middleware/validation');
+  const { validateRequiredFieldsDirect } = require('../middleware/validation');
   const { sendBadRequest, sendNotFound, sendSuccess, sendServerError, asyncHandler, logError } = require('../utils/responses');
   
   // Local sync service instances (initialized when needed)
   let stashSyncService = null;
   let stashSyncServiceOptimized = null;
   const stashBackgroundSync = new StashBackgroundSyncService();
+  const geviScraper = new GeviScraperService();
+  const actionCodeService = new ActionCodeService();
   const SYNC_SERVICE_TYPE = process.env.STASH_SYNC_OPTIMIZED === 'false' ? 'legacy' : 'optimized';
   
   // Helper function for getting active sync service
@@ -359,7 +363,8 @@ router.get('/scenes', asyncHandler(async (req, res) => {
       tag,
       minRating,
       maxRating,
-      watched
+      watched,
+      noPerformers
     } = req.query;
     
     const skip = (parseInt(page) - 1) * parseInt(perPage);
@@ -385,6 +390,14 @@ router.get('/scenes', asyncHandler(async (req, res) => {
           }
         }
       };
+    }
+
+    // Filter by scenes with no performers
+    if (noPerformers === 'true') {
+      where.AND = where.AND || [];
+      where.AND.push({
+        performers: { none: {} }
+      });
     }
     
     if (studio) {
@@ -793,6 +806,7 @@ router.get('/scenes/:id', asyncHandler(async (req, res) => {
 // POST /api/stash/scenes/:id/parse-filename - Parse filename to extract metadata
 router.post('/scenes/:id/parse-filename', asyncHandler(async (req, res) => {
   const { id } = req.params;
+  const { customFilename } = req.body;
   
   const scene = await prisma.stashScene.findUnique({
     where: { id },
@@ -805,9 +819,16 @@ router.post('/scenes/:id/parse-filename', asyncHandler(async (req, res) => {
     return sendBadRequest(res, 'Scene not found or has no file path');
   }
   
-  // Extract filename from path
-  const filename = scene.path.split(/[\\/]/).pop();
-  let nameWithoutExt = filename.replace(/\.[^/.]+$/, '');
+  // Use custom filename if provided, otherwise extract from path
+  let nameWithoutExt;
+  if (customFilename) {
+    // Use provided custom filename (already without extension)
+    nameWithoutExt = customFilename;
+  } else {
+    // Extract filename from path
+    const filename = scene.path.split(/[\\/]/).pop();
+    nameWithoutExt = filename.replace(/\.[^/.]+$/, '');
+  }
   
   // Normalize filename: replace underscores with spaces, normalize separators
   nameWithoutExt = nameWithoutExt
@@ -825,35 +846,111 @@ router.post('/scenes/:id/parse-filename', asyncHandler(async (req, res) => {
   // Helper function to match performers in a string
   const findPerformersInText = (text) => {
     const matched = [];
-    const textLower = text.toLowerCase().replace(/\s+/g, '');
+    const textLower = text.toLowerCase();
+    const textNormalized = textLower.replace(/\s+/g, '');
     
     for (const performer of allPerformers) {
-      const normalizedName = performer.name.toLowerCase().replace(/\s+/g, '');
+      const nameLower = performer.name.toLowerCase();
+      const normalizedName = nameLower.replace(/\s+/g, '');
       
-      // Check primary name - calculate match score
-      if (textLower.includes(normalizedName)) {
-        const score = normalizedName.length / textLower.length; // Higher = better match
+      // Check primary name
+      let isMatch = false;
+      let isExactMatch = false;
+      let score = 0;
+      
+      // First check for exact match (with spaces preserved)
+      if (textLower === nameLower) {
+        isMatch = true;
+        isExactMatch = true;
+        score = 1.0;
+      }
+      // Then check for exact match (normalized without spaces)
+      else if (textNormalized === normalizedName) {
+        isMatch = true;
+        isExactMatch = true;
+        score = 1.0;
+      }
+      // Finally check if the performer name is a complete word/token in the text
+      // Use word boundary matching to avoid "Xisco" matching in "Javi Xisco"
+      else if (textNormalized.includes(normalizedName)) {
+        // Check if it's a word boundary match in the original text with spaces
+        const nameWords = nameLower.split(/\s+/);
+        const textWords = textLower.split(/\s+/);
+        
+        // Check if all words of the performer name appear consecutively in the text
+        let foundConsecutive = false;
+        for (let i = 0; i <= textWords.length - nameWords.length; i++) {
+          const slice = textWords.slice(i, i + nameWords.length);
+          if (slice.join(' ') === nameWords.join(' ')) {
+            foundConsecutive = true;
+            break;
+          }
+        }
+        
+        if (foundConsecutive) {
+          isMatch = true;
+          isExactMatch = false;
+          score = normalizedName.length / textNormalized.length * 0.9;
+        }
+      }
+      
+      if (isMatch) {
         matched.push({
           performer,
           matchedVia: 'name',
           matchedText: performer.name,
-          score
+          score,
+          isExactMatch
         });
         continue;
       }
       
-      // Check aliases
+      // Check aliases with the same logic
       if (performer.alias) {
         const aliases = performer.alias.split(',').map(a => a.trim());
         for (const alias of aliases) {
-          const normalizedAlias = alias.toLowerCase().replace(/\s+/g, '');
-          if (textLower.includes(normalizedAlias)) {
-            const score = normalizedAlias.length / textLower.length;
+          const aliasLower = alias.toLowerCase();
+          const normalizedAlias = aliasLower.replace(/\s+/g, '');
+          
+          let aliasMatch = false;
+          let aliasExactMatch = false;
+          let aliasScore = 0;
+          
+          if (textLower === aliasLower) {
+            aliasMatch = true;
+            aliasExactMatch = true;
+            aliasScore = 1.0;
+          } else if (textNormalized === normalizedAlias) {
+            aliasMatch = true;
+            aliasExactMatch = true;
+            aliasScore = 1.0;
+          } else if (textNormalized.includes(normalizedAlias)) {
+            const aliasWords = aliasLower.split(/\s+/);
+            const textWords = textLower.split(/\s+/);
+            
+            let foundConsecutive = false;
+            for (let i = 0; i <= textWords.length - aliasWords.length; i++) {
+              const slice = textWords.slice(i, i + aliasWords.length);
+              if (slice.join(' ') === aliasWords.join(' ')) {
+                foundConsecutive = true;
+                break;
+              }
+            }
+            
+            if (foundConsecutive) {
+              aliasMatch = true;
+              aliasExactMatch = false;
+              aliasScore = normalizedAlias.length / textNormalized.length * 0.9;
+            }
+          }
+          
+          if (aliasMatch) {
             matched.push({
               performer,
               matchedVia: 'alias',
               matchedText: alias,
-              score
+              score: aliasScore,
+              isExactMatch: aliasExactMatch
             });
             break;
           }
@@ -861,8 +958,14 @@ router.post('/scenes/:id/parse-filename', asyncHandler(async (req, res) => {
       }
     }
     
-    // Sort by score (best match first) and return
-    return matched.sort((a, b) => b.score - a.score);
+    // Sort by exact match first, then by score (best match first)
+    return matched.sort((a, b) => {
+      // Prioritize exact matches
+      if (a.isExactMatch && !b.isExactMatch) return -1;
+      if (!a.isExactMatch && b.isExactMatch) return 1;
+      // Then sort by score
+      return b.score - a.score;
+    });
   };
   
   // Helper function to match studio in text
@@ -1083,10 +1186,431 @@ router.post('/scenes/:id/parse-filename', asyncHandler(async (req, res) => {
   });
 }));
 
+// POST /api/stash/performers/create - Create a new performer in both Stash and local DB
+router.post('/performers/create', asyncHandler(async (req, res) => {
+  console.log('👤 [Create Performer] Request received');
+  console.log('   - Body:', JSON.stringify(req.body, null, 2));
+  
+  const { name, aliases, gender, birthdate, ethnicity, country, eyeColor, hairColor, height, measurements, fakeTits, penisLength, circumcised, tattoos, piercings, careerLength, details } = req.body;
+
+  // Validate required fields - this will throw an error if validation fails
+  validateRequiredFieldsDirect(req.body, ['name']);
+
+  console.log('👤 [Create Performer] Creating performer:', name);
+
+  // Initialize sync service if not already done
+  if (!stashSyncService && !stashSyncServiceOptimized) {
+    await initializeStashSyncService();
+  }
+
+  // Ensure sync service is available
+  const syncService = getActiveSyncService();
+  if (!syncService) {
+    console.error('   - Sync service not initialized');
+    return sendServerError(res, 'Stash sync service not initialized');
+  }
+
+  // Ensure Stash URL is configured
+  try {
+    await syncService.ensureConfigLoaded();
+  } catch (error) {
+    console.error('   - Stash not configured:', error.message);
+    return sendServerError(res, 'Stash server not configured. Please configure in Settings.');
+  }
+
+  try {
+    // First, create performer in Stash via GraphQL
+    const createMutation = `
+      mutation PerformerCreate($input: PerformerCreateInput!) {
+        performerCreate(input: $input) {
+          id
+          name
+          alias_list
+          gender
+          birthdate
+          ethnicity
+          country
+          eye_color
+          hair_color
+          height_cm
+          measurements
+          fake_tits
+          penis_length
+          circumcised
+          tattoos
+          piercings
+          career_length
+          details
+          stash_ids {
+            endpoint
+            stash_id
+          }
+        }
+      }
+    `;
+
+    const variables = {
+      input: {
+        name: name,
+        alias_list: aliases || [],
+        gender: gender || null,
+        birthdate: birthdate || null,
+        ethnicity: ethnicity || null,
+        country: country || null,
+        eye_color: eyeColor || null,
+        hair_color: hairColor || null,
+        height_cm: height || null,
+        measurements: measurements || null,
+        fake_tits: fakeTits || null,
+        penis_length: penisLength || null,
+        circumcised: circumcised || null,
+        tattoos: tattoos || null,
+        piercings: piercings || null,
+        career_length: careerLength || null,
+        details: details || null
+      }
+    };
+
+    console.log('   - Creating in Stash with variables:', JSON.stringify(variables, null, 2));
+
+    const data = await syncService.makeGraphQLRequest(createMutation, variables);
+
+    console.log('   - GraphQL response data:', JSON.stringify(data, null, 2));
+
+    if (!data || !data.performerCreate) {
+      console.error('   - Failed to create performer in Stash. Response:', data);
+      return sendServerError(res, 'Failed to create performer in Stash - no data returned');
+    }
+
+    const stashPerformer = data.performerCreate;
+    console.log('   - Created in Stash:', stashPerformer.id, stashPerformer.name);
+
+    // Now create in local database
+    const localPerformer = await prisma.stashPerformer.create({
+      data: {
+        id: stashPerformer.id, // Use Stash ID as primary key
+        name: stashPerformer.name,
+        alias: stashPerformer.alias_list && stashPerformer.alias_list.length > 0 ? stashPerformer.alias_list.join(', ') : null,
+        gender: stashPerformer.gender || null,
+        birthdate: stashPerformer.birthdate || null,
+        ethnicity: stashPerformer.ethnicity || null,
+        country: stashPerformer.country || null,
+        eye_color: stashPerformer.eye_color || null,
+        hair_color: stashPerformer.hair_color || null,
+        height: stashPerformer.height_cm ? String(stashPerformer.height_cm) : null,
+        measurements: stashPerformer.measurements || null,
+        fake_tits: stashPerformer.fake_tits || null,
+        penis_length: stashPerformer.penis_length ? String(stashPerformer.penis_length) : null,
+        circumcised: stashPerformer.circumcised || null,
+        tattoos: stashPerformer.tattoos || null,
+        piercings: stashPerformer.piercings || null,
+        career_length: stashPerformer.career_length || null,
+        details: stashPerformer.details || null,
+        image: null, // Will be set on next sync if available
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        lastSyncedAt: new Date()
+      }
+    });
+
+    console.log('   - Created in local DB:', localPerformer.id, localPerformer.name);
+
+    sendSuccess(res, {
+      performer: localPerformer,
+      message: `Performer "${name}" created successfully`
+    });
+
+  } catch (error) {
+    console.error('❌ [Create Performer] Error:', error);
+    console.error('   - Error message:', error.message);
+    console.error('   - Error stack:', error.stack);
+    return sendServerError(res, error.message || 'Failed to create performer');
+  }
+}));
+
+// POST /api/stash/scenes/:id/scrape-gevi - Scrape scene metadata from GEVI
+router.post('/scenes/:id/scrape-gevi', asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  const { url } = req.body;
+
+  console.log('🔍 [GEVI Scrape] Starting scrape for scene:', id);
+  console.log('   - URL:', url);
+
+  // Validate URL provided
+  if (!url || !url.trim()) {
+    return sendBadRequest(res, 'URL is required');
+  }
+
+  // Scrape the GEVI page
+  const scrapeResult = await geviScraper.scrapeScene(url);
+
+  if (!scrapeResult.success) {
+    return sendServerError(res, scrapeResult.error || 'Failed to scrape GEVI');
+  }
+
+  const { metadata } = scrapeResult;
+
+  console.log('   - Scraped metadata:', JSON.stringify(metadata, null, 2));
+
+  // Match performers and studio against database
+  let matchedPerformers = { matched: [], unmatched: [] };
+  let matchedStudio = null;
+
+  if (metadata.performers && metadata.performers.length > 0) {
+    matchedPerformers = await geviScraper.matchPerformers(metadata.performers, prisma);
+  }
+
+  if (metadata.studio) {
+    matchedStudio = await geviScraper.matchStudio(metadata.studio, prisma);
+  }
+
+  console.log('   - Matched performers:', matchedPerformers.matched.length);
+  console.log('   - Unmatched performers:', matchedPerformers.unmatched);
+  console.log('   - Matched studio:', matchedStudio ? matchedStudio.name : 'none');
+
+  // Return scraped data with matches
+  sendSuccess(res, {
+    scraped: metadata,
+    matched: {
+      studio: matchedStudio,
+      performers: matchedPerformers.matched
+    },
+    unmatched: {
+      studio: matchedStudio ? null : metadata.studio,
+      performers: matchedPerformers.unmatched
+    },
+    source: 'GEVI',
+    sourceUrl: url
+  });
+}));
+
+// POST /api/stash/scenes/:id/search-gevi - Search GEVI using scene performers
+router.post('/scenes/:id/search-gevi', asyncHandler(async (req, res) => {
+  const { id } = req.params;
+
+  console.log('🔍 [GEVI Search] Starting search for scene:', id);
+
+  // Get the scene with performers
+  const scene = await prisma.stashScene.findUnique({
+    where: { id },
+    include: {
+      performers: {
+        include: {
+          performer: true
+        }
+      }
+    }
+  });
+
+  if (!scene) {
+    return sendBadRequest(res, 'Scene not found');
+  }
+
+  if (!scene.performers || scene.performers.length < 2) {
+    return sendBadRequest(res, 'Scene must have at least 2 performers to search GEVI');
+  }
+
+  const performers = scene.performers.map(p => p.performer);
+  const performerNames = performers.map(p => p.name);
+  console.log('   - Performers:', performerNames);
+
+  // Step 1: Determine which performer to search first
+  // Prefer performers with two or more names (first + last name) as they're more specific
+  let firstPerformerIndex = 0;
+  let secondPerformerIndex = 1;
+
+  // Count words in each performer name (more words = more specific)
+  const nameWordCounts = performers.map(p => p.name.trim().split(/\s+/).length);
+  
+  // If second performer has more words than first, swap them
+  if (nameWordCounts[1] > nameWordCounts[0]) {
+    firstPerformerIndex = 1;
+    secondPerformerIndex = 0;
+    console.log(`   - Swapping search order: "${performers[1].name}" (${nameWordCounts[1]} words) before "${performers[0].name}" (${nameWordCounts[0]} words)`);
+  }
+
+  const firstPerformer = performers[firstPerformerIndex];
+  const secondPerformer = performers[secondPerformerIndex];
+
+  console.log(`   - Searching for: "${firstPerformer.name}" first, then "${secondPerformer.name}"`);
+
+  // Step 2: Search for first performer
+  const firstPerformerResults = await geviScraper.searchPerformer(firstPerformer.name);
+
+  if (!firstPerformerResults || firstPerformerResults.length === 0) {
+    return sendServerError(res, `No results found for performer: ${firstPerformer.name}`);
+  }
+
+  console.log(`   - Found ${firstPerformerResults.length} results for first performer`);
+
+  // Step 3: Search with fallback logic
+  let sceneResults = [];
+  let matchedFirstPerformerIndex = 0;
+  
+  // Try first performer match
+  for (let i = 0; i < firstPerformerResults.length; i++) {
+    const firstPerformerUrl = firstPerformerResults[i].url;
+    console.log(`   - Trying first performer match ${i + 1}/${firstPerformerResults.length}: ${firstPerformerResults[i].name}`);
+    
+    // Try to find scenes with both performers
+    sceneResults = await geviScraper.searchScenesWithPerformers(firstPerformerUrl, secondPerformer);
+    
+    if (sceneResults.length > 0) {
+      console.log(`   - Found ${sceneResults.length} scenes with both performers`);
+      matchedFirstPerformerIndex = i;
+      break;
+    }
+    
+    console.log(`   - No scenes found with both performers on this match`);
+    
+    // If no results with second performer, try searching by scene title
+    if (scene.title) {
+      console.log(`   - Trying to match scene title: "${scene.title}"`);
+      sceneResults = await geviScraper.searchScenesByTitle(firstPerformerUrl, scene.title);
+      
+      if (sceneResults.length > 0) {
+        console.log(`   - Found ${sceneResults.length} scenes matching title`);
+        matchedFirstPerformerIndex = i;
+        break;
+      }
+      
+      console.log(`   - No scenes found matching title`);
+    }
+    
+    // If this was the last match, stop
+    if (i === firstPerformerResults.length - 1) {
+      console.log(`   - Exhausted all ${firstPerformerResults.length} matches for first performer`);
+    }
+  }
+
+  // Return the search results
+  sendSuccess(res, {
+    firstPerformer: {
+      ...firstPerformerResults[matchedFirstPerformerIndex],
+      name: firstPerformer.name
+    },
+    secondPerformer: secondPerformer.name,
+    scenes: sceneResults,
+    triedMatches: matchedFirstPerformerIndex + 1,
+    totalMatches: firstPerformerResults.length
+  });
+}));
+
+// DELETE /api/stash/scenes/:sceneId/performers/:performerId - Remove performer from scene
+router.delete('/scenes/:sceneId/performers/:performerId', asyncHandler(async (req, res) => {
+  const { sceneId, performerId } = req.params;
+
+  console.log(`🗑️ [REMOVE PERFORMER] Removing performer ${performerId} from scene ${sceneId}`);
+
+  // Initialize Stash sync service if not already initialized
+  if (!stashSyncService && !stashSyncServiceOptimized) {
+    await initializeStashSyncService();
+  }
+
+  const syncService = stashSyncServiceOptimized || stashSyncService;
+
+  // Get current scene data to determine the updated performer list
+  const scene = await prisma.stashScene.findUnique({
+    where: { id: sceneId },
+    include: {
+      performers: {
+        include: {
+          performer: true
+        }
+      }
+    }
+  });
+
+  if (!scene) {
+    return sendBadRequest(res, 'Scene not found');
+  }
+
+  // Check if performer is actually in the scene
+  const performerInScene = scene.performers.find(p => p.performerId === performerId);
+  if (!performerInScene) {
+    return sendBadRequest(res, 'Performer not found in scene');
+  }
+
+  // Update in Stash first (if configured)
+  if (syncService && await syncService.ensureConfigLoaded()) {
+    console.log('   🔄 Updating in Stash via GraphQL...');
+    
+    try {
+      // Get the updated list of performer IDs (excluding the one we're removing)
+      const updatedPerformerIds = scene.performers
+        .filter(p => p.performerId !== performerId)
+        .map(p => p.performerId);
+
+      const mutation = `
+        mutation SceneUpdate($input: SceneUpdateInput!) {
+          sceneUpdate(input: $input) {
+            id
+            performers {
+              performer {
+                id
+                name
+              }
+            }
+          }
+        }
+      `;
+      
+      const variables = {
+        input: {
+          id: sceneId,
+          performer_ids: updatedPerformerIds
+        }
+      };
+
+      console.log('   - Updated performer IDs:', updatedPerformerIds);
+
+      const result = await syncService.makeGraphQLRequest(mutation, variables);
+      
+      if (!result || !result.data || !result.data.sceneUpdate) {
+        throw new Error('Invalid response from Stash');
+      }
+
+      console.log('   ✅ Stash updated successfully');
+    } catch (error) {
+      console.error('❌ Failed to remove performer from scene in Stash:', error.message);
+      return sendServerError(res, `Failed to update Stash: ${error.message}`);
+    }
+  } else {
+    console.warn('⚠️ Stash service not configured, skipping Stash update');
+  }
+
+  // Remove from local database
+  console.log('   💾 Removing from local database...');
+  await prisma.stashScenePerformer.delete({
+    where: {
+      sceneId_performerId: {
+        sceneId,
+        performerId
+      }
+    }
+  });
+
+  console.log('   ✅ Performer removed from scene successfully');
+
+  // Return updated scene data
+  const updatedScene = await prisma.stashScene.findUnique({
+    where: { id: sceneId },
+    include: {
+      performers: {
+        include: {
+          performer: true
+        }
+      }
+    }
+  });
+
+  sendSuccess(res, updatedScene);
+}));
+
 // PUT /api/stash/scenes/:id - Update scene details
 router.put('/scenes/:id', asyncHandler(async (req, res) => {
   const { id } = req.params;
-  const { title, studio, studioId, performerIds } = req.body;
+  const { title, studio, studioId, performerIds, details, date, url, coverImage, actionCodes } = req.body;
   
   // Initialize Stash sync service if not already initialized
   if (!stashSyncService) {
@@ -1097,6 +1621,9 @@ router.put('/scenes/:id', asyncHandler(async (req, res) => {
   if (title !== undefined) updateData.title = title;
   if (studio !== undefined) updateData.studio = studio;
   if (studioId !== undefined) updateData.studioId = studioId;
+  if (details !== undefined) updateData.details = details;
+  if (date !== undefined) updateData.date = date;
+  if (url !== undefined) updateData.url = url;
   
   // Update local database
   const updatedScene = await prisma.stashScene.update({
@@ -1122,6 +1649,34 @@ router.put('/scenes/:id', asyncHandler(async (req, res) => {
         update: {} // No update needed, just ensure it exists
       });
     }
+    
+    // Apply action code tags if provided
+    if (actionCodes && Array.isArray(actionCodes)) {
+      console.log('🏷️  Processing action codes for scene performers...');
+      const performersWithCodes = performerIds
+        .map((performerId, idx) => ({
+          id: performerId,
+          actionCode: actionCodes[idx]
+        }))
+        .filter(p => p.actionCode); // Only process those with codes
+      
+      if (performersWithCodes.length > 0) {
+        try {
+          const tagResult = await actionCodeService.applyActionCodeTagsForPerformers(
+            id, 
+            performersWithCodes, 
+            prisma
+          );
+          console.log(`🏷️  Applied ${tagResult.totalApplied} tags from ${performersWithCodes.length} action codes`);
+          if (tagResult.missingTags.length > 0) {
+            console.warn(`⚠️  Warning: ${tagResult.missingTags.length} tags not found in database:`, tagResult.missingTags);
+          }
+        } catch (error) {
+          console.error('❌ Error applying action code tags:', error);
+          // Don't fail the request if tagging fails
+        }
+      }
+    }
   }
   
   // Update scene in Stash itself if configured
@@ -1140,15 +1695,41 @@ router.put('/scenes/:id', asyncHandler(async (req, res) => {
       console.log('   - Title:', title);
       console.log('   - Studio ID:', studioId);
       console.log('   - Performer IDs:', performerIds);
+      console.log('   - Details:', details ? `${details.substring(0, 50)}...` : 'none');
+      console.log('   - Date:', date);
+      console.log('   - URL:', url);
+      console.log('   - Cover Image:', coverImage ? 'provided' : 'none');
       
       const stashUpdates = {};
       if (title !== undefined) stashUpdates.title = title;
       if (studioId !== undefined) stashUpdates.studioId = studioId;
       if (performerIds !== undefined && Array.isArray(performerIds)) {
-        stashUpdates.performerIds = performerIds;
+        // Validate that all performers exist in local database (synced from Stash)
+        const validPerformerIds = [];
+        for (const performerId of performerIds) {
+          const performer = await prisma.stashPerformer.findUnique({
+            where: { id: performerId }
+          });
+          
+          if (performer) {
+            validPerformerIds.push(performerId);
+          } else {
+            console.warn(`⚠️  Performer ${performerId} not found in database, skipping`);
+          }
+        }
+        
+        if (validPerformerIds.length !== performerIds.length) {
+          console.warn(`⚠️  ${performerIds.length - validPerformerIds.length} performer(s) not found, using ${validPerformerIds.length} valid performers`);
+        }
+        
+        stashUpdates.performerIds = validPerformerIds;
       }
+      if (details !== undefined) stashUpdates.details = details;
+      if (date !== undefined) stashUpdates.date = date;
+      if (url !== undefined) stashUpdates.url = url;
+      if (coverImage !== undefined) stashUpdates.coverImage = coverImage;
       
-      console.log('   - Updates object:', JSON.stringify(stashUpdates, null, 2));
+      console.log('   - Updates object keys:', Object.keys(stashUpdates));
       
       try {
         const stashResult = await stashSyncService.updateScene(id, stashUpdates);
@@ -4396,6 +4977,43 @@ router.delete('/clips/:id/tags/:tagId', asyncHandler(async (req, res) => {
     clipId: clipId,
     tagId: tagId
   });
+}));
+
+// GET /api/stash/gevi-image-proxy - Proxy GEVI images to avoid CORS issues
+router.get('/gevi-image-proxy', asyncHandler(async (req, res) => {
+  const { url } = req.query;
+
+  if (!url) {
+    return sendBadRequest(res, 'Image URL is required');
+  }
+
+  // Validate it's a GEVI URL
+  if (!url.startsWith('https://gayeroticvideoindex.com/')) {
+    return sendBadRequest(res, 'Only GEVI images are allowed');
+  }
+
+  try {
+    const axios = require('axios');
+    const response = await axios.get(url, {
+      responseType: 'stream',
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        'Referer': 'https://gayeroticvideoindex.com/'
+      }
+    });
+
+    // Set appropriate headers
+    res.set({
+      'Content-Type': response.headers['content-type'] || 'image/jpeg',
+      'Cache-Control': 'public, max-age=86400' // Cache for 24 hours
+    });
+
+    // Pipe the image data
+    response.data.pipe(res);
+  } catch (error) {
+    console.error('❌ Error proxying GEVI image:', error.message);
+    return sendServerError(res, 'Failed to proxy image');
+  }
 }));
 
   // Mount scene-performer metadata routes (mounted at router root, routes handle their own paths)
