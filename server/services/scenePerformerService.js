@@ -104,8 +104,7 @@ class ScenePerformerService {
             sceneId,
             performerId,
             tagId
-          })),
-          skipDuplicates: true
+          }))
         });
       }
     }

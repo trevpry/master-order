@@ -24,7 +24,7 @@ export default function Stash() {
   const [mainTab, setMainTab] = useState(() => {
     return localStorage.getItem('stash-main-tab') || 'upnext';
   });
-  const [libraryTab, setLibraryTab] = useState('scenes');
+  const [libraryTab, setLibraryTab] = useState('overview');
   const [data, setData] = useState({
     scenes: [],
     performers: [],

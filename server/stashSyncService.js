@@ -4,12 +4,32 @@ if (process.env.NODE_ENV !== 'production') {
 }
 const fetch = require('node-fetch');
 const prisma = require('./prismaClient'); // Use shared Prisma client
+const PerformerTagMappingService = require('./services/performerTagMappingService');
 
 class StashSyncService {
   constructor() {
     // Initialize with null, will be loaded from database when needed
     this.stashUrl = null;
     this.stashApiKey = null;
+    
+    // Initialize tag mapping service for performer attributes
+    this.tagMappingService = new PerformerTagMappingService(
+      // Pass GraphQL client function
+      (query, variables) => this.makeGraphQLRequest(query, variables)
+    );
+  }
+
+  /**
+   * Check if the service is properly configured
+   * @returns {Promise<boolean>} True if configured, false otherwise
+   */
+  async isConfigured() {
+    try {
+      await this.ensureConfigLoaded();
+      return !!this.stashUrl;
+    } catch (error) {
+      return false;
+    }
   }
 
   async ensureConfigLoaded() {
@@ -71,34 +91,52 @@ class StashSyncService {
       headers['ApiKey'] = this.stashApiKey;
     }
     
-    console.log(`Making Stash GraphQL request to: ${graphqlUrl}`);
+    console.log('🌐 [makeGraphQLRequest] Preparing GraphQL request:');
+    console.log('   - URL:', graphqlUrl);
+    console.log('   - Has API Key:', !!this.stashApiKey);
+    console.log('   - Variables:', JSON.stringify(variables, null, 2));
+    console.log('   - Query:', query.substring(0, 100) + '...');
     
     try {
+      console.log('   - Sending HTTP POST request...');
       const response = await fetch(graphqlUrl, {
         method: 'POST',
         headers,
         body: JSON.stringify(requestBody)
       });
       
+      console.log('   - Response received:');
+      console.log('     - Status:', response.status, response.statusText);
+      console.log('     - Content-Type:', response.headers.get('content-type'));
+      
       if (!response.ok) {
         const errorText = await response.text();
+        console.error('❌ [makeGraphQLRequest] HTTP error:', errorText);
         throw new Error(`Stash GraphQL request failed: ${response.status} ${response.statusText}. Response: ${errorText}`);
       }
       
       const contentType = response.headers.get('content-type');
       if (!contentType || !contentType.includes('application/json')) {
         const responseText = await response.text();
+        console.error('❌ [makeGraphQLRequest] Non-JSON response:', responseText.substring(0, 200));
         throw new Error(`Expected JSON response from Stash GraphQL endpoint, but got ${contentType}. Response: ${responseText.substring(0, 200)}...`);
       }
       
       const jsonData = await response.json();
+      console.log('   - JSON parsed successfully');
       
       if (jsonData.errors) {
+        console.error('❌ [makeGraphQLRequest] GraphQL errors:', JSON.stringify(jsonData.errors, null, 2));
         throw new Error(`Stash GraphQL error: ${JSON.stringify(jsonData.errors)}`);
       }
       
+      console.log('✅ [makeGraphQLRequest] Request successful, returning data');
       return jsonData.data;
     } catch (error) {
+      console.error('❌ [makeGraphQLRequest] Exception:', error.message);
+      console.error('   - Error code:', error.code);
+      console.error('   - Error type:', error.name);
+      
       if (error.code === 'ECONNREFUSED' || error.code === 'ENOTFOUND') {
         throw new Error(`Cannot connect to Stash server at ${graphqlUrl}. Please verify the Stash URL is correct and the server is running.`);
       }
@@ -859,6 +897,8 @@ class StashSyncService {
             weight
             measurements
             fake_tits
+            penis_length
+            circumcised
             career_length
             tattoos
             piercings
@@ -909,6 +949,29 @@ class StashSyncService {
       
       console.log(`🔧 Pre-loaded validation data: ${tagIds.size} tags`);
       
+      // NEW: Process ethnicity tag mapping for all performers first
+      console.log('🏷️  Mapping performer ethnicities to tags...');
+      const ethnicityTagMap = new Map(); // performerId -> tagId
+      
+      for (const performer of performers) {
+        if (performer.scene_count > 0 && performer.ethnicity) {
+          try {
+            const ethnicityTag = await this.tagMappingService.findOrCreateTag(
+              performer.ethnicity,
+              'Race' // Parent tag name
+            );
+            
+            if (ethnicityTag) {
+              ethnicityTagMap.set(performer.id, ethnicityTag.id);
+            }
+          } catch (error) {
+            console.warn(`⚠️  Failed to map ethnicity for performer ${performer.name}:`, error.message);
+          }
+        }
+      }
+      
+      console.log(`✅ Mapped ${ethnicityTagMap.size} ethnicities to tags`);
+      
       for (const performer of performers) {
         // Skip performers with 0 scenes
         if (performer.scene_count === 0) {
@@ -925,7 +988,8 @@ class StashSyncService {
           ignore_auto_tag: performer.ignore_auto_tag || false,
           birthdate: performer.birthdate || null,
           death_date: performer.death_date || null,
-          ethnicity: performer.ethnicity || null,
+          ethnicity: performer.ethnicity || null, // Keep for backward compatibility
+          ethnicityTagId: ethnicityTagMap.get(performer.id) || null, // NEW: Link to tag
           country: performer.country || null,
           eye_color: performer.eye_color || null,
           hair_color: performer.hair_color || null,
@@ -933,6 +997,8 @@ class StashSyncService {
           weight: (typeof performer.weight === 'number') ? `${performer.weight}` : (performer.weight || null),
           measurements: performer.measurements || null,
           fake_tits: performer.fake_tits || null,
+          penis_length: (typeof performer.penis_length === 'number') ? `${performer.penis_length} cm` : null,
+          circumcised: performer.circumcised || null,
           career_length: performer.career_length || null,
           tattoos: performer.tattoos || null,
           piercings: performer.piercings || null,
@@ -2024,6 +2090,83 @@ class StashSyncService {
       
     } catch (error) {
       console.error(`❌ Error deleting scene ${sceneId} from Stash:`, error);
+      return {
+        success: false,
+        error: error.message
+      };
+    }
+  }
+
+  async updateScene(sceneId, updates) {
+    console.log('🔧 [updateScene] Starting scene update...');
+    console.log('   - Scene ID (raw):', sceneId, 'Type:', typeof sceneId);
+    console.log('   - Updates (raw):', JSON.stringify(updates, null, 2));
+    
+    try {
+      console.log('   - Loading configuration...');
+      await this.ensureConfigLoaded();
+      console.log('   - Configuration loaded. Stash URL:', this.stashUrl);
+      
+      // Build the mutation for updating scene
+      const mutation = `
+        mutation SceneUpdate($input: SceneUpdateInput!) {
+          sceneUpdate(input: $input) {
+            id
+            title
+            studio {
+              id
+              name
+            }
+            performers {
+              id
+              name
+            }
+          }
+        }
+      `;
+
+      // Build the input object with only provided fields
+      // NOTE: Stash expects IDs as strings, not integers
+      const input = { id: String(sceneId) };
+      if (updates.title !== undefined) input.title = updates.title;
+      if (updates.studioId !== undefined) {
+        input.studio_id = String(updates.studioId);
+      }
+      if (updates.performerIds !== undefined && Array.isArray(updates.performerIds)) {
+        input.performer_ids = updates.performerIds.map(id => String(id));
+      }
+
+      const variables = { input };
+
+      console.log('📝 [updateScene] GraphQL mutation prepared:');
+      console.log('   - Input:', JSON.stringify(input, null, 2));
+      console.log('   - Variables:', JSON.stringify(variables, null, 2));
+      console.log('   - Making GraphQL request to:', this.stashUrl + '/graphql');
+      
+      const result = await this.makeGraphQLRequest(mutation, variables);
+      
+      console.log('📥 [updateScene] GraphQL response received:');
+      console.log('   - Full result:', JSON.stringify(result, null, 2));
+
+      if (result?.sceneUpdate) {
+        console.log(`✅ [updateScene] Scene ${sceneId} updated in Stash successfully!`);
+        console.log('   - Updated scene data:', JSON.stringify(result.sceneUpdate, null, 2));
+        return {
+          success: true,
+          scene: result.sceneUpdate
+        };
+      } else {
+        console.error('❌ [updateScene] Unexpected response structure from Stash:');
+        console.error('   - Expected "sceneUpdate" property in result');
+        console.error('   - Received:', JSON.stringify(result, null, 2));
+        return {
+          success: false,
+          error: 'Unexpected response from Stash API - no sceneUpdate in result'
+        };
+      }
+      
+    } catch (error) {
+      console.error(`❌ Error updating scene ${sceneId} in Stash:`, error);
       return {
         success: false,
         error: error.message

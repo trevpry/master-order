@@ -19,6 +19,14 @@ import CustomOrders from './modules/media/pages/custom-orders/index';
 import WatchStats from './modules/media/pages/watch-stats/index';
 import Stash from './modules/media/pages/Stash';
 import PerformerDetail from './modules/media/pages/stash/PerformerDetail';
+import TagsPage from './modules/media/pages/stash/TagsPage';
+import TagDetail from './modules/media/pages/stash/TagDetail';
+import ScenesPage from './modules/media/pages/stash/ScenesPage';
+import SceneDetail from './modules/media/pages/stash/SceneDetail';
+import StudiosPage from './modules/media/pages/stash/StudiosPage';
+import StudioDetail from './modules/media/pages/stash/StudioDetail';
+import ClipsPage from './modules/media/pages/stash/ClipsPage';
+import ClipDetail from './modules/media/pages/stash/ClipDetail';
 import Music from './modules/media/pages/music/index';
 import Backgrounds from './modules/media/pages/backgrounds/index';
 import Books from './pages/Books'; // Unified Books component
@@ -56,7 +64,16 @@ function App() {
           <Route path="/media/custom-orders/:orderId" element={<CustomOrders />} />
           <Route path="/media/watch-stats" element={<WatchStats />} />
           <Route path="/media/stash" element={<Stash />} />
+          <Route path="/media/stash/tags" element={<TagsPage />} />
+          <Route path="/media/stash/tags/:id" element={<TagDetail />} />
+          <Route path="/media/stash/scenes" element={<ScenesPage />} />
+          <Route path="/media/stash/scenes/:id" element={<SceneDetail />} />
+          <Route path="/media/stash/studios" element={<StudiosPage />} />
+          <Route path="/media/stash/studios/:id" element={<StudioDetail />} />
+          <Route path="/media/stash/clips" element={<ClipsPage />} />
+          <Route path="/media/stash/clips/:id" element={<ClipDetail />} />
           <Route path="/media/stash/performer/:id" element={<PerformerDetail />} />
+          <Route path="/media/stash/performers/:id" element={<PerformerDetail />} />
           <Route path="/media/music" element={<Music />} />
           <Route path="/media/backgrounds" element={<Backgrounds />} />
           <Route path="/media/books" element={<Books />} />
@@ -69,6 +86,14 @@ function App() {
           <Route path="/custom-orders/:orderId" element={<CustomOrders />} />
           <Route path="/watch-stats" element={<WatchStats />} />
           <Route path="/stash" element={<Stash />} />
+          <Route path="/stash/tags" element={<TagsPage />} />
+          <Route path="/stash/tags/:id" element={<TagDetail />} />
+          <Route path="/stash/scenes" element={<ScenesPage />} />
+          <Route path="/stash/scenes/:id" element={<SceneDetail />} />
+          <Route path="/stash/studios" element={<StudiosPage />} />
+          <Route path="/stash/studios/:id" element={<StudioDetail />} />
+          <Route path="/stash/clips" element={<ClipsPage />} />
+          <Route path="/stash/clips/:id" element={<ClipDetail />} />
           <Route path="/stash/performer/:id" element={<PerformerDetail />} />
           <Route path="/music" element={<Music />} />
           <Route path="/backgrounds" element={<Backgrounds />} />

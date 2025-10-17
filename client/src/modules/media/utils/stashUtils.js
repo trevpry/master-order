@@ -6,6 +6,16 @@ export const getSceneDisplayTitle = (scene) => {
   // Try various title fields in order of preference
   if (scene.title) return scene.title;
   if (scene.name) return scene.name;
+  
+  // If no title, try to extract filename from path
+  if (scene.path) {
+    // Extract filename from path (handles both Windows and Unix paths)
+    const filename = scene.path.split(/[\\/]/).pop();
+    // Remove file extension
+    const nameWithoutExt = filename.replace(/\.[^/.]+$/, '');
+    if (nameWithoutExt) return nameWithoutExt;
+  }
+  
   if (scene.id) return `Scene ${scene.id}`;
   
   return 'Unknown Scene';

@@ -1,5 +1,7 @@
 import React from 'react';
+import { Link } from 'react-router-dom';
 import Button from '../../../../../shared/components/Button';
+import StashLibraryOverview from './StashLibraryOverview';
 
 const StashLibraryTab = ({
   libraryTab,
@@ -31,6 +33,7 @@ const StashLibraryTab = ({
   clipTags
 }) => {
   const tabLabels = {
+    overview: '📚 Overview',
     scenes: '🎬 Scenes',
     performers: '👤 Performers',
     studios: '🏢 Studios',
@@ -40,44 +43,54 @@ const StashLibraryTab = ({
 
   return (
     <div className="library-tab">
-      {/* Sync Section */}
-      <div className="sync-section">
-        <div className="sync-controls">
-          <Button
-            onClick={runSync} 
-            disabled={syncStatus.isRunning}
-            className={`sync-button ${syncStatus.isRunning ? 'syncing' : ''}`}
-          >
-            {syncStatus.isRunning ? '🔄 Syncing...' : '🔄 Sync Library'}
-          </Button>
-          
-          {syncStatus.lastSync && (
-            <div className="sync-info">
-              <span className="sync-time">
-                Last sync: {new Date(syncStatus.lastSync).toLocaleString()}
-              </span>
-              {syncStatus.message && (
-                <span className="sync-message">{syncStatus.message}</span>
-              )}
-            </div>
-          )}
-        </div>
-      </div>
-
       {/* Library Navigation Tabs */}
       <div className="library-nav">
-        {Object.entries(tabLabels).map(([key, label]) => (
-          <button
-            key={key}
-            className={`library-nav-tab ${libraryTab === key ? 'active' : ''}`}
-            onClick={() => setLibraryTab(key)}
-          >
-            {label}
-            {pagination[key]?.total > 0 && (
-              <span className="tab-count">({pagination[key].total})</span>
-            )}
-          </button>
-        ))}
+        {Object.entries(tabLabels).map(([key, label]) => {
+          // Overview tab
+          if (key === 'overview') {
+            return (
+              <button
+                key={key}
+                className={`library-nav-tab ${libraryTab === key ? 'active' : ''}`}
+                onClick={() => setLibraryTab(key)}
+                data-library-tab={key}
+              >
+                {label}
+              </button>
+            );
+          }
+          
+          // Scenes, Studios, Tags, and Clips should navigate to their dedicated pages
+          if (key === 'scenes' || key === 'studios' || key === 'tags' || key === 'clips') {
+            return (
+              <Link
+                key={key}
+                to={`/media/stash/${key}`}
+                className="library-nav-tab"
+              >
+                {label}
+                {pagination[key]?.total > 0 && (
+                  <span className="tab-count">({pagination[key].total})</span>
+                )}
+              </Link>
+            );
+          }
+          
+          // Performers tab works as before (stays on current page)
+          return (
+            <button
+              key={key}
+              className={`library-nav-tab ${libraryTab === key ? 'active' : ''}`}
+              onClick={() => setLibraryTab(key)}
+              data-library-tab={key}
+            >
+              {label}
+              {pagination[key]?.total > 0 && (
+                <span className="tab-count">({pagination[key].total})</span>
+              )}
+            </button>
+          );
+        })}
       </div>
 
       {/* Search and Filters */}
@@ -248,7 +261,7 @@ const StashLibraryTab = ({
 
       {/* Content Area */}
       <div className="library-content">
-        {isLoading ? (
+        {isLoading && libraryTab !== 'overview' ? (
           <div className="loading-spinner">
             <div className="spinner"></div>
             <span>Loading {tabLabels[libraryTab]}...</span>
@@ -257,6 +270,12 @@ const StashLibraryTab = ({
           <div className="content-container">
             {(() => {
               switch (libraryTab) {
+                case 'overview':
+                  return <StashLibraryOverview 
+                    syncStatus={syncStatus}
+                    runSync={runSync}
+                    pagination={pagination}
+                  />;
                 case 'scenes':
                   return contentRenderers.renderScenes();
                 case 'performers':
@@ -268,14 +287,18 @@ const StashLibraryTab = ({
                 case 'clips':
                   return contentRenderers.renderClips();
                 default:
-                  return <div>Select a category to browse</div>;
+                  return <StashLibraryOverview 
+                    syncStatus={syncStatus}
+                    runSync={runSync}
+                    pagination={pagination}
+                  />;
               }
             })()}
           </div>
         )}
         
-        {/* Pagination Controls */}
-        {pagination[libraryTab] && pagination[libraryTab].totalPages > 1 && (
+        {/* Pagination Controls - Don't show for overview */}
+        {libraryTab !== 'overview' && pagination[libraryTab] && pagination[libraryTab].totalPages > 1 && (
           <div className="pagination-controls">
             <div className="pagination-info">
               <span>

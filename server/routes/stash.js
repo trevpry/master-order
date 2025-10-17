@@ -358,7 +358,8 @@ router.get('/scenes', asyncHandler(async (req, res) => {
       studio,
       tag,
       minRating,
-      maxRating
+      maxRating,
+      watched
     } = req.query;
     
     const skip = (parseInt(page) - 1) * parseInt(perPage);
@@ -369,9 +370,10 @@ router.get('/scenes', asyncHandler(async (req, res) => {
     
     if (search) {
       where.OR = [
-        { title: { contains: search, mode: 'insensitive' } },
-        { details: { contains: search, mode: 'insensitive' } },
-        { synopsis: { contains: search, mode: 'insensitive' } }
+        { title: { contains: search } },
+        { details: { contains: search } },
+        { synopsis: { contains: search } },
+        { path: { contains: search } }
       ];
     }
     
@@ -379,30 +381,34 @@ router.get('/scenes', asyncHandler(async (req, res) => {
       where.performers = {
         some: {
           performer: {
-            name: { contains: performer, mode: 'insensitive' }
+            name: { contains: performer }
           }
         }
       };
     }
     
     if (studio) {
-      where.OR = [
-        {
-          studioObject: {
-            name: { contains: studio, mode: 'insensitive' }
+      // Use AND to combine with other filters
+      where.AND = where.AND || [];
+      where.AND.push({
+        OR: [
+          {
+            studioObject: {
+              name: { contains: studio }
+            }
+          },
+          {
+            studio: { contains: studio }
           }
-        },
-        {
-          studio: { contains: studio, mode: 'insensitive' }
-        }
-      ];
+        ]
+      });
     }
     
     if (tag) {
       where.tags = {
         some: {
           tag: {
-            name: { contains: tag, mode: 'insensitive' }
+            name: { contains: tag }
           }
         }
       };
@@ -416,18 +422,33 @@ router.get('/scenes', asyncHandler(async (req, res) => {
       where.rating = { ...where.rating, lte: parseFloat(maxRating) };
     }
     
+    // Handle watched filter
+    if (watched === 'true') {
+      where.playCount = { gt: 0 };
+    } else if (watched === 'false') {
+      // Use AND to combine with other filters
+      where.AND = where.AND || [];
+      where.AND.push({
+        OR: [
+          { playCount: 0 },
+          { playCount: null }
+        ]
+      });
+    }
+    
     // Build order by clause
+    const sortOrderLower = sortOrder.toLowerCase();
     const orderBy = {};
     if (sortBy === 'title') {
-      orderBy.title = sortOrder;
+      orderBy.title = sortOrderLower;
     } else if (sortBy === 'rating') {
-      orderBy.rating = sortOrder;
+      orderBy.rating = sortOrderLower;
     } else if (sortBy === 'duration') {
-      orderBy.duration = sortOrder;
+      orderBy.duration = sortOrderLower;
     } else if (sortBy === 'playCount') {
-      orderBy.playCount = sortOrder;
+      orderBy.playCount = sortOrderLower;
     } else {
-      orderBy.date = sortOrder;
+      orderBy.date = sortOrderLower;
     }
     
     // Get total count for pagination
@@ -714,6 +735,11 @@ router.get('/scenes/:id', asyncHandler(async (req, res) => {
       code: scene.code,
       director: scene.director,
       synopsis: scene.synopsis,
+      // Image URLs using Stash screenshot API
+      paths: {
+        screenshot: `scene/${scene.id}/screenshot`,
+        image: `scene/${scene.id}/screenshot`
+      },
       // Play status fields
       playCount: scene.playCount,
       lastPlayedAt: scene.lastPlayedAt,
@@ -764,6 +790,386 @@ router.get('/scenes/:id', asyncHandler(async (req, res) => {
     });
 }));
 
+// POST /api/stash/scenes/:id/parse-filename - Parse filename to extract metadata
+router.post('/scenes/:id/parse-filename', asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  
+  const scene = await prisma.stashScene.findUnique({
+    where: { id },
+    include: {
+      studioObject: true
+    }
+  });
+  
+  if (!scene || !scene.path) {
+    return sendBadRequest(res, 'Scene not found or has no file path');
+  }
+  
+  // Extract filename from path
+  const filename = scene.path.split(/[\\/]/).pop();
+  let nameWithoutExt = filename.replace(/\.[^/.]+$/, '');
+  
+  // Normalize filename: replace underscores with spaces, normalize separators
+  nameWithoutExt = nameWithoutExt
+    .replace(/_/g, ' ')                          // Replace underscores with spaces
+    .replace(/\s+and\s+/gi, ' & ')               // Normalize "and" to "&"
+    .replace(/\s*,\s*/g, ', ')                   // Normalize commas with consistent spacing
+    .replace(/\s*&\s*/g, ' & ')                  // Normalize ampersands with consistent spacing
+    .replace(/\s+/g, ' ')                        // Collapse multiple spaces
+    .trim();                                     // Remove leading/trailing whitespace
+  
+  // Get all performers and studios for matching
+  const allPerformers = await prisma.stashPerformer.findMany();
+  const allStudios = await prisma.stashStudio.findMany();
+  
+  // Helper function to match performers in a string
+  const findPerformersInText = (text) => {
+    const matched = [];
+    const textLower = text.toLowerCase().replace(/\s+/g, '');
+    
+    for (const performer of allPerformers) {
+      const normalizedName = performer.name.toLowerCase().replace(/\s+/g, '');
+      
+      // Check primary name - calculate match score
+      if (textLower.includes(normalizedName)) {
+        const score = normalizedName.length / textLower.length; // Higher = better match
+        matched.push({
+          performer,
+          matchedVia: 'name',
+          matchedText: performer.name,
+          score
+        });
+        continue;
+      }
+      
+      // Check aliases
+      if (performer.alias) {
+        const aliases = performer.alias.split(',').map(a => a.trim());
+        for (const alias of aliases) {
+          const normalizedAlias = alias.toLowerCase().replace(/\s+/g, '');
+          if (textLower.includes(normalizedAlias)) {
+            const score = normalizedAlias.length / textLower.length;
+            matched.push({
+              performer,
+              matchedVia: 'alias',
+              matchedText: alias,
+              score
+            });
+            break;
+          }
+        }
+      }
+    }
+    
+    // Sort by score (best match first) and return
+    return matched.sort((a, b) => b.score - a.score);
+  };
+  
+  // Helper function to match studio in text
+  const findStudioInText = (text) => {
+    const textLower = text.toLowerCase().replace(/\s+/g, '');
+    
+    for (const studio of allStudios) {
+      const normalizedName = studio.name.toLowerCase().replace(/\s+/g, '');
+      if (textLower.includes(normalizedName)) {
+        return studio;
+      }
+    }
+    
+    return null;
+  };
+  
+  // Helper function to add performer with alternatives
+  const addPerformerMatch = (searchText) => {
+    const found = findPerformersInText(searchText);
+    if (found.length > 0) {
+      const bestMatch = found[0]; // Highest score
+      const alternatives = found.slice(1).map(fp => ({
+        id: fp.performer.id,
+        name: fp.performer.name,
+        matchedVia: fp.matchedVia,
+        matchedAlias: fp.matchedVia === 'alias' ? fp.matchedText : null
+      }));
+      
+      // Check if this performer is already in the list
+      if (!matchedPerformers.find(mp => mp.id === bestMatch.performer.id)) {
+        matchedPerformers.push({
+          id: bestMatch.performer.id,
+          name: bestMatch.performer.name,
+          matchedVia: bestMatch.matchedVia,
+          matchedAlias: bestMatch.matchedVia === 'alias' ? bestMatch.matchedText : null,
+          alternatives: alternatives
+        });
+        performers.push(bestMatch.performer.name);
+      }
+      return true;
+    }
+    return false;
+  };
+  
+  // Helper function to add ALL performers found in text by splitting by separators first
+  const addAllPerformerMatches = (searchText) => {
+    // Split by & or , to identify individual performer names
+    const performerNames = searchText.split(/\s*[,&]\s*/).map(p => p.trim()).filter(Boolean);
+    
+    let addedCount = 0;
+    
+    // For each name, find best match + alternatives specific to that name
+    performerNames.forEach(pName => {
+      const found = findPerformersInText(pName);
+      
+      if (found.length > 0) {
+        // Group by performer ID to handle duplicate matches for same performer
+        const performerGroups = {};
+        found.forEach(fp => {
+          if (!performerGroups[fp.performer.id]) {
+            performerGroups[fp.performer.id] = [];
+          }
+          performerGroups[fp.performer.id].push(fp);
+        });
+        
+        // Convert to array and sort by best score
+        const uniquePerformers = Object.values(performerGroups).map(group => group[0]);
+        uniquePerformers.sort((a, b) => b.score - a.score);
+        
+        // Best match for THIS name
+        const bestMatch = uniquePerformers[0];
+        
+        // Alternatives are other performers that also match THIS name
+        const alternatives = uniquePerformers.slice(1).map(fp => ({
+          id: fp.performer.id,
+          name: fp.performer.name,
+          matchedVia: fp.matchedVia,
+          matchedAlias: fp.matchedVia === 'alias' ? fp.matchedText : null
+        }));
+        
+        // Check if this performer is already in the list
+        if (!matchedPerformers.find(mp => mp.id === bestMatch.performer.id)) {
+          matchedPerformers.push({
+            id: bestMatch.performer.id,
+            name: bestMatch.performer.name,
+            matchedVia: bestMatch.matchedVia,
+            matchedAlias: bestMatch.matchedVia === 'alias' ? bestMatch.matchedText : null,
+            alternatives: alternatives,
+            originalName: pName  // Store the original name from filename
+          });
+          performers.push(bestMatch.performer.name);
+          addedCount++;
+        }
+      } else {
+        // No match found - add as unmatched
+        unmatchedPerformers.push(pName);
+        performers.push(pName);
+      }
+    });
+    
+    return addedCount;
+  };
+  
+  // Strategy: Try to match performers first, then studio, then derive title
+  let studio = null;
+  let performers = [];
+  let title = null;
+  let matchedStudio = null;
+  const matchedPerformers = [];
+  const unmatchedPerformers = [];
+  
+  // Split filename by dash separators to detect structure
+  const parts = nameWithoutExt.split(/\s*[-]\s*/);
+  
+  // Pattern 1: Studio - Performer(s) - Title (3 parts)
+  if (parts.length === 3) {
+    const [part1, part2, part3] = parts.map(p => p.trim());
+    
+    // If we haven't found studio yet, first part might be studio
+    if (!studio) {
+      const studioMatch = findStudioInText(part1);
+      if (studioMatch) {
+        matchedStudio = studioMatch;
+        studio = studioMatch.name;
+      } else {
+        studio = part1;
+      }
+    }
+    
+    // Second part is performers - parse all of them
+    if (performers.length === 0) {
+      addAllPerformerMatches(part2);
+    }
+    
+    // Third part is title
+    title = part3;
+  }
+  // Pattern 2: Studio - Performer(s) OR Performer(s) - Title (2 parts)
+  else if (parts.length === 2) {
+    const [part1, part2] = parts.map(p => p.trim());
+    
+    // Check if first part is studio
+    const studioMatch = findStudioInText(part1);
+    if (studioMatch && !studio) {
+      matchedStudio = studioMatch;
+      studio = studioMatch.name;
+      
+      // Second part is performers, generate title from them
+      if (performers.length === 0) {
+        addAllPerformerMatches(part2);
+        title = performers.join(' & ');
+      }
+    } else {
+      // First part might be performers, second is title
+      if (performers.length === 0) {
+        addAllPerformerMatches(part1);
+      }
+      title = part2;
+    }
+  }
+  // Single part - try to parse it as performers or studio
+  else {
+    // If we already found performers/studio globally, use those
+    if (performers.length > 0 || studio) {
+      // Generate title from performers if no title yet
+      if (!title && performers.length > 0) {
+        title = performers.join(' & ');
+      } else if (!title) {
+        title = nameWithoutExt;
+      }
+    } else {
+      // No dash separators - could be:
+      // 1. Multiple performers separated by & or ,
+      // 2. Single studio name
+      // 3. Just a title
+      
+      // Try to parse as multiple performers (this will split by & or ,)
+      const foundCount = addAllPerformerMatches(nameWithoutExt);
+      
+      if (foundCount > 0) {
+        // Found performers - generate title from them
+        title = performers.join(' & ');
+      } else {
+        // No performers found - try as studio
+        const studioMatch = findStudioInText(nameWithoutExt);
+        if (studioMatch) {
+          matchedStudio = studioMatch;
+          studio = studioMatch.name;
+          title = studio;
+        } else {
+          // Final fallback - use whole name as title
+          title = nameWithoutExt;
+        }
+      }
+    }
+  }
+  
+  // Set unmatched studio if we have a studio but no match
+  const unmatchedStudio = studio && !matchedStudio ? studio : null;
+  
+  // Don't automatically update scene - just return parsing results
+  // User will accept/edit in modal before updating
+  
+  sendSuccess(res, {
+    parsed: {
+      studio: studio,
+      performers: performers,
+      title: title
+    },
+    matched: {
+      studio: matchedStudio ? { id: matchedStudio.id, name: matchedStudio.name } : null,
+      performers: matchedPerformers
+    },
+    unmatched: {
+      studio: unmatchedStudio,
+      performers: unmatchedPerformers
+    }
+  });
+}));
+
+// PUT /api/stash/scenes/:id - Update scene details
+router.put('/scenes/:id', asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  const { title, studio, studioId, performerIds } = req.body;
+  
+  // Initialize Stash sync service if not already initialized
+  if (!stashSyncService) {
+    await initializeStashSyncService();
+  }
+  
+  const updateData = {};
+  if (title !== undefined) updateData.title = title;
+  if (studio !== undefined) updateData.studio = studio;
+  if (studioId !== undefined) updateData.studioId = studioId;
+  
+  // Update local database
+  const updatedScene = await prisma.stashScene.update({
+    where: { id },
+    data: updateData
+  });
+  
+  // Handle performer relationships if provided
+  if (performerIds !== undefined && Array.isArray(performerIds)) {
+    // Add new performer relationships (upsert to avoid duplicates)
+    for (const performerId of performerIds) {
+      await prisma.stashScenePerformer.upsert({
+        where: {
+          sceneId_performerId: {
+            sceneId: id,
+            performerId: performerId
+          }
+        },
+        create: {
+          sceneId: id,
+          performerId: performerId
+        },
+        update: {} // No update needed, just ensure it exists
+      });
+    }
+  }
+  
+  // Update scene in Stash itself if configured
+  console.log('🔍 [STASH UPDATE] Checking Stash sync configuration...');
+  console.log('   - stashSyncService exists:', !!stashSyncService);
+  
+  if (!stashSyncService) {
+    console.warn('⚠️ [STASH UPDATE] stashSyncService is not available');
+  } else {
+    const isConfigured = await stashSyncService.isConfigured();
+    console.log('   - stashSyncService.isConfigured():', isConfigured);
+    
+    if (isConfigured) {
+      console.log('📡 [STASH UPDATE] Preparing to update scene in Stash...');
+      console.log('   - Scene ID:', id);
+      console.log('   - Title:', title);
+      console.log('   - Studio ID:', studioId);
+      console.log('   - Performer IDs:', performerIds);
+      
+      const stashUpdates = {};
+      if (title !== undefined) stashUpdates.title = title;
+      if (studioId !== undefined) stashUpdates.studioId = studioId;
+      if (performerIds !== undefined && Array.isArray(performerIds)) {
+        stashUpdates.performerIds = performerIds;
+      }
+      
+      console.log('   - Updates object:', JSON.stringify(stashUpdates, null, 2));
+      
+      try {
+        const stashResult = await stashSyncService.updateScene(id, stashUpdates);
+        console.log('   - Stash result:', JSON.stringify(stashResult, null, 2));
+        
+        if (!stashResult.success) {
+          console.error('❌ [STASH UPDATE] Failed to update scene in Stash:', stashResult.error);
+        } else {
+          console.log('✅ [STASH UPDATE] Scene updated in Stash successfully!');
+        }
+      } catch (error) {
+        console.error('❌ [STASH UPDATE] Exception during Stash update:', error);
+      }
+    } else {
+      console.warn('⚠️ [STASH UPDATE] Stash service not configured, skipping update');
+    }
+  }
+  
+  sendSuccess(res, updatedScene);
+}));
+
 // POST /api/stash/scenes/:id/watched - Mark Stash scene as watched
 router.post('/scenes/:id/watched', asyncHandler(async (req, res) => {
   const sceneId = req.params.id;
@@ -795,9 +1201,10 @@ router.post('/scenes/:id/watched', asyncHandler(async (req, res) => {
     let stashResult = null;
     console.log('🔍 Checking Stash service for play count increment...');
     console.log('   - stashService exists:', !!stashSyncService);
-    console.log('   - stashService.isConfigured():', stashSyncService ? stashSyncService.isConfigured() : 'N/A');
+    const isStashConfigured = stashSyncService ? await stashSyncService.isConfigured() : false;
+    console.log('   - stashService.isConfigured():', isStashConfigured);
     
-    if (stashSyncService && stashSyncService.isConfigured()) {
+    if (stashSyncService && isStashConfigured) {
       console.log('📡 Incrementing play count in Stash...');
       stashResult = await stashSyncService.incrementScenePlayCount(sceneId);
       if (!stashResult.success) {
@@ -808,7 +1215,7 @@ router.post('/scenes/:id/watched', asyncHandler(async (req, res) => {
     } else {
       console.warn('Stash service not configured, skipping remote play count increment');
       console.warn('   - Service exists:', !!stashSyncService);
-      console.warn('   - Service configured:', stashSyncService ? stashSyncService.isConfigured() : false);
+      console.warn('   - Service configured:', isStashConfigured);
     }
 
   res.json({
@@ -1316,6 +1723,83 @@ router.get('/clips', asyncHandler(async (req, res) => {
       totalPages: totalPages
     }
   });
+}));
+
+// GET /clips/:id - Single clip details
+router.get('/clips/:id', asyncHandler(async (req, res) => {
+  const clipId = parseInt(req.params.id);
+
+  const clip = await prisma.stashClip.findUnique({
+    where: { id: clipId },
+    include: {
+      tags: {
+        include: {
+          tag: {
+            select: {
+              id: true,
+              name: true,
+              favorite: true
+            }
+          }
+        }
+      },
+      scene: {
+        select: {
+          id: true,
+          title: true,
+          date: true,
+          duration: true,
+          rating: true,
+          studioObject: {
+            select: {
+              id: true,
+              name: true
+            }
+          },
+          performers: {
+            select: {
+              performer: {
+                select: {
+                  id: true,
+                  name: true
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  });
+
+  if (!clip) {
+    return sendBadRequest(res, `Clip with ID ${clipId} not found`);
+  }
+
+  // Transform data to match expected format
+  const transformedClip = {
+    id: clip.id,
+    name: clip.name || `Clip ${clip.clipIndex}`,
+    duration: clip.duration,
+    startTime: clip.startTime,
+    endTime: clip.endTime,
+    clipIndex: clip.clipIndex,
+    sceneId: clip.sceneId,
+    sceneTitle: clip.scene?.title,
+    watched: clip.watched,
+    watchedAt: clip.watchedAt,
+    createdAt: clip.createdAt,
+    tags: clip.tags.map(ct => ct.tag),
+    scene: clip.scene ? {
+      id: clip.scene.id,
+      title: clip.scene.title,
+      date: clip.scene.date,
+      rating: clip.scene.rating,
+      duration: clip.scene.duration,
+      studioName: clip.scene.studioObject?.name
+    } : null
+  };
+
+  sendSuccess(res, transformedClip);
 }));
 
 // POST /api/stash/clips/:id/watched - Mark clip as watched
@@ -2170,18 +2654,29 @@ router.get('/performers/body-attributes', asyncHandler(async (req, res) => {
 router.get('/performers/:id', asyncHandler(async (req, res) => {
   const { id } = req.params;
 
-  // Fetch performer with tags and a few recent scenes
+  // Fetch performer with tags and ALL scenes with their tags
   const performer = await prisma.stashPerformer.findUnique({
     where: { id },
     include: {
       tags: { include: { tag: true } },
+      ethnicityTag: true, // Include the ethnicity tag relation
       scenes: {
         include: {
           scene: {
             select: { id: true, title: true, date: true, studio: true, rating: true }
+          },
+          tags: {
+            include: {
+              tag: true
+            }
           }
         },
-        take: 12
+        orderBy: {
+          scene: {
+            date: 'desc'
+          }
+        }
+        // No take limit - get ALL scenes to collect all scene-specific tags
       }
     }
   });
@@ -2203,6 +2698,7 @@ router.get('/performers/:id', asyncHandler(async (req, res) => {
     details: performer.details,
     rating: performer.rating,
     ethnicity: performer.ethnicity,
+    ethnicityTag: performer.ethnicityTag ? { id: performer.ethnicityTag.id, name: performer.ethnicityTag.name } : null,
     country: performer.country,
     eye_color: performer.eye_color,
     hair_color: performer.hair_color,
@@ -2210,6 +2706,8 @@ router.get('/performers/:id', asyncHandler(async (req, res) => {
     weight: performer.weight,
     measurements: performer.measurements,
     fake_tits: performer.fake_tits,
+    penis_length: performer.penis_length,
+    circumcised: performer.circumcised,
     career_length: performer.career_length,
     tattoos: performer.tattoos,
     piercings: performer.piercings,
@@ -2218,7 +2716,20 @@ router.get('/performers/:id', asyncHandler(async (req, res) => {
     twitter: performer.twitter,
     url: performer.url,
     tags: performer.tags.map(pt => ({ id: pt.tag.id, name: pt.tag.name })),
-    scenes: performer.scenes.map(ps => ps.scene)
+    // Return only recent scenes for display (limit 20)
+    scenes: performer.scenes.slice(0, 20).map(ps => ({
+      ...ps.scene,
+      performerTags: ps.tags.map(t => ({ id: t.tag.id, name: t.tag.name }))
+    })),
+    // Include ALL scene-performer tags for comprehensive tag merging
+    allScenePerformerTags: performer.scenes.flatMap(ps => 
+      ps.tags.map(t => ({ 
+        tagId: t.tag.id, 
+        tagName: t.tag.name,
+        sceneId: ps.sceneId,
+        sceneTitle: ps.scene.title
+      }))
+    )
   };
 
   return sendSuccess(res, data);
@@ -2276,6 +2787,141 @@ router.get('/studios', asyncHandler(async (req, res) => {
       totalPages: Math.ceil(total / parseInt(perPage))
     }
   });
+}));
+
+// GET /studios/:id - Single studio details
+router.get('/studios/:id', asyncHandler(async (req, res) => {
+  const { id } = req.params;
+
+  const studio = await prisma.stashStudio.findUnique({
+    where: { id },
+    include: {
+      scenes: {
+        include: {
+          tags: {
+            include: {
+              tag: {
+                select: {
+                  id: true,
+                  name: true
+                }
+              }
+            }
+          }
+        },
+        orderBy: {
+          date: 'desc'
+        }
+      }
+    }
+  });
+
+  if (!studio) {
+    return sendBadRequest(res, `Studio with ID ${id} not found`);
+  }
+
+  // Transform data to match expected format
+  const transformedStudio = {
+    id: studio.id,
+    name: studio.name,
+    url: studio.url,
+    image: studio.image,
+    scenes: studio.scenes.map(scene => ({
+      id: scene.id,
+      title: scene.title,
+      date: scene.date,
+      rating: scene.rating,
+      duration: scene.duration,
+      tags: scene.tags.map(st => st.tag)
+    })),
+    scene_count: studio.scenes.length
+  };
+
+  sendSuccess(res, transformedStudio);
+}));
+
+// GET /tags/:id - Single tag details
+// NOTE: This MUST come before /tags to avoid route collision
+router.get('/tags/:id', asyncHandler(async (req, res) => {
+  const { id } = req.params;
+
+  // Fetch tag with scenes, performers, parent, and children
+  const tag = await prisma.stashTag.findUnique({
+    where: { id },
+    include: {
+      scenes: {
+        include: {
+          scene: {
+            select: { 
+              id: true, 
+              title: true, 
+              date: true, 
+              studio: true, 
+              rating: true
+            }
+          }
+        },
+        take: 20
+      },
+      performers: {
+        include: {
+          performer: {
+            select: {
+              id: true,
+              name: true,
+              image: true
+            }
+          }
+        },
+        take: 20
+      },
+      parentTags: {
+        include: {
+          parentTag: {
+            select: {
+              id: true,
+              name: true
+            }
+          }
+        }
+      },
+      childTags: {
+        include: {
+          childTag: {
+            select: {
+              id: true,
+              name: true,
+              description: true,
+              image: true
+            }
+          }
+        }
+      }
+    }
+  });
+
+  if (!tag) {
+    return sendNotFound(res, 'Tag not found');
+  }
+
+  const data = {
+    id: tag.id,
+    name: tag.name,
+    description: tag.description,
+    aliases: tag.aliases ? tag.aliases.split(',').map(a => a.trim()) : [],
+    image: tag.image,
+    favorite: tag.favorite,
+    scene_count: tag.scenes.length,
+    performer_count: tag.performers.length,
+    parent: tag.parentTags.length > 0 ? tag.parentTags[0].parentTag : null,
+    children: tag.childTags.map(ct => ct.childTag),
+    scenes: tag.scenes.map(ts => ts.scene),
+    performers: tag.performers.map(tp => tp.performer),
+    created_at: tag.created_at,
+    updated_at: tag.updated_at
+  };
+
+  return sendSuccess(res, data);
 }));
 
 // GET /tags - Stash tags endpoint

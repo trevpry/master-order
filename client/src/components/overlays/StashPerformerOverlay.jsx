@@ -2,20 +2,29 @@
  * StashPerformerOverlay Component
  * Displays detailed performer information in a modal overlay.
  * Can be triggered from any component that has performer data.
- * Supports tagging performers in specific clips (clip-performer-tag relationship).
+ * Supports tagging performers in specific clips (clip-performer-tag relationship)
+ * and scenes (scene-performer-tag relationship).
  */
 import React, { useState, useEffect } from 'react';
 import PropTypes from 'prop-types';
 import toast from 'react-hot-toast';
 import config from '../../config';
+import StashPerformerTagSelector from './StashPerformerTagSelector';
 
-const StashPerformerOverlay = ({ performerId, sceneDate, clipId, onClose }) => {
+const StashPerformerOverlay = ({ performerId, sceneDate, clipId, sceneId, onClose }) => {
   const [performer, setPerformer] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [clipPerformerTags, setClipPerformerTags] = useState([]);
+  const [scenePerformerTags, setScenePerformerTags] = useState([]);
+  const [contextTagObjects, setContextTagObjects] = useState([]); // Full tag objects for display
   const [loadingTags, setLoadingTags] = useState(false);
   const [addingTag, setAddingTag] = useState(null);
+  const [showTagSelector, setShowTagSelector] = useState(false);
+
+  // Determine which tags to use based on context
+  const performerTags = clipId ? clipPerformerTags : scenePerformerTags;
+  const setPerformerTags = clipId ? setClipPerformerTags : setScenePerformerTags;
 
   useEffect(() => {
     if (!performerId) return;
@@ -49,88 +58,194 @@ const StashPerformerOverlay = ({ performerId, sceneDate, clipId, onClose }) => {
     fetchPerformerDetails();
   }, [performerId]);
 
-  // Fetch clip-performer tags if clipId is provided
+  // Fetch clip-performer or scene-performer tags if clipId or sceneId is provided
   useEffect(() => {
-    if (!clipId || !performerId) {
+    if (!performerId) {
       setClipPerformerTags([]);
+      setScenePerformerTags([]);
       return;
     }
 
-    const fetchClipPerformerTags = async () => {
-      try {
-        setLoadingTags(true);
-        const url = `${config.apiBaseUrl}/api/android/stash/clip/${clipId}/performer/${performerId}/tags`;
+    fetchPerformerContextTags();
+  }, [performerId, clipId, sceneId]);
+
+  const fetchPerformerContextTags = async () => {
+    if (!performerId) {
+      setClipPerformerTags([]);
+      setScenePerformerTags([]);
+      return;
+    }
+
+    try {
+      setLoadingTags(true);
+      let url, tagData;
+
+      if (clipId) {
+        // Fetch clip-performer tags
+        url = `${config.apiBaseUrl}/api/android/stash/clip/${clipId}/performer/${performerId}/tags`;
         console.log('🏷️ Fetching clip-performer tags from:', url);
 
         const response = await fetch(url);
         console.log('Response status:', response.status);
 
         if (response.ok) {
-          const data = await response.json();
-          console.log('Clip-performer tags data:', data);
+          tagData = await response.json();
+          console.log('Clip-performer tags data:', tagData);
           
-          // Extract tag IDs from the response
-          const tagIds = data.tags?.map(tag => tag.id) || [];
+          const tagIds = [];
+          const tagObjs = [];
+          
+          tagData.tags?.forEach(tag => {
+            tagIds.push(tag.id);
+            tagObjs.push(tag);
+          });
+          
           setClipPerformerTags(tagIds);
-          console.log('Extracted tag IDs:', tagIds);
+          setContextTagObjects(tagObjs);
+          console.log('Extracted clip tag IDs:', tagIds);
+          console.log('Extracted clip tag objects:', tagObjs);
         } else {
           console.log('Failed to fetch clip-performer tags:', response.status);
           setClipPerformerTags([]);
+          setContextTagObjects([]);
         }
-      } catch (error) {
-        console.error('Error fetching clip-performer tags:', error);
-        setClipPerformerTags([]);
-      } finally {
-        setLoadingTags(false);
+      } else if (sceneId) {
+        // Fetch scene-performer tags
+        url = `${config.apiBaseUrl}/api/stash/scenes/${sceneId}/performers/${performerId}`;
+        console.log('🏷️ Fetching scene-performer tags from:', url);
+
+        const response = await fetch(url);
+        console.log('Response status:', response.status);
+
+        if (response.ok) {
+          tagData = await response.json();
+          console.log('Scene-performer tags data:', tagData);
+          
+          if (tagData.success && tagData.data) {
+            console.log('Tags array:', tagData.data.tags);
+            console.log('First tag structure:', tagData.data.tags?.[0]);
+            
+            const tagIds = [];
+            const tagObjs = [];
+            
+            tagData.data.tags?.forEach(tagWrapper => {
+              console.log('Processing tag wrapper:', tagWrapper);
+              const tag = tagWrapper.tag || tagWrapper;
+              console.log('Extracted tag:', tag);
+              tagIds.push(tag.id);
+              tagObjs.push(tag);
+            });
+            
+            setScenePerformerTags(tagIds);
+            setContextTagObjects(tagObjs);
+            console.log('Extracted scene tag IDs:', tagIds);
+            console.log('Extracted scene tag objects:', tagObjs);
+          }
+        } else {
+          console.log('Failed to fetch scene-performer tags:', response.status);
+          setScenePerformerTags([]);
+        }
       }
-    };
+    } catch (error) {
+      console.error('Error fetching performer tags:', error);
+      setClipPerformerTags([]);
+      setScenePerformerTags([]);
+    } finally {
+      setLoadingTags(false);
+    }
+  };
 
-    fetchClipPerformerTags();
-  }, [clipId, performerId]);
+  const handleTagsAdded = (newTagIds) => {
+    console.log('Tags added, refreshing performer context tags');
+    // Refresh the performer context tags
+    fetchPerformerContextTags();
+  };
 
-  // Handle tag click to add tag to clip-performer combination
+  // Handle tag click to add tag to clip-performer or scene-performer combination
   const handleTagClick = async (tagId, tagName) => {
-    if (!clipId) {
-      toast.error('Clip ID not available. Tags can only be added when viewing a specific clip.');
+    if (!clipId && !sceneId) {
+      toast.error('Clip or Scene ID not available. Tags can only be added when viewing a specific clip or scene.');
       return;
     }
 
-    const isTagOnClipPerformer = clipPerformerTags.includes(tagId);
+    const isTagOnPerformer = performerTags.includes(tagId);
     
-    if (isTagOnClipPerformer) {
-      console.log('Tag already on this clip-performer combination:', tagId);
-      toast('Tag already added to this performer in this clip', { icon: 'ℹ️' });
+    if (isTagOnPerformer) {
+      console.log('Tag already on this performer combination:', tagId);
+      toast(`Tag already added to this performer in this ${clipId ? 'clip' : 'scene'}`, { icon: 'ℹ️' });
       return;
     }
     
     try {
       setAddingTag(tagId);
-      console.log(`Adding tag ${tagId} to clip ${clipId} performer ${performerId}`);
       
-      const url = `${config.apiBaseUrl}/api/android/stash/clip/${clipId}/performer/${performerId}/tags`;
-      console.log('POST URL:', url);
-      console.log('POST body:', { tagIds: [tagId] });
-      
-      const response = await fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ tagIds: [tagId] })
-      });
-      
-      console.log('Response status:', response.status);
-      const responseData = await response.json();
-      console.log('Response data:', responseData);
-      
-      if (response.ok) {
-        // Update local state
-        setClipPerformerTags(prev => [...prev, tagId]);
-        toast.success(`✅ Added "${tagName}" to performer in this clip`);
-      } else {
-        toast.error(responseData.error || 'Failed to add tag');
+      if (clipId) {
+        // Add tag to clip-performer
+        console.log(`Adding tag ${tagId} to clip ${clipId} performer ${performerId}`);
+        
+        const url = `${config.apiBaseUrl}/api/android/stash/clip/${clipId}/performer/${performerId}/tags`;
+        console.log('POST URL:', url);
+        console.log('POST body:', { tagIds: [tagId] });
+        
+        const response = await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ tagIds: [tagId] })
+        });
+        
+        console.log('Response status:', response.status);
+        const responseData = await response.json();
+        console.log('Response data:', responseData);
+        
+        if (response.ok) {
+          setClipPerformerTags(prev => [...prev, tagId]);
+          toast.success(`✅ Added "${tagName}" to performer in this clip`);
+        } else {
+          toast.error(responseData.error || 'Failed to add tag');
+        }
+      } else if (sceneId) {
+        // Add tag to scene-performer
+        console.log(`Adding tag ${tagId} to scene ${sceneId} performer ${performerId}`);
+        
+        const url = `${config.apiBaseUrl}/api/stash/scenes/${sceneId}/performers/${performerId}`;
+        console.log('PUT URL:', url);
+        
+        // First, fetch current metadata
+        const getResponse = await fetch(url);
+        let currentTags = [];
+        
+        if (getResponse.ok) {
+          const getData = await getResponse.json();
+          if (getData.success && getData.data) {
+            currentTags = getData.data.tags || [];
+          }
+        }
+        
+        // Add new tag to existing tags
+        const updatedTags = [...currentTags.map(t => ({ tagId: t.tag?.id || t.tagId })), { tagId }];
+        
+        console.log('PUT body:', { tags: updatedTags });
+        
+        const response = await fetch(url, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ tags: updatedTags })
+        });
+        
+        console.log('Response status:', response.status);
+        const responseData = await response.json();
+        console.log('Response data:', responseData);
+        
+        if (response.ok) {
+          setScenePerformerTags(prev => [...prev, tagId]);
+          toast.success(`✅ Added "${tagName}" to performer in this scene`);
+        } else {
+          toast.error(responseData.error || 'Failed to add tag');
+        }
       }
     } catch (error) {
-      console.error('Error adding tag to clip-performer:', error);
-      toast.error('Failed to add tag to performer in clip');
+      console.error('Error adding tag:', error);
+      toast.error(`Failed to add tag to performer in ${clipId ? 'clip' : 'scene'}`);
     } finally {
       setAddingTag(null);
     }
@@ -315,26 +430,64 @@ const StashPerformerOverlay = ({ performerId, sceneDate, clipId, onClose }) => {
               )}
 
               {/* Tags */}
-              {performer.tags && performer.tags.length > 0 && (
+              {(clipId || sceneId || (performer.tags && performer.tags.length > 0)) && (
                 <div className="bg-gray-800 rounded-lg p-4">
-                  <h4 className="text-sm font-semibold text-gray-300 uppercase mb-3">
-                    Tags {clipId && <span className="text-xs text-gray-500">(Click to add to clip)</span>}
-                  </h4>
+                  <div className="flex items-center justify-between mb-3">
+                    <h4 className="text-sm font-semibold text-gray-300 uppercase">
+                      Tags {(clipId || sceneId) && <span className="text-xs text-gray-500">(Click to add to {clipId ? 'clip' : 'scene'})</span>}
+                    </h4>
+                    {(clipId || sceneId) && (
+                      <button
+                        onClick={() => setShowTagSelector(true)}
+                        className="px-3 py-1 bg-blue-600 text-white text-sm rounded hover:bg-blue-700 transition-colors"
+                      >
+                        + Add Tags
+                      </button>
+                    )}
+                  </div>
                   {loadingTags && (
-                    <div className="text-xs text-gray-400 mb-2">Loading clip-performer tags...</div>
+                    <div className="text-xs text-gray-400 mb-2">Loading performer tags...</div>
                   )}
+                  
+                  {/* Context-specific tags (scene-performer or clip-performer) */}
+                  {contextTagObjects.length > 0 && (
+                    <div className="mb-4">
+                      <div className="text-xs font-semibold text-green-400 mb-2">
+                        Tags on this performer in this {clipId ? 'clip' : 'scene'}:
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                        {contextTagObjects.map((tag) => (
+                          <span
+                            key={tag.id}
+                            className="px-3 py-1 text-sm rounded-full bg-green-700 text-green-100"
+                            title="This tag is applied to the performer in this specific context"
+                          >
+                            ✓ {tag.name}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  
+                  {/* Performer's general tags */}
+                  {performer.tags && performer.tags.length > 0 ? (
+                    <div>
+                      <div className="text-xs font-semibold text-gray-400 mb-2">
+                        General performer tags:
+                      </div>
                   <div className="flex flex-wrap gap-2">
                     {performer.tags.map((tag) => {
-                      const isOnClipPerformer = clipPerformerTags.includes(tag.id);
+                      const isOnPerformer = performerTags.includes(tag.id);
                       const isAdding = addingTag === tag.id;
+                      const hasContext = clipId || sceneId;
                       
                       // Color coding:
-                      // Green = already on this clip-performer combination
-                      // Blue = available to add (only if clipId provided)
-                      // Purple = not clickable (no clipId)
-                      const colorClass = isOnClipPerformer
+                      // Green = already on this performer combination
+                      // Blue = available to add (only if clipId or sceneId provided)
+                      // Purple = not clickable (no context)
+                      const colorClass = isOnPerformer
                         ? 'bg-green-700 text-green-100'
-                        : clipId
+                        : hasContext
                         ? 'bg-blue-700 text-blue-100 hover:bg-blue-600 cursor-pointer'
                         : 'bg-purple-900 text-purple-200';
                       
@@ -343,15 +496,15 @@ const StashPerformerOverlay = ({ performerId, sceneDate, clipId, onClose }) => {
                       return (
                         <button
                           key={tag.id}
-                          onClick={() => clipId && !isOnClipPerformer && handleTagClick(tag.id, tag.name)}
-                          disabled={isAdding || !clipId || isOnClipPerformer}
-                          className={`px-3 py-1 text-sm rounded-full transition-colors ${colorClass} ${opacityClass} ${!clipId || isOnClipPerformer ? 'cursor-default' : ''}`}
+                          onClick={() => hasContext && !isOnPerformer && handleTagClick(tag.id, tag.name)}
+                          disabled={isAdding || !hasContext || isOnPerformer}
+                          className={`px-3 py-1 text-sm rounded-full transition-colors ${colorClass} ${opacityClass} ${!hasContext || isOnPerformer ? 'cursor-default' : ''}`}
                           title={
-                            isOnClipPerformer
-                              ? 'Already added to this performer in this clip'
-                              : clipId
-                              ? 'Click to add tag to this performer in this clip'
-                              : 'Clip ID not available'
+                            isOnPerformer
+                              ? `Already added to this performer in this ${clipId ? 'clip' : 'scene'}`
+                              : hasContext
+                              ? `Click to add tag to this performer in this ${clipId ? 'clip' : 'scene'}`
+                              : 'Context not available'
                           }
                         >
                           {isAdding ? '...' : tag.name}
@@ -359,6 +512,12 @@ const StashPerformerOverlay = ({ performerId, sceneDate, clipId, onClose }) => {
                       );
                     })}
                   </div>
+                    </div>
+                  ) : (contextTagObjects.length === 0 && (
+                    <div className="text-sm text-gray-400">
+                      No tags associated with this performer. Click "+ Add Tags" to add tags to this {clipId ? 'clip' : 'scene'}.
+                    </div>
+                  ))}
                 </div>
               )}
 
@@ -424,6 +583,17 @@ const StashPerformerOverlay = ({ performerId, sceneDate, clipId, onClose }) => {
           </button>
         </div>
       </div>
+
+      {/* Tag Selector Modal */}
+      {showTagSelector && (
+        <StashPerformerTagSelector
+          performerId={performerId}
+          clipId={clipId}
+          sceneId={sceneId}
+          onClose={() => setShowTagSelector(false)}
+          onTagsAdded={handleTagsAdded}
+        />
+      )}
     </div>
   );
 };
@@ -432,6 +602,7 @@ StashPerformerOverlay.propTypes = {
   performerId: PropTypes.string.isRequired,
   sceneDate: PropTypes.string,
   clipId: PropTypes.number,
+  sceneId: PropTypes.string,
   onClose: PropTypes.func.isRequired,
 };
 

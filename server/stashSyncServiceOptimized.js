@@ -4,12 +4,19 @@ if (process.env.NODE_ENV !== 'production') {
 }
 const fetch = require('node-fetch');
 const prisma = require('./prismaClient'); // Use shared Prisma client
+const PerformerTagMappingService = require('./services/performerTagMappingService');
 
 class StashSyncServiceOptimized {
   constructor() {
     // Initialize with null, will be loaded from database when needed
     this.stashUrl = null;
     this.stashApiKey = null;
+    
+    // Initialize tag mapping service for performer attributes
+    this.tagMappingService = new PerformerTagMappingService(
+      // Pass GraphQL client function
+      (query, variables) => this.makeGraphQLRequestWithRetry(query, variables)
+    );
     
     // Phase 2: Memory caching for sync performance
     this.syncCache = {
@@ -582,6 +589,8 @@ class StashSyncServiceOptimized {
             weight
             measurements
             fake_tits
+            penis_length
+            circumcised
             career_length
             tattoos
             piercings
@@ -626,12 +635,36 @@ class StashSyncServiceOptimized {
         return { performers: [], hasMore: false, totalCount: count };
       }
       
+      // Filter out performers with 0 scenes first
+      const validPerformers = performers.filter(performer => performer.scene_count > 0);
+      
+      // Phase 1: Process ethnicity tag mapping for all performers BEFORE transaction
+      console.log('🏷️  Mapping performer ethnicities to tags...');
+      const ethnicityTagMap = new Map(); // performerId -> tagId
+      
+      for (const performer of validPerformers) {
+        if (performer.ethnicity) {
+          try {
+            const ethnicityTag = await this.tagMappingService.findOrCreateTag(
+              performer.ethnicity,
+              'Race' // Parent tag name
+            );
+            
+            if (ethnicityTag) {
+              ethnicityTagMap.set(performer.id, ethnicityTag.id);
+            }
+          } catch (error) {
+            console.warn(`⚠️  Failed to map ethnicity for performer ${performer.name}:`, error.message);
+          }
+        }
+      }
+      
+      console.log(`✅ Mapped ${ethnicityTagMap.size} ethnicities to tags`);
+      
       // Phase 2: Use database transaction
       const syncedPerformers = await prisma.$transaction(async (tx) => {
         console.log('🔄 Starting performer batch transaction...');
         
-        // Filter out performers with 0 scenes and prepare batch data
-        const validPerformers = performers.filter(performer => performer.scene_count > 0);
         const performerData = [];
         const allTagRelations = [];
         
@@ -649,12 +682,15 @@ class StashSyncServiceOptimized {
             weight: (typeof performer.weight === 'number') ? `${performer.weight}` : (performer.weight || null),
             gender: performer.gender || null,
             details: performer.details || null,
-            ethnicity: performer.ethnicity || null,
+            ethnicity: performer.ethnicity || null, // Keep for backward compatibility
+            ethnicityTagId: ethnicityTagMap.get(performer.id) || null, // NEW: Link to tag
             country: performer.country || null,
             eye_color: performer.eye_color || null,
             height: performer.height_cm ? `${performer.height_cm} cm` : null,
             measurements: performer.measurements || null,
             fake_tits: performer.fake_tits || null,
+            penis_length: (typeof performer.penis_length === 'number') ? `${performer.penis_length} cm` : null,
+            circumcised: performer.circumcised || null,
             career_length: performer.career_length || null,
             tattoos: performer.tattoos || null,
             piercings: performer.piercings || null,

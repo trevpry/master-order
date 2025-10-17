@@ -899,7 +899,8 @@ model StashPerformer {
   ignore_auto_tag Boolean                 @default(false)
   birthdate       String?
   death_date      String?
-  ethnicity       String?
+  ethnicity       String? // Deprecated - use ethnicityTag relation instead
+  ethnicityTagId  String? // FK to StashTag (child of "Race" parent tag)
   country         String?
   eye_color       String?
   hair_color      String?
@@ -907,6 +908,8 @@ model StashPerformer {
   weight          String?
   measurements    String?
   fake_tits       String?
+  penis_length    String?
+  circumcised     String?
   career_length   String?
   tattoos         String?
   piercings       String?
@@ -920,6 +923,7 @@ model StashPerformer {
   createdAt       DateTime                @default(now())
   updatedAt       DateTime                @updatedAt
   lastSyncedAt    DateTime                @default(now())
+  ethnicityTag    StashTag?               @relation("PerformerEthnicityTag", fields: [ethnicityTagId], references: [id], onDelete: SetNull)
   galleries       StashGalleryPerformer[]
   images          StashImagePerformer[]
   tags            StashPerformerTag[]
@@ -963,6 +967,9 @@ model StashTag {
   clips         StashClipTag[]
   clipPerformers StashClipPerformerTag[]
   scenePerformers StashScenePerformerTag[]
+  
+  // Performer attribute relations
+  performersWithEthnicity StashPerformer[] @relation("PerformerEthnicityTag")
   
   // Tag hierarchy relations
   parentTags    StashTagHierarchy[] @relation("ChildTag")
