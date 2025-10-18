@@ -41,6 +41,23 @@ export default function PerformerDetail() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [mergedTags, setMergedTags] = useState([]);
+  const [stashUrl, setStashUrl] = useState(null);
+
+  // Fetch Stash URL from settings
+  useEffect(() => {
+    const fetchStashUrl = async () => {
+      try {
+        const res = await fetch(`${config.apiBaseUrl}/api/stash/check-connection`);
+        const json = await res.json();
+        if (json.connected && json.stashUrl) {
+          setStashUrl(json.stashUrl);
+        }
+      } catch (error) {
+        console.error('Failed to fetch Stash URL:', error);
+      }
+    };
+    fetchStashUrl();
+  }, []);
 
   useEffect(() => {
     const fetchPerformer = async () => {
@@ -182,6 +199,18 @@ export default function PerformerDetail() {
               {data.twitter && (
                 <a href={data.twitter} target="_blank" rel="noopener noreferrer" className="social-link-inline">
                   🐦
+                </a>
+              )}
+              {/* Stash Link */}
+              {stashUrl && (
+                <a 
+                  href={`${stashUrl}/performers/${data.id}`} 
+                  target="_blank" 
+                  rel="noopener noreferrer" 
+                  className="social-link-inline"
+                  title="View in Stash"
+                >
+                  📊
                 </a>
               )}
             </div>

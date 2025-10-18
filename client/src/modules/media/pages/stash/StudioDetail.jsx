@@ -21,6 +21,16 @@ export default function StudioDetail() {
     perPage: 20
   });
   const [filterNoPerformers, setFilterNoPerformers] = useState(false);
+  
+  // GEVI URL state
+  const [showGeviUrlModal, setShowGeviUrlModal] = useState(false);
+  const [geviUrlInput, setGeviUrlInput] = useState('');
+  const [isSavingGeviUrl, setIsSavingGeviUrl] = useState(false);
+  
+  // Notes state
+  const [showNotesModal, setShowNotesModal] = useState(false);
+  const [notesInput, setNotesInput] = useState('');
+  const [isSavingNotes, setIsSavingNotes] = useState(false);
 
   useEffect(() => {
     const fetchStudio = async () => {
@@ -79,6 +89,86 @@ export default function StudioDetail() {
     }
   };
 
+  const handleSaveGeviUrl = async () => {
+    if (!geviUrlInput.trim()) {
+      alert('Please enter a GEVI URL');
+      return;
+    }
+
+    // Basic validation for GEVI URL format
+    if (!geviUrlInput.includes('gayeroticvideoindex.com')) {
+      if (!confirm('This doesn\'t look like a GEVI URL. Save anyway?')) {
+        return;
+      }
+    }
+
+    setIsSavingGeviUrl(true);
+
+    try {
+      const response = await fetch(`${config.apiBaseUrl}/api/stash/studios/${id}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          geviUrl: geviUrlInput
+        })
+      });
+
+      const result = await response.json();
+      
+      if (result.success) {
+        setData(prevData => ({
+          ...prevData,
+          geviUrl: geviUrlInput
+        }));
+        setShowGeviUrlModal(false);
+        alert('GEVI URL saved successfully!');
+      } else {
+        alert(`Failed to save GEVI URL: ${result.error || 'Unknown error'}`);
+      }
+    } catch (error) {
+      console.error('Error saving GEVI URL:', error);
+      alert('Failed to save GEVI URL');
+    } finally {
+      setIsSavingGeviUrl(false);
+    }
+  };
+
+  const handleSaveNotes = async () => {
+    setIsSavingNotes(true);
+
+    try {
+      const response = await fetch(`${config.apiBaseUrl}/api/stash/studios/${id}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          notes: notesInput
+        })
+      });
+
+      const result = await response.json();
+      
+      if (result.success) {
+        setData(prevData => ({
+          ...prevData,
+          notes: notesInput
+        }));
+        setShowNotesModal(false);
+        alert('Notes saved successfully!');
+      } else {
+        alert(`Failed to save notes: ${result.error || 'Unknown error'}`);
+      }
+    } catch (error) {
+      console.error('Error saving notes:', error);
+      alert('Failed to save notes');
+    } finally {
+      setIsSavingNotes(false);
+    }
+  };
+
   if (loading) return <div className="page pad">Loading studio...</div>;
   if (error) return <div className="page pad">Error: {error}</div>;
   if (!data) return null;
@@ -109,6 +199,58 @@ export default function StudioDetail() {
                 </a>
               </p>
             )}
+            {data.geviUrl && (
+              <p>
+                <a href={data.geviUrl} target="_blank" rel="noopener noreferrer" className="studio-link">
+                  🌐 View on GEVI
+                </a>
+              </p>
+            )}
+            
+            <button 
+              onClick={() => {
+                setGeviUrlInput(data?.geviUrl || '');
+                setShowGeviUrlModal(true);
+              }}
+              className="btn-secondary"
+              style={{ marginTop: '10px' }}
+              title={data?.geviUrl ? "Update GEVI URL" : "Set GEVI URL"}
+            >
+              {data?.geviUrl ? '🔗 Update GEVI URL' : '🔗 Set GEVI URL'}
+            </button>
+            
+            <button 
+              onClick={() => {
+                setNotesInput(data?.notes || '');
+                setShowNotesModal(true);
+              }}
+              className="btn-secondary"
+              style={{ marginTop: '10px', marginLeft: '10px' }}
+              title={data?.notes ? "Edit Notes" : "Add Notes"}
+            >
+              {data?.notes ? '📝 Edit Notes' : '📝 Add Notes'}
+            </button>
+            
+            {data.notes && (
+              <div className="studio-notes" style={{ 
+                marginTop: '15px', 
+                padding: '12px', 
+                backgroundColor: '#f9fafb', 
+                borderRadius: '6px',
+                borderLeft: '3px solid #8b5cf6'
+              }}>
+                <strong style={{ color: '#6b7280' }}>📝 Notes:</strong>
+                <p style={{ 
+                  marginTop: '8px', 
+                  whiteSpace: 'pre-wrap', 
+                  color: '#374151',
+                  lineHeight: '1.6'
+                }}>
+                  {data.notes}
+                </p>
+              </div>
+            )}
+            
             {data.details && <p className="studio-description">{data.details}</p>}
             
             <div className="studio-stats-detail">
@@ -175,6 +317,98 @@ export default function StudioDetail() {
           </>
         )}
       </div>
+
+      {/* Set/Update GEVI URL Modal */}
+      {showGeviUrlModal && (
+        <div className="modal-overlay" onClick={() => setShowGeviUrlModal(false)}>
+          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+            <h3>🔗 {data?.geviUrl ? 'Update' : 'Set'} GEVI Studio URL</h3>
+            
+            <div className="scrape-input-section">
+              <label htmlFor="gevi-url-input">GEVI Studio URL:</label>
+              <input
+                id="gevi-url-input"
+                type="text"
+                value={geviUrlInput}
+                onChange={(e) => setGeviUrlInput(e.target.value)}
+                placeholder="https://gayeroticvideoindex.com/studio/..."
+                disabled={isSavingGeviUrl}
+                className="scrape-url-input"
+              />
+              <p style={{ fontSize: '0.9rem', color: '#666', marginTop: '0.5rem' }}>
+                Enter the GEVI studio URL. This will be saved for quick reference.
+              </p>
+            </div>
+
+            <div className="modal-actions">
+              <button 
+                className="btn-accept" 
+                onClick={handleSaveGeviUrl}
+                disabled={isSavingGeviUrl || !geviUrlInput.trim()}
+              >
+                {isSavingGeviUrl ? '⏳ Saving...' : '💾 Save URL'}
+              </button>
+              <button 
+                className="btn-cancel" 
+                onClick={() => setShowGeviUrlModal(false)}
+                disabled={isSavingGeviUrl}
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Edit Notes Modal */}
+      {showNotesModal && (
+        <div className="modal-overlay" onClick={() => setShowNotesModal(false)}>
+          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+            <h3>📝 {data?.notes ? 'Edit' : 'Add'} Studio Notes</h3>
+            
+            <div className="scrape-input-section">
+              <label htmlFor="notes-input">Notes:</label>
+              <textarea
+                id="notes-input"
+                value={notesInput}
+                onChange={(e) => setNotesInput(e.target.value)}
+                placeholder="Enter notes about this studio..."
+                disabled={isSavingNotes}
+                rows={8}
+                style={{
+                  width: '100%',
+                  padding: '10px',
+                  border: '1px solid #ddd',
+                  borderRadius: '4px',
+                  fontSize: '14px',
+                  fontFamily: 'inherit',
+                  resize: 'vertical'
+                }}
+              />
+              <p style={{ fontSize: '0.9rem', color: '#666', marginTop: '0.5rem' }}>
+                Add any notes or information about this studio (contracts, preferences, etc.)
+              </p>
+            </div>
+
+            <div className="modal-actions">
+              <button 
+                className="btn-accept" 
+                onClick={handleSaveNotes}
+                disabled={isSavingNotes}
+              >
+                {isSavingNotes ? '⏳ Saving...' : '💾 Save Notes'}
+              </button>
+              <button 
+                className="btn-cancel" 
+                onClick={() => setShowNotesModal(false)}
+                disabled={isSavingNotes}
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

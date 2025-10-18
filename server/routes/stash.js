@@ -712,7 +712,19 @@ router.get('/scenes/:id', asyncHandler(async (req, res) => {
             tag: true
           }
         },
-        studioObject: true
+        studioObject: true,
+        groups: {
+          include: {
+            group: {
+              include: {
+                studio: true
+              }
+            }
+          },
+          orderBy: {
+            sceneIndex: 'asc'
+          }
+        }
       }
     });
     
@@ -739,11 +751,13 @@ router.get('/scenes/:id', asyncHandler(async (req, res) => {
       path: scene.path,
       duration: scene.duration,
       fileModTime: scene.fileModTime,
+      geviUrl: scene.geviUrl,
       studio: scene.studioObject ? { 
         id: scene.studioObject.id, 
         name: scene.studioObject.name,
         url: scene.studioObject.url,
-        image: scene.studioObject.image
+        image: scene.studioObject.image,
+        geviUrl: scene.studioObject.geviUrl
       } : scene.studio ? { name: scene.studio } : null,
       code: scene.code,
       director: scene.director,
@@ -794,6 +808,23 @@ router.get('/scenes/:id', asyncHandler(async (req, res) => {
         name: st.tag.name,
         description: st.tag.description,
         image: st.tag.image
+      })),
+      groups: scene.groups.map(groupWrapper => ({
+        sceneIndex: groupWrapper.sceneIndex,
+        group: {
+          id: groupWrapper.group.id,
+          name: groupWrapper.group.name,
+          date: groupWrapper.group.date,
+          rating: groupWrapper.group.rating,
+          duration: groupWrapper.group.duration,
+          director: groupWrapper.group.director,
+          studio: groupWrapper.group.studio ? {
+            id: groupWrapper.group.studio.id,
+            name: groupWrapper.group.studio.name
+          } : null,
+          front_image: groupWrapper.group.front_image,
+          back_image: groupWrapper.group.back_image
+        }
       }))
     };
     
@@ -806,7 +837,9 @@ router.get('/scenes/:id', asyncHandler(async (req, res) => {
 // POST /api/stash/scenes/:id/parse-filename - Parse filename to extract metadata
 router.post('/scenes/:id/parse-filename', asyncHandler(async (req, res) => {
   const { id } = req.params;
-  const { customFilename } = req.body;
+  const { customFilename, parseStudio = true, parseTitle = true, parsePerformers = true } = req.body;
+  
+  console.log(`🔍 [Parse Filename] Parse options: Studio=${parseStudio}, Title=${parseTitle}, Performers=${parsePerformers}`);
   
   const scene = await prisma.stashScene.findUnique({
     where: { id },
@@ -830,9 +863,12 @@ router.post('/scenes/:id/parse-filename', asyncHandler(async (req, res) => {
     nameWithoutExt = filename.replace(/\.[^/.]+$/, '');
   }
   
-  // Normalize filename: replace underscores with spaces, normalize separators
+  // Normalize filename: handle double underscores as performer separators, then replace single underscores with spaces
+  // Important: Preserve dashes in performer names (e.g., "Q-Tip")
   nameWithoutExt = nameWithoutExt
-    .replace(/_/g, ' ')                          // Replace underscores with spaces
+    .replace(/__/g, ' & ')                       // Replace double underscores with ampersand separator (performer delimiter)
+    .replace(/_-_/g, ' - ')                      // Replace _-_ pattern with dash separator (structure delimiter)
+    .replace(/_/g, ' ')                          // Replace remaining single underscores with spaces
     .replace(/\s+and\s+/gi, ' & ')               // Normalize "and" to "&"
     .replace(/\s*,\s*/g, ', ')                   // Normalize commas with consistent spacing
     .replace(/\s*&\s*/g, ' & ')                  // Normalize ampersands with consistent spacing
@@ -1078,14 +1114,15 @@ router.post('/scenes/:id/parse-filename', asyncHandler(async (req, res) => {
   const unmatchedPerformers = [];
   
   // Split filename by dash separators to detect structure
-  const parts = nameWithoutExt.split(/\s*[-]\s*/);
+  // Only split on " - " (space-dash-space) to preserve dashes in names like "Q-Tip"
+  const parts = nameWithoutExt.split(' - ');
   
   // Pattern 1: Studio - Performer(s) - Title (3 parts)
   if (parts.length === 3) {
     const [part1, part2, part3] = parts.map(p => p.trim());
     
-    // If we haven't found studio yet, first part might be studio
-    if (!studio) {
+    // If we haven't found studio yet and parsing studio is enabled, first part might be studio
+    if (!studio && parseStudio) {
       const studioMatch = findStudioInText(part1);
       if (studioMatch) {
         matchedStudio = studioMatch;
@@ -1095,45 +1132,55 @@ router.post('/scenes/:id/parse-filename', asyncHandler(async (req, res) => {
       }
     }
     
-    // Second part is performers - parse all of them
-    if (performers.length === 0) {
+    // Second part is performers - parse all of them if parsing performers is enabled
+    if (performers.length === 0 && parsePerformers) {
       addAllPerformerMatches(part2);
     }
     
-    // Third part is title
-    title = part3;
+    // Third part is title if parsing title is enabled
+    if (parseTitle) {
+      title = part3;
+    }
   }
   // Pattern 2: Studio - Performer(s) OR Performer(s) - Title (2 parts)
   else if (parts.length === 2) {
     const [part1, part2] = parts.map(p => p.trim());
     
-    // Check if first part is studio
-    const studioMatch = findStudioInText(part1);
-    if (studioMatch && !studio) {
+    // Check if first part is studio and parsing studio is enabled
+    const studioMatch = parseStudio ? findStudioInText(part1) : null;
+    if (studioMatch && !studio && parseStudio) {
       matchedStudio = studioMatch;
       studio = studioMatch.name;
       
-      // Second part is performers, generate title from them
-      if (performers.length === 0) {
+      // Second part could be performers or title
+      if (performers.length === 0 && parsePerformers) {
+        // Parse as performers, generate title from them
         addAllPerformerMatches(part2);
-        title = performers.join(' & ');
+        if (parseTitle) {
+          title = performers.join(' & ');
+        }
+      } else if (parseTitle) {
+        // Not parsing performers, so second part is the title
+        title = part2;
       }
     } else {
       // First part might be performers, second is title
-      if (performers.length === 0) {
+      if (performers.length === 0 && parsePerformers) {
         addAllPerformerMatches(part1);
       }
-      title = part2;
+      if (parseTitle) {
+        title = part2;
+      }
     }
   }
   // Single part - try to parse it as performers or studio
   else {
     // If we already found performers/studio globally, use those
     if (performers.length > 0 || studio) {
-      // Generate title from performers if no title yet
-      if (!title && performers.length > 0) {
+      // Generate title from performers if no title yet and parsing title is enabled
+      if (!title && performers.length > 0 && parseTitle) {
         title = performers.join(' & ');
-      } else if (!title) {
+      } else if (!title && parseTitle) {
         title = nameWithoutExt;
       }
     } else {
@@ -1142,20 +1189,22 @@ router.post('/scenes/:id/parse-filename', asyncHandler(async (req, res) => {
       // 2. Single studio name
       // 3. Just a title
       
-      // Try to parse as multiple performers (this will split by & or ,)
-      const foundCount = addAllPerformerMatches(nameWithoutExt);
+      // Try to parse as multiple performers (this will split by & or ,) if parsing performers is enabled
+      const foundCount = parsePerformers ? addAllPerformerMatches(nameWithoutExt) : 0;
       
-      if (foundCount > 0) {
+      if (foundCount > 0 && parseTitle) {
         // Found performers - generate title from them
         title = performers.join(' & ');
-      } else {
-        // No performers found - try as studio
-        const studioMatch = findStudioInText(nameWithoutExt);
-        if (studioMatch) {
+      } else if (foundCount === 0) {
+        // No performers found - try as studio if parsing studio is enabled
+        const studioMatch = parseStudio ? findStudioInText(nameWithoutExt) : null;
+        if (studioMatch && parseStudio) {
           matchedStudio = studioMatch;
           studio = studioMatch.name;
-          title = studio;
-        } else {
+          if (parseTitle) {
+            title = studio;
+          }
+        } else if (parseTitle) {
           // Final fallback - use whole name as title
           title = nameWithoutExt;
         }
@@ -1171,17 +1220,17 @@ router.post('/scenes/:id/parse-filename', asyncHandler(async (req, res) => {
   
   sendSuccess(res, {
     parsed: {
-      studio: studio,
-      performers: performers,
-      title: title
+      studio: parseStudio ? studio : null,
+      performers: parsePerformers ? performers : [],
+      title: parseTitle ? title : null
     },
     matched: {
-      studio: matchedStudio ? { id: matchedStudio.id, name: matchedStudio.name } : null,
-      performers: matchedPerformers
+      studio: parseStudio && matchedStudio ? { id: matchedStudio.id, name: matchedStudio.name } : null,
+      performers: parsePerformers ? matchedPerformers : []
     },
     unmatched: {
-      studio: unmatchedStudio,
-      performers: unmatchedPerformers
+      studio: parseStudio ? unmatchedStudio : null,
+      performers: parsePerformers ? unmatchedPerformers : []
     }
   });
 }));
@@ -1328,6 +1377,458 @@ router.post('/performers/create', asyncHandler(async (req, res) => {
   }
 }));
 
+// POST /api/stash/groups/create - Create a new group/movie in both Stash and local DB
+router.post('/groups/create', asyncHandler(async (req, res) => {
+  console.log('🎬 [Create Group] Request received');
+  console.log('   - Body:', JSON.stringify(req.body, null, 2));
+  
+  const { 
+    name, 
+    aliases, 
+    duration, 
+    date, 
+    rating, 
+    director, 
+    synopsis, 
+    studioId,
+    front_image,
+    back_image,
+    url,
+    geviUrl
+  } = req.body;
+
+  // Validate required fields
+  validateRequiredFieldsDirect(req.body, ['name']);
+
+  console.log('🎬 [Create Group] Creating group:', name);
+
+  // Initialize sync service if not already done
+  if (!stashSyncService && !stashSyncServiceOptimized) {
+    await initializeStashSyncService();
+  }
+
+  // Ensure sync service is available
+  const syncService = getActiveSyncService();
+  if (!syncService) {
+    console.error('   - Sync service not initialized');
+    return sendServerError(res, 'Stash sync service not initialized');
+  }
+
+  // Ensure Stash URL is configured
+  try {
+    await syncService.ensureConfigLoaded();
+  } catch (error) {
+    console.error('   - Stash not configured:', error.message);
+    return sendServerError(res, 'Stash server not configured. Please configure in Settings.');
+  }
+
+  try {
+    // First, create group in Stash via GraphQL
+    const createMutation = `
+      mutation GroupCreate($input: GroupCreateInput!) {
+        groupCreate(input: $input) {
+          id
+          name
+          aliases
+          duration
+          date
+          rating100
+          director
+          synopsis
+          studio {
+            id
+            name
+          }
+          urls
+          front_image_path
+          back_image_path
+        }
+      }
+    `;
+
+    const variables = {
+      input: {
+        name: name,
+        aliases: aliases || null,
+        duration: duration ? parseInt(duration) : null,
+        date: date || null,
+        rating100: rating ? parseInt(rating) : null,
+        director: director || null,
+        synopsis: synopsis || null,
+        studio_id: studioId || null,
+        urls: url ? [url] : []
+      }
+    };
+
+    console.log('   - Creating in Stash with variables:', JSON.stringify(variables, null, 2));
+
+    const data = await syncService.makeGraphQLRequest(createMutation, variables);
+
+    console.log('   - GraphQL response data:', JSON.stringify(data, null, 2));
+
+    if (!data || !data.groupCreate) {
+      console.error('   - Failed to create group in Stash. Response:', data);
+      return sendServerError(res, 'Failed to create group in Stash - no data returned');
+    }
+
+    const stashGroup = data.groupCreate;
+    console.log('   - Created in Stash:', stashGroup.id, stashGroup.name);
+
+    // Now create in local database
+    const localGroup = await prisma.stashGroup.create({
+      data: {
+        id: stashGroup.id, // Use Stash ID as primary key
+        name: stashGroup.name,
+        aliases: stashGroup.aliases || null,
+        duration: stashGroup.duration || null,
+        date: stashGroup.date || null,
+        rating: stashGroup.rating100 || null,
+        director: stashGroup.director || null,
+        synopsis: stashGroup.synopsis || null,
+        studioId: stashGroup.studio?.id || studioId || null,
+        url: url || (stashGroup.urls && stashGroup.urls.length > 0 ? stashGroup.urls[0] : null),
+        geviUrl: geviUrl || null, // Store GEVI URL
+        frontImage: front_image || stashGroup.front_image_path || null,
+        backImage: back_image || stashGroup.back_image_path || null,
+        createdAt: new Date(),
+        updatedAt: new Date()
+      }
+    });
+
+    console.log('   - Created in local DB:', localGroup.id, localGroup.name);
+
+    // Return group with studio info if available
+    const groupWithStudio = await prisma.stashGroup.findUnique({
+      where: { id: localGroup.id },
+      include: {
+        studio: true
+      }
+    });
+
+    sendSuccess(res, {
+      group: groupWithStudio,
+      message: `Group "${name}" created successfully`
+    });
+
+  } catch (error) {
+    console.error('❌ [Create Group] Error:', error);
+    console.error('   - Error message:', error.message);
+    console.error('   - Error stack:', error.stack);
+    return sendServerError(res, error.message || 'Failed to create group');
+  }
+}));
+
+// POST /api/stash/groups/:id/add-scene - Add a scene to an existing group/movie
+router.post('/groups/:id/add-scene', asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  const { sceneId, sceneIndex = 0 } = req.body;
+
+  console.log(`\n=== ADD SCENE TO GROUP ===`);
+  console.log(`Group ID: ${id}`);
+  console.log(`Scene ID: ${sceneId}`);
+  console.log(`Scene Index: ${sceneIndex}`);
+
+  validateRequiredFieldsDirect(req.body, ['sceneId']);
+
+  try {
+    // First, verify the group exists
+    const group = await prisma.stashGroup.findUnique({
+      where: { id: id }
+    });
+
+    if (!group) {
+      return sendBadRequest(res, `Group with ID ${id} not found`);
+    }
+
+    // Verify the scene exists
+    const scene = await prisma.stashScene.findUnique({
+      where: { id: sceneId }
+    });
+
+    if (!scene) {
+      return sendBadRequest(res, `Scene with ID ${sceneId} not found`);
+    }
+
+    // Check if the relationship already exists
+    const existingRelation = await prisma.stashGroupScene.findFirst({
+      where: {
+        groupId: id,
+        sceneId: sceneId
+      }
+    });
+
+    if (existingRelation) {
+      return sendBadRequest(res, 'Scene is already linked to this group');
+    }
+
+    // Create the relationship in the database
+    const groupScene = await prisma.stashGroupScene.create({
+      data: {
+        groupId: id,
+        sceneId: sceneId,
+        sceneIndex: parseInt(sceneIndex)
+      }
+    });
+
+    console.log('✅ Scene linked to group in database');
+
+    // Also update in Stash via GraphQL if we have the IDs
+    if (group.id && scene.id) {
+      const mutation = `
+        mutation UpdateGroup($input: GroupUpdateInput!) {
+          groupUpdate(input: $input) {
+            id
+          }
+        }
+      `;
+
+      // First get the existing scene IDs
+      const existingScenes = await prisma.stashGroupScene.findMany({
+        where: { groupId: id },
+        include: { scene: true }
+      });
+
+      const sceneIds = existingScenes
+        .map(gs => gs.scene.id)
+        .filter(sid => sid); // Filter out nulls
+
+      const variables = {
+        input: {
+          id: group.id,
+          scene_ids: sceneIds
+        }
+      };
+
+      try {
+        await makeStashGraphQLRequest(mutation, variables);
+        console.log('✅ Scene linked to group in Stash');
+      } catch (stashError) {
+        console.error('⚠️  Warning: Failed to update Stash, but database was updated:', stashError.message);
+        // Continue anyway since database update succeeded
+      }
+    }
+
+    sendSuccess(res, {
+      groupScene,
+      message: 'Scene linked to group successfully'
+    });
+
+  } catch (error) {
+    console.error('❌ [Add Scene to Group] Error:', error);
+    console.error('   - Error message:', error.message);
+    console.error('   - Error stack:', error.stack);
+    return sendServerError(res, error.message || 'Failed to add scene to group');
+  }
+}));
+
+// POST /api/stash/groups/:id/search-gevi - Search GEVI for movies by group title
+router.post('/groups/:id/search-gevi', asyncHandler(async (req, res) => {
+  const { id } = req.params;
+
+  console.log('🔍 [GEVI Movie Search] Searching for group:', id);
+
+  // Get the group from database
+  const group = await prisma.stashGroup.findUnique({
+    where: { id },
+    include: {
+      studio: true
+    }
+  });
+
+  if (!group) {
+    return sendBadRequest(res, 'Group not found');
+  }
+
+  if (!group.name || !group.name.trim()) {
+    return sendBadRequest(res, 'Group has no title to search');
+  }
+
+  console.log('   - Group title:', group.name);
+
+  try {
+    // Search GEVI for movies matching the group title
+    const movies = await geviScraper.searchMovie(group.name);
+
+    if (!movies || movies.length === 0) {
+      console.log('   - No movies found');
+      return sendSuccess(res, {
+        group: {
+          id: group.id,
+          name: group.name
+        },
+        movies: []
+      });
+    }
+
+    console.log(`   - Found ${movies.length} movies`);
+    
+    sendSuccess(res, {
+      group: {
+        id: group.id,
+        name: group.name
+      },
+      movies: movies
+    });
+
+  } catch (error) {
+    console.error('❌ Error searching GEVI:', error);
+    return sendServerError(res, error.message || 'Failed to search GEVI');
+  }
+}));
+
+// PUT /api/stash/groups/:id - Update group with scraped GEVI metadata
+router.put('/groups/:id', asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  const { name, date, duration, director, synopsis, studio, front_image, back_image, geviUrl } = req.body;
+
+  console.log('📝 [Group Update] Updating group:', id);
+
+  // Initialize sync service if not already done
+  if (!stashSyncService && !stashSyncServiceOptimized) {
+    await initializeStashSyncService();
+  }
+
+  // Ensure sync service is available
+  const syncService = getActiveSyncService();
+  if (!syncService) {
+    console.error('   - Sync service not initialized');
+    return sendServerError(res, 'Stash sync service not initialized');
+  }
+
+  // Ensure Stash URL is configured
+  try {
+    await syncService.ensureConfigLoaded();
+  } catch (error) {
+    console.error('   - Stash not configured:', error.message);
+    return sendServerError(res, 'Stash server not configured. Please configure in Settings.');
+  }
+
+  // Get the group from database
+  const group = await prisma.stashGroup.findUnique({
+    where: { id }
+  });
+
+  if (!group) {
+    return sendBadRequest(res, 'Group not found');
+  }
+
+  try {
+    // Prepare update data for Stash GraphQL
+    const updateInput = {
+      id: id,
+    };
+
+    if (name) updateInput.name = name;
+    if (date) updateInput.date = date;
+    if (duration) updateInput.duration = parseInt(duration, 10);
+    if (director) updateInput.director = director;
+    if (synopsis) updateInput.synopsis = synopsis;
+    if (front_image) updateInput.front_image = front_image;
+    if (back_image) updateInput.back_image = back_image;
+
+    // Handle studio
+    if (studio) {
+      const studioName = typeof studio === 'string' ? studio : studio.name;
+      if (studioName && studioName.trim()) {
+        // Find or create studio in Stash
+        const existingStudio = await prisma.stashStudio.findFirst({
+          where: { name: studioName }
+        });
+
+        if (existingStudio) {
+          updateInput.studio_id = existingStudio.id;
+        } else {
+          // Create new studio in Stash
+        const createStudioMutation = `
+          mutation StudioCreate($input: StudioCreateInput!) {
+            studioCreate(input: $input) {
+              id
+              name
+            }
+          }
+        `;
+
+        const studioData = await syncService.makeGraphQLRequest(createStudioMutation, {
+          input: { name: studioName }
+        });
+
+        if (studioData && studioData.studioCreate) {
+          const newStudio = studioData.studioCreate;
+          updateInput.studio_id = newStudio.id;            // Save to local database
+            await prisma.stashStudio.upsert({
+              where: { id: newStudio.id },
+              update: { name: newStudio.name },
+              create: { id: newStudio.id, name: newStudio.name }
+            });
+          }
+        }
+      }
+    }
+
+    // Update group in Stash via GraphQL
+    const updateMutation = `
+      mutation MovieUpdate($input: MovieUpdateInput!) {
+        movieUpdate(input: $input) {
+          id
+          name
+          date
+          duration
+          director
+          synopsis
+          front_image_path
+          back_image_path
+          studio {
+            id
+            name
+          }
+        }
+      }
+    `;
+
+    const stashData = await syncService.makeGraphQLRequest(updateMutation, {
+      input: updateInput
+    });
+
+    if (!stashData || !stashData.movieUpdate) {
+      console.error('❌ Failed to update group in Stash. Response:', stashData);
+      return sendServerError(res, 'Failed to update group in Stash');
+    }
+
+    const updatedMovie = stashData.movieUpdate;
+
+    // Update local database
+    const dbUpdateData = {};
+    if (name) dbUpdateData.name = name;
+    if (date) dbUpdateData.date = date;
+    if (duration) dbUpdateData.duration = parseInt(duration, 10);
+    if (director) dbUpdateData.director = director;
+    if (synopsis) dbUpdateData.synopsis = synopsis;
+    if (front_image) dbUpdateData.frontImage = front_image;
+    if (back_image) dbUpdateData.backImage = back_image;
+    if (geviUrl) dbUpdateData.geviUrl = geviUrl;
+    if (updatedMovie.studio) dbUpdateData.studioId = updatedMovie.studio.id;
+
+    const updatedGroup = await prisma.stashGroup.update({
+      where: { id },
+      data: dbUpdateData,
+      include: {
+        studio: true
+      }
+    });
+
+    console.log('✅ Group updated successfully:', updatedGroup.name);
+
+    sendSuccess(res, {
+      group: updatedGroup,
+      stashMovie: updatedMovie
+    });
+
+  } catch (error) {
+    console.error('❌ Error updating group:', error);
+    return sendServerError(res, error.message || 'Failed to update group');
+  }
+}));
+
 // POST /api/stash/scenes/:id/scrape-gevi - Scrape scene metadata from GEVI
 router.post('/scenes/:id/scrape-gevi', asyncHandler(async (req, res) => {
   const { id } = req.params;
@@ -1352,9 +1853,10 @@ router.post('/scenes/:id/scrape-gevi', asyncHandler(async (req, res) => {
 
   console.log('   - Scraped metadata:', JSON.stringify(metadata, null, 2));
 
-  // Match performers and studio against database
+  // Match performers, studio, and movies/groups against database
   let matchedPerformers = { matched: [], unmatched: [] };
   let matchedStudio = null;
+  let matchedGroups = { matched: [], unmatched: [] };
 
   if (metadata.performers && metadata.performers.length > 0) {
     matchedPerformers = await geviScraper.matchPerformers(metadata.performers, prisma);
@@ -1364,24 +1866,197 @@ router.post('/scenes/:id/scrape-gevi', asyncHandler(async (req, res) => {
     matchedStudio = await geviScraper.matchStudio(metadata.studio, prisma);
   }
 
+  if (metadata.movies && metadata.movies.length > 0) {
+    matchedGroups = await geviScraper.matchGroups(metadata.movies, prisma);
+  }
+
   console.log('   - Matched performers:', matchedPerformers.matched.length);
   console.log('   - Unmatched performers:', matchedPerformers.unmatched);
   console.log('   - Matched studio:', matchedStudio ? matchedStudio.name : 'none');
+  console.log('   - Matched groups:', matchedGroups.matched.length);
+  console.log('   - Unmatched groups:', matchedGroups.unmatched);
+
+  // Proxy the image URL if present
+  if (metadata.image) {
+    const originalImage = metadata.image;
+    metadata.image = `/api/stash/gevi-image-proxy?url=${encodeURIComponent(originalImage)}`;
+    console.log('   - Proxied image URL:', metadata.image);
+  }
 
   // Return scraped data with matches
   sendSuccess(res, {
     scraped: metadata,
     matched: {
       studio: matchedStudio,
-      performers: matchedPerformers.matched
+      performers: matchedPerformers.matched,
+      groups: matchedGroups.matched
     },
     unmatched: {
       studio: matchedStudio ? null : metadata.studio,
-      performers: matchedPerformers.unmatched
+      performers: matchedPerformers.unmatched,
+      groups: matchedGroups.unmatched
     },
     source: 'GEVI',
     sourceUrl: url
   });
+}));
+
+// POST /api/stash/gevi/movie - Fetch full movie details from GEVI URL
+router.post('/gevi/movie', asyncHandler(async (req, res) => {
+  const { url, groupId } = req.body;
+
+  console.log('🎬 [GEVI Movie] Fetching movie details from:', url);
+
+  // Validate URL provided
+  if (!url || !url.trim()) {
+    return sendBadRequest(res, 'URL is required');
+  }
+
+  // Fetch movie details
+  const movie = await geviScraper.movieFromUrl(url);
+
+  if (!movie) {
+    return sendServerError(res, 'Failed to fetch movie details from GEVI');
+  }
+
+  console.log('   - Movie details fetched:', movie.name);
+
+  // If groupId is provided, try to match scenes
+  let matchedScenes = [];
+  console.log(`   - groupId provided: ${groupId}`);
+  console.log(`   - movie.scenes length: ${movie.scenes?.length}`);
+  
+  if (groupId && movie.scenes && movie.scenes.length > 0) {
+    console.log(`   - Attempting to match scenes for group ${groupId}`);
+    
+    // Fetch scenes associated with this group
+    const groupScenes = await prisma.stashGroupScene.findMany({
+      where: { groupId },
+      include: {
+        scene: {
+          include: {
+            performers: {
+              include: {
+                performer: true
+              }
+            }
+          }
+        }
+      }
+    });
+
+    console.log(`   - Found ${groupScenes.length} scenes in database for this group`);
+
+    if (groupScenes.length > 0) {
+      const dbScenes = groupScenes.map(gs => gs.scene);
+      matchedScenes = await geviScraper.matchMovieScenes(movie.scenes, dbScenes);
+      console.log(`   - Matched ${matchedScenes.length} scenes`);
+      console.log(`   - Matched scenes details:`, JSON.stringify(matchedScenes, null, 2));
+      
+      // Update matched scenes with GEVI details if they don't have any
+      for (const match of matchedScenes) {
+        console.log(`\n   🔄 Processing matched scene ${match.sceneId}`);
+        const dbScene = dbScenes.find(s => s.id === match.sceneId);
+        if (dbScene) {
+          console.log(`      - Found DB scene: ${dbScene.title || dbScene.id}`);
+          console.log(`      - Current details: "${dbScene.details?.substring(0, 50)}..."`);
+          console.log(`      - Current geviUrl: "${dbScene.geviUrl}"`);
+          console.log(`      - Match details: "${match.details?.substring(0, 50)}..."`);
+          console.log(`      - Match episodeUrl: "${match.episodeUrl}"`);
+          
+          const localUpdates = {};
+          const stashUpdates = {};
+          let needsUpdate = false;
+          
+          // Update details if empty
+          if (!dbScene.details || dbScene.details.trim() === '') {
+            localUpdates.details = match.details || '';
+            stashUpdates.details = match.details || '';
+            needsUpdate = true;
+            console.log(`      ✓ Will update details`);
+          } else {
+            console.log(`      ✗ Skipping details (already has: "${dbScene.details.substring(0, 30)}...")`);
+          }
+          
+          // Update GEVI URL if empty
+          if ((!dbScene.geviUrl || dbScene.geviUrl.trim() === '') && match.episodeUrl) {
+            localUpdates.geviUrl = match.episodeUrl;
+            // Add GEVI URL to scene URLs in Stash
+            stashUpdates.urls = dbScene.url ? [dbScene.url, match.episodeUrl] : [match.episodeUrl];
+            needsUpdate = true;
+            console.log(`      ✓ Will update GEVI URL: ${match.episodeUrl}`);
+          } else {
+            console.log(`      ✗ Skipping GEVI URL (already has: "${dbScene.geviUrl}")`);
+          }
+          
+          console.log(`      - needsUpdate: ${needsUpdate}`);
+          
+          // Perform update if needed
+          if (needsUpdate) {
+            try {
+              // Update local database
+              await prisma.stashScene.update({
+                where: { id: match.sceneId },
+                data: localUpdates
+              });
+              console.log(`   - ✅ Updated local database for scene ${match.sceneId}`);
+              
+              // Update Stash via GraphQL
+              const mutation = `
+                mutation SceneUpdate($input: SceneUpdateInput!) {
+                  sceneUpdate(input: $input) {
+                    id
+                    details
+                    urls
+                  }
+                }
+              `;
+              
+              const variables = {
+                input: {
+                  id: match.sceneId,
+                  ...stashUpdates
+                }
+              };
+              
+              console.log(`   - Sending GraphQL mutation for scene ${match.sceneId}:`, JSON.stringify(variables, null, 2));
+              
+              const result = await syncService.makeGraphQLRequest(mutation, variables);
+              
+              if (!result || !result.data || !result.data.sceneUpdate) {
+                console.error(`   - ❌ Invalid response from Stash:`, result);
+                throw new Error('Invalid response from Stash');
+              }
+              
+              console.log(`   - ✅ Updated Stash for scene ${match.sceneId}:`, result.data.sceneUpdate);
+              
+            } catch (error) {
+              console.error(`   - ❌ Failed to update scene ${match.sceneId}:`, error.message);
+              if (error.response) {
+                console.error(`   - GraphQL errors:`, error.response.errors);
+              }
+            }
+          }
+        }
+      }
+    } else {
+      console.log(`   - No scenes found in database for group ${groupId}`);
+    }
+  } else {
+    console.log(`   - Scene matching skipped (groupId: ${groupId}, movie.scenes: ${movie.scenes?.length})`);
+  }
+
+  // Return movie data
+  const responseData = {
+    movie,
+    matchedScenes,
+    source: 'GEVI',
+    sourceUrl: url
+  };
+  
+  console.log(`   - Sending response with matchedScenes length: ${matchedScenes.length}`);
+  
+  sendSuccess(res, responseData);
 }));
 
 // POST /api/stash/scenes/:id/search-gevi - Search GEVI using scene performers
@@ -1410,89 +2085,780 @@ router.post('/scenes/:id/search-gevi', asyncHandler(async (req, res) => {
     return sendBadRequest(res, 'Scene must have at least 2 performers to search GEVI');
   }
 
-  const performers = scene.performers.map(p => p.performer);
-  const performerNames = performers.map(p => p.name);
-  console.log('   - Performers:', performerNames);
+  const allPerformers = scene.performers.map(sp => sp.performer);
+  const firstPerformer = allPerformers[0];
 
-  // Step 1: Determine which performer to search first
-  // Prefer performers with two or more names (first + last name) as they're more specific
-  let firstPerformerIndex = 0;
-  let secondPerformerIndex = 1;
+  console.log(`   - Scene has ${allPerformers.length} performers:`, allPerformers.map(p => p.name).join(', '));
+  console.log('   - Primary search performer:', firstPerformer.name);
 
-  // Count words in each performer name (more words = more specific)
-  const nameWordCounts = performers.map(p => p.name.trim().split(/\s+/).length);
-  
-  // If second performer has more words than first, swap them
-  if (nameWordCounts[1] > nameWordCounts[0]) {
-    firstPerformerIndex = 1;
-    secondPerformerIndex = 0;
-    console.log(`   - Swapping search order: "${performers[1].name}" (${nameWordCounts[1]} words) before "${performers[0].name}" (${nameWordCounts[0]} words)`);
-  }
-
-  const firstPerformer = performers[firstPerformerIndex];
-  const secondPerformer = performers[secondPerformerIndex];
-
-  console.log(`   - Searching for: "${firstPerformer.name}" first, then "${secondPerformer.name}"`);
-
-  // Step 2: Search for first performer
+  // Search GEVI for the first performer
   const firstPerformerResults = await geviScraper.searchPerformer(firstPerformer.name);
 
   if (!firstPerformerResults || firstPerformerResults.length === 0) {
     return sendServerError(res, `No results found for performer: ${firstPerformer.name}`);
   }
 
-  console.log(`   - Found ${firstPerformerResults.length} results for first performer`);
+  console.log(`   - Found ${firstPerformerResults.length} matches for first performer`);
 
-  // Step 3: Search with fallback logic
-  let sceneResults = [];
-  let matchedFirstPerformerIndex = 0;
+  // Try each matching performer until we find one with episodes
+  let performerPage = null;
+  let scenesByUrl = new Map(); // Map of scene URL to {title, url, matchedPerformers[]}
   
-  // Try first performer match
-  for (let i = 0; i < firstPerformerResults.length; i++) {
-    const firstPerformerUrl = firstPerformerResults[i].url;
-    console.log(`   - Trying first performer match ${i + 1}/${firstPerformerResults.length}: ${firstPerformerResults[i].name}`);
+  for (let matchIndex = 0; matchIndex < firstPerformerResults.length; matchIndex++) {
+    const candidatePerformer = firstPerformerResults[matchIndex];
+    console.log(`   - Trying match ${matchIndex + 1}/${firstPerformerResults.length}: ${candidatePerformer.name} (${candidatePerformer.url})`);
     
-    // Try to find scenes with both performers
-    sceneResults = await geviScraper.searchScenesWithPerformers(firstPerformerUrl, secondPerformer);
+    // Test this performer by searching for one other performer
+    // Use a quick test with the second performer to see if this page has episodes
+    const testPerformer = allPerformers[1];
+    console.log(`   - Testing with performer: ${testPerformer.name}`);
     
-    if (sceneResults.length > 0) {
-      console.log(`   - Found ${sceneResults.length} scenes with both performers`);
-      matchedFirstPerformerIndex = i;
-      break;
-    }
+    const testScenes = await geviScraper.searchScenesWithPerformers(candidatePerformer.url, testPerformer);
     
-    console.log(`   - No scenes found with both performers on this match`);
-    
-    // If no results with second performer, try searching by scene title
-    if (scene.title) {
-      console.log(`   - Trying to match scene title: "${scene.title}"`);
-      sceneResults = await geviScraper.searchScenesByTitle(firstPerformerUrl, scene.title);
+    if (testScenes.length > 0) {
+      console.log(`   - ✅ Found ${testScenes.length} episodes on this performer page`);
+      performerPage = candidatePerformer;
       
-      if (sceneResults.length > 0) {
-        console.log(`   - Found ${sceneResults.length} scenes matching title`);
-        matchedFirstPerformerIndex = i;
-        break;
+      // Add test results to our collection
+      for (const scene of testScenes) {
+        scenesByUrl.set(scene.url, {
+          ...scene,
+          matchedPerformers: [testPerformer.name]
+        });
       }
       
-      console.log(`   - No scenes found matching title`);
-    }
-    
-    // If this was the last match, stop
-    if (i === firstPerformerResults.length - 1) {
-      console.log(`   - Exhausted all ${firstPerformerResults.length} matches for first performer`);
+      break; // Found a working performer page, stop searching
+    } else {
+      console.log(`   - ⚠️  No episodes found on this performer page, trying next match...`);
     }
   }
 
-  // Return the search results
+  if (!performerPage) {
+    return sendServerError(res, `No performer pages with episodes found for: ${firstPerformer.name}`);
+  }
+
+  console.log(`   - Using performer: ${performerPage.name} (${performerPage.url})`);
+  console.log(`   - Searching for ${allPerformers.length - 2} remaining performers in episodes...`);
+  console.log(`   - (Skipping ${firstPerformer.name} since we're already on their page, and ${allPerformers[1].name} already searched)`);
+
+  // Search for remaining performers (skip first two: one is the page owner, one was used for testing)
+  for (let i = 2; i < allPerformers.length; i++) {
+    const performer = allPerformers[i];
+    console.log(`   - [${i - 1}/${allPerformers.length - 2}] Searching for: ${performer.name}`);
+
+    // Search for scenes with this performer on the performer's page
+    // Pass the performer object (not just the name string)
+    const performerScenes = await geviScraper.searchScenesWithPerformers(performerPage.url, performer);
+
+    console.log(`   - Found ${performerScenes.length} scenes with ${performer.name}`);
+
+    // Add to our collection, tracking which performers matched
+    for (const scene of performerScenes) {
+      if (scenesByUrl.has(scene.url)) {
+        // Scene already found, add this performer to the match list
+        const existing = scenesByUrl.get(scene.url);
+        existing.matchedPerformers.push(performer.name);
+      } else {
+        // New scene, start tracking
+        scenesByUrl.set(scene.url, {
+          ...scene,
+          matchedPerformers: [performer.name]
+        });
+      }
+    }
+  }
+
+  // Convert map to array and sort by number of matched performers (descending)
+  let scenes = Array.from(scenesByUrl.values()).sort((a, b) => {
+    return b.matchedPerformers.length - a.matchedPerformers.length;
+  });
+
+  console.log(`   - Total unique scenes found: ${scenes.length}`);
+  console.log(`   - Match distribution:`);
+  
+  // Log distribution of matches
+  const matchCounts = {};
+  scenes.forEach(scene => {
+    const count = scene.matchedPerformers.length;
+    matchCounts[count] = (matchCounts[count] || 0) + 1;
+  });
+  
+  Object.keys(matchCounts).sort((a, b) => b - a).forEach(count => {
+    console.log(`   - ${matchCounts[count]} scene(s) with ${count} matching performer(s)`);
+  });
+
+  // Proxy image URLs for any scenes that have images
+  const scenesWithProxiedImages = scenes.map(scene => {
+    if (scene.image) {
+      return {
+        ...scene,
+        image: `/api/stash/gevi-image-proxy?url=${encodeURIComponent(scene.image)}`
+      };
+    }
+    return scene;
+  });
+
   sendSuccess(res, {
     firstPerformer: {
-      ...firstPerformerResults[matchedFirstPerformerIndex],
+      ...performerPage,
       name: firstPerformer.name
     },
-    secondPerformer: secondPerformer.name,
-    scenes: sceneResults,
-    triedMatches: matchedFirstPerformerIndex + 1,
-    totalMatches: firstPerformerResults.length
+    searchedPerformers: allPerformers.slice(1).map(p => p.name),
+    scenes: scenesWithProxiedImages,
+    totalScenes: scenes.length,
+    performersSearched: allPerformers.length - 1
+  });
+}));
+
+// POST /api/stash/scenes/:id/search-gevi-by-title - Search GEVI using studio URL and scene title
+router.post('/scenes/:id/search-gevi-by-title', asyncHandler(async (req, res) => {
+  const { id } = req.params;
+
+  console.log('🔍 [GEVI Title Search] Starting search for scene:', id);
+
+  // Get the scene with studio
+  const scene = await prisma.stashScene.findUnique({
+    where: { id },
+    include: {
+      studioObject: true
+    }
+  });
+
+  if (!scene) {
+    return sendBadRequest(res, 'Scene not found');
+  }
+
+  if (!scene.title) {
+    return sendBadRequest(res, 'Scene must have a title to search GEVI');
+  }
+
+  if (!scene.studioObject) {
+    return sendBadRequest(res, 'Scene must have a studio to search GEVI by title');
+  }
+
+  if (!scene.studioObject.geviUrl) {
+    return sendBadRequest(res, 'Studio must have a GEVI URL set to search by title');
+  }
+
+  console.log('   - Studio:', scene.studioObject.name);
+  console.log('   - Studio GEVI URL:', scene.studioObject.geviUrl);
+  console.log('   - Scene Title:', scene.title);
+
+  // Search for scenes on the studio's GEVI page by title
+  const sceneResults = await geviScraper.searchScenesByTitleOnStudio(scene.studioObject.geviUrl, scene.title);
+
+  if (!sceneResults || sceneResults.length === 0) {
+    return sendServerError(res, `No results found for title "${scene.title}" on studio page`);
+  }
+
+  console.log(`   - Found ${sceneResults.length} matching scenes on studio page`);
+
+  // Proxy the image URLs through our server to handle CORS
+  const scenesWithProxiedImages = sceneResults.map(scene => {
+    if (scene.image) {
+      return {
+        ...scene,
+        image: `/api/stash/gevi-image-proxy?url=${encodeURIComponent(scene.image)}`
+      };
+    }
+    return scene;
+  });
+
+  sendSuccess(res, {
+    studio: {
+      name: scene.studioObject.name,
+      geviUrl: scene.studioObject.geviUrl
+    },
+    searchTitle: scene.title,
+    scenes: scenesWithProxiedImages
+  });
+}));
+
+// POST /api/stash/scenes/:id/search-gevi-movies - Open GEVI performer page for movie search
+router.post('/scenes/:id/search-gevi-movies', asyncHandler(async (req, res) => {
+  const { id } = req.params;
+
+  console.log('🎬 [GEVI Movie Search] Starting movie search for scene:', id);
+
+  // Get the scene with performers
+  const scene = await prisma.stashScene.findUnique({
+    where: { id },
+    include: {
+      performers: {
+        include: {
+          performer: true
+        }
+      }
+    }
+  });
+
+  if (!scene) {
+    return sendBadRequest(res, 'Scene not found');
+  }
+
+  if (!scene.performers || scene.performers.length < 2) {
+    return sendBadRequest(res, 'Scene must have at least 2 performers to search GEVI movies');
+  }
+
+  const allPerformers = scene.performers.map(sp => sp.performer);
+  const firstPerformer = allPerformers[0];
+
+  console.log(`   - Scene has ${allPerformers.length} performers:`, allPerformers.map(p => p.name).join(', '));
+  console.log('   - Primary search performer:', firstPerformer.name);
+
+  // Search GEVI for the first performer
+  const firstPerformerResults = await geviScraper.searchPerformer(firstPerformer.name);
+
+  if (!firstPerformerResults || firstPerformerResults.length === 0) {
+    return sendServerError(res, `No results found for performer: ${firstPerformer.name}`);
+  }
+
+  console.log(`   - Found ${firstPerformerResults.length} matches for first performer`);
+
+  // Use the first result (best match)
+  const performerPage = firstPerformerResults[0];
+  console.log(`   - Using performer: ${performerPage.name} (${performerPage.url})`);
+
+  // Launch Puppeteer browser
+  const puppeteer = require('puppeteer');
+  
+  const browser = await puppeteer.launch({
+    headless: true,  // Run in headless mode
+    args: ['--no-sandbox', '--disable-setuid-sandbox']
+  });
+
+  const page = await browser.newPage();
+  await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36');
+  
+  console.log(`   - Loading GEVI homepage...`);
+  await page.goto('https://gayeroticvideoindex.com', { 
+    waitUntil: 'networkidle2',
+    timeout: 30000
+  });
+
+  console.log(`   - Looking for Enter button...`);
+  
+  // Wait for and click the Enter button
+  try {
+    // Try multiple possible selectors for the Enter button
+    const enterButtonClicked = await page.evaluate(() => {
+      // Look for various possible selectors
+      const selectors = [
+        'button:contains("Enter")',
+        'a:contains("Enter")',
+        'input[type="submit"][value*="Enter"]',
+        'button[type="submit"]',
+        '.enter-button',
+        '#enter-button',
+        '[onclick*="enter"]'
+      ];
+
+      // Try text-based search first (most reliable)
+      const buttons = Array.from(document.querySelectorAll('button, a, input[type="submit"]'));
+      const enterButton = buttons.find(el => 
+        el.textContent.trim().toLowerCase() === 'enter' ||
+        el.value?.toLowerCase() === 'enter'
+      );
+
+      if (enterButton) {
+        enterButton.click();
+        return true;
+      }
+
+      // Fallback to selector search
+      for (const selector of selectors) {
+        try {
+          const element = document.querySelector(selector);
+          if (element) {
+            element.click();
+            return true;
+          }
+        } catch (e) {}
+      }
+
+      return false;
+    });
+
+    if (enterButtonClicked) {
+      console.log(`   - ✅ Clicked Enter button`);
+      // Wait for any navigation/modal close
+      await new Promise(resolve => setTimeout(resolve, 2000));
+    } else {
+      console.log(`   - ℹ️  No Enter button found, proceeding...`);
+    }
+  } catch (error) {
+    console.log(`   - ℹ️  Enter button not required or already dismissed:`, error.message);
+  }
+
+  console.log(`   - Navigating to performer page...`);
+  await page.goto(performerPage.url, { 
+    waitUntil: 'networkidle2',
+    timeout: 30000
+  });
+
+  console.log(`   - Page loaded, looking for Movies tab...`);
+  
+  // Wait for the page to be fully loaded
+  await new Promise(resolve => setTimeout(resolve, 2000));
+
+  // Click on the Movies tab/button
+  // The Movies tab is a button with sectionid="movies"
+  const moviesTabClicked = await page.evaluate(() => {
+    // Look for various possible selectors
+    const selectors = [
+      'button[sectionid="movies"]',           // Primary: button with sectionid
+      'button[data-sectionid="movies"]',      // Alternate data attribute
+      '[sectionid="movies"]',                 // Any element with sectionid
+      'a[href="#movies"]',                    // Fallback: link
+      'a[href="#moviesDT"]',                  // Fallback: DataTable link
+      'button:contains("Movies")'             // Fallback: text search
+    ];
+
+    for (const selector of selectors) {
+      try {
+        // Try direct selector
+        const element = document.querySelector(selector);
+        if (element) {
+          element.click();
+          console.log('Clicked Movies tab using selector:', selector);
+          return true;
+        }
+      } catch (e) {}
+    }
+
+    // Final fallback: find by text content
+    const buttons = Array.from(document.querySelectorAll('button, a'));
+    const moviesButton = buttons.find(el => 
+      el.textContent.trim().toLowerCase() === 'movies' ||
+      el.getAttribute('sectionid') === 'movies'
+    );
+
+    if (moviesButton) {
+      moviesButton.click();
+      console.log('Clicked Movies tab via text/attribute search');
+      return true;
+    }
+
+    return false;
+  });
+
+  if (moviesTabClicked) {
+    console.log(`   - ✅ Clicked Movies tab`);
+  } else {
+    console.log(`   - ⚠️  Could not find Movies tab, page may already be showing movies`);
+  }
+
+  // Wait for the movies table and search box to appear
+  await new Promise(resolve => setTimeout(resolve, 2000));
+
+  console.log(`   - Searching for ${allPerformers.length - 1} other performers in movies table...`);
+  console.log(`   - (Skipping ${firstPerformer.name} since we're already on their page)`);
+
+  // Search for each performer (except the first one, since we're on their page)
+  const moviesByPerformer = new Map(); // Map of movie URL to {title, url, matchedPerformers[]}
+
+  for (let i = 1; i < allPerformers.length; i++) {
+    const performer = allPerformers[i];
+    console.log(`   - [${i}/${allPerformers.length - 1}] Searching for: ${performer.name}`);
+
+    // Clear the search box
+    await page.evaluate(() => {
+      const searchBox = document.querySelector('#moviesDT_filter input[type="search"]');
+      if (searchBox) {
+        searchBox.value = '';
+        searchBox.dispatchEvent(new Event('input', { bubbles: true }));
+      }
+    });
+
+    await new Promise(resolve => setTimeout(resolve, 500));
+
+    // Wait for the search input to be available
+    await page.waitForSelector('#moviesDT_filter input[type="search"]', { timeout: 10000 });
+
+    // Type the performer's name into the search box
+    await page.type('#moviesDT_filter input[type="search"]', performer.name);
+
+    // Press Enter to search
+    await page.keyboard.press('Enter');
+
+    // Wait for search results to load
+    await new Promise(resolve => setTimeout(resolve, 3000));
+
+    // Extract movie results for this performer
+    const performerMovies = await page.evaluate((performerName) => {
+      const results = [];
+      const rows = document.querySelectorAll('#moviesDT tbody tr');
+      
+      rows.forEach((row, index) => {
+        const cells = row.querySelectorAll('td');
+        
+        // Skip empty data rows
+        const firstCell = cells[0];
+        if (firstCell && firstCell.classList.contains('dataTables_empty')) {
+          return;
+        }
+        
+        // Look for the movie link
+        let foundLink = null;
+        let foundTitle = null;
+        
+        for (let i = 0; i < cells.length; i++) {
+          const link = cells[i].querySelector('a[href*="video/"]');
+          if (link) {
+            const href = link.getAttribute('href');
+            if (href && !href.includes('company/') && !href.includes('performer/')) {
+              foundLink = link;
+              foundTitle = link.textContent.trim();
+              break;
+            }
+          }
+        }
+        
+        if (foundLink && foundTitle) {
+          let url = foundLink.getAttribute('href');
+          
+          // Make URL absolute if it's relative
+          if (url && !url.startsWith('http')) {
+            url = 'https://gayeroticvideoindex.com/' + (url.startsWith('/') ? url.substring(1) : url);
+          }
+          
+          if (url) {
+            results.push({ title: foundTitle, url });
+          }
+        }
+      });
+      
+      return results;
+    }, performer.name);
+
+    console.log(`     - Found ${performerMovies.length} movie(s) for ${performer.name}`);
+
+    // Add to our map, tracking which performers are in each movie
+    performerMovies.forEach(movie => {
+      if (!moviesByPerformer.has(movie.url)) {
+        moviesByPerformer.set(movie.url, {
+          title: movie.title,
+          url: movie.url,
+          matchedPerformers: []
+        });
+      }
+      moviesByPerformer.get(movie.url).matchedPerformers.push(performer.name);
+    });
+  }
+
+  // Close the browser
+  await browser.close();
+
+  // Convert map to array and sort by number of matched performers (descending)
+  const movies = Array.from(moviesByPerformer.values()).sort((a, b) => {
+    return b.matchedPerformers.length - a.matchedPerformers.length;
+  });
+
+  console.log(`   - Found ${movies.length} unique movie(s)`);
+  
+  // Check if movies exist in database by matching on geviUrl or name
+  for (const movie of movies) {
+    // Try to find existing movie by GEVI URL (most accurate)
+    let existingMovie = await prisma.stashGroup.findFirst({
+      where: { geviUrl: movie.url }
+    });
+
+    // If not found by URL, try fuzzy match on name
+    if (!existingMovie) {
+      // Remove common suffixes/prefixes for better matching
+      const cleanTitle = movie.title
+        .toLowerCase()
+        .replace(/\s+/g, ' ')
+        .trim();
+      
+      const allMovies = await prisma.stashGroup.findMany({
+        select: { id: true, name: true, geviUrl: true }
+      });
+
+      existingMovie = allMovies.find(m => {
+        const cleanDbTitle = m.name
+          .toLowerCase()
+          .replace(/\s+/g, ' ')
+          .trim();
+        return cleanDbTitle === cleanTitle;
+      });
+    }
+
+    if (existingMovie) {
+      movie.existingMovieId = existingMovie.id;
+      movie.existingMovieName = existingMovie.name;
+      console.log(`     ✓ "${movie.title}" matches existing movie: ${existingMovie.name} (ID: ${existingMovie.id})`);
+    }
+  }
+
+  movies.forEach((movie, idx) => {
+    const matchStatus = movie.existingMovieId ? '✓ IN DB' : '✗ NEW';
+    console.log(`     ${idx + 1}. [${matchStatus}] "${movie.title}" - ${movie.matchedPerformers.length} performer(s): ${movie.matchedPerformers.join(', ')}`);
+  });
+  console.log(`✅ Search completed for ${performerPage.name}`);
+
+  sendSuccess(res, {
+    firstPerformer: {
+      name: performerPage.name,
+      url: performerPage.url
+    },
+    secondPerformer: allPerformers.length > 1 ? allPerformers[1].name : null,
+    allPerformers: allPerformers.map(p => p.name),
+    movies: movies
+  });
+}));
+
+// POST /api/stash/scenes/:id/search-gevi-movies-by-title - Search studio's GEVI page for movies by title
+router.post('/scenes/:id/search-gevi-movies-by-title', asyncHandler(async (req, res) => {
+  const { id } = req.params;
+
+  console.log('🎬 [GEVI Movie Search by Title] Starting movie search for scene:', id);
+
+  // Get the scene with studio info
+  const scene = await prisma.stashScene.findUnique({
+    where: { id },
+    include: {
+      studioObject: true
+    }
+  });
+
+  if (!scene) {
+    return sendBadRequest(res, 'Scene not found');
+  }
+
+  if (!scene.studioObject || !scene.studioObject.geviUrl) {
+    return sendBadRequest(res, 'Studio must have a GEVI URL set to search by title');
+  }
+
+  if (!scene.title) {
+    return sendBadRequest(res, 'Scene must have a title to search');
+  }
+
+  const studioGeviUrl = scene.studioObject.geviUrl;
+  const sceneTitle = scene.title;
+
+  console.log(`   - Studio: ${scene.studioObject.name}`);
+  console.log(`   - Studio GEVI URL: ${studioGeviUrl}`);
+  console.log(`   - Scene title: ${sceneTitle}`);
+
+  // Strip common scene number patterns from title for movie search
+  // Movies typically don't include "Scene X" in their titles
+  let searchTitle = sceneTitle
+    .replace(/\s*[-–—:]\s*Scene\s+\d+\s*$/i, '')  // Remove "- Scene 2" at end
+    .replace(/\s*[-–—:]\s*Part\s+\d+\s*$/i, '')   // Remove "- Part 2" at end
+    .replace(/\s*[-–—:]\s*Episode\s+\d+\s*$/i, '') // Remove "- Episode 2" at end
+    .replace(/\s*\(\s*Scene\s+\d+\s*\)\s*$/i, '')  // Remove "(Scene 2)" at end
+    .replace(/\s*#\d+\s*$/i, '')                    // Remove "#2" at end
+    .trim();
+
+  console.log(`   - Search title (scene number stripped): "${searchTitle}"`);
+
+  // Launch Puppeteer browser
+  const puppeteer = require('puppeteer');
+  
+  const browser = await puppeteer.launch({
+    headless: true,
+    args: ['--no-sandbox', '--disable-setuid-sandbox']
+  });
+
+  const page = await browser.newPage();
+  await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36');
+  
+  console.log(`   - Loading GEVI homepage...`);
+  await page.goto('https://gayeroticvideoindex.com', { 
+    waitUntil: 'networkidle2',
+    timeout: 30000
+  });
+
+  console.log(`   - Looking for Enter button...`);
+  
+  // Wait for and click the Enter button if present
+  try {
+    const enterButtonClicked = await page.evaluate(() => {
+      const buttons = Array.from(document.querySelectorAll('button, a, input[type="submit"]'));
+      const enterButton = buttons.find(el => 
+        el.textContent.trim().toLowerCase() === 'enter' ||
+        el.value?.toLowerCase() === 'enter'
+      );
+
+      if (enterButton) {
+        enterButton.click();
+        return true;
+      }
+      return false;
+    });
+
+    if (enterButtonClicked) {
+      console.log(`   - ✅ Clicked Enter button`);
+      await new Promise(resolve => setTimeout(resolve, 2000));
+    } else {
+      console.log(`   - ℹ️  No Enter button found, proceeding...`);
+    }
+  } catch (error) {
+    console.log(`   - ℹ️  Enter button handling:`, error.message);
+  }
+
+  console.log(`   - Navigating to studio page...`);
+  await page.goto(studioGeviUrl, { 
+    waitUntil: 'networkidle2',
+    timeout: 30000
+  });
+
+  console.log(`   - Page loaded, looking for Movies tab...`);
+  
+  await new Promise(resolve => setTimeout(resolve, 2000));
+
+  // Click on the Movies tab
+  const moviesTabClicked = await page.evaluate(() => {
+    const selectors = [
+      'button[sectionid="movies"]',
+      '[sectionid="movies"]',
+      'a[href="#movies"]',
+      'a[href="#moviesDT"]'
+    ];
+
+    for (const selector of selectors) {
+      try {
+        const element = document.querySelector(selector);
+        if (element) {
+          element.click();
+          return true;
+        }
+      } catch (e) {}
+    }
+
+    const buttons = Array.from(document.querySelectorAll('button, a'));
+    const moviesButton = buttons.find(el => 
+      el.textContent.trim().toLowerCase() === 'movies' ||
+      el.getAttribute('sectionid') === 'movies'
+    );
+
+    if (moviesButton) {
+      moviesButton.click();
+      return true;
+    }
+
+    return false;
+  });
+
+  if (moviesTabClicked) {
+    console.log(`   - ✅ Clicked Movies tab`);
+  } else {
+    console.log(`   - ⚠️  Could not find Movies tab`);
+  }
+
+  await new Promise(resolve => setTimeout(resolve, 2000));
+
+  console.log(`   - Searching for title: "${sceneTitle}"`);
+
+  // Clear the search box
+  console.log(`   - Clearing search box...`);
+  await page.evaluate(() => {
+    const searchBox = document.querySelector('#moviesDT_filter input[type="search"]');
+    if (searchBox) {
+      searchBox.value = '';
+      searchBox.dispatchEvent(new Event('input', { bubbles: true }));
+    }
+  });
+
+  await new Promise(resolve => setTimeout(resolve, 500));
+
+  // Wait for and type into the search input
+  console.log(`   - Waiting for search input...`);
+  await page.waitForSelector('#moviesDT_filter input[type="search"]', { timeout: 10000 });
+  
+  console.log(`   - Typing title into search box: "${sceneTitle}"`);
+  await page.type('#moviesDT_filter input[type="search"]', sceneTitle, { delay: 50 });
+  
+  console.log(`   - Pressing Enter to search...`);
+  await page.keyboard.press('Enter');
+
+  console.log(`   - Waiting for search results...`);
+  await new Promise(resolve => setTimeout(resolve, 3000));
+
+  // Extract movie results
+  const movies = await page.evaluate(() => {
+    const results = [];
+    const rows = document.querySelectorAll('#moviesDT tbody tr');
+    
+    rows.forEach((row) => {
+      const cells = row.querySelectorAll('td');
+      
+      if (cells[0] && cells[0].classList.contains('dataTables_empty')) {
+        return;
+      }
+      
+      if (cells.length >= 2) {
+        const titleCell = cells[1];
+        const link = titleCell.querySelector('a');
+        
+        if (link && link.href) {
+          const title = link.textContent.trim();
+          const url = link.href;
+          
+          results.push({
+            title: title,
+            url: url
+          });
+        }
+      }
+    });
+    
+    return results;
+  });
+
+  await browser.close();
+
+  console.log(`   - Found ${movies.length} movie(s) matching title`);
+
+  // Check against local database
+  const localMovies = await prisma.stashGroup.findMany({
+    select: {
+      id: true,
+      name: true,
+      geviUrl: true
+    }
+  });
+
+  for (const movie of movies) {
+    const existingMovie = localMovies.find(m => {
+      if (m.geviUrl === movie.url) return true;
+      
+      const cleanDbTitle = m.name
+        .toLowerCase()
+        .replace(/[^\w\s]/g, '')
+        .replace(/\s+/g, ' ')
+        .trim();
+      const cleanTitle = movie.title
+        .toLowerCase()
+        .replace(/[^\w\s]/g, '')
+        .replace(/\s+/g, ' ')
+        .trim();
+      return cleanDbTitle === cleanTitle;
+    });
+
+    if (existingMovie) {
+      movie.existingMovieId = existingMovie.id;
+      movie.existingMovieName = existingMovie.name;
+      console.log(`     ✓ "${movie.title}" matches existing movie: ${existingMovie.name} (ID: ${existingMovie.id})`);
+    }
+  }
+
+  movies.forEach((movie, idx) => {
+    const matchStatus = movie.existingMovieId ? '✓ IN DB' : '✗ NEW';
+    console.log(`     ${idx + 1}. [${matchStatus}] "${movie.title}"`);
+  });
+
+  console.log(`✅ Search completed for studio: ${scene.studioObject.name}`);
+
+  sendSuccess(res, {
+    studio: {
+      name: scene.studioObject.name,
+      url: studioGeviUrl
+    },
+    searchTitle: sceneTitle,
+    movies: movies,
+    searchMethod: 'title'
   });
 }));
 
@@ -1610,7 +2976,7 @@ router.delete('/scenes/:sceneId/performers/:performerId', asyncHandler(async (re
 // PUT /api/stash/scenes/:id - Update scene details
 router.put('/scenes/:id', asyncHandler(async (req, res) => {
   const { id } = req.params;
-  const { title, studio, studioId, performerIds, details, date, url, coverImage, actionCodes } = req.body;
+  const { title, studio, studioId, performerIds, groupIds, details, date, url, coverImage, actionCodes, geviUrl } = req.body;
   
   // Initialize Stash sync service if not already initialized
   if (!stashSyncService) {
@@ -1624,6 +2990,7 @@ router.put('/scenes/:id', asyncHandler(async (req, res) => {
   if (details !== undefined) updateData.details = details;
   if (date !== undefined) updateData.date = date;
   if (url !== undefined) updateData.url = url;
+  if (geviUrl !== undefined) updateData.geviUrl = geviUrl;
   
   // Update local database
   const updatedScene = await prisma.stashScene.update({
@@ -1678,6 +3045,43 @@ router.put('/scenes/:id', asyncHandler(async (req, res) => {
       }
     }
   }
+
+  // Handle group relationships if provided
+  if (groupIds !== undefined && Array.isArray(groupIds)) {
+    console.log('🎬 Processing group associations for scene...');
+    
+    // Get current groups to determine scene index
+    const existingGroups = await prisma.stashGroupScene.findMany({
+      where: { sceneId: id }
+    });
+
+    // Add new group relationships
+    for (const groupId of groupIds) {
+      // Check if association already exists
+      const existing = existingGroups.find(g => g.groupId === groupId);
+      
+      if (!existing) {
+        // Get the current max sceneIndex for this group to append at the end
+        const maxIndexGroup = await prisma.stashGroupScene.findMany({
+          where: { groupId: groupId },
+          orderBy: { sceneIndex: 'desc' },
+          take: 1
+        });
+
+        const nextIndex = maxIndexGroup.length > 0 ? (maxIndexGroup[0].sceneIndex || 0) + 1 : 1;
+
+        await prisma.stashGroupScene.create({
+          data: {
+            sceneId: id,
+            groupId: groupId,
+            sceneIndex: nextIndex
+          }
+        });
+
+        console.log(`   - Added scene to group ${groupId} at index ${nextIndex}`);
+      }
+    }
+  }
   
   // Update scene in Stash itself if configured
   console.log('🔍 [STASH UPDATE] Checking Stash sync configuration...');
@@ -1723,6 +3127,27 @@ router.put('/scenes/:id', asyncHandler(async (req, res) => {
         }
         
         stashUpdates.performerIds = validPerformerIds;
+      }
+      if (groupIds !== undefined && Array.isArray(groupIds)) {
+        // Validate that all groups exist in local database
+        const validGroupIds = [];
+        for (const groupId of groupIds) {
+          const group = await prisma.stashGroup.findUnique({
+            where: { id: groupId }
+          });
+          
+          if (group) {
+            validGroupIds.push(groupId);
+          } else {
+            console.warn(`⚠️  Group ${groupId} not found in database, skipping`);
+          }
+        }
+        
+        if (validGroupIds.length !== groupIds.length) {
+          console.warn(`⚠️  ${groupIds.length - validGroupIds.length} group(s) not found, using ${validGroupIds.length} valid groups`);
+        }
+        
+        stashUpdates.groupIds = validGroupIds;
       }
       if (details !== undefined) stashUpdates.details = details;
       if (date !== undefined) stashUpdates.date = date;
@@ -3407,6 +4832,7 @@ router.get('/studios/:id', asyncHandler(async (req, res) => {
     name: studio.name,
     url: studio.url,
     image: studio.image,
+    geviUrl: studio.geviUrl,
     scenes: studio.scenes.map(scene => ({
       id: scene.id,
       title: scene.title,
@@ -3419,6 +4845,33 @@ router.get('/studios/:id', asyncHandler(async (req, res) => {
   };
 
   sendSuccess(res, transformedStudio);
+}));
+
+// PUT /studios/:id - Update studio details
+router.put('/studios/:id', asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  const { geviUrl, notes } = req.body;
+
+  // Check if studio exists
+  const studio = await prisma.stashStudio.findUnique({
+    where: { id }
+  });
+
+  if (!studio) {
+    return sendBadRequest(res, `Studio with ID ${id} not found`);
+  }
+
+  // Update studio
+  const updateData = {};
+  if (geviUrl !== undefined) updateData.geviUrl = geviUrl;
+  if (notes !== undefined) updateData.notes = notes;
+
+  const updatedStudio = await prisma.stashStudio.update({
+    where: { id },
+    data: updateData
+  });
+
+  sendSuccess(res, updatedStudio);
 }));
 
 // GET /tags/:id - Single tag details
@@ -4606,6 +6059,28 @@ router.post('/sync/galleries', asyncHandler(async (req, res) => {
       totalCount: results.totalCount
     }
   });
+}));
+
+// Sync groups/movies endpoint
+router.post('/sync/groups', asyncHandler(async (req, res) => {
+  if (!stashSyncService) {
+    await initializeStashSyncService();
+  }
+  
+  if (!stashSyncService) {
+    return sendBadRequest(res, 'Stash sync service not configured');
+  }
+  
+  const { page = 1, perPage = 100 } = req.body;
+  console.log(`Starting Stash groups sync (page ${page})...`);
+  
+  const results = await stashSyncService.syncGroups(parseInt(page), parseInt(perPage));
+  
+  sendSuccess(res, {
+    synced: results.groups.length,
+    hasMore: results.hasMore,
+    totalCount: results.totalCount
+  }, `Synced ${results.groups.length} groups from page ${page}`);
 }));
 
 // Sync images endpoint

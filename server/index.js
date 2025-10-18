@@ -20,6 +20,7 @@ const healthRoutes = require('./routes/health');
 const databaseHealthRoutes = require('./routes/databaseHealth');
 const plexRoutes = require('./routes/plex');
 const createStashRouter = require('./routes/stash');
+const groupsRoutes = require('./routes/groups');
 const comicvineRoutes = require('./routes/comicvine');
 const komgaRoutes = require('./routes/komga');
 const openlibraryRoutes = require('./routes/openlibrary');
@@ -263,6 +264,9 @@ const stashRoutes = createStashRouter({
   stashBackgroundSync: stashBackgroundSync 
 });
 app.use('/api/stash', stashRoutes);
+
+// Stash Groups routes
+app.use('/api/stash/groups', groupsRoutes);
 
 // Stash Image Proxy route (separate mounting for frontend compatibility)
 const stashImageProxyRouter = express.Router();

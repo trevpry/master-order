@@ -807,12 +807,14 @@ model StashScene {
   aiGeneratedTags     String?
   moodScore           Float?
   actionIntensity     Float?
+  geviUrl             String?
   clips               StashClip[]
   markers             StashMarker[]
   studioObject        StashStudio?             @relation(fields: [studioId], references: [id])
   performers          StashScenePerformer[]
   tags                StashSceneTag[]
   watchHistory        StashSceneWatchHistory[]
+  groups              StashGroupScene[]
 
   @@map("StashScene")
 }
@@ -826,6 +828,54 @@ model StashSceneWatchHistory {
   scene     StashScene @relation(fields: [sceneId], references: [id], onDelete: Cascade)
 
   @@map("StashSceneWatchHistory")
+}
+
+model StashGroup {
+  id              String               @id
+  name            String
+  aliases         String?
+  duration        Float?
+  date            String?
+  rating          Int?
+  director        String?
+  synopsis        String?
+  url             String?
+  frontImage      String?
+  backImage       String?
+  studioId        String?
+  studio          StashStudio?         @relation(fields: [studioId], references: [id])
+  tagIds          String?              // Comma-separated tag IDs
+  geviUrl         String?              // GEVI movie URL for scraping
+  createdAt       DateTime             @default(now())
+  updatedAt       DateTime             @default(now()) @updatedAt
+  lastSyncedAt    DateTime?
+  scenes          StashGroupScene[]
+  tags            StashGroupTag[]
+
+  @@map("StashGroup")
+}
+
+model StashGroupScene {
+  groupId     String
+  sceneId     String
+  sceneIndex  Int?       // Order within the group
+  group       StashGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  scene       StashScene @relation(fields: [sceneId], references: [id], onDelete: Cascade)
+  createdAt   DateTime   @default(now())
+
+  @@id([groupId, sceneId])
+  @@map("StashGroupScene")
+}
+
+model StashGroupTag {
+  groupId   String
+  tagId     String
+  group     StashGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  tag       StashTag   @relation(fields: [tagId], references: [id], onDelete: Cascade)
+  createdAt DateTime   @default(now())
+
+  @@id([groupId, tagId])
+  @@map("StashGroupTag")
 }
 
 model StashClip {
@@ -938,12 +988,15 @@ model StashStudio {
   name         String         @unique
   url          String?
   image        String?
+  geviUrl      String?        // GEVI company URL
+  notes        String?        // Custom notes about the studio
   createdAt    DateTime       @default(now())
   updatedAt    DateTime       @updatedAt
   lastSyncedAt DateTime       @default(now())
   galleries    StashGallery[]
   images       StashImage[]
   scenes       StashScene[]
+  groups       StashGroup[]
 
   @@map("StashStudio")
 }
@@ -967,6 +1020,7 @@ model StashTag {
   clips         StashClipTag[]
   clipPerformers StashClipPerformerTag[]
   scenePerformers StashScenePerformerTag[]
+  groups        StashGroupTag[]
   
   // Performer attribute relations
   performersWithEthnicity StashPerformer[] @relation("PerformerEthnicityTag")

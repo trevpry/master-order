@@ -23,6 +23,8 @@ import TagsPage from './modules/media/pages/stash/TagsPage';
 import TagDetail from './modules/media/pages/stash/TagDetail';
 import ScenesPage from './modules/media/pages/stash/ScenesPage';
 import SceneDetail from './modules/media/pages/stash/SceneDetail';
+import GroupsPage from './modules/media/pages/stash/GroupsPage';
+import GroupDetail from './modules/media/pages/stash/GroupDetail';
 import StudiosPage from './modules/media/pages/stash/StudiosPage';
 import StudioDetail from './modules/media/pages/stash/StudioDetail';
 import ClipsPage from './modules/media/pages/stash/ClipsPage';
@@ -68,6 +70,8 @@ function App() {
           <Route path="/media/stash/tags/:id" element={<TagDetail />} />
           <Route path="/media/stash/scenes" element={<ScenesPage />} />
           <Route path="/media/stash/scenes/:id" element={<SceneDetail />} />
+          <Route path="/media/stash/groups" element={<GroupsPage />} />
+          <Route path="/media/stash/groups/:id" element={<GroupDetail />} />
           <Route path="/media/stash/studios" element={<StudiosPage />} />
           <Route path="/media/stash/studios/:id" element={<StudioDetail />} />
           <Route path="/media/stash/clips" element={<ClipsPage />} />
@@ -90,6 +94,8 @@ function App() {
           <Route path="/stash/tags/:id" element={<TagDetail />} />
           <Route path="/stash/scenes" element={<ScenesPage />} />
           <Route path="/stash/scenes/:id" element={<SceneDetail />} />
+          <Route path="/stash/groups" element={<GroupsPage />} />
+          <Route path="/stash/groups/:id" element={<GroupDetail />} />
           <Route path="/stash/studios" element={<StudiosPage />} />
           <Route path="/stash/studios/:id" element={<StudioDetail />} />
           <Route path="/stash/clips" element={<ClipsPage />} />

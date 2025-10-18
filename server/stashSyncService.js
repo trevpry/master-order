@@ -12,6 +12,9 @@ class StashSyncService {
     this.stashUrl = null;
     this.stashApiKey = null;
     
+    // Initialize Prisma client
+    this.prisma = prisma;
+    
     // Initialize tag mapping service for performer attributes
     this.tagMappingService = new PerformerTagMappingService(
       // Pass GraphQL client function
@@ -1356,6 +1359,7 @@ class StashSyncService {
         performers: 0,
         studios: 0,
         tags: 0,
+        groups: 0,
         galleries: 0,
         images: 0
       };
@@ -1411,6 +1415,21 @@ class StashSyncService {
         console.log(`   Page ${page-1}: ${result.scenes.length} scenes`);
       }
       console.log(`✅ Scenes sync completed: ${totalSynced.scenes} total`);
+
+      // Sync groups/movies (references scenes, studios, and tags)
+      console.log('🎬 Syncing groups/movies...');
+      page = 1;
+      hasMore = true;
+      let totalGroups = 0;
+      while (hasMore) {
+        const result = await this.syncGroups(page);
+        totalGroups += result.groups.length;
+        hasMore = result.hasMore;
+        page++;
+        console.log(`   Page ${page-1}: ${result.groups.length} groups`);
+      }
+      console.log(`✅ Groups sync completed: ${totalGroups} total`);
+      totalSynced.groups = totalGroups;
 
       // Sync galleries (references performers and studios)
       console.log('🖼️  Syncing galleries...');
@@ -2097,6 +2116,181 @@ class StashSyncService {
     }
   }
 
+  async syncGroups(page = 1, perPage = 250) {
+    console.log(`Syncing groups/movies (page ${page})...`);
+    
+    const query = `
+      query FindMovies($filter: FindFilterType!) {
+        findMovies(filter: $filter) {
+          count
+          movies {
+            id
+            name
+            aliases
+            duration
+            date
+            rating100
+            director
+            synopsis
+            url
+            front_image_path
+            back_image_path
+            studio {
+              id
+              name
+            }
+            scenes {
+              id
+              title
+            }
+            tags {
+              id
+              name
+            }
+          }
+        }
+      }
+    `;
+
+    const variables = {
+      filter: {
+        page,
+        per_page: perPage,
+        sort: "name",
+        direction: "ASC"
+      }
+    };
+
+    try {
+      const data = await this.makeGraphQLRequest(query, variables);
+      const groups = data.findMovies?.movies || [];
+      const count = data.findMovies?.count || 0;
+      
+      console.log(`Found ${groups.length} groups on page ${page} of ${Math.ceil(count / perPage)}`);
+      
+      // Pre-load existing studios for validation
+      const allExistingStudios = await prisma.stashStudio.findMany({
+        select: { id: true }
+      });
+      const studioIds = new Set(allExistingStudios.map(s => s.id));
+      
+      // Pre-load existing scenes for validation
+      const allExistingScenes = await prisma.stashScene.findMany({
+        select: { id: true }
+      });
+      const sceneIds = new Set(allExistingScenes.map(s => s.id));
+      
+      // Pre-load existing tags for validation
+      const allExistingTags = await prisma.stashTag.findMany({
+        select: { id: true }
+      });
+      const tagIds = new Set(allExistingTags.map(t => t.id));
+      
+      console.log(`🔧 Pre-loaded validation data: ${studioIds.size} studios, ${sceneIds.size} scenes, ${tagIds.size} tags`);
+      
+      const syncedGroups = [];
+      
+      for (const group of groups) {
+        // Validate studio reference
+        let validatedStudioId = null;
+        if (group.studio?.id) {
+          if (studioIds.has(group.studio.id)) {
+            validatedStudioId = group.studio.id;
+          } else {
+            console.log(`⚠️ Studio ${group.studio.id} not found for group ${group.id}, setting studioId to null`);
+          }
+        }
+        
+        const groupData = {
+          id: group.id,
+          name: group.name || 'Untitled Group',
+          aliases: group.aliases || null,
+          duration: group.duration || null,
+          date: group.date || null,
+          rating: group.rating100 || null,
+          director: group.director || null,
+          synopsis: group.synopsis || null,
+          url: group.url || null,
+          frontImage: group.front_image_path || null,
+          backImage: group.back_image_path || null,
+          studioId: validatedStudioId,
+          lastSyncedAt: new Date()
+        };
+
+        // Upsert group
+        const syncedGroup = await prisma.stashGroup.upsert({
+          where: { id: group.id },
+          update: groupData,
+          create: groupData
+        });
+        
+        // Sync group-scene relationships
+        if (group.scenes && group.scenes.length > 0) {
+          // Delete old relationships
+          await prisma.stashGroupScene.deleteMany({
+            where: { groupId: group.id }
+          });
+          
+          // Create new relationships with scene order
+          for (let i = 0; i < group.scenes.length; i++) {
+            const scene = group.scenes[i];
+            
+            // Validate scene exists
+            if (!sceneIds.has(scene.id)) {
+              console.log(`⚠️ Scene ${scene.id} not found in database, skipping for group ${group.id}`);
+              continue;
+            }
+            
+            await prisma.stashGroupScene.create({
+              data: {
+                groupId: group.id,
+                sceneId: scene.id,
+                sceneIndex: i
+              }
+            });
+          }
+        }
+        
+        // Sync group-tag relationships
+        if (group.tags && group.tags.length > 0) {
+          // Delete old relationships
+          await prisma.stashGroupTag.deleteMany({
+            where: { groupId: group.id }
+          });
+          
+          // Create new relationships
+          for (const tag of group.tags) {
+            // Validate tag exists
+            if (!tagIds.has(tag.id)) {
+              console.log(`⚠️ Tag ${tag.id} not found in database, skipping for group ${group.id}`);
+              continue;
+            }
+            
+            await prisma.stashGroupTag.create({
+              data: {
+                groupId: group.id,
+                tagId: tag.id
+              }
+            });
+          }
+        }
+        
+        syncedGroups.push(syncedGroup);
+      }
+      
+      console.log(`Synced ${syncedGroups.length} groups from page ${page}`);
+      return { 
+        groups: syncedGroups, 
+        hasMore: (page * perPage) < count, 
+        totalCount: count 
+      };
+      
+    } catch (error) {
+      console.error('Error syncing groups:', error);
+      throw error;
+    }
+  }
+
   async updateScene(sceneId, updates) {
     console.log('🔧 [updateScene] Starting scene update...');
     console.log('   - Scene ID (raw):', sceneId, 'Type:', typeof sceneId);
@@ -2121,6 +2315,20 @@ class StashSyncService {
               id
               name
             }
+            groups {
+              group {
+                id
+                name
+              }
+              scene_index
+            }
+            movies {
+              movie {
+                id
+                name
+              }
+              scene_index
+            }
           }
         }
       `;
@@ -2135,13 +2343,59 @@ class StashSyncService {
       if (updates.performerIds !== undefined && Array.isArray(updates.performerIds)) {
         input.performer_ids = updates.performerIds.map(id => String(id));
       }
+      if (updates.groupIds !== undefined && Array.isArray(updates.groupIds)) {
+        // Get all existing groups for this scene first to preserve scene_index
+        const existingGroups = await this.prisma.stashGroupScene.findMany({
+          where: { sceneId: String(sceneId) },
+          orderBy: { sceneIndex: 'asc' }
+        });
+        
+        // Build groups array with SceneGroupInput format: { group_id, scene_index }
+        // Stash requires the full groups array, not just IDs
+        const groupsMap = new Map();
+        
+        // First, add existing groups with their scene indices
+        existingGroups.forEach(eg => {
+          groupsMap.set(eg.groupId, { group_id: String(eg.groupId), scene_index: eg.sceneIndex });
+        });
+        
+        // Then add new groups at the end
+        let nextIndex = existingGroups.length > 0 
+          ? Math.max(...existingGroups.map(g => g.sceneIndex)) + 1 
+          : 0;
+        
+        updates.groupIds.forEach(groupId => {
+          if (!groupsMap.has(groupId)) {
+            groupsMap.set(groupId, { group_id: String(groupId), scene_index: nextIndex++ });
+          }
+        });
+        
+        input.groups = Array.from(groupsMap.values());
+        console.log(`   - Setting ${input.groups.length} groups for scene (${updates.groupIds.length} new)`, input.groups);
+      }
       if (updates.details !== undefined) input.details = updates.details;
       if (updates.date !== undefined) input.date = updates.date;
       if (updates.url !== undefined) {
         // Convert single URL to urls array (url field is deprecated)
         input.urls = [updates.url];
       }
-      if (updates.coverImage !== undefined) input.cover_image = updates.coverImage;
+      if (updates.coverImage !== undefined) {
+        // If coverImage is a relative proxy URL, convert to original GEVI URL
+        if (updates.coverImage.startsWith('/api/stash/gevi-image-proxy')) {
+          // Extract the GEVI URL from the proxy path
+          const urlMatch = updates.coverImage.match(/url=([^&]+)/);
+          if (urlMatch) {
+            const geviImageUrl = decodeURIComponent(urlMatch[1]);
+            console.log('   - Converting proxy URL to original GEVI URL:', geviImageUrl);
+            input.cover_image = geviImageUrl;
+          } else {
+            console.warn('   - Could not extract GEVI URL from proxy path, using as-is');
+            input.cover_image = updates.coverImage;
+          }
+        } else {
+          input.cover_image = updates.coverImage;
+        }
+      }
 
       const variables = { input };
 

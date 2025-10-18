@@ -30,7 +30,33 @@ export default function SceneDetail() {
   const [isSearching, setIsSearching] = useState(false);
   const [searchResults, setSearchResults] = useState(null);
   const [creatingPerformers, setCreatingPerformers] = useState(new Set()); // Track which performers are being created
+  const [creatingGroups, setCreatingGroups] = useState(new Set()); // Track which groups are being created
   const [hoveringPerformer, setHoveringPerformer] = useState(null); // Track which performer is being hovered
+  const [showGeviUrlModal, setShowGeviUrlModal] = useState(false);
+  const [geviUrlInput, setGeviUrlInput] = useState('');
+  const [isSavingGeviUrl, setIsSavingGeviUrl] = useState(false);
+  const [parseStudio, setParseStudio] = useState(true);
+  const [parseTitle, setParseTitle] = useState(true);
+  const [parsePerformers, setParsePerformers] = useState(true);
+  const [stashUrl, setStashUrl] = useState(null);
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
+
+  // Fetch Stash URL from settings
+  useEffect(() => {
+    const fetchStashUrl = async () => {
+      try {
+        const res = await fetch(`${config.apiBaseUrl}/api/settings`);
+        const settings = await res.json();
+        if (settings?.stashUrl) {
+          setStashUrl(settings.stashUrl);
+        }
+      } catch (error) {
+        console.error('Error fetching Stash URL:', error);
+      }
+    };
+    fetchStashUrl();
+  }, []);
 
   useEffect(() => {
     const fetchScene = async () => {
@@ -148,7 +174,10 @@ export default function SceneDetail() {
           'Content-Type': 'application/json'
         },
         body: JSON.stringify({
-          customFilename: customFilename || undefined
+          customFilename: customFilename || undefined,
+          parseStudio: parseStudio,
+          parseTitle: parseTitle,
+          parsePerformers: parsePerformers
         })
       });
 
@@ -197,7 +226,7 @@ export default function SceneDetail() {
       const result = await response.json();
 
       if (result.success) {
-        const { firstPerformer, secondPerformer, scenes } = result.data;
+        const { firstPerformer, searchedPerformers, scenes } = result.data;
         
         // Proxy GEVI image URLs to avoid CORS issues
         const scenesWithProxiedImages = scenes.map(scene => {
@@ -211,12 +240,13 @@ export default function SceneDetail() {
         });
         
         if (scenesWithProxiedImages.length === 0) {
-          alert(`No scenes found with ${firstPerformer.name} and ${secondPerformer}`);
+          alert(`No scenes found with ${firstPerformer.name} and ${searchedPerformers.join(', ')}`);
         } else {
           setSearchResults({
             firstPerformer,
-            secondPerformer,
-            scenes: scenesWithProxiedImages
+            searchedPerformers,
+            scenes: scenesWithProxiedImages,
+            isSceneSearch: true  // Flag to indicate this is scene search (not movie search)
           });
         }
       } else {
@@ -230,9 +260,200 @@ export default function SceneDetail() {
     }
   };
 
-  const handleSelectSearchResult = (sceneUrl) => {
-    setScrapeUrl(sceneUrl);
-    setSearchResults(null); // Clear search results
+  const handleSearchGeviByTitle = async () => {
+    setIsSearching(true);
+    setSearchResults(null);
+
+    try {
+      const response = await fetch(`${config.apiBaseUrl}/api/stash/scenes/${id}/search-gevi-by-title`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        }
+      });
+
+      const result = await response.json();
+
+      if (result.success) {
+        const { studio, searchTitle, scenes } = result.data;
+        
+        if (scenes.length === 0) {
+          alert(`No scenes found for "${searchTitle}" on ${studio.name}'s GEVI page`);
+        } else {
+          // Set search results in a format compatible with the existing display
+          setSearchResults({
+            firstPerformer: { name: studio.name },
+            secondPerformer: `(Title: "${searchTitle}")`,
+            scenes: scenes,
+            isSceneSearchByTitle: true  // Flag to indicate this is title search (not movie search)
+          });
+        }
+      } else {
+        alert(`Failed to search GEVI by title: ${result.error || 'Unknown error'}`);
+      }
+    } catch (error) {
+      console.error('Error searching GEVI by title:', error);
+      alert('Failed to search GEVI by title');
+    } finally {
+      setIsSearching(false);
+    }
+  };
+
+  const handleSearchGeviMovies = async () => {
+    // Check if we need to search by title (no performers) or by performers
+    const hasEnoughPerformers = data && data.performers && data.performers.length >= 2;
+    const hasStudioAndTitle = data?.studio?.geviUrl && data?.title;
+    
+    if (!hasEnoughPerformers && !hasStudioAndTitle) {
+      alert('Scene needs either:\n- At least 2 performers to search by performers, OR\n- A studio with GEVI URL and scene title to search by title');
+      return;
+    }
+
+    setIsSearching(true);
+    setSearchResults(null); // Clear any previous results
+
+    try {
+      // If no performers, use title-based search instead
+      const endpoint = hasEnoughPerformers 
+        ? `${config.apiBaseUrl}/api/stash/scenes/${id}/search-gevi-movies`
+        : `${config.apiBaseUrl}/api/stash/scenes/${id}/search-gevi-movies-by-title`;
+
+      const response = await fetch(endpoint, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        }
+      });
+
+      const result = await response.json();
+
+      if (result.success) {
+        const { firstPerformer, secondPerformer, movies, searchMethod } = result.data;
+        
+        if (movies && movies.length > 0) {
+          // Set search results to display in modal (using same format as scenes)
+          setSearchResults({
+            firstPerformer: firstPerformer || { name: 'Studio Movies' },
+            secondPerformer: secondPerformer || `Title: "${data.title}"`,
+            scenes: movies // Use 'scenes' key for consistency with existing display logic
+          });
+        } else {
+          const searchDescription = searchMethod === 'title' 
+            ? `with title "${data.title}" on studio page`
+            : `with ${firstPerformer.name} and ${secondPerformer}`;
+          alert(`No movies found ${searchDescription}`);
+        }
+      } else {
+        alert(`Failed to search GEVI movies: ${result.error || 'Unknown error'}`);
+      }
+    } catch (error) {
+      console.error('Error searching GEVI movies:', error);
+      alert('Failed to search GEVI movies');
+    } finally {
+      setIsSearching(false);
+    }
+  };
+
+  const handleSelectSearchResult = (sceneUrl, movieData = null) => {
+    // If this is a movie result with existing movie ID, link scene to movie
+    if (movieData && movieData.existingMovieId) {
+      handleLinkToExistingMovie(movieData.existingMovieId);
+    } 
+    // If this is a movie result without existing movie, create new movie
+    else if (movieData && !movieData.existingMovieId) {
+      handleCreateNewMovie(movieData);
+    }
+    // Otherwise, it's a scene search result - just populate URL
+    else {
+      setScrapeUrl(sceneUrl);
+      setSearchResults(null); // Clear search results
+    }
+  };
+
+  const handleLinkToExistingMovie = async (movieId) => {
+    try {
+      setIsSearching(true);
+      
+      // Link the scene to the existing movie
+      const response = await fetch(`${config.apiBaseUrl}/api/stash/groups/${movieId}/add-scene`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          sceneId: id,
+          sceneIndex: 0 // Default index
+        })
+      });
+
+      const result = await response.json();
+
+      if (result.success) {
+        alert(`✅ Scene linked to existing movie successfully!`);
+        // Navigate to movie detail page
+        window.location.href = `/media/stash/groups/${movieId}`;
+      } else {
+        alert(`Failed to link scene to movie: ${result.error || 'Unknown error'}`);
+      }
+    } catch (error) {
+      console.error('Error linking scene to movie:', error);
+      alert('Failed to link scene to movie');
+    } finally {
+      setIsSearching(false);
+    }
+  };
+
+  const handleCreateNewMovie = async (movieData) => {
+    try {
+      setIsSearching(true);
+      
+      // Create new movie with GEVI URL
+      const response = await fetch(`${config.apiBaseUrl}/api/stash/groups/create`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          name: movieData.title,
+          geviUrl: movieData.url
+        })
+      });
+
+      const result = await response.json();
+
+      if (result.success) {
+        // Link the scene to the newly created movie
+        const movieId = result.data.group.id;
+        
+        const linkResponse = await fetch(`${config.apiBaseUrl}/api/stash/groups/${movieId}/add-scene`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            sceneId: id,
+            sceneIndex: 0
+          })
+        });
+
+        const linkResult = await linkResponse.json();
+
+        if (linkResult.success) {
+          alert(`✅ New movie created and scene linked successfully!`);
+          // Navigate to new movie detail page
+          window.location.href = `/media/stash/groups/${movieId}`;
+        } else {
+          alert(`Movie created but failed to link scene: ${linkResult.error || 'Unknown error'}`);
+        }
+      } else {
+        alert(`Failed to create movie: ${result.error || 'Unknown error'}`);
+      }
+    } catch (error) {
+      console.error('Error creating movie:', error);
+      alert('Failed to create movie');
+    } finally {
+      setIsSearching(false);
+    }
   };
 
   const handleScrapeGevi = async () => {
@@ -255,10 +476,11 @@ export default function SceneDetail() {
       const result = await response.json();
 
       if (result.success) {
-        const { scraped, matched, unmatched } = result.data;
+        const { scraped, matched, unmatched, sourceUrl } = result.data;
         
         console.log('🔍 Scraped data received:', scraped);
         console.log('📸 Image URL:', scraped.image);
+        console.log('🔗 Source URL:', sourceUrl);
         
         // Store original image URL for sending to Stash
         const originalImageUrl = scraped.image;
@@ -270,7 +492,7 @@ export default function SceneDetail() {
           console.log('📸 Proxied Image URL for display:', displayImageUrl);
         }
         
-        // Store scrape results with both URLs
+        // Store scrape results with both URLs and source URL
         setScrapeData({ 
           scraped: {
             ...scraped,
@@ -278,7 +500,8 @@ export default function SceneDetail() {
             originalImage: originalImageUrl // For sending to Stash
           }, 
           matched, 
-          unmatched 
+          unmatched,
+          sourceUrl: sourceUrl // Store the GEVI URL for saving later
         });
         setShowScrapeModal(false);
         setShowScrapeReviewModal(true);
@@ -319,7 +542,10 @@ export default function SceneDetail() {
       // Determine studio ID if matched
       const studioId = scrapeData.matched.studio ? scrapeData.matched.studio.id : null;
 
-      // Update scene with scraped values (including image and action codes)
+      // Collect matched group IDs
+      const groupIds = scrapeData.matched.groups?.map(g => g.id) || [];
+
+      // Update scene with scraped values (including image, action codes, groups, and GEVI URL)
       // Use originalImage (direct GEVI URL) for Stash, not the proxied URL
       const response = await fetch(`${config.apiBaseUrl}/api/stash/scenes/${id}`, {
         method: 'PUT',
@@ -332,10 +558,12 @@ export default function SceneDetail() {
           studioId: studioId,
           performerIds: performerIds,
           actionCodes: actionCodes,
+          groupIds: groupIds,
           details: scrapeData.scraped.details,
           date: scrapeData.scraped.date,
           url: scrapeData.scraped.url,
-          coverImage: scrapeData.scraped.originalImage || scrapeData.scraped.image // Use original URL for Stash
+          coverImage: scrapeData.scraped.originalImage || scrapeData.scraped.image, // Use original URL for Stash
+          geviUrl: scrapeData.sourceUrl // Save the GEVI URL used for scraping
         })
       });
 
@@ -352,7 +580,7 @@ export default function SceneDetail() {
     }
   };
 
-  const handleCreatePerformer = async (performerName) => {
+  const handleCreatePerformerFromParse = async (performerName) => {
     if (!performerName || !performerName.trim()) {
       alert('Performer name cannot be empty');
       return;
@@ -414,6 +642,212 @@ export default function SceneDetail() {
     }
   };
 
+  const handleCreatePerformer = async (performerName) => {
+    if (!performerName || !performerName.trim()) {
+      alert('Performer name cannot be empty');
+      return;
+    }
+
+    setCreatingPerformers(prev => new Set(prev).add(performerName));
+
+    try {
+      console.log('👤 Creating performer:', performerName);
+      
+      // Create the performer with minimal data
+      const createResponse = await fetch(`${config.apiBaseUrl}/api/stash/performers/create`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          name: performerName,
+          aliases: [],
+          gender: null,
+          birthdate: null,
+          ethnicity: null,
+          country: null,
+          eyeColor: null,
+          hairColor: null,
+          height: null,
+          measurements: null,
+          fakeTits: null,
+          penisLength: null,
+          circumcised: null,
+          tattoos: null,
+          piercings: null,
+          careerLength: null,
+          details: null
+        })
+      });
+
+      const createResult = await createResponse.json();
+
+      if (createResult.success) {
+        const newPerformer = createResult.data.performer;
+        
+        // Find the action code for this performer if it exists
+        const scrapedPerformer = scrapeData.scraped.performers.find(
+          sp => sp.name === performerName
+        );
+        const actionCode = scrapedPerformer?.actionCode;
+
+        // Update scrapeData to move performer from unmatched to matched
+        setScrapeData(prev => ({
+          ...prev,
+          matched: {
+            ...prev.matched,
+            performers: [
+              ...prev.matched.performers,
+              {
+                id: newPerformer.id,
+                name: newPerformer.name,
+                stashId: newPerformer.stashId,
+                matchedVia: 'created',
+                alternatives: [],
+                originalName: performerName,
+                actionCode: actionCode
+              }
+            ]
+          },
+          unmatched: {
+            ...prev.unmatched,
+            performers: prev.unmatched.performers.filter(p => p !== performerName)
+          }
+        }));
+
+        alert(`✅ Performer "${performerName}" created successfully!`);
+      } else {
+        alert(`Failed to create performer: ${createResult.error || 'Unknown error'}`);
+      }
+    } catch (error) {
+      console.error('Error creating performer:', error);
+      alert(`Failed to create performer: ${error.message}`);
+    } finally {
+      setCreatingPerformers(prev => {
+        const newSet = new Set(prev);
+        newSet.delete(performerName);
+        return newSet;
+      });
+    }
+  };
+
+  const handleCreateGroup = async (group) => {
+    if (!group || !group.name || !group.name.trim()) {
+      alert('Group name cannot be empty');
+      return;
+    }
+
+    setCreatingGroups(prev => new Set(prev).add(group.name));
+
+    try {
+      // First, fetch full movie details from GEVI
+      console.log('🎬 Fetching movie details from:', group.url);
+      const movieResponse = await fetch('/api/stash/gevi/movie', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url: group.url })
+      });
+
+      if (!movieResponse.ok) {
+        throw new Error('Failed to fetch movie details');
+      }
+
+      const movieResult = await movieResponse.json();
+      const movie = movieResult.data.movie;
+      console.log('✅ Movie details fetched:', movie);
+
+      // Extract studio name if it's an object
+      let studioName = null;
+      let studioId = null;
+      if (movie.studio) {
+        if (typeof movie.studio === 'object' && movie.studio.name) {
+          studioName = movie.studio.name;
+        } else if (typeof movie.studio === 'string') {
+          studioName = movie.studio;
+        }
+      }
+
+      // Try to match studio to existing studio in database
+      if (studioName && scrapeData.matched.studio) {
+        studioId = scrapeData.matched.studio.id;
+      }
+
+      // Convert duration from "120:00" format to minutes (120)
+      let durationMinutes = null;
+      if (movie.duration) {
+        const match = movie.duration.match(/^(\d+):/);
+        if (match) {
+          durationMinutes = parseInt(match[1]);
+        }
+      }
+
+      // Create the group
+      const createResponse = await fetch(`${config.apiBaseUrl}/api/stash/groups/create`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          name: movie.name || group.name,
+          aliases: null,
+          duration: durationMinutes,
+          date: movie.date,
+          rating: null,
+          director: movie.director,
+          synopsis: movie.synopsis,
+          studioId: studioId,
+          front_image: movie.front_image,
+          back_image: movie.back_image,
+          url: movie.url
+        })
+      });
+
+      const createResult = await createResponse.json();
+
+      if (createResult.success) {
+        const newGroup = createResult.data.group;
+
+        // Update scrapeData to move group from unmatched to matched
+        setScrapeData(prev => ({
+          ...prev,
+          matched: {
+            ...prev.matched,
+            groups: [
+              ...(prev.matched.groups || []),
+              {
+                id: newGroup.id,
+                name: newGroup.name,
+                studio: newGroup.studio?.name || studioName,
+                date: newGroup.date,
+                matchedVia: 'created',
+                alternatives: [],
+                originalName: group.name,
+                url: group.url
+              }
+            ]
+          },
+          unmatched: {
+            ...prev.unmatched,
+            groups: prev.unmatched.groups.filter(g => g.name !== group.name)
+          }
+        }));
+
+        alert(`✅ Group "${movie.name || group.name}" created successfully!`);
+      } else {
+        alert(`Failed to create group: ${createResult.error || 'Unknown error'}`);
+      }
+    } catch (error) {
+      console.error('Error creating group:', error);
+      alert(`Failed to create group: ${error.message}`);
+    } finally {
+      setCreatingGroups(prev => {
+        const newSet = new Set(prev);
+        newSet.delete(group.name);
+        return newSet;
+      });
+    }
+  };
+
   const handleRemovePerformer = async (performerId, performerName) => {
     if (!window.confirm(`Remove ${performerName} from this scene?`)) {
       return;
@@ -446,6 +880,52 @@ export default function SceneDetail() {
     } catch (error) {
       console.error('Error removing performer:', error);
       alert(`Failed to remove performer: ${error.message}`);
+    }
+  };
+
+  const handleSaveGeviUrl = async () => {
+    if (!geviUrlInput.trim()) {
+      alert('Please enter a GEVI URL');
+      return;
+    }
+
+    // Basic validation for GEVI URL format
+    if (!geviUrlInput.includes('gayeroticvideoindex.com')) {
+      if (!confirm('This doesn\'t look like a GEVI URL. Save anyway?')) {
+        return;
+      }
+    }
+
+    setIsSavingGeviUrl(true);
+
+    try {
+      const response = await fetch(`${config.apiBaseUrl}/api/stash/scenes/${id}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          geviUrl: geviUrlInput
+        })
+      });
+
+      const result = await response.json();
+      
+      if (result.success) {
+        setData(prevData => ({
+          ...prevData,
+          geviUrl: geviUrlInput
+        }));
+        setShowGeviUrlModal(false);
+        alert('GEVI URL saved successfully!');
+      } else {
+        alert(`Failed to save GEVI URL: ${result.error || 'Unknown error'}`);
+      }
+    } catch (error) {
+      console.error('Error saving GEVI URL:', error);
+      alert('Failed to save GEVI URL');
+    } finally {
+      setIsSavingGeviUrl(false);
     }
   };
 
@@ -507,6 +987,31 @@ export default function SceneDetail() {
 
   const closePerformerOverlay = () => {
     setSelectedPerformer(null);
+  };
+
+  const handleDeleteScene = async () => {
+    setIsDeleting(true);
+    
+    try {
+      const response = await fetch(`${config.apiBaseUrl}/api/stash/scenes/${id}`, {
+        method: 'DELETE'
+      });
+
+      const result = await response.json();
+      
+      if (result.success) {
+        alert('Scene deleted successfully from both database and Stash!');
+        navigate('/media/stash/scenes');
+      } else {
+        alert(`Failed to delete scene: ${result.error || 'Unknown error'}`);
+      }
+    } catch (error) {
+      console.error('Error deleting scene:', error);
+      alert('Failed to delete scene');
+    } finally {
+      setIsDeleting(false);
+      setShowDeleteModal(false);
+    }
   };
 
   if (loading) {
@@ -581,7 +1086,8 @@ export default function SceneDetail() {
               <button 
                 onClick={() => {
                   setShowScrapeModal(true);
-                  setScrapeUrl('');
+                  // Auto-populate with previously saved GEVI URL if available
+                  setScrapeUrl(data?.geviUrl || '');
                 }}
                 className="scrape-gevi-button"
                 title="Scrape metadata from GEVI"
@@ -590,6 +1096,45 @@ export default function SceneDetail() {
               </button>
             </>
           )}
+
+          <button 
+            onClick={() => {
+              setGeviUrlInput(data?.geviUrl || '');
+              setShowGeviUrlModal(true);
+            }}
+            className="set-gevi-url-button"
+            title={data?.geviUrl ? "Update GEVI URL" : "Set GEVI URL"}
+          >
+            {data?.geviUrl ? '🔗 Update GEVI URL' : '🔗 Set GEVI URL'}
+          </button>
+
+          {stashUrl ? (
+            <a
+              href={`${stashUrl}/scenes/${data.id}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="view-in-stash-button"
+              title="View scene in Stash"
+            >
+              🎭 View in Stash
+            </a>
+          ) : (
+            <button
+              onClick={() => alert('Stash URL not configured. Please configure it in Settings.')}
+              className="view-in-stash-button"
+              title="Stash URL not configured"
+            >
+              🎭 View in Stash
+            </button>
+          )}
+
+          <button
+            onClick={() => setShowDeleteModal(true)}
+            className="delete-scene-button"
+            title="Delete scene from database and Stash"
+          >
+            🗑️ Delete Scene
+          </button>
           
           <div className="scene-meta-badges">
             {data.date && (
@@ -602,6 +1147,20 @@ export default function SceneDetail() {
               <div className="meta-badge">
                 <span className="badge-icon">🏢</span>
                 <span>{typeof data.studio === 'string' ? data.studio : data.studio?.name}</span>
+              </div>
+            )}
+            {data.geviUrl && (
+              <div className="meta-badge">
+                <span className="badge-icon">🌐</span>
+                <a 
+                  href={data.geviUrl} 
+                  target="_blank" 
+                  rel="noopener noreferrer"
+                  style={{ color: 'inherit', textDecoration: 'none' }}
+                  title="View on GEVI"
+                >
+                  GEVI
+                </a>
               </div>
             )}
             {data.rating && (
@@ -704,6 +1263,58 @@ export default function SceneDetail() {
                   </div>
                 );
               })}
+            </div>
+          </div>
+        )}
+
+        {/* Groups Section */}
+        {data.groups && data.groups.length > 0 && (
+          <div className="card">
+            <h3>🎬 Groups / Movies ({data.groups.length})</h3>
+            <p className="text-sm text-gray-600 mb-3">
+              This scene appears in the following groups/movies
+            </p>
+            <div className="groups-list">
+              {data.groups
+                .sort((a, b) => a.sceneIndex - b.sceneIndex)
+                .map((groupWrapper) => {
+                  const group = groupWrapper.group;
+                  return (
+                    <Link
+                      key={group.id}
+                      to={`/media/stash/groups/${group.id}`}
+                      className="group-item"
+                    >
+                      <div className="group-item-content">
+                        {group.front_image && (
+                          <div className="group-thumbnail">
+                            <img src={group.front_image} alt={group.name} />
+                          </div>
+                        )}
+                        <div className="group-info">
+                          <div className="group-title">
+                            <span className="scene-number">#{groupWrapper.sceneIndex + 1}</span>
+                            <span className="group-name">{group.name}</span>
+                          </div>
+                          <div className="group-meta">
+                            {group.studio && (
+                              <span className="group-studio">🏢 {group.studio.name}</span>
+                            )}
+                            {group.date && (
+                              <span className="group-date">📅 {group.date}</span>
+                            )}
+                            {group.director && (
+                              <span className="group-director">🎬 {group.director}</span>
+                            )}
+                            {group.duration && (
+                              <span className="group-duration">⏱️ {formatDuration(group.duration)}</span>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    </Link>
+                  );
+                })}
             </div>
           </div>
         )}
@@ -848,6 +1459,34 @@ export default function SceneDetail() {
           <div className="modal-content parse-filename-modal" onClick={(e) => e.stopPropagation()}>
             <h3>📋 Review Parsed Filename</h3>
             
+            {/* Parse Options Toggles */}
+            <div className="parse-options">
+              <label className="parse-option-toggle">
+                <input
+                  type="checkbox"
+                  checked={parseStudio}
+                  onChange={(e) => setParseStudio(e.target.checked)}
+                />
+                <span>Parse Studio</span>
+              </label>
+              <label className="parse-option-toggle">
+                <input
+                  type="checkbox"
+                  checked={parseTitle}
+                  onChange={(e) => setParseTitle(e.target.checked)}
+                />
+                <span>Parse Title</span>
+              </label>
+              <label className="parse-option-toggle">
+                <input
+                  type="checkbox"
+                  checked={parsePerformers}
+                  onChange={(e) => setParsePerformers(e.target.checked)}
+                />
+                <span>Parse Performers</span>
+              </label>
+            </div>
+            
             <div className="parse-results">
               {/* Filename Input with Refresh Button */}
               <div className="parse-field">
@@ -975,7 +1614,7 @@ export default function SceneDetail() {
                           )}
                           <button
                             className="btn-create-performer"
-                            onClick={() => handleCreatePerformer(performer)}
+                            onClick={() => handleCreatePerformerFromParse(performer)}
                             disabled={creatingPerformers.has(performer)}
                             title="Create new performer in Stash with this name"
                           >
@@ -1046,7 +1685,13 @@ export default function SceneDetail() {
                 overflowY: 'auto'
               }}>
                 <h4 style={{ marginBottom: '10px', fontSize: '14px', color: '#666' }}>
-                  Found {searchResults.scenes.length} scene(s) with {searchResults.firstPerformer.name} and {searchResults.secondPerformer}:
+                  Found {searchResults.scenes.length} {searchResults.isSceneSearch ? 
+                    (searchResults.scenes.length === 1 ? 'scene' : 'scenes') : 
+                    (searchResults.scenes.length === 1 ? 'movie' : 'movies')}
+                  {searchResults.allPerformers ? ` (searched for: ${searchResults.allPerformers.join(', ')})` : 
+                   searchResults.searchedPerformers ? 
+                     ` (searched for: ${searchResults.searchedPerformers.join(', ')})` :
+                     ` with ${searchResults.firstPerformer.name} and ${searchResults.secondPerformer}`}:
                 </h4>
                 {searchResults.scenes.map((scene, idx) => (
                   <div 
@@ -1058,21 +1703,9 @@ export default function SceneDetail() {
                       marginBottom: '8px', 
                       backgroundColor: 'white', 
                       borderRadius: '4px',
-                      cursor: 'pointer',
                       border: '1px solid #ddd',
                       transition: 'all 0.2s',
                       alignItems: 'center'
-                    }}
-                    onClick={() => handleSelectSearchResult(scene.url)}
-                    onMouseEnter={(e) => {
-                      e.currentTarget.style.borderColor = '#8b5cf6';
-                      e.currentTarget.style.transform = 'translateY(-2px)';
-                      e.currentTarget.style.boxShadow = '0 4px 12px rgba(0,0,0,0.1)';
-                    }}
-                    onMouseLeave={(e) => {
-                      e.currentTarget.style.borderColor = '#ddd';
-                      e.currentTarget.style.transform = 'translateY(0)';
-                      e.currentTarget.style.boxShadow = 'none';
                     }}
                   >
                     {scene.image && (
@@ -1091,12 +1724,126 @@ export default function SceneDetail() {
                         }}
                       />
                     )}
-                    <div style={{ flex: 1 }}>
-                      <div style={{ fontWeight: '500', color: '#333', marginBottom: '4px' }}>{scene.title}</div>
-                      <div style={{ fontSize: '12px', color: '#666' }}>
-                        Click to select this scene
+                    <div 
+                      style={{ 
+                        flex: 1, 
+                        cursor: 'pointer' 
+                      }}
+                      onClick={() => {
+                        // Only pass movieData if this is a movie search (not scene search)
+                        if (searchResults.isSceneSearch || searchResults.isSceneSearchByTitle) {
+                          // Scene search - just populate URL for scraping
+                          handleSelectSearchResult(scene.url);
+                        } else if (scene.matchedPerformers) {
+                          // Movie search - handle movie creation/linking
+                          handleSelectSearchResult(scene.url, scene);
+                        } else {
+                          // Fallback - just populate URL
+                          handleSelectSearchResult(scene.url);
+                        }
+                      }}
+                      onMouseEnter={(e) => {
+                        e.currentTarget.style.color = '#8b5cf6';
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.color = 'inherit';
+                      }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
+                        <span style={{ fontWeight: '500', color: '#333' }}>{scene.title}</span>
+                        {/* Only show movie badges for movie search results */}
+                        {!searchResults.isSceneSearch && !searchResults.isSceneSearchByTitle && scene.existingMovieId && (
+                          <span style={{ 
+                            fontSize: '11px', 
+                            padding: '2px 6px', 
+                            backgroundColor: '#10b981', 
+                            color: 'white', 
+                            borderRadius: '3px',
+                            fontWeight: '600'
+                          }}>
+                            ✓ IN DATABASE
+                          </span>
+                        )}
+                        {!searchResults.isSceneSearch && !searchResults.isSceneSearchByTitle && scene.matchedPerformers && !scene.existingMovieId && (
+                          <span style={{ 
+                            fontSize: '11px', 
+                            padding: '2px 6px', 
+                            backgroundColor: '#f59e0b', 
+                            color: 'white', 
+                            borderRadius: '3px',
+                            fontWeight: '600'
+                          }}>
+                            ✦ NEW MOVIE
+                          </span>
+                        )}
+                      </div>
+                      {/* Show matched performers for both scene and movie searches */}
+                      {scene.matchedPerformers && scene.matchedPerformers.length > 0 && (
+                        <div style={{ fontSize: '12px', color: '#10b981', marginBottom: '2px', fontWeight: '600' }}>
+                          ✓ {scene.matchedPerformers.length} {scene.matchedPerformers.length === 1 ? 'match' : 'matches'}: {scene.matchedPerformers.join(', ')}
+                        </div>
+                      )}
+                      {/* Only show movie action hints for movie searches */}
+                      {!searchResults.isSceneSearch && !searchResults.isSceneSearchByTitle && scene.existingMovieId && (
+                        <div style={{ fontSize: '12px', color: '#059669', marginBottom: '4px', fontStyle: 'italic' }}>
+                          → Will link scene to existing movie
+                        </div>
+                      )}
+                      {!searchResults.isSceneSearch && !searchResults.isSceneSearchByTitle && scene.matchedPerformers && !scene.existingMovieId && (
+                        <div style={{ fontSize: '12px', color: '#d97706', marginBottom: '4px', fontStyle: 'italic' }}>
+                          → Will create new movie and link scene
+                        </div>
+                      )}
+                      {/* Show scene info hint for scene searches */}
+                      {(searchResults.isSceneSearch || searchResults.isSceneSearchByTitle) && (
+                        <div style={{ fontSize: '12px', color: '#6366f1', marginBottom: '4px', fontStyle: 'italic' }}>
+                          → Click to populate URL and scrape scene metadata
+                        </div>
+                      )}
+                      {scene.studio && (
+                        <div style={{ fontSize: '12px', color: '#8b5cf6', marginBottom: '2px' }}>
+                          🎬 {scene.studio}
+                        </div>
+                      )}
+                      {scene.performers && (
+                        <div style={{ fontSize: '12px', color: '#666', marginBottom: '2px' }}>
+                          👥 {scene.performers}
+                        </div>
+                      )}
+                      {scene.date && (
+                        <div style={{ fontSize: '11px', color: '#999', marginBottom: '4px' }}>
+                          📅 {scene.date}
+                        </div>
+                      )}
+                      <div style={{ fontSize: '12px', color: '#666', fontStyle: 'italic' }}>
+                        Click to select this {searchResults.allPerformers ? 'movie' : 'scene'}
                       </div>
                     </div>
+                    <a
+                      href={scene.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      onClick={(e) => e.stopPropagation()}
+                      style={{
+                        padding: '6px 12px',
+                        backgroundColor: '#8b5cf6',
+                        color: 'white',
+                        borderRadius: '4px',
+                        textDecoration: 'none',
+                        fontSize: '12px',
+                        fontWeight: '500',
+                        transition: 'background-color 0.2s',
+                        flexShrink: 0
+                      }}
+                      onMouseEnter={(e) => {
+                        e.currentTarget.style.backgroundColor = '#7c3aed';
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.backgroundColor = '#8b5cf6';
+                      }}
+                    >
+                      🔗 View on GEVI
+                    </a>
                   </div>
                 ))}
               </div>
@@ -1110,6 +1857,47 @@ export default function SceneDetail() {
                 style={{ marginRight: '10px' }}
               >
                 {isSearching ? '⏳ Searching...' : '🔎 Search by Performers'}
+              </button>
+              <button 
+                className="btn-primary" 
+                onClick={handleSearchGeviByTitle}
+                disabled={isScraping || isSearching || !data || !data.title || !data.studio || !data.studio.geviUrl}
+                style={{ marginRight: '10px' }}
+                title={
+                  !data?.studio?.geviUrl 
+                    ? 'Studio must have a GEVI URL set (go to studio page to set it)' 
+                    : !data?.title 
+                    ? 'Scene must have a title' 
+                    : 'Search for this scene on the studio\'s GEVI page by title'
+                }
+              >
+                {isSearching ? '⏳ Searching...' : '📝 Search by Title'}
+              </button>
+              <button 
+                className="btn-primary" 
+                onClick={handleSearchGeviMovies}
+                disabled={
+                  isScraping || 
+                  isSearching || 
+                  !data || 
+                  (
+                    // Need either 2+ performers OR (studio with GEVI URL + title)
+                    (!data.performers || data.performers.length < 2) &&
+                    (!data.studio?.geviUrl || !data.title)
+                  )
+                }
+                style={{ marginRight: '10px' }}
+                title={
+                  !data 
+                    ? 'Loading scene data...' 
+                    : (data.performers && data.performers.length >= 2)
+                    ? 'Search GEVI movies table using scene performers'
+                    : (data.studio?.geviUrl && data.title)
+                    ? 'Search GEVI movies table on studio page by title'
+                    : 'Scene needs either:\n- At least 2 performers, OR\n- Studio with GEVI URL and scene title'
+                }
+              >
+                {isSearching ? '⏳ Searching...' : '🎬 Search Movies'}
               </button>
               <button 
                 className="btn-accept" 
@@ -1257,43 +2045,56 @@ export default function SceneDetail() {
                             ✓ {performer.name}
                             {actionCode && <span className="action-code" style={{ color: '#10b981', marginLeft: '0.5rem', fontSize: '0.875rem' }}>({actionCode})</span>}
                           </span>
-                          {hasAlternatives && (
-                            <select
-                              className="performer-alternatives-dropdown"
-                              onChange={(e) => {
-                                if (e.target.value) {
-                                  // Update matched performers with selected alternative
-                                  const newMatched = [...scrapeData.matched.performers];
-                                  const selectedAlt = performer.alternatives.find(a => a.name === e.target.value);
-                                  if (selectedAlt) {
-                                    newMatched[index] = {
-                                      ...selectedAlt,
-                                      originalName: performer.originalName,
-                                      alternatives: [
-                                        { ...performer, matchedAlias: performer.matchedAlias, matchedVia: performer.matchedVia },
-                                        ...performer.alternatives.filter(a => a.id !== selectedAlt.id)
-                                      ]
-                                    };
-                                    setScrapeData({
-                                      ...scrapeData,
-                                      matched: {
-                                        ...scrapeData.matched,
-                                        performers: newMatched
-                                      }
-                                    });
-                                  }
+                          <select
+                            className="performer-alternatives-dropdown"
+                            onChange={async (e) => {
+                              const value = e.target.value;
+                              if (!value) return;
+                              
+                              if (value === '__ADD_NEW__') {
+                                // Create new performer with original GEVI name
+                                const isCreating = creatingPerformers.has(performer.originalName);
+                                if (isCreating) return;
+                                
+                                await handleCreatePerformer(performer.originalName);
+                                // Reset the dropdown
+                                e.target.value = '';
+                              } else {
+                                // Switch to alternative performer
+                                const newMatched = [...scrapeData.matched.performers];
+                                const selectedAlt = performer.alternatives?.find(a => a.name === value);
+                                if (selectedAlt) {
+                                  newMatched[index] = {
+                                    ...selectedAlt,
+                                    originalName: performer.originalName,
+                                    alternatives: [
+                                      { ...performer, matchedAlias: performer.matchedAlias, matchedVia: performer.matchedVia },
+                                      ...performer.alternatives.filter(a => a.id !== selectedAlt.id)
+                                    ]
+                                  };
+                                  setScrapeData({
+                                    ...scrapeData,
+                                    matched: {
+                                      ...scrapeData.matched,
+                                      performers: newMatched
+                                    }
+                                  });
                                 }
-                              }}
-                              value=""
-                            >
-                              <option value="">Switch to alternative...</option>
-                              {performer.alternatives.map((alt, altIndex) => (
-                                <option key={altIndex} value={alt.name}>
-                                  {alt.name} {alt.matchedVia === 'alias' && alt.matchedAlias ? `(via: ${alt.matchedAlias})` : ''}
-                                </option>
-                              ))}
-                            </select>
-                          )}
+                              }
+                            }}
+                            value=""
+                          >
+                            <option value="">Select action...</option>
+                            <option value="__ADD_NEW__">
+                              ➕ Add "{performer.originalName}" as new performer
+                            </option>
+                            {hasAlternatives && <option disabled>──────────</option>}
+                            {hasAlternatives && performer.alternatives.map((alt, altIndex) => (
+                              <option key={altIndex} value={alt.name}>
+                                Switch to: {alt.name} {alt.matchedVia === 'alias' && alt.matchedAlias ? `(via: ${alt.matchedAlias})` : ''}
+                              </option>
+                            ))}
+                          </select>
                         </div>
                         <span className="match-label">
                           (Matched{performer.matchedVia === 'alias' && performer.matchedAlias ? ` via alias: ${performer.matchedAlias}` : ''})
@@ -1310,19 +2111,182 @@ export default function SceneDetail() {
                       sp => sp.name === performerName
                     );
                     const actionCode = scrapedPerformer?.actionCode;
+                    const isCreating = creatingPerformers.has(performerName);
                     
                     return (
                       <div key={index} className="performer-item unmatched">
-                        <span className="performer-name">
-                          ✗ {performerName}
-                          {actionCode && <span className="action-code" style={{ color: '#ef4444', marginLeft: '0.5rem', fontSize: '0.875rem' }}>({actionCode})</span>}
-                        </span>
-                        <span className="match-label">(Not found)</span>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
+                          <div>
+                            <span className="performer-name">
+                              ✗ {performerName}
+                              {actionCode && <span className="action-code" style={{ color: '#ef4444', marginLeft: '0.5rem', fontSize: '0.875rem' }}>({actionCode})</span>}
+                            </span>
+                            <span className="match-label">(Not found)</span>
+                          </div>
+                          <button
+                            onClick={() => handleCreatePerformer(performerName)}
+                            disabled={isCreating}
+                            style={{
+                              padding: '4px 12px',
+                              fontSize: '12px',
+                              background: '#10b981',
+                              color: 'white',
+                              border: 'none',
+                              borderRadius: '4px',
+                              cursor: isCreating ? 'not-allowed' : 'pointer',
+                              whiteSpace: 'nowrap',
+                              opacity: isCreating ? 0.5 : 1
+                            }}
+                          >
+                            {isCreating ? '⏳ Creating...' : '➕ Add New'}
+                          </button>
+                        </div>
                       </div>
                     );
                   })}
                 </div>
               </div>
+
+              {/* Movies/Groups Field */}
+              {(scrapeData.matched.groups?.length > 0 || scrapeData.unmatched.groups?.length > 0) && (
+                <div className="parse-field">
+                  <label>Movies/Groups:</label>
+                  <div className="performers-list">
+                    {scrapeData.matched.groups?.map((group, index) => {
+                      const hasAlternatives = group.alternatives && group.alternatives.length > 0;
+                      
+                      return (
+                        <div key={index} className="performer-item matched">
+                          <div className="performer-input-wrapper">
+                            <span className="performer-name">
+                              ✓ {group.name}
+                              {group.studio && <span style={{ color: '#6b7280', marginLeft: '0.5rem', fontSize: '0.875rem' }}>({group.studio})</span>}
+                            </span>
+                            {hasAlternatives && (
+                              <select
+                                className="performer-alternatives-dropdown"
+                                onChange={(e) => {
+                                  if (e.target.value) {
+                                    // Update matched groups with selected alternative
+                                    const newMatched = [...scrapeData.matched.groups];
+                                    const selectedAlt = group.alternatives.find(a => a.name === e.target.value);
+                                    if (selectedAlt) {
+                                      newMatched[index] = {
+                                        ...selectedAlt,
+                                        originalName: group.originalName,
+                                        url: group.url,
+                                        alternatives: [
+                                          { ...group, matchedAlias: group.matchedAlias, matchedVia: group.matchedVia },
+                                          ...group.alternatives.filter(a => a.id !== selectedAlt.id)
+                                        ]
+                                      };
+                                      setScrapeData({
+                                        ...scrapeData,
+                                        matched: {
+                                          ...scrapeData.matched,
+                                          groups: newMatched
+                                        }
+                                      });
+                                    }
+                                  }
+                                }}
+                                value=""
+                              >
+                                <option value="">Switch to alternative...</option>
+                                {group.alternatives.map((alt, altIndex) => (
+                                  <option key={altIndex} value={alt.name}>
+                                    {alt.name} {alt.studio ? `(${alt.studio})` : ''} {alt.matchedVia === 'alias' && alt.matchedAlias ? `(via: ${alt.matchedAlias})` : ''}
+                                  </option>
+                                ))}
+                              </select>
+                            )}
+                          </div>
+                          <span className="match-label">
+                            (Matched{group.matchedVia === 'alias' && group.matchedAlias ? ` via alias: ${group.matchedAlias}` : ''})
+                            {hasAlternatives && (
+                              <span className="alternatives-count"> (+{group.alternatives.length} more)</span>
+                            )}
+                          </span>
+                        </div>
+                      );
+                    })}
+                    {scrapeData.unmatched.groups?.map((group, index) => {
+                      const isCreating = creatingGroups.has(group.name);
+                      
+                      return (
+                        <div key={index} className="performer-item unmatched">
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
+                            <div>
+                              <span className="performer-name">
+                                ✗ {group.name}
+                              </span>
+                              <span className="match-label">(Not found)</span>
+                            </div>
+                            <div style={{ display: 'flex', gap: '8px' }}>
+                              <button
+                                onClick={async () => {
+                                  try {
+                                    console.log('🎬 Fetching movie details from:', group.url);
+                                    const response = await fetch('/api/stash/gevi/movie', {
+                                      method: 'POST',
+                                      headers: { 'Content-Type': 'application/json' },
+                                      body: JSON.stringify({ url: group.url })
+                                    });
+                                    
+                                    if (!response.ok) {
+                                      throw new Error('Failed to fetch movie details');
+                                    }
+                                    
+                                    const result = await response.json();
+                                    console.log('✅ Movie details fetched:', result.data.movie);
+                                    
+                                    // Show movie details in an alert or modal (for now, just log)
+                                    alert(`Movie Details:\n\nTitle: ${result.data.movie.name}\nStudio: ${result.data.movie.studio || 'N/A'}\nDate: ${result.data.movie.date || 'N/A'}\nDuration: ${result.data.movie.duration || 'N/A'}\nDirector: ${result.data.movie.director || 'N/A'}\n\n(Full details in console)`);
+                                  } catch (error) {
+                                    console.error('❌ Failed to fetch movie details:', error);
+                                    alert('Failed to fetch movie details. See console for details.');
+                                  }
+                                }}
+                                disabled={isCreating}
+                                style={{
+                                  padding: '4px 12px',
+                                  fontSize: '12px',
+                                  background: '#8b5cf6',
+                                  color: 'white',
+                                  border: 'none',
+                                  borderRadius: '4px',
+                                  cursor: isCreating ? 'not-allowed' : 'pointer',
+                                  whiteSpace: 'nowrap',
+                                  opacity: isCreating ? 0.5 : 1
+                                }}
+                              >
+                                📥 Fetch Details
+                              </button>
+                              <button
+                                onClick={() => handleCreateGroup(group)}
+                                disabled={isCreating}
+                                style={{
+                                  padding: '4px 12px',
+                                  fontSize: '12px',
+                                  background: '#10b981',
+                                  color: 'white',
+                                  border: 'none',
+                                  borderRadius: '4px',
+                                  cursor: isCreating ? 'not-allowed' : 'pointer',
+                                  whiteSpace: 'nowrap',
+                                  opacity: isCreating ? 0.5 : 1
+                                }}
+                              >
+                                {isCreating ? '⏳ Creating...' : '➕ Add New'}
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
 
               {/* Date Field */}
               {scrapeData.scraped.date && (
@@ -1356,6 +2320,94 @@ export default function SceneDetail() {
                 ✓ Accept & Update
               </button>
               <button className="btn-cancel" onClick={() => setShowScrapeReviewModal(false)}>
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Set/Update GEVI URL Modal */}
+      {showGeviUrlModal && (
+        <div className="modal-overlay" onClick={() => setShowGeviUrlModal(false)}>
+          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+            <h3>🔗 {data?.geviUrl ? 'Update' : 'Set'} GEVI URL</h3>
+            
+            <div className="scrape-input-section">
+              <label htmlFor="gevi-url-input">GEVI Episode URL:</label>
+              <input
+                id="gevi-url-input"
+                type="text"
+                value={geviUrlInput}
+                onChange={(e) => setGeviUrlInput(e.target.value)}
+                placeholder="https://gayeroticvideoindex.com/episode/..."
+                disabled={isSavingGeviUrl}
+                className="scrape-url-input"
+              />
+              <p style={{ fontSize: '0.9rem', color: '#666', marginTop: '0.5rem' }}>
+                Enter the GEVI episode URL for this scene. This will be saved and used for future scraping.
+              </p>
+            </div>
+
+            <div className="modal-actions">
+              <button 
+                className="btn-accept" 
+                onClick={handleSaveGeviUrl}
+                disabled={isSavingGeviUrl || !geviUrlInput.trim()}
+              >
+                {isSavingGeviUrl ? '⏳ Saving...' : '💾 Save URL'}
+              </button>
+              <button 
+                className="btn-cancel" 
+                onClick={() => setShowGeviUrlModal(false)}
+                disabled={isSavingGeviUrl}
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Scene Confirmation Modal */}
+      {showDeleteModal && (
+        <div className="modal-overlay" onClick={() => !isDeleting && setShowDeleteModal(false)}>
+          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+            <h3 style={{ color: '#ef4444' }}>🗑️ Delete Scene</h3>
+            
+            <div style={{ marginBottom: '1.5rem' }}>
+              <p style={{ fontSize: '1rem', marginBottom: '1rem' }}>
+                Are you sure you want to delete this scene?
+              </p>
+              <p style={{ fontSize: '0.95rem', color: '#f59e0b', marginBottom: '0.5rem' }}>
+                ⚠️ This will:
+              </p>
+              <ul style={{ fontSize: '0.9rem', color: '#9ca3af', marginLeft: '1.5rem' }}>
+                <li>Delete the scene from the local database</li>
+                <li>Delete the scene from Stash</li>
+                <li>Delete the video file from disk</li>
+                <li>Delete all generated content (screenshots, etc.)</li>
+                <li>This action cannot be undone</li>
+              </ul>
+            </div>
+
+            <div className="modal-actions">
+              <button 
+                className="btn-danger" 
+                onClick={handleDeleteScene}
+                disabled={isDeleting}
+                style={{
+                  backgroundColor: '#ef4444',
+                  color: 'white'
+                }}
+              >
+                {isDeleting ? '⏳ Deleting...' : '🗑️ Delete Permanently'}
+              </button>
+              <button 
+                className="btn-cancel" 
+                onClick={() => setShowDeleteModal(false)}
+                disabled={isDeleting}
+              >
                 Cancel
               </button>
             </div>

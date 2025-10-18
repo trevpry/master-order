@@ -12,6 +12,9 @@ class StashSyncServiceOptimized {
     this.stashUrl = null;
     this.stashApiKey = null;
     
+    // Initialize Prisma client
+    this.prisma = prisma;
+    
     // Initialize tag mapping service for performer attributes
     this.tagMappingService = new PerformerTagMappingService(
       // Pass GraphQL client function
@@ -1198,6 +1201,7 @@ class StashSyncServiceOptimized {
         performers: 0,
         studios: 0,
         tags: 0,
+        groups: 0,
         galleries: 0,
         images: 0
       };
@@ -1225,6 +1229,11 @@ class StashSyncServiceOptimized {
       totalSynced.scenes = sceneResult;
 
       console.log(`✅ Scenes sync completed: ${totalSynced.scenes} total`);
+
+      // Sync groups/movies (references scenes, studios, and tags)
+      console.log(`🎬 Starting groups/movies sync...`);
+      totalSynced.groups = await this.syncAllEntitiesOfType('groups', this.syncGroupsOptimized.bind(this));
+      console.log(`✅ Groups sync completed: ${totalSynced.groups} total`);
 
       // Sync galleries sequentially  
       console.log(`🖼️ Starting galleries sync...`);
@@ -1259,6 +1268,7 @@ class StashSyncServiceOptimized {
       console.log(`   - Studios: ${totalSynced.studios}`);
       console.log(`   - Performers: ${totalSynced.performers}`);
       console.log(`   - Scenes: ${totalSynced.scenes}`);
+      console.log(`   - Groups: ${totalSynced.groups}`);
       console.log(`   - Galleries: ${totalSynced.galleries}`);
       console.log(`   - Images: ${totalSynced.images}`);
       
@@ -1309,6 +1319,196 @@ class StashSyncServiceOptimized {
       optimizedTime,
       timeSaved: estimatedBaselineTime - optimizedTime
     };
+  }
+
+  // Optimized groups/movies sync
+  async syncGroupsOptimized(page = 1) {
+    console.log(`🎬 Syncing groups/movies (page ${page}) with optimizations...`);
+    
+    const query = `
+      query FindMovies($filter: FindFilterType!) {
+        findMovies(filter: $filter) {
+          count
+          movies {
+            id
+            name
+            aliases
+            duration
+            date
+            rating100
+            director
+            synopsis
+            url
+            front_image_path
+            back_image_path
+            studio {
+              id
+              name
+            }
+            scenes {
+              id
+              title
+            }
+            tags {
+              id
+              name
+            }
+          }
+        }
+      }
+    `;
+
+    const variables = {
+      filter: {
+        page,
+        per_page: this.pageSize,
+        sort: "name",
+        direction: "ASC"
+      }
+    };
+
+    try {
+      const data = await this.makeGraphQLRequestWithRetry(query, variables);
+      const groups = data.findMovies?.movies || [];
+      const count = data.findMovies?.count || 0;
+      
+      console.log(`Found ${groups.length} groups on page ${page} of ${Math.ceil(count / this.pageSize)}`);
+      
+      if (groups.length === 0) {
+        return { groups: [], hasMore: false, totalCount: count };
+      }
+      
+      // Pre-load validation data from memory cache
+      const studioIds = this.syncCache?.validationCache?.studioIds || new Set();
+      const sceneIds = this.syncCache?.validationCache?.sceneIds || new Set();
+      const tagIds = this.syncCache?.validationCache?.tagIds || new Set();
+      
+      // If cache not populated, load from database
+      if (studioIds.size === 0) {
+        const studios = await prisma.stashStudio.findMany({ select: { id: true } });
+        studios.forEach(s => studioIds.add(s.id));
+      }
+      if (sceneIds.size === 0) {
+        const scenes = await prisma.stashScene.findMany({ select: { id: true } });
+        scenes.forEach(s => sceneIds.add(s.id));
+      }
+      if (tagIds.size === 0) {
+        const tags = await prisma.stashTag.findMany({ select: { id: true } });
+        tags.forEach(t => tagIds.add(t.id));
+      }
+      
+      console.log(`🔧 Pre-loaded validation data: ${studioIds.size} studios, ${sceneIds.size} scenes, ${tagIds.size} tags`);
+      
+      // Batch process groups
+      const groupData = [];
+      const allSceneRelations = [];
+      const allTagRelations = [];
+      
+      for (const group of groups) {
+        // Validate studio reference
+        let validatedStudioId = null;
+        if (group.studio?.id && studioIds.has(group.studio.id)) {
+          validatedStudioId = group.studio.id;
+        }
+        
+        groupData.push({
+          id: group.id,
+          name: group.name || 'Untitled Group',
+          aliases: group.aliases || null,
+          duration: group.duration || null,
+          date: group.date || null,
+          rating: group.rating100 || null,
+          director: group.director || null,
+          synopsis: group.synopsis || null,
+          url: group.url || null,
+          frontImage: group.front_image_path || null,
+          backImage: group.back_image_path || null,
+          studioId: validatedStudioId,
+          lastSyncedAt: new Date()
+        });
+        
+        // Prepare scene relationships
+        if (group.scenes && group.scenes.length > 0) {
+          group.scenes.forEach((scene, index) => {
+            if (sceneIds.has(scene.id)) {
+              allSceneRelations.push({
+                groupId: group.id,
+                sceneId: scene.id,
+                sceneIndex: index
+              });
+            }
+          });
+        }
+        
+        // Prepare tag relationships
+        if (group.tags && group.tags.length > 0) {
+          group.tags.forEach(tag => {
+            if (tagIds.has(tag.id)) {
+              allTagRelations.push({
+                groupId: group.id,
+                tagId: tag.id
+              });
+            }
+          });
+        }
+      }
+      
+      console.log(`🔧 Batch processing ${groupData.length} groups...`);
+      
+      // Batch upsert in transaction
+      const syncedGroups = await prisma.$transaction(async (tx) => {
+        // Upsert all groups
+        const upsertPromises = groupData.map(data =>
+          tx.stashGroup.upsert({
+            where: { id: data.id },
+            update: data,
+            create: data
+          })
+        );
+        
+        const results = await Promise.all(upsertPromises);
+        
+        // Handle scene relationships
+        if (allSceneRelations.length > 0) {
+          const groupIds = groupData.map(g => g.id);
+          
+          await tx.stashGroupScene.deleteMany({
+            where: { groupId: { in: groupIds } }
+          });
+          
+          await tx.stashGroupScene.createMany({
+            data: allSceneRelations
+          });
+        }
+        
+        // Handle tag relationships
+        if (allTagRelations.length > 0) {
+          const groupIds = groupData.map(g => g.id);
+          
+          await tx.stashGroupTag.deleteMany({
+            where: { groupId: { in: groupIds } }
+          });
+          
+          await tx.stashGroupTag.createMany({
+            data: allTagRelations
+          });
+        }
+        
+        return results;
+      });
+      
+      console.log(`✅ Synced ${syncedGroups.length} groups from page ${page}`);
+      
+      return {
+        groups: syncedGroups,
+        hasMore: (page * this.pageSize) < count,
+        totalCount: count
+      };
+      
+    } catch (error) {
+      console.error('Error syncing groups (optimized):', error);
+      throw error;
+    }
   }
 
   // Phase 1 & 2: Optimized gallery sync with batching and reduced lock time 

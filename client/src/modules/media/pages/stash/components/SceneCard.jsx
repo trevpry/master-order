@@ -49,6 +49,18 @@ const styles = {
     fontSize: '0.75rem',
     fontWeight: '600',
   },
+  sceneNumberBadge: {
+    position: 'absolute',
+    top: '0.5rem',
+    left: '0.5rem',
+    background: 'rgba(102, 126, 234, 0.95)',
+    color: 'white',
+    padding: '0.25rem 0.6rem',
+    borderRadius: '0.25rem',
+    fontSize: '0.85rem',
+    fontWeight: '700',
+    boxShadow: '0 2px 4px rgba(0, 0, 0, 0.2)',
+  },
   cardBody: {
     padding: '1rem',
     display: 'flex',
@@ -115,7 +127,7 @@ const styles = {
   },
 };
 
-export default function SceneCard({ scene, onSceneClick }) {
+export default function SceneCard({ scene, onSceneClick, sceneNumber = null }) {
   const handleMouseEnter = (e) => {
     e.currentTarget.style.boxShadow = '0 4px 6px -1px rgba(0, 0, 0, 0.1)';
     e.currentTarget.style.transform = 'translateY(-2px)';
@@ -150,6 +162,11 @@ export default function SceneCard({ scene, onSceneClick }) {
               e.target.src = '/placeholder-scene.jpg';
             }}
           />
+          {sceneNumber !== null && (
+            <div style={styles.sceneNumberBadge}>
+              #{sceneNumber}
+            </div>
+          )}
           <div style={styles.durationBadge}>
             {formatDuration(scene.duration)}
           </div>

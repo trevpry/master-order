@@ -35,6 +35,7 @@ const StashLibraryTab = ({
   const tabLabels = {
     overview: '📚 Overview',
     scenes: '🎬 Scenes',
+    groups: '🎬 Groups',
     performers: '👤 Performers',
     studios: '🏢 Studios',
     tags: '🏷️ Tags',
@@ -60,8 +61,8 @@ const StashLibraryTab = ({
             );
           }
           
-          // Scenes, Studios, Tags, and Clips should navigate to their dedicated pages
-          if (key === 'scenes' || key === 'studios' || key === 'tags' || key === 'clips') {
+          // Scenes, Groups, Studios, Tags, and Clips should navigate to their dedicated pages
+          if (key === 'scenes' || key === 'groups' || key === 'studios' || key === 'tags' || key === 'clips') {
             return (
               <Link
                 key={key}
