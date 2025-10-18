@@ -3,6 +3,7 @@ import { useParams, Link, useNavigate } from 'react-router-dom';
 import { formatDuration } from '../../../../utils/timeUtils';
 import { getSceneDisplayTitle, getSceneImageUrl, formatDate } from '../../utils/stashUtils';
 import StashPerformerOverlay from '../../../../components/overlays/StashPerformerOverlay';
+import PerformerSwapModal from './components/PerformerSwapModal';
 import config from '../../../../config';
 
 export default function SceneDetail() {
@@ -41,6 +42,8 @@ export default function SceneDetail() {
   const [stashUrl, setStashUrl] = useState(null);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [showSwapModal, setShowSwapModal] = useState(false);
+  const [performerToSwap, setPerformerToSwap] = useState(null);
 
   // Fetch Stash URL from settings
   useEffect(() => {
@@ -883,6 +886,26 @@ export default function SceneDetail() {
     }
   };
 
+  const handleSwapPerformer = (performer) => {
+    setPerformerToSwap(performer);
+    setShowSwapModal(true);
+  };
+
+  const handleSwapComplete = (result) => {
+    console.log('✅ Swap complete:', result);
+    
+    // Update local state with the updated scene data
+    if (result.scene) {
+      setData(prevData => ({
+        ...prevData,
+        performers: result.scene.performers
+      }));
+    }
+
+    // Show success message
+    alert(`Performer swapped successfully!\n${result.swap.oldPerformer.name} → ${result.swap.newPerformer.name}\n\nTransferred ${result.swap.transferredTags.length} tags`);
+  };
+
   const handleSaveGeviUrl = async () => {
     if (!geviUrlInput.trim()) {
       alert('Please enter a GEVI URL');
@@ -1206,6 +1229,43 @@ export default function SceneDetail() {
                     onMouseLeave={() => setHoveringPerformer(null)}
                   >
                     <button
+                      className="performer-swap-btn"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleSwapPerformer(performerData);
+                      }}
+                      title={`Swap ${performerData.name}`}
+                      style={{
+                        position: 'absolute',
+                        top: '4px',
+                        right: '32px',
+                        background: 'rgba(59, 130, 246, 0.9)',
+                        color: 'white',
+                        border: 'none',
+                        borderRadius: '4px',
+                        width: '24px',
+                        height: '24px',
+                        display: isHovering ? 'flex' : 'none',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        cursor: 'pointer',
+                        fontSize: '14px',
+                        fontWeight: 'bold',
+                        zIndex: 10,
+                        transition: 'all 0.2s'
+                      }}
+                      onMouseEnter={(e) => {
+                        e.currentTarget.style.background = 'rgba(37, 99, 235, 1)';
+                        e.currentTarget.style.transform = 'scale(1.1)';
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.background = 'rgba(59, 130, 246, 0.9)';
+                        e.currentTarget.style.transform = 'scale(1)';
+                      }}
+                    >
+                      🔄
+                    </button>
+                    <button
                       className="performer-delete-btn"
                       onClick={(e) => {
                         e.stopPropagation();
@@ -1293,7 +1353,7 @@ export default function SceneDetail() {
                         )}
                         <div className="group-info">
                           <div className="group-title">
-                            <span className="scene-number">#{groupWrapper.sceneIndex + 1}</span>
+                            <span className="scene-number">#{groupWrapper.sceneIndex || '?'}</span>
                             <span className="group-name">{group.name}</span>
                           </div>
                           <div className="group-meta">
@@ -2414,6 +2474,18 @@ export default function SceneDetail() {
           </div>
         </div>
       )}
+
+      {/* Performer Swap Modal */}
+      <PerformerSwapModal
+        isOpen={showSwapModal}
+        onClose={() => {
+          setShowSwapModal(false);
+          setPerformerToSwap(null);
+        }}
+        sceneId={id}
+        performer={performerToSwap}
+        onSwapComplete={handleSwapComplete}
+      />
     </div>
   );
 }

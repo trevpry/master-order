@@ -550,14 +550,46 @@ class GeviScraperService {
             }
           }
           
-          // Extract performers
+          // Extract performers with action codes
           sceneData.performers = [];
-          $(sceneEl).find('a[href*="performer"]').each((j, perfLink) => {
-            const performerName = $(perfLink).find('span').text().trim() || $(perfLink).text().trim();
-            if (performerName) {
-              sceneData.performers.push(performerName);
-            }
-          });
+          
+          // Find the div containing performers
+          const performersDiv = $(sceneEl).find('div').filter((i, el) => {
+            return $(el).find('a[href*="performer"]').length > 0;
+          }).first();
+          
+          if (performersDiv.length) {
+            // Get the full HTML content
+            const performersHtml = performersDiv.html();
+            
+            // Split by <a> tags to process each performer
+            const performerLinks = performersDiv.find('a[href*="performer"]');
+            
+            performerLinks.each((j, perfLink) => {
+              const $perfLink = $(perfLink);
+              const performerName = $perfLink.find('span').text().trim() || $perfLink.text().trim();
+              
+              if (performerName) {
+                const performerData = { name: performerName };
+                
+                // Get the text node immediately after the </a> tag
+                const nextNode = perfLink.nextSibling;
+                if (nextNode && nextNode.nodeType === 3) { // Text node
+                  // Extract action code (everything before comma or end of text)
+                  const textAfter = nextNode.nodeValue || '';
+                  const actionCodeMatch = textAfter.match(/^([^,\s]+)/);
+                  if (actionCodeMatch && actionCodeMatch[1]) {
+                    const actionCode = actionCodeMatch[1].trim();
+                    if (actionCode && actionCode !== '' && actionCode.length > 0) {
+                      performerData.actionCode = actionCode;
+                    }
+                  }
+                }
+                
+                sceneData.performers.push(performerData);
+              }
+            });
+          }
           
           // Extract scene description/synopsis
           const sceneText = $(sceneEl).find('div.sceneText').first();
@@ -624,7 +656,10 @@ class GeviScraperService {
         console.log(`         - Movie performers:`, movieScene.performers);
 
         // Match performers - use fuzzy matching
-        const moviePerformerNames = movieScene.performers.map(p => p.toLowerCase());
+        // Handle both string[] and object[] performer formats
+        const moviePerformerNames = movieScene.performers.map(p => 
+          typeof p === 'string' ? p.toLowerCase() : p.name.toLowerCase()
+        );
         console.log(`         - Movie performer names (lowercase):`, moviePerformerNames);
         
         // Method 1: Direct name matching (partial match allowed)
@@ -729,6 +764,7 @@ class GeviScraperService {
           date: bestMatch.date,
           details: bestMatch.details,
           episodeUrl: bestMatch.episodeUrl,
+          performers: bestMatch.performers, // Include performers with action codes
           confidence: Math.round(bestScore)
         };
         matches.push(matchData);

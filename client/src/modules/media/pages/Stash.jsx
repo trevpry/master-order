@@ -21,6 +21,7 @@ export default function Stash() {
   });
   const [isLoading, setIsLoading] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const [searchStartsWith, setSearchStartsWith] = useState(false);
   const [mainTab, setMainTab] = useState(() => {
     return localStorage.getItem('stash-main-tab') || 'upnext';
   });
@@ -155,6 +156,9 @@ export default function Stash() {
       // Only add non-empty parameters
       if (searchQuery) {
         params.set('search', searchQuery);
+        if (searchStartsWith) {
+          params.set('startsWith', 'true');
+        }
       }
       if (watchStatusFilter !== 'all') {
         params.set('watched', watchStatusFilter);
@@ -805,7 +809,7 @@ export default function Stash() {
     if (connectionStatus.connected) {
       loadData(libraryTab, 1); // Always start from page 1 when filters change
     }
-  }, [libraryTab, sortBy, sortDirection, watchStatusFilter, connectionStatus.connected]);
+  }, [libraryTab, sortBy, sortDirection, watchStatusFilter, searchQuery, searchStartsWith, connectionStatus.connected, loadData]);
 
   // Load clip tags when clips tab is selected
   useEffect(() => {
@@ -940,6 +944,8 @@ export default function Stash() {
                 setLibraryTab={setLibraryTab}
                 searchQuery={searchQuery}
                 setSearchQuery={setSearchQuery}
+                searchStartsWith={searchStartsWith}
+                setSearchStartsWith={setSearchStartsWith}
                 sortBy={sortBy}
                 setSortBy={setSortBy}
                 sortDirection={sortDirection}

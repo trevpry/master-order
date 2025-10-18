@@ -17,7 +17,7 @@ export default function SceneGrid({ scenes, onSceneClick, showSceneNumbers = fal
           key={scene.id} 
           scene={scene} 
           onSceneClick={onSceneClick}
-          sceneNumber={showSceneNumbers ? index + 1 : null}
+          sceneNumber={showSceneNumbers ? (scene.sceneIndex || index + 1) : null}
         />
       ))}
     </div>

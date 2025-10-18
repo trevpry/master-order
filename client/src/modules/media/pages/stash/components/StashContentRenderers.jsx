@@ -2,6 +2,7 @@ import React from 'react';
 import { Link } from 'react-router-dom';
 import { formatDuration, formatTime } from '../../../../../utils/timeUtils';
 import { getSceneDisplayTitle, getSceneImageUrl, formatDate } from '../../../utils/stashUtils';
+import PerformerGrid from './PerformerGrid';
 
 const StashContentRenderers = ({
   data,
@@ -123,63 +124,7 @@ const StashContentRenderers = ({
 
   const renderPerformers = () => {
     const performers = data.performers || [];
-    
-    return (
-      <div className="content-grid performers-grid">
-        {performers.map((performer) => (
-          <Link key={performer.id} to={`/media/stash/performer/${performer.id}`} className="content-card performer-card" style={{ textDecoration: 'none', color: 'inherit' }}>
-            <div className="performer-image">
-              {performer.image ? (
-                <img
-                  src={performer.image}
-                  alt={performer.name}
-                  onError={(e) => {
-                    e.target.style.display = 'none';
-                    e.target.nextElementSibling.style.display = 'flex';
-                  }}
-                />
-              ) : (
-                <div className="performer-placeholder">
-                  <span>👤</span>
-                </div>
-              )}
-              {performer.image && (
-                <div className="performer-placeholder" style={{display: 'none'}}>
-                  <span>👤</span>
-                </div>
-              )}
-            </div>
-            
-            <div className="content-card-body">
-              <h3 className="content-title">{performer.name}</h3>
-              
-              <div className="content-meta">
-                {performer.birthdate && (
-                  <div className="meta-item">
-                    <span className="meta-icon">🎂</span>
-                    <span>Born: {formatDate(performer.birthdate)}</span>
-                  </div>
-                )}
-                
-                {performer.country && (
-                  <div className="meta-item">
-                    <span className="meta-icon">🌍</span>
-                    <span>{performer.country}</span>
-                  </div>
-                )}
-                
-                {performer.scene_count && (
-                  <div className="meta-item">
-                    <span className="meta-icon">🎬</span>
-                    <span>{performer.scene_count} scenes</span>
-                  </div>
-                )}
-              </div>
-            </div>
-          </Link>
-        ))}
-      </div>
-    );
+    return <PerformerGrid performers={performers} />;
   };
 
   const renderStudios = () => {

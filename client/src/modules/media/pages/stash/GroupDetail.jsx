@@ -198,6 +198,24 @@ export default function GroupDetail() {
       const result = await response.json();
       console.log('✅ Group updated:', result);
 
+      // Apply matched scenes action codes if available
+      if (scrapeData.matchedScenes && scrapeData.matchedScenes.length > 0) {
+        console.log(`🎬 Applying action codes for ${scrapeData.matchedScenes.length} matched scenes`);
+        
+        const scenesResponse = await fetch(`/api/stash/groups/${id}/apply-matched-scenes`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ matchedScenes: scrapeData.matchedScenes })
+        });
+
+        if (!scenesResponse.ok) {
+          console.warn('⚠️  Failed to apply action codes, but group was updated');
+        } else {
+          const scenesResult = await scenesResponse.json();
+          console.log('✅ Action codes applied:', scenesResult.data?.results);
+        }
+      }
+
       // Close modals and reload page to show updates
       setShowScrapeReviewModal(false);
       setShowScrapeModal(false);
@@ -397,9 +415,13 @@ export default function GroupDetail() {
         
         {(() => {
           // Transform scene data for SceneGrid
+          // Include sceneIndex from the pivot table wrapper
           const scenes = group.scenes
             ?.sort((a, b) => (a.sceneIndex || 0) - (b.sceneIndex || 0))
-            .map(wrapper => wrapper.scene) || [];
+            .map(wrapper => ({
+              ...wrapper.scene,
+              sceneIndex: wrapper.sceneIndex
+            })) || [];
           
           const handleSceneClick = (scene) => {
             navigate(`/media/stash/scenes/${scene.id}`);

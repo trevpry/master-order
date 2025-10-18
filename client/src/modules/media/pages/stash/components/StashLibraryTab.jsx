@@ -8,6 +8,8 @@ const StashLibraryTab = ({
   setLibraryTab,
   searchQuery,
   setSearchQuery,
+  searchStartsWith,
+  setSearchStartsWith,
   sortBy,
   setSortBy,
   sortDirection,
@@ -114,6 +116,21 @@ const StashLibraryTab = ({
             </button>
           )}
         </div>
+        
+        {/* Starts With checkbox - only show for performers */}
+        {libraryTab === 'performers' && (
+          <div className="search-options">
+            <label className="search-checkbox-label">
+              <input
+                type="checkbox"
+                checked={searchStartsWith}
+                onChange={(e) => setSearchStartsWith(e.target.checked)}
+                className="search-checkbox"
+              />
+              <span>Name/alias must start with search text</span>
+            </label>
+          </div>
+        )}
 
         {/* Sorting and Filtering Controls */}
         <div className="filter-controls">

@@ -20,6 +20,7 @@ const StashSyncServiceOptimized = require('../stashSyncServiceOptimized');
 const StashBackgroundSyncService = require('../stashBackgroundSyncService');
 const GeviScraperService = require('../services/geviScraperService');
 const ActionCodeService = require('../services/actionCodeService');
+const PerformerSwapService = require('../services/performerSwapService');
 
 // Create a function that returns a router with io instance
 function createStashRouter(io) {
@@ -35,6 +36,7 @@ function createStashRouter(io) {
   const stashBackgroundSync = new StashBackgroundSyncService();
   const geviScraper = new GeviScraperService();
   const actionCodeService = new ActionCodeService();
+  const performerSwapService = new PerformerSwapService();
   const SYNC_SERVICE_TYPE = process.env.STASH_SYNC_OPTIMIZED === 'false' ? 'legacy' : 'optimized';
   
   // Helper function for getting active sync service
@@ -1377,6 +1379,413 @@ router.post('/performers/create', asyncHandler(async (req, res) => {
   }
 }));
 
+// PUT /api/stash/performers/:id - Update performer in both Stash and local DB
+router.put('/performers/:id', asyncHandler(async (req, res) => {
+  console.log('✏️ [Update Performer] Request received');
+  console.log('   - Performer ID:', req.params.id);
+  console.log('   - Body:', JSON.stringify(req.body, null, 2));
+
+  const { id } = req.params;
+  const { name, alias, disambiguation, newUrls } = req.body;
+
+  // Validate required fields
+  validateRequiredFieldsDirect(req.body, ['name']);
+
+  console.log('✏️ [Update Performer] Updating performer:', id, name);
+
+  // Initialize sync service if not already done
+  if (!stashSyncService && !stashSyncServiceOptimized) {
+    await initializeStashSyncService();
+  }
+
+  // Ensure sync service is available
+  const syncService = getActiveSyncService();
+  if (!syncService) {
+    console.error('   - Sync service not initialized');
+    return sendServerError(res, 'Stash sync service not initialized');
+  }
+
+  // Ensure Stash URL is configured
+  try {
+    await syncService.ensureConfigLoaded();
+  } catch (error) {
+    console.error('   - Stash not configured:', error.message);
+    return sendServerError(res, 'Stash server not configured. Please configure in Settings.');
+  }
+
+  try {
+    // First, fetch current performer data from Stash to get existing URLs
+    const fetchQuery = `
+      query FindPerformer($id: ID!) {
+        findPerformer(id: $id) {
+          id
+          urls
+        }
+      }
+    `;
+
+    const currentData = await syncService.makeGraphQLRequest(fetchQuery, { id });
+    const existingUrls = currentData?.findPerformer?.urls || [];
+    
+    console.log('   - Existing URLs:', existingUrls.length);
+    
+    // Prepare new URLs to append (filter out duplicates)
+    const urlsToAdd = (newUrls || [])
+      .filter(url => url && url.trim() !== '')
+      .filter(url => !existingUrls.includes(url));
+    
+    console.log('   - URLs to add:', urlsToAdd.length);
+    
+    // Combine existing and new URLs
+    const allUrls = [...existingUrls, ...urlsToAdd];
+    
+    // Now update performer in Stash via GraphQL
+    const updateMutation = `
+      mutation PerformerUpdate($input: PerformerUpdateInput!) {
+        performerUpdate(input: $input) {
+          id
+          name
+          disambiguation
+          alias_list
+          url
+          twitter
+          instagram
+          urls
+        }
+      }
+    `;
+
+    // Prepare variables - convert alias to array if provided
+    const aliasList = alias && alias.trim() !== '' 
+      ? alias.split(',').map(a => a.trim()).filter(a => a !== '')
+      : [];
+
+    const variables = {
+      input: {
+        id: id,
+        name: name.trim(),
+        alias_list: aliasList,
+        disambiguation: disambiguation && disambiguation.trim() !== '' ? disambiguation.trim() : null,
+        urls: allUrls // Send complete URLs array (existing + new)
+      }
+    };
+
+    console.log('   - Updating in Stash with variables:', JSON.stringify(variables, null, 2));
+
+    const data = await syncService.makeGraphQLRequest(updateMutation, variables);
+
+    console.log('   - GraphQL response data:', JSON.stringify(data, null, 2));
+
+    if (!data || !data.performerUpdate) {
+      console.error('   - Failed to update performer in Stash. Response:', data);
+      return sendServerError(res, 'Failed to update performer in Stash - no data returned');
+    }
+
+    const stashPerformer = data.performerUpdate;
+    console.log('   - Updated in Stash:', stashPerformer.id, stashPerformer.name);
+
+    // Now update in local database
+    const updatedPerformer = await prisma.stashPerformer.update({
+      where: { id: id },
+      data: {
+        name: stashPerformer.name,
+        alias: stashPerformer.alias_list && stashPerformer.alias_list.length > 0 
+          ? stashPerformer.alias_list.join(', ') 
+          : null,
+        disambiguation: stashPerformer.disambiguation || null,
+        url: stashPerformer.url || null,
+        twitter: stashPerformer.twitter || null,
+        instagram: stashPerformer.instagram || null,
+        updatedAt: new Date(),
+        lastSyncedAt: new Date()
+      }
+    });
+
+    console.log('   - Updated in local DB:', updatedPerformer.id, updatedPerformer.name);
+
+    sendSuccess(res, {
+      performer: updatedPerformer,
+      message: `Performer "${name}" updated successfully`
+    });
+
+  } catch (error) {
+    console.error('❌ [Update Performer] Error:', error);
+    console.error('   - Error message:', error.message);
+    console.error('   - Error stack:', error.stack);
+    
+    // Handle case where performer doesn't exist in local DB
+    if (error.code === 'P2025') {
+      return sendNotFound(res, 'Performer not found in local database');
+    }
+    
+    return sendServerError(res, error.message || 'Failed to update performer');
+  }
+}));
+
+// DELETE /api/stash/performers/:id - Delete performer from both Stash and local DB
+router.delete('/performers/:id', asyncHandler(async (req, res) => {
+  console.log('🗑️ [Delete Performer] Request received');
+  console.log('   - Performer ID:', req.params.id);
+
+  const { id } = req.params;
+
+  console.log('🗑️ [Delete Performer] Deleting performer:', id);
+
+  // Initialize sync service if not already done
+  if (!stashSyncService && !stashSyncServiceOptimized) {
+    await initializeStashSyncService();
+  }
+
+  // Get sync service (but don't require it - we'll delete from DB even if Stash fails)
+  const syncService = getActiveSyncService();
+  
+  let stashDeleted = false;
+  let stashError = null;
+
+  // Try to delete from Stash first (but don't fail if this doesn't work)
+  if (syncService) {
+    try {
+      await syncService.ensureConfigLoaded();
+      
+      const deleteMutation = `
+        mutation PerformerDestroy($input: PerformerDestroyInput!) {
+          performerDestroy(input: $input)
+        }
+      `;
+
+      const variables = {
+        input: {
+          id: id
+        }
+      };
+
+      console.log('   - Deleting from Stash with variables:', JSON.stringify(variables, null, 2));
+
+      const data = await syncService.makeGraphQLRequest(deleteMutation, variables);
+
+      console.log('   - GraphQL response data:', JSON.stringify(data, null, 2));
+
+      if (data && data.performerDestroy) {
+        stashDeleted = true;
+        console.log('   - Successfully deleted from Stash');
+      } else {
+        stashError = 'Stash did not confirm deletion';
+        console.warn('   - Stash deletion uncertain:', data);
+      }
+
+    } catch (error) {
+      stashError = error.message;
+      console.error('   - Failed to delete from Stash:', error.message);
+      console.error('   - Will proceed with local DB deletion anyway');
+    }
+  } else {
+    stashError = 'Sync service not initialized';
+    console.warn('   - Sync service not available, will only delete from local DB');
+  }
+
+  // Always try to delete from local database, regardless of Stash result
+  try {
+    const deletedPerformer = await prisma.stashPerformer.delete({
+      where: { id: id }
+    });
+
+    console.log('   - Deleted from local DB:', deletedPerformer.id, deletedPerformer.name);
+
+    // Prepare response message
+    let message = '';
+    if (stashDeleted) {
+      message = `Performer "${deletedPerformer.name}" deleted successfully from both Stash and local database`;
+    } else if (stashError) {
+      message = `Performer "${deletedPerformer.name}" deleted from local database. Stash deletion ${stashError ? 'failed: ' + stashError : 'could not be verified'}`;
+    } else {
+      message = `Performer "${deletedPerformer.name}" deleted from local database`;
+    }
+
+    sendSuccess(res, {
+      performer: deletedPerformer,
+      message: message,
+      stashDeleted: stashDeleted,
+      stashError: stashError
+    });
+
+  } catch (error) {
+    console.error('❌ [Delete Performer] Error deleting from local DB:', error);
+    console.error('   - Error message:', error.message);
+    console.error('   - Error stack:', error.stack);
+    
+    // Handle case where performer doesn't exist in local DB
+    if (error.code === 'P2025') {
+      return sendNotFound(res, 'Performer not found in local database');
+    }
+    
+    return sendServerError(res, error.message || 'Failed to delete performer from local database');
+  }
+}));
+
+// POST /api/stash/performers/:id/sync - Sync single performer from Stash
+router.post('/performers/:id/sync', asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  
+  console.log('🔄 [Sync Performer] Syncing performer from Stash:', id);
+  
+  // Initialize sync service if needed
+  if (!stashSyncService && !stashSyncServiceOptimized) {
+    await initializeStashSyncService();
+  }
+  
+  const syncService = getActiveSyncService();
+  if (!syncService) {
+    console.error('   - Sync service not initialized');
+    return sendServerError(res, 'Stash sync service not initialized');
+  }
+  
+  try {
+    // Fetch performer data from Stash
+    const performerQuery = `
+      query FindPerformer($id: ID!) {
+        findPerformer(id: $id) {
+          id
+          name
+          disambiguation
+          alias_list
+          gender
+          birthdate
+          death_date
+          country
+          ethnicity
+          hair_color
+          eye_color
+          height_cm
+          weight
+          penis_length
+          circumcised
+          fake_tits
+          career_length
+          tattoos
+          piercings
+          url
+          twitter
+          instagram
+          urls
+          image_path
+          tags {
+            id
+            name
+          }
+          scene_count
+        }
+      }
+    `;
+    
+    console.log('   - Fetching from Stash API...');
+    const data = await syncService.makeGraphQLRequest(performerQuery, { id });
+    
+    if (!data || !data.findPerformer) {
+      console.log('   - Performer not found in Stash');
+      return sendNotFound(res, 'Performer not found in Stash');
+    }
+    
+    const stashPerformer = data.findPerformer;
+    console.log('   - Fetched performer:', stashPerformer.name);
+    
+    // Update performer in local database
+    const updatedPerformer = await prisma.stashPerformer.update({
+      where: { id: id },
+      data: {
+        name: stashPerformer.name,
+        disambiguation: stashPerformer.disambiguation || null,
+        alias: stashPerformer.alias_list?.join(', ') || null,
+        gender: stashPerformer.gender || null,
+        birthdate: stashPerformer.birthdate || null,
+        death_date: stashPerformer.death_date || null,
+        country: stashPerformer.country || null,
+        ethnicity: stashPerformer.ethnicity || null,
+        hair_color: stashPerformer.hair_color || null,
+        eye_color: stashPerformer.eye_color || null,
+        height: stashPerformer.height_cm ? `${stashPerformer.height_cm} cm` : null,
+        weight: stashPerformer.weight ? `${stashPerformer.weight} kg` : null,
+        penis_length: stashPerformer.penis_length ? `${stashPerformer.penis_length} cm` : null,
+        circumcised: stashPerformer.circumcised || null,
+        fake_tits: stashPerformer.fake_tits || null,
+        career_length: stashPerformer.career_length || null,
+        tattoos: stashPerformer.tattoos || null,
+        piercings: stashPerformer.piercings || null,
+        url: stashPerformer.url || null,
+        twitter: stashPerformer.twitter || null,
+        instagram: stashPerformer.instagram || null,
+        image: stashPerformer.image_path || null
+      }
+    });
+    
+    console.log('   - Updated local database');
+    
+    // Sync tags (delete existing relationships and recreate)
+    if (stashPerformer.tags && stashPerformer.tags.length > 0) {
+      console.log(`   - Syncing ${stashPerformer.tags.length} tags...`);
+      
+      // Delete existing tag relationships
+      await prisma.stashPerformerTag.deleteMany({
+        where: { performerId: id }
+      });
+      
+      // Create new tag relationships
+      for (const tag of stashPerformer.tags) {
+        // Ensure tag exists in database
+        await prisma.stashTag.upsert({
+          where: { id: tag.id },
+          create: {
+            id: tag.id,
+            name: tag.name
+          },
+          update: {
+            name: tag.name
+          }
+        });
+        
+        // Create relationship
+        await prisma.stashPerformerTag.create({
+          data: {
+            performerId: id,
+            tagId: tag.id
+          }
+        });
+      }
+      
+      console.log('   - Tags synced');
+    }
+    
+    // Fetch updated performer with relationships
+    const finalPerformer = await prisma.stashPerformer.findUnique({
+      where: { id: id },
+      include: {
+        tags: {
+          include: {
+            tag: true
+          }
+        }
+      }
+    });
+    
+    console.log('✅ [Sync Performer] Successfully synced:', finalPerformer.name);
+    
+    sendSuccess(res, {
+      performer: finalPerformer,
+      message: `Successfully synced "${finalPerformer.name}" from Stash`
+    });
+    
+  } catch (error) {
+    console.error('❌ [Sync Performer] Error:', error);
+    console.error('   - Error message:', error.message);
+    console.error('   - Error stack:', error.stack);
+    
+    if (error.code === 'P2025') {
+      return sendNotFound(res, 'Performer not found in local database');
+    }
+    
+    return sendServerError(res, error.message || 'Failed to sync performer from Stash');
+  }
+}));
+
 // POST /api/stash/groups/create - Create a new group/movie in both Stash and local DB
 router.post('/groups/create', asyncHandler(async (req, res) => {
   console.log('🎬 [Create Group] Request received');
@@ -1619,6 +2028,134 @@ router.post('/groups/:id/add-scene', asyncHandler(async (req, res) => {
     console.error('   - Error stack:', error.stack);
     return sendServerError(res, error.message || 'Failed to add scene to group');
   }
+}));
+
+// POST /api/stash/groups/:id/apply-matched-scenes - Apply action codes from matched scenes after user acceptance
+router.post('/groups/:id/apply-matched-scenes', asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  const { matchedScenes } = req.body;
+
+  console.log('🎬 [Apply Matched Scenes] Processing action codes for group:', id);
+  console.log(`   - Received ${matchedScenes?.length || 0} matched scenes`);
+
+  validateRequiredFieldsDirect(req.body, ['matchedScenes']);
+
+  if (!Array.isArray(matchedScenes) || matchedScenes.length === 0) {
+    return sendBadRequest(res, 'matchedScenes must be a non-empty array');
+  }
+
+  const results = {
+    totalScenes: matchedScenes.length,
+    processedScenes: 0,
+    totalPerformers: 0,
+    appliedActionCodes: 0,
+    errors: []
+  };
+
+  for (const match of matchedScenes) {
+    if (!match.sceneId || !match.performers || !Array.isArray(match.performers)) {
+      console.log(`   ⚠️  Skipping invalid match (sceneId: ${match.sceneId}, performers: ${match.performers?.length})`);
+      continue;
+    }
+
+    console.log(`\n   🎭 Processing scene ${match.sceneId} with ${match.performers.length} performers`);
+
+    // Get scene with performers
+    const dbScene = await prisma.stashScene.findUnique({
+      where: { id: match.sceneId },
+      include: {
+        performers: {
+          include: {
+            performer: true
+          }
+        }
+      }
+    });
+
+    if (!dbScene) {
+      console.log(`   ⚠️  Scene ${match.sceneId} not found in database`);
+      results.errors.push({ sceneId: match.sceneId, error: 'Scene not found' });
+      continue;
+    }
+
+    // Build array of performers with IDs and action codes
+    const performersWithCodes = [];
+
+    for (const geviPerformer of match.performers) {
+      const performerName = typeof geviPerformer === 'string' ? geviPerformer : geviPerformer.name;
+      const actionCode = typeof geviPerformer === 'object' ? geviPerformer.actionCode : null;
+
+      if (!actionCode) {
+        console.log(`      ⚠️  No action code for performer: ${performerName}`);
+        continue;
+      }
+
+      console.log(`      - Performer: ${performerName}, Action Code: ${actionCode}`);
+
+      // Find matching performer in database scene
+      const dbPerformer = dbScene.performers.find(sp => 
+        sp.performer.name.toLowerCase() === performerName.toLowerCase() ||
+        sp.performer.name.toLowerCase().includes(performerName.toLowerCase()) ||
+        performerName.toLowerCase().includes(sp.performer.name.toLowerCase())
+      );
+
+      if (dbPerformer) {
+        performersWithCodes.push({
+          id: dbPerformer.performerId,
+          name: dbPerformer.performer.name,
+          actionCode: actionCode
+        });
+        results.totalPerformers++;
+      } else {
+        console.log(`      ⚠️  Could not find matching DB performer for: ${performerName}`);
+        results.errors.push({ sceneId: match.sceneId, performer: performerName, error: 'Performer not found' });
+      }
+    }
+
+    // Apply action code tags using the service
+    if (performersWithCodes.length > 0) {
+      try {
+        const tagResult = await actionCodeService.applyActionCodeTagsForPerformers(
+          match.sceneId,
+          performersWithCodes,
+          prisma
+        );
+
+        console.log(`      ✅ Applied ${tagResult.totalApplied} tags from ${performersWithCodes.length} action codes`);
+        results.appliedActionCodes += tagResult.totalApplied;
+        results.processedScenes++;
+
+        if (tagResult.missingTags && tagResult.missingTags.length > 0) {
+          console.warn(`      ⚠️  Warning: ${tagResult.missingTags.length} tags not found in database`);
+          results.errors.push({ sceneId: match.sceneId, missingTags: tagResult.missingTags });
+        }
+
+        // Log details for each performer
+        for (const result of tagResult.performerResults) {
+          if (result.appliedTags.length > 0) {
+            console.log(`      ✅ ${result.performerName}: ${result.appliedTags.join(', ')}`);
+          }
+          if (result.missingTags.length > 0) {
+            console.log(`      ⚠️  ${result.performerName}: Missing tags - ${result.missingTags.join(', ')}`);
+          }
+        }
+      } catch (error) {
+        console.error(`      ❌ Failed to apply action code tags:`, error.message);
+        results.errors.push({ sceneId: match.sceneId, error: error.message });
+      }
+    }
+  }
+
+  console.log(`\n✅ [Apply Matched Scenes] Complete:`);
+  console.log(`   - Processed: ${results.processedScenes}/${results.totalScenes} scenes`);
+  console.log(`   - Total performers: ${results.totalPerformers}`);
+  console.log(`   - Applied action codes: ${results.appliedActionCodes}`);
+  console.log(`   - Errors: ${results.errors.length}`);
+
+  sendSuccess(res, {
+    message: 'Action codes applied successfully',
+    results
+  });
 }));
 
 // POST /api/stash/groups/:id/search-gevi - Search GEVI for movies by group title
@@ -1956,6 +2493,7 @@ router.post('/gevi/movie', asyncHandler(async (req, res) => {
       // Update matched scenes with GEVI details if they don't have any
       for (const match of matchedScenes) {
         console.log(`\n   🔄 Processing matched scene ${match.sceneId}`);
+        console.log(`      - Match scene number: ${match.sceneNumber}`);
         const dbScene = dbScenes.find(s => s.id === match.sceneId);
         if (dbScene) {
           console.log(`      - Found DB scene: ${dbScene.title || dbScene.id}`);
@@ -2037,6 +2575,105 @@ router.post('/gevi/movie', asyncHandler(async (req, res) => {
               }
             }
           }
+          
+          // Update scene index (scene number) in the group-scene pivot table
+          // Always update even if one exists, as it may be wrong
+          console.log(`      - Checking scene index update: sceneNumber=${match.sceneNumber}, groupId=${groupId}`);
+          if (match.sceneNumber !== undefined && match.sceneNumber !== null && groupId) {
+            try {
+              console.log(`      - Attempting to update scene index to ${match.sceneNumber} for scene ${match.sceneId} in group ${groupId}`);
+              await prisma.stashGroupScene.update({
+                where: {
+                  groupId_sceneId: {
+                    groupId: groupId,
+                    sceneId: match.sceneId
+                  }
+                },
+                data: {
+                  sceneIndex: match.sceneNumber
+                }
+              });
+              console.log(`      ✅ Updated scene index to ${match.sceneNumber} for scene ${match.sceneId}`);
+            } catch (error) {
+              console.error(`      ⚠️  Failed to update scene index:`, error.message);
+              console.error(`      - Error details:`, error);
+            }
+          } else {
+            console.log(`      ⚠️  Skipping scene index update - sceneNumber: ${match.sceneNumber}, groupId: ${groupId}`);
+          }
+          
+          // NOTE: Action code application has been moved to the acceptance workflow
+          // Action codes are now applied via POST /api/stash/groups/:id/apply-matched-scenes
+          // This ensures users can review scrape results before applying changes
+          
+          /* COMMENTED OUT: Auto-apply action codes during scrape
+          // Update performer action codes if performers data is available
+          if (match.performers && Array.isArray(match.performers) && match.performers.length > 0) {
+            console.log(`\n   🎭 Updating action codes for ${match.performers.length} performers`);
+            
+            // Build array of performers with IDs and action codes
+            const performersWithCodes = [];
+            
+            for (const geviPerformer of match.performers) {
+              // Handle both object and string formats
+              const performerName = typeof geviPerformer === 'string' ? geviPerformer : geviPerformer.name;
+              const actionCode = typeof geviPerformer === 'object' ? geviPerformer.actionCode : null;
+              
+              if (!actionCode) {
+                console.log(`      ⚠️  No action code for performer: ${performerName}`);
+                continue;
+              }
+              
+              console.log(`      - Performer: ${performerName}, Action Code: ${actionCode}`);
+              
+              // Find matching performer in database scene
+              const dbPerformer = dbScene.performers.find(sp => 
+                sp.performer.name.toLowerCase() === performerName.toLowerCase() ||
+                sp.performer.name.toLowerCase().includes(performerName.toLowerCase()) ||
+                performerName.toLowerCase().includes(sp.performer.name.toLowerCase())
+              );
+              
+              if (dbPerformer) {
+                performersWithCodes.push({
+                  id: dbPerformer.performerId,
+                  name: dbPerformer.performer.name,
+                  actionCode: actionCode
+                });
+              } else {
+                console.log(`      ⚠️  Could not find matching DB performer for: ${performerName}`);
+              }
+            }
+            
+            // Apply action code tags using the service
+            if (performersWithCodes.length > 0) {
+              try {
+                const tagResult = await actionCodeService.applyActionCodeTagsForPerformers(
+                  match.sceneId,
+                  performersWithCodes,
+                  prisma
+                );
+                
+                console.log(`      ✅ Applied ${tagResult.totalApplied} tags from ${performersWithCodes.length} action codes`);
+                
+                if (tagResult.missingTags && tagResult.missingTags.length > 0) {
+                  console.warn(`      ⚠️  Warning: ${tagResult.missingTags.length} tags not found in database`);
+                }
+                
+                // Log details for each performer
+                for (const result of tagResult.performerResults) {
+                  if (result.appliedTags.length > 0) {
+                    console.log(`      ✅ ${result.performerName}: ${result.appliedTags.join(', ')}`);
+                  }
+                  if (result.missingTags.length > 0) {
+                    console.log(`      ⚠️  ${result.performerName}: Missing tags - ${result.missingTags.join(', ')}`);
+                  }
+                }
+              } catch (error) {
+                console.error(`      ❌ Failed to apply action code tags:`, error.message);
+              }
+            }
+          }
+          */
         }
       }
     } else {
@@ -2971,6 +3608,83 @@ router.delete('/scenes/:sceneId/performers/:performerId', asyncHandler(async (re
   });
 
   sendSuccess(res, updatedScene);
+}));
+
+// POST /api/stash/scenes/:sceneId/performers/:performerId/swap - Swap performer with another
+router.post('/scenes/:sceneId/performers/:performerId/swap', asyncHandler(async (req, res) => {
+  const { sceneId, performerId: oldPerformerId } = req.params;
+  const { newPerformerId } = req.body;
+
+  console.log(`🔄 [SWAP PERFORMER] Swapping performer in scene ${sceneId}`);
+  console.log(`   - Old: ${oldPerformerId} → New: ${newPerformerId}`);
+
+  validateRequiredFieldsDirect(req.body, ['newPerformerId']);
+
+  // Perform the swap
+  const result = await performerSwapService.swapPerformerInScene(
+    sceneId,
+    oldPerformerId,
+    newPerformerId,
+    prisma
+  );
+
+  // Return updated scene data with performers
+  const updatedScene = await prisma.stashScene.findUnique({
+    where: { id: sceneId },
+    include: {
+      performers: {
+        include: {
+          performer: true
+        }
+      }
+    }
+  });
+
+  sendSuccess(res, {
+    scene: updatedScene,
+    swap: result
+  });
+}));
+
+// GET /api/stash/performers/search - Search for performers
+router.get('/performers/search', asyncHandler(async (req, res) => {
+  const { q, limit = 20 } = req.query;
+
+  console.log(`🔍 [SEARCH PERFORMERS] Query: "${q}"`);
+
+  if (!q || q.trim().length < 2) {
+    return sendSuccess(res, []);
+  }
+
+  const performers = await performerSwapService.searchPerformers(q, parseInt(limit));
+
+  console.log(`   - Found ${performers.length} matches`);
+
+  sendSuccess(res, performers);
+}));
+
+// POST /api/stash/performers - Create new performer
+router.post('/performers', asyncHandler(async (req, res) => {
+  const { name, stashId, image } = req.body;
+
+  console.log(`\n➕ [CREATE PERFORMER] Request received for: "${name}"`);
+
+  validateRequiredFieldsDirect(req.body, ['name']);
+
+  // Get active sync service to create in Stash
+  const syncService = getActiveSyncService();
+  
+  if (!syncService) {
+    console.warn('   - ⚠️  Sync service not initialized, creating local-only performer');
+  }
+
+  const performer = await performerSwapService.createPerformer({
+    name,
+    stashId,
+    image
+  }, syncService);
+
+  sendSuccess(res, performer);
 }));
 
 // PUT /api/stash/scenes/:id - Update scene details
@@ -4558,24 +5272,34 @@ router.get('/stats', asyncHandler(async (req, res) => {
 
 // GET /performers - Stash performers endpoint
 router.get('/performers', asyncHandler(async (req, res) => {
-  const { page = 1, perPage = 20, filter = '' } = req.query;
+  const { page = 1, perPage = 20, filter = '', search = '', startsWith = 'false' } = req.query;
   
   const skip = (parseInt(page) - 1) * parseInt(perPage);
   const take = parseInt(perPage);
   
-  // Build search filter
-  const searchFilter = filter ? {
+  // Use 'search' or 'filter' parameter (search takes precedence for compatibility)
+  const searchQuery = search || filter;
+  const useStartsWith = startsWith === 'true';
+  
+  // Build search filter for name and alias
+  // Note: Using 'contains' or 'startsWith' without 'mode' for SQLite compatibility
+  // This makes search case-sensitive in SQLite, case-insensitive in PostgreSQL
+  const searchFilter = searchQuery ? {
     OR: [
-      { name: { contains: filter, mode: 'insensitive' } },
-      { alias: { contains: filter, mode: 'insensitive' } },
-      { disambiguation: { contains: filter, mode: 'insensitive' } }
+      { name: useStartsWith ? { startsWith: searchQuery } : { contains: searchQuery } },
+      { alias: useStartsWith ? { startsWith: searchQuery } : { contains: searchQuery } },
+      { disambiguation: useStartsWith ? { startsWith: searchQuery } : { contains: searchQuery } }
     ]
   } : {};
+  
+  console.log(`🔍 [PERFORMERS] Searching with query: "${searchQuery}" (startsWith: ${useStartsWith})`);
   
   // Get total count
   const total = await prisma.stashPerformer.count({
     where: searchFilter
   });
+  
+  console.log(`📊 [PERFORMERS] Found ${total} total matches`);
   
   // Get performers with related data
   const performers = await prisma.stashPerformer.findMany({
@@ -4601,6 +5325,8 @@ router.get('/performers', asyncHandler(async (req, res) => {
     skip: skip,
     take: take
   });
+  
+  console.log(`✅ [PERFORMERS] Returning ${performers.length} performers for page ${page}`);
   
   // Transform data to match expected format
   const transformedPerformers = performers.map(performer => ({

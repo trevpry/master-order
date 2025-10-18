@@ -42,15 +42,29 @@ export default function PerformerDetail() {
   const [error, setError] = useState(null);
   const [mergedTags, setMergedTags] = useState([]);
   const [stashUrl, setStashUrl] = useState(null);
+  
+  // Edit mode state
+  const [isEditing, setIsEditing] = useState(false);
+  const [editData, setEditData] = useState({
+    name: '',
+    alias: '',
+    disambiguation: '',
+    newUrls: [''] // Array of new URLs to add
+  });
+  const [isSaving, setIsSaving] = useState(false);
 
   // Fetch Stash URL from settings
   useEffect(() => {
     const fetchStashUrl = async () => {
       try {
-        const res = await fetch(`${config.apiBaseUrl}/api/stash/check-connection`);
+        const res = await fetch(`${config.apiBaseUrl}/api/stash/status`);
         const json = await res.json();
+        console.log('🔍 Stash connection check:', json);
         if (json.connected && json.stashUrl) {
+          console.log('✅ Setting stashUrl:', json.stashUrl);
           setStashUrl(json.stashUrl);
+        } else {
+          console.log('❌ Stash not connected or no URL');
         }
       } catch (error) {
         console.error('Failed to fetch Stash URL:', error);
@@ -124,6 +138,164 @@ export default function PerformerDetail() {
     };
     fetchPerformer();
   }, [id]);
+  
+  // Handle edit mode toggle
+  const handleEditClick = () => {
+    setEditData({
+      name: data.name || '',
+      alias: data.alias || '',
+      disambiguation: data.disambiguation || '',
+      newUrls: [''] // Start with one empty URL field
+    });
+    setIsEditing(true);
+  };
+  
+  const handleCancelEdit = () => {
+    setIsEditing(false);
+    setEditData({ 
+      name: '', 
+      alias: '', 
+      disambiguation: '',
+      newUrls: ['']
+    });
+  };
+  
+  // Handle adding a new URL field
+  const handleAddUrlField = () => {
+    setEditData({
+      ...editData,
+      newUrls: [...editData.newUrls, '']
+    });
+  };
+  
+  // Handle removing a URL field
+  const handleRemoveUrlField = (index) => {
+    const updatedUrls = editData.newUrls.filter((_, i) => i !== index);
+    setEditData({
+      ...editData,
+      newUrls: updatedUrls.length > 0 ? updatedUrls : [''] // Always keep at least one field
+    });
+  };
+  
+  // Handle updating a URL field
+  const handleUrlChange = (index, value) => {
+    const updatedUrls = [...editData.newUrls];
+    updatedUrls[index] = value;
+    setEditData({
+      ...editData,
+      newUrls: updatedUrls
+    });
+  };
+  
+  // Handle save changes
+  const handleSaveChanges = async () => {
+    if (!editData.name.trim()) {
+      alert('Performer name cannot be empty');
+      return;
+    }
+    
+    // Filter out empty URLs
+    const validUrls = editData.newUrls.filter(url => url.trim() !== '');
+    
+    setIsSaving(true);
+    try {
+      const response = await fetch(`${config.apiBaseUrl}/api/stash/performers/${id}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          name: editData.name.trim(),
+          alias: editData.alias.trim() || null,
+          disambiguation: editData.disambiguation.trim() || null,
+          newUrls: validUrls // Send array of new URLs to append
+        })
+      });
+      
+      const result = await response.json();
+      
+      if (!result.success) {
+        throw new Error(result.error || 'Failed to update performer');
+      }
+      
+      // Update local state with returned performer data
+      setData(result.data.performer);
+      
+      setIsEditing(false);
+      alert('Performer updated successfully in both local database and Stash!');
+      
+    } catch (error) {
+      console.error('Failed to update performer:', error);
+      alert(`Failed to update performer: ${error.message}`);
+    } finally {
+      setIsSaving(false);
+    }
+  };
+  
+  // Handle delete performer
+  const handleDeletePerformer = async () => {
+    const confirmDelete = window.confirm(
+      `Are you sure you want to delete performer "${data.name}"?\n\n` +
+      `This will remove the performer from both the local database and Stash.\n` +
+      `This action cannot be undone.`
+    );
+    
+    if (!confirmDelete) return;
+    
+    try {
+      const response = await fetch(`${config.apiBaseUrl}/api/stash/performers/${id}`, {
+        method: 'DELETE',
+        headers: {
+          'Content-Type': 'application/json',
+        }
+      });
+      
+      const result = await response.json();
+      
+      if (!result.success) {
+        throw new Error(result.error || 'Failed to delete performer');
+      }
+      
+      alert(result.message || 'Performer deleted successfully!');
+      
+      // Navigate back to performers list
+      navigate('/stash?tab=performers');
+      
+    } catch (error) {
+      console.error('Failed to delete performer:', error);
+      alert(`Failed to delete performer: ${error.message}`);
+    }
+  };
+
+  // Handle sync from Stash
+  const handleSyncFromStash = async () => {
+    setLoading(true);
+    try {
+      const response = await fetch(`${config.apiBaseUrl}/api/stash/performers/${id}/sync`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        }
+      });
+      
+      const result = await response.json();
+      
+      if (!result.success) {
+        throw new Error(result.error || 'Failed to sync performer');
+      }
+      
+      // Update local state with synced data
+      setData(result.data.performer);
+      
+      console.log('✅ Performer synced from Stash:', result.data.message);
+      
+    } catch (error) {
+      console.error('Failed to sync performer:', error);
+      alert(`Failed to sync performer: ${error.message}`);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   if (loading) {
     return (
@@ -178,7 +350,50 @@ export default function PerformerDetail() {
         
         <div className="performer-hero-info">
           <div className="performer-header-row">
-            <h1 className="scene-title">👤 {data.name}</h1>
+            <h1 className="scene-title">
+              👤 {data.name}
+              {!isEditing && (
+                <>
+                  <button 
+                    className="edit-performer-btn"
+                    onClick={handleEditClick}
+                    title="Edit performer details"
+                  >
+                    ✏️
+                  </button>
+                  <button 
+                    className="delete-performer-btn"
+                    onClick={handleDeletePerformer}
+                    title="Delete performer from database and Stash"
+                  >
+                    🗑️
+                  </button>
+                  <button 
+                    className="sync-performer-btn"
+                    onClick={handleSyncFromStash}
+                    title="Sync latest data from Stash"
+                  >
+                    🔄
+                  </button>
+                  {stashUrl && (
+                    <a 
+                      href={`${stashUrl}/performers/${data.id}`} 
+                      target="_blank" 
+                      rel="noopener noreferrer" 
+                      className="view-stash-btn"
+                      title="View this performer in Stash"
+                    >
+                      📊
+                    </a>
+                  )}
+                  {!stashUrl && (
+                    <span style={{color: '#999', fontSize: '0.8em', marginLeft: '1rem'}}>
+                      (Stash not connected)
+                    </span>
+                  )}
+                </>
+              )}
+            </h1>
             <div className="performer-header-meta">
               {data.country && (
                 <span className="country-badge">
@@ -201,24 +416,129 @@ export default function PerformerDetail() {
                   🐦
                 </a>
               )}
-              {/* Stash Link */}
-              {stashUrl && (
-                <a 
-                  href={`${stashUrl}/performers/${data.id}`} 
-                  target="_blank" 
-                  rel="noopener noreferrer" 
-                  className="social-link-inline"
-                  title="View in Stash"
-                >
-                  📊
-                </a>
-              )}
             </div>
           </div>
+          
+          {/* Edit Form */}
+          {isEditing && (
+            <div className="performer-edit-form">
+              <h3>✏️ Edit Performer Details</h3>
+              <div className="edit-form-grid">
+                <div className="form-group">
+                  <label htmlFor="edit-name">Name *</label>
+                  <input
+                    id="edit-name"
+                    type="text"
+                    value={editData.name}
+                    onChange={(e) => setEditData({ ...editData, name: e.target.value })}
+                    placeholder="Performer name"
+                    disabled={isSaving}
+                  />
+                </div>
+                
+                <div className="form-group">
+                  <label htmlFor="edit-alias">Alias</label>
+                  <input
+                    id="edit-alias"
+                    type="text"
+                    value={editData.alias}
+                    onChange={(e) => setEditData({ ...editData, alias: e.target.value })}
+                    placeholder="Also known as..."
+                    disabled={isSaving}
+                  />
+                </div>
+                
+                <div className="form-group">
+                  <label htmlFor="edit-disambiguation">Disambiguation</label>
+                  <input
+                    id="edit-disambiguation"
+                    type="text"
+                    value={editData.disambiguation}
+                    onChange={(e) => setEditData({ ...editData, disambiguation: e.target.value })}
+                    placeholder="e.g., (II), (Performer)"
+                    disabled={isSaving}
+                  />
+                </div>
+              </div>
+              
+              {/* New URLs Section */}
+              <div className="edit-form-section">
+                <div className="section-header">
+                  <h4>Add New URLs</h4>
+                  <button 
+                    type="button"
+                    className="btn-add-url"
+                    onClick={handleAddUrlField}
+                    disabled={isSaving}
+                    title="Add another URL field"
+                  >
+                    ➕ Add URL
+                  </button>
+                </div>
+                
+                <div className="url-fields-container">
+                  {editData.newUrls.map((url, index) => (
+                    <div key={index} className="url-field-row">
+                      <input
+                        type="url"
+                        value={url}
+                        onChange={(e) => handleUrlChange(index, e.target.value)}
+                        placeholder="https://... (website, social media, etc.)"
+                        disabled={isSaving}
+                        className="url-input"
+                      />
+                      {editData.newUrls.length > 1 && (
+                        <button
+                          type="button"
+                          className="btn-remove-url"
+                          onClick={() => handleRemoveUrlField(index)}
+                          disabled={isSaving}
+                          title="Remove this URL"
+                        >
+                          ❌
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                </div>
+                
+                <p className="url-help-text">
+                  ℹ️ New URLs will be added to the performer's existing URLs in Stash
+                </p>
+              </div>
+              
+              <div className="edit-form-actions">
+                <button 
+                  className="btn-save"
+                  onClick={handleSaveChanges}
+                  disabled={isSaving}
+                >
+                  {isSaving ? '💾 Saving...' : '💾 Save Changes'}
+                </button>
+                <button 
+                  className="btn-cancel"
+                  onClick={handleCancelEdit}
+                  disabled={isSaving}
+                >
+                  ❌ Cancel
+                </button>
+              </div>
+              
+              <p className="edit-form-note">
+                ℹ️ Changes will be saved to both the local database and Stash
+              </p>
+            </div>
+          )}
           
           {data.alias && (
             <p className="performer-alias">
               Also known as: <span>{data.alias}</span>
+            </p>
+          )}
+          
+          {data.disambiguation && (
+            <p className="performer-disambiguation">
+              <span className="disambiguation-badge">{data.disambiguation}</span>
             </p>
           )}
 
