@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import config from '../../../../../config';
 
-export default function StashLibraryOverview({ syncStatus, runSync, pagination }) {
+export default function StashLibraryOverview({ syncStatus, runSync, reloadScrapers, pagination }) {
   const [stats, setStats] = useState({
     scenes: 0,
     performers: 0,
@@ -87,6 +87,17 @@ export default function StashLibraryOverview({ syncStatus, runSync, pagination }
           >
             {syncStatus.isRunning ? '🔄 Syncing...' : '🔄 Sync Library'}
           </button>
+          
+          {reloadScrapers && (
+            <button
+              onClick={reloadScrapers}
+              disabled={syncStatus.isRunning}
+              className="sync-button ml-2"
+              title="Reload YAML scraper configurations"
+            >
+              🔄 Reload Scrapers
+            </button>
+          )}
           
           {syncStatus.lastSync && (
             <div className="sync-info">

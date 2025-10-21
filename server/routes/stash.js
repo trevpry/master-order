@@ -22,6 +22,16 @@ const GeviScraperService = require('../services/geviScraperService');
 const ActionCodeService = require('../services/actionCodeService');
 const PerformerSwapService = require('../services/performerSwapService');
 const PerformerMergeService = require('../services/performerMergeService');
+const ScraperRegistry = require('../services/scrapers/ScraperRegistry');
+
+// Create global scraper registry singleton (shared across all routes)
+let globalScraperRegistry = null;
+function getScraperRegistry() {
+  if (!globalScraperRegistry) {
+    globalScraperRegistry = new ScraperRegistry();
+  }
+  return globalScraperRegistry;
+}
 
 // Create a function that returns a router with io instance
 function createStashRouter(io) {
@@ -4747,9 +4757,8 @@ router.get('/scenes/:id/available-scrapers', asyncHandler(async (req, res) => {
   
   console.log(`   - Found ${urls.length} URL(s) to check:`, urls);
   
-  // Initialize scraper registry
-  const ScraperRegistry = require('../services/scrapers/ScraperRegistry');
-  const registry = new ScraperRegistry();
+  // Use global scraper registry
+  const registry = getScraperRegistry();
   
   console.log(`   - Registry has ${registry.scrapers.length} scrapers loaded`);
   
@@ -4780,6 +4789,29 @@ router.get('/scenes/:id/available-scrapers', asyncHandler(async (req, res) => {
       url: s.url
     }))
   });
+}));
+
+// POST /api/stash/scrapers/reload - Reload all YAML scraper configurations
+router.post('/scrapers/reload', asyncHandler(async (req, res) => {
+  console.log('🔄 [Scraper Reload] Reloading YAML scrapers...');
+  
+  try {
+    const registry = getScraperRegistry();
+    const result = registry.reloadYamlScrapers();
+    
+    console.log('✅ [Scraper Reload] Successfully reloaded scrapers');
+    console.log(`   - Total scrapers: ${result.totalScrapers}`);
+    console.log(`   - YAML scrapers: ${result.yamlScrapers}`);
+    console.log(`   - Code scrapers: ${result.codeScrapers}`);
+    
+    sendSuccess(res, {
+      message: 'YAML scrapers reloaded successfully',
+      ...result
+    });
+  } catch (error) {
+    console.error('❌ [Scraper Reload] Failed to reload scrapers:', error);
+    return sendServerError(res, `Failed to reload scrapers: ${error.message}`);
+  }
 }));
 
 // POST /api/stash/scenes/:id/scrape-generic - Scrape using any registered scraper
@@ -4817,9 +4849,8 @@ router.post('/scenes/:id/scrape-generic', asyncHandler(async (req, res) => {
   const scenePerformers = scene.performers.map(sp => sp.performer);
   console.log(`   - Scene has ${scenePerformers.length} performer(s):`, scenePerformers.map(p => p.name));
   
-  // Initialize scraper registry
-  const ScraperRegistry = require('../services/scrapers/ScraperRegistry');
-  const registry = new ScraperRegistry();
+  // Use global scraper registry
+  const registry = getScraperRegistry();
   
   // Get the appropriate scraper
   let scraper;

@@ -430,6 +430,32 @@ export default function Stash() {
     }
   };
 
+  const reloadScrapers = async () => {
+    setSyncStatus(prev => ({ ...prev, isRunning: true, message: 'Reloading scrapers...' }));
+    try {
+      const response = await fetch(`${config.apiBaseUrl}/api/stash/scrapers/reload`, {
+        method: 'POST'
+      });
+      const result = await response.json();
+      
+      if (result.success) {
+        setSyncStatus(prev => ({ 
+          ...prev, 
+          message: `Scrapers reloaded: ${result.yamlScrapers} YAML, ${result.codeScrapers} code`
+        }));
+        // Show success message for a few seconds
+        setTimeout(() => {
+          setSyncStatus(prev => ({ ...prev, message: null }));
+        }, 5000);
+      }
+    } catch (error) {
+      console.error('❌ Error reloading scrapers:', error);
+      setSyncStatus(prev => ({ ...prev, message: 'Failed to reload scrapers' }));
+    } finally {
+      setSyncStatus(prev => ({ ...prev, isRunning: false }));
+    }
+  };
+
   // Tag filtering functions
   const addTagFilter = (tagId) => {
     console.log('➕ Adding tag filter:', tagId, 'Current filters:', tagFilter);
@@ -994,6 +1020,7 @@ export default function Stash() {
                 contentRenderers={contentRenderers}
                 syncStatus={syncStatus}
                 runSync={runSync}
+                reloadScrapers={reloadScrapers}
                 goToPage={goToPage}
                 goToNextPage={goToNextPage}
                 goToPreviousPage={goToPreviousPage}

@@ -25,6 +25,7 @@ const StashLibraryTab = ({
   contentRenderers,
   syncStatus,
   runSync,
+  reloadScrapers,
   goToPage,
   goToNextPage,
   goToPreviousPage,
@@ -346,6 +347,7 @@ const StashLibraryTab = ({
                   return <StashLibraryOverview 
                     syncStatus={syncStatus}
                     runSync={runSync}
+                    reloadScrapers={reloadScrapers}
                     pagination={pagination}
                   />;
                 case 'scenes':
@@ -362,6 +364,7 @@ const StashLibraryTab = ({
                   return <StashLibraryOverview 
                     syncStatus={syncStatus}
                     runSync={runSync}
+                    reloadScrapers={reloadScrapers}
                     pagination={pagination}
                   />;
               }

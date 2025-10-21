@@ -71,6 +71,7 @@ class BaseScraperService {
    */
   formatResult(data) {
     return {
+      success: true, // Indicate successful scrape
       source: this.siteName,
       scraped: {
         title: data.title || null,

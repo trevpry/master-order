@@ -92,30 +92,26 @@ class ScraperRegistry {
   }
 
   /**
-   * Check which scrapers can handle URLs from a scene
-   * @param {Array<string>} urls - Array of URLs to check
-   * @returns {Array<Object>} - Array of {scraper, url, name} objects (one per matching URL)
+   * Reload all YAML scrapers (useful in production when configs are updated)
+   * Keeps code-based scrapers intact, only reloads YAML configs
    */
-  getAvailableScrapers(urls) {
-    if (!urls || !Array.isArray(urls)) return [];
-
-    const available = [];
+  reloadYamlScrapers() {
+    console.log('🔄 Reloading YAML scrapers...');
     
-    for (const url of urls) {
-      const scraper = this.getScraperForUrl(url);
-      if (scraper) {
-        // Add an entry for each URL that has a matching scraper
-        // (even if the same scraper handles multiple URLs)
-        available.push({
-          scraper,
-          url,
-          name: scraper.siteName,
-          canHandle: true
-        });
-      }
-    }
-
-    return available;
+    // Remove all YAML scrapers (keep code-based ones like AEBN)
+    this.scrapers = this.scrapers.filter(scraper => !(scraper instanceof YamlScraperService));
+    
+    // Reload YAML scrapers
+    this.loadYamlScrapers();
+    
+    console.log(`✅ Reload complete - ${this.scrapers.length} total scraper(s) now registered`);
+    
+    return {
+      success: true,
+      totalScrapers: this.scrapers.length,
+      yamlScrapers: this.scrapers.filter(s => s instanceof YamlScraperService).length,
+      codeScrapers: this.scrapers.filter(s => !(s instanceof YamlScraperService)).length
+    };
   }
 }
 
