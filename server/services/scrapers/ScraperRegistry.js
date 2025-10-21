@@ -92,6 +92,28 @@ class ScraperRegistry {
   }
 
   /**
+   * Get available scrapers for a list of URLs
+   * @param {Array<string>} urls - Array of URLs to check
+   * @returns {Array<{name: string, scraper: BaseScraperService, url: string}>} - Available scrapers with matching URLs
+   */
+  getAvailableScrapers(urls) {
+    const availableScrapers = [];
+    
+    urls.forEach(url => {
+      const scraper = this.getScraperForUrl(url);
+      if (scraper) {
+        availableScrapers.push({
+          name: scraper.siteName,
+          scraper: scraper,
+          url: url
+        });
+      }
+    });
+    
+    return availableScrapers;
+  }
+
+  /**
    * Reload all YAML scrapers (useful in production when configs are updated)
    * Keeps code-based scrapers intact, only reloads YAML configs
    */
