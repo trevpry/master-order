@@ -58,7 +58,10 @@ const sendServerError = (res, message = 'Internal server error') => {
  * @param {string} message - Success message (optional)
  */
 const sendSuccess = (res, data, message = null) => {
-  const response = { success: true, data };
+  // Serialize BigInt values to prevent JSON serialization errors
+  const serializedData = serializeBigInt(data);
+  
+  const response = { success: true, data: serializedData };
   if (message) {
     response.message = message;
   }
@@ -106,6 +109,38 @@ const logError = (error, context = 'Unknown') => {
   }
 };
 
+/**
+ * Convert BigInt values to Numbers in an object for JSON serialization
+ * Recursively handles nested objects and arrays
+ * @param {any} obj - Object to convert
+ * @returns {any} Object with BigInt values converted to Numbers
+ */
+const serializeBigInt = (obj) => {
+  if (obj === null || obj === undefined) {
+    return obj;
+  }
+  
+  if (typeof obj === 'bigint') {
+    return Number(obj);
+  }
+  
+  if (Array.isArray(obj)) {
+    return obj.map(item => serializeBigInt(item));
+  }
+  
+  if (typeof obj === 'object') {
+    const serialized = {};
+    for (const key in obj) {
+      if (obj.hasOwnProperty(key)) {
+        serialized[key] = serializeBigInt(obj[key]);
+      }
+    }
+    return serialized;
+  }
+  
+  return obj;
+};
+
 module.exports = {
   sendBadRequest,
   sendUnauthorized,
@@ -116,5 +151,6 @@ module.exports = {
   sendCreated,
   sendNoContent,
   asyncHandler,
-  logError
+  logError,
+  serializeBigInt
 };

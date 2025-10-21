@@ -784,7 +784,7 @@ model StashScene {
   playDuration        Float?
   playCount           Int?
   duration            Float?
-  fileSize            Int?
+  fileSize            BigInt?
   bitrate             Float?
   resolution          String?
   width               Int?

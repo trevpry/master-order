@@ -307,7 +307,7 @@ function createStashIntegrationRoutes(prisma, io) {
             organized: fullScene.organized,
             path: fullScene.path,
             duration: fullScene.duration,
-            fileSize: fullScene.fileSize,
+            fileSize: fullScene.fileSize ? Number(fullScene.fileSize) : null,
             resolution: fullScene.resolution,
             width: fullScene.width,
             height: fullScene.height,

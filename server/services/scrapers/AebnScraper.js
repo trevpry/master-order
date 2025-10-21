@@ -144,14 +144,27 @@ class AebnScraper {
         const sceneDuration = $scene.find('.dts-scene-title-metadata span').text().trim();
         
         // Extract performers from this specific scene
-        // Performers are in: <span class="dts-scene-star-wrapper"> <a href="/gay/stars/...">Name</a>
+        // Format 1 (older): <span class="dts-scene-star-wrapper"> <a href="/gay/stars/...">Name</a>
+        // Format 2 (newer): <a class="dts-movie-star-wrapper dts-text-link" href="/gay/stars/..."><span>Name</span></a>
         const scenePerformersList = [];
-        $scene.find('.dts-scene-star-wrapper a.dts-text-link').each((j, perfElem) => {
+        
+        // Try newer format first: a.dts-movie-star-wrapper > span
+        $scene.find('a.dts-movie-star-wrapper.dts-text-link span').each((j, perfElem) => {
           const perfName = $(perfElem).text().trim();
           if (perfName && !scenePerformersList.includes(perfName)) {
             scenePerformersList.push(perfName);
           }
         });
+        
+        // If no performers found, try older format: .dts-scene-star-wrapper a
+        if (scenePerformersList.length === 0) {
+          $scene.find('.dts-scene-star-wrapper a.dts-text-link').each((j, perfElem) => {
+            const perfName = $(perfElem).text().trim();
+            if (perfName && !scenePerformersList.includes(perfName)) {
+              scenePerformersList.push(perfName);
+            }
+          });
+        }
         
         // Get scene image (5th thumbnail for better scene representation)
         const thumbnails = $scene.find('img[src*="/dis/t/"]');

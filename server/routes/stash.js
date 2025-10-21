@@ -758,7 +758,7 @@ router.get('/scenes/:id', asyncHandler(async (req, res) => {
       episodeUrlsLength: scene.episodeUrls ? scene.episodeUrls.length : 'null',
       // File info
       path: scene.path,
-      fileSize: scene.fileSize,
+      fileSize: scene.fileSize ? Number(scene.fileSize) : null,
       width: scene.width,
       height: scene.height,
       duration: scene.duration,
@@ -785,7 +785,7 @@ router.get('/scenes/:id', asyncHandler(async (req, res) => {
       geviUrl: scene.geviUrl,
       episodeUrls: scene.episodeUrls,
       // File information for merge UI
-      fileSize: scene.fileSize,
+      fileSize: scene.fileSize ? Number(scene.fileSize) : null,
       width: scene.width,
       height: scene.height,
       bitrate: scene.bitrate,
@@ -9138,7 +9138,7 @@ router.post('/scenes/merge', asyncHandler(async (req, res) => {
     // Prepare file information from the scene we're keeping the file from
     const fileData = {
       path: keepFileScene.path,
-      fileSize: keepFileScene.fileSize,
+      fileSize: keepFileScene.fileSize ? Number(keepFileScene.fileSize) : null,
       duration: keepFileScene.duration,
       width: keepFileScene.width,
       height: keepFileScene.height,
