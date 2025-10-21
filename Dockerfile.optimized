@@ -43,11 +43,12 @@ RUN --mount=type=cache,target=/root/.npm \
     npm ci
 
 # ==========================================
-# LAYER 5: Copy Prisma schema files
+# LAYER 5: Copy Prisma schema files and setup script
 # These change less frequently than source code
 # ==========================================
 WORKDIR /app
 COPY server/prisma ./server/prisma
+COPY server/setup-schema.js ./server/setup-schema.js
 
 # ==========================================
 # LAYER 6: Setup Prisma for production
