@@ -169,6 +169,7 @@ class AebnScraper {
         const positions = [];
         const settings = [];
         
+        // Format 1: Tags in <li> elements (older format)
         $scene.find('li').each((j, li) => {
           const $li = $(li);
           const label = $li.find('.section-detail-list-item-title').text().trim();
@@ -187,6 +188,29 @@ class AebnScraper {
             $li.find('a').each((k, a) => {
               const setting = $(a).text().trim().replace(/,\s*$/, '');
               if (setting) settings.push(setting);
+            });
+          }
+        });
+        
+        // Format 2: Tags in .scene-strip-meta-data div (newer format)
+        $scene.find('.scene-strip-meta-data > div').each((j, div) => {
+          const $div = $(div);
+          const label = $div.find('.section-detail-list-item-title').text().trim();
+          
+          if (label.includes('Sex acts:')) {
+            $div.find('a.dts-text-link').each((k, a) => {
+              const act = $(a).text().trim();
+              if (act && !sexActs.includes(act)) sexActs.push(act);
+            });
+          } else if (label.includes('Positions:')) {
+            $div.find('a.dts-text-link').each((k, a) => {
+              const pos = $(a).text().trim();
+              if (pos && !positions.includes(pos)) positions.push(pos);
+            });
+          } else if (label.includes('Settings:')) {
+            $div.find('a.dts-text-link').each((k, a) => {
+              const setting = $(a).text().trim();
+              if (setting && !settings.includes(setting)) settings.push(setting);
             });
           }
         });
