@@ -112,13 +112,14 @@ export default function GroupDetail() {
         console.log('🎬 Full API Response:', result);
         console.log('🎬 result.data structure:', Object.keys(result.data));
         
-        const { movie, sourceUrl, matchedScenes } = result.data;
+        const { movie, sourceUrl, matchedScenes, compilations } = result.data;
         
         console.log('🎬 Scraped movie data:', movie);
         console.log('🎬 Source URL:', sourceUrl);
         console.log('🎬 Matched Scenes:', matchedScenes);
         console.log('🎬 Matched Scenes type:', typeof matchedScenes);
         console.log('🎬 Matched Scenes length:', matchedScenes?.length);
+        console.log('🎬 Compilations:', compilations);
         
         // Store original image URLs for sending to Stash
         const originalFrontImage = movie.front_image;
@@ -148,11 +149,13 @@ export default function GroupDetail() {
             originalBackImage: originalBackImage // For sending to Stash
           },
           matchedScenes: matchedScenes || [],
+          compilations: compilations || { matched: [], unmatched: [] },
           sourceUrl: sourceUrl
         };
         
         console.log('🎬 Setting scrapeData:', scrapeDataToSet);
         console.log('🎬 scrapeData.matchedScenes length:', scrapeDataToSet.matchedScenes.length);
+        console.log('🎬 scrapeData.compilations:', scrapeDataToSet.compilations);
         
         setScrapeData(scrapeDataToSet);
         setShowScrapeModal(false);
@@ -224,6 +227,107 @@ export default function GroupDetail() {
     } catch (error) {
       console.error('❌ Error updating group:', error);
       alert('Failed to update group: ' + error.message);
+    }
+  };
+
+  const handleCreateCompilation = async (compilation) => {
+    try {
+      console.log('🎬 Creating compilation:', compilation);
+      
+      const response = await fetch('/api/stash/compilations/create', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          geviUrl: compilation.geviUrl,
+          name: compilation.name,
+          sceneId: compilation.sceneId || null // Use the sceneId from the compilation object
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to create compilation');
+      }
+
+      const result = await response.json();
+      console.log('✅ Compilation created:', result);
+      
+      alert(`Compilation "${compilation.name}" created successfully!`);
+      
+      // Refresh the compilation list by re-running the scrape or just remove from unmatched
+      // For now, we'll just show success and let user close the modal
+      
+    } catch (error) {
+      console.error('❌ Error creating compilation:', error);
+      alert('Failed to create compilation: ' + error.message);
+    }
+  };
+
+  const handleLinkSceneToCompilation = async (compilation) => {
+    try {
+      console.log('🔗 Linking scene to compilation:', compilation);
+      
+      const response = await fetch('/api/stash/compilations/link-scene', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          groupId: compilation.id,
+          sceneId: compilation.sceneId
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to link scene to compilation');
+      }
+
+      const result = await response.json();
+      console.log('✅ Scene linked to compilation:', result);
+      
+      if (result.data.alreadyLinked) {
+        alert(`Scene is already linked to "${compilation.name}"`);
+      } else {
+        alert(`Scene successfully linked to "${compilation.name}"!`);
+      }
+      
+    } catch (error) {
+      console.error('❌ Error linking scene to compilation:', error);
+      alert('Failed to link scene to compilation: ' + error.message);
+    }
+  };
+
+  const handleDelete = async () => {
+    if (!group) return;
+
+    const confirmDelete = window.confirm(
+      `Are you sure you want to delete "${group.name}"?\n\n` +
+      `This will delete the group from both Stash and your local database.\n` +
+      `${group.scenes?.length > 0 ? `\nNote: This group has ${group.scenes.length} scene(s) linked. The scenes themselves will NOT be deleted, only the group and scene links.` : ''}\n\n` +
+      `This action cannot be undone.`
+    );
+
+    if (!confirmDelete) return;
+
+    try {
+      console.log('🗑️  Deleting group:', group.name);
+      
+      const response = await fetch(`/api/stash/groups/${id}`, {
+        method: 'DELETE'
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to delete group');
+      }
+
+      const result = await response.json();
+      console.log('✅ Group deleted:', result);
+      
+      alert(`Group "${group.name}" deleted successfully!`);
+      
+      // Navigate back to groups list
+      navigate('/media/stash/groups');
+      
+    } catch (error) {
+      console.error('❌ Error deleting group:', error);
+      alert('Failed to delete group: ' + error.message);
     }
   };
 
@@ -317,7 +421,7 @@ export default function GroupDetail() {
             </div>
           )}
 
-          <div className="group-actions" style={{ margin: '1rem 0' }}>
+          <div className="group-actions" style={{ margin: '1rem 0', display: 'flex', gap: '0.75rem' }}>
             <button 
               onClick={() => {
                 setShowScrapeModal(true);
@@ -336,6 +440,23 @@ export default function GroupDetail() {
               }}
             >
               🌐 Scrape GEVI
+            </button>
+            
+            <button 
+              onClick={handleDelete}
+              className="delete-group-button"
+              title="Delete this group from Stash and local database"
+              style={{
+                padding: '0.5rem 1rem',
+                background: '#dc2626',
+                color: 'white',
+                border: 'none',
+                borderRadius: '4px',
+                cursor: 'pointer',
+                fontSize: '0.9rem'
+              }}
+            >
+              🗑️ Delete Group
             </button>
           </div>
 
@@ -1010,6 +1131,269 @@ export default function GroupDetail() {
                       color: '#1e40af'
                     }}>
                       ℹ️ These scenes were automatically matched based on performers and titles. Scene numbers will be updated when you accept.
+                    </div>
+                  </div>
+                )}
+
+                {/* Compilations Section */}
+                {scrapeData.compilations && (scrapeData.compilations.matched.length > 0 || scrapeData.compilations.unmatched.length > 0) && (
+                  <div style={{ marginTop: '1.5rem', borderTop: '2px solid #e5e7eb', paddingTop: '1.5rem' }}>
+                    <h4 style={{ fontSize: '1.125rem', fontWeight: '600', marginBottom: '1rem', color: '#1f2937' }}>
+                      📀 Compilations Found in Matched Scenes
+                    </h4>
+                    
+                    {/* Group compilations by scene number */}
+                    {(() => {
+                      const compilationsByScene = {};
+                      
+                      // Group matched compilations
+                      scrapeData.compilations.matched.forEach(comp => {
+                        if (!compilationsByScene[comp.sceneNumber]) {
+                          compilationsByScene[comp.sceneNumber] = { matched: [], unmatched: [] };
+                        }
+                        compilationsByScene[comp.sceneNumber].matched.push(comp);
+                      });
+                      
+                      // Group unmatched compilations
+                      scrapeData.compilations.unmatched.forEach(comp => {
+                        if (!compilationsByScene[comp.sceneNumber]) {
+                          compilationsByScene[comp.sceneNumber] = { matched: [], unmatched: [] };
+                        }
+                        compilationsByScene[comp.sceneNumber].unmatched.push(comp);
+                      });
+                      
+                      return Object.keys(compilationsByScene).sort((a, b) => a - b).map(sceneNumber => (
+                        <div key={sceneNumber} style={{ marginBottom: '1.5rem' }}>
+                          <h5 style={{ fontSize: '0.9rem', fontWeight: '600', marginBottom: '0.75rem', color: '#4b5563' }}>
+                            Scene {sceneNumber}
+                          </h5>
+                          
+                          {/* Matched Compilations for this scene */}
+                          {compilationsByScene[sceneNumber].matched.length > 0 && (
+                            <div style={{ marginBottom: '0.75rem' }}>
+                              <div style={{ fontSize: '0.75rem', fontWeight: '600', marginBottom: '0.5rem', color: '#15803d' }}>
+                                ✅ Found in Database ({compilationsByScene[sceneNumber].matched.length})
+                              </div>
+                              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                                {compilationsByScene[sceneNumber].matched.map((comp, idx) => (
+                                  <div 
+                                    key={idx}
+                                    style={{
+                                      padding: '0.75rem',
+                                      background: '#f0fdf4',
+                                      border: '1px solid #86efac',
+                                      borderRadius: '6px',
+                                      display: 'flex',
+                                      justifyContent: 'space-between',
+                                      alignItems: 'center'
+                                    }}
+                                  >
+                                    <div>
+                                      <div style={{ fontWeight: '600', color: '#15803d', fontSize: '0.875rem' }}>
+                                        {comp.name}
+                                      </div>
+                                      {comp.studio && (
+                                        <div style={{ fontSize: '0.75rem', color: '#6b7280', marginTop: '0.25rem' }}>
+                                          Studio: {comp.studio}
+                                        </div>
+                                      )}
+                                      {comp.date && (
+                                        <div style={{ fontSize: '0.75rem', color: '#6b7280' }}>
+                                          Released: {comp.date}
+                                        </div>
+                                      )}
+                                    </div>
+                                    <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+                                      <button
+                                        onClick={() => handleLinkSceneToCompilation(comp)}
+                                        style={{
+                                          padding: '0.375rem 0.75rem',
+                                          background: '#8b5cf6',
+                                          color: 'white',
+                                          border: 'none',
+                                          borderRadius: '4px',
+                                          cursor: 'pointer',
+                                          fontSize: '0.75rem',
+                                          fontWeight: '500',
+                                          whiteSpace: 'nowrap'
+                                        }}
+                                      >
+                                        🔗 Link Scene
+                                      </button>
+                                      <a
+                                        href={`/media/stash/groups/${comp.id}`}
+                                        style={{
+                                          padding: '0.375rem 0.75rem',
+                                          background: '#10b981',
+                                          color: 'white',
+                                          border: 'none',
+                                          borderRadius: '4px',
+                                          textDecoration: 'none',
+                                          fontSize: '0.75rem',
+                                          fontWeight: '500',
+                                          whiteSpace: 'nowrap'
+                                        }}
+                                      >
+                                        View Movie
+                                      </a>
+                                      <button
+                                        onClick={() => handleAddCompilation(comp)}
+                                        style={{
+                                          padding: '0.375rem 0.75rem',
+                                          background: '#f59e0b',
+                                          color: 'white',
+                                          border: 'none',
+                                          borderRadius: '4px',
+                                          cursor: 'pointer',
+                                          fontSize: '0.75rem',
+                                          fontWeight: '500',
+                                          whiteSpace: 'nowrap'
+                                        }}
+                                      >
+                                        ➕ Create New Movie
+                                      </button>
+                                      {comp.stashId && (
+                                        <a
+                                          href={`${config.apiBaseUrl.replace('/api', '')}/movies/${comp.stashId}`}
+                                          target="_blank"
+                                          rel="noopener noreferrer"
+                                          style={{
+                                            padding: '0.375rem 0.75rem',
+                                            background: '#3b82f6',
+                                            color: 'white',
+                                            border: 'none',
+                                            borderRadius: '4px',
+                                            textDecoration: 'none',
+                                            fontSize: '0.75rem',
+                                            fontWeight: '500',
+                                            whiteSpace: 'nowrap'
+                                          }}
+                                        >
+                                          View in Stash
+                                        </a>
+                                      )}
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+
+                          {/* Create New Movie Button - if match isn't right */}
+                          {compilationsByScene[sceneNumber].matched.length > 0 && (
+                            <div style={{ marginBottom: '0.75rem' }}>
+                              <button
+                                onClick={() => {
+                                  const comp = compilationsByScene[sceneNumber].matched[0];
+                                  handleAddCompilation(comp);
+                                }}
+                                style={{
+                                  padding: '0.5rem 1rem',
+                                  background: '#f59e0b',
+                                  color: 'white',
+                                  border: 'none',
+                                  borderRadius: '6px',
+                                  cursor: 'pointer',
+                                  fontSize: '0.875rem',
+                                  fontWeight: '600',
+                                  width: '100%',
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  justifyContent: 'center',
+                                  gap: '0.5rem'
+                                }}
+                                title="Match not right? Create a new movie instead"
+                              >
+                                ➕ Create New Movie Instead
+                              </button>
+                              <div style={{ fontSize: '0.7rem', color: '#6b7280', marginTop: '0.25rem', textAlign: 'center' }}>
+                                If the matched movie isn't correct, create a new one
+                              </div>
+                            </div>
+                          )}
+
+                          {/* Unmatched Compilations for this scene */}
+                          {compilationsByScene[sceneNumber].unmatched.length > 0 && (
+                            <div>
+                              <div style={{ fontSize: '0.75rem', fontWeight: '600', marginBottom: '0.5rem', color: '#dc2626' }}>
+                                ⚠️  Not in Database ({compilationsByScene[sceneNumber].unmatched.length})
+                              </div>
+                              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                                {compilationsByScene[sceneNumber].unmatched.map((comp, idx) => (
+                                  <div 
+                                    key={idx}
+                                    style={{
+                                      padding: '0.75rem',
+                                      background: '#fef2f2',
+                                      border: '1px solid #fecaca',
+                                      borderRadius: '6px',
+                                      display: 'flex',
+                                      justifyContent: 'space-between',
+                                      alignItems: 'center'
+                                    }}
+                                  >
+                                    <div>
+                                      <div style={{ fontWeight: '600', color: '#dc2626', fontSize: '0.875rem' }}>
+                                        {comp.name}
+                                      </div>
+                                      <div style={{ fontSize: '0.75rem', color: '#6b7280', marginTop: '0.25rem' }}>
+                                        This compilation is not in your database yet
+                                      </div>
+                                    </div>
+                                    <div style={{ display: 'flex', gap: '0.5rem' }}>
+                                      <a
+                                        href={comp.geviUrl}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        style={{
+                                          padding: '0.375rem 0.75rem',
+                                          background: '#6b7280',
+                                          color: 'white',
+                                          border: 'none',
+                                          borderRadius: '4px',
+                                          textDecoration: 'none',
+                                          fontSize: '0.75rem',
+                                          fontWeight: '500',
+                                          whiteSpace: 'nowrap'
+                                        }}
+                                      >
+                                        View on GEVI
+                                      </a>
+                                      <button
+                                        onClick={() => handleCreateCompilation(comp)}
+                                        style={{
+                                          padding: '0.375rem 0.75rem',
+                                          background: '#10b981',
+                                          color: 'white',
+                                          border: 'none',
+                                          borderRadius: '4px',
+                                          cursor: 'pointer',
+                                          fontSize: '0.75rem',
+                                          fontWeight: '500',
+                                          whiteSpace: 'nowrap'
+                                        }}
+                                      >
+                                        ➕ Add Movie
+                                      </button>
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      ));
+                    })()}
+
+                    <div style={{ 
+                      marginTop: '1rem', 
+                      padding: '0.75rem', 
+                      background: '#eff6ff', 
+                      borderRadius: '6px',
+                      fontSize: '0.875rem',
+                      color: '#1e40af'
+                    }}>
+                      ℹ️ These compilations were found in the "found in compilation" sections for matched scenes on GEVI. You can add new compilations to your database to track them.
                     </div>
                   </div>
                 )}

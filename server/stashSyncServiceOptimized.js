@@ -475,36 +475,97 @@ class StashSyncServiceOptimized {
         if (allPerformerRelations.length > 0 || allTagRelations.length > 0) {
           const sceneIds = scenesToUpsert.map(s => s.id);
           
-          // Delete existing relationships in batch
-          await Promise.all([
-            tx.stashScenePerformer.deleteMany({
-              where: { sceneId: { in: sceneIds } }
-            }),
-            tx.stashSceneTag.deleteMany({
-              where: { sceneId: { in: sceneIds } }
+          // PRESERVE PERFORMER TAGS: Get existing performer relationships with tags
+          const existingPerformerRelationships = await tx.stashScenePerformer.findMany({
+            where: { sceneId: { in: sceneIds } },
+            include: { tags: true }
+          });
+          
+          // Build a map of relationships that have tags or notes (local data to preserve)
+          const relationshipsWithData = new Map();
+          existingPerformerRelationships.forEach(rel => {
+            if (rel.tags.length > 0 || rel.notes) {
+              const key = `${rel.sceneId}-${rel.performerId}`;
+              relationshipsWithData.set(key, rel);
+            }
+          });
+          
+          // Build a set of performer relationships from Stash
+          const stashPerformerRelationships = new Set();
+          allPerformerRelations.forEach(rel => {
+            stashPerformerRelationships.add(`${rel.sceneId}-${rel.performerId}`);
+          });
+          
+          // Delete only performer relationships that:
+          // 1. Are NOT in the current Stash data, AND
+          // 2. Don't have any local tags or notes
+          const performersToRemove = existingPerformerRelationships
+            .filter(rel => {
+              const key = `${rel.sceneId}-${rel.performerId}`;
+              return !stashPerformerRelationships.has(key) && !relationshipsWithData.has(key);
             })
-          ]);
+            .map(rel => ({ sceneId: rel.sceneId, performerId: rel.performerId }));
+          
+          if (performersToRemove.length > 0) {
+            // Delete in batch using OR conditions
+            await tx.stashScenePerformer.deleteMany({
+              where: {
+                OR: performersToRemove.map(rel => ({
+                  sceneId: rel.sceneId,
+                  performerId: rel.performerId
+                }))
+              }
+            });
+            console.log(`   🗑️ Removed ${performersToRemove.length} performer relationship(s) no longer in Stash (without local data)`);
+          }
+          
+          // Count how many we're preserving
+          const preservedCount = allPerformerRelations.filter(rel => 
+            relationshipsWithData.has(`${rel.sceneId}-${rel.performerId}`)
+          ).length;
+          if (preservedCount > 0) {
+            console.log(`   💾 Preserving ${preservedCount} performer relationship(s) with action codes/notes`);
+          }
+          
+          // Delete and recreate tag relationships (tags don't have local data to preserve)
+          await tx.stashSceneTag.deleteMany({
+            where: { sceneId: { in: sceneIds } }
+          });
           
           // Phase 1: Create all relationships in batch with chunking support
           const relationshipPromises = [];
           
           if (allPerformerRelations.length > 0) {
-            if (allPerformerRelations.length > this.batchConfig.maxRelationships) {
-              console.log(`🔧 Large performer relationship set (${allPerformerRelations.length}), processing in chunks...`);
-              for (let i = 0; i < allPerformerRelations.length; i += this.batchConfig.maxRelationships) {
-                const chunk = allPerformerRelations.slice(i, i + this.batchConfig.maxRelationships);
-                relationshipPromises.push(
-                  tx.stashScenePerformer.createMany({
-                    data: chunk
+            // Use upsert instead of createMany to preserve existing tags/notes
+            console.log(`🔧 Upserting ${allPerformerRelations.length} performer relationships (preserving local data)...`);
+            
+            // Process in chunks to avoid overwhelming the database
+            const chunkSize = this.batchConfig.maxRelationships;
+            for (let i = 0; i < allPerformerRelations.length; i += chunkSize) {
+              const chunk = allPerformerRelations.slice(i, i + chunkSize);
+              
+              // Use Promise.all for parallel upserts within the chunk
+              const chunkPromise = Promise.all(
+                chunk.map(rel =>
+                  tx.stashScenePerformer.upsert({
+                    where: {
+                      sceneId_performerId: {
+                        sceneId: rel.sceneId,
+                        performerId: rel.performerId
+                      }
+                    },
+                    update: {
+                      // Don't overwrite notes or tags - keep existing local data
+                    },
+                    create: {
+                      sceneId: rel.sceneId,
+                      performerId: rel.performerId
+                    }
                   })
-                );
-              }
-            } else {
-              relationshipPromises.push(
-                tx.stashScenePerformer.createMany({
-                  data: allPerformerRelations
-                })
+                )
               );
+              
+              relationshipPromises.push(chunkPromise);
             }
           }
           

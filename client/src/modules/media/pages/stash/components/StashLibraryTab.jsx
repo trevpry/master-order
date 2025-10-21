@@ -32,7 +32,11 @@ const StashLibraryTab = ({
   addTagFilter,
   removeTagFilter,
   clearTagFilter,
-  clipTags
+  clipTags,
+  performerSelectionMode,
+  setPerformerSelectionMode,
+  selectedPerformers,
+  setShowMergeModal
 }) => {
   const tabLabels = {
     overview: '📚 Overview',
@@ -129,6 +133,56 @@ const StashLibraryTab = ({
               />
               <span>Name/alias must start with search text</span>
             </label>
+          </div>
+        )}
+
+        {/* Performer Selection Controls */}
+        {libraryTab === 'performers' && (
+          <div className="performer-selection-controls" style={{ 
+            display: 'flex', 
+            gap: '0.75rem', 
+            alignItems: 'center',
+            marginTop: '0.5rem',
+            padding: '0.75rem',
+            backgroundColor: performerSelectionMode ? '#eff6ff' : 'transparent',
+            borderRadius: '0.375rem',
+            border: performerSelectionMode ? '2px solid #3b82f6' : 'none'
+          }}>
+            <Button
+              onClick={() => {
+                setPerformerSelectionMode(!performerSelectionMode);
+                // Clear selection when turning off selection mode
+                if (performerSelectionMode && selectedPerformers) {
+                  selectedPerformers.clear();
+                }
+              }}
+              variant={performerSelectionMode ? 'primary' : 'secondary'}
+              style={{ fontSize: '0.875rem' }}
+            >
+              {performerSelectionMode ? '✓ Selection Mode' : '☑️ Select Performers'}
+            </Button>
+            
+            {performerSelectionMode && selectedPerformers && selectedPerformers.size > 0 && (
+              <>
+                <span style={{ fontSize: '0.875rem', color: '#6b7280' }}>
+                  {selectedPerformers.size} selected
+                </span>
+                
+                {selectedPerformers.size >= 2 && (
+                  <Button
+                    onClick={() => setShowMergeModal(true)}
+                    variant="primary"
+                    style={{ 
+                      fontSize: '0.875rem',
+                      backgroundColor: '#3b82f6',
+                      color: 'white'
+                    }}
+                  >
+                    🔀 Merge {selectedPerformers.size} Performers
+                  </Button>
+                )}
+              </>
+            )}
           </div>
         )}
 

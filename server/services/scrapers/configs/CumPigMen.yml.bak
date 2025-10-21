@@ -1,0 +1,55 @@
+name: CumPigMen
+performerByURL:
+  - action: scrapeXPath
+    scraper: sceneScraper
+    url:
+      # Taken from https://www.gaynetwork.com/en/sites on 2025-05-17
+      - berryboys.fr/en/modeles/detail/
+sceneByURL:
+  - action: scrapeXPath
+    scraper: sceneScraper
+    url:
+      # Taken from https://www.gaynetwork.com/en/sites on 2025-05-17
+      - cumpigmen.com/scenes/
+xPathScrapers:
+  sceneScraper:
+    scene:
+      Title: //div[@class="movie-player"]/h2/text()
+      Details: //div[contains(@class, "description")
+      URL: &url //link[@rel="alternate" and hreflang="en"]/@href
+      # Date: &date
+      #   selector: //script[@type="application/ld+json"]/text()
+      #   postProcess:
+      #     - replace:
+      #         - regex: .*"datePublished"\s*:\s*"([^"]+)".*
+      #           with: $1
+      Studio:
+        Name:
+          fixed: "Cum Pig Men"  
+      Performers:
+        Name: //div[contains(@class, "m-name")]/a/text()
+        URL: //div[contains(@class, "m-name")]/a/@href
+      Tags:
+        Name: 
+          selector: //div[contains(@class, "v-tags")]/a/text()
+          postProcess:
+            - replace: 
+                - regex: "#"
+                  with: ""  
+  performerScraper:
+    performer:
+      Name: 
+        selector: //div[@class="p-1 pt-2 text-center h90 text-terciary -bg-black-50 text-truncate"]/text()
+        postProcess:
+          - replace:
+              - regex: "\""
+                with: "" 
+      Gender:
+        fixed: Male       
+      URL:
+        selector: //link[@rel="canonical"]/@content
+      Image: 
+        selector: //img[@class="border embed-responsive-item bg-light border-dark obj-cover"]/@src
+   
+
+

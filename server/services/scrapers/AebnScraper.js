@@ -1,0 +1,376 @@
+const axios = require('axios');
+const cheerio = require('cheerio');
+const puppeteer = require('puppeteer');
+
+class AebnScraper {
+  constructor() {
+    this.siteName = 'AEBN';
+    this.sceneUrlPatterns = [
+      'aebn.com',
+      'gay.aebn.com'
+    ];
+  }
+
+  /**
+   * Check if this scraper can handle the given URL
+   */
+  canHandle(url) {
+    if (!url) return false;
+    return this.sceneUrlPatterns.some(pattern => url.includes(pattern));
+  }
+
+  /**
+   * Scrape scene data from AEBN movie page using Puppeteer
+   * AEBN shows MOVIES with multiple SCENES. We need to:
+   * 1. Fetch the movie page
+   * 2. Extract all scenes from sections with id="scene-*"
+   * 3. Either:
+   *    a) If sceneNumber provided: Use that specific scene directly
+   *    b) If scenePerformers provided: Match the correct scene by comparing performers
+   * 4. Return only the matched scene's data
+   * 
+   * @param {string} url - AEBN movie URL
+   * @param {Array} scenePerformers - Performers to match (pass null if using sceneNumber)
+   * @param {number} sceneNumber - Specific scene number to scrape (e.g., 1, 2, 3)
+   */
+  async scrape(url, scenePerformers = [], sceneNumber = null) {
+    console.log(`🔍 [AEBN Scraper] Scraping movie URL: ${url}`);
+    
+    if (sceneNumber) {
+      console.log(`   - Direct scene number: ${sceneNumber}`);
+    } else if (scenePerformers && scenePerformers.length > 0) {
+      console.log(`   - Looking for scene with performers:`, scenePerformers.map(p => p.name || p));
+    } else {
+      console.log(`   - ⚠️ No scene number or performers provided`);
+    }
+
+    let browser = null;
+    
+    try {
+      // Launch Puppeteer in headless mode
+      console.log(`   - Launching browser...`);
+      browser = await puppeteer.launch({
+        headless: true,
+        args: [
+          '--no-sandbox',
+          '--disable-setuid-sandbox',
+          '--disable-dev-shm-usage',
+          '--disable-gpu'
+        ]
+      });
+
+      const page = await browser.newPage();
+      
+      // Set viewport and user agent
+      await page.setViewport({ width: 1920, height: 1080 });
+      await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
+      
+      console.log(`   - Navigating to page...`);
+      await page.goto(url, { 
+        waitUntil: 'networkidle2',
+        timeout: 30000 
+      });
+
+      // Check if age gate is present
+      const ageGateButton = await page.$('a.button.enter, a[href*="gate-redirect"]');
+      
+      if (ageGateButton) {
+        console.log(`   - Age gate detected, clicking Enter button...`);
+        
+        // Click the age verification button
+        await Promise.all([
+          page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 30000 }),
+          ageGateButton.click()
+        ]);
+        
+        console.log(`   - Age gate bypassed successfully`);
+      } else {
+        console.log(`   - No age gate detected`);
+      }
+
+      // Wait a bit for content to load using setTimeout wrapped in Promise
+      await new Promise(resolve => setTimeout(resolve, 2000));
+
+      // Get the page HTML
+      const html = await page.content();
+      await browser.close();
+      browser = null;
+
+      console.log(`   - Page content loaded, parsing HTML...`);
+      const $ = cheerio.load(html);
+
+      // Extract movie-level data
+      const movieTitle = $('.dts-section-page-heading-title h1').first().text().trim() ||
+                         $('h1.dts-movie-title').first().text().trim() ||
+                         $('title').text().split('|')[0].trim();
+      
+      const studioName = $('.dts-studio-name a').first().text().trim() ||
+                         $('a[href*="/gay/studios/"]').first().text().trim();
+      
+      const releaseDate = $('.dts-release-date').text().replace(/Released?:?\s*/i, '').trim();
+      
+      const director = $('.dts-director-name a').first().text().trim();
+
+      const synopsis = $('.dts-movie-description').text().trim();
+
+      const movieImage = $('img.dts-movie-boxcover').attr('src') ||
+                        $('meta[property="og:image"]').attr('content');
+      
+      // Fix protocol-relative URLs (//pic.aebn.net/...) by adding https:
+      const fixedMovieImage = movieImage && movieImage.startsWith('//') ? `https:${movieImage}` : movieImage;
+
+      console.log(`   - Movie: ${movieTitle}`);
+      console.log(`   - Studio: ${studioName}`);
+
+      // Extract ALL scenes from the page
+      // Each scene is in a <section> tag with id="scene-XXXXX"
+      const scenes = [];
+      
+      $('section[id^="scene-"]').each((i, elem) => {
+        const $scene = $(elem);
+        const sceneId = $scene.attr('id'); // e.g., "scene-977220"
+        
+        // Get scene title from header (e.g., "Scene 1", "Scene 2")
+        // First try the specific no-link span for more accurate scene number
+        const sceneTitle = $scene.find('.dts-panel-header-title-no-link').first().text().trim() ||
+                          $scene.find('.dts-panel-header-title h1 span').first().text().trim() || 
+                          $scene.find('h1').first().text().trim();
+        
+        // Extract just the scene number from "Scene 1" -> 1
+        const sceneNumberMatch = sceneTitle.match(/Scene\s+(\d+)/i);
+        const sceneNumber = sceneNumberMatch ? parseInt(sceneNumberMatch[1]) : null;
+        
+        // Get scene duration metadata if available
+        const sceneDuration = $scene.find('.dts-scene-title-metadata span').text().trim();
+        
+        // Extract performers from this specific scene
+        // Performers are in: <span class="dts-scene-star-wrapper"> <a href="/gay/stars/...">Name</a>
+        const scenePerformersList = [];
+        $scene.find('.dts-scene-star-wrapper a.dts-text-link').each((j, perfElem) => {
+          const perfName = $(perfElem).text().trim();
+          if (perfName && !scenePerformersList.includes(perfName)) {
+            scenePerformersList.push(perfName);
+          }
+        });
+        
+        // Get scene image (5th thumbnail for better scene representation)
+        const thumbnails = $scene.find('img[src*="/dis/t/"]');
+        let sceneImage = thumbnails.length >= 5 ? 
+                          thumbnails.eq(4).attr('src') : // Use 5th thumbnail (index 4)
+                          (thumbnails.first().attr('src') || fixedMovieImage); // Fallback to first or movie image
+        
+        // Fix protocol-relative URLs (//pic.aebn.net/...) by adding https:
+        if (sceneImage && sceneImage.startsWith('//')) {
+          sceneImage = `https:${sceneImage}`;
+        }
+        
+        // Get sex acts, positions, settings
+        const sexActs = [];
+        const positions = [];
+        const settings = [];
+        
+        $scene.find('li').each((j, li) => {
+          const $li = $(li);
+          const label = $li.find('.section-detail-list-item-title').text().trim();
+          
+          if (label.includes('Sex acts:')) {
+            $li.find('a').each((k, a) => {
+              const act = $(a).text().trim().replace(/,\s*$/, '');
+              if (act) sexActs.push(act);
+            });
+          } else if (label.includes('Positions:')) {
+            $li.find('a').each((k, a) => {
+              const pos = $(a).text().trim().replace(/,\s*$/, '');
+              if (pos) positions.push(pos);
+            });
+          } else if (label.includes('Settings:')) {
+            $li.find('a').each((k, a) => {
+              const setting = $(a).text().trim().replace(/,\s*$/, '');
+              if (setting) settings.push(setting);
+            });
+          }
+        });
+
+        // Add scene even if no performers (some AEBN scenes don't list performers)
+        scenes.push({
+          id: sceneId,
+          title: sceneTitle,
+          number: sceneNumber,
+          duration: sceneDuration,
+          performers: scenePerformersList,
+          image: sceneImage,
+          sexActs: sexActs,
+          positions: positions,
+          settings: settings
+        });
+        
+        if (scenePerformersList.length > 0) {
+          console.log(`   - Found scene: ${sceneTitle} (number: ${sceneNumber}) with performers: ${scenePerformersList.join(', ')}`);
+        } else {
+          console.log(`   - Found scene: ${sceneTitle} (number: ${sceneNumber}) - no performers listed`);
+        }
+      });
+
+      console.log(`   - Extracted ${scenes.length} scenes from movie page`);
+
+      // If no scenes found, return error
+      if (scenes.length === 0) {
+        console.log(`   ⚠️ No scenes found in movie page`);
+        return {
+          success: false,
+          error: 'No scenes found on AEBN movie page'
+        };
+      }
+
+      // Match scene: either by scene number (direct) or by performers (matching)
+      let matchedScene = null;
+      let matchScore = 0;
+      
+      if (sceneNumber) {
+        // Direct scene selection by number
+        console.log(`   - Looking for scene with number: ${sceneNumber}`);
+        
+        matchedScene = scenes.find(scene => scene.number === sceneNumber);
+        
+        if (matchedScene) {
+          console.log(`   ✓ Found scene by number: "${matchedScene.title}" (Scene ${matchedScene.number})`);
+        } else {
+          console.log(`   ⚠️ No scene found with number ${sceneNumber}`);
+          console.log(`   - Available scene numbers: ${scenes.map(s => s.number).join(', ')}`);
+          return {
+            success: false,
+            error: `Scene ${sceneNumber} not found on AEBN page. Available scenes: ${scenes.map(s => s.number).join(', ')}`
+          };
+        }
+      } else if (scenePerformers && scenePerformers.length > 0) {
+        // Match scene by performers
+        const scenePerformerNames = scenePerformers.map(p => 
+          (p.name || p).toLowerCase().trim()
+        );
+
+        console.log(`   - Attempting to match scene by performers:`, scenePerformerNames);
+
+        // Find scene with most matching performers
+        scenes.forEach((scene, index) => {
+          // Count exact matches
+          const exactMatches = scene.performers.filter(p => 
+            scenePerformerNames.some(spn => {
+              const pLower = p.toLowerCase().trim();
+              return pLower === spn;
+            })
+          ).length;
+
+          // Count partial matches (one name contains another)
+          const partialMatches = scene.performers.filter(p => {
+            const pLower = p.toLowerCase().trim();
+            return scenePerformerNames.some(spn => 
+              pLower.includes(spn) || spn.includes(pLower)
+            );
+          }).length;
+
+          // Calculate match score (exact matches worth 2 points, partial worth 1)
+          const score = (exactMatches * 2) + partialMatches;
+
+          console.log(`   - ${scene.title}: ${scene.performers.join(', ')} (exact: ${exactMatches}, partial: ${partialMatches}, score: ${score})`);
+
+          if (score > matchScore) {
+            matchScore = score;
+            matchedScene = scene;
+          }
+        });
+
+        if (matchedScene) {
+          console.log(`   ✓ Matched scene: "${matchedScene.title}" with ${matchScore} points`);
+        } else {
+          console.log(`   ⚠️ No scene matched by performers`);
+          return {
+            success: false,
+            error: 'Could not match scene by performers on AEBN page'
+          };
+        }
+      } else {
+        // No scene number or performers provided - can't match
+        console.log(`   ⚠️ No scene number or performers provided for matching`);
+        return {
+          success: false,
+          error: 'Scene performers required to match scene on AEBN movie page'
+        };
+      }
+
+      // Build tags from sex acts, positions, and settings
+      const allTags = [
+        ...matchedScene.sexActs,
+        ...matchedScene.positions,
+        ...matchedScene.settings
+      ];
+
+      // Build the scraped metadata in standard format
+      const metadata = {
+        title: `${movieTitle} - ${matchedScene.title}`,
+        details: synopsis || '',
+        date: releaseDate || null,
+        director: director || null,
+        studio: studioName || null,
+        image: matchedScene.image || fixedMovieImage,
+        performers: matchedScene.performers.map(name => ({ name })),
+        tags: allTags.map(tag => ({ name: tag })),
+        movies: movieTitle ? [{
+          name: movieTitle,
+          url: url,
+          date: releaseDate,
+          studio: studioName,
+          sceneNumber: matchedScene.number  // Add scene number to movie metadata
+        }] : [],
+        _debug: {
+          totalScenes: scenes.length,
+          matchScore: matchScore,
+          matchedSceneId: matchedScene.id,
+          matchedSceneTitle: matchedScene.title,
+          allScenes: scenes.map(s => ({
+            title: s.title,
+            performers: s.performers
+          }))
+        }
+      };
+
+      console.log(`   ✓ Scraped AEBN scene:`, {
+        title: metadata.title,
+        performers: metadata.performers.length,
+        studio: metadata.studio?.name,
+        matched: !!matchedScene,
+        totalScenes: scenes.length
+      });
+
+      return {
+        success: true,
+        scraped: metadata,
+        source: this.siteName,
+        sourceUrl: url
+      };
+
+    } catch (error) {
+      console.error(`❌ [AEBN Scraper] Error:`, error.message);
+      if (error.response) {
+        console.error(`   - Status: ${error.response.status}`);
+        console.error(`   - Status Text: ${error.response.statusText}`);
+      }
+      
+      // Ensure browser is closed on error
+      if (browser) {
+        try {
+          await browser.close();
+          console.log(`   - Browser closed after error`);
+        } catch (closeError) {
+          console.error(`   - Error closing browser:`, closeError.message);
+        }
+      }
+      
+      return {
+        success: false,
+        error: `Failed to scrape AEBN: ${error.message}`
+      };
+    }
+  }
+}
+
+module.exports = AebnScraper;

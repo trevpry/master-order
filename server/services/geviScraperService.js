@@ -123,10 +123,16 @@ class GeviScraperService {
       if (dateDiv.length) {
         // Get the full text of the parent div and extract the date
         const fullText = dateDiv.text();
-        // Remove "Date:" and trim to get just the date
-        const dateText = fullText.replace('Date:', '').trim();
-        if (dateText) {
-          metadata.date = dateText;
+        // Remove "Date:" label and trim
+        let dateText = fullText.replace(/Date:/g, '').trim();
+        
+        // Extract first valid date in YYYY-MM-DD format
+        const dateMatch = dateText.match(/\d{4}-\d{2}-\d{2}/);
+        if (dateMatch) {
+          metadata.date = dateMatch[0];
+        } else if (dateText) {
+          // Fallback to cleaned text if no exact match
+          metadata.date = dateText.split('\n')[0].trim();
         }
       }
 
@@ -158,6 +164,31 @@ class GeviScraperService {
       const studioLink = section.find('a[href*="company"]').first();
       if (studioLink.length) {
         metadata.studio = this.nameWithUrl($, studioLink).name;
+      }
+
+      // Extract episode URLs from "View episode at" divs
+      metadata.episodeUrls = [];
+      const episodeDivs = $('div:contains("View episode at")');
+      episodeDivs.each((i, div) => {
+        // Only process divs where the direct text content starts with "View episode at"
+        const divText = $(div).contents().filter(function() {
+          return this.type === 'text';
+        }).text().trim();
+        
+        if (divText.startsWith('View episode at')) {
+          const link = $(div).find('a').first();
+          if (link.length) {
+            const href = link.attr('href');
+            if (href) {
+              const fullUrl = this.absUrl(href);
+              metadata.episodeUrls.push(fullUrl);
+            }
+          }
+        }
+      });
+      
+      if (metadata.episodeUrls.length > 0) {
+        console.log(`   - Found ${metadata.episodeUrls.length} episode URL(s):`, metadata.episodeUrls);
       }
 
       // Extract movies from "Found in these movies:" or "Found in this movie:" sections
@@ -603,6 +634,21 @@ class GeviScraperService {
             sceneData.episodeUrl = this.absUrl(episodeLink.attr('href'));
           }
           
+          // Extract compilations ("found in compilation" links) - can have multiple per scene
+          sceneData.compilations = [];
+          const compilationDivs = $(sceneEl).find('div:contains("found in compilation")');
+          compilationDivs.each((k, compilationDiv) => {
+            const compilationLink = $(compilationDiv).find('a[href*="video/"]').first();
+            if (compilationLink.length) {
+              const compilation = this.nameWithUrl($, compilationLink);
+              sceneData.compilations.push(compilation);
+            }
+          });
+          
+          if (sceneData.compilations.length > 0) {
+            console.log(`   - Scene ${sceneData.sceneNumber} has ${sceneData.compilations.length} compilations`);
+          }
+          
           movie.scenes.push(sceneData);
         });
         
@@ -880,13 +926,154 @@ class GeviScraperService {
           matchedAlias: bestMatch.matchedVia === 'alias' ? bestMatch.matchedText : null,
           alternatives: alternatives,
           originalName: movieName,  // Store the original scraped name
-          url: movie.url  // Store the GEVI URL for fetching full details
+          url: movie.url,  // Store the GEVI URL for fetching full details
+          sceneNumber: movie.sceneNumber || null  // Store the scene number from AEBN scraper
         });
       } else {
         // No match found
         unmatched.push({
           name: movieName,
           url: movie.url  // Store the GEVI URL for fetching full details
+        });
+      }
+    }
+
+    return { matched, unmatched };
+  }
+
+  /**
+   * Match scraped compilations against database movies
+   * @param {Array<Object>} scrapedCompilations - Array of compilation objects with name and url
+   * @param {Object} prisma - Prisma client instance
+   * @returns {Promise<Object>} Matched and unmatched compilations
+   */
+  async matchCompilations(scrapedCompilations, prisma) {
+    const matched = [];
+    const unmatched = [];
+
+    // Get all groups once for efficiency
+    const allGroups = await prisma.stashGroup.findMany({
+      include: {
+        studio: true
+      }
+    });
+
+    for (const compilation of scrapedCompilations) {
+      const compilationName = compilation.name;
+      
+      // Search by name (SQLite-compatible - filter in JS)
+      const normalizedName = compilationName.toLowerCase().replace(/\s+/g, '');
+      
+      // Find all matches with scores
+      const foundMatches = [];
+      
+      for (const dbGroup of allGroups) {
+        const dbNormalized = dbGroup.name.toLowerCase().replace(/\s+/g, '');
+        
+        let score = 0;
+        let matchedVia = 'name';
+        let matchedText = dbGroup.name;
+        
+        // Check aliases FIRST (higher priority for exact alias matches)
+        if (dbGroup.aliases) {
+          const aliases = dbGroup.aliases.split(',').map(a => a.trim());
+          for (const alias of aliases) {
+            const normalizedAlias = alias.toLowerCase().replace(/\s+/g, '');
+            
+            // Exact match on alias (highest priority)
+            if (normalizedAlias === normalizedName) {
+              score = 1.0;
+              matchedVia = 'alias';
+              matchedText = alias;
+              break;
+            }
+            // Scraped name contains alias
+            else if (normalizedName.includes(normalizedAlias)) {
+              const newScore = normalizedAlias.length / normalizedName.length;
+              if (newScore > score) {
+                score = newScore;
+                matchedVia = 'alias';
+                matchedText = alias;
+              }
+            }
+            // Alias contains scraped name
+            else if (normalizedAlias.includes(normalizedName)) {
+              const newScore = normalizedName.length / normalizedAlias.length;
+              if (newScore > score) {
+                score = newScore;
+                matchedVia = 'alias';
+                matchedText = alias;
+              }
+            }
+          }
+        }
+        
+        // If no good alias match, check name
+        if (score < 1.0) {
+          // Exact match on name
+          if (dbNormalized === normalizedName) {
+            score = 1.0;
+            matchedVia = 'name';
+            matchedText = dbGroup.name;
+          }
+          // Check if scraped name contains db name
+          else if (normalizedName.includes(dbNormalized)) {
+            const newScore = dbNormalized.length / normalizedName.length;
+            if (newScore > score) {
+              score = newScore;
+              matchedVia = 'name';
+              matchedText = dbGroup.name;
+            }
+          }
+          // Check if db name contains scraped name
+          else if (dbNormalized.includes(normalizedName)) {
+            const newScore = normalizedName.length / dbNormalized.length;
+            if (newScore > score) {
+              score = newScore;
+              matchedVia = 'name';
+              matchedText = dbGroup.name;
+            }
+          }
+        }
+        
+        // Only include if score is above threshold
+        if (score > 0.7) {
+          foundMatches.push({
+            group: dbGroup,
+            score,
+            matchedVia,
+            matchedText
+          });
+        }
+      }
+
+      // Sort by score (best match first)
+      foundMatches.sort((a, b) => b.score - a.score);
+
+      if (foundMatches.length > 0) {
+        // Best match
+        const bestMatch = foundMatches[0];
+
+        matched.push({
+          id: bestMatch.group.id,
+          name: bestMatch.group.name,
+          stashId: bestMatch.group.stashId,
+          studio: bestMatch.group.studio ? bestMatch.group.studio.name : null,
+          date: bestMatch.group.date,
+          matchedVia: bestMatch.matchedVia,
+          matchedAlias: bestMatch.matchedVia === 'alias' ? bestMatch.matchedText : null,
+          originalName: compilationName,
+          geviUrl: compilation.url,
+          sceneNumber: compilation.sceneNumber, // Preserve scene tracking
+          sceneId: compilation.sceneId // Preserve scene tracking
+        });
+      } else {
+        // No match found
+        unmatched.push({
+          name: compilationName,
+          geviUrl: compilation.url,
+          sceneNumber: compilation.sceneNumber, // Preserve scene tracking
+          sceneId: compilation.sceneId // Preserve scene tracking
         });
       }
     }
@@ -908,8 +1095,9 @@ class GeviScraperService {
     const allPerformers = await prisma.stashPerformer.findMany();
 
     for (const performer of scrapedPerformers) {
-      // Extract name from object or use string directly
+      // Extract name and URL from object or use string directly
       const performerName = typeof performer === 'string' ? performer : performer.name;
+      const performerUrl = typeof performer === 'object' ? performer.url : null;
       
       // Search by name (SQLite-compatible - filter in JS)
       const normalizedName = performerName.toLowerCase().replace(/\s+/g, '');
@@ -973,6 +1161,7 @@ class GeviScraperService {
         const alternatives = foundMatches.slice(1).map(m => ({
           id: m.performer.id,
           name: m.performer.name,
+          disambiguation: m.performer.disambiguation || null,
           matchedVia: m.matchedVia,
           matchedAlias: m.matchedVia === 'alias' ? m.matchedText : null
         }));
@@ -980,14 +1169,16 @@ class GeviScraperService {
         matched.push({
           id: bestMatch.performer.id,
           name: bestMatch.performer.name,
+          disambiguation: bestMatch.performer.disambiguation || null,
           matchedVia: bestMatch.matchedVia,
           matchedAlias: bestMatch.matchedVia === 'alias' ? bestMatch.matchedText : null,
           alternatives: alternatives,
-          originalName: performerName  // Store the original scraped name
+          originalName: performerName,  // Store the original scraped name
+          scrapedUrl: performerUrl  // Store the scraped URL
         });
       } else {
-        // No match found
-        unmatched.push(performerName);
+        // No match found - include URL if available
+        unmatched.push(typeof performer === 'object' ? performer : performerName);
       }
     }
 
@@ -1051,6 +1242,83 @@ class GeviScraperService {
     }
 
     return null;
+  }
+
+  /**
+   * Match scraped tags against database tags
+   * @param {Array} scrapedTags - Array of tag objects or strings from scrape
+   * @param {Object} prisma - Prisma client instance
+   * @returns {Promise<Object>} Object with matched and unmatched tags
+   */
+  async matchTags(scrapedTags, prisma) {
+    const matched = [];
+    const unmatched = [];
+
+    if (!scrapedTags || scrapedTags.length === 0) {
+      return { matched, unmatched };
+    }
+
+    // Get all tags with their aliases
+    const allTags = await prisma.stashTag.findMany({
+      include: {
+        aliases: true
+      }
+    });
+
+    for (const tag of scrapedTags) {
+      // Extract name from object or use string directly
+      const tagName = typeof tag === 'string' ? tag : tag.name;
+      
+      if (!tagName) continue;
+
+      // Search by name (case-insensitive)
+      const normalizedName = tagName.toLowerCase().trim();
+      
+      // Look for exact match or alias match
+      let foundTag = null;
+      let matchedVia = 'name';
+      let matchedAlias = null;
+      
+      for (const dbTag of allTags) {
+        const dbNormalized = dbTag.name.toLowerCase().trim();
+        
+        // Exact match on name
+        if (dbNormalized === normalizedName) {
+          foundTag = dbTag;
+          matchedVia = 'name';
+          break;
+        }
+        
+        // Check aliases if present
+        if (dbTag.aliases && dbTag.aliases.length > 0) {
+          const matchingAlias = dbTag.aliases.find(a => 
+            a.alias.toLowerCase().trim() === normalizedName
+          );
+          
+          if (matchingAlias) {
+            foundTag = dbTag;
+            matchedVia = 'alias';
+            matchedAlias = matchingAlias.alias;
+            break;
+          }
+        }
+      }
+
+      if (foundTag) {
+        matched.push({
+          id: foundTag.id,
+          name: foundTag.name,
+          originalName: tagName,
+          matchedVia: matchedVia,
+          matchedAlias: matchedAlias
+        });
+      } else {
+        // No match found - keep as object if it has other properties
+        unmatched.push(typeof tag === 'object' ? tag : tagName);
+      }
+    }
+
+    return { matched, unmatched };
   }
 
   /**

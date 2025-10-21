@@ -21,6 +21,7 @@ const StashBackgroundSyncService = require('../stashBackgroundSyncService');
 const GeviScraperService = require('../services/geviScraperService');
 const ActionCodeService = require('../services/actionCodeService');
 const PerformerSwapService = require('../services/performerSwapService');
+const PerformerMergeService = require('../services/performerMergeService');
 
 // Create a function that returns a router with io instance
 function createStashRouter(io) {
@@ -737,9 +738,27 @@ router.get('/scenes/:id', asyncHandler(async (req, res) => {
       });
     }
     
+    console.log(`🔍 [Scene GET] Scene ${id} raw data:`, {
+      id: scene.id,
+      title: scene.title,
+      url: scene.url,
+      geviUrl: scene.geviUrl,
+      episodeUrls: scene.episodeUrls,
+      episodeUrlsType: typeof scene.episodeUrls,
+      episodeUrlsLength: scene.episodeUrls ? scene.episodeUrls.length : 'null',
+      // File info
+      path: scene.path,
+      fileSize: scene.fileSize,
+      width: scene.width,
+      height: scene.height,
+      duration: scene.duration,
+      bitrate: scene.bitrate
+    });
+    
     // Transform data to match expected format
     const transformedScene = {
       id: scene.id,
+      stashId: scene.stashId,
       title: scene.title,
       details: scene.details,
       url: scene.url,
@@ -754,6 +773,14 @@ router.get('/scenes/:id', asyncHandler(async (req, res) => {
       duration: scene.duration,
       fileModTime: scene.fileModTime,
       geviUrl: scene.geviUrl,
+      episodeUrls: scene.episodeUrls,
+      // File information for merge UI
+      fileSize: scene.fileSize,
+      width: scene.width,
+      height: scene.height,
+      bitrate: scene.bitrate,
+      frameRate: scene.frameRate,
+      videoCodec: scene.videoCodec,
       studio: scene.studioObject ? { 
         id: scene.studioObject.id, 
         name: scene.studioObject.name,
@@ -1028,6 +1055,7 @@ router.post('/scenes/:id/parse-filename', asyncHandler(async (req, res) => {
       const alternatives = found.slice(1).map(fp => ({
         id: fp.performer.id,
         name: fp.performer.name,
+        disambiguation: fp.performer.disambiguation || null,
         matchedVia: fp.matchedVia,
         matchedAlias: fp.matchedVia === 'alias' ? fp.matchedText : null
       }));
@@ -1037,6 +1065,7 @@ router.post('/scenes/:id/parse-filename', asyncHandler(async (req, res) => {
         matchedPerformers.push({
           id: bestMatch.performer.id,
           name: bestMatch.performer.name,
+          disambiguation: bestMatch.performer.disambiguation || null,
           matchedVia: bestMatch.matchedVia,
           matchedAlias: bestMatch.matchedVia === 'alias' ? bestMatch.matchedText : null,
           alternatives: alternatives
@@ -1080,6 +1109,7 @@ router.post('/scenes/:id/parse-filename', asyncHandler(async (req, res) => {
         const alternatives = uniquePerformers.slice(1).map(fp => ({
           id: fp.performer.id,
           name: fp.performer.name,
+          disambiguation: fp.performer.disambiguation || null,
           matchedVia: fp.matchedVia,
           matchedAlias: fp.matchedVia === 'alias' ? fp.matchedText : null
         }));
@@ -1089,6 +1119,7 @@ router.post('/scenes/:id/parse-filename', asyncHandler(async (req, res) => {
           matchedPerformers.push({
             id: bestMatch.performer.id,
             name: bestMatch.performer.name,
+            disambiguation: bestMatch.performer.disambiguation || null,
             matchedVia: bestMatch.matchedVia,
             matchedAlias: bestMatch.matchedVia === 'alias' ? bestMatch.matchedText : null,
             alternatives: alternatives,
@@ -1242,12 +1273,15 @@ router.post('/performers/create', asyncHandler(async (req, res) => {
   console.log('👤 [Create Performer] Request received');
   console.log('   - Body:', JSON.stringify(req.body, null, 2));
   
-  const { name, aliases, gender, birthdate, ethnicity, country, eyeColor, hairColor, height, measurements, fakeTits, penisLength, circumcised, tattoos, piercings, careerLength, details } = req.body;
+  const { name, aliases, gender, birthdate, ethnicity, country, eyeColor, hairColor, height, measurements, fakeTits, penisLength, circumcised, tattoos, piercings, careerLength, details, url } = req.body;
 
   // Validate required fields - this will throw an error if validation fails
   validateRequiredFieldsDirect(req.body, ['name']);
 
   console.log('👤 [Create Performer] Creating performer:', name);
+  if (url) {
+    console.log('   - With URL:', url);
+  }
 
   // Initialize sync service if not already done
   if (!stashSyncService && !stashSyncServiceOptimized) {
@@ -1292,6 +1326,7 @@ router.post('/performers/create', asyncHandler(async (req, res) => {
           piercings
           career_length
           details
+          url
           stash_ids {
             endpoint
             stash_id
@@ -1314,6 +1349,7 @@ router.post('/performers/create', asyncHandler(async (req, res) => {
         measurements: measurements || null,
         fake_tits: fakeTits || null,
         penis_length: penisLength || null,
+        url: url || null,
         circumcised: circumcised || null,
         tattoos: tattoos || null,
         piercings: piercings || null,
@@ -1357,6 +1393,7 @@ router.post('/performers/create', asyncHandler(async (req, res) => {
         piercings: stashPerformer.piercings || null,
         career_length: stashPerformer.career_length || null,
         details: stashPerformer.details || null,
+        url: stashPerformer.url || null,
         image: null, // Will be set on next sync if available
         createdAt: new Date(),
         updatedAt: new Date(),
@@ -1376,6 +1413,111 @@ router.post('/performers/create', asyncHandler(async (req, res) => {
     console.error('   - Error message:', error.message);
     console.error('   - Error stack:', error.stack);
     return sendServerError(res, error.message || 'Failed to create performer');
+  }
+}));
+
+// POST /api/stash/tags/create - Create a new tag in both Stash and local DB
+router.post('/tags/create', asyncHandler(async (req, res) => {
+  console.log('🏷️ [Create Tag] Request received');
+  console.log('   - Body:', JSON.stringify(req.body, null, 2));
+  
+  const { name, aliases } = req.body;
+
+  // Validate required fields
+  validateRequiredFieldsDirect(req.body, ['name']);
+
+  console.log('🏷️ [Create Tag] Creating tag:', name);
+
+  // Initialize sync service if not already done
+  if (!stashSyncService && !stashSyncServiceOptimized) {
+    await initializeStashSyncService();
+  }
+
+  // Ensure sync service is available
+  const syncService = getActiveSyncService();
+  if (!syncService) {
+    console.error('   - Sync service not initialized');
+    return sendServerError(res, 'Stash sync service not initialized');
+  }
+
+  // Ensure Stash URL is configured
+  try {
+    await syncService.ensureConfigLoaded();
+  } catch (error) {
+    console.error('   - Stash not configured:', error.message);
+    return sendServerError(res, 'Stash server not configured. Please configure in Settings.');
+  }
+
+  try {
+    // First, create tag in Stash via GraphQL
+    const createMutation = `
+      mutation TagCreate($input: TagCreateInput!) {
+        tagCreate(input: $input) {
+          id
+          name
+          aliases
+        }
+      }
+    `;
+
+    const variables = {
+      input: {
+        name: name,
+        aliases: aliases || []
+      }
+    };
+
+    console.log('   - Creating in Stash with variables:', JSON.stringify(variables, null, 2));
+
+    const data = await syncService.makeGraphQLRequest(createMutation, variables);
+
+    console.log('   - GraphQL response data:', JSON.stringify(data, null, 2));
+
+    if (!data || !data.tagCreate) {
+      console.error('   - Failed to create tag in Stash. Response:', data);
+      return sendServerError(res, 'Failed to create tag in Stash - no data returned');
+    }
+
+    const stashTag = data.tagCreate;
+    console.log('   - Created in Stash:', stashTag.id, stashTag.name);
+
+    // Now create in local database with aliases as separate records
+    const createData = {
+      id: stashTag.id,
+      name: stashTag.name,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      lastSyncedAt: new Date()
+    };
+
+    // Add aliases if they exist
+    if (stashTag.aliases && stashTag.aliases.length > 0) {
+      createData.aliases = {
+        create: stashTag.aliases.map(alias => ({
+          alias: alias
+        }))
+      };
+    }
+
+    const localTag = await prisma.stashTag.create({
+      data: createData,
+      include: {
+        aliases: true
+      }
+    });
+
+    console.log('   - Created in local DB:', localTag.id, localTag.name);
+
+    sendSuccess(res, {
+      tag: localTag,
+      message: `Tag "${name}" created successfully`
+    });
+
+  } catch (error) {
+    console.error('❌ [Create Tag] Error:', error);
+    console.error('   - Error message:', error.message);
+    console.error('   - Error stack:', error.stack);
+    return sendServerError(res, error.message || 'Failed to create tag');
   }
 }));
 
@@ -1786,6 +1928,55 @@ router.post('/performers/:id/sync', asyncHandler(async (req, res) => {
   }
 }));
 
+// POST /api/stash/performers/merge - Merge multiple performers into one
+router.post('/performers/merge', asyncHandler(async (req, res) => {
+  const { mainPerformerId, mergePerformerIds } = req.body;
+  
+  console.log('🔄 [Merge Performers] Request received');
+  console.log(`   - Main performer: ${mainPerformerId}`);
+  console.log(`   - Merge performers: ${mergePerformerIds?.join(', ')}`);
+  
+  // Validate inputs
+  validateRequiredFieldsDirect({ mainPerformerId, mergePerformerIds }, ['mainPerformerId', 'mergePerformerIds']);
+  
+  if (!Array.isArray(mergePerformerIds) || mergePerformerIds.length === 0) {
+    return sendBadRequest(res, 'mergePerformerIds must be a non-empty array');
+  }
+  
+  if (mergePerformerIds.includes(mainPerformerId)) {
+    return sendBadRequest(res, 'Cannot merge a performer into itself');
+  }
+  
+  // Initialize sync service if needed
+  if (!stashSyncService && !stashSyncServiceOptimized) {
+    await initializeStashSyncService();
+  }
+  
+  const syncService = getActiveSyncService();
+  
+  // Create merge service instance with sync service
+  const mergeService = new PerformerMergeService(prisma, syncService);
+  
+  // Perform the merge
+  const result = await mergeService.mergePerformers(mainPerformerId, mergePerformerIds);
+  
+  if (result.success) {
+    console.log('✅ [Merge Performers] Merge completed successfully');
+    console.log(`   - Merged ${result.mergedCount} performer(s) into ${result.mainPerformer.name}`);
+    console.log(`   - Transferred ${result.transferredScenes} scene(s)`);
+    
+    sendSuccess(res, {
+      mainPerformer: result.mainPerformer,
+      mergedCount: result.mergedCount,
+      transferredScenes: result.transferredScenes,
+      message: `Successfully merged ${result.mergedCount} performer(s) into "${result.mainPerformer.name}"`
+    });
+  } else {
+    console.error('❌ [Merge Performers] Merge failed:', result.error);
+    return sendServerError(res, result.error || 'Failed to merge performers');
+  }
+}));
+
 // POST /api/stash/groups/create - Create a new group/movie in both Stash and local DB
 router.post('/groups/create', asyncHandler(async (req, res) => {
   console.log('🎬 [Create Group] Request received');
@@ -1803,7 +1994,9 @@ router.post('/groups/create', asyncHandler(async (req, res) => {
     front_image,
     back_image,
     url,
-    geviUrl
+    geviUrl,
+    sceneId,
+    sceneIndex
   } = req.body;
 
   // Validate required fields
@@ -2285,19 +2478,38 @@ router.put('/groups/:id', asyncHandler(async (req, res) => {
           }
         `;
 
-        const studioData = await syncService.makeGraphQLRequest(createStudioMutation, {
-          input: { name: studioName }
-        });
+        try {
+          const studioData = await syncService.makeGraphQLRequest(createStudioMutation, {
+            input: { name: studioName }
+          });
 
-        if (studioData && studioData.studioCreate) {
-          const newStudio = studioData.studioCreate;
-          updateInput.studio_id = newStudio.id;            // Save to local database
+          if (studioData && studioData.studioCreate) {
+            const newStudio = studioData.studioCreate;
+            updateInput.studio_id = newStudio.id;
+            
+            // Save to local database
             await prisma.stashStudio.upsert({
               where: { id: newStudio.id },
               update: { name: newStudio.name },
               create: { id: newStudio.id, name: newStudio.name }
             });
           }
+        } catch (studioError) {
+          // Studio might already exist - search for it in local database
+          console.warn(`   - ⚠️  Studio creation failed (likely already exists): ${studioError.message}`);
+          
+          const existingStudio = await prisma.stashStudio.findFirst({
+            where: { name: studioName }
+          });
+          
+          if (existingStudio) {
+            console.log(`   - ✅ Found existing studio in local database: ${existingStudio.name} (ID: ${existingStudio.id})`);
+            updateInput.studio_id = existingStudio.id;
+          } else {
+            console.warn(`   - ⚠️  Studio not found in local database either, continuing without studio`);
+            // Continue without studio
+          }
+        }
         }
       }
     }
@@ -2363,6 +2575,113 @@ router.put('/groups/:id', asyncHandler(async (req, res) => {
   } catch (error) {
     console.error('❌ Error updating group:', error);
     return sendServerError(res, error.message || 'Failed to update group');
+  }
+}));
+
+// DELETE /api/stash/groups/:id - Delete group from both Stash and local database
+router.delete('/groups/:id', asyncHandler(async (req, res) => {
+  const { id } = req.params;
+
+  console.log('🗑️  [Delete Group] Starting deletion for group:', id);
+
+  // Initialize sync service if needed
+  if (!stashSyncService && !stashSyncServiceOptimized) {
+    await initializeStashSyncService();
+  }
+
+  // Get sync service
+  const syncService = getActiveSyncService();
+  
+  if (!syncService) {
+    console.error('   - Sync service not initialized');
+    return sendServerError(res, 'Stash sync service not initialized');
+  }
+
+  // Ensure Stash URL is configured
+  try {
+    await syncService.ensureConfigLoaded();
+  } catch (error) {
+    console.error('   - Stash not configured:', error.message);
+    return sendServerError(res, 'Stash server not configured. Please configure in Settings.');
+  }
+
+  // Get the group from database to verify it exists
+  const group = await prisma.stashGroup.findUnique({
+    where: { id },
+    include: {
+      scenes: true
+    }
+  });
+
+  if (!group) {
+    return sendBadRequest(res, 'Group not found');
+  }
+
+  console.log(`   - Found group: ${group.name}`);
+  console.log(`   - Group has ${group.scenes.length} scene(s) linked`);
+
+  try {
+    // Delete from Stash first via GraphQL
+    const deleteMutation = `
+      mutation GroupDestroy($input: GroupDestroyInput!) {
+        groupDestroy(input: $input)
+      }
+    `;
+
+    const variables = {
+      input: {
+        id: id
+      }
+    };
+
+    console.log(`   - Deleting group from Stash...`);
+    console.log(`   - GraphQL Variables:`, JSON.stringify(variables, null, 2));
+    
+    let stashResult;
+    try {
+      stashResult = await syncService.makeGraphQLRequest(deleteMutation, variables);
+      console.log(`   - GraphQL Response:`, JSON.stringify(stashResult, null, 2));
+    } catch (graphqlError) {
+      console.error(`   - ❌ GraphQL Error:`, graphqlError);
+      // If group doesn't exist in Stash, continue with local deletion
+      if (graphqlError.message && graphqlError.message.includes('not found')) {
+        console.warn(`   - ⚠️  Group not found in Stash (may have been deleted manually), continuing with local deletion...`);
+        stashResult = { groupDestroy: true }; // Proceed with local deletion
+      } else {
+        throw graphqlError; // Re-throw other errors
+      }
+    }
+    
+    if (!stashResult || stashResult.groupDestroy === false) {
+      console.error(`   - ⚠️  Failed to delete from Stash:`, stashResult);
+      return sendServerError(res, 'Failed to delete group from Stash');
+    }
+
+    console.log(`   - ✅ Deleted group from Stash (or already deleted)`);
+
+    // Delete from local database
+    // First delete related records (cascade should handle this, but being explicit)
+    await prisma.stashGroupScene.deleteMany({
+      where: { groupId: id }
+    });
+
+    console.log(`   - Deleted ${group.scenes.length} scene link(s) from local database`);
+
+    // Delete the group itself
+    await prisma.stashGroup.delete({
+      where: { id }
+    });
+
+    console.log(`   - ✅ Deleted group from local database`);
+
+    sendSuccess(res, {
+      message: `Group "${group.name}" deleted successfully from both Stash and local database`
+    });
+
+  } catch (error) {
+    console.error('❌ Error deleting group:', error);
+    console.error('   - Error stack:', error.stack);
+    return sendServerError(res, error.message || 'Failed to delete group');
   }
 }));
 
@@ -2683,18 +3002,555 @@ router.post('/gevi/movie', asyncHandler(async (req, res) => {
     console.log(`   - Scene matching skipped (groupId: ${groupId}, movie.scenes: ${movie.scenes?.length})`);
   }
 
+  // Extract and match compilations from MATCHED scenes only
+  let matchedCompilations = { matched: [], unmatched: [] };
+  if (matchedScenes && matchedScenes.length > 0 && movie.scenes && movie.scenes.length > 0) {
+    const allCompilations = [];
+    
+    // Collect all compilations from matched scenes (including duplicates by URL for different scenes)
+    for (const matchedScene of matchedScenes) {
+      // Find the corresponding movie scene by scene number
+      const movieScene = movie.scenes.find(s => s.sceneNumber === matchedScene.sceneNumber);
+      
+      if (movieScene && movieScene.compilations && movieScene.compilations.length > 0) {
+        console.log(`   - Scene ${matchedScene.sceneNumber} has ${movieScene.compilations.length} compilations`);
+        for (const comp of movieScene.compilations) {
+          // Add ALL compilations with scene tracking (don't dedupe yet)
+          allCompilations.push({
+            ...comp,
+            sceneNumber: matchedScene.sceneNumber,
+            sceneId: matchedScene.sceneId
+          });
+        }
+      }
+    }
+    
+    console.log(`   - Found ${allCompilations.length} total compilations from ${matchedScenes.length} matched scenes`);
+    
+    // Match compilations against database movies
+    if (allCompilations.length > 0) {
+      matchedCompilations = await geviScraper.matchCompilations(allCompilations, prisma);
+      console.log(`   - Matched ${matchedCompilations.matched.length} compilations`);
+      console.log(`   - Unmatched ${matchedCompilations.unmatched.length} compilations`);
+    }
+  }
+
   // Return movie data
   const responseData = {
     movie,
     matchedScenes,
+    compilations: matchedCompilations,
     source: 'GEVI',
     sourceUrl: url
   };
   
   console.log(`   - Sending response with matchedScenes length: ${matchedScenes.length}`);
+  console.log(`   - Sending response with compilations: ${matchedCompilations.matched.length} matched, ${matchedCompilations.unmatched.length} unmatched`);
   
   sendSuccess(res, responseData);
 }));
+
+// POST /api/stash/compilations/create - Create a new compilation movie from GEVI and link to scene
+router.post('/compilations/create', asyncHandler(async (req, res) => {
+  const { geviUrl, sceneId, name } = req.body;
+
+  console.log('🎬 [Create Compilation] Creating new compilation from GEVI');
+  console.log(`   - GEVI URL: ${geviUrl}`);
+  console.log(`   - Scene ID: ${sceneId}`);
+  console.log(`   - Name (from scene): ${name}`);
+
+  // Validate inputs
+  if (!geviUrl || !name) {
+    console.log('   - ❌ Validation failed: Missing geviUrl or name');
+    return sendBadRequest(res, 'GEVI URL and name are required');
+  }
+
+  try {
+    console.log('   - ✅ Validation passed, entering try block');
+    
+    // Initialize sync service if needed
+    await initializeStashSyncService();
+    console.log('   - 🔄 Sync service initialized');
+    
+    // Get active sync service
+    const activeSyncService = getActiveSyncService();
+    console.log('   - Got sync service:', activeSyncService ? 'Available' : 'NULL');
+    
+    if (!activeSyncService) {
+      console.log('   - ❌ Sync service not available');
+      return sendServerError(res, 'Stash sync service is not available. Please check your Stash connection settings.');
+    }
+
+    // Extract alias from the original name (text in parentheses)
+    // Example: "Hard Luck (ChocolateCream)" -> alias = "ChocolateCream"
+    let aliasFromOriginalName = null;
+    const aliasMatch = name.match(/\(([^)]+)\)$/);
+    if (aliasMatch) {
+      aliasFromOriginalName = aliasMatch[1].trim();
+      console.log(`   - Extracted alias from original name: ${aliasFromOriginalName}`);
+    }
+
+    // Scrape the compilation movie from GEVI
+    console.log('   - 🌐 Starting GEVI scrape...');
+    const movie = await geviScraper.movieFromUrl(geviUrl);
+    console.log('   - 🌐 GEVI scrape completed');
+    
+    if (!movie) {
+      console.log('   - ❌ No movie data returned from GEVI');
+      return sendServerError(res, 'Failed to scrape movie from GEVI');
+    }
+
+    console.log(`   - Scraped movie name: ${movie.name}`);
+
+    // Get or create studio first (if studio exists)
+    let studioId = null;
+    if (movie.studio) {
+      try {
+        studioId = await getOrCreateStudio(movie.studio, activeSyncService);
+        console.log(`   - Studio ID: ${studioId}`);
+      } catch (studioError) {
+        console.error(`   - ⚠️  Failed to get/create studio:`, studioError);
+        // Continue without studio
+      }
+    }
+
+    // Create group in Stash via GraphQL
+    const createMutation = `
+      mutation GroupCreate($input: GroupCreateInput!) {
+        groupCreate(input: $input) {
+          id
+          name
+          aliases
+          date
+          duration
+          director
+          synopsis
+          urls
+        }
+      }
+    `;
+
+    // Build aliases string
+    // If we have an alias from the original name, use the full original name as alias
+    // This preserves the full title like "Hard Luck (ChocolateCream)"
+    let aliasesString = null;
+    if (aliasFromOriginalName) {
+      aliasesString = name; // Store the full original name with parentheses as alias
+      console.log(`   - Setting aliases: ${aliasesString}`);
+    }
+
+    const createVariables = {
+      input: {
+        name: movie.name || name,
+        aliases: aliasesString,
+        date: movie.date || null,
+        duration: movie.duration || null,
+        director: movie.director || null,
+        synopsis: movie.synopsis || null,
+        studio_id: studioId,
+        urls: [geviUrl]
+      }
+    };
+
+    console.log(`   - Creating group in Stash with variables:`, JSON.stringify(createVariables, null, 2));
+    
+    const createResult = await activeSyncService.makeGraphQLRequest(createMutation, createVariables);
+    
+    // makeGraphQLRequest returns the data directly (already unwrapped)
+    if (!createResult || !createResult.groupCreate) {
+      console.error(`   - ❌ Invalid response from Stash:`, JSON.stringify(createResult, null, 2));
+      throw new Error('Failed to create group in Stash - invalid response');
+    }
+
+    const stashGroup = createResult.groupCreate;
+    console.log(`   - ✅ Created group in Stash with ID: ${stashGroup.id}`);
+    if (stashGroup.aliases) {
+      console.log(`   - ✅ Aliases saved to Stash: ${stashGroup.aliases}`);
+    }
+
+    // Get Stash URL for constructing group URL
+    const stashUrl = await getStashUrl();
+    console.log(`   - Stash URL: ${stashUrl}`);
+
+    // Create group in local database
+    console.log(`   - Creating group in local database...`);
+    const localGroup = await prisma.stashGroup.create({
+      data: {
+        id: stashGroup.id,
+        name: stashGroup.name || name,
+        aliases: stashGroup.aliases || aliasesString || null,
+        date: stashGroup.date || null,
+        duration: stashGroup.duration || null,
+        director: stashGroup.director || null,
+        synopsis: stashGroup.synopsis || null,
+        studioId: studioId,
+        geviUrl: geviUrl,
+        url: `${stashUrl}/movies/${stashGroup.id}`
+      }
+    });
+
+    console.log(`   - ✅ Created group in local database with ID: ${localGroup.id}`);
+    if (localGroup.aliases) {
+      console.log(`   - ✅ Saved aliases: ${localGroup.aliases}`);
+    }
+
+    // Link scene to the new compilation if sceneId provided
+    if (sceneId) {
+      console.log(`   - Scene ID provided: ${sceneId}, linking scene to group...`);
+      
+      // Verify scene exists first
+      const sceneExists = await prisma.stashScene.findUnique({
+        where: { id: sceneId }
+      });
+      
+      if (!sceneExists) {
+        console.warn(`   - ⚠️  Scene ${sceneId} not found in database, skipping scene linking`);
+      } else {
+        // Get existing groups for this scene first
+        const existingSceneGroups = await prisma.stashGroupScene.findMany({
+          where: { sceneId: sceneId },
+          select: { groupId: true, sceneIndex: true }
+        });
+
+        console.log(`   - Scene has ${existingSceneGroups.length} existing group(s)`);
+
+        // Build groups array with existing groups + new group
+        const allGroups = [
+          ...existingSceneGroups.map(sg => ({
+            group_id: sg.groupId,
+            scene_index: sg.sceneIndex
+          })),
+          {
+            group_id: stashGroup.id,
+            scene_index: sceneIndex || null  // Use provided scene index or null
+          }
+        ];
+
+        // Update scene to add this group (scene-centric approach)
+        const updateSceneMutation = `
+          mutation SceneUpdate($input: SceneUpdateInput!) {
+            sceneUpdate(input: $input) {
+              id
+              groups {
+                group {
+                  id
+                  name
+                }
+              }
+            }
+          }
+        `;
+
+        const updateSceneVariables = {
+          input: {
+            id: sceneId,
+            groups: allGroups
+          }
+        };
+
+        console.log(`   - Updating scene ${sceneId} with ${allGroups.length} group(s) in Stash`);
+
+        const updateSceneResult = await activeSyncService.makeGraphQLRequest(updateSceneMutation, updateSceneVariables);
+
+        // makeGraphQLRequest returns the data directly (already unwrapped)
+        if (!updateSceneResult || !updateSceneResult.sceneUpdate) {
+          console.error(`   - ⚠️  Failed to add scene to group in Stash:`, updateSceneResult);
+        } else {
+          console.log(`   - ✅ Scene now belongs to ${updateSceneResult.sceneUpdate.groups.length} group(s) in Stash`);
+        }
+
+        // Link in local database (check if link already exists)
+        const existingLink = await prisma.stashGroupScene.findUnique({
+          where: {
+            groupId_sceneId: {
+              groupId: stashGroup.id,
+              sceneId: sceneId
+            }
+          }
+        });
+
+        if (!existingLink) {
+          await prisma.stashGroupScene.create({
+            data: {
+              groupId: stashGroup.id,
+              sceneId: sceneId
+            }
+          });
+          console.log(`   - ✅ Linked scene to group in local database`);
+        } else {
+          console.log(`   - ℹ️  Scene already linked to group in local database`);
+        }
+      }
+    }
+
+    // Return the created group
+    sendSuccess(res, {
+      group: {
+        id: localGroup.id,
+        name: localGroup.name,
+        stashId: localGroup.id,
+        date: localGroup.date,
+        duration: localGroup.duration,
+        director: localGroup.director,
+        synopsis: localGroup.synopsis,
+        geviUrl: localGroup.geviUrl,
+        url: localGroup.url
+      }
+    });
+
+  } catch (error) {
+    console.error('❌ [Create Compilation] Error caught:');
+    console.error('   - Message:', error.message);
+    console.error('   - Stack:', error.stack);
+    console.error('   - Full error:', error);
+    return sendServerError(res, `Failed to create compilation: ${error.message}`);
+  }
+}));
+
+// Link scene to existing compilation/group
+router.post('/compilations/link-scene', asyncHandler(async (req, res) => {
+  const { groupId, sceneId } = req.body;
+
+  console.log('🔗 [Link Scene to Compilation] Linking scene to existing group');
+  console.log(`   - Group ID: ${groupId}`);
+  console.log(`   - Scene ID: ${sceneId}`);
+
+  // Validate inputs
+  if (!groupId || !sceneId) {
+    console.log('   - ❌ Validation failed: Missing groupId or sceneId');
+    return sendBadRequest(res, 'Group ID and Scene ID are required');
+  }
+
+  try {
+    console.log('   - ✅ Validation passed, entering try block');
+    
+    // Initialize sync service if needed
+    await initializeStashSyncService();
+    console.log('   - 🔄 Sync service initialized');
+    
+    // Get active sync service
+    const activeSyncService = getActiveSyncService();
+    console.log('   - Got sync service:', activeSyncService ? 'Available' : 'NULL');
+    
+    if (!activeSyncService) {
+      console.log('   - ❌ Sync service not available');
+      return sendServerError(res, 'Stash sync service is not available. Please check your Stash connection settings.');
+    }
+
+    // Verify group exists in database
+    const group = await prisma.stashGroup.findUnique({
+      where: { id: groupId }
+    });
+
+    if (!group) {
+      console.log(`   - ❌ Group ${groupId} not found in database`);
+      return sendBadRequest(res, `Group ${groupId} not found`);
+    }
+
+    console.log(`   - ✅ Found group: ${group.name}`);
+
+    // Verify scene exists in database
+    const scene = await prisma.stashScene.findUnique({
+      where: { id: sceneId }
+    });
+
+    if (!scene) {
+      console.log(`   - ❌ Scene ${sceneId} not found in database`);
+      return sendBadRequest(res, `Scene ${sceneId} not found`);
+    }
+
+    console.log(`   - ✅ Found scene: ${scene.title}`);
+
+    // Check if link already exists
+    const existingLink = await prisma.stashGroupScene.findFirst({
+      where: {
+        groupId: groupId,
+        sceneId: sceneId
+      }
+    });
+
+    if (existingLink) {
+      console.log(`   - ⚠️  Scene ${sceneId} is already linked to group ${groupId}`);
+      return sendSuccess(res, {
+        message: 'Scene is already linked to this group',
+        alreadyLinked: true
+      });
+    }
+
+    // Link scene to group in Stash via GraphQL
+    // We need to update the SCENE, not the group, because scenes belong to groups
+    const updateSceneMutation = `
+      mutation SceneUpdate($input: SceneUpdateInput!) {
+        sceneUpdate(input: $input) {
+          id
+          groups {
+            group {
+              id
+              name
+            }
+            scene_index
+          }
+        }
+      }
+    `;
+
+    // Get all existing groups for this scene
+    const existingSceneGroups = await prisma.stashGroupScene.findMany({
+      where: { sceneId: sceneId },
+      select: { groupId: true, sceneIndex: true }
+    });
+
+    // Add the new group to the list
+    const allGroups = [
+      ...existingSceneGroups.map(sg => ({
+        group_id: sg.groupId,
+        scene_index: sg.sceneIndex
+      })),
+      {
+        group_id: groupId,
+        scene_index: null  // No specific index for now
+      }
+    ];
+
+    console.log(`   - Existing groups for scene: ${existingSceneGroups.length}`);
+    console.log(`   - Total groups after adding: ${allGroups.length}`);
+
+    const updateSceneVariables = {
+      input: {
+        id: sceneId,
+        groups: allGroups
+      }
+    };
+
+    console.log(`   - Linking scene ${sceneId} to group ${groupId} in Stash`);
+
+    const updateSceneResult = await activeSyncService.makeGraphQLRequest(updateSceneMutation, updateSceneVariables);
+
+    // makeGraphQLRequest returns the data directly (already unwrapped)
+    if (!updateSceneResult || !updateSceneResult.sceneUpdate) {
+      console.error(`   - ⚠️  Failed to link scene to group in Stash:`, updateSceneResult);
+      return sendServerError(res, 'Failed to link scene to group in Stash');
+    }
+
+    console.log(`   - ✅ Linked scene to group in Stash`);
+    console.log(`   - Scene now belongs to ${updateSceneResult.sceneUpdate.groups.length} group(s)`);
+
+    // Create link in local database
+    await prisma.stashGroupScene.create({
+      data: {
+        groupId: groupId,
+        sceneId: sceneId
+      }
+    });
+
+    console.log(`   - ✅ Linked scene to group in local database`);
+
+    // Return success
+    sendSuccess(res, {
+      message: `Successfully linked scene ${scene.title} to group ${group.name}`,
+      group: {
+        id: group.id,
+        name: group.name
+      },
+      scene: {
+        id: scene.id,
+        title: scene.title
+      }
+    });
+
+  } catch (error) {
+    console.error('❌ [Link Scene to Compilation] Error caught:');
+    console.error('   - Message:', error.message);
+    console.error('   - Stack:', error.stack);
+    console.error('   - Full error:', error);
+    return sendServerError(res, `Failed to link scene to compilation: ${error.message}`);
+  }
+}));
+
+// Helper function to get or create studio
+async function getOrCreateStudio(studioName, syncService) {
+  if (typeof studioName !== 'string') {
+    studioName = studioName.name || studioName;
+  }
+
+  // Search for existing studio
+  const existing = await prisma.stashStudio.findFirst({
+    where: {
+      name: studioName
+    }
+  });
+
+  if (existing) {
+    return existing.id;
+  }
+
+  // Create in Stash
+  const createMutation = `
+    mutation StudioCreate($input: StudioCreateInput!) {
+      studioCreate(input: $input) {
+        id
+        name
+      }
+    }
+  `;
+
+  const createVariables = {
+    input: {
+      name: studioName
+    }
+  };
+
+  try {
+    const result = await syncService.makeGraphQLRequest(createMutation, createVariables);
+
+    // makeGraphQLRequest returns the data directly (already unwrapped)
+    if (!result || !result.studioCreate) {
+      throw new Error('Failed to create studio in Stash');
+    }
+
+    // Create in local database
+    const studio = await prisma.stashStudio.create({
+      data: {
+        id: result.studioCreate.id,
+        name: studioName,
+        url: `${await getStashUrl()}/studios/${result.studioCreate.id}`
+      }
+    });
+
+    return studio.id;
+  } catch (error) {
+    // If studio already exists in Stash, search for it by name
+    if (error.message && error.message.includes('already exists')) {
+      console.log(`   - Studio "${studioName}" already exists in Stash, searching for it...`);
+      
+      // Search for the studio in local database again (might have been created by another process)
+      const existing = await prisma.stashStudio.findFirst({
+        where: {
+          name: studioName
+        }
+      });
+      
+      if (existing) {
+        return existing.id;
+      }
+      
+      // If not in local DB, we need to fetch it from Stash
+      // For now, just return null and continue without studio
+      console.warn(`   - Studio "${studioName}" exists in Stash but not in local database`);
+      return null;
+    }
+    
+    // Re-throw other errors
+    throw error;
+  }
+}
+
+// Helper function to get Stash URL
+async function getStashUrl() {
+  const settings = await prisma.settings.findMany();
+  const stashUrl = settings.find(s => s.key === 'stashUrl')?.value;
+  return stashUrl || 'http://localhost:9999';
+}
 
 // POST /api/stash/scenes/:id/search-gevi - Search GEVI using scene performers
 router.post('/scenes/:id/search-gevi', asyncHandler(async (req, res) => {
@@ -2950,248 +3806,281 @@ router.post('/scenes/:id/search-gevi-movies', asyncHandler(async (req, res) => {
     return sendServerError(res, `No results found for performer: ${firstPerformer.name}`);
   }
 
+  console.log(`✅ Found ${firstPerformerResults.length} performers matching "${firstPerformer.name}"`);
   console.log(`   - Found ${firstPerformerResults.length} matches for first performer`);
 
-  // Use the first result (best match)
-  const performerPage = firstPerformerResults[0];
-  console.log(`   - Using performer: ${performerPage.name} (${performerPage.url})`);
+  // We'll aggregate results from all performer matches
+  const allMoviesMap = new Map(); // Map of movie URL to {title, url, matchedPerformers[], foundVia}
 
-  // Launch Puppeteer browser
-  const puppeteer = require('puppeteer');
-  
-  const browser = await puppeteer.launch({
-    headless: true,  // Run in headless mode
-    args: ['--no-sandbox', '--disable-setuid-sandbox']
-  });
+  // Try searching with each performer match
+  for (let matchIdx = 0; matchIdx < firstPerformerResults.length; matchIdx++) {
+    const performerPage = firstPerformerResults[matchIdx];
+    console.log(`\n   - [Match ${matchIdx + 1}/${firstPerformerResults.length}] Using performer: ${performerPage.name} (${performerPage.url})`);
 
-  const page = await browser.newPage();
-  await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36');
-  
-  console.log(`   - Loading GEVI homepage...`);
-  await page.goto('https://gayeroticvideoindex.com', { 
-    waitUntil: 'networkidle2',
-    timeout: 30000
-  });
+    let browser = null;
+    try {
+      // Launch Puppeteer browser
+      const puppeteer = require('puppeteer');
+      
+      browser = await puppeteer.launch({
+        headless: true,  // Run in headless mode
+        args: ['--no-sandbox', '--disable-setuid-sandbox']
+      });
 
-  console.log(`   - Looking for Enter button...`);
-  
-  // Wait for and click the Enter button
-  try {
-    // Try multiple possible selectors for the Enter button
-    const enterButtonClicked = await page.evaluate(() => {
-      // Look for various possible selectors
-      const selectors = [
-        'button:contains("Enter")',
-        'a:contains("Enter")',
-        'input[type="submit"][value*="Enter"]',
-        'button[type="submit"]',
-        '.enter-button',
-        '#enter-button',
-        '[onclick*="enter"]'
-      ];
+      const page = await browser.newPage();
+      await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36');
+      
+      console.log(`   - Loading GEVI homepage...`);
+      await page.goto('https://gayeroticvideoindex.com', { 
+        waitUntil: 'networkidle2',
+        timeout: 30000
+      });
 
-      // Try text-based search first (most reliable)
-      const buttons = Array.from(document.querySelectorAll('button, a, input[type="submit"]'));
-      const enterButton = buttons.find(el => 
-        el.textContent.trim().toLowerCase() === 'enter' ||
-        el.value?.toLowerCase() === 'enter'
-      );
+      console.log(`   - Looking for Enter button...`);
+      
+      // Wait for and click the Enter button
+      try {
+        // Try multiple possible selectors for the Enter button
+        const enterButtonClicked = await page.evaluate(() => {
+          // Look for various possible selectors
+          const selectors = [
+            'button:contains("Enter")',
+            'a:contains("Enter")',
+            'input[type="submit"][value*="Enter"]',
+            'button[type="submit"]',
+            '.enter-button',
+            '#enter-button',
+            '[onclick*="enter"]'
+          ];
 
-      if (enterButton) {
-        enterButton.click();
-        return true;
-      }
+          // Try text-based search first (most reliable)
+          const buttons = Array.from(document.querySelectorAll('button, a, input[type="submit"]'));
+          const enterButton = buttons.find(el => 
+            el.textContent.trim().toLowerCase() === 'enter' ||
+            el.value?.toLowerCase() === 'enter'
+          );
 
-      // Fallback to selector search
-      for (const selector of selectors) {
-        try {
-          const element = document.querySelector(selector);
-          if (element) {
-            element.click();
+          if (enterButton) {
+            enterButton.click();
             return true;
           }
-        } catch (e) {}
+
+          // Fallback to selector search
+          for (const selector of selectors) {
+            try {
+              const element = document.querySelector(selector);
+              if (element) {
+                element.click();
+                return true;
+              }
+            } catch (e) {}
+          }
+
+          return false;
+        });
+
+        if (enterButtonClicked) {
+          console.log(`   - ✅ Clicked Enter button`);
+          // Wait for any navigation/modal close
+          await new Promise(resolve => setTimeout(resolve, 2000));
+        } else {
+          console.log(`   - ℹ️  No Enter button found, proceeding...`);
+        }
+      } catch (error) {
+        console.log(`   - ℹ️  Enter button not required or already dismissed:`, error.message);
       }
 
-      return false;
-    });
+      console.log(`   - Navigating to performer page...`);
+      await page.goto(performerPage.url, { 
+        waitUntil: 'networkidle2',
+        timeout: 30000
+      });
 
-    if (enterButtonClicked) {
-      console.log(`   - ✅ Clicked Enter button`);
-      // Wait for any navigation/modal close
+      console.log(`   - Page loaded, looking for Movies tab...`);
+      
+      // Wait for the page to be fully loaded
       await new Promise(resolve => setTimeout(resolve, 2000));
-    } else {
-      console.log(`   - ℹ️  No Enter button found, proceeding...`);
-    }
-  } catch (error) {
-    console.log(`   - ℹ️  Enter button not required or already dismissed:`, error.message);
-  }
 
-  console.log(`   - Navigating to performer page...`);
-  await page.goto(performerPage.url, { 
-    waitUntil: 'networkidle2',
-    timeout: 30000
-  });
+      // Click on the Movies tab/button
+      // The Movies tab is a button with sectionid="movies"
+      // Click on the Movies tab/button
+      // The Movies tab is a button with sectionid="movies"
+      const moviesTabClicked = await page.evaluate(() => {
+        // Look for various possible selectors
+        const selectors = [
+          'button[sectionid="movies"]',           // Primary: button with sectionid
+          'button[data-sectionid="movies"]',      // Alternate data attribute
+          '[sectionid="movies"]',                 // Any element with sectionid
+          'a[href="#movies"]',                    // Fallback: link
+          'a[href="#moviesDT"]',                  // Fallback: DataTable link
+          'button:contains("Movies")'             // Fallback: text search
+        ];
 
-  console.log(`   - Page loaded, looking for Movies tab...`);
-  
-  // Wait for the page to be fully loaded
-  await new Promise(resolve => setTimeout(resolve, 2000));
+        for (const selector of selectors) {
+          try {
+            // Try direct selector
+            const element = document.querySelector(selector);
+            if (element) {
+              element.click();
+              console.log('Clicked Movies tab using selector:', selector);
+              return true;
+            }
+          } catch (e) {}
+        }
 
-  // Click on the Movies tab/button
-  // The Movies tab is a button with sectionid="movies"
-  const moviesTabClicked = await page.evaluate(() => {
-    // Look for various possible selectors
-    const selectors = [
-      'button[sectionid="movies"]',           // Primary: button with sectionid
-      'button[data-sectionid="movies"]',      // Alternate data attribute
-      '[sectionid="movies"]',                 // Any element with sectionid
-      'a[href="#movies"]',                    // Fallback: link
-      'a[href="#moviesDT"]',                  // Fallback: DataTable link
-      'button:contains("Movies")'             // Fallback: text search
-    ];
+        // Final fallback: find by text content
+        const buttons = Array.from(document.querySelectorAll('button, a'));
+        const moviesButton = buttons.find(el => 
+          el.textContent.trim().toLowerCase() === 'movies' ||
+          el.getAttribute('sectionid') === 'movies'
+        );
 
-    for (const selector of selectors) {
-      try {
-        // Try direct selector
-        const element = document.querySelector(selector);
-        if (element) {
-          element.click();
-          console.log('Clicked Movies tab using selector:', selector);
+        if (moviesButton) {
+          moviesButton.click();
+          console.log('Clicked Movies tab via text/attribute search');
           return true;
         }
-      } catch (e) {}
-    }
 
-    // Final fallback: find by text content
-    const buttons = Array.from(document.querySelectorAll('button, a'));
-    const moviesButton = buttons.find(el => 
-      el.textContent.trim().toLowerCase() === 'movies' ||
-      el.getAttribute('sectionid') === 'movies'
-    );
-
-    if (moviesButton) {
-      moviesButton.click();
-      console.log('Clicked Movies tab via text/attribute search');
-      return true;
-    }
-
-    return false;
-  });
-
-  if (moviesTabClicked) {
-    console.log(`   - ✅ Clicked Movies tab`);
-  } else {
-    console.log(`   - ⚠️  Could not find Movies tab, page may already be showing movies`);
-  }
-
-  // Wait for the movies table and search box to appear
-  await new Promise(resolve => setTimeout(resolve, 2000));
-
-  console.log(`   - Searching for ${allPerformers.length - 1} other performers in movies table...`);
-  console.log(`   - (Skipping ${firstPerformer.name} since we're already on their page)`);
-
-  // Search for each performer (except the first one, since we're on their page)
-  const moviesByPerformer = new Map(); // Map of movie URL to {title, url, matchedPerformers[]}
-
-  for (let i = 1; i < allPerformers.length; i++) {
-    const performer = allPerformers[i];
-    console.log(`   - [${i}/${allPerformers.length - 1}] Searching for: ${performer.name}`);
-
-    // Clear the search box
-    await page.evaluate(() => {
-      const searchBox = document.querySelector('#moviesDT_filter input[type="search"]');
-      if (searchBox) {
-        searchBox.value = '';
-        searchBox.dispatchEvent(new Event('input', { bubbles: true }));
-      }
-    });
-
-    await new Promise(resolve => setTimeout(resolve, 500));
-
-    // Wait for the search input to be available
-    await page.waitForSelector('#moviesDT_filter input[type="search"]', { timeout: 10000 });
-
-    // Type the performer's name into the search box
-    await page.type('#moviesDT_filter input[type="search"]', performer.name);
-
-    // Press Enter to search
-    await page.keyboard.press('Enter');
-
-    // Wait for search results to load
-    await new Promise(resolve => setTimeout(resolve, 3000));
-
-    // Extract movie results for this performer
-    const performerMovies = await page.evaluate((performerName) => {
-      const results = [];
-      const rows = document.querySelectorAll('#moviesDT tbody tr');
-      
-      rows.forEach((row, index) => {
-        const cells = row.querySelectorAll('td');
-        
-        // Skip empty data rows
-        const firstCell = cells[0];
-        if (firstCell && firstCell.classList.contains('dataTables_empty')) {
-          return;
-        }
-        
-        // Look for the movie link
-        let foundLink = null;
-        let foundTitle = null;
-        
-        for (let i = 0; i < cells.length; i++) {
-          const link = cells[i].querySelector('a[href*="video/"]');
-          if (link) {
-            const href = link.getAttribute('href');
-            if (href && !href.includes('company/') && !href.includes('performer/')) {
-              foundLink = link;
-              foundTitle = link.textContent.trim();
-              break;
-            }
-          }
-        }
-        
-        if (foundLink && foundTitle) {
-          let url = foundLink.getAttribute('href');
-          
-          // Make URL absolute if it's relative
-          if (url && !url.startsWith('http')) {
-            url = 'https://gayeroticvideoindex.com/' + (url.startsWith('/') ? url.substring(1) : url);
-          }
-          
-          if (url) {
-            results.push({ title: foundTitle, url });
-          }
-        }
+        return false;
       });
-      
-      return results;
-    }, performer.name);
 
-    console.log(`     - Found ${performerMovies.length} movie(s) for ${performer.name}`);
+      if (moviesTabClicked) {
+        console.log(`   - ✅ Clicked Movies tab`);
+      } else {
+        console.log(`   - ⚠️  Could not find Movies tab, page may already be showing movies`);
+      }
 
-    // Add to our map, tracking which performers are in each movie
-    performerMovies.forEach(movie => {
-      if (!moviesByPerformer.has(movie.url)) {
-        moviesByPerformer.set(movie.url, {
-          title: movie.title,
-          url: movie.url,
-          matchedPerformers: []
+      // Wait for the movies table and search box to appear
+      await new Promise(resolve => setTimeout(resolve, 2000));
+
+      console.log(`   - Searching for ${allPerformers.length - 1} other performers in movies table...`);
+      console.log(`   - (Skipping ${firstPerformer.name} since we're already on their page)`);
+
+      // Search for each performer (except the first one, since we're on their page)
+      const moviesByPerformer = new Map(); // Map of movie URL to {title, url, matchedPerformers[]}
+
+      for (let i = 1; i < allPerformers.length; i++) {
+        const performer = allPerformers[i];
+        console.log(`   - [${i}/${allPerformers.length - 1}] Searching for: ${performer.name}`);
+
+        // Clear the search box
+        await page.evaluate(() => {
+          const searchBox = document.querySelector('#moviesDT_filter input[type="search"]');
+          if (searchBox) {
+            searchBox.value = '';
+            searchBox.dispatchEvent(new Event('input', { bubbles: true }));
+          }
+        });
+
+        await new Promise(resolve => setTimeout(resolve, 500));
+
+        // Wait for the search input to be available
+        await page.waitForSelector('#moviesDT_filter input[type="search"]', { timeout: 10000 });
+
+        // Type the performer's name into the search box
+        await page.type('#moviesDT_filter input[type="search"]', performer.name);
+
+        // Press Enter to search
+        await page.keyboard.press('Enter');
+
+        // Wait for search results to load
+        await new Promise(resolve => setTimeout(resolve, 3000));
+
+        // Extract movie results for this performer
+        const performerMovies = await page.evaluate((performerName) => {
+          const results = [];
+          const rows = document.querySelectorAll('#moviesDT tbody tr');
+          
+          rows.forEach((row, index) => {
+            const cells = row.querySelectorAll('td');
+            
+            // Skip empty data rows
+            const firstCell = cells[0];
+            if (firstCell && firstCell.classList.contains('dataTables_empty')) {
+              return;
+            }
+            
+            // Look for the movie link
+            let foundLink = null;
+            let foundTitle = null;
+            
+            for (let i = 0; i < cells.length; i++) {
+              const link = cells[i].querySelector('a[href*="video/"]');
+              if (link) {
+                const href = link.getAttribute('href');
+                if (href && !href.includes('company/') && !href.includes('performer/')) {
+                  foundLink = link;
+                  foundTitle = link.textContent.trim();
+                  break;
+                }
+              }
+            }
+            
+            if (foundLink && foundTitle) {
+              let url = foundLink.getAttribute('href');
+              
+              // Make URL absolute if it's relative
+              if (url && !url.startsWith('http')) {
+                url = 'https://gayeroticvideoindex.com/' + (url.startsWith('/') ? url.substring(1) : url);
+              }
+              
+              if (url) {
+                results.push({ title: foundTitle, url });
+              }
+            }
+          });
+          
+          return results;
+        }, performer.name);
+
+        console.log(`     - Found ${performerMovies.length} movie(s) for ${performer.name}`);
+
+        // Add to our map, tracking which performers are in each movie
+        performerMovies.forEach(movie => {
+          if (!moviesByPerformer.has(movie.url)) {
+            moviesByPerformer.set(movie.url, {
+              title: movie.title,
+              url: movie.url,
+              matchedPerformers: [],
+              foundVia: performerPage.name // Track which performer match found this
+            });
+          }
+          moviesByPerformer.get(movie.url).matchedPerformers.push(performer.name);
         });
       }
-      moviesByPerformer.get(movie.url).matchedPerformers.push(performer.name);
-    });
-  }
 
-  // Close the browser
-  await browser.close();
+      // Merge results into the main allMoviesMap
+      moviesByPerformer.forEach((movieData, url) => {
+        if (!allMoviesMap.has(url)) {
+          allMoviesMap.set(url, movieData);
+        } else {
+          // Movie already found via different performer match - merge matched performers
+          const existing = allMoviesMap.get(url);
+          movieData.matchedPerformers.forEach(p => {
+            if (!existing.matchedPerformers.includes(p)) {
+              existing.matchedPerformers.push(p);
+            }
+          });
+        }
+      });
+
+      console.log(`   - Found ${moviesByPerformer.size} unique movie(s) via ${performerPage.name}`);
+      console.log(`✅ Search completed for ${performerPage.name}`);    } catch (error) {
+      console.error(`   - ❌ Error searching with ${performerPage.name}:`, error.message);
+    } finally {
+      // Close the browser
+      if (browser) {
+        await browser.close();
+      }
+    }
+  } // End of for loop through performer matches
 
   // Convert map to array and sort by number of matched performers (descending)
-  const movies = Array.from(moviesByPerformer.values()).sort((a, b) => {
+  const movies = Array.from(allMoviesMap.values()).sort((a, b) => {
     return b.matchedPerformers.length - a.matchedPerformers.length;
   });
 
-  console.log(`   - Found ${movies.length} unique movie(s)`);
+  console.log(`\n📊 FINAL RESULTS: Found ${movies.length} unique movie(s) across all performer matches`);
   
   // Check if movies exist in database by matching on geviUrl or name
   for (const movie of movies) {
@@ -3232,12 +4121,12 @@ router.post('/scenes/:id/search-gevi-movies', asyncHandler(async (req, res) => {
     const matchStatus = movie.existingMovieId ? '✓ IN DB' : '✗ NEW';
     console.log(`     ${idx + 1}. [${matchStatus}] "${movie.title}" - ${movie.matchedPerformers.length} performer(s): ${movie.matchedPerformers.join(', ')}`);
   });
-  console.log(`✅ Search completed for ${performerPage.name}`);
+  console.log(`✅ Search completed across all performer matches`);
 
   sendSuccess(res, {
     firstPerformer: {
-      name: performerPage.name,
-      url: performerPage.url
+      name: firstPerformerResults[0].name,
+      url: firstPerformerResults[0].url
     },
     secondPerformer: allPerformers.length > 1 ? allPerformers[1].name : null,
     allPerformers: allPerformers.map(p => p.name),
@@ -3535,10 +4424,11 @@ router.delete('/scenes/:sceneId/performers/:performerId', asyncHandler(async (re
   }
 
   // Update in Stash first (if configured)
-  if (syncService && await syncService.ensureConfigLoaded()) {
-    console.log('   🔄 Updating in Stash via GraphQL...');
-    
+  if (syncService) {
     try {
+      await syncService.ensureConfigLoaded();
+      console.log('   🔄 Updating in Stash via GraphQL...');
+      
       // Get the updated list of performer IDs (excluding the one we're removing)
       const updatedPerformerIds = scene.performers
         .filter(p => p.performerId !== performerId)
@@ -3549,10 +4439,8 @@ router.delete('/scenes/:sceneId/performers/:performerId', asyncHandler(async (re
           sceneUpdate(input: $input) {
             id
             performers {
-              performer {
-                id
-                name
-              }
+              id
+              name
             }
           }
         }
@@ -3569,17 +4457,20 @@ router.delete('/scenes/:sceneId/performers/:performerId', asyncHandler(async (re
 
       const result = await syncService.makeGraphQLRequest(mutation, variables);
       
-      if (!result || !result.data || !result.data.sceneUpdate) {
+      if (!result || !result.sceneUpdate) {
+        console.error('   ❌ Invalid response from Stash:', JSON.stringify(result, null, 2));
         throw new Error('Invalid response from Stash');
       }
 
       console.log('   ✅ Stash updated successfully');
+      console.log('   - Scene now has', result.sceneUpdate.performers.length, 'performer(s)');
     } catch (error) {
       console.error('❌ Failed to remove performer from scene in Stash:', error.message);
-      return sendServerError(res, `Failed to update Stash: ${error.message}`);
+      // Don't return error - continue with local DB update
+      console.warn('⚠️  Continuing with local database update...');
     }
   } else {
-    console.warn('⚠️ Stash service not configured, skipping Stash update');
+    console.warn('⚠️ Stash service not available, skipping Stash update');
   }
 
   // Remove from local database
@@ -3602,6 +4493,167 @@ router.delete('/scenes/:sceneId/performers/:performerId', asyncHandler(async (re
       performers: {
         include: {
           performer: true
+        }
+      }
+    }
+  });
+
+  sendSuccess(res, updatedScene);
+}));
+
+// POST /api/stash/scenes/:id/performers - Add a performer to a scene
+router.post('/scenes/:id/performers', asyncHandler(async (req, res) => {
+  const { id: sceneId } = req.params;
+  const { performerId } = req.body;
+
+  console.log(`➕ [ADD PERFORMER] Adding performer ${performerId} to scene ${sceneId}`);
+
+  validateRequiredFieldsDirect(req.body, ['performerId']);
+
+  // Check if scene exists
+  const scene = await prisma.stashScene.findUnique({
+    where: { id: sceneId },
+    include: {
+      performers: {
+        include: {
+          performer: true
+        }
+      }
+    }
+  });
+
+  if (!scene) {
+    return sendNotFound(res, 'Scene not found');
+  }
+
+  // Check if performer exists
+  const performer = await prisma.stashPerformer.findUnique({
+    where: { id: performerId }
+  });
+
+  if (!performer) {
+    return sendNotFound(res, 'Performer not found');
+  }
+
+  // Check if performer is already in the scene
+  const existingLink = scene.performers.find(sp => sp.performerId === performerId);
+  if (existingLink) {
+    return sendBadRequest(res, 'Performer is already in this scene');
+  }
+
+  // Add performer to scene in local database
+  await prisma.stashScenePerformer.create({
+    data: {
+      sceneId: sceneId,
+      performerId: performerId
+    }
+  });
+
+  console.log(`   ✅ Added performer ${performer.name} to scene locally`);
+
+  // Update in Stash via GraphQL
+  // Note: In our schema, the 'id' field IS the Stash ID (no separate stashId field)
+  if (scene.id && performer.id) {
+    try {
+      let stashService = getActiveSyncService();
+      
+      // If service not initialized, try to initialize it
+      if (!stashService) {
+        console.log('   📡 Stash service not initialized, initializing now...');
+        await initializeStashSyncService();
+        stashService = getActiveSyncService();
+      }
+      
+      if (!stashService) {
+        console.warn('   ⚠️ Stash service not available - skipping Stash update');
+        console.warn('   ℹ️  Performer added to local database only');
+        const updatedScene = await prisma.stashScene.findUnique({
+          where: { id: sceneId },
+          include: {
+            performers: {
+              include: {
+                performer: true,
+                tags: {
+                  include: {
+                    tag: true
+                  }
+                }
+              }
+            }
+          }
+        });
+        return sendSuccess(res, updatedScene);
+      }
+      
+      console.log(`   📝 Preparing Stash update:`);
+      console.log(`      - Scene ID: ${scene.id}`);
+      console.log(`      - Performer ID: ${performer.id}`);
+      console.log(`      - Performer Name: ${performer.name}`);
+      
+      // Get current performer IDs from scene (using performer.id, not performer.stashId)
+      const currentPerformerIds = scene.performers.map(sp => sp.performer.id).filter(Boolean);
+      console.log(`      - Current performers in scene: ${currentPerformerIds.length}`);
+      console.log(`      - Current performer IDs: [${currentPerformerIds.join(', ')}]`);
+      
+      // Add new performer ID
+      const updatedPerformerIds = [...currentPerformerIds, performer.id];
+      console.log(`      - Updated performer IDs: [${updatedPerformerIds.join(', ')}]`);
+      
+      const updateMutation = `
+        mutation SceneUpdate($input: SceneUpdateInput!) {
+          sceneUpdate(input: $input) {
+            id
+            performers { id name }
+          }
+        }
+      `;
+
+      console.log(`   🚀 Sending GraphQL mutation to Stash...`);
+      const data = await stashService.makeGraphQLRequest(updateMutation, {
+        input: {
+          id: scene.id,
+          performer_ids: updatedPerformerIds
+        }
+      });
+      
+      const result = data ? { sceneUpdate: data.sceneUpdate } : null;
+
+      if (result && result.sceneUpdate) {
+        console.log(`   ✅ Successfully updated scene in Stash`);
+        console.log(`      - Scene ID: ${result.sceneUpdate.id}`);
+        console.log(`      - Performers now in scene: ${result.sceneUpdate.performers?.length || 0}`);
+        if (result.sceneUpdate.performers) {
+          result.sceneUpdate.performers.forEach(p => {
+            console.log(`        - ${p.name} (${p.id})`);
+          });
+        }
+      } else {
+        console.error(`   ⚠️ Unexpected response from Stash:`, result);
+      }
+    } catch (stashError) {
+      console.error('   ❌ Failed to update Stash:', stashError.message);
+      console.error('   Stack:', stashError.stack);
+      // Continue anyway - local database is updated
+    }
+  } else {
+    console.warn(`   ⚠️ Cannot update in Stash - missing IDs:`);
+    console.warn(`      - Scene ID: ${scene.id || 'MISSING'}`);
+    console.warn(`      - Performer ID: ${performer.id || 'MISSING'}`);
+    console.warn(`      - Performer Name: ${performer.name}`);
+  }
+
+  // Return updated scene
+  const updatedScene = await prisma.stashScene.findUnique({
+    where: { id: sceneId },
+    include: {
+      performers: {
+        include: {
+          performer: true,
+          tags: {
+            include: {
+              tag: true
+            }
+          }
         }
       }
     }
@@ -3643,6 +4695,242 @@ router.post('/scenes/:sceneId/performers/:performerId/swap', asyncHandler(async 
   sendSuccess(res, {
     scene: updatedScene,
     swap: result
+  });
+}));
+
+// ============================================================================
+// GENERIC SCRAPER ROUTES
+// ============================================================================
+
+// GET /api/stash/scenes/:id/available-scrapers - Get available scrapers for a scene's URLs
+router.get('/scenes/:id/available-scrapers', asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  
+  console.log(`🔍 [Available Scrapers] Checking available scrapers for scene: ${id}`);
+  
+  // Fetch scene with URLs
+  const scene = await prisma.stashScene.findUnique({
+    where: { id },
+    select: { 
+      id: true, 
+      url: true, 
+      episodeUrls: true 
+    }
+  });
+  
+  if (!scene) {
+    return sendNotFound(res, 'Scene not found');
+  }
+  
+  // Collect all URLs
+  const urls = [];
+  if (scene.url) urls.push(scene.url);
+  if (scene.episodeUrls) {
+    try {
+      const parsedUrls = typeof scene.episodeUrls === 'string' 
+        ? JSON.parse(scene.episodeUrls) 
+        : scene.episodeUrls;
+      if (Array.isArray(parsedUrls)) {
+        // Handle both formats: plain strings and objects with url property
+        parsedUrls.forEach(urlItem => {
+          if (typeof urlItem === 'string') {
+            urls.push(urlItem);
+          } else if (urlItem && urlItem.url) {
+            urls.push(urlItem.url);
+          }
+        });
+      }
+    } catch (e) {
+      console.warn('   - Failed to parse episodeUrls:', e.message);
+    }
+  }
+  
+  console.log(`   - Found ${urls.length} URL(s) to check:`, urls);
+  
+  // Initialize scraper registry
+  const ScraperRegistry = require('../services/scrapers/ScraperRegistry');
+  const registry = new ScraperRegistry();
+  
+  console.log(`   - Registry has ${registry.scrapers.length} scrapers loaded`);
+  
+  // Debug: Check each URL against each scraper
+  urls.forEach(url => {
+    console.log(`   - Checking URL: ${url}`);
+    registry.scrapers.forEach(scraper => {
+      const canHandle = scraper.canHandle(url);
+      console.log(`     - ${scraper.siteName}: ${canHandle ? '✅ MATCH' : '❌ no match'}`);
+      if (scraper.sceneUrlPatterns) {
+        console.log(`       Patterns: ${scraper.sceneUrlPatterns.join(', ')}`);
+      }
+    });
+  });
+  
+  // Get available scrapers
+  const availableScrapers = registry.getAvailableScrapers(urls);
+  
+  console.log(`   - Found ${availableScrapers.length} available scraper(s):`, 
+    availableScrapers.map(s => s.name).join(', '));
+  
+  sendSuccess(res, {
+    sceneId: id,
+    urls,
+    scrapers: availableScrapers.map(s => ({
+      name: s.name,
+      siteName: s.scraper.siteName,
+      url: s.url
+    }))
+  });
+}));
+
+// POST /api/stash/scenes/:id/scrape-generic - Scrape using any registered scraper
+router.post('/scenes/:id/scrape-generic', asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  const { url, scraperName, sceneNumber } = req.body;
+  
+  console.log(`🔍 [Generic Scrape] Starting scrape for scene: ${id}`);
+  console.log(`   - URL: ${url}`);
+  console.log(`   - Scraper: ${scraperName || 'auto-detect'}`);
+  if (sceneNumber) {
+    console.log(`   - Direct scene number: ${sceneNumber}`);
+  }  
+  // Validate URL provided
+  if (!url || !url.trim()) {
+    return sendBadRequest(res, 'URL is required');
+  }
+  
+  // Fetch scene data with performers for matching
+  const scene = await prisma.stashScene.findUnique({
+    where: { id },
+    include: {
+      performers: {
+        include: {
+          performer: true
+        }
+      }
+    }
+  });
+  
+  if (!scene) {
+    return sendBadRequest(res, 'Scene not found');
+  }
+  
+  const scenePerformers = scene.performers.map(sp => sp.performer);
+  console.log(`   - Scene has ${scenePerformers.length} performer(s):`, scenePerformers.map(p => p.name));
+  
+  // Initialize scraper registry
+  const ScraperRegistry = require('../services/scrapers/ScraperRegistry');
+  const registry = new ScraperRegistry();
+  
+  // Get the appropriate scraper
+  let scraper;
+  if (scraperName) {
+    // Find scraper by name
+    scraper = registry.getAllScrapers().find(s => s.siteName === scraperName);
+    if (!scraper) {
+      return sendBadRequest(res, `Unknown scraper: ${scraperName}`);
+    }
+    if (!scraper.canHandle(url)) {
+      return sendBadRequest(res, `Scraper "${scraperName}" cannot handle URL: ${url}`);
+    }
+  } else {
+    // Auto-detect scraper from URL
+    scraper = registry.getScraperForUrl(url);
+    if (!scraper) {
+      return sendBadRequest(res, 'No scraper available for this URL');
+    }
+  }
+  
+  console.log(`   - Using scraper: ${scraper.siteName}`);
+  
+  // Scrape the URL (pass performers for matching if scraper supports it)
+  let scrapeResult;
+  try {
+    // Check if scraper accepts performers parameter (like AEBN)
+    if (scraper.siteName === 'AEBN') {
+      // If scene number provided, pass null for performers (skip matching)
+      if (sceneNumber) {
+        console.log(`   - Using direct scene number ${sceneNumber}, skipping performer matching`);
+        scrapeResult = await scraper.scrape(url, null, sceneNumber);
+      } else {
+        scrapeResult = await scraper.scrape(url, scenePerformers);
+      }
+    } else {
+      scrapeResult = await scraper.scrape(url);
+    }
+  } catch (error) {
+    console.error(`❌ [Generic Scrape] Scrape failed:`, error);
+    return sendServerError(res, `Failed to scrape: ${error.message}`);
+  }
+  
+  // Check if scrape was successful
+  if (!scrapeResult || !scrapeResult.success) {
+    const errorMsg = scrapeResult?.error || 'Unknown scrape error';
+    console.error(`❌ [Generic Scrape] Scrape unsuccessful:`, errorMsg);
+    return sendServerError(res, errorMsg);
+  }
+  
+  const metadata = scrapeResult.scraped;
+  
+  if (!metadata) {
+    console.error(`❌ [Generic Scrape] No metadata returned from scraper`);
+    return sendServerError(res, 'No metadata returned from scraper');
+  }
+  
+  console.log(`   - Scraped metadata:`, JSON.stringify(metadata, null, 2));
+  
+  // Match performers, studio, tags, and movies/groups against database
+  let matchedPerformers = { matched: [], unmatched: [] };
+  let matchedStudio = null;
+  let matchedTags = { matched: [], unmatched: [] };
+  let matchedGroups = { matched: [], unmatched: [] };
+  
+  if (metadata.performers && metadata.performers.length > 0) {
+    matchedPerformers = await geviScraper.matchPerformers(metadata.performers, prisma);
+  }
+  
+  if (metadata.studio) {
+    matchedStudio = await geviScraper.matchStudio(metadata.studio, prisma);
+  }
+
+  if (metadata.tags && metadata.tags.length > 0) {
+    matchedTags = await geviScraper.matchTags(metadata.tags, prisma);
+  }
+  
+  if (metadata.movies && metadata.movies.length > 0) {
+    matchedGroups = await geviScraper.matchGroups(metadata.movies, prisma);
+  }
+  
+  console.log(`   - Matched performers: ${matchedPerformers.matched.length}`);
+  console.log(`   - Unmatched performers:`, matchedPerformers.unmatched);
+  console.log(`   - Matched studio: ${matchedStudio ? matchedStudio.name : 'none'}`);
+  console.log(`   - Matched tags: ${matchedTags.matched.length}`);
+  console.log(`   - Unmatched tags:`, matchedTags.unmatched);
+  console.log(`   - Matched groups: ${matchedGroups.matched.length}`);
+  console.log(`   - Unmatched groups:`, matchedGroups.unmatched);
+  
+  // Note: Image URL is used directly from scraper (no proxying)
+  // Each scraper can proxy in their YAML config if needed
+  if (metadata.image) {
+    console.log(`   - Image URL: ${metadata.image}`);
+  }
+  
+  // Return scraped data with matches (same format as GEVI scraper)
+  sendSuccess(res, {
+    scraped: metadata,
+    matched: {
+      studio: matchedStudio,
+      performers: matchedPerformers.matched,
+      tags: matchedTags.matched,
+      groups: matchedGroups.matched
+    },
+    unmatched: {
+      studio: matchedStudio ? null : metadata.studio,
+      performers: matchedPerformers.unmatched,
+      tags: matchedTags.unmatched,
+      groups: matchedGroups.unmatched
+    },
+    source: scraper.siteName,
+    sourceUrl: url
   });
 }));
 
@@ -3690,7 +4978,15 @@ router.post('/performers', asyncHandler(async (req, res) => {
 // PUT /api/stash/scenes/:id - Update scene details
 router.put('/scenes/:id', asyncHandler(async (req, res) => {
   const { id } = req.params;
-  const { title, studio, studioId, performerIds, groupIds, details, date, url, coverImage, actionCodes, geviUrl } = req.body;
+  const { title, studio, studioId, performerIds, tagIds, groupIds, sceneNumbers, details, date, url, coverImage, actionCodes, geviUrl, episodeUrls } = req.body;
+  
+  console.log('🎬 [PUT /scenes/:id] Scene update request received');
+  console.log('   - Scene ID:', id);
+  console.log('   - Performer IDs:', performerIds);
+  console.log('   - Tag IDs:', tagIds);
+  console.log('   - Group IDs:', groupIds);
+  console.log('   - Scene Numbers:', sceneNumbers);
+  console.log('   - Request body keys:', Object.keys(req.body));
   
   // Initialize Stash sync service if not already initialized
   if (!stashSyncService) {
@@ -3705,6 +5001,11 @@ router.put('/scenes/:id', asyncHandler(async (req, res) => {
   if (date !== undefined) updateData.date = date;
   if (url !== undefined) updateData.url = url;
   if (geviUrl !== undefined) updateData.geviUrl = geviUrl;
+  if (episodeUrls !== undefined && Array.isArray(episodeUrls)) {
+    // Store episode URLs as JSON string in database
+    updateData.episodeUrls = JSON.stringify(episodeUrls);
+    console.log(`   - Storing ${episodeUrls.length} episode URL(s) in database`);
+  }
   
   // Update local database
   const updatedScene = await prisma.stashScene.update({
@@ -3760,9 +5061,34 @@ router.put('/scenes/:id', asyncHandler(async (req, res) => {
     }
   }
 
+  // Handle tag relationships if provided
+  if (tagIds !== undefined && Array.isArray(tagIds)) {
+    console.log('🏷️  Processing tag associations for scene...');
+    
+    // Add new tag relationships (upsert to avoid duplicates)
+    for (const tagId of tagIds) {
+      await prisma.stashSceneTag.upsert({
+        where: {
+          sceneId_tagId: {
+            sceneId: id,
+            tagId: tagId
+          }
+        },
+        create: {
+          sceneId: id,
+          tagId: tagId
+        },
+        update: {} // No update needed, just ensure it exists
+      });
+    }
+    console.log(`   - Added ${tagIds.length} tag(s) to scene`);
+  }
+
   // Handle group relationships if provided
   if (groupIds !== undefined && Array.isArray(groupIds)) {
     console.log('🎬 Processing group associations for scene...');
+    console.log('   - Group IDs:', groupIds);
+    console.log('   - Scene Numbers:', sceneNumbers);
     
     // Get current groups to determine scene index
     const existingGroups = await prisma.stashGroupScene.findMany({
@@ -3770,29 +5096,39 @@ router.put('/scenes/:id', asyncHandler(async (req, res) => {
     });
 
     // Add new group relationships
-    for (const groupId of groupIds) {
+    for (let i = 0; i < groupIds.length; i++) {
+      const groupId = groupIds[i];
+      
       // Check if association already exists
       const existing = existingGroups.find(g => g.groupId === groupId);
       
       if (!existing) {
-        // Get the current max sceneIndex for this group to append at the end
-        const maxIndexGroup = await prisma.stashGroupScene.findMany({
-          where: { groupId: groupId },
-          orderBy: { sceneIndex: 'desc' },
-          take: 1
-        });
+        // Use provided scene number if available (from AEBN scraper)
+        let sceneIndex;
+        if (sceneNumbers && Array.isArray(sceneNumbers) && sceneNumbers[i] !== null && sceneNumbers[i] !== undefined) {
+          sceneIndex = parseInt(sceneNumbers[i]);
+          console.log(`   - Using provided scene number ${sceneIndex} for group ${groupId}`);
+        } else {
+          // Get the current max sceneIndex for this group to append at the end
+          const maxIndexGroup = await prisma.stashGroupScene.findMany({
+            where: { groupId: groupId },
+            orderBy: { sceneIndex: 'desc' },
+            take: 1
+          });
 
-        const nextIndex = maxIndexGroup.length > 0 ? (maxIndexGroup[0].sceneIndex || 0) + 1 : 1;
+          sceneIndex = maxIndexGroup.length > 0 ? (maxIndexGroup[0].sceneIndex || 0) + 1 : 1;
+          console.log(`   - Auto-calculated scene index ${sceneIndex} for group ${groupId}`);
+        }
 
         await prisma.stashGroupScene.create({
           data: {
             sceneId: id,
             groupId: groupId,
-            sceneIndex: nextIndex
+            sceneIndex: sceneIndex
           }
         });
 
-        console.log(`   - Added scene to group ${groupId} at index ${nextIndex}`);
+        console.log(`   - Added scene to group ${groupId} at index ${sceneIndex}`);
       }
     }
   }
@@ -3800,6 +5136,17 @@ router.put('/scenes/:id', asyncHandler(async (req, res) => {
   // Update scene in Stash itself if configured
   console.log('🔍 [STASH UPDATE] Checking Stash sync configuration...');
   console.log('   - stashSyncService exists:', !!stashSyncService);
+  console.log('   - Request body received:', {
+    title: title !== undefined ? 'provided' : 'not provided',
+    studioId: studioId !== undefined ? studioId : 'not provided',
+    performerIds: performerIds !== undefined ? `${performerIds.length} performers` : 'not provided',
+    tagIds: tagIds !== undefined ? `${tagIds.length} tags` : 'not provided',
+    groupIds: groupIds !== undefined ? `${groupIds.length} groups` : 'not provided',
+    details: details !== undefined ? 'provided' : 'not provided',
+    date: date !== undefined ? date : 'not provided',
+    url: url !== undefined ? 'provided' : 'not provided',
+    coverImage: coverImage !== undefined ? 'provided' : 'not provided'
+  });
   
   if (!stashSyncService) {
     console.warn('⚠️ [STASH UPDATE] stashSyncService is not available');
@@ -3813,6 +5160,7 @@ router.put('/scenes/:id', asyncHandler(async (req, res) => {
       console.log('   - Title:', title);
       console.log('   - Studio ID:', studioId);
       console.log('   - Performer IDs:', performerIds);
+      console.log('   - Performer IDs type:', typeof performerIds, Array.isArray(performerIds));
       console.log('   - Details:', details ? `${details.substring(0, 50)}...` : 'none');
       console.log('   - Date:', date);
       console.log('   - URL:', url);
@@ -3822,6 +5170,8 @@ router.put('/scenes/:id', asyncHandler(async (req, res) => {
       if (title !== undefined) stashUpdates.title = title;
       if (studioId !== undefined) stashUpdates.studioId = studioId;
       if (performerIds !== undefined && Array.isArray(performerIds)) {
+        console.log('✅ [STASH UPDATE] Performer IDs validation starting...');
+        console.log('   - Input performer IDs:', performerIds);
         // Validate that all performers exist in local database (synced from Stash)
         const validPerformerIds = [];
         for (const performerId of performerIds) {
@@ -3840,6 +5190,10 @@ router.put('/scenes/:id', asyncHandler(async (req, res) => {
           console.warn(`⚠️  ${performerIds.length - validPerformerIds.length} performer(s) not found, using ${validPerformerIds.length} valid performers`);
         }
         
+        console.log('✅ [STASH UPDATE] Performer validation complete');
+        console.log('   - Valid performer IDs:', validPerformerIds);
+        console.log('   - Count:', validPerformerIds.length);
+        
         stashUpdates.performerIds = validPerformerIds;
       }
       if (groupIds !== undefined && Array.isArray(groupIds)) {
@@ -3857,18 +5211,50 @@ router.put('/scenes/:id', asyncHandler(async (req, res) => {
           }
         }
         
-        if (validGroupIds.length !== groupIds.length) {
-          console.warn(`⚠️  ${groupIds.length - validGroupIds.length} group(s) not found, using ${validGroupIds.length} valid groups`);
-        }
-        
-        stashUpdates.groupIds = validGroupIds;
+      if (validGroupIds.length !== groupIds.length) {
+        console.warn(`⚠️  ${groupIds.length - validGroupIds.length} group(s) not found, using ${validGroupIds.length} valid groups`);
       }
-      if (details !== undefined) stashUpdates.details = details;
-      if (date !== undefined) stashUpdates.date = date;
-      if (url !== undefined) stashUpdates.url = url;
-      if (coverImage !== undefined) stashUpdates.coverImage = coverImage;
+      
+      stashUpdates.groupIds = validGroupIds;
+      
+      // If scene numbers are provided, pass them along for Stash update
+      if (sceneNumbers && Array.isArray(sceneNumbers)) {
+        stashUpdates.sceneNumbers = sceneNumbers;
+        console.log('   - Including scene numbers for Stash update:', sceneNumbers);
+      }
+    }
+    if (tagIds !== undefined && Array.isArray(tagIds)) {
+      // Validate that all tags exist in local database
+      const validTagIds = [];
+      for (const tagId of tagIds) {
+        const tag = await prisma.stashTag.findUnique({
+          where: { id: tagId }
+        });
+        
+        if (tag) {
+          validTagIds.push(tagId);
+        } else {
+          console.warn(`⚠️  Tag ${tagId} not found in database, skipping`);
+        }
+      }
+      
+      if (validTagIds.length !== tagIds.length) {
+        console.warn(`⚠️  ${tagIds.length - validTagIds.length} tag(s) not found, using ${validTagIds.length} valid tags`);
+      }
+      
+      stashUpdates.tagIds = validTagIds;
+    }
+    if (details !== undefined) stashUpdates.details = details;
+    if (date !== undefined) stashUpdates.date = date;
+    if (url !== undefined) stashUpdates.url = url;
+    if (coverImage !== undefined) stashUpdates.coverImage = coverImage;      // Handle episode URLs - append to existing URLs in Stash
+      if (episodeUrls !== undefined && Array.isArray(episodeUrls) && episodeUrls.length > 0) {
+        console.log(`   - Preparing to append ${episodeUrls.length} episode URL(s) to Stash`);
+        stashUpdates.episodeUrls = episodeUrls;
+      }
       
       console.log('   - Updates object keys:', Object.keys(stashUpdates));
+      console.log('   - Full stashUpdates object:', JSON.stringify(stashUpdates, null, 2));
       
       try {
         const stashResult = await stashSyncService.updateScene(id, stashUpdates);
@@ -3946,7 +5332,272 @@ router.post('/scenes/:id/watched', asyncHandler(async (req, res) => {
   });
 }));
 
-// DELETE /api/stash/scenes/:id - Delete Stash scene (from both local database and Stash itself)
+// Sync a single scene from Stash
+router.post('/scenes/:id/sync', asyncHandler(async (req, res) => {
+  const sceneId = req.params.id;
+  console.log(`🔄 [Sync Scene] Syncing scene ${sceneId} from Stash`);
+
+  try {
+    // Get Stash settings
+    const settings = await prisma.settings.findUnique({ where: { id: 1 } });
+    if (!settings?.stashUrl) {
+      return sendBadRequest(res, 'Stash URL not configured');
+    }
+
+    // Fetch scene from Stash
+    const query = `
+      query FindScene($id: ID!) {
+        findScene(id: $id) {
+          id
+          title
+          details
+          url
+          date
+          rating100
+          o_counter
+          organized
+          studio {
+            id
+            name
+          }
+          tags {
+            id
+            name
+          }
+          performers {
+            id
+            name
+          }
+          stash_ids {
+            endpoint
+            stash_id
+          }
+          files {
+            path
+            size
+            duration
+            video_codec
+            audio_codec
+            width
+            height
+            frame_rate
+            bit_rate
+          }
+        }
+      }
+    `;
+
+    const stashResponse = await fetch(`${settings.stashUrl}/graphql`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        query,
+        variables: { id: sceneId }
+      })
+    });
+
+    const stashData = await stashResponse.json();
+    const scene = stashData?.data?.findScene;
+
+    if (!scene) {
+      return sendBadRequest(res, 'Scene not found in Stash');
+    }
+
+    console.log(`   - Found scene in Stash: ${scene.title}`);
+
+    // Process scene data - adapted from StashSyncService.syncScenes()
+    const primaryFile = scene.files && scene.files.length > 0 ? scene.files[0] : null;
+    
+    // DEBUG: Log file metadata
+    if (primaryFile) {
+      console.log(`   📹 File metadata:`, {
+        size: primaryFile.size,
+        width: primaryFile.width,
+        height: primaryFile.height,
+        video_codec: primaryFile.video_codec,
+        audio_codec: primaryFile.audio_codec,
+        frame_rate: primaryFile.frame_rate,
+        bit_rate: primaryFile.bit_rate
+      });
+    } else {
+      console.log(`   ⚠️ No file data available`);
+    }
+    
+    // Validate foreign key references
+    let validatedStudioId = null;
+    if (scene.studio?.id) {
+      const studioExists = await prisma.stashStudio.findUnique({
+        where: { id: scene.studio.id }
+      });
+      if (studioExists) {
+        validatedStudioId = scene.studio.id;
+      } else {
+        console.log(`   ⚠️ Studio ${scene.studio.id} not found, setting studioId to null`);
+      }
+    }
+
+    const sceneData = {
+      id: scene.id,
+      title: scene.title || '',
+      details: scene.details || null,
+      url: scene.url || null,
+      date: scene.date || null,
+      rating: scene.rating100 ? Math.round(scene.rating100 / 20) : null,
+      organized: scene.organized || false,
+      osHash: null,
+      checksum: null,
+      phash: null,
+      oCounter: scene.o_counter || null,
+      path: primaryFile?.path || null,
+      fileModTime: null,
+      // File metadata
+      fileSize: primaryFile?.size || null,
+      duration: primaryFile?.duration || null,
+      width: primaryFile?.width || null,
+      height: primaryFile?.height || null,
+      videoCodec: primaryFile?.video_codec || null,
+      audioCodec: primaryFile?.audio_codec || null,
+      frameRate: primaryFile?.frame_rate || null,
+      bitrate: primaryFile?.bit_rate || null,
+      // Studio and other metadata
+      studio: scene.studio?.name || null,
+      studioId: validatedStudioId,
+      code: null,
+      director: null,
+      synopsis: null,
+      lastPlayedAt: null,
+      resumeTime: null,
+      playDuration: null,
+      playCount: null,
+      lastSyncedAt: new Date()
+    };
+
+    // Upsert scene
+    const syncedScene = await prisma.stashScene.upsert({
+      where: { id: scene.id },
+      update: sceneData,
+      create: sceneData
+    });
+
+    console.log(`   - Synced scene data to database`);
+
+    // Sync performers - PRESERVE LOCAL TAGS/NOTES
+    if (scene.performers && scene.performers.length > 0) {
+      // Get existing performer relationships with their tags (action codes)
+      const existingRelationships = await prisma.stashScenePerformer.findMany({
+        where: { sceneId: scene.id },
+        include: {
+          tags: true
+        }
+      });
+
+      // Create a map of existing relationships that have tags or notes
+      const relationshipsWithData = new Map();
+      existingRelationships.forEach(rel => {
+        if (rel.tags.length > 0 || rel.notes) {
+          relationshipsWithData.set(rel.performerId, rel);
+        }
+      });
+
+      // Build set of performer IDs from Stash
+      const stashPerformerIds = new Set();
+      const validPerformers = [];
+      
+      for (const performer of scene.performers) {
+        const performerExists = await prisma.stashPerformer.findUnique({
+          where: { id: performer.id }
+        });
+        if (performerExists) {
+          validPerformers.push(performer);
+          stashPerformerIds.add(performer.id);
+        } else {
+          console.log(`   ⚠️ Skipping performer ${performer.id} - not found in database`);
+        }
+      }
+
+      // Remove only relationships that:
+      // 1. Are NOT in the current Stash data, AND
+      // 2. Don't have any local tags or notes
+      const performersToRemove = existingRelationships
+        .filter(rel => !stashPerformerIds.has(rel.performerId) && !relationshipsWithData.has(rel.performerId))
+        .map(rel => rel.performerId);
+
+      if (performersToRemove.length > 0) {
+        await prisma.stashScenePerformer.deleteMany({
+          where: { 
+            sceneId: scene.id,
+            performerId: { in: performersToRemove }
+          }
+        });
+        console.log(`   🗑️ Removed ${performersToRemove.length} performer(s) no longer in Stash (without local data)`);
+      }
+
+      // Upsert performers to preserve existing tags/notes
+      if (validPerformers.length > 0) {
+        for (const performer of validPerformers) {
+          await prisma.stashScenePerformer.upsert({
+            where: {
+              sceneId_performerId: {
+                sceneId: scene.id,
+                performerId: performer.id
+              }
+            },
+            update: {
+              // Don't overwrite notes or tags - keep existing local data
+            },
+            create: {
+              sceneId: scene.id,
+              performerId: performer.id
+            }
+          });
+        }
+        
+        const preserved = validPerformers.filter(p => relationshipsWithData.has(p.id)).length;
+        console.log(`   - Synced ${validPerformers.length} performers`);
+        if (preserved > 0) {
+          console.log(`   💾 Preserved ${preserved} performer(s) with action codes/notes`);
+        }
+      }
+    }
+
+    // Sync tags
+    if (scene.tags && scene.tags.length > 0) {
+      await prisma.stashSceneTag.deleteMany({
+        where: { sceneId: scene.id }
+      });
+
+      const validTags = [];
+      for (const tag of scene.tags) {
+        const tagExists = await prisma.stashTag.findUnique({
+          where: { id: tag.id }
+        });
+        if (tagExists) {
+          validTags.push(tag);
+        } else {
+          console.log(`   ⚠️ Skipping tag ${tag.id} - not found in database`);
+        }
+      }
+
+      if (validTags.length > 0) {
+        await prisma.stashSceneTag.createMany({
+          data: validTags.map(tag => ({
+            sceneId: scene.id,
+            tagId: tag.id
+          }))
+        });
+        console.log(`   - Synced ${validTags.length} tags`);
+      }
+    }
+
+    console.log(`✅ [Sync Scene] Scene ${sceneId} synced successfully`);
+    sendSuccess(res, { sceneId, title: scene.title });
+
+  } catch (error) {
+    console.error('❌ [Sync Scene] Error:', error);
+    sendServerError(res, `Failed to sync scene: ${error.message}`);
+  }
+}));
+
 router.delete('/scenes/:id', asyncHandler(async (req, res) => {
   try {
     const sceneId = req.params.id;
@@ -7214,6 +8865,473 @@ router.get('/gevi-image-proxy', asyncHandler(async (req, res) => {
   } catch (error) {
     console.error('❌ Error proxying GEVI image:', error.message);
     return sendServerError(res, 'Failed to proxy image');
+  }
+}));
+
+// POST /api/stash/scenes/merge - Merge multiple scenes into one
+router.post('/scenes/merge', asyncHandler(async (req, res) => {
+  const { primarySceneId, mergeSceneIds, mergedData } = req.body;
+
+  if (!primarySceneId || !mergeSceneIds || mergeSceneIds.length === 0) {
+    return sendBadRequest(res, 'Primary scene ID and merge scene IDs are required');
+  }
+
+  if (!mergedData.keepFileFromSceneId) {
+    return sendBadRequest(res, 'keepFileFromSceneId is required to determine which file to keep');
+  }
+
+  console.log(`🔀 Merging ${mergeSceneIds.length} scenes into scene ${primarySceneId}`);
+  console.log(`📁 Keeping file from scene ${mergedData.keepFileFromSceneId}`);
+
+  try {
+    const allSceneIds = [primarySceneId, ...mergeSceneIds];
+
+    // Fetch all scenes to merge with pivot data
+    const scenes = await prisma.stashScene.findMany({
+      where: { id: { in: allSceneIds } },
+      include: {
+        studioObject: true,
+        performers: {
+          include: {
+            performer: true,
+            tags: {
+              include: {
+                tag: true
+              }
+            }
+          }
+        },
+        tags: {
+          include: {
+            tag: true
+          }
+        },
+        groups: {
+          include: {
+            group: true
+          }
+        }
+      }
+    });
+
+    if (scenes.length !== allSceneIds.length) {
+      return sendBadRequest(res, 'One or more scenes not found');
+    }
+
+    const primaryScene = scenes.find(s => s.id === primarySceneId);
+    const mergeScenes = scenes.filter(s => s.id !== primarySceneId);
+    const keepFileScene = scenes.find(s => s.id === mergedData.keepFileFromSceneId);
+
+    if (!keepFileScene) {
+      return sendBadRequest(res, 'Scene with file to keep not found');
+    }
+
+    // Collect all unique performers from all scenes with their pivot data
+    const performerDataMap = new Map(); // Map<performerId, { notes, tagIds }>
+    
+    scenes.forEach(scene => {
+      scene.performers.forEach(sp => {
+        const performerId = sp.performerId;
+        
+        if (!performerDataMap.has(performerId)) {
+          // First time seeing this performer, initialize with their data
+          const tagIds = new Set(sp.tags.map(t => t.tagId));
+          performerDataMap.set(performerId, {
+            notes: sp.notes || null,
+            tagIds: tagIds
+          });
+        } else {
+          // Performer already exists, merge the data
+          const existing = performerDataMap.get(performerId);
+          
+          // Keep existing notes if present, otherwise use new notes
+          if (!existing.notes && sp.notes) {
+            existing.notes = sp.notes;
+          }
+          
+          // Merge tag IDs (union of all tags across scenes)
+          sp.tags.forEach(t => existing.tagIds.add(t.tagId));
+        }
+      });
+    });
+
+    const allPerformerIds = Array.from(performerDataMap.keys());
+    
+    console.log(`👥 Merging ${allPerformerIds.length} unique performers with their action codes/tags`);
+
+    // Collect all unique tags from all scenes
+    const allTagIds = new Set();
+    scenes.forEach(scene => {
+      scene.tags.forEach(t => allTagIds.add(t.tagId));
+    });
+
+    // Collect all unique groups (movies/compilations) from all scenes with scene numbers
+    const groupDataMap = new Map(); // Map<groupId, sceneIndex>
+    
+    scenes.forEach(scene => {
+      scene.groups.forEach(sg => {
+        const groupId = sg.groupId;
+        
+        if (!groupDataMap.has(groupId)) {
+          // First time seeing this group, store with scene index
+          groupDataMap.set(groupId, {
+            sceneIndex: sg.sceneIndex
+          });
+        } else {
+          // Group already exists, keep existing scene index if present, otherwise use new one
+          const existing = groupDataMap.get(groupId);
+          if (existing.sceneIndex === null && sg.sceneIndex !== null) {
+            existing.sceneIndex = sg.sceneIndex;
+          }
+        }
+      });
+    });
+
+    const allGroupIds = Array.from(groupDataMap.keys());
+    
+    if (allGroupIds.length > 0) {
+      console.log(`🎬 Merging ${allGroupIds.length} movie/compilation links`);
+    }
+
+    // Collect all unique URLs from all scenes
+    const allUrls = new Set();
+    scenes.forEach(scene => {
+      if (scene.url) allUrls.add(scene.url);
+      if (scene.geviUrl) allUrls.add(scene.geviUrl);
+    });
+
+    // Collect all episode URLs from all scenes
+    const allEpisodeUrls = [];
+    const episodeUrlSet = new Set(); // Track unique URLs to avoid duplicates
+    
+    scenes.forEach(scene => {
+      if (scene.episodeUrls) {
+        try {
+          // episodeUrls is stored as JSON string
+          const urls = typeof scene.episodeUrls === 'string' 
+            ? JSON.parse(scene.episodeUrls) 
+            : scene.episodeUrls;
+          if (Array.isArray(urls)) {
+            urls.forEach(urlItem => {
+              // Handle both formats: plain strings and objects with url property
+              let urlString = null;
+              let urlLabel = 'Episode URL';
+              
+              if (typeof urlItem === 'string') {
+                // Format: ["url1", "url2", ...]
+                urlString = urlItem;
+              } else if (urlItem && urlItem.url) {
+                // Format: [{url: "...", label: "..."}, ...]
+                urlString = urlItem.url;
+                urlLabel = urlItem.label || 'Episode URL';
+              }
+              
+              // Avoid duplicates
+              if (urlString && !episodeUrlSet.has(urlString)) {
+                episodeUrlSet.add(urlString);
+                allEpisodeUrls.push({
+                  url: urlString,
+                  label: urlLabel
+                });
+              }
+            });
+          }
+        } catch (e) {
+          console.error(`Failed to parse episodeUrls for scene ${scene.id}:`, e);
+        }
+      }
+    });
+
+    // Add all collected URLs to episodeUrls if they're not already there
+    // This ensures we don't lose any URLs from url or geviUrl fields
+    const selectedUrl = mergedData.url || primaryScene.url;
+    const selectedGeviUrl = mergedData.geviUrl || primaryScene.geviUrl;
+    
+    Array.from(allUrls).forEach(url => {
+      // Don't add if it's the selected primary url or geviUrl (they go in their dedicated fields)
+      // But do add to episodeUrls if not already there
+      if (!episodeUrlSet.has(url)) {
+        episodeUrlSet.add(url);
+        allEpisodeUrls.push({
+          url: url,
+          label: url === selectedGeviUrl ? 'GEVI' : 'Scene URL'
+        });
+      }
+    });
+
+    // Convert episodeUrls array to JSON string for storage
+    const combinedEpisodeUrls = JSON.stringify(allEpisodeUrls);
+
+    console.log(`📎 Combining URLs: ${allUrls.size} unique URLs from url/geviUrl fields, ${allEpisodeUrls.length} total episode URLs after combining`);
+
+    // Prepare file information from the scene we're keeping the file from
+    const fileData = {
+      path: keepFileScene.path,
+      fileSize: keepFileScene.fileSize,
+      duration: keepFileScene.duration,
+      width: keepFileScene.width,
+      height: keepFileScene.height,
+      bitrate: keepFileScene.bitrate,
+      frameRate: keepFileScene.frameRate,
+      videoCodec: keepFileScene.videoCodec,
+      fileModTime: keepFileScene.fileModTime,
+      osHash: keepFileScene.osHash,
+      checksum: keepFileScene.checksum,
+      phash: keepFileScene.phash
+    };
+
+    // Update primary scene with merged data and file information
+    const updatedScene = await prisma.stashScene.update({
+      where: { id: primarySceneId },
+      data: {
+        title: mergedData.title || primaryScene.title,
+        date: mergedData.date || primaryScene.date,
+        details: mergedData.details || primaryScene.details,
+        url: mergedData.url || primaryScene.url,
+        stashId: mergedData.stashId || primaryScene.stashId,
+        geviUrl: mergedData.geviUrl || primaryScene.geviUrl,
+        episodeUrls: combinedEpisodeUrls, // Combined episode URLs from all scenes
+        studioId: mergedData.studio?.id || primaryScene.studioId,
+        // Update file information
+        ...fileData
+      },
+      include: {
+        studioObject: true,
+        performers: {
+          include: {
+            performer: true,
+            tags: {
+              include: {
+                tag: true
+              }
+            }
+          }
+        },
+        tags: true
+      }
+    });
+
+    // Clear existing performer relationships and their pivot data
+    await prisma.stashScenePerformer.deleteMany({
+      where: { sceneId: primarySceneId }
+    });
+
+    // Recreate performer relationships with merged pivot data
+    for (const performerId of allPerformerIds) {
+      const performerData = performerDataMap.get(performerId);
+      
+      // Create the scene-performer relationship
+      await prisma.stashScenePerformer.create({
+        data: {
+          sceneId: primarySceneId,
+          performerId: performerId,
+          notes: performerData.notes
+        }
+      });
+
+      // Create the performer tag relationships (action codes)
+      if (performerData.tagIds.size > 0) {
+        await prisma.stashScenePerformerTag.createMany({
+          data: Array.from(performerData.tagIds).map(tagId => ({
+            sceneId: primarySceneId,
+            performerId: performerId,
+            tagId: tagId
+          }))
+        });
+        
+        console.log(`   ✓ Merged ${performerData.tagIds.size} action codes for performer ${performerId}`);
+      }
+    }
+
+    // Update scene tags (separate from performer tags)
+    await prisma.stashSceneTag.deleteMany({
+      where: { sceneId: primarySceneId }
+    });
+    
+    await prisma.stashSceneTag.createMany({
+      data: Array.from(allTagIds).map(tagId => ({
+        sceneId: primarySceneId,
+        tagId: tagId
+      }))
+    });
+
+    // Update scene groups (movies/compilations) with scene numbers
+    await prisma.stashGroupScene.deleteMany({
+      where: { sceneId: primarySceneId }
+    });
+    
+    if (allGroupIds.length > 0) {
+      for (const groupId of allGroupIds) {
+        const groupData = groupDataMap.get(groupId);
+        
+        await prisma.stashGroupScene.create({
+          data: {
+            sceneId: primarySceneId,
+            groupId: groupId,
+            sceneIndex: groupData.sceneIndex
+          }
+        });
+        
+        console.log(`   ✓ Linked to movie/compilation ${groupId}${groupData.sceneIndex ? ` (scene #${groupData.sceneIndex})` : ''}`);
+      }
+    }
+
+    // Update in Stash via GraphQL
+    try {
+      const stashService = getActiveSyncService();
+      
+      if (!stashService) {
+        console.warn('⚠️ Stash service not available - skipping Stash update');
+        throw new Error('Stash service not available');
+      }
+      
+      // Fetch fresh scene data with all relationships for Stash update
+      const freshScene = await prisma.stashScene.findUnique({
+        where: { id: primarySceneId },
+        include: {
+          studioObject: true,
+          performers: {
+            include: {
+              performer: true
+            }
+          },
+          tags: {
+            include: {
+              tag: true
+            }
+          },
+          groups: {
+            include: {
+              group: true
+            }
+          }
+        }
+      });
+      
+      const updateMutation = `
+        mutation SceneUpdate($input: SceneUpdateInput!) {
+          sceneUpdate(input: $input) {
+            id
+            title
+            date
+            details
+            url
+            studio { id name }
+            performers { id name }
+            tags { id name }
+            movies { movie { id name } scene_index }
+          }
+        }
+      `;
+
+      // Prepare movies input with scene numbers
+      const moviesInput = freshScene.groups.map(sg => ({
+        group_id: sg.group.id,
+        scene_index: sg.sceneIndex
+      })).filter(m => m.group_id); // Only include if group has ID
+
+      const stashInput = {
+        id: primaryScene.id,
+        title: freshScene.title,
+        date: freshScene.date,
+        details: freshScene.details,
+        url: freshScene.url,
+        studio_id: freshScene.studioObject?.id || null,
+        performer_ids: freshScene.performers.map(sp => sp.performer.id).filter(Boolean),
+        tag_ids: freshScene.tags.map(st => st.tag.id).filter(Boolean),
+        movies: moviesInput
+      };
+
+      console.log(`📤 Updating scene ${primaryScene.id} in Stash with:`, {
+        title: stashInput.title,
+        performers: stashInput.performer_ids?.length || 0,
+        tags: stashInput.tag_ids?.length || 0,
+        movies: stashInput.movies?.length || 0
+      });
+
+      const updateResult = await stashService.makeGraphQLRequest(updateMutation, {
+        input: stashInput
+      });
+
+      if (updateResult.errors) {
+        console.error(`❌ GraphQL errors updating scene:`, updateResult.errors);
+        throw new Error(`Failed to update scene in Stash: ${updateResult.errors.map(e => e.message).join(', ')}`);
+      }
+
+      console.log(`✅ Updated primary scene in Stash: ${primaryScene.id}`);
+      if (moviesInput.length > 0) {
+        console.log(`   ✓ Updated ${moviesInput.length} movie/compilation link(s) in Stash`);
+      }
+
+      // Delete merged scenes from Stash (including their files if not the kept file)
+      console.log(`🗑️ Deleting ${mergeScenes.length} merged scene(s) from Stash...`);
+      
+      for (const scene of mergeScenes) {
+        console.log(`   Processing scene ${scene.id} (title: ${scene.title})`);
+        
+        if (!scene.id) {
+          console.log(`   ⚠️ Skipping scene - no ID found`);
+          continue;
+        }
+        
+        // Delete the file from disk if this is NOT the scene with the file we're keeping
+        const deleteFile = scene.id !== mergedData.keepFileFromSceneId;
+        
+        console.log(`   🗑️ Deleting scene ${scene.id} from Stash (deleteFile: ${deleteFile})`);
+        
+        const deleteMutation = `
+          mutation SceneDestroy($id: ID!, $deleteFile: Boolean!) {
+            sceneDestroy(input: { id: $id, delete_file: $deleteFile })
+          }
+        `;
+        
+        try {
+          await stashService.makeGraphQLRequest(deleteMutation, { 
+            id: scene.id,
+            deleteFile: deleteFile
+          });
+          
+          console.log(`   ✅ Successfully deleted scene ${scene.id} from Stash`);
+        } catch (deleteError) {
+          console.error(`   ❌ Failed to delete scene ${scene.id} from Stash:`, deleteError.message);
+        }
+      }
+      
+      console.log(`✅ Finished deleting merged scenes from Stash`);
+
+      // If the primary scene has a different file than the one we're keeping, 
+      // we need to handle this specially since we're not deleting the primary scene
+      if (primaryScene.id !== mergedData.keepFileFromSceneId) {
+        console.log(`⚠️ Primary scene file will be replaced with kept file from scene ${mergedData.keepFileFromSceneId}`);
+        console.log(`   Old file: ${primaryScene.path}`);
+        console.log(`   New file: ${keepFileScene.path}`);
+        // Note: The primary scene now has the kept file's path/info, so it points to the correct file
+        // The old primary scene file will remain on disk but won't be referenced in Stash
+      }
+
+    } catch (stashError) {
+      console.error('❌ CRITICAL: Failed to update Stash:', stashError.message);
+      console.error('   Stack:', stashError.stack);
+      // Still continue with local merge, but make the error very visible
+      console.error('⚠️  WARNING: Scenes merged locally but NOT in Stash!');
+      console.error('⚠️  You may need to manually merge the scenes in Stash.');
+    }
+
+    // Delete merged scenes from local database
+    await prisma.stashScene.deleteMany({
+      where: { id: { in: mergeSceneIds } }
+    });
+
+    console.log(`✅ Merged ${mergeSceneIds.length} scenes into scene ${primarySceneId}`);
+    sendSuccess(res, {
+      scene: updatedScene,
+      mergedCount: mergeSceneIds.length,
+      keptFile: keepFileScene.path
+    });
+
+  } catch (error) {
+    console.error('Failed to merge scenes:', error);
+    return sendServerError(res, `Failed to merge scenes: ${error.message}`);
   }
 }));
 

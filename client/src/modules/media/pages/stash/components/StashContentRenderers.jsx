@@ -10,7 +10,10 @@ const StashContentRenderers = ({
   setSelectedPerformer,
   setDeleteSceneId,
   setVideoPlayer,
-  setAutoSkipRetries
+  setAutoSkipRetries,
+  performerSelectionMode = false,
+  selectedPerformers = new Set(),
+  onTogglePerformerSelection
 }) => {
   const renderScenes = () => {
     const scenes = data.scenes || [];
@@ -124,7 +127,14 @@ const StashContentRenderers = ({
 
   const renderPerformers = () => {
     const performers = data.performers || [];
-    return <PerformerGrid performers={performers} />;
+    return (
+      <PerformerGrid 
+        performers={performers} 
+        selectionMode={performerSelectionMode}
+        selectedPerformers={selectedPerformers}
+        onToggleSelection={onTogglePerformerSelection}
+      />
+    );
   };
 
   const renderStudios = () => {

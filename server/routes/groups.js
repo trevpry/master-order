@@ -31,10 +31,14 @@ router.get('/', asyncHandler(async (req, res) => {
   const where = {};
   
   if (search) {
+    // Note: SQLite doesn't support mode: 'insensitive', but contains is case-insensitive by default in SQLite
+    // PostgreSQL needs mode: 'insensitive' for case-insensitive search
+    const searchFilter = { contains: search };
+    
     where.OR = [
-      { name: { contains: search, mode: 'insensitive' } },
-      { synopsis: { contains: search, mode: 'insensitive' } },
-      { director: { contains: search, mode: 'insensitive' } }
+      { name: searchFilter },
+      { synopsis: searchFilter },
+      { director: searchFilter }
     ];
   }
 

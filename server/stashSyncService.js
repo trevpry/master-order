@@ -184,6 +184,12 @@ class StashSyncService {
               size
               duration
               mod_time
+              video_codec
+              audio_codec
+              width
+              height
+              frame_rate
+              bit_rate
               fingerprints {
                 type
                 value
@@ -256,6 +262,23 @@ class StashSyncService {
       for (const scene of scenes) {
         // Extract file information from the files array
         const primaryFile = scene.files && scene.files.length > 0 ? scene.files[0] : null;
+        
+        // DEBUG: Log file metadata to verify it's being received from Stash
+        if (primaryFile) {
+          console.log(`📹 Scene ${scene.id} "${scene.title}" file metadata:`, {
+            size: primaryFile.size,
+            width: primaryFile.width,
+            height: primaryFile.height,
+            video_codec: primaryFile.video_codec,
+            audio_codec: primaryFile.audio_codec,
+            frame_rate: primaryFile.frame_rate,
+            bit_rate: primaryFile.bit_rate,
+            path: primaryFile.path
+          });
+        } else {
+          console.log(`⚠️ Scene ${scene.id} "${scene.title}" has no file data`);
+        }
+        
         const osHash = primaryFile?.fingerprints?.find(fp => fp.type === 'oshash')?.value || null;
         const checksum = primaryFile?.fingerprints?.find(fp => fp.type === 'md5')?.value || null;
         
@@ -285,6 +308,16 @@ class StashSyncService {
           oCounter: scene.o_counter || null,
           path: primaryFile?.path || null,
           fileModTime: primaryFile?.mod_time ? new Date(primaryFile.mod_time) : null,
+          // File information
+          fileSize: primaryFile?.size || null,
+          duration: primaryFile?.duration || null,
+          width: primaryFile?.width || null,
+          height: primaryFile?.height || null,
+          videoCodec: primaryFile?.video_codec || null,
+          audioCodec: primaryFile?.audio_codec || null,
+          frameRate: primaryFile?.frame_rate || null,
+          bitrate: primaryFile?.bit_rate || null,
+          // Studio info
           studio: scene.studio?.name || null,
           studioId: validatedStudioId, // Use validated studio ID or null
           code: scene.code || null,
@@ -295,7 +328,6 @@ class StashSyncService {
           resumeTime: scene.resume_time || null,
           playDuration: scene.play_duration || null,
           playCount: scene.play_count || null,
-          duration: primaryFile?.duration || null,
           lastSyncedAt: new Date()
         };
 
@@ -308,10 +340,41 @@ class StashSyncService {
 
         // Sync performers for this scene
         if (scene.performers && scene.performers.length > 0) {
-          // Remove existing performer relationships
-          await prisma.stashScenePerformer.deleteMany({
-            where: { sceneId: scene.id }
+          // Get existing performer relationships with their tags (action codes)
+          const existingRelationships = await prisma.stashScenePerformer.findMany({
+            where: { sceneId: scene.id },
+            include: {
+              tags: true
+            }
           });
+
+          // Create a map of existing relationships that have tags or notes
+          const relationshipsWithData = new Map();
+          existingRelationships.forEach(rel => {
+            if (rel.tags.length > 0 || rel.notes) {
+              relationshipsWithData.set(rel.performerId, rel);
+            }
+          });
+
+          // Get performer IDs from Stash
+          const stashPerformerIds = new Set(scene.performers.map(p => p.id));
+
+          // Remove only relationships that:
+          // 1. Are NOT in the current Stash data, AND
+          // 2. Don't have any local tags or notes
+          const performersToRemove = existingRelationships
+            .filter(rel => !stashPerformerIds.has(rel.performerId) && !relationshipsWithData.has(rel.performerId))
+            .map(rel => rel.performerId);
+
+          if (performersToRemove.length > 0) {
+            await prisma.stashScenePerformer.deleteMany({
+              where: { 
+                sceneId: scene.id,
+                performerId: { in: performersToRemove }
+              }
+            });
+            console.log(`   🗑️ Removed ${performersToRemove.length} performer(s) no longer in Stash (without local data)`);
+          }
 
           // Filter valid performers using pre-loaded data
           const validPerformers = scene.performers.filter(performer => {
@@ -323,14 +386,30 @@ class StashSyncService {
             }
           });
 
-          // Batch create performer relationships
+          // Add or update performer relationships (upsert to preserve existing data)
           if (validPerformers.length > 0) {
-            await prisma.stashScenePerformer.createMany({
-              data: validPerformers.map(performer => ({
-                sceneId: scene.id,
-                performerId: performer.id
-              }))
-            });
+            for (const performer of validPerformers) {
+              await prisma.stashScenePerformer.upsert({
+                where: {
+                  sceneId_performerId: {
+                    sceneId: scene.id,
+                    performerId: performer.id
+                  }
+                },
+                update: {
+                  // Don't update anything - preserve notes and tags
+                },
+                create: {
+                  sceneId: scene.id,
+                  performerId: performer.id
+                }
+              });
+            }
+            
+            const preserved = validPerformers.filter(p => relationshipsWithData.has(p.id)).length;
+            if (preserved > 0) {
+              console.log(`   💾 Preserved ${preserved} performer(s) with action codes/notes`);
+            }
           }
         }
 
@@ -2343,6 +2422,10 @@ class StashSyncService {
       if (updates.performerIds !== undefined && Array.isArray(updates.performerIds)) {
         input.performer_ids = updates.performerIds.map(id => String(id));
       }
+      if (updates.tagIds !== undefined && Array.isArray(updates.tagIds)) {
+        input.tag_ids = updates.tagIds.map(id => String(id));
+        console.log(`   - Setting ${input.tag_ids.length} tag(s) for scene`, input.tag_ids);
+      }
       if (updates.groupIds !== undefined && Array.isArray(updates.groupIds)) {
         // Get all existing groups for this scene first to preserve scene_index
         const existingGroups = await this.prisma.stashGroupScene.findMany({
@@ -2359,14 +2442,24 @@ class StashSyncService {
           groupsMap.set(eg.groupId, { group_id: String(eg.groupId), scene_index: eg.sceneIndex });
         });
         
-        // Then add new groups at the end
+        // Then add new groups - use provided scene numbers if available (from AEBN)
         let nextIndex = existingGroups.length > 0 
           ? Math.max(...existingGroups.map(g => g.sceneIndex)) + 1 
           : 0;
         
-        updates.groupIds.forEach(groupId => {
+        updates.groupIds.forEach((groupId, idx) => {
           if (!groupsMap.has(groupId)) {
-            groupsMap.set(groupId, { group_id: String(groupId), scene_index: nextIndex++ });
+            // Check if scene number is provided for this group
+            let sceneIndex;
+            if (updates.sceneNumbers && Array.isArray(updates.sceneNumbers) && 
+                updates.sceneNumbers[idx] !== null && updates.sceneNumbers[idx] !== undefined) {
+              sceneIndex = parseInt(updates.sceneNumbers[idx]);
+              console.log(`   - Using provided scene number ${sceneIndex} for group ${groupId}`);
+            } else {
+              sceneIndex = nextIndex++;
+              console.log(`   - Auto-calculated scene index ${sceneIndex} for group ${groupId}`);
+            }
+            groupsMap.set(groupId, { group_id: String(groupId), scene_index: sceneIndex });
           }
         });
         
@@ -2374,10 +2467,58 @@ class StashSyncService {
         console.log(`   - Setting ${input.groups.length} groups for scene (${updates.groupIds.length} new)`, input.groups);
       }
       if (updates.details !== undefined) input.details = updates.details;
-      if (updates.date !== undefined) input.date = updates.date;
-      if (updates.url !== undefined) {
-        // Convert single URL to urls array (url field is deprecated)
-        input.urls = [updates.url];
+      if (updates.date !== undefined) {
+        // Sanitize date string - extract just the date portion (YYYY-MM-DD)
+        let cleanDate = updates.date;
+        if (typeof cleanDate === 'string') {
+          // Remove HTML tags, newlines, and extra whitespace
+          cleanDate = cleanDate.replace(/<[^>]*>/g, '').replace(/\n/g, ' ').trim();
+          
+          // Extract first valid date in YYYY-MM-DD format
+          const dateMatch = cleanDate.match(/\d{4}-\d{2}-\d{2}/);
+          if (dateMatch) {
+            cleanDate = dateMatch[0];
+            console.log(`   - Sanitized date from "${updates.date.substring(0, 50)}..." to "${cleanDate}"`);
+          } else {
+            console.warn(`   - Could not extract valid date from: "${cleanDate}"`);
+            cleanDate = null; // Don't send invalid date
+          }
+        }
+        if (cleanDate) {
+          input.date = cleanDate;
+        }
+      }
+      if (updates.url !== undefined || updates.episodeUrls !== undefined) {
+        // Fetch existing URLs from Stash to preserve them
+        console.log('   - Fetching existing URLs from Stash...');
+        const existingSceneQuery = `
+          query FindScene($id: ID!) {
+            findScene(id: $id) {
+              urls
+            }
+          }
+        `;
+        
+        const existingSceneData = await this.makeGraphQLRequest(existingSceneQuery, { id: String(sceneId) });
+        const existingUrls = existingSceneData?.findScene?.urls || [];
+        console.log(`   - Found ${existingUrls.length} existing URL(s) in Stash:`, existingUrls);
+        
+        // Build merged urls array, avoiding duplicates
+        const urlsSet = new Set(existingUrls);
+        
+        if (updates.url) {
+          console.log(`   - Adding main URL: ${updates.url}`);
+          urlsSet.add(updates.url);
+        }
+        
+        if (updates.episodeUrls && Array.isArray(updates.episodeUrls)) {
+          console.log(`   - Adding ${updates.episodeUrls.length} episode URL(s):`, updates.episodeUrls);
+          updates.episodeUrls.forEach(url => urlsSet.add(url));
+        }
+        
+        const urlsArray = Array.from(urlsSet);
+        input.urls = urlsArray;
+        console.log(`   - Final ${urlsArray.length} URL(s) in Stash (${existingUrls.length} existing + ${urlsArray.length - existingUrls.length} new):`, urlsArray);
       }
       if (updates.coverImage !== undefined) {
         // If coverImage is a relative proxy URL, convert to original GEVI URL

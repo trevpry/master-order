@@ -4,6 +4,9 @@ import { formatDuration } from '../../../../utils/timeUtils';
 import { getSceneDisplayTitle, getSceneImageUrl, formatDate } from '../../utils/stashUtils';
 import StashPerformerOverlay from '../../../../components/overlays/StashPerformerOverlay';
 import PerformerSwapModal from './components/PerformerSwapModal';
+import AddPerformerModal from './components/AddPerformerModal';
+import MergePerformersModal from '../../../../components/stash/MergePerformersModal';
+import PerformerCheckboxOverlay from '../../../../components/stash/PerformerCheckboxOverlay';
 import config from '../../../../config';
 
 export default function SceneDetail() {
@@ -25,6 +28,7 @@ export default function SceneDetail() {
   const [isParsing, setIsParsing] = useState(false);
   const [showScrapeModal, setShowScrapeModal] = useState(false);
   const [scrapeUrl, setScrapeUrl] = useState('');
+  const [aebnSceneNumber, setAebnSceneNumber] = useState(''); // Scene number for AEBN direct scraping
   const [isScraping, setIsScraping] = useState(false);
   const [scrapeData, setScrapeData] = useState(null);
   const [showScrapeReviewModal, setShowScrapeReviewModal] = useState(false);
@@ -32,6 +36,16 @@ export default function SceneDetail() {
   const [searchResults, setSearchResults] = useState(null);
   const [creatingPerformers, setCreatingPerformers] = useState(new Set()); // Track which performers are being created
   const [creatingGroups, setCreatingGroups] = useState(new Set()); // Track which groups are being created
+  const [creatingTags, setCreatingTags] = useState(new Set()); // Track which tags are being created
+  const [isCreatingMatched, setIsCreatingMatched] = useState(false); // Track if creating a new movie from matched group
+  const [fieldSelections, setFieldSelections] = useState({
+    title: 'scraped',
+    studio: 'scraped', 
+    date: 'scraped',
+    details: 'scraped',
+    image: 'scraped',
+    url: 'scraped'
+  }); // Track which version of each field to use
   const [hoveringPerformer, setHoveringPerformer] = useState(null); // Track which performer is being hovered
   const [showGeviUrlModal, setShowGeviUrlModal] = useState(false);
   const [geviUrlInput, setGeviUrlInput] = useState('');
@@ -44,6 +58,22 @@ export default function SceneDetail() {
   const [isDeleting, setIsDeleting] = useState(false);
   const [showSwapModal, setShowSwapModal] = useState(false);
   const [performerToSwap, setPerformerToSwap] = useState(null);
+  const [isSyncing, setIsSyncing] = useState(false);
+  
+  // Generic scraper states
+  const [availableScrapers, setAvailableScrapers] = useState([]);
+  const [selectedScraper, setSelectedScraper] = useState(null);
+  
+  // Performer selection and merge states
+  const [performerSelectionMode, setPerformerSelectionMode] = useState(false);
+  const [selectedPerformers, setSelectedPerformers] = useState(new Set());
+  const [showMergeModal, setShowMergeModal] = useState(false);
+  const [showAddPerformerModal, setShowAddPerformerModal] = useState(false);
+
+  // URL editor states
+  const [showUrlEditorModal, setShowUrlEditorModal] = useState(false);
+  const [editingUrls, setEditingUrls] = useState([]);
+  const [isSavingUrls, setIsSavingUrls] = useState(false);
 
   // Fetch Stash URL from settings
   useEffect(() => {
@@ -122,6 +152,9 @@ export default function SceneDetail() {
         );
         setMergedTags(merged);
         
+        // Fetch available scrapers for this scene
+        fetchAvailableScrapers(id);
+        
       } catch (e) {
         setError(e.message);
       } finally {
@@ -130,6 +163,20 @@ export default function SceneDetail() {
     };
     fetchScene();
   }, [id]);
+
+  // Fetch available scrapers for the scene
+  const fetchAvailableScrapers = async (sceneId) => {
+    try {
+      const res = await fetch(`${config.apiBaseUrl}/api/stash/scenes/${sceneId}/available-scrapers`);
+      const json = await res.json();
+      if (json.success && json.data.scrapers) {
+        setAvailableScrapers(json.data.scrapers);
+        console.log('✅ Available scrapers:', json.data.scrapers);
+      }
+    } catch (error) {
+      console.error('Error fetching available scrapers:', error);
+    }
+  };
 
   const handlePerformerClick = (e, performer) => {
     e.preventDefault();
@@ -461,29 +508,49 @@ export default function SceneDetail() {
 
   const handleScrapeGevi = async () => {
     if (!scrapeUrl.trim()) {
-      alert('Please enter a GEVI URL');
+      alert(`Please enter a ${selectedScraper ? selectedScraper.siteName : 'GEVI'} URL`);
       return;
     }
 
     setIsScraping(true);
 
     try {
-      const response = await fetch(`${config.apiBaseUrl}/api/stash/scenes/${id}/scrape-gevi`, {
+      // Use generic scraper if a specific scraper is selected, otherwise use GEVI
+      const endpoint = selectedScraper 
+        ? `/api/stash/scenes/${id}/scrape-generic`
+        : `/api/stash/scenes/${id}/scrape-gevi`;
+      
+      const requestBody = selectedScraper
+        ? { 
+            url: scrapeUrl, 
+            scraperName: selectedScraper.siteName,
+            // Include scene number for AEBN if provided
+            ...(selectedScraper.siteName === 'AEBN' && aebnSceneNumber ? { sceneNumber: parseInt(aebnSceneNumber) } : {})
+          }
+        : { url: scrapeUrl };
+
+      console.log(`🔍 Scraping with ${selectedScraper ? selectedScraper.siteName : 'GEVI'}:`, scrapeUrl);
+      if (selectedScraper?.siteName === 'AEBN' && aebnSceneNumber) {
+        console.log(`   - Direct scene number: ${aebnSceneNumber}`);
+      }
+
+      const response = await fetch(`${config.apiBaseUrl}${endpoint}`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'
         },
-        body: JSON.stringify({ url: scrapeUrl })
+        body: JSON.stringify(requestBody)
       });
 
       const result = await response.json();
 
       if (result.success) {
-        const { scraped, matched, unmatched, sourceUrl } = result.data;
+        const { scraped, matched, unmatched, sourceUrl, source } = result.data;
         
         console.log('🔍 Scraped data received:', scraped);
         console.log('📸 Image URL:', scraped.image);
         console.log('🔗 Source URL:', sourceUrl);
+        console.log('🏷️  Scraper Source:', source);
         
         // Store original image URL for sending to Stash
         const originalImageUrl = scraped.image;
@@ -504,8 +571,20 @@ export default function SceneDetail() {
           }, 
           matched, 
           unmatched,
-          sourceUrl: sourceUrl // Store the GEVI URL for saving later
+          sourceUrl: sourceUrl, // Store the source URL for saving later
+          source: source // Store the scraper source to determine if it's GEVI
         });
+        
+        // Reset field selections to prefer scraped data by default
+        setFieldSelections({
+          title: 'scraped',
+          studio: 'scraped',
+          date: 'scraped',
+          details: 'scraped',
+          image: 'scraped',
+          url: 'scraped'
+        });
+        
         setShowScrapeModal(false);
         setShowScrapeReviewModal(true);
         
@@ -513,10 +592,10 @@ export default function SceneDetail() {
         setEditedTitle(scraped.title || data.title || '');
         setEditedStudio(scraped.studio || '');
         
-        // Build performer list from matched + unmatched
+        // Build performer list from matched + unmatched (handle both string and object formats)
         const performerNames = [
           ...matched.performers.map(p => p.name),
-          ...unmatched.performers
+          ...unmatched.performers.map(p => typeof p === 'string' ? p : p.name)
         ];
         setEditedPerformers(performerNames);
       } else {
@@ -532,6 +611,34 @@ export default function SceneDetail() {
 
   const handleAcceptScrape = async () => {
     try {
+      // Update performer URLs for matched performers if scraped URL is available
+      for (const matchedPerformer of scrapeData.matched.performers) {
+        if (matchedPerformer.scrapedUrl) {
+          try {
+            console.log(`📝 Updating URL for performer ${matchedPerformer.name}: ${matchedPerformer.scrapedUrl}`);
+            const updateResponse = await fetch(`${config.apiBaseUrl}/api/stash/performers/${matchedPerformer.id}`, {
+              method: 'PUT',
+              headers: {
+                'Content-Type': 'application/json'
+              },
+              body: JSON.stringify({
+                name: matchedPerformer.name,
+                newUrls: [matchedPerformer.scrapedUrl]
+              })
+            });
+            
+            const updateResult = await updateResponse.json();
+            if (updateResult.success) {
+              console.log(`✅ Updated URL for ${matchedPerformer.name}`);
+            } else {
+              console.warn(`⚠️ Failed to update URL for ${matchedPerformer.name}:`, updateResult.error);
+            }
+          } catch (error) {
+            console.error(`❌ Error updating URL for ${matchedPerformer.name}:`, error);
+          }
+        }
+      }
+      
       // Collect matched performer IDs
       const performerIds = scrapeData.matched.performers.map(p => p.id);
 
@@ -545,29 +652,88 @@ export default function SceneDetail() {
       // Determine studio ID if matched
       const studioId = scrapeData.matched.studio ? scrapeData.matched.studio.id : null;
 
-      // Collect matched group IDs
-      const groupIds = scrapeData.matched.groups?.map(g => g.id) || [];
+      // Collect matched tag IDs
+      const tagIds = scrapeData.matched.tags?.map(t => t.id) || [];
 
-      // Update scene with scraped values (including image, action codes, groups, and GEVI URL)
+      // Collect matched group IDs and scene numbers
+      const groupIds = scrapeData.matched.groups?.map(g => g.id) || [];
+      const sceneNumbers = scrapeData.matched.groups?.map(g => g.sceneNumber || null) || [];
+      
+      console.log('🎬 [Scene Update] Group IDs:', groupIds);
+      console.log('🎬 [Scene Update] Scene Numbers:', sceneNumbers);
+      console.log('🎬 [Scene Update] Matched Groups:', scrapeData.matched.groups);
+
+      // Build update payload based on field selections
+      const updatePayload = {
+        performerIds: performerIds,
+        actionCodes: actionCodes,
+        tagIds: tagIds,
+        groupIds: groupIds,
+        sceneNumbers: sceneNumbers  // Pass scene numbers for AEBN movies
+      };
+
+      // Add fields based on user selection
+      if (fieldSelections.title === 'scraped') {
+        updatePayload.title = scrapeData.scraped.title;
+      } else if (fieldSelections.title === 'existing') {
+        updatePayload.title = data.title;
+      }
+
+      if (fieldSelections.studio === 'scraped') {
+        updatePayload.studio = scrapeData.scraped.studio;
+        updatePayload.studioId = studioId;
+      } else if (fieldSelections.studio === 'existing') {
+        updatePayload.studio = data.studio?.name || null;
+        updatePayload.studioId = data.studio?.id || null;
+      }
+
+      if (fieldSelections.details === 'scraped' && scrapeData.scraped.details) {
+        updatePayload.details = scrapeData.scraped.details;
+      } else if (fieldSelections.details === 'existing') {
+        updatePayload.details = data.details;
+      }
+
+      if (fieldSelections.date === 'scraped' && scrapeData.scraped.date) {
+        updatePayload.date = scrapeData.scraped.date;
+      } else if (fieldSelections.date === 'existing') {
+        updatePayload.date = data.date;
+      }
+
+      if (fieldSelections.url === 'scraped' && scrapeData.scraped.url) {
+        updatePayload.url = scrapeData.scraped.url;
+        // Only update geviUrl if the scraper source is GEVI
+        // This prevents non-GEVI scrapers from overwriting the GEVI URL
+        if (scrapeData.source && scrapeData.source.toLowerCase().includes('gevi')) {
+          updatePayload.geviUrl = scrapeData.sourceUrl;
+          console.log('📎 [URL Update] GEVI scraper detected - updating geviUrl:', scrapeData.sourceUrl);
+        } else {
+          console.log('📎 [URL Update] Non-GEVI scraper detected - preserving existing geviUrl');
+        }
+        updatePayload.episodeUrls = scrapeData.scraped.episodeUrls || [];
+        console.log('📎 [URL Update] Including URLs in payload:');
+        console.log('   - Main URL:', updatePayload.url);
+        console.log('   - Scraper Source:', scrapeData.source);
+        console.log('   - Episode URLs:', updatePayload.episodeUrls);
+        console.log('   - Total URLs to add:', 1 + (updatePayload.episodeUrls?.length || 0));
+      } else if (fieldSelections.url === 'existing') {
+        // Keep existing URLs - don't send url field
+        console.log('📎 [URL Update] Keeping existing URLs (not sending url fields)');
+      }
+
+      if (fieldSelections.image === 'scraped' && scrapeData.scraped.originalImage) {
+        updatePayload.coverImage = scrapeData.scraped.originalImage || scrapeData.scraped.image;
+      } else if (fieldSelections.image === 'existing') {
+        // Keep existing image - don't send coverImage field
+      }
+
+      // Update scene with scraped values (including image, action codes, tags, groups, and GEVI URL)
       // Use originalImage (direct GEVI URL) for Stash, not the proxied URL
       const response = await fetch(`${config.apiBaseUrl}/api/stash/scenes/${id}`, {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json'
         },
-        body: JSON.stringify({
-          title: editedTitle,
-          studio: editedStudio,
-          studioId: studioId,
-          performerIds: performerIds,
-          actionCodes: actionCodes,
-          groupIds: groupIds,
-          details: scrapeData.scraped.details,
-          date: scrapeData.scraped.date,
-          url: scrapeData.scraped.url,
-          coverImage: scrapeData.scraped.originalImage || scrapeData.scraped.image, // Use original URL for Stash
-          geviUrl: scrapeData.sourceUrl // Save the GEVI URL used for scraping
-        })
+        body: JSON.stringify(updatePayload)
       });
 
       const result = await response.json();
@@ -625,7 +791,10 @@ export default function SceneDetail() {
           },
           unmatched: {
             ...prev.unmatched,
-            performers: prev.unmatched.performers.filter(p => p !== performerName)
+            performers: prev.unmatched.performers.filter(p => {
+              const pName = typeof p === 'string' ? p : p.name;
+              return pName !== performerName;
+            })
           }
         }));
 
@@ -656,6 +825,11 @@ export default function SceneDetail() {
     try {
       console.log('👤 Creating performer:', performerName);
       
+      // Find the scraped performer to get additional data (action code, URL, etc.)
+      const scrapedPerformer = scrapeData.scraped.performers.find(
+        sp => sp.name === performerName
+      );
+      
       // Create the performer with minimal data
       const createResponse = await fetch(`${config.apiBaseUrl}/api/stash/performers/create`, {
         method: 'POST',
@@ -664,6 +838,7 @@ export default function SceneDetail() {
         },
         body: JSON.stringify({
           name: performerName,
+          url: scrapedPerformer?.url || null,
           aliases: [],
           gender: null,
           birthdate: null,
@@ -714,7 +889,10 @@ export default function SceneDetail() {
           },
           unmatched: {
             ...prev.unmatched,
-            performers: prev.unmatched.performers.filter(p => p !== performerName)
+            performers: prev.unmatched.performers.filter(p => {
+              const pName = typeof p === 'string' ? p : p.name;
+              return pName !== performerName;
+            })
           }
         }));
 
@@ -734,16 +912,208 @@ export default function SceneDetail() {
     }
   };
 
+  const handleCreateTag = async (tagName) => {
+    if (!tagName || !tagName.trim()) {
+      alert('Tag name cannot be empty');
+      return;
+    }
+
+    setCreatingTags(prev => new Set(prev).add(tagName));
+
+    try {
+      console.log('🏷️ Creating tag:', tagName);
+      
+      // Create the tag with minimal data
+      const createResponse = await fetch(`${config.apiBaseUrl}/api/stash/tags/create`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          name: tagName,
+          aliases: []
+        })
+      });
+
+      const createResult = await createResponse.json();
+
+      if (createResult.success) {
+        const newTag = createResult.data.tag;
+
+        // Update scrapeData to move tag from unmatched to matched
+        setScrapeData(prev => ({
+          ...prev,
+          matched: {
+            ...prev.matched,
+            tags: [
+              ...prev.matched.tags,
+              {
+                id: newTag.id,
+                name: newTag.name,
+                originalName: tagName
+              }
+            ]
+          },
+          unmatched: {
+            ...prev.unmatched,
+            tags: prev.unmatched.tags.filter(t => {
+              const tName = typeof t === 'string' ? t : t.name;
+              return tName !== tagName;
+            })
+          }
+        }));
+
+        alert(`✅ Tag "${tagName}" created successfully!`);
+      } else {
+        alert(`Failed to create tag: ${createResult.error || 'Unknown error'}`);
+      }
+    } catch (error) {
+      console.error('Error creating tag:', error);
+      alert(`Failed to create tag: ${error.message}`);
+    } finally {
+      setCreatingTags(prev => {
+        const newSet = new Set(prev);
+        newSet.delete(tagName);
+        return newSet;
+      });
+    }
+  };
+
+  const handleCreateNewMovieFromAebn = async (group) => {
+    if (!group || !scrapeData?.scraped?.title) {
+      alert('Cannot create movie: missing scraped title');
+      return;
+    }
+
+    setIsCreatingMatched(true);
+
+    try {
+      // Get the scene number from the scraped movie data (AEBN provides this)
+      const sceneNumber = scrapeData.scraped.movies?.[0]?.sceneNumber || null;
+      
+      console.log(`🎬 [Create New Movie] Scene number from AEBN: ${sceneNumber}`);
+      
+      // Create a simple group with just the scraped title and URL, and link scene with proper index
+      const createResponse = await fetch(`${config.apiBaseUrl}/api/stash/groups/create`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          name: scrapeData.scraped.title,
+          urls: [scrapeData.scraped.url || scrapeData.sourceUrl],
+          sceneId: id,  // Link the current scene
+          sceneIndex: sceneNumber  // Use the AEBN scene number
+        })
+      });
+
+      const createResult = await createResponse.json();
+
+      if (createResult.success) {
+        const newGroupId = createResult.data.group.id;
+        
+        // Replace the original matched group with the new movie (don't keep the original match)
+        setScrapeData(prev => ({
+          ...prev,
+          matched: {
+            ...prev.matched,
+            groups: [
+              {
+                id: newGroupId,
+                name: scrapeData.scraped.title,
+                matchedVia: 'created-from-aebn',
+                url: scrapeData.scraped.url || scrapeData.sourceUrl,
+                sceneNumber: sceneNumber  // Include scene number for proper indexing
+              }
+            ]
+          }
+        }));
+
+        alert(`✅ Movie "${scrapeData.scraped.title}" created and scene linked with index ${sceneNumber || 'auto'}!`);
+      } else {
+        alert(`Failed to create movie: ${createResult.error || 'Unknown error'}`);
+      }
+    } catch (error) {
+      console.error('Error creating movie from AEBN:', error);
+      alert('Failed to create movie');
+    } finally {
+      setIsCreatingMatched(false);
+    }
+  };
+
   const handleCreateGroup = async (group) => {
     if (!group || !group.name || !group.name.trim()) {
       alert('Group name cannot be empty');
       return;
     }
 
+    // Check if this is an AEBN URL - use simple creation flow instead of fetching full details
+    const isAebnUrl = group.url?.toLowerCase().includes('aebn.com');
+    
+    if (isAebnUrl) {
+      console.log('🎬 Detected AEBN URL, using simple creation flow');
+      setCreatingGroups(prev => new Set(prev).add(group.name));
+      
+      try {
+        // For AEBN, just create with the name and URL (no need to fetch full details)
+        const createResponse = await fetch(`${config.apiBaseUrl}/api/stash/groups/create`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            name: group.name,
+            urls: [group.url]
+          })
+        });
+
+        const createResult = await createResponse.json();
+
+        if (createResult.success) {
+          const newGroupId = createResult.data.group.id;
+          
+          // Update scrapeData to move from unmatched to matched
+          setScrapeData(prev => ({
+            ...prev,
+            matched: {
+              ...prev.matched,
+              groups: [
+                ...(prev.matched.groups || []),
+                {
+                  id: newGroupId,
+                  name: group.name,
+                  matchedVia: 'created',
+                  url: group.url
+                }
+              ]
+            },
+            unmatched: {
+              ...prev.unmatched,
+              groups: prev.unmatched.groups?.filter(g => g.name !== group.name) || []
+            }
+          }));
+
+          alert(`✅ Movie "${group.name}" created successfully!`);
+        } else {
+          alert(`Failed to create movie: ${createResult.error || 'Unknown error'}`);
+        }
+      } catch (error) {
+        console.error('Error creating AEBN movie:', error);
+        alert('Failed to create movie');
+      } finally {
+        setCreatingGroups(prev => {
+          const newSet = new Set(prev);
+          newSet.delete(group.name);
+          return newSet;
+        });
+      }
+      return; // Exit early for AEBN
+    }
+
     setCreatingGroups(prev => new Set(prev).add(group.name));
 
     try {
-      // First, fetch full movie details from GEVI
+      // For non-AEBN (GEVI), fetch full movie details
       console.log('🎬 Fetching movie details from:', group.url);
       const movieResponse = await fetch('/api/stash/gevi/movie', {
         method: 'POST',
@@ -775,12 +1145,18 @@ export default function SceneDetail() {
         studioId = scrapeData.matched.studio.id;
       }
 
-      // Convert duration from "120:00" format to minutes (120)
+      // Duration comes from GEVI scraper in seconds, convert to minutes for display
       let durationMinutes = null;
       if (movie.duration) {
-        const match = movie.duration.match(/^(\d+):/);
-        if (match) {
-          durationMinutes = parseInt(match[1]);
+        if (typeof movie.duration === 'number') {
+          // Already in seconds from scraper, convert to minutes
+          durationMinutes = Math.round(movie.duration / 60);
+        } else if (typeof movie.duration === 'string') {
+          // Handle string format "120:00" if ever provided
+          const match = movie.duration.match(/^(\d+):/);
+          if (match) {
+            durationMinutes = parseInt(match[1]);
+          }
         }
       }
 
@@ -904,6 +1280,34 @@ export default function SceneDetail() {
 
     // Show success message
     alert(`Performer swapped successfully!\n${result.swap.oldPerformer.name} → ${result.swap.newPerformer.name}\n\nTransferred ${result.swap.transferredTags.length} tags`);
+  };
+
+  // Handle toggling performer selection
+  const handleTogglePerformerSelection = (performerId) => {
+    console.log('🔄 Toggling performer selection:', performerId);
+    setSelectedPerformers(prev => {
+      const newSelection = new Set(prev);
+      if (newSelection.has(performerId)) {
+        console.log('  ❌ Removing from selection');
+        newSelection.delete(performerId);
+      } else {
+        console.log('  ✅ Adding to selection');
+        newSelection.add(performerId);
+      }
+      console.log('  📊 New selection size:', newSelection.size);
+      return newSelection;
+    });
+  };
+
+  // Handle merge success
+  const handleMergeSuccess = (result) => {
+    console.log('✅ Merge successful:', result);
+    // Reset selection state
+    setSelectedPerformers(new Set());
+    setPerformerSelectionMode(false);
+    setShowMergeModal(false);
+    // Reload scene data
+    window.location.reload();
   };
 
   const handleSaveGeviUrl = async () => {
@@ -1037,6 +1441,105 @@ export default function SceneDetail() {
     }
   };
 
+  const handleSyncFromStash = async () => {
+    if (!window.confirm('Sync this scene from Stash? This will update the local database with current Stash data.')) {
+      return;
+    }
+
+    setIsSyncing(true);
+    
+    try {
+      const response = await fetch(`${config.apiBaseUrl}/api/stash/scenes/${id}/sync`, {
+        method: 'POST'
+      });
+
+      const result = await response.json();
+      
+      if (result.success) {
+        alert('✅ Scene synced successfully from Stash!');
+        // Reload the page to show updated data
+        window.location.reload();
+      } else {
+        alert(`Failed to sync scene: ${result.error || 'Unknown error'}`);
+      }
+    } catch (error) {
+      console.error('Error syncing scene:', error);
+      alert('Failed to sync scene from Stash');
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
+  // Open URL editor modal
+  const handleOpenUrlEditor = () => {
+    try {
+      const urls = data.episodeUrls ? 
+        (typeof data.episodeUrls === 'string' ? JSON.parse(data.episodeUrls) : data.episodeUrls) : [];
+      setEditingUrls(Array.isArray(urls) ? [...urls] : []);
+    } catch (e) {
+      console.error('Error parsing episodeUrls:', e);
+      setEditingUrls([]);
+    }
+    setShowUrlEditorModal(true);
+  };
+
+  // Add new URL to the list
+  const handleAddUrl = () => {
+    setEditingUrls([...editingUrls, '']);
+  };
+
+  // Update URL at specific index
+  const handleUpdateUrl = (index, value) => {
+    const newUrls = [...editingUrls];
+    newUrls[index] = value;
+    setEditingUrls(newUrls);
+  };
+
+  // Remove URL at specific index
+  const handleRemoveUrl = (index) => {
+    const newUrls = editingUrls.filter((_, i) => i !== index);
+    setEditingUrls(newUrls);
+  };
+
+  // Save URLs to database and Stash
+  const handleSaveUrls = async () => {
+    setIsSavingUrls(true);
+    
+    try {
+      // Filter out empty URLs
+      const validUrls = editingUrls.filter(url => url.trim() !== '');
+      
+      const response = await fetch(`${config.apiBaseUrl}/api/stash/scenes/${id}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          episodeUrls: validUrls
+        })
+      });
+
+      const result = await response.json();
+      
+      if (result.success) {
+        // Update local state
+        setData(prevData => ({
+          ...prevData,
+          episodeUrls: validUrls
+        }));
+        setShowUrlEditorModal(false);
+        alert('✅ URLs saved successfully!');
+      } else {
+        alert(`Failed to save URLs: ${result.error || 'Unknown error'}`);
+      }
+    } catch (error) {
+      console.error('Error saving URLs:', error);
+      alert('Failed to save URLs');
+    } finally {
+      setIsSavingUrls(false);
+    }
+  };
+
   if (loading) {
     return (
       <div className="page pad scene-detail">
@@ -1109,6 +1612,7 @@ export default function SceneDetail() {
               <button 
                 onClick={() => {
                   setShowScrapeModal(true);
+                  setSelectedScraper(null); // GEVI scraper
                   // Auto-populate with previously saved GEVI URL if available
                   setScrapeUrl(data?.geviUrl || '');
                 }}
@@ -1119,6 +1623,41 @@ export default function SceneDetail() {
               </button>
             </>
           )}
+
+          {/* Dynamic scraper buttons based on available scrapers */}
+          {availableScrapers.map((scraper, index) => {
+            // Extract domain from URL for display
+            let urlDisplay = '';
+            try {
+              const urlObj = new URL(scraper.url);
+              urlDisplay = urlObj.hostname.replace('www.', '');
+            } catch (e) {
+              urlDisplay = scraper.url;
+            }
+            
+            return (
+              <button
+                key={`${scraper.name}-${index}`}
+                onClick={() => {
+                  setShowScrapeModal(true);
+                  setSelectedScraper(scraper);
+                  setScrapeUrl(scraper.url || '');
+                }}
+                className="scrape-gevi-button"
+                title={`Scrape metadata from ${scraper.url}`}
+                style={{
+                  background: '#10b981', // Green for other scrapers
+                }}
+              >
+                🌐 Scrape {scraper.siteName}
+                {availableScrapers.filter(s => s.siteName === scraper.siteName).length > 1 && (
+                  <span style={{ fontSize: '11px', opacity: 0.8, marginLeft: '4px' }}>
+                    ({urlDisplay})
+                  </span>
+                )}
+              </button>
+            );
+          })}
 
           <button 
             onClick={() => {
@@ -1150,6 +1689,19 @@ export default function SceneDetail() {
               🎭 View in Stash
             </button>
           )}
+
+          <button
+            onClick={handleSyncFromStash}
+            className="sync-stash-button"
+            title="Sync this scene from Stash"
+            disabled={isSyncing}
+            style={{
+              background: isSyncing ? '#9ca3af' : '#10b981',
+              cursor: isSyncing ? 'not-allowed' : 'pointer'
+            }}
+          >
+            {isSyncing ? '⏳ Syncing...' : '🔄 Sync from Stash'}
+          </button>
 
           <button
             onClick={() => setShowDeleteModal(true)}
@@ -1212,14 +1764,184 @@ export default function SceneDetail() {
           </div>
         )}
 
+        {/* Episode URLs Section */}
+        <div className="card">
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+            <h3 style={{ margin: 0 }}>
+              🔗 Episode URLs {data.episodeUrls && (() => {
+                try {
+                  const urls = typeof data.episodeUrls === 'string' ? JSON.parse(data.episodeUrls) : data.episodeUrls;
+                  return Array.isArray(urls) ? `(${urls.length})` : '(0)';
+                } catch (e) {
+                  return '(0)';
+                }
+              })()}
+            </h3>
+            <button
+              onClick={handleOpenUrlEditor}
+              style={{
+                padding: '6px 12px',
+                background: '#6366f1',
+                color: 'white',
+                border: 'none',
+                borderRadius: '4px',
+                cursor: 'pointer',
+                fontSize: '13px',
+                fontWeight: '500'
+              }}
+            >
+              ✏️ Edit URLs
+            </button>
+          </div>
+          
+          {data.episodeUrls && (() => {
+            try {
+              const urls = typeof data.episodeUrls === 'string' ? JSON.parse(data.episodeUrls) : data.episodeUrls;
+              if (Array.isArray(urls) && urls.length > 0) {
+                return (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                    {urls.map((urlItem, index) => {
+                      // Handle both string format and {url, label} object format
+                      const urlString = typeof urlItem === 'string' ? urlItem : urlItem?.url;
+                      const label = typeof urlItem === 'object' && urlItem?.label ? urlItem.label : null;
+                      
+                      return (
+                        <div key={index} style={{ 
+                          display: 'flex', 
+                          alignItems: 'center', 
+                          gap: '8px',
+                          padding: '8px',
+                          background: '#f9fafb',
+                          borderRadius: '4px'
+                        }}>
+                          <span style={{ 
+                            fontSize: '13px', 
+                            color: '#6b7280',
+                            fontFamily: 'monospace',
+                            flex: 1,
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                            whiteSpace: 'nowrap'
+                          }}>
+                            {label ? `${label}: ${urlString}` : urlString}
+                          </span>
+                          <a
+                            href={urlString}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                          style={{
+                            padding: '4px 12px',
+                            background: '#6366f1',
+                            color: 'white',
+                            borderRadius: '4px',
+                            textDecoration: 'none',
+                            fontSize: '12px',
+                            whiteSpace: 'nowrap'
+                          }}
+                        >
+                          Open
+                        </a>
+                      </div>
+                      );
+                    })}
+                  </div>
+                );
+              } else {
+                return (
+                  <p style={{ color: '#6b7280', fontSize: '14px', fontStyle: 'italic' }}>
+                    No URLs added yet. Click "Edit URLs" to add some.
+                  </p>
+                );
+              }
+            } catch (e) {
+              console.error('Error parsing episodeUrls:', e);
+              return (
+                <p style={{ color: '#ef4444', fontSize: '14px' }}>
+                  Error loading URLs
+                </p>
+              );
+            }
+          })()}
+        </div>
+
         {/* Performers Section */}
-        {data.performers && data.performers.length > 0 && (
-          <div className="card">
-            <h3>👥 Performers ({data.performers.length})</h3>
+        <div className="card">
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+            <h3 style={{ margin: 0 }}>👥 Performers ({data.performers?.length || 0})</h3>
+            <div style={{ display: 'flex', gap: '8px' }}>
+              <button
+                onClick={() => setShowAddPerformerModal(true)}
+                style={{
+                  padding: '6px 12px',
+                  background: '#10b981',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '6px',
+                  fontSize: '14px',
+                  fontWeight: '500',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px'
+                }}
+              >
+                ➕ Add Performer
+              </button>
+              {data.performers?.length > 0 && (
+                <>
+                  {selectedPerformers.size > 1 && (
+                    <button
+                      onClick={() => setShowMergeModal(true)}
+                      style={{
+                        padding: '6px 12px',
+                        background: '#f59e0b',
+                        color: 'white',
+                        border: 'none',
+                        borderRadius: '6px',
+                        fontSize: '14px',
+                        fontWeight: '500',
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '6px'
+                      }}
+                    >
+                      🔀 Merge {selectedPerformers.size} Performers
+                    </button>
+                  )}
+                  <button
+                    onClick={() => {
+                      console.log('🔘 Selection mode toggled. Current:', performerSelectionMode, '→ New:', !performerSelectionMode);
+                      setPerformerSelectionMode(!performerSelectionMode);
+                      if (performerSelectionMode) {
+                        setSelectedPerformers(new Set());
+                        console.log('  🗑️ Cleared selections');
+                      }
+                    }}
+                    style={{
+                      padding: '6px 12px',
+                      background: performerSelectionMode ? '#ef4444' : '#6366f1',
+                      color: 'white',
+                      border: 'none',
+                      borderRadius: '6px',
+                      fontSize: '14px',
+                      fontWeight: '500',
+                      cursor: 'pointer'
+                    }}
+                  >
+                    {performerSelectionMode ? '✕ Cancel' : '☑ Select'}
+                  </button>
+                </>
+              )}
+            </div>
+          </div>
+          
+          {data.performers && data.performers.length > 0 ? (
             <div className="performers-grid">
               {data.performers.map(performer => {
                 const performerData = performer.performer || performer;
                 const isHovering = hoveringPerformer === performerData.id;
+                const isSelected = selectedPerformers.has(performerData.id);
                 return (
                   <div
                     key={performerData.id}
@@ -1228,6 +1950,13 @@ export default function SceneDetail() {
                     onMouseEnter={() => setHoveringPerformer(performerData.id)}
                     onMouseLeave={() => setHoveringPerformer(null)}
                   >
+                    {performerSelectionMode && (
+                      <PerformerCheckboxOverlay
+                        performerId={performerData.id}
+                        isSelected={isSelected}
+                        onToggle={handleTogglePerformerSelection}
+                      />
+                    )}
                     <button
                       className="performer-swap-btn"
                       onClick={(e) => {
@@ -1304,8 +2033,17 @@ export default function SceneDetail() {
                     </button>
                     <div
                       className="clickable"
-                      onClick={(e) => handlePerformerClick(e, performer)}
-                      style={{ cursor: 'pointer', width: '100%', height: '100%' }}
+                      onClick={(e) => {
+                        if (!performerSelectionMode) {
+                          handlePerformerClick(e, performer);
+                        }
+                      }}
+                      style={{ 
+                        cursor: performerSelectionMode ? 'default' : 'pointer', 
+                        width: '100%', 
+                        height: '100%',
+                        pointerEvents: performerSelectionMode ? 'none' : 'auto'
+                      }}
                     >
                       {performerData.image ? (
                         <div className="performer-thumbnail-image">
@@ -1324,8 +2062,24 @@ export default function SceneDetail() {
                 );
               })}
             </div>
-          </div>
-        )}
+          ) : (
+            <div style={{
+              padding: '40px',
+              textAlign: 'center',
+              color: '#666',
+              background: '#f9f9f9',
+              borderRadius: '8px'
+            }}>
+              <div style={{ fontSize: '48px', marginBottom: '16px' }}>👥</div>
+              <div style={{ fontSize: '16px', marginBottom: '8px', fontWeight: '500' }}>
+                No performers in this scene
+              </div>
+              <div style={{ fontSize: '14px', color: '#999' }}>
+                Click "Add Performer" above to add performers to this scene
+              </div>
+            </div>
+          )}
+        </div>
 
         {/* Groups Section */}
         {data.groups && data.groups.length > 0 && (
@@ -1619,7 +2373,10 @@ export default function SceneDetail() {
                       );
                     }
                     
-                    const isUnmatched = parseData.unmatched.performers.includes(performer);
+                    const isUnmatched = parseData.unmatched.performers.some(p => {
+                      const pName = typeof p === 'string' ? p : p.name;
+                      return pName === performer;
+                    });
                     
                     const hasAlternatives = matched && matched.alternatives && matched.alternatives.length > 0;
                     
@@ -1651,7 +2408,9 @@ export default function SceneDetail() {
                               <option value="">Switch to alternative...</option>
                               {matched.alternatives.map((alt, altIndex) => (
                                 <option key={altIndex} value={alt.name}>
-                                  {alt.name} {alt.matchedVia === 'alias' && alt.matchedAlias ? `(via: ${alt.matchedAlias})` : ''}
+                                  {alt.name}
+                                  {alt.disambiguation ? ` (${alt.disambiguation})` : ''}
+                                  {alt.matchedVia === 'alias' && alt.matchedAlias ? ` (via: ${alt.matchedAlias})` : ''}
                                 </option>
                               ))}
                             </select>
@@ -1661,6 +2420,11 @@ export default function SceneDetail() {
                           {matched && (
                             <span className="match-status matched">
                               ✓ {matched.name}
+                              {matched.disambiguation && (
+                                <span style={{ color: '#6b7280', marginLeft: '0.25rem', fontSize: '0.875rem' }}>
+                                  ({matched.disambiguation})
+                                </span>
+                              )}
                               {matched.matchedVia === 'alias' && matched.matchedAlias && (
                                 <span className="alias-info"> (via alias: {matched.matchedAlias})</span>
                               )}
@@ -1713,14 +2477,14 @@ export default function SceneDetail() {
         </div>
       )}
 
-      {/* Scrape GEVI URL Input Modal */}
+      {/* Scrape URL Input Modal (Generic for all scrapers) */}
       {showScrapeModal && (
         <div className="modal-overlay" onClick={() => setShowScrapeModal(false)}>
           <div className="modal-content scrape-url-modal" onClick={(e) => e.stopPropagation()}>
-            <h3>🌐 Scrape GEVI Metadata</h3>
+            <h3>🌐 Scrape {selectedScraper ? selectedScraper.siteName : 'GEVI'} Metadata</h3>
             
             <div className="scrape-url-input">
-              <label>GEVI Episode URL:</label>
+              <label>{selectedScraper ? selectedScraper.siteName : 'GEVI'} Episode URL:</label>
               <input
                 type="text"
                 value={scrapeUrl}
@@ -1729,6 +2493,27 @@ export default function SceneDetail() {
                 placeholder="https://gayeroticvideoindex.com/episode/12345"
                 disabled={isScraping || isSearching}
               />
+              
+              {/* AEBN Scene Number Input - only show for AEBN scraper */}
+              {selectedScraper?.siteName === 'AEBN' && (
+                <div style={{ marginTop: '10px' }}>
+                  <label>Scene Number (optional):</label>
+                  <input
+                    type="number"
+                    value={aebnSceneNumber}
+                    onChange={(e) => setAebnSceneNumber(e.target.value)}
+                    className="url-input"
+                    placeholder="e.g., 1, 2, 3..."
+                    min="1"
+                    disabled={isScraping || isSearching}
+                    style={{ width: '150px' }}
+                  />
+                  <p className="help-text" style={{ fontSize: '12px', color: '#666', marginTop: '5px' }}>
+                    If you know the scene number, enter it here to scrape that specific scene directly without performer matching
+                  </p>
+                </div>
+              )}
+              
               <p className="help-text">
                 Enter the GEVI episode URL to extract metadata, or use Search to find the scene by performers
               </p>
@@ -2024,19 +2809,266 @@ export default function SceneDetail() {
                 </div>
               )}
 
+              {/* Image Selection */}
+              <div className="parse-field">
+                <label>Cover Image:</label>
+                <div style={{ display: 'flex', gap: '10px' }}>
+                  {/* Existing Image */}
+                  {data?.paths?.screenshot && (
+                    <div 
+                      onClick={() => setFieldSelections(prev => ({ ...prev, image: 'existing' }))}
+                      style={{
+                        flex: 1,
+                        padding: '10px',
+                        border: fieldSelections.image === 'existing' ? '2px solid #10b981' : '1px solid #d1d5db',
+                        borderRadius: '6px',
+                        cursor: 'pointer',
+                        background: fieldSelections.image === 'existing' ? '#d1fae5' : '#f9fafb',
+                        transition: 'all 0.2s'
+                      }}
+                    >
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                        <span style={{ fontSize: '12px', fontWeight: '600', color: '#6b7280' }}>EXISTING</span>
+                        {fieldSelections.image === 'existing' && <span style={{ color: '#10b981', fontSize: '18px' }}>✓</span>}
+                      </div>
+                      <img 
+                        src={`${config.stashUrl}${data.paths.screenshot}`}
+                        alt="Existing"
+                        style={{ width: '100%', borderRadius: '4px' }}
+                      />
+                    </div>
+                  )}
+                  {/* Scraped Image */}
+                  {scrapeData.scraped.image && (
+                    <div 
+                      onClick={() => setFieldSelections(prev => ({ ...prev, image: 'scraped' }))}
+                      style={{
+                        flex: 1,
+                        padding: '10px',
+                        border: fieldSelections.image === 'scraped' ? '2px solid #10b981' : '1px solid #d1d5db',
+                        borderRadius: '6px',
+                        cursor: 'pointer',
+                        background: fieldSelections.image === 'scraped' ? '#d1fae5' : '#f9fafb',
+                        transition: 'all 0.2s'
+                      }}
+                    >
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                        <span style={{ fontSize: '12px', fontWeight: '600', color: '#6b7280' }}>SCRAPED</span>
+                        {fieldSelections.image === 'scraped' && <span style={{ color: '#10b981', fontSize: '18px' }}>✓</span>}
+                      </div>
+                      <img 
+                        src={scrapeData.scraped.image}
+                        alt="Scraped"
+                        style={{ width: '100%', borderRadius: '4px' }}
+                      />
+                    </div>
+                  )}
+                </div>
+              </div>
+
               {/* Title Field */}
               <div className="parse-field">
                 <label>Title:</label>
-                <input
-                  type="text"
-                  value={editedTitle}
-                  onChange={(e) => setEditedTitle(e.target.value)}
-                  className="parse-input"
-                  placeholder="Scene title"
-                />
+                <div style={{ display: 'flex', gap: '10px', flexDirection: 'column' }}>
+                  {/* Existing Title */}
+                  {data?.title && (
+                    <div 
+                      onClick={() => setFieldSelections(prev => ({ ...prev, title: 'existing' }))}
+                      style={{
+                        padding: '10px',
+                        border: fieldSelections.title === 'existing' ? '2px solid #10b981' : '1px solid #d1d5db',
+                        borderRadius: '6px',
+                        cursor: 'pointer',
+                        background: fieldSelections.title === 'existing' ? '#d1fae5' : '#f9fafb',
+                        transition: 'all 0.2s'
+                      }}
+                    >
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
+                        <span style={{ fontSize: '12px', fontWeight: '600', color: '#6b7280' }}>EXISTING</span>
+                        {fieldSelections.title === 'existing' && <span style={{ color: '#10b981', fontSize: '18px' }}>✓</span>}
+                      </div>
+                      <div style={{ fontSize: '14px', color: '#111827' }}>{data.title}</div>
+                    </div>
+                  )}
+                  {/* Scraped Title */}
+                  {scrapeData.scraped.title && (
+                    <div 
+                      onClick={() => setFieldSelections(prev => ({ ...prev, title: 'scraped' }))}
+                      style={{
+                        padding: '10px',
+                        border: fieldSelections.title === 'scraped' ? '2px solid #10b981' : '1px solid #d1d5db',
+                        borderRadius: '6px',
+                        cursor: 'pointer',
+                        background: fieldSelections.title === 'scraped' ? '#d1fae5' : '#f9fafb',
+                        transition: 'all 0.2s'
+                      }}
+                    >
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
+                        <span style={{ fontSize: '12px', fontWeight: '600', color: '#6b7280' }}>SCRAPED</span>
+                        {fieldSelections.title === 'scraped' && <span style={{ color: '#10b981', fontSize: '18px' }}>✓</span>}
+                      </div>
+                      <div style={{ fontSize: '14px', color: '#111827' }}>{scrapeData.scraped.title}</div>
+                    </div>
+                  )}
+                </div>
               </div>
 
-              {/* GEVI URL Field */}
+              {/* Studio Field */}
+              <div className="parse-field">
+                <label>Studio:</label>
+                <div style={{ display: 'flex', gap: '10px', flexDirection: 'column' }}>
+                  {/* Existing Studio */}
+                  {data?.studio?.name && (
+                    <div 
+                      onClick={() => setFieldSelections(prev => ({ ...prev, studio: 'existing' }))}
+                      style={{
+                        padding: '10px',
+                        border: fieldSelections.studio === 'existing' ? '2px solid #10b981' : '1px solid #d1d5db',
+                        borderRadius: '6px',
+                        cursor: 'pointer',
+                        background: fieldSelections.studio === 'existing' ? '#d1fae5' : '#f9fafb',
+                        transition: 'all 0.2s'
+                      }}
+                    >
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
+                        <span style={{ fontSize: '12px', fontWeight: '600', color: '#6b7280' }}>EXISTING</span>
+                        {fieldSelections.studio === 'existing' && <span style={{ color: '#10b981', fontSize: '18px' }}>✓</span>}
+                      </div>
+                      <div style={{ fontSize: '14px', color: '#111827' }}>{data.studio.name}</div>
+                    </div>
+                  )}
+                  {/* Scraped Studio */}
+                  {scrapeData.scraped.studio && (
+                    <div 
+                      onClick={() => setFieldSelections(prev => ({ ...prev, studio: 'scraped' }))}
+                      style={{
+                        padding: '10px',
+                        border: fieldSelections.studio === 'scraped' ? '2px solid #10b981' : '1px solid #d1d5db',
+                        borderRadius: '6px',
+                        cursor: 'pointer',
+                        background: fieldSelections.studio === 'scraped' ? '#d1fae5' : '#f9fafb',
+                        transition: 'all 0.2s'
+                      }}
+                    >
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
+                        <span style={{ fontSize: '12px', fontWeight: '600', color: '#6b7280' }}>SCRAPED</span>
+                        {fieldSelections.studio === 'scraped' && <span style={{ color: '#10b981', fontSize: '18px' }}>✓</span>}
+                      </div>
+                      <div style={{ fontSize: '14px', color: '#111827' }}>
+                        {scrapeData.scraped.studio}
+                        {scrapeData.matched.studio && (
+                          <span style={{ marginLeft: '8px', fontSize: '12px', color: '#10b981' }}>✓ Matched</span>
+                        )}
+                        {!scrapeData.matched.studio && (
+                          <span style={{ marginLeft: '8px', fontSize: '12px', color: '#f59e0b' }}>⚠️ Not matched</span>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Date Field */}
+              {(data?.date || scrapeData.scraped.date) && (
+                <div className="parse-field">
+                  <label>Date:</label>
+                  <div style={{ display: 'flex', gap: '10px' }}>
+                    {data?.date && (
+                      <div 
+                        onClick={() => setFieldSelections(prev => ({ ...prev, date: 'existing' }))}
+                        style={{
+                          flex: 1,
+                          padding: '10px',
+                          border: fieldSelections.date === 'existing' ? '2px solid #10b981' : '1px solid #d1d5db',
+                          borderRadius: '6px',
+                          cursor: 'pointer',
+                          background: fieldSelections.date === 'existing' ? '#d1fae5' : '#f9fafb',
+                          transition: 'all 0.2s'
+                        }}
+                      >
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
+                          <span style={{ fontSize: '12px', fontWeight: '600', color: '#6b7280' }}>EXISTING</span>
+                          {fieldSelections.date === 'existing' && <span style={{ color: '#10b981', fontSize: '18px' }}>✓</span>}
+                        </div>
+                        <div style={{ fontSize: '14px', color: '#111827' }}>{data.date}</div>
+                      </div>
+                    )}
+                    {scrapeData.scraped.date && (
+                      <div 
+                        onClick={() => setFieldSelections(prev => ({ ...prev, date: 'scraped' }))}
+                        style={{
+                          flex: 1,
+                          padding: '10px',
+                          border: fieldSelections.date === 'scraped' ? '2px solid #10b981' : '1px solid #d1d5db',
+                          borderRadius: '6px',
+                          cursor: 'pointer',
+                          background: fieldSelections.date === 'scraped' ? '#d1fae5' : '#f9fafb',
+                          transition: 'all 0.2s'
+                        }}
+                      >
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
+                          <span style={{ fontSize: '12px', fontWeight: '600', color: '#6b7280' }}>SCRAPED</span>
+                          {fieldSelections.date === 'scraped' && <span style={{ color: '#10b981', fontSize: '18px' }}>✓</span>}
+                        </div>
+                        <div style={{ fontSize: '14px', color: '#111827' }}>{scrapeData.scraped.date}</div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* Details Field */}
+              {(data?.details || scrapeData.scraped.details) && (
+                <div className="parse-field">
+                  <label>Details:</label>
+                  <div style={{ display: 'flex', gap: '10px', flexDirection: 'column' }}>
+                    {data?.details && (
+                      <div 
+                        onClick={() => setFieldSelections(prev => ({ ...prev, details: 'existing' }))}
+                        style={{
+                          padding: '10px',
+                          border: fieldSelections.details === 'existing' ? '2px solid #10b981' : '1px solid #d1d5db',
+                          borderRadius: '6px',
+                          cursor: 'pointer',
+                          background: fieldSelections.details === 'existing' ? '#d1fae5' : '#f9fafb',
+                          transition: 'all 0.2s',
+                          maxHeight: '150px',
+                          overflow: 'auto'
+                        }}
+                      >
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
+                          <span style={{ fontSize: '12px', fontWeight: '600', color: '#6b7280' }}>EXISTING</span>
+                          {fieldSelections.details === 'existing' && <span style={{ color: '#10b981', fontSize: '18px' }}>✓</span>}
+                        </div>
+                        <div style={{ fontSize: '13px', color: '#111827', whiteSpace: 'pre-wrap' }}>{data.details}</div>
+                      </div>
+                    )}
+                    {scrapeData.scraped.details && (
+                      <div 
+                        onClick={() => setFieldSelections(prev => ({ ...prev, details: 'scraped' }))}
+                        style={{
+                          padding: '10px',
+                          border: fieldSelections.details === 'scraped' ? '2px solid #10b981' : '1px solid #d1d5db',
+                          borderRadius: '6px',
+                          cursor: 'pointer',
+                          background: fieldSelections.details === 'scraped' ? '#d1fae5' : '#f9fafb',
+                          transition: 'all 0.2s',
+                          maxHeight: '150px',
+                          overflow: 'auto'
+                        }}
+                      >
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
+                          <span style={{ fontSize: '12px', fontWeight: '600', color: '#6b7280' }}>SCRAPED</span>
+                          {fieldSelections.details === 'scraped' && <span style={{ color: '#10b981', fontSize: '18px' }}>✓</span>}
+                        </div>
+                        <div style={{ fontSize: '13px', color: '#111827', whiteSpace: 'pre-wrap' }}>{scrapeData.scraped.details}</div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* GEVI URL Field - Read-only */}
               <div className="parse-field">
                 <label>GEVI URL:</label>
                 <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
@@ -2066,24 +3098,51 @@ export default function SceneDetail() {
                 </div>
               </div>
 
-              {/* Studio Field */}
-              <div className="parse-field">
-                <label>Studio:</label>
-                <div className="parse-field-with-status">
-                  <input
-                    type="text"
-                    value={editedStudio}
-                    onChange={(e) => setEditedStudio(e.target.value)}
-                    className="parse-input"
-                    placeholder="Studio name"
-                  />
-                  {scrapeData.matched.studio ? (
-                    <span className="match-status matched">✓ Matched: {scrapeData.matched.studio.name}</span>
-                  ) : scrapeData.scraped.studio ? (
-                    <span className="match-status unmatched">✗ Not found in database</span>
-                  ) : null}
+              {/* Episode URLs */}
+              {scrapeData.scraped.episodeUrls && scrapeData.scraped.episodeUrls.length > 0 && (
+                <div className="parse-field">
+                  <label>Episode URLs ({scrapeData.scraped.episodeUrls.length}):</label>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                    {scrapeData.scraped.episodeUrls.map((episodeUrl, index) => (
+                      <div key={index} style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                        <input
+                          type="text"
+                          value={episodeUrl}
+                          className="parse-input"
+                          readOnly
+                          style={{ flex: 1, background: '#f3f4f6', cursor: 'default', fontSize: '13px' }}
+                        />
+                        <a
+                          href={episodeUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          style={{
+                            padding: '6px 10px',
+                            background: '#6366f1',
+                            color: 'white',
+                            borderRadius: '4px',
+                            textDecoration: 'none',
+                            fontSize: '12px',
+                            whiteSpace: 'nowrap'
+                          }}
+                        >
+                          🔗
+                        </a>
+                      </div>
+                    ))}
+                  </div>
+                  <div style={{ 
+                    marginTop: '8px', 
+                    padding: '8px 12px', 
+                    background: '#dbeafe', 
+                    borderRadius: '4px',
+                    fontSize: '13px',
+                    color: '#1e40af'
+                  }}>
+                    ℹ️ These URLs will be added to the scene in Stash
+                  </div>
                 </div>
-              </div>
+              )}
 
               {/* Performers Field */}
               <div className="parse-field">
@@ -2103,6 +3162,11 @@ export default function SceneDetail() {
                         <div className="performer-input-wrapper">
                           <span className="performer-name">
                             ✓ {performer.name}
+                            {performer.disambiguation && (
+                              <span style={{ color: '#6b7280', marginLeft: '0.5rem', fontSize: '0.875rem' }}>
+                                ({performer.disambiguation})
+                              </span>
+                            )}
                             {actionCode && <span className="action-code" style={{ color: '#10b981', marginLeft: '0.5rem', fontSize: '0.875rem' }}>({actionCode})</span>}
                           </span>
                           <select
@@ -2117,6 +3181,16 @@ export default function SceneDetail() {
                                 if (isCreating) return;
                                 
                                 await handleCreatePerformer(performer.originalName);
+                                
+                                // Remove the incorrectly matched performer from the matched list
+                                setScrapeData(prev => ({
+                                  ...prev,
+                                  matched: {
+                                    ...prev.matched,
+                                    performers: prev.matched.performers.filter((_, i) => i !== index)
+                                  }
+                                }));
+                                
                                 // Reset the dropdown
                                 e.target.value = '';
                               } else {
@@ -2151,7 +3225,9 @@ export default function SceneDetail() {
                             {hasAlternatives && <option disabled>──────────</option>}
                             {hasAlternatives && performer.alternatives.map((alt, altIndex) => (
                               <option key={altIndex} value={alt.name}>
-                                Switch to: {alt.name} {alt.matchedVia === 'alias' && alt.matchedAlias ? `(via: ${alt.matchedAlias})` : ''}
+                                Switch to: {alt.name}
+                                {alt.disambiguation ? ` (${alt.disambiguation})` : ''}
+                                {alt.matchedVia === 'alias' && alt.matchedAlias ? ` (via: ${alt.matchedAlias})` : ''}
                               </option>
                             ))}
                           </select>
@@ -2165,7 +3241,10 @@ export default function SceneDetail() {
                       </div>
                     );
                   })}
-                  {scrapeData.unmatched.performers.map((performerName, index) => {
+                  {scrapeData.unmatched.performers.map((performer, index) => {
+                    // Handle both string and object formats
+                    const performerName = typeof performer === 'string' ? performer : performer.name;
+                    
                     // Find the corresponding scraped performer to get action code
                     const scrapedPerformer = scrapeData.scraped.performers.find(
                       sp => sp.name === performerName
@@ -2207,6 +3286,101 @@ export default function SceneDetail() {
                 </div>
               </div>
 
+              {/* Tags Field */}
+              {(scrapeData.matched.tags?.length > 0 || scrapeData.unmatched.tags?.length > 0) && (
+                <div className="parse-field">
+                  <label>Tags ({(scrapeData.matched.tags?.length || 0) + (scrapeData.unmatched.tags?.length || 0)}):</label>
+                  <div className="performers-list" style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+                    {/* Tags already on the scene */}
+                    {data?.tags?.map((tag, index) => (
+                      <div key={`existing-${index}`} style={{
+                        padding: '4px 10px',
+                        background: '#e5e7eb',
+                        color: '#374151',
+                        borderRadius: '12px',
+                        fontSize: '13px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '4px'
+                      }}>
+                        <span>📌</span>
+                        <span>{tag.name}</span>
+                        <span style={{ fontSize: '11px', color: '#6b7280' }}>(on scene)</span>
+                      </div>
+                    ))}
+                    
+                    {/* Matched tags from scrape */}
+                    {scrapeData.matched.tags?.map((tag, index) => (
+                      <div key={`matched-${index}`} style={{
+                        padding: '4px 10px',
+                        background: '#d1fae5',
+                        color: '#065f46',
+                        borderRadius: '12px',
+                        fontSize: '13px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '4px'
+                      }}>
+                        <span>✓</span>
+                        <span>{tag.name}</span>
+                      </div>
+                    ))}
+                    
+                    {/* Unmatched tags - can be created */}
+                    {scrapeData.unmatched.tags?.map((tag, index) => {
+                      const tagName = typeof tag === 'string' ? tag : tag.name;
+                      const isCreating = creatingTags.has(tagName);
+                      
+                      return (
+                        <div key={`unmatched-${index}`} style={{
+                          padding: '4px 10px',
+                          background: '#fef3c7',
+                          color: '#92400e',
+                          borderRadius: '12px',
+                          fontSize: '13px',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '6px',
+                          border: '1px dashed #f59e0b'
+                        }}>
+                          <span>✗</span>
+                          <span>{tagName}</span>
+                          <button
+                            onClick={() => handleCreateTag(tagName)}
+                            disabled={isCreating}
+                            style={{
+                              padding: '2px 8px',
+                              fontSize: '11px',
+                              background: '#10b981',
+                              color: 'white',
+                              border: 'none',
+                              borderRadius: '8px',
+                              cursor: isCreating ? 'not-allowed' : 'pointer',
+                              opacity: isCreating ? 0.5 : 1,
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: '2px'
+                            }}
+                          >
+                            {isCreating ? '⏳' : '➕'}
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                  <div style={{ 
+                    marginTop: '8px', 
+                    padding: '8px 12px', 
+                    background: '#f3f4f6', 
+                    borderRadius: '4px',
+                    fontSize: '12px',
+                    color: '#6b7280'
+                  }}>
+                    ℹ️ Tags with ✓ are in your database. Tags with ✗ are not - click ➕ to add them. Tags with 📌 are already on this scene.
+                  </div>
+                </div>
+              )}
+
               {/* Movies/Groups Field */}
               {(scrapeData.matched.groups?.length > 0 || scrapeData.unmatched.groups?.length > 0) && (
                 <div className="parse-field">
@@ -2214,6 +3388,8 @@ export default function SceneDetail() {
                   <div className="performers-list">
                     {scrapeData.matched.groups?.map((group, index) => {
                       const hasAlternatives = group.alternatives && group.alternatives.length > 0;
+                      
+                      const isCreatingMatched = creatingGroups.has(group.name);
                       
                       return (
                         <div key={index} className="performer-item matched">
@@ -2261,12 +3437,50 @@ export default function SceneDetail() {
                               </select>
                             )}
                           </div>
-                          <span className="match-label">
-                            (Matched{group.matchedVia === 'alias' && group.matchedAlias ? ` via alias: ${group.matchedAlias}` : ''})
-                            {hasAlternatives && (
-                              <span className="alternatives-count"> (+{group.alternatives.length} more)</span>
-                            )}
-                          </span>
+                          <div style={{ display: 'flex', gap: '8px', alignItems: 'center', marginTop: '8px' }}>
+                            <span className="match-label">
+                              (Matched{group.matchedVia === 'alias' && group.matchedAlias ? ` via alias: ${group.matchedAlias}` : ''})
+                              {hasAlternatives && (
+                                <span className="alternatives-count"> (+{group.alternatives.length} more)</span>
+                              )}
+                            </span>
+                            <button
+                              onClick={() => {
+                                // Check if this is an AEBN scrape (source contains 'aebn' or URL contains 'aebn.com')
+                                const isAebnScrape = scrapeData?.source?.toLowerCase().includes('aebn') || 
+                                                    scrapeData?.sourceUrl?.toLowerCase().includes('aebn.com') ||
+                                                    scrapeData?.scraped?.url?.toLowerCase().includes('aebn.com');
+                                
+                                console.log('🔍 [Create Movie Button] Checking scraper type:');
+                                console.log('   - source:', scrapeData?.source);
+                                console.log('   - sourceUrl:', scrapeData?.sourceUrl);
+                                console.log('   - scraped.url:', scrapeData?.scraped?.url);
+                                console.log('   - isAebnScrape:', isAebnScrape);
+                                
+                                if (isAebnScrape) {
+                                  console.log('   ✓ Using AEBN create flow');
+                                  handleCreateNewMovieFromAebn(group);
+                                } else {
+                                  console.log('   → Using GEVI create flow');
+                                  handleCreateGroup(group);
+                                }
+                              }}
+                              disabled={isCreatingMatched}
+                              style={{
+                                padding: '4px 12px',
+                                fontSize: '12px',
+                                background: '#f59e0b',
+                                color: 'white',
+                                border: 'none',
+                                borderRadius: '4px',
+                                cursor: isCreatingMatched ? 'not-allowed' : 'pointer',
+                                whiteSpace: 'nowrap',
+                                opacity: isCreatingMatched ? 0.5 : 1
+                              }}
+                            >
+                              {isCreatingMatched ? '⏳ Creating...' : '➕ Create New Movie'}
+                            </button>
+                          </div>
                         </div>
                       );
                     })}
@@ -2429,6 +3643,118 @@ export default function SceneDetail() {
         </div>
       )}
 
+      {/* URL Editor Modal */}
+      {showUrlEditorModal && (
+        <div className="modal-overlay" onClick={() => !isSavingUrls && setShowUrlEditorModal(false)}>
+          <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '700px', maxHeight: '80vh', overflow: 'auto' }}>
+            <h3>✏️ Edit Scene URLs</h3>
+            
+            <div style={{ marginBottom: '1.5rem' }}>
+              <p style={{ fontSize: '0.9rem', color: '#666', marginBottom: '1rem' }}>
+                Add or edit URLs for this scene. These URLs will be synced to Stash.
+              </p>
+              
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                {editingUrls.length === 0 ? (
+                  <p style={{ color: '#9ca3af', fontStyle: 'italic', textAlign: 'center', padding: '2rem' }}>
+                    No URLs yet. Click "Add URL" to get started.
+                  </p>
+                ) : (
+                  editingUrls.map((url, index) => (
+                    <div key={index} style={{ 
+                      display: 'flex', 
+                      gap: '8px', 
+                      alignItems: 'center',
+                      padding: '8px',
+                      background: '#f9fafb',
+                      borderRadius: '6px'
+                    }}>
+                      <span style={{ 
+                        color: '#6b7280', 
+                        fontSize: '13px', 
+                        fontWeight: '600',
+                        minWidth: '30px'
+                      }}>
+                        {index + 1}.
+                      </span>
+                      <input
+                        type="text"
+                        value={url}
+                        onChange={(e) => handleUpdateUrl(index, e.target.value)}
+                        placeholder="https://example.com/scene/..."
+                        disabled={isSavingUrls}
+                        style={{
+                          flex: 1,
+                          padding: '8px 12px',
+                          border: '1px solid #d1d5db',
+                          borderRadius: '4px',
+                          fontSize: '13px',
+                          fontFamily: 'monospace'
+                        }}
+                      />
+                      <button
+                        onClick={() => handleRemoveUrl(index)}
+                        disabled={isSavingUrls}
+                        style={{
+                          padding: '6px 12px',
+                          background: '#ef4444',
+                          color: 'white',
+                          border: 'none',
+                          borderRadius: '4px',
+                          cursor: isSavingUrls ? 'not-allowed' : 'pointer',
+                          fontSize: '13px',
+                          opacity: isSavingUrls ? 0.5 : 1
+                        }}
+                        title="Remove URL"
+                      >
+                        🗑️
+                      </button>
+                    </div>
+                  ))
+                )}
+              </div>
+              
+              <button
+                onClick={handleAddUrl}
+                disabled={isSavingUrls}
+                style={{
+                  marginTop: '12px',
+                  width: '100%',
+                  padding: '10px',
+                  background: '#10b981',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '6px',
+                  cursor: isSavingUrls ? 'not-allowed' : 'pointer',
+                  fontSize: '14px',
+                  fontWeight: '500',
+                  opacity: isSavingUrls ? 0.5 : 1
+                }}
+              >
+                ➕ Add URL
+              </button>
+            </div>
+
+            <div className="modal-actions">
+              <button 
+                className="btn-accept" 
+                onClick={handleSaveUrls}
+                disabled={isSavingUrls}
+              >
+                {isSavingUrls ? '⏳ Saving...' : '💾 Save URLs'}
+              </button>
+              <button 
+                className="btn-cancel" 
+                onClick={() => setShowUrlEditorModal(false)}
+                disabled={isSavingUrls}
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Delete Scene Confirmation Modal */}
       {showDeleteModal && (
         <div className="modal-overlay" onClick={() => !isDeleting && setShowDeleteModal(false)}>
@@ -2486,6 +3812,30 @@ export default function SceneDetail() {
         performer={performerToSwap}
         onSwapComplete={handleSwapComplete}
       />
+
+      {/* Add Performer Modal */}
+      <AddPerformerModal
+        isOpen={showAddPerformerModal}
+        onClose={() => setShowAddPerformerModal(false)}
+        sceneId={id}
+        existingPerformers={data?.performers?.map(p => p.performer || p) || []}
+        onAddComplete={(updatedScene) => {
+          console.log('✅ Performer added, refreshing scene data');
+          setData(updatedScene);
+          setShowAddPerformerModal(false);
+        }}
+      />
+
+      {/* Merge Performers Modal */}
+      {showMergeModal && (
+        <MergePerformersModal
+          performers={data.performers
+            .map(p => p.performer || p)
+            .filter(p => selectedPerformers.has(p.id))}
+          onClose={() => setShowMergeModal(false)}
+          onSuccess={handleMergeSuccess}
+        />
+      )}
     </div>
   );
 }

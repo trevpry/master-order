@@ -1,6 +1,7 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
 import { formatDate } from '../../../utils/stashUtils';
+import PerformerCheckboxOverlay from '../../../../../components/stash/PerformerCheckboxOverlay';
 
 const styles = {
   card: {
@@ -118,26 +119,26 @@ const styles = {
   },
 };
 
-export default function PerformerCard({ performer }) {
+export default function PerformerCard({ 
+  performer, 
+  selectionMode = false, 
+  isSelected = false, 
+  onToggleSelection 
+}) {
   const imageUrl = performer.image_path || performer.image;
   const sceneCount = performer.scene_count || performer.scenes?.length || 0;
   const tags = performer.tags || [];
 
-  return (
-    <Link 
-      to={`/media/stash/performer/${performer.id}`} 
-      style={styles.card}
-      className="performer-card"
-      onMouseEnter={(e) => {
-        e.currentTarget.style.transform = 'translateY(-4px)';
-        e.currentTarget.style.boxShadow = '0 4px 12px rgba(0, 0, 0, 0.15)';
-      }}
-      onMouseLeave={(e) => {
-        e.currentTarget.style.transform = 'translateY(0)';
-        e.currentTarget.style.boxShadow = 'none';
-      }}
-    >
+  const cardContent = (
+    <>
       <div style={styles.imageContainer}>
+        {selectionMode && (
+          <PerformerCheckboxOverlay
+            performerId={performer.id}
+            isSelected={isSelected}
+            onToggle={onToggleSelection}
+          />
+        )}
         {imageUrl ? (
           <>
             <img
@@ -231,6 +232,37 @@ export default function PerformerCard({ performer }) {
           </div>
         )}
       </div>
+    </>
+  );
+
+  // In selection mode, render as div instead of Link
+  if (selectionMode) {
+    return (
+      <div
+        style={styles.card}
+        className="performer-card"
+      >
+        {cardContent}
+      </div>
+    );
+  }
+
+  // Normal mode: render as Link
+  return (
+    <Link 
+      to={`/media/stash/performer/${performer.id}`} 
+      style={styles.card}
+      className="performer-card"
+      onMouseEnter={(e) => {
+        e.currentTarget.style.transform = 'translateY(-4px)';
+        e.currentTarget.style.boxShadow = '0 4px 12px rgba(0, 0, 0, 0.15)';
+      }}
+      onMouseLeave={(e) => {
+        e.currentTarget.style.transform = 'translateY(0)';
+        e.currentTarget.style.boxShadow = 'none';
+      }}
+    >
+      {cardContent}
     </Link>
   );
 }

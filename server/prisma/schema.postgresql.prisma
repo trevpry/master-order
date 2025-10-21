@@ -791,6 +791,8 @@ model StashScene {
   height              Int?
   frameRate           Float?
   codec               String?
+  videoCodec          String?
+  audioCodec          String?
   userRating          Float?
   favorite            Boolean                  @default(false)
   watchedComplete     Boolean                  @default(false)
@@ -808,6 +810,7 @@ model StashScene {
   moodScore           Float?
   actionIntensity     Float?
   geviUrl             String?
+  episodeUrls         String?                  // JSON array of episode URLs from GEVI
   clips               StashClip[]
   markers             StashMarker[]
   studioObject        StashStudio?             @relation(fields: [studioId], references: [id])

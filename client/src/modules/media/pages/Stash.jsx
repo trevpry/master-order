@@ -7,6 +7,7 @@ import StashStatsTab from './stash/components/StashStatsTab';
 import StashSlideshowModal from './stash/components/StashSlideshowModal';
 import StashContentRenderers from './stash/components/StashContentRenderers';
 import StashModals from './stash/components/StashModals';
+import MergePerformersModal from '../../../components/stash/MergePerformersModal';
 import { getSceneDisplayTitle, getSceneImageUrl, formatDate, formatDuration, formatTime, isVideoFormatSupported } from '../utils/stashUtils';
 import './Stash.css';
 import config from '../../../config';
@@ -92,6 +93,11 @@ export default function Stash() {
   const [selectedPerformer, setSelectedPerformer] = useState(null);
   const [deleteSceneId, setDeleteSceneId] = useState(null);
 
+  // Performer Merge State
+  const [performerSelectionMode, setPerformerSelectionMode] = useState(false);
+  const [selectedPerformers, setSelectedPerformers] = useState(new Set());
+  const [showMergeModal, setShowMergeModal] = useState(false);
+
   // Mixed Mode State
   const [mixedMode, setMixedMode] = useState(false);
 
@@ -99,6 +105,19 @@ export default function Stash() {
   const [upNextData, setUpNextData] = useState(null);
   const [upNextScene, setUpNextScene] = useState(null);
   const [stats, setStats] = useState({ loading: false, error: null });
+
+  // Handle performer selection toggle
+  const handleTogglePerformerSelection = useCallback((performerId) => {
+    setSelectedPerformers(prev => {
+      const newSelection = new Set(prev);
+      if (newSelection.has(performerId)) {
+        newSelection.delete(performerId);
+      } else {
+        newSelection.add(performerId);
+      }
+      return newSelection;
+    });
+  }, []);
 
   // Initialize content renderers
   const contentRenderers = StashContentRenderers({
@@ -108,7 +127,10 @@ export default function Stash() {
     setSelectedPerformer,
     setDeleteSceneId,
     setVideoPlayer,
-    setAutoSkipRetries
+    setAutoSkipRetries,
+    performerSelectionMode,
+    selectedPerformers,
+    onTogglePerformerSelection: handleTogglePerformerSelection
   });
 
   // API Functions
@@ -267,6 +289,17 @@ export default function Stash() {
       setIsLoading(false);
     }
   }, [connectionStatus.connected, sortBy, sortDirection, searchQuery, watchStatusFilter]);
+
+  // Handle merge success (defined after loadData to avoid initialization error)
+  const handleMergeSuccess = useCallback((result) => {
+    console.log('✅ Merge successful:', result);
+    // Reset selection state
+    setSelectedPerformers(new Set());
+    setPerformerSelectionMode(false);
+    setShowMergeModal(false);
+    // Reload performers data
+    loadData('performers');
+  }, [loadData]);
 
   // Load all library tabs data
   const loadAllLibraryData = useCallback(async () => {
@@ -969,6 +1002,10 @@ export default function Stash() {
                 removeTagFilter={removeTagFilter}
                 clearTagFilter={clearTagFilter}
                 clipTags={clipTags}
+                performerSelectionMode={performerSelectionMode}
+                setPerformerSelectionMode={setPerformerSelectionMode}
+                selectedPerformers={selectedPerformers}
+                setShowMergeModal={setShowMergeModal}
               />
             )}
 
@@ -1010,6 +1047,15 @@ export default function Stash() {
         handleDeleteScene={handleDeleteScene}
         connectionStatus={connectionStatus}
       />
+
+      {/* Merge Performers Modal */}
+      {showMergeModal && selectedPerformers.size >= 2 && (
+        <MergePerformersModal
+          performers={data.performers.filter(p => selectedPerformers.has(p.id))}
+          onClose={() => setShowMergeModal(false)}
+          onSuccess={handleMergeSuccess}
+        />
+      )}
     </div>
   );
 }

@@ -196,11 +196,20 @@ class PerformerSwapService {
 
     const performers = await this.prisma.stashPerformer.findMany({
       where: {
-        name: {
-          contains: query
-          // Note: 'mode: insensitive' not supported in SQLite
-          // Search is case-sensitive in SQLite, case-insensitive in PostgreSQL
-        }
+        OR: [
+          {
+            name: {
+              contains: query
+              // Note: 'mode: insensitive' not supported in SQLite
+              // Search is case-sensitive in SQLite, case-insensitive in PostgreSQL
+            }
+          },
+          {
+            alias: {
+              contains: query
+            }
+          }
+        ]
       },
       take: limit,
       orderBy: {
@@ -209,11 +218,24 @@ class PerformerSwapService {
       select: {
         id: true,
         name: true,
-        image: true
+        alias: true,
+        image: true,
+        _count: {
+          select: {
+            scenes: true
+          }
+        }
       }
     });
 
-    return performers;
+    // Add scene_count to match expected format and improve display
+    return performers.map(p => ({
+      id: p.id,
+      name: p.name,
+      alias: p.alias,
+      image: p.image,
+      scene_count: p._count?.scenes || 0
+    }));
   }
 
   /**
