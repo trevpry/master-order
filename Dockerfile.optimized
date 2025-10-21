@@ -1,0 +1,175 @@
+# Multi-stage build for Master Order application - OPTIMIZED FOR LAYER CACHING
+# This Dockerfile is optimized to minimize rebuild time by:
+# 1. Copying package files first (dependencies change less often)
+# 2. Installing dependencies in separate layers
+# 3. Copying source code last (changes most frequently)
+# 4. Using BuildKit cache mounts for npm cache
+
+FROM node:20-alpine AS build
+
+# Install dependencies needed for sqlite3 and other native modules
+RUN apk add --no-cache python3 make g++
+
+# Set working directory
+WORKDIR /app
+
+# ==========================================
+# LAYER 1: Copy package files only
+# This layer only invalidates when dependencies change
+# ==========================================
+COPY package*.json ./
+COPY server/package*.json ./server/
+COPY client/package*.json ./client/
+
+# ==========================================
+# LAYER 2: Install root dependencies
+# Uses npm cache mount for faster installs
+# ==========================================
+RUN --mount=type=cache,target=/root/.npm \
+    npm ci
+
+# ==========================================
+# LAYER 3: Install server dependencies
+# ==========================================
+WORKDIR /app/server
+RUN --mount=type=cache,target=/root/.npm \
+    npm ci
+
+# ==========================================
+# LAYER 4: Install client dependencies
+# ==========================================
+WORKDIR /app/client
+RUN --mount=type=cache,target=/root/.npm \
+    npm ci
+
+# ==========================================
+# LAYER 5: Copy Prisma schema files
+# These change less frequently than source code
+# ==========================================
+WORKDIR /app
+COPY server/prisma ./server/prisma
+
+# ==========================================
+# LAYER 6: Setup Prisma for production
+# Note: This only sets up the schema files, no database connection during build
+# ==========================================
+WORKDIR /app/server
+ENV DATABASE_URL="postgresql://placeholder:placeholder@localhost:5432/placeholder"
+RUN npm run build:production
+
+# ==========================================
+# LAYER 7: Copy server source code
+# This changes frequently but won't invalidate earlier layers
+# ==========================================
+WORKDIR /app
+COPY server ./server
+
+# ==========================================
+# LAYER 8: Copy client source code
+# ==========================================
+COPY client/src ./client/src
+COPY client/public ./client/public
+COPY client/index.html ./client/index.html
+COPY client/vite.config.js ./client/vite.config.js
+COPY client/tailwind.config.js ./client/tailwind.config.js
+COPY client/postcss.config.js ./client/postcss.config.js
+
+# ==========================================
+# LAYER 9: Build client
+# ==========================================
+WORKDIR /app/client
+RUN npm run build
+
+# ==========================================
+# LAYER 10: Copy remaining files
+# ==========================================
+WORKDIR /app
+COPY start.js ./
+COPY docker-entrypoint.sh ./
+
+# Remove any .env files that might override Docker environment variables
+RUN find . -name ".env*" -type f -delete || true
+
+# ==========================================
+# Production stage
+# ==========================================
+FROM node:20-alpine AS production
+
+# Install runtime dependencies including Chrome for Puppeteer
+RUN apk add --no-cache \
+    python3 \
+    make \
+    g++ \
+    sqlite \
+    curl \
+    su-exec \
+    postgresql-client \
+    netcat-openbsd \
+    chromium \
+    nss \
+    freetype \
+    harfbuzz \
+    ca-certificates \
+    ttf-freefont \
+    && rm -rf /var/cache/apk/*
+
+# Create app directory
+WORKDIR /app
+
+# Copy package files first for better caching
+COPY --from=build /app/package*.json ./
+COPY --from=build /app/server/package*.json ./server/
+
+# Install production dependencies
+RUN --mount=type=cache,target=/root/.npm \
+    npm ci --omit=dev
+WORKDIR /app/server
+RUN --mount=type=cache,target=/root/.npm \
+    npm ci --omit=dev
+
+# Create non-root user
+WORKDIR /app
+RUN addgroup -g 1001 -S nodejs && \
+    adduser -S app -u 1001
+
+# Copy built application
+COPY --from=build --chown=app:nodejs /app/server ./server
+COPY --from=build --chown=app:nodejs /app/client/dist ./client/dist
+COPY --from=build --chown=app:nodejs /app/package*.json ./
+COPY --from=build --chown=app:nodejs /app/start.js ./start.js
+COPY --chown=app:nodejs ./docker-entrypoint.sh ./docker-entrypoint.sh
+
+# Copy migration recovery script
+COPY --from=build --chown=app:nodejs /app/server/fix-failed-migration.js ./server/fix-failed-migration.js
+
+# Ensure Prisma files are copied (schema and migrations)
+COPY --from=build --chown=app:nodejs /app/server/prisma ./server/prisma
+
+# Make entrypoint executable
+RUN chmod +x ./docker-entrypoint.sh
+
+# Create data directories with proper permissions
+RUN mkdir -p /app/data /app/server/artwork-cache /app/server/temp-uploads /app/server/guidebooks /app/logs && \
+    chown -R app:nodejs /app/data /app/server/artwork-cache /app/server/temp-uploads /app/server/guidebooks /app/logs && \
+    chmod -R 755 /app/data /app/server/artwork-cache /app/server/temp-uploads /app/server/guidebooks /app/logs
+
+# Set up environment
+ENV NODE_ENV=production
+ENV PORT=3001
+# Set Puppeteer to use system-installed Chromium
+ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
+ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium-browser
+
+# Expose port
+EXPOSE 3001
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
+    CMD curl -f http://localhost:3001/api/health || exit 1
+
+# Don't switch to non-root user yet - let entrypoint handle permissions
+# USER app
+
+# Start the application (entrypoint will handle user switching)
+ENTRYPOINT ["./docker-entrypoint.sh"]
+CMD ["npm", "start"]
