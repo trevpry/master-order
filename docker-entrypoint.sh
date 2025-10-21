@@ -70,6 +70,25 @@ fi
 # Change to server directory for consistency
 cd /app/server
 
+echo "[INFO] Setting up correct Prisma schema for runtime environment..."
+echo "[DEBUG] Current DATABASE_URL: $DATABASE_URL"
+
+# CRITICAL: Run setup-schema.js to select the correct schema based on runtime DATABASE_URL
+# This must happen BEFORE any Prisma operations
+if [ -f "/app/server/setup-schema.js" ]; then
+    echo "[INFO] Running schema setup script..."
+    node /app/server/setup-schema.js
+    if [ $? -eq 0 ]; then
+        echo "[SUCCESS] Schema setup completed"
+    else
+        echo "[ERROR] Schema setup failed"
+        exit 1
+    fi
+else
+    echo "[ERROR] setup-schema.js not found!"
+    exit 1
+fi
+
 echo "[INFO] Setting correct DATABASE_URL for runtime..."
 
 # Debug: Show final DATABASE_URL after schema setup
