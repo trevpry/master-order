@@ -132,6 +132,10 @@ class YamlScraperService extends BaseScraperService {
     // Example: [contains(@href, "value")]
     selector = selector.replace(/\[contains\(@(\w+),\s*["']([^"']+)["']\)\]/g, '[$1*="$2"]');
     
+    // Handle contains(text(), "value") - convert to :contains() selector
+    // Example: //li[contains(text(),"Added:")] -> li:contains("Added:")
+    selector = selector.replace(/\[contains\(text\(\),\s*["']([^"']+)["']\)\]/g, ':contains("$1")');
+    
     // Handle not() conditions
     // Example: [not(i)]
     selector = selector.replace(/\[not\(([^)]+)\)\]/g, ':not($1)');
@@ -163,18 +167,98 @@ class YamlScraperService extends BaseScraperService {
    * Apply post-processing rules from YAML
    */
   applyPostProcess(value, postProcess) {
+    console.log(`   🔧 applyPostProcess called with value: "${value}"`);
+    console.log(`   🔧 postProcess rules:`, JSON.stringify(postProcess, null, 2));
+    
     postProcess.forEach(rule => {
       if (rule.replace) {
+        console.log(`   🔄 Applying replace rule:`, rule.replace);
         rule.replace.forEach(replacement => {
           if (replacement.regex) {
             const regex = new RegExp(replacement.regex);
+            const oldValue = value;
             value = value.replace(regex, replacement.with || '');
+            console.log(`   🔄 Replace: "${oldValue}" → "${value}"`);
           }
         });
       }
+      
+      if (rule.parseDate) {
+        // Parse date using Go-style format and convert to YYYY-MM-DD
+        console.log(`   🔍 Parsing date "${value}" with format "${rule.parseDate}"`);
+        const parsedValue = this.parseDate(value, rule.parseDate);
+        console.log(`   ✅ Parsed date result: "${parsedValue}"`);
+        value = parsedValue;
+      }
     });
     
+    console.log(`   🔧 applyPostProcess final value: "${value}"`);
     return value;
+  }
+
+  /**
+   * Parse date string using Go-style format
+   * Converts to YYYY-MM-DD format
+   * 
+   * Go date format reference:
+   * 02 = day (01-31)
+   * 01 = month (01-12)  
+   * 2006 = year
+   * 
+   * Example: "02-01-2006" means DD-MM-YYYY
+   */
+  parseDate(dateString, formatString) {
+    if (!dateString || !formatString) return dateString;
+
+    try {
+      // Build regex from Go format string
+      // 02 = day, 01 = month, 2006 = year
+      let regexPattern = formatString
+        .replace(/2006/g, '(\\d{4})')  // Year
+        .replace(/01/g, '(\\d{1,2})')  // Month
+        .replace(/02/g, '(\\d{1,2})'); // Day
+      
+      // Escape special regex characters in separators
+      regexPattern = regexPattern.replace(/[-\/]/g, (match) => '\\' + match);
+      
+      const regex = new RegExp(regexPattern);
+      const match = dateString.match(regex);
+      
+      if (!match) {
+        console.warn(`   ⚠️ Date "${dateString}" doesn't match format "${formatString}"`);
+        return dateString;
+      }
+
+      // Determine which capture group is which based on format string
+      const yearIndex = formatString.indexOf('2006');
+      const monthIndex = formatString.indexOf('01');
+      const dayIndex = formatString.indexOf('02');
+      
+      // Create array of positions
+      const positions = [
+        { type: 'year', index: yearIndex },
+        { type: 'month', index: monthIndex },
+        { type: 'day', index: dayIndex }
+      ].sort((a, b) => a.index - b.index);
+      
+      // Map capture groups to date parts
+      const parts = {};
+      positions.forEach((pos, idx) => {
+        parts[pos.type] = match[idx + 1];
+      });
+      
+      // Pad month and day with leading zeros if needed
+      const year = parts.year;
+      const month = parts.month.padStart(2, '0');
+      const day = parts.day.padStart(2, '0');
+      
+      // Return in YYYY-MM-DD format
+      return `${year}-${month}-${day}`;
+      
+    } catch (error) {
+      console.warn(`   ⚠️ Error parsing date "${dateString}" with format "${formatString}":`, error.message);
+      return dateString;
+    }
   }
 
   /**
@@ -391,9 +475,13 @@ class YamlScraperService extends BaseScraperService {
 
       // Extract Date
       if (sceneConfig.Date) {
+        console.log(`   🔍 Extracting Date with config:`, JSON.stringify(sceneConfig.Date, null, 2));
         metadata.date = this.extractValue($, sceneConfig.Date);
+        console.log(`   📅 Date extraction result: "${metadata.date}"`);
         if (metadata.date) {
           console.log(`   - Date: ${metadata.date}`);
+        } else {
+          console.log(`   ⚠️ Date is null/empty after extraction`);
         }
       }
 

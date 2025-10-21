@@ -5032,10 +5032,50 @@ router.put('/scenes/:id', asyncHandler(async (req, res) => {
   if (date !== undefined) updateData.date = date;
   if (url !== undefined) updateData.url = url;
   if (geviUrl !== undefined) updateData.geviUrl = geviUrl;
+  
+  // Handle episode URLs - APPEND instead of replace
   if (episodeUrls !== undefined && Array.isArray(episodeUrls)) {
-    // Store episode URLs as JSON string in database
-    updateData.episodeUrls = JSON.stringify(episodeUrls);
-    console.log(`   - Storing ${episodeUrls.length} episode URL(s) in database`);
+    // Fetch existing scene to get current episodeUrls
+    const existingScene = await prisma.stashScene.findUnique({
+      where: { id },
+      select: { episodeUrls: true }
+    });
+    
+    let existingUrls = [];
+    if (existingScene && existingScene.episodeUrls) {
+      try {
+        existingUrls = typeof existingScene.episodeUrls === 'string'
+          ? JSON.parse(existingScene.episodeUrls)
+          : existingScene.episodeUrls;
+        
+        if (!Array.isArray(existingUrls)) {
+          existingUrls = [];
+        }
+      } catch (e) {
+        console.warn('   - Failed to parse existing episodeUrls, starting fresh:', e.message);
+        existingUrls = [];
+      }
+    }
+    
+    // Merge new URLs with existing ones (remove duplicates)
+    const allUrls = [...existingUrls];
+    
+    for (const newUrl of episodeUrls) {
+      // Check if URL already exists (support both string URLs and objects with url property)
+      const newUrlString = typeof newUrl === 'string' ? newUrl : newUrl.url;
+      const exists = allUrls.some(existing => {
+        const existingUrlString = typeof existing === 'string' ? existing : existing.url;
+        return existingUrlString === newUrlString;
+      });
+      
+      if (!exists) {
+        allUrls.push(newUrl);
+      }
+    }
+    
+    // Store merged episode URLs as JSON string in database
+    updateData.episodeUrls = JSON.stringify(allUrls);
+    console.log(`   - Appending ${episodeUrls.length} new episode URL(s) to ${existingUrls.length} existing (total: ${allUrls.length})`);
   }
   
   // Update local database

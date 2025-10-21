@@ -1,0 +1,39 @@
+name: "EastBoys"
+sceneByURL:
+  - action: scrapeXPath
+    url:
+      - eastboys.com/tour/
+    scraper: sceneScraper
+xPathScrapers:
+  sceneScraper:
+    common:
+      $perf: //li[contains(text(),'Added:')]/../li[2]
+    scene:
+      Title:
+        selector: //h2[@class="gen-title"]/text()
+      Date:
+        selector: //li[contains(text(),'Added:')]
+        postProcess:
+          - replace:
+            - regex: "^Added:\\s*(.+)$"
+              with: $1
+          - parseDate: 02-01-2006
+      Details:
+        selector: //div[@id="druhos"]/text()
+      Performers:
+        Name:
+          selector: //li/span[@class="kat-single"]/a/text()
+        URL:
+          selector: //li/span[@class="kat-single"]/a/@href
+          postProcess:
+            - replace:
+                - regex: ^/
+                  with: https://www.eastboys.com/
+      Tags:
+        Name: //div[@class="row"]/div[@class="col-lg-12 pt-2"]/span[@class="kat-single"]/a/text()
+      Image:
+        selector: //video/@poster
+      Studio:
+        Name:
+          fixed: "East Boys"
+# Last Updated July 27, 2025
