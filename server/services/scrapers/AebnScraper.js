@@ -281,6 +281,7 @@ class AebnScraper {
         }
       } else if (scenePerformers && scenePerformers.length > 0) {
         // Match scene by performers
+        // Uses the performers extracted earlier (supports both old and new HTML formats)
         const scenePerformerNames = scenePerformers.map(p => 
           (p.name || p).toLowerCase().trim()
         );

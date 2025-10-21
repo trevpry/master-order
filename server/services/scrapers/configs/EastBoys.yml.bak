@@ -7,12 +7,12 @@ sceneByURL:
 xPathScrapers:
   sceneScraper:
     common:
-      $perf: //li[contains(text(),"Added:")]/../li[2]
+      $perf: //li[contains(text(),'Added:')]/../li[2]
     scene:
       Title:
         selector: //h2[@class="gen-title"]/text()
       Date:
-        selector: //li[contains(text(),"Added:")]
+        selector: //li[contains(text(),'Added:')]
         postProcess:
           - replace:
             - regex: "^Added:\\s*(.+)$"

@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import Button from '../../../../shared/components/Button';
 import SceneGrid from './components/SceneGrid';
+import SceneCard from './components/SceneCard';
 import config from '../../../../config';
 
 export default function StudioDetail() {
@@ -21,6 +22,15 @@ export default function StudioDetail() {
     perPage: 20
   });
   const [filterNoPerformers, setFilterNoPerformers] = useState(false);
+  const [searchTitle, setSearchTitle] = useState('');
+  const [searchPerformer, setSearchPerformer] = useState('');
+  
+  // Scene merge state
+  const [selectedScenes, setSelectedScenes] = useState(new Set());
+  const [showSceneMergeModal, setShowSceneMergeModal] = useState(false);
+  const [scenesToMerge, setScenesToMerge] = useState([]);
+  const [mergeSceneData, setMergeSceneData] = useState(null);
+  const [isMergingScenes, setIsMergingScenes] = useState(false);
   
   // GEVI URL state
   const [showGeviUrlModal, setShowGeviUrlModal] = useState(false);
@@ -54,7 +64,7 @@ export default function StudioDetail() {
     if (data) {
       loadScenes();
     }
-  }, [scenesPage, data, filterNoPerformers]);
+  }, [scenesPage, data, filterNoPerformers, searchTitle, searchPerformer]);
 
   const loadScenes = async () => {
     setScenesLoading(true);
@@ -68,6 +78,14 @@ export default function StudioDetail() {
       
       if (filterNoPerformers) {
         params.set('noPerformers', 'true');
+      }
+      
+      if (searchTitle.trim()) {
+        params.set('title', searchTitle.trim());
+      }
+      
+      if (searchPerformer.trim()) {
+        params.set('performer', searchPerformer.trim());
       }
 
       const response = await fetch(`${config.apiBaseUrl}/api/stash/scenes?${params}`);
@@ -86,6 +104,136 @@ export default function StudioDetail() {
       console.error('Error loading scenes:', err);
     } finally {
       setScenesLoading(false);
+    }
+  };
+
+  // Handle scene checkbox toggle
+  const handleToggleScene = (sceneId) => {
+    setSelectedScenes(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(sceneId)) {
+        newSet.delete(sceneId);
+      } else {
+        newSet.add(sceneId);
+      }
+      return newSet;
+    });
+  };
+
+  // Handle opening scene merge modal
+  const handleOpenSceneMergeModal = async () => {
+    if (selectedScenes.size < 2) {
+      alert('Please select at least 2 scenes to merge');
+      return;
+    }
+
+    try {
+      // Fetch full details for selected scenes
+      const sceneIds = Array.from(selectedScenes);
+      const scenePromises = sceneIds.map(id =>
+        fetch(`${config.apiBaseUrl}/api/stash/scenes/${id}`).then(r => r.json())
+      );
+      
+      const sceneResults = await Promise.all(scenePromises);
+      const scenes = sceneResults.map(r => r.data);
+      
+      setScenesToMerge(scenes);
+      
+      // Initialize merge data with first scene's data as default
+      setMergeSceneData({
+        title: scenes[0].title || '',
+        date: scenes[0].date || '',
+        details: scenes[0].details || '',
+        url: scenes[0].url || '',
+        stashId: scenes[0].stashId || '',
+        studio: scenes[0].studio || null,
+        performers: scenes[0].performers || [],
+        tags: scenes[0].tags || [],
+        episodeUrls: scenes[0].episodeUrls || [],
+        geviUrl: scenes[0].geviUrl || '',
+        // File information - which file to keep
+        keepFileFromSceneId: scenes[0].id,
+        // Keep track of which scene is the primary
+        primarySceneId: scenes[0].id
+      });
+      
+      setShowSceneMergeModal(true);
+    } catch (error) {
+      console.error('Failed to load scene details:', error);
+      alert(`Failed to load scene details: ${error.message}`);
+    }
+  };
+
+  // Handle updating merge data field
+  const handleUpdateMergeField = (field, value) => {
+    setMergeSceneData(prev => ({
+      ...prev,
+      [field]: value
+    }));
+  };
+
+  // Handle scene merge execution
+  const handleMergeScenes = async () => {
+    if (!mergeSceneData || !mergeSceneData.primarySceneId) {
+      alert('Please select a primary scene');
+      return;
+    }
+
+    if (!mergeSceneData.keepFileFromSceneId) {
+      alert('Please select which file to keep');
+      return;
+    }
+
+    const primarySceneTitle = scenesToMerge.find(s => s.id === mergeSceneData.primarySceneId)?.title;
+    const keepFileSceneTitle = scenesToMerge.find(s => s.id === mergeSceneData.keepFileFromSceneId)?.title;
+    const otherScenes = scenesToMerge.filter(s => s.id !== mergeSceneData.primarySceneId);
+    const deletedFileScenes = scenesToMerge.filter(s => s.id !== mergeSceneData.keepFileFromSceneId);
+    
+    const confirmMessage = 
+      `Merge ${scenesToMerge.length} scenes?\n\n` +
+      `Primary scene (ID kept): ${primarySceneTitle}\n` +
+      `File kept from: ${keepFileSceneTitle}\n` +
+      `Scenes to delete: ${otherScenes.map(s => s.title).join(', ')}\n\n` +
+      `⚠️ WARNING: Video files will be PERMANENTLY DELETED from disk!\n` +
+      `Files to delete: ${deletedFileScenes.filter(s => s.id !== mergeSceneData.primarySceneId).map(s => s.title).join(', ')}\n\n` +
+      `This action cannot be undone.`;
+
+    if (!window.confirm(confirmMessage)) {
+      return;
+    }
+
+    setIsMergingScenes(true);
+    try {
+      const response = await fetch(`${config.apiBaseUrl}/api/stash/scenes/merge`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          primarySceneId: mergeSceneData.primarySceneId,
+          mergeSceneIds: scenesToMerge.filter(s => s.id !== mergeSceneData.primarySceneId).map(s => s.id),
+          mergedData: mergeSceneData
+        })
+      });
+
+      const result = await response.json();
+
+      if (!result.success) {
+        throw new Error(result.error || 'Failed to merge scenes');
+      }
+
+      alert('✅ Successfully merged scenes!');
+      
+      setShowSceneMergeModal(false);
+      setSelectedScenes(new Set());
+      
+      // Reload scenes
+      loadScenes();
+    } catch (error) {
+      console.error('Failed to merge scenes:', error);
+      alert(`Failed to merge scenes: ${error.message}`);
+    } finally {
+      setIsMergingScenes(false);
     }
   };
 
@@ -267,21 +415,109 @@ export default function StudioDetail() {
 
       {/* Scenes Section */}
       <div className="section">
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
-          <h2>Scenes from this studio</h2>
-          <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
-            <input
-              type="checkbox"
-              checked={filterNoPerformers}
-              onChange={(e) => {
-                setFilterNoPerformers(e.target.checked);
-                setScenesPage(1); // Reset to page 1 when filter changes
-              }}
-              style={{ cursor: 'pointer' }}
-            />
-            <span>Show only scenes with no performers</span>
-          </label>
+        <h2>Scenes from this studio</h2>
+        
+        {/* Search and Filter Controls */}
+        <div style={{ 
+          display: 'flex', 
+          flexDirection: 'column', 
+          gap: '15px', 
+          marginBottom: '20px',
+          padding: '15px',
+          backgroundColor: '#f9fafb',
+          borderRadius: '8px',
+          border: '1px solid #e5e7eb'
+        }}>
+          {/* Search Inputs */}
+          <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+            <div style={{ flex: '1', minWidth: '200px' }}>
+              <label htmlFor="search-title" style={{ display: 'block', marginBottom: '5px', fontSize: '0.9rem', fontWeight: '500' }}>
+                🔍 Search by Title:
+              </label>
+              <input
+                id="search-title"
+                type="text"
+                value={searchTitle}
+                onChange={(e) => {
+                  setSearchTitle(e.target.value);
+                  setScenesPage(1); // Reset to page 1 when search changes
+                }}
+                placeholder="Enter scene title..."
+                style={{
+                  width: '100%',
+                  padding: '8px 12px',
+                  border: '1px solid #d1d5db',
+                  borderRadius: '6px',
+                  fontSize: '14px'
+                }}
+              />
+            </div>
+            
+            <div style={{ flex: '1', minWidth: '200px' }}>
+              <label htmlFor="search-performer" style={{ display: 'block', marginBottom: '5px', fontSize: '0.9rem', fontWeight: '500' }}>
+                👤 Search by Performer:
+              </label>
+              <input
+                id="search-performer"
+                type="text"
+                value={searchPerformer}
+                onChange={(e) => {
+                  setSearchPerformer(e.target.value);
+                  setScenesPage(1); // Reset to page 1 when search changes
+                }}
+                placeholder="Enter performer name..."
+                style={{
+                  width: '100%',
+                  padding: '8px 12px',
+                  border: '1px solid #d1d5db',
+                  borderRadius: '6px',
+                  fontSize: '14px'
+                }}
+              />
+            </div>
+          </div>
+          
+          {/* Filter Checkbox */}
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
+              <input
+                type="checkbox"
+                checked={filterNoPerformers}
+                onChange={(e) => {
+                  setFilterNoPerformers(e.target.checked);
+                  setScenesPage(1); // Reset to page 1 when filter changes
+                }}
+                style={{ cursor: 'pointer' }}
+              />
+              <span>Show only scenes with no performers</span>
+            </label>
+            
+            {/* Clear Filters Button */}
+            {(searchTitle || searchPerformer || filterNoPerformers) && (
+              <button
+                onClick={() => {
+                  setSearchTitle('');
+                  setSearchPerformer('');
+                  setFilterNoPerformers(false);
+                  setScenesPage(1);
+                }}
+                style={{
+                  padding: '6px 12px',
+                  backgroundColor: '#ef4444',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '6px',
+                  fontSize: '0.9rem',
+                  cursor: 'pointer',
+                  fontWeight: '500'
+                }}
+              >
+                ✕ Clear Filters
+              </button>
+            )}
+          </div>
         </div>
+        
         {scenesLoading ? (
           <div className="loading">
             <div className="spinner"></div>
@@ -289,7 +525,80 @@ export default function StudioDetail() {
           </div>
         ) : (
           <>
-            <SceneGrid scenes={scenes} />
+            {/* Merge Button */}
+            {selectedScenes.size >= 2 && (
+              <div style={{ marginBottom: '20px' }}>
+                <button
+                  onClick={handleOpenSceneMergeModal}
+                  style={{
+                    background: 'linear-gradient(135deg, #8b5cf6 0%, #7c3aed 100%)',
+                    color: 'white',
+                    border: '2px solid #8b5cf6',
+                    padding: '10px 20px',
+                    borderRadius: '8px',
+                    cursor: 'pointer',
+                    fontSize: '15px',
+                    fontWeight: '600',
+                    boxShadow: '0 2px 4px rgba(139, 92, 246, 0.2)',
+                    transition: 'all 0.2s ease'
+                  }}
+                  onMouseEnter={(e) => {
+                    e.target.style.transform = 'translateY(-1px)';
+                    e.target.style.boxShadow = '0 4px 8px rgba(139, 92, 246, 0.3)';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.target.style.transform = 'translateY(0)';
+                    e.target.style.boxShadow = '0 2px 4px rgba(139, 92, 246, 0.2)';
+                  }}
+                >
+                  🔀 Merge {selectedScenes.size} Selected Scenes
+                </button>
+              </div>
+            )}
+            
+            {/* Scenes with Checkboxes */}
+            <div className="content-grid scenes-grid">
+              {scenes.map((scene) => (
+                <div
+                  key={scene.id}
+                  style={{
+                    position: 'relative',
+                    backgroundColor: selectedScenes.has(scene.id) ? '#f3f4f6' : 'transparent',
+                    borderRadius: '8px',
+                    padding: '4px',
+                    transition: 'background-color 0.2s'
+                  }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={selectedScenes.has(scene.id)}
+                    onChange={(e) => {
+                      e.stopPropagation();
+                      handleToggleScene(scene.id);
+                    }}
+                    style={{
+                      position: 'absolute',
+                      top: '12px',
+                      left: '12px',
+                      width: '20px',
+                      height: '20px',
+                      cursor: 'pointer',
+                      zIndex: 10,
+                      backgroundColor: 'white',
+                      border: '2px solid #8b5cf6',
+                      borderRadius: '4px'
+                    }}
+                  />
+                  <SceneCard scene={scene} />
+                </div>
+              ))}
+            </div>
+            
+            {scenes.length === 0 && (
+              <div className="empty-state">
+                <p>No scenes found</p>
+              </div>
+            )}
             
             {/* Pagination Controls */}
             {scenesPagination.totalPages > 1 && (
@@ -402,6 +711,153 @@ export default function StudioDetail() {
                 className="btn-cancel" 
                 onClick={() => setShowNotesModal(false)}
                 disabled={isSavingNotes}
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Scene Merge Modal */}
+      {showSceneMergeModal && (
+        <div className="modal-overlay" onClick={() => !isMergingScenes && setShowSceneMergeModal(false)}>
+          <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '900px', maxHeight: '90vh', overflow: 'auto' }}>
+            <h3>🔀 Merge {scenesToMerge.length} Scenes</h3>
+            
+            <p style={{ fontSize: '0.9rem', color: '#666', marginBottom: '1.5rem' }}>
+              Select which data to keep for the merged scene. The primary scene will be kept, others will be deleted.
+            </p>
+
+            {/* Primary Scene Selection */}
+            <div style={{ marginBottom: '1.5rem' }}>
+              <label style={{ display: 'block', fontWeight: '600', marginBottom: '8px' }}>
+                Primary Scene (will be kept):
+              </label>
+              <select
+                value={mergeSceneData?.primarySceneId || ''}
+                onChange={(e) => handleUpdateMergeField('primarySceneId', e.target.value)}
+                style={{
+                  width: '100%',
+                  padding: '8px',
+                  border: '1px solid #d1d5db',
+                  borderRadius: '6px',
+                  fontSize: '14px'
+                }}
+              >
+                {scenesToMerge.map(scene => (
+                  <option key={scene.id} value={scene.id}>
+                    {scene.title || 'Untitled Scene'} {scene.date ? `(${scene.date})` : ''}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {/* File Selection */}
+            <div style={{ marginBottom: '1.5rem' }}>
+              <label style={{ display: 'block', fontWeight: '600', marginBottom: '8px' }}>
+                Which File to Keep:
+              </label>
+              <select
+                value={mergeSceneData?.keepFileFromSceneId || ''}
+                onChange={(e) => handleUpdateMergeField('keepFileFromSceneId', e.target.value)}
+                style={{
+                  width: '100%',
+                  padding: '8px',
+                  border: '1px solid #d1d5db',
+                  borderRadius: '6px',
+                  fontSize: '14px'
+                }}
+              >
+                {scenesToMerge.map(scene => (
+                  <option key={scene.id} value={scene.id}>
+                    {scene.title || 'Untitled Scene'} - {scene.path ? scene.path.split('/').pop() : 'No path'} ({scene.fileSize ? `${(scene.fileSize / 1024 / 1024 / 1024).toFixed(2)}GB` : 'Unknown size'})
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {/* Title Selection */}
+            <div style={{ marginBottom: '1.5rem' }}>
+              <label style={{ display: 'block', fontWeight: '600', marginBottom: '8px' }}>
+                Title:
+              </label>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                {scenesToMerge.map(scene => (
+                  <label
+                    key={scene.id}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      padding: '8px',
+                      border: '1px solid #d1d5db',
+                      borderRadius: '6px',
+                      cursor: 'pointer',
+                      backgroundColor: mergeSceneData?.title === scene.title ? '#dbeafe' : 'white'
+                    }}
+                  >
+                    <input
+                      type="radio"
+                      name="title"
+                      checked={mergeSceneData?.title === scene.title}
+                      onChange={() => handleUpdateMergeField('title', scene.title)}
+                      style={{ marginRight: '8px' }}
+                    />
+                    <span style={{ flex: 1, fontSize: '14px' }}>
+                      {scene.title || <em style={{ color: '#9ca3af' }}>No title</em>}
+                    </span>
+                  </label>
+                ))}
+              </div>
+            </div>
+
+            {/* Date Selection */}
+            <div style={{ marginBottom: '1.5rem' }}>
+              <label style={{ display: 'block', fontWeight: '600', marginBottom: '8px' }}>
+                Date:
+              </label>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                {scenesToMerge.map(scene => (
+                  <label
+                    key={scene.id}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      padding: '8px',
+                      border: '1px solid #d1d5db',
+                      borderRadius: '6px',
+                      cursor: 'pointer',
+                      backgroundColor: mergeSceneData?.date === scene.date ? '#dbeafe' : 'white'
+                    }}
+                  >
+                    <input
+                      type="radio"
+                      name="date"
+                      checked={mergeSceneData?.date === scene.date}
+                      onChange={() => handleUpdateMergeField('date', scene.date)}
+                      style={{ marginRight: '8px' }}
+                    />
+                    <span style={{ fontSize: '14px' }}>
+                      {scene.date || <em style={{ color: '#9ca3af' }}>No date</em>}
+                    </span>
+                  </label>
+                ))}
+              </div>
+            </div>
+
+            {/* Actions */}
+            <div className="modal-actions">
+              <button 
+                className="btn-accept" 
+                onClick={handleMergeScenes}
+                disabled={isMergingScenes}
+              >
+                {isMergingScenes ? '⏳ Merging...' : '🔀 Merge Scenes'}
+              </button>
+              <button 
+                className="btn-cancel" 
+                onClick={() => setShowSceneMergeModal(false)}
+                disabled={isMergingScenes}
               >
                 Cancel
               </button>

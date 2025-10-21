@@ -623,6 +623,7 @@ export default function SceneDetail() {
               },
               body: JSON.stringify({
                 name: matchedPerformer.name,
+                disambiguation: matchedPerformer.disambiguation || null,
                 newUrls: [matchedPerformer.scrapedUrl]
               })
             });

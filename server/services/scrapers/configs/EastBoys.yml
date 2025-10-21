@@ -3,6 +3,7 @@ sceneByURL:
   - action: scrapeXPath
     url:
       - eastboys.com/tour/
+      - nats.eastboys.com/track/MTMuMS4xLjEuMC4wLjAuMC4w/
     scraper: sceneScraper
 xPathScrapers:
   sceneScraper:
