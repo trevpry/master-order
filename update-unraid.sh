@@ -408,34 +408,57 @@ else
 fi
 
 # Step 7: Rebuild the image with latest code
-# Enable BuildKit for better caching and performance
-export DOCKER_BUILDKIT=1
+# Check if BuildKit is available (requires Docker 19.03+ with buildx)
+BUILDKIT_AVAILABLE=false
+DOCKERFILE_TO_USE="Dockerfile.optimized-no-buildkit"
+
+if docker buildx version >/dev/null 2>&1; then
+    BUILDKIT_AVAILABLE=true
+    DOCKERFILE_TO_USE="Dockerfile.optimized"
+    log_info "✅ BuildKit detected - using optimized build with cache mounts"
+    export DOCKER_BUILDKIT=1
+else
+    log_warning "⚠️  BuildKit not available - using compatibility Dockerfile (still gets layer caching benefits)"
+    log_info "💡 Tip: Update to Docker 19.03+ with buildx for even faster builds"
+    export DOCKER_BUILDKIT=0
+fi
 
 if [ "$USE_CACHE" = true ]; then
     log_info "Building updated image with optimized caching..."
     log_info "⚡ Performance: First build ~5-8 min, subsequent builds ~1-3 min"
     log_info "🔒 Data Safety: 100% PostgreSQL data safe (identical runtime to original)"
+    log_info "📦 Using: $DOCKERFILE_TO_USE"
     
-    # Use optimized Dockerfile with layer caching
-    docker build -f Dockerfile.optimized -t $IMAGE_NAME .
+    # Use appropriate optimized Dockerfile based on BuildKit availability
+    docker build -f "$DOCKERFILE_TO_USE" -t $IMAGE_NAME .
+    BUILD_STATUS=$?
 else
     log_info "Building updated image without cache (full rebuild)..."
     log_info "🔒 Data Safety: 100% PostgreSQL data safe"
+    log_info "📦 Using: $DOCKERFILE_TO_USE"
     
     # Full rebuild without cache
-    docker build --no-cache -f Dockerfile.optimized -t $IMAGE_NAME .
+    docker build --no-cache -f "$DOCKERFILE_TO_USE" -t $IMAGE_NAME .
+    BUILD_STATUS=$?
 fi
 
-if [ $? -ne 0 ]; then
+if [ $BUILD_STATUS -ne 0 ]; then
     log_error "Failed to build Docker image. Please check the build logs."
     if [ "$USE_CACHE" = true ]; then
-        log_warning "Try running with --no-cache flag if build fails: ./update-unraid.sh --no-cache"
+        log_warning "Try running with --no-cache flag: ./update-unraid.sh --no-cache"
+    fi
+    if [ "$BUILDKIT_AVAILABLE" = false ]; then
+        log_info "Note: To enable full BuildKit features, update Docker to 19.03+ and install buildx"
     fi
     exit 1
 fi
 
 if [ "$USE_CACHE" = true ]; then
-    log_success "Image built successfully with optimized caching (60-75% faster for code changes)"
+    if [ "$BUILDKIT_AVAILABLE" = true ]; then
+        log_success "Image built successfully with BuildKit optimized caching (60-75% faster)"
+    else
+        log_success "Image built successfully with layer caching (40-60% faster, no BuildKit cache mounts)"
+    fi
 else
     log_success "Image built successfully with full rebuild"
 fi
