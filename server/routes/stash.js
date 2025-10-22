@@ -6167,432 +6167,8 @@ router.get('/clips', asyncHandler(async (req, res) => {
   });
 }));
 
-// GET /clips/:id - Single clip details
-router.get('/clips/:id', asyncHandler(async (req, res) => {
-  const clipId = parseInt(req.params.id);
-
-  const clip = await prisma.stashClip.findUnique({
-    where: { id: clipId },
-    include: {
-      tags: {
-        include: {
-          tag: {
-            select: {
-              id: true,
-              name: true,
-              favorite: true
-            }
-          }
-        }
-      },
-      scene: {
-        select: {
-          id: true,
-          title: true,
-          date: true,
-          duration: true,
-          rating: true,
-          studioObject: {
-            select: {
-              id: true,
-              name: true
-            }
-          },
-          performers: {
-            select: {
-              performer: {
-                select: {
-                  id: true,
-                  name: true
-                }
-              }
-            }
-          }
-        }
-      }
-    }
-  });
-
-  if (!clip) {
-    return sendBadRequest(res, `Clip with ID ${clipId} not found`);
-  }
-
-  // Transform data to match expected format
-  const transformedClip = {
-    id: clip.id,
-    name: clip.name || `Clip ${clip.clipIndex}`,
-    duration: clip.duration,
-    startTime: clip.startTime,
-    endTime: clip.endTime,
-    clipIndex: clip.clipIndex,
-    sceneId: clip.sceneId,
-    sceneTitle: clip.scene?.title,
-    watched: clip.watched,
-    watchedAt: clip.watchedAt,
-    createdAt: clip.createdAt,
-    tags: clip.tags.map(ct => ct.tag),
-    scene: clip.scene ? {
-      id: clip.scene.id,
-      title: clip.scene.title,
-      date: clip.scene.date,
-      rating: clip.scene.rating,
-      duration: clip.scene.duration,
-      studioName: clip.scene.studioObject?.name
-    } : null
-  };
-
-  sendSuccess(res, transformedClip);
-}));
-
-// POST /api/stash/clips/:id/watched - Mark clip as watched
-router.post('/clips/:id/watched', asyncHandler(async (req, res) => {
-  const clipId = parseInt(req.params.id);
-  console.log(`✅ Marking clip ${clipId} as watched...`);
-  
-  const updatedClip = await prisma.stashClip.update({
-    where: { id: clipId },
-    data: { 
-      watched: true,
-      watchedAt: new Date()
-    },
-    include: {
-      scene: {
-        select: {
-          id: true,
-          title: true
-        }
-      }
-    }
-  });
-  
-  console.log(`✅ Clip ${clipId} marked as watched`);
-  
-  res.json({
-    message: 'Clip marked as watched',
-    clip: updatedClip
-  });
-}));
-
-// POST /api/stash/clips/:id/play - Play a specific clip by ID
-router.post('/clips/:id/play', asyncHandler(async (req, res) => {
-  const clipId = parseInt(req.params.id);
-  console.log(`▶️ Playing clip: ${clipId}`);
-
-  // Get the clip with scene information
-  const clip = await prisma.stashClip.findUnique({
-    where: { id: clipId },
-    include: {
-      scene: {
-        select: {
-          id: true,
-          title: true,
-          url: true
-        }
-      }
-    }
-  });
-
-  if (!clip) {
-    return sendBadRequest(res, 'Clip not found');
-  }
-
-  console.log(`▶️ Found clip for scene: ${clip.scene.title}`);
-
-  // Construct streaming URL - prioritize database settings over environment
-  const settings = await prisma.settings.findFirst();
-  const stashUrl = settings?.stashUrl || process.env.STASH_URL;
-  let streamUrl = `${stashUrl}/scene/${clip.sceneId}/stream`;
-  
-  console.log(`▶️ Stream URL: ${streamUrl}`);
-
-  sendSuccess(res, {
-    clip,
-    streamUrl,
-    message: `Playing clip ${clip.clipIndex + 1} from "${clip.scene.title}"`
-  });
-}));
-
-// POST /api/stash/clips/reset - Reset all clips watched status (for testing)
-router.post('/clips/reset', asyncHandler(async (req, res) => {
-  console.log('🔄 Resetting all clips watched status...');
-  
-  const result = await prisma.stashClip.updateMany({
-    where: { watched: true },
-    data: { 
-      watched: false,
-      watchedAt: null
-    }
-  });
-  
-  console.log(`✅ Reset ${result.count} clips to unwatched`);
-  
-  res.json({
-    message: 'All clips reset to unwatched',
-    resetCount: result.count
-  });
-}));
-
-// POST /api/stash/clip-play - Select and play a random clip from a random scene
-router.post('/clip-play', asyncHandler(async (req, res) => {
-  console.log('🎬 Starting Clip Play - selecting random scene and checking/generating clips...');
-  
-  // First, get all scenes from Stash database
-  const allScenes = await prisma.stashScene.findMany({
-    select: {
-      id: true,
-      title: true,
-      path: true,
-      duration: true
-    },
-    where: {
-      duration: { gt: 60 } // Only scenes longer than 1 minute
-    }
-  });
-  
-  if (allScenes.length === 0) {
-    return sendBadRequest(res, 'No scenes available for clip generation', {
-      suggestion: 'Sync with Stash to populate scene library'
-    });
-  }
-
-  // ALWAYS start by selecting a random scene first
-  const randomSceneIndex = Math.floor(Math.random() * allScenes.length);
-  const selectedScene = allScenes[randomSceneIndex];
-  
-  console.log(`🎲 Selected random scene: ${selectedScene.title}`);
-  
-  let selectedClip;
-  
-  // Check if this scene has any clips
-  const existingClips = await prisma.stashClip.findMany({
-    where: { sceneId: selectedScene.id },
-    include: {
-      scene: {
-        select: {
-          id: true,
-          title: true,
-          path: true,
-          duration: true
-        }
-      },
-      tags: {
-        include: {
-          tag: {
-            include: {
-              parentTags: {
-                include: {
-                  parentTag: {
-                    select: {
-                      id: true,
-                      name: true
-                    }
-                  }
-                }
-              },
-              childTags: {
-                include: {
-                  childTag: {
-                    select: {
-                      id: true,
-                      name: true
-                    }
-                  }
-                }
-              }
-            }
-          }
-        }
-      }
-    }
-  });
-  
-  if (existingClips.length > 0) {
-    // Scene has clips - check if any are unwatched
-    const unwatchedClips = existingClips.filter(clip => !clip.watched);
-    
-    if (unwatchedClips.length > 0) {
-      // Select random unwatched clip from this scene
-      const randomIndex = Math.floor(Math.random() * unwatchedClips.length);
-      selectedClip = unwatchedClips[randomIndex];
-      console.log(`📋 Found ${unwatchedClips.length} unwatched clips, selected clip ${selectedClip.clipIndex + 1} from scene: ${selectedScene.title}`);
-    } else {
-      // All clips from this scene are watched - reset them and pick random one
-      await prisma.stashClip.updateMany({
-        where: { sceneId: selectedScene.id },
-        data: { 
-          watched: false,
-          watchedAt: null
-        }
-      });
-      
-      // Select random clip from the reset clips
-      const randomClipIndex = Math.floor(Math.random() * existingClips.length);
-      selectedClip = existingClips[randomClipIndex];
-      selectedClip.watched = false;
-      console.log(`♻️ Reset ${existingClips.length} clips for scene: ${selectedScene.title}, selected clip ${selectedClip.clipIndex + 1}`);
-    }
-  } else {
-    // Scene has no clips - generate them
-    const clipDuration = 60; // 1 minute clips
-    
-    console.log(`🎬 Generating optimized clips for scene: ${selectedScene.title} (${selectedScene.duration}s)`);
-    const clipsToCreate = generateOptimizedClips(selectedScene.id, selectedScene.duration, clipDuration);
-    
-    if (clipsToCreate.length === 0) {
-      return sendBadRequest(res, 'Selected scene too short for clip generation', {
-        suggestion: 'Scene must be longer than 60 seconds'
-      });
-    }
-    
-    // Bulk create clips
-    await prisma.stashClip.createMany({
-      data: clipsToCreate
-    });
-    
-    // Get a random generated clip
-    const randomClipIndex = Math.floor(Math.random() * clipsToCreate.length);
-    selectedClip = await prisma.stashClip.findFirst({
-      where: { 
-        sceneId: selectedScene.id,
-        clipIndex: randomClipIndex
-      },
-      include: {
-        scene: {
-          select: {
-            id: true,
-            title: true,
-            path: true,
-            duration: true
-          }
-        },
-        tags: {
-          include: {
-            tag: {
-              include: {
-                parentTags: {
-                  include: {
-                    parentTag: {
-                      select: {
-                        id: true,
-                        name: true
-                      }
-                    }
-                  }
-                },
-                childTags: {
-                  include: {
-                    childTag: {
-                      select: {
-                        id: true,
-                        name: true
-                      }
-                    }
-                  }
-                }
-              }
-            }
-          }
-        }
-      }
-    });
-    
-    console.log(`✅ Generated ${clipsToCreate.length} optimized clips for scene: ${selectedScene.title}, selected clip ${randomClipIndex + 1}`);
-  }
-  
-  // Get connection status for stream URL
-  const settings = await prisma.settings.findFirst();
-  let stashUrl = settings?.stashUrl || process.env.STASH_URL || process.env.STASH_URL_FALLBACK_1 || 
-                 process.env.STASH_URL_FALLBACK_2 || process.env.STASH_URL_FALLBACK_3;
-  
-  // Normalize URL - remove trailing slashes
-  if (stashUrl) {
-    stashUrl = stashUrl.replace(/\/+$/, '');
-  }
-  
-  if (!stashUrl) {
-    return sendBadRequest(res, 'Stash URL not configured in settings or environment');
-  }
-  
-  // Build stream URL (stashUrl is already normalized)
-  const streamUrl = `${stashUrl}/scene/${selectedClip.scene.id}/stream`;
-  
-  // Build Android companion app message
-  const androidMessage = {
-    type: 'STASH_PLAYBACK',
-    action: 'PLAY_CLIP',
-    scene: {
-      id: selectedClip.scene.id,
-      title: selectedClip.scene.title,
-      streamUrl: streamUrl,
-      startTime: selectedClip.startTime,
-      endTime: selectedClip.endTime,
-      duration: selectedClip.duration,
-      clipIndex: selectedClip.clipIndex + 1, // Human-readable index
-      totalClips: Math.floor(selectedClip.scene.duration / 60),
-      stashUrl: stashUrl
-    },
-    clip: {
-      id: selectedClip.id,
-      clipIndex: selectedClip.clipIndex,
-      startTime: selectedClip.startTime,
-      endTime: selectedClip.endTime,
-      duration: selectedClip.duration
-    },
-    timestamp: new Date().toISOString()
-  };
-  
-  console.log(`🎯 Selected clip ${selectedClip.clipIndex + 1} from scene: ${selectedClip.scene.title}`);
-  
-  // Also attempt HTTP forward for legacy support
-  try {
-    const response = await fetch('http://localhost:8080/play', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        action: 'play_clip',
-        scene: androidMessage.scene,
-        clip: androidMessage.clip
-      }),
-      signal: AbortSignal.timeout(2000)
-    });
-    
-    if (response.ok) {
-      console.log('HTTP clip play command sent successfully to Android app');
-    }
-  } catch (httpError) {
-    console.log('Android HTTP app not available (using WebSocket only)');
-  }
-  
-  // Mark clip as watched
-  await prisma.stashClip.update({
-    where: { id: selectedClip.id },
-    data: { 
-      watched: true,
-      watchedAt: new Date()
-    }
-  });
-  
-  console.log(`✅ Clip ${selectedClip.id} marked as watched`);
-  
-  // Get current count of unwatched clips across all scenes
-  const totalUnwatchedClips = await prisma.stashClip.count({
-    where: { watched: false }
-  });
-  
-  res.json({
-    message: 'Clip play started successfully',
-    clip: selectedClip,
-    totalUnwatchedClips: totalUnwatchedClips,
-    playbackInfo: {
-      streamUrl: streamUrl,
-      startTime: selectedClip.startTime,
-      endTime: selectedClip.endTime,
-      duration: selectedClip.duration
-    }
-  });
-}));
-
 // GET /clips/next - Get next clip for continuous playback
+// NOTE: This route MUST come before /clips/:id to avoid matching "next" as an ID parameter
 router.get('/clips/next', asyncHandler(async (req, res) => {
   console.log('🎲 Getting next clip for continuous playback...');
   
@@ -6848,6 +6424,19 @@ router.get('/clips/next', asyncHandler(async (req, res) => {
     console.log(`✅ Generated ${clipsToCreate.length} optimized clips for scene: ${selectedScene.title}, selected clip ${randomClipIndex + 1}`);
   }
   
+  // Verify we have a valid clip
+  if (!selectedClip || !selectedClip.id) {
+    console.error('❌ Failed to select a clip:', {
+      selectedClipExists: !!selectedClip,
+      selectedClipId: selectedClip?.id,
+      sceneId: selectedScene?.id
+    });
+    return sendBadRequest(res, 'Failed to select clip', {
+      reason: 'Clip selection returned null or invalid data',
+      suggestion: 'Please try again'
+    });
+  }
+  
   // Get connection status for stream URL
   const settings = await prisma.settings.findFirst();
   let stashUrl = settings?.stashUrl || process.env.STASH_URL || process.env.STASH_URL_FALLBACK_1 || 
@@ -6898,6 +6487,454 @@ router.get('/clips/next', asyncHandler(async (req, res) => {
   
   res.json({
     message: 'Next clip selected successfully',
+    clip: selectedClip,
+    totalUnwatchedClips: totalUnwatchedClips,
+    playbackInfo: {
+      streamUrl: streamUrl,
+      startTime: selectedClip.startTime,
+      endTime: selectedClip.endTime,
+      duration: selectedClip.duration
+    }
+  });
+}));
+
+// POST /clips/reset - Reset all clips to unwatched
+// NOTE: This route MUST come before /clips/:id to avoid matching "reset" as an ID parameter
+router.post('/clips/reset', asyncHandler(async (req, res) => {
+  console.log('🔄 Resetting all clips watched status...');
+  
+  const result = await prisma.stashClip.updateMany({
+    where: { watched: true },
+    data: { 
+      watched: false,
+      watchedAt: null
+    }
+  });
+  
+  console.log(`✅ Reset ${result.count} clips to unwatched`);
+  
+  res.json({
+    message: 'All clips reset to unwatched',
+    resetCount: result.count
+  });
+}));
+
+// GET /clips/:id - Single clip details
+// NOTE: This route MUST come after specific /clips/* routes to avoid shadowing them
+router.get('/clips/:id', asyncHandler(async (req, res) => {
+  const clipId = parseInt(req.params.id);
+  
+  // Validate that clipId is a valid number
+  if (isNaN(clipId) || clipId <= 0) {
+    return sendBadRequest(res, 'Invalid clip ID', {
+      provided: req.params.id,
+      message: 'Clip ID must be a valid positive integer'
+    });
+  }
+
+  const clip = await prisma.stashClip.findUnique({
+    where: { id: clipId },
+    include: {
+      tags: {
+        include: {
+          tag: {
+            select: {
+              id: true,
+              name: true,
+              favorite: true
+            }
+          }
+        }
+      },
+      scene: {
+        select: {
+          id: true,
+          title: true,
+          date: true,
+          duration: true,
+          rating: true,
+          studioObject: {
+            select: {
+              id: true,
+              name: true
+            }
+          },
+          performers: {
+            select: {
+              performer: {
+                select: {
+                  id: true,
+                  name: true
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  });
+
+  if (!clip) {
+    return sendBadRequest(res, `Clip with ID ${clipId} not found`);
+  }
+
+  // Transform data to match expected format
+  const transformedClip = {
+    id: clip.id,
+    name: clip.name || `Clip ${clip.clipIndex}`,
+    duration: clip.duration,
+    startTime: clip.startTime,
+    endTime: clip.endTime,
+    clipIndex: clip.clipIndex,
+    sceneId: clip.sceneId,
+    sceneTitle: clip.scene?.title,
+    watched: clip.watched,
+    watchedAt: clip.watchedAt,
+    createdAt: clip.createdAt,
+    tags: clip.tags.map(ct => ct.tag),
+    scene: clip.scene ? {
+      id: clip.scene.id,
+      title: clip.scene.title,
+      date: clip.scene.date,
+      rating: clip.scene.rating,
+      duration: clip.scene.duration,
+      studioName: clip.scene.studioObject?.name
+    } : null
+  };
+
+  sendSuccess(res, transformedClip);
+}));
+
+// POST /api/stash/clips/:id/watched - Mark clip as watched
+router.post('/clips/:id/watched', asyncHandler(async (req, res) => {
+  const clipId = parseInt(req.params.id);
+  console.log(`✅ Marking clip ${clipId} as watched...`);
+  
+  const updatedClip = await prisma.stashClip.update({
+    where: { id: clipId },
+    data: { 
+      watched: true,
+      watchedAt: new Date()
+    },
+    include: {
+      scene: {
+        select: {
+          id: true,
+          title: true
+        }
+      }
+    }
+  });
+  
+  console.log(`✅ Clip ${clipId} marked as watched`);
+  
+  res.json({
+    message: 'Clip marked as watched',
+    clip: updatedClip
+  });
+}));
+
+// POST /api/stash/clips/:id/play - Play a specific clip by ID
+router.post('/clips/:id/play', asyncHandler(async (req, res) => {
+  const clipId = parseInt(req.params.id);
+  console.log(`▶️ Playing clip: ${clipId}`);
+
+  // Get the clip with scene information
+  const clip = await prisma.stashClip.findUnique({
+    where: { id: clipId },
+    include: {
+      scene: {
+        select: {
+          id: true,
+          title: true,
+          url: true
+        }
+      }
+    }
+  });
+
+  if (!clip) {
+    return sendBadRequest(res, 'Clip not found');
+  }
+
+  console.log(`▶️ Found clip for scene: ${clip.scene.title}`);
+
+  // Construct streaming URL - prioritize database settings over environment
+  const settings = await prisma.settings.findFirst();
+  const stashUrl = settings?.stashUrl || process.env.STASH_URL;
+  let streamUrl = `${stashUrl}/scene/${clip.sceneId}/stream`;
+  
+  console.log(`▶️ Stream URL: ${streamUrl}`);
+
+  sendSuccess(res, {
+    clip,
+    streamUrl,
+    message: `Playing clip ${clip.clipIndex + 1} from "${clip.scene.title}"`
+  });
+}));
+
+// POST /api/stash/clip-play - Select and play a random clip from a random scene
+router.post('/clip-play', asyncHandler(async (req, res) => {
+  console.log('🎬 Starting Clip Play - selecting random scene and checking/generating clips...');
+  
+  // First, get all scenes from Stash database
+  const allScenes = await prisma.stashScene.findMany({
+    select: {
+      id: true,
+      title: true,
+      path: true,
+      duration: true
+    },
+    where: {
+      duration: { gt: 60 } // Only scenes longer than 1 minute
+    }
+  });
+  
+  if (allScenes.length === 0) {
+    return sendBadRequest(res, 'No scenes available for clip generation', {
+      suggestion: 'Sync with Stash to populate scene library'
+    });
+  }
+
+  // ALWAYS start by selecting a random scene first
+  const randomSceneIndex = Math.floor(Math.random() * allScenes.length);
+  const selectedScene = allScenes[randomSceneIndex];
+  
+  console.log(`🎲 Selected random scene: ${selectedScene.title}`);
+  
+  let selectedClip;
+  
+  // Check if this scene has any clips
+  const existingClips = await prisma.stashClip.findMany({
+    where: { sceneId: selectedScene.id },
+    include: {
+      scene: {
+        select: {
+          id: true,
+          title: true,
+          path: true,
+          duration: true
+        }
+      },
+      tags: {
+        include: {
+          tag: {
+            include: {
+              parentTags: {
+                include: {
+                  parentTag: {
+                    select: {
+                      id: true,
+                      name: true
+                    }
+                  }
+                }
+              },
+              childTags: {
+                include: {
+                  childTag: {
+                    select: {
+                      id: true,
+                      name: true
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  });
+  
+  if (existingClips.length > 0) {
+    // Scene has clips - check if any are unwatched
+    const unwatchedClips = existingClips.filter(clip => !clip.watched);
+    
+    if (unwatchedClips.length > 0) {
+      // Select random unwatched clip from this scene
+      const randomIndex = Math.floor(Math.random() * unwatchedClips.length);
+      selectedClip = unwatchedClips[randomIndex];
+      console.log(`📋 Found ${unwatchedClips.length} unwatched clips, selected clip ${selectedClip.clipIndex + 1} from scene: ${selectedScene.title}`);
+    } else {
+      // All clips from this scene are watched - reset them and pick random one
+      await prisma.stashClip.updateMany({
+        where: { sceneId: selectedScene.id },
+        data: { 
+          watched: false,
+          watchedAt: null
+        }
+      });
+      
+      // Select random clip from the reset clips
+      const randomClipIndex = Math.floor(Math.random() * existingClips.length);
+      selectedClip = existingClips[randomClipIndex];
+      selectedClip.watched = false;
+      console.log(`♻️ Reset ${existingClips.length} clips for scene: ${selectedScene.title}, selected clip ${selectedClip.clipIndex + 1}`);
+    }
+  } else {
+    // Scene has no clips - generate them
+    const clipDuration = 60; // 1 minute clips
+    
+    console.log(`🎬 Generating optimized clips for scene: ${selectedScene.title} (${selectedScene.duration}s)`);
+    const clipsToCreate = generateOptimizedClips(selectedScene.id, selectedScene.duration, clipDuration);
+    
+    if (clipsToCreate.length === 0) {
+      return sendBadRequest(res, 'Selected scene too short for clip generation', {
+        suggestion: 'Scene must be longer than 60 seconds'
+      });
+    }
+    
+    // Bulk create clips
+    await prisma.stashClip.createMany({
+      data: clipsToCreate
+    });
+    
+    // Get a random generated clip
+    const randomClipIndex = Math.floor(Math.random() * clipsToCreate.length);
+    selectedClip = await prisma.stashClip.findFirst({
+      where: { 
+        sceneId: selectedScene.id,
+        clipIndex: randomClipIndex
+      },
+      include: {
+        scene: {
+          select: {
+            id: true,
+            title: true,
+            path: true,
+            duration: true
+          }
+        },
+        tags: {
+          include: {
+            tag: {
+              include: {
+                parentTags: {
+                  include: {
+                    parentTag: {
+                      select: {
+                        id: true,
+                        name: true
+                      }
+                    }
+                  }
+                },
+                childTags: {
+                  include: {
+                    childTag: {
+                      select: {
+                        id: true,
+                        name: true
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    });
+    
+    console.log(`✅ Generated ${clipsToCreate.length} optimized clips for scene: ${selectedScene.title}, selected clip ${randomClipIndex + 1}`);
+  }
+  
+  // Verify we have a valid clip
+  if (!selectedClip || !selectedClip.id) {
+    console.error('❌ Failed to select a clip:', {
+      selectedClipExists: !!selectedClip,
+      selectedClipId: selectedClip?.id,
+      sceneId: selectedScene?.id
+    });
+    return sendBadRequest(res, 'Failed to select clip', {
+      reason: 'Clip selection returned null or invalid data',
+      suggestion: 'Please try again'
+    });
+  }
+  
+  // Get connection status for stream URL
+  const settings = await prisma.settings.findFirst();
+  let stashUrl = settings?.stashUrl || process.env.STASH_URL || process.env.STASH_URL_FALLBACK_1 || 
+                 process.env.STASH_URL_FALLBACK_2 || process.env.STASH_URL_FALLBACK_3;
+  
+  // Normalize URL - remove trailing slashes
+  if (stashUrl) {
+    stashUrl = stashUrl.replace(/\/+$/, '');
+  }
+  
+  if (!stashUrl) {
+    return sendBadRequest(res, 'Stash URL not configured in settings or environment');
+  }
+  
+  // Build stream URL (stashUrl is already normalized)
+  const streamUrl = `${stashUrl}/scene/${selectedClip.scene.id}/stream`;
+  
+  // Build Android companion app message
+  const androidMessage = {
+    type: 'STASH_PLAYBACK',
+    action: 'PLAY_CLIP',
+    scene: {
+      id: selectedClip.scene.id,
+      title: selectedClip.scene.title,
+      streamUrl: streamUrl,
+      startTime: selectedClip.startTime,
+      endTime: selectedClip.endTime,
+      duration: selectedClip.duration,
+      clipIndex: selectedClip.clipIndex + 1, // Human-readable index
+      totalClips: Math.floor(selectedClip.scene.duration / 60),
+      stashUrl: stashUrl
+    },
+    clip: {
+      id: selectedClip.id,
+      clipIndex: selectedClip.clipIndex,
+      startTime: selectedClip.startTime,
+      endTime: selectedClip.endTime,
+      duration: selectedClip.duration
+    },
+    timestamp: new Date().toISOString()
+  };
+  
+  console.log(`🎯 Selected clip ${selectedClip.clipIndex + 1} from scene: ${selectedClip.scene.title}`);
+  
+  // Also attempt HTTP forward for legacy support
+  try {
+    const response = await fetch('http://localhost:8080/play', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        action: 'play_clip',
+        scene: androidMessage.scene,
+        clip: androidMessage.clip
+      }),
+      signal: AbortSignal.timeout(2000)
+    });
+    
+    if (response.ok) {
+      console.log('HTTP clip play command sent successfully to Android app');
+    }
+  } catch (httpError) {
+    console.log('Android HTTP app not available (using WebSocket only)');
+  }
+  
+  // Mark clip as watched
+  await prisma.stashClip.update({
+    where: { id: selectedClip.id },
+    data: { 
+      watched: true,
+      watchedAt: new Date()
+    }
+  });
+  
+  console.log(`✅ Clip ${selectedClip.id} marked as watched`);
+  
+  // Get current count of unwatched clips across all scenes
+  const totalUnwatchedClips = await prisma.stashClip.count({
+    where: { watched: false }
+  });
+  
+  res.json({
+    message: 'Clip play started successfully',
     clip: selectedClip,
     totalUnwatchedClips: totalUnwatchedClips,
     playbackInfo: {

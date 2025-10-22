@@ -1,0 +1,45 @@
+name: "GayLifeNetwork"
+sceneByURL:
+  - action: scrapeXPath
+    url:
+      - gaylifenetwork.com/gay-porn-twinks-watch/
+      - www2.gaylifenetwork.com/track/MTAwMTg0Ny4xMDAxNS43LjcuMC4wLjAuMC4w/gay-porn-twinks-watch/
+    scraper: sceneScraper
+xPathScrapers:
+  sceneScraper:
+    common:
+      $perf: //li[contains(text(),'Added:')]/../li[2]
+    scene:
+      Title:
+        selector: //div[@class="videoContainer"]/h1/
+        postProcess:
+          - replace:
+            - regex: ^(.+)\s\-\s(\D+)\s?\d{1,3}\s[Mm]inutes$
+              with: $2
+      Date:
+        selector: //div[@class="videoContainer"]/h1/text()
+        postProcess:
+          - replace:
+            - regex: ^(.+)\s\-\s(.+)$
+              with: $1
+          - parseDate: "August 15, 2012"
+      Details:
+        selector: //div[@class="videoContainer"]/text()
+      Performers:
+        Name:
+          selector: //div[@class="videoContainer"]/h2/a/text()
+        URL:
+          selector: //div[@class="videoContainer"]/h2/a/@href
+          postProcess:
+            - replace:
+                - regex: ^/
+                  with: https://www.gaylifenetwork.com
+      Tags:
+        Name: 
+          selector: //div[@class="videoContainer"]/h4/a/text()
+      Image:
+        selector: //video/@poster
+      Studio:
+        Name:
+          selector: //div[@class="videoContainer"]/h3/a/text()
+# Last Updated July 27, 2025

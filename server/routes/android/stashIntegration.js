@@ -174,6 +174,20 @@ function createStashIntegrationRoutes(prisma, io) {
       const clip = nextClipData.clip;
       const scene = clip.scene;
 
+      // Validate clip has required fields
+      if (!clip.id || !scene || !scene.id) {
+        console.error('❌ Invalid clip data received:', {
+          hasClipId: !!clip.id,
+          hasScene: !!scene,
+          hasSceneId: !!scene?.id,
+          clipData: clip
+        });
+        return res.status(500).json({
+          error: 'Invalid clip data',
+          message: 'Received clip data is missing required fields'
+        });
+      }
+
       // VERIFY: Check if clip actually exists in database
       const clipVerification = await prisma.stashClip.findUnique({
         where: { id: clip.id }
