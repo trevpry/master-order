@@ -725,6 +725,15 @@ router.get('/scenes/:id', asyncHandler(async (req, res) => {
             tag: true
           }
         },
+        clips: {
+          include: {
+            tags: {
+              include: {
+                tag: true
+              }
+            }
+          }
+        },
         studioObject: true,
         groups: {
           include: {
@@ -848,6 +857,23 @@ router.get('/scenes/:id', asyncHandler(async (req, res) => {
         description: st.tag.description,
         image: st.tag.image
       })),
+      clipTags: (() => {
+        // Collect all unique tags from clips
+        const tagMap = new Map();
+        scene.clips?.forEach(clip => {
+          clip.tags?.forEach(ct => {
+            if (!tagMap.has(ct.tag.id)) {
+              tagMap.set(ct.tag.id, {
+                id: ct.tag.id,
+                name: ct.tag.name,
+                description: ct.tag.description,
+                image: ct.tag.image
+              });
+            }
+          });
+        });
+        return Array.from(tagMap.values());
+      })(),
       groups: scene.groups.map(groupWrapper => ({
         sceneIndex: groupWrapper.sceneIndex,
         group: {

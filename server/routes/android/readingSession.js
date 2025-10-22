@@ -594,8 +594,12 @@ function createReadingSessionRoutes(prisma) {
           };
         }
       } catch (progressError) {
-        console.error('Error updating reading progress:', progressError);
+        console.error('❌ Error updating reading progress:', progressError);
+        console.error('❌ Error stack:', progressError.stack);
+        console.error('❌ Error details - sessionId:', activeSession.id, 'customOrderItemId:', activeSession.customOrderItemId);
         // Don't fail the entire request for progress update errors
+        // But we should still return the progress that was sent
+        finalProgressData = progress;
       }
     } else {
       if (!progress) {
