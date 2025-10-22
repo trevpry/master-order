@@ -2259,6 +2259,97 @@ router.post('/groups/:id/add-scene', asyncHandler(async (req, res) => {
   }
 }));
 
+// DELETE /api/stash/groups/:groupId/scenes/:sceneId - Unlink a scene from a group
+router.delete('/groups/:groupId/scenes/:sceneId', asyncHandler(async (req, res) => {
+  const { groupId, sceneId } = req.params;
+
+  console.log(`\n=== UNLINK SCENE FROM GROUP ===`);
+  console.log(`Group ID: ${groupId}`);
+  console.log(`Scene ID: ${sceneId}`);
+
+  // Verify the group exists
+  const group = await prisma.stashGroup.findUnique({
+    where: { id: groupId }
+  });
+
+  if (!group) {
+    return sendBadRequest(res, `Group with ID ${groupId} not found`);
+  }
+
+  // Verify the scene exists
+  const scene = await prisma.stashScene.findUnique({
+    where: { id: sceneId }
+  });
+
+  if (!scene) {
+    return sendBadRequest(res, `Scene with ID ${sceneId} not found`);
+  }
+
+  // Check if the relationship exists
+  const existingRelation = await prisma.stashGroupScene.findFirst({
+    where: {
+      groupId: groupId,
+      sceneId: sceneId
+    }
+  });
+
+  if (!existingRelation) {
+    return sendBadRequest(res, 'Scene is not linked to this group');
+  }
+
+  // Delete the relationship from the database using compound key
+  await prisma.stashGroupScene.delete({
+    where: {
+      groupId_sceneId: {
+        groupId: groupId,
+        sceneId: sceneId
+      }
+    }
+  });
+
+  console.log('✅ Scene unlinked from group in database');
+
+  // Also update in Stash via GraphQL if we have the IDs
+  if (group.id && scene.id) {
+    const mutation = `
+      mutation UpdateGroup($input: GroupUpdateInput!) {
+        groupUpdate(input: $input) {
+          id
+        }
+      }
+    `;
+
+    // Get the remaining scene IDs (after deletion)
+    const remainingScenes = await prisma.stashGroupScene.findMany({
+      where: { groupId: groupId },
+      include: { scene: true }
+    });
+
+    const sceneIds = remainingScenes
+      .map(gs => gs.scene.id)
+      .filter(sid => sid); // Filter out nulls
+
+    const variables = {
+      input: {
+        id: group.id,
+        scene_ids: sceneIds
+      }
+    };
+
+    try {
+      await makeStashGraphQLRequest(mutation, variables);
+      console.log('✅ Scene unlinked from group in Stash');
+    } catch (stashError) {
+      console.error('⚠️  Warning: Failed to update Stash, but database was updated:', stashError.message);
+      // Continue anyway since database update succeeded
+    }
+  }
+
+  sendSuccess(res, {
+    message: 'Scene unlinked from group successfully'
+  });
+}));
+
 // POST /api/stash/groups/:id/apply-matched-scenes - Apply action codes from matched scenes after user acceptance
 router.post('/groups/:id/apply-matched-scenes', asyncHandler(async (req, res) => {
   const { id } = req.params;

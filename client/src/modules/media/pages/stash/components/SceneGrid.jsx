@@ -1,7 +1,7 @@
 import React from 'react';
 import SceneCard from './SceneCard';
 
-export default function SceneGrid({ scenes, onSceneClick, showSceneNumbers = false }) {
+export default function SceneGrid({ scenes, onSceneClick, showSceneNumbers = false, onUnlinkClick = null }) {
   if (!scenes || scenes.length === 0) {
     return (
       <div className="empty-state">
@@ -17,6 +17,7 @@ export default function SceneGrid({ scenes, onSceneClick, showSceneNumbers = fal
           key={scene.id} 
           scene={scene} 
           onSceneClick={onSceneClick}
+          onUnlinkClick={onUnlinkClick}
           sceneNumber={showSceneNumbers ? (scene.sceneIndex || index + 1) : null}
         />
       ))}

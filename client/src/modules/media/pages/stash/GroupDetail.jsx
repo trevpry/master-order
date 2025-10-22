@@ -331,6 +331,44 @@ export default function GroupDetail() {
     }
   };
 
+  const handleUnlinkScene = async (scene) => {
+    if (!scene || !group) return;
+
+    const confirmUnlink = window.confirm(
+      `Unlink "${scene.title || 'this scene'}" from "${group.name}"?\n\n` +
+      `This will remove the scene from the group in both Stash and your local database.\n` +
+      `The scene itself will NOT be deleted.\n\n` +
+      `Continue?`
+    );
+
+    if (!confirmUnlink) return;
+
+    try {
+      console.log('🔗 Unlinking scene from group:', scene.title);
+      
+      const response = await fetch(`${config.apiBaseUrl}/api/stash/groups/${id}/scenes/${scene.id}`, {
+        method: 'DELETE'
+      });
+
+      if (!response.ok) {
+        const result = await response.json();
+        throw new Error(result.error || 'Failed to unlink scene');
+      }
+
+      const result = await response.json();
+      console.log('✅ Scene unlinked:', result);
+      
+      // Refresh the group data to show updated scene list
+      await fetchGroup();
+      
+      alert(`Scene unlinked successfully!`);
+      
+    } catch (error) {
+      console.error('❌ Error unlinking scene:', error);
+      alert('Failed to unlink scene: ' + error.message);
+    }
+  };
+
   const formatDuration = (seconds) => {
     if (!seconds) return '';
     const hours = Math.floor(seconds / 3600);
@@ -552,6 +590,7 @@ export default function GroupDetail() {
             <SceneGrid 
               scenes={scenes} 
               onSceneClick={handleSceneClick}
+              onUnlinkClick={handleUnlinkScene}
               showSceneNumbers={true}
             />
           ) : (

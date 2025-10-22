@@ -125,9 +125,22 @@ const styles = {
     fontWeight: '600',
     transition: 'background 0.2s ease',
   },
+  unlinkBtn: {
+    width: '100%',
+    padding: '0.5rem',
+    background: '#ef4444',
+    color: 'white',
+    border: 'none',
+    borderRadius: '0.375rem',
+    cursor: 'pointer',
+    fontSize: '0.875rem',
+    fontWeight: '600',
+    transition: 'background 0.2s ease',
+    marginTop: '0.5rem',
+  },
 };
 
-export default function SceneCard({ scene, onSceneClick, sceneNumber = null }) {
+export default function SceneCard({ scene, onSceneClick, sceneNumber = null, onUnlinkClick = null }) {
   const handleMouseEnter = (e) => {
     e.currentTarget.style.boxShadow = '0 4px 6px -1px rgba(0, 0, 0, 0.1)';
     e.currentTarget.style.transform = 'translateY(-2px)';
@@ -144,6 +157,14 @@ export default function SceneCard({ scene, onSceneClick, sceneNumber = null }) {
 
   const handlePlayBtnLeave = (e) => {
     e.currentTarget.style.background = '#3b82f6';
+  };
+
+  const handleUnlinkBtnHover = (e) => {
+    e.currentTarget.style.background = '#dc2626';
+  };
+
+  const handleUnlinkBtnLeave = (e) => {
+    e.currentTarget.style.background = '#ef4444';
   };
 
   return (
@@ -249,17 +270,33 @@ export default function SceneCard({ scene, onSceneClick, sceneNumber = null }) {
           )}
         </div>
         
-        {onSceneClick && (
+        {(onSceneClick || onUnlinkClick) && (
           <div style={styles.actions}>
-            <button 
-              style={styles.playBtn}
-              onClick={() => onSceneClick(scene)}
-              onMouseEnter={handlePlayBtnHover}
-              onMouseLeave={handlePlayBtnLeave}
-              title="Play Scene"
-            >
-              ▶️ Play
-            </button>
+            {onSceneClick && (
+              <button 
+                style={styles.playBtn}
+                onClick={() => onSceneClick(scene)}
+                onMouseEnter={handlePlayBtnHover}
+                onMouseLeave={handlePlayBtnLeave}
+                title="Play Scene"
+              >
+                ▶️ Play
+              </button>
+            )}
+            {onUnlinkClick && (
+              <button 
+                style={styles.unlinkBtn}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onUnlinkClick(scene);
+                }}
+                onMouseEnter={handleUnlinkBtnHover}
+                onMouseLeave={handleUnlinkBtnLeave}
+                title="Unlink scene from group"
+              >
+                🔗 Unlink from Group
+              </button>
+            )}
           </div>
         )}
       </div>
