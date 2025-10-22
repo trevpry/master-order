@@ -1,0 +1,33 @@
+name: "EuroBoyXXX"
+sceneByURL:
+  - action: scrapeXPath
+    url:
+      - euroboyxxx.com/video/
+    scraper: sceneScraper
+xPathScrapers:
+  sceneScraper:
+    common:
+      $perf: //li[contains(text(),'Added:')]/../li[2]
+    scene:
+      Title:
+        selector: //div[@class="col-xs-12 col-md-6"]/h1/
+      Details:
+        selector: //div[@class="col-xs-12"]/div[@class="text-justify"]/text()
+        postProcess:
+            - replace:
+                - regex: "SCENE INFORMATION:"
+                  with: ""
+      Performers:
+        Name:
+          selector: //div[@class="col-xs-6 col-sm-6 item"]/span/text()
+        URL:
+          selector: //div[@class="videoContainer"]/a[1]/@href
+      Tags:
+        Name: 
+          selector: //div[@class="tags"]/a/text()
+      Image:
+        selector: //video/@poster
+      Studio:
+        Name:
+          fixed: "Euro Boy XXX"  
+# Last Updated July 27, 2025
