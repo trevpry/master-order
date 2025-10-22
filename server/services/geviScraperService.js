@@ -558,6 +558,28 @@ class GeviScraperService {
         movie.director = directors.join(', ');
       }
 
+      // Extract external URLs (e.g., AEBN, VOD, etc.) from "View movie at" divs
+      movie.externalUrls = [];
+      const externalDivs = $('div:contains("View movie at")');
+      externalDivs.each((i, div) => {
+        // Only process divs where the direct text content starts with "View movie at"
+        const divText = $(div).contents().filter(function() {
+          return this.type === 'text';
+        }).text().trim();
+        
+        if (divText.startsWith('View movie at')) {
+          const link = $(div).find('a').first();
+          if (link.length) {
+            const href = link.attr('href');
+            if (href) {
+              const fullUrl = this.absUrl(href);
+              movie.externalUrls.push(fullUrl);
+              console.log(`   - Found external URL: ${fullUrl}`);
+            }
+          }
+        }
+      });
+
       // Extract scenes from the movie page
       const scenesDiv = $('#scenes');
       if (scenesDiv.length) {

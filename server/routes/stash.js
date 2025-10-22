@@ -2412,12 +2412,49 @@ router.post('/groups/:id/apply-matched-scenes', asyncHandler(async (req, res) =>
 
       console.log(`      - Performer: ${performerName}, Action Code: ${actionCode}`);
 
-      // Find matching performer in database scene
-      const dbPerformer = dbScene.performers.find(sp => 
-        sp.performer.name.toLowerCase() === performerName.toLowerCase() ||
-        sp.performer.name.toLowerCase().includes(performerName.toLowerCase()) ||
-        performerName.toLowerCase().includes(sp.performer.name.toLowerCase())
-      );
+      // Find matching performer in database scene with flexible matching
+      // Remove parentheses and normalize for better matching
+      const normalizedGevi = performerName
+        .replace(/[()]/g, ' ')  // Replace parentheses with spaces
+        .replace(/\s+/g, ' ')    // Collapse multiple spaces
+        .trim()
+        .toLowerCase();
+      
+      const geviParts = normalizedGevi.split(' ').filter(p => p.length > 0);
+      
+      const dbPerformer = dbScene.performers.find(sp => {
+        const dbName = sp.performer.name.toLowerCase();
+        const normalizedDb = dbName
+          .replace(/[()]/g, ' ')
+          .replace(/\s+/g, ' ')
+          .trim();
+        const dbParts = normalizedDb.split(' ').filter(p => p.length > 0);
+        
+        // Exact match after normalization
+        if (normalizedDb === normalizedGevi) {
+          return true;
+        }
+        
+        // Check if all GEVI name parts appear in DB name
+        const allGeviPartsInDb = geviParts.every(part => 
+          dbParts.some(dbPart => dbPart.includes(part) || part.includes(dbPart))
+        );
+        
+        // Check if all DB name parts appear in GEVI name
+        const allDbPartsInGevi = dbParts.every(part => 
+          geviParts.some(geviPart => geviPart.includes(part) || part.includes(geviPart))
+        );
+        
+        // Match if significant overlap (at least 2 parts match, or all parts of shorter name match)
+        const matchingParts = geviParts.filter(part => 
+          dbParts.some(dbPart => dbPart.includes(part) || part.includes(dbPart))
+        ).length;
+        
+        const minParts = Math.min(geviParts.length, dbParts.length);
+        const hasSignificantOverlap = matchingParts >= Math.min(2, minParts);
+        
+        return allGeviPartsInDb || allDbPartsInGevi || hasSignificantOverlap;
+      });
 
       if (dbPerformer) {
         performersWithCodes.push({
@@ -2426,6 +2463,7 @@ router.post('/groups/:id/apply-matched-scenes', asyncHandler(async (req, res) =>
           actionCode: actionCode
         });
         results.totalPerformers++;
+        console.log(`      ✅ Matched "${performerName}" to "${dbPerformer.performer.name}"`);
       } else {
         console.log(`      ⚠️  Could not find matching DB performer for: ${performerName}`);
         results.errors.push({ sceneId: match.sceneId, performer: performerName, error: 'Performer not found' });
@@ -2981,12 +3019,33 @@ router.post('/gevi/movie', asyncHandler(async (req, res) => {
           // Update GEVI URL if empty
           if ((!dbScene.geviUrl || dbScene.geviUrl.trim() === '') && match.episodeUrl) {
             localUpdates.geviUrl = match.episodeUrl;
-            // Add GEVI URL to scene URLs in Stash
-            stashUpdates.urls = dbScene.url ? [dbScene.url, match.episodeUrl] : [match.episodeUrl];
             needsUpdate = true;
             console.log(`      ✓ Will update GEVI URL: ${match.episodeUrl}`);
           } else {
             console.log(`      ✗ Skipping GEVI URL (already has: "${dbScene.geviUrl}")`);
+          }
+          
+          // Build URLs array for Stash - include existing URL, GEVI episode URL, and any AEBN/external URLs
+          const urlsToAdd = [];
+          if (dbScene.url) urlsToAdd.push(dbScene.url);
+          if (match.episodeUrl && !urlsToAdd.includes(match.episodeUrl)) {
+            urlsToAdd.push(match.episodeUrl);
+          }
+          
+          // Add AEBN and other external URLs from the movie page
+          if (movie.externalUrls && Array.isArray(movie.externalUrls)) {
+            for (const extUrl of movie.externalUrls) {
+              if (!urlsToAdd.includes(extUrl)) {
+                urlsToAdd.push(extUrl);
+                console.log(`      ✓ Adding external URL: ${extUrl}`);
+              }
+            }
+          }
+          
+          // Only update URLs in Stash if we have URLs to add and they differ from current
+          if (urlsToAdd.length > 0) {
+            stashUpdates.urls = urlsToAdd;
+            needsUpdate = true;
           }
           
           console.log(`      - needsUpdate: ${needsUpdate}`);
