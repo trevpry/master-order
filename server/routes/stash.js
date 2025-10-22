@@ -2413,7 +2413,23 @@ router.post('/groups/:id/search-gevi', asyncHandler(async (req, res) => {
 
   try {
     // Search GEVI for movies matching the group title
-    const movies = await geviScraper.searchMovie(group.name);
+    let movies = await geviScraper.searchMovie(group.name);
+
+    // If no results and group has aliases, try searching with each alias
+    if ((!movies || movies.length === 0) && group.aliases) {
+      console.log('   - No results with primary title, trying aliases...');
+      const aliases = group.aliases.split(',').map(a => a.trim()).filter(a => a.length > 0);
+      
+      for (const alias of aliases) {
+        console.log(`   - Trying alias: "${alias}"`);
+        movies = await geviScraper.searchMovie(alias);
+        
+        if (movies && movies.length > 0) {
+          console.log(`   - ✓ Found ${movies.length} movies using alias "${alias}"`);
+          break;
+        }
+      }
+    }
 
     if (!movies || movies.length === 0) {
       console.log('   - No movies found');
@@ -3615,7 +3631,10 @@ router.post('/scenes/:id/search-gevi', asyncHandler(async (req, res) => {
   }
 
   const allPerformers = scene.performers.map(sp => sp.performer);
-  const firstPerformer = allPerformers[0];
+  
+  // Choose performer without punctuation for better GEVI search results
+  const hasPunctuation = (name) => /['".,;:!?\-()[\]{}]/.test(name);
+  const firstPerformer = allPerformers.find(p => !hasPunctuation(p.name)) || allPerformers[0];
 
   console.log(`   - Scene has ${allPerformers.length} performers:`, allPerformers.map(p => p.name).join(', '));
   console.log('   - Primary search performer:', firstPerformer.name);
@@ -3633,13 +3652,15 @@ router.post('/scenes/:id/search-gevi', asyncHandler(async (req, res) => {
   let performerPage = null;
   let scenesByUrl = new Map(); // Map of scene URL to {title, url, matchedPerformers[]}
   
+  // Get a test performer (first one that isn't the primary search performer)
+  const testPerformer = allPerformers.find(p => p.id !== firstPerformer.id);
+  
   for (let matchIndex = 0; matchIndex < firstPerformerResults.length; matchIndex++) {
     const candidatePerformer = firstPerformerResults[matchIndex];
     console.log(`   - Trying match ${matchIndex + 1}/${firstPerformerResults.length}: ${candidatePerformer.name} (${candidatePerformer.url})`);
     
-    // Test this performer by searching for one other performer
-    // Use a quick test with the second performer to see if this page has episodes
-    const testPerformer = allPerformers[1];
+    // Test this performer by searching for another performer
+    // Use a quick test with the test performer to see if this page has episodes
     console.log(`   - Testing with performer: ${testPerformer.name}`);
     
     const testScenes = await geviScraper.searchScenesWithPerformers(candidatePerformer.url, testPerformer);
@@ -3667,13 +3688,19 @@ router.post('/scenes/:id/search-gevi', asyncHandler(async (req, res) => {
   }
 
   console.log(`   - Using performer: ${performerPage.name} (${performerPage.url})`);
-  console.log(`   - Searching for ${allPerformers.length - 2} remaining performers in episodes...`);
-  console.log(`   - (Skipping ${firstPerformer.name} since we're already on their page, and ${allPerformers[1].name} already searched)`);
+  
+  // Filter out the performers we've already searched
+  const remainingPerformers = allPerformers.filter(p => 
+    p.id !== firstPerformer.id && p.id !== testPerformer.id
+  );
+  
+  console.log(`   - Searching for ${remainingPerformers.length} remaining performers in episodes...`);
+  console.log(`   - (Already searched: ${firstPerformer.name}, ${testPerformer.name})`);
 
-  // Search for remaining performers (skip first two: one is the page owner, one was used for testing)
-  for (let i = 2; i < allPerformers.length; i++) {
-    const performer = allPerformers[i];
-    console.log(`   - [${i - 1}/${allPerformers.length - 2}] Searching for: ${performer.name}`);
+  // Search for remaining performers
+  for (let i = 0; i < remainingPerformers.length; i++) {
+    const performer = remainingPerformers[i];
+    console.log(`   - [${i + 1}/${remainingPerformers.length}] Searching for: ${performer.name}`);
 
     // Search for scenes with this performer on the performer's page
     // Pass the performer object (not just the name string)
@@ -3830,7 +3857,10 @@ router.post('/scenes/:id/search-gevi-movies', asyncHandler(async (req, res) => {
   }
 
   const allPerformers = scene.performers.map(sp => sp.performer);
-  const firstPerformer = allPerformers[0];
+  
+  // Choose performer without punctuation for better GEVI search results
+  const hasPunctuation = (name) => /['".,;:!?\-()[\]{}]/.test(name);
+  const firstPerformer = allPerformers.find(p => !hasPunctuation(p.name)) || allPerformers[0];
 
   console.log(`   - Scene has ${allPerformers.length} performers:`, allPerformers.map(p => p.name).join(', '));
   console.log('   - Primary search performer:', firstPerformer.name);
@@ -3989,15 +4019,18 @@ router.post('/scenes/:id/search-gevi-movies', asyncHandler(async (req, res) => {
       // Wait for the movies table and search box to appear
       await new Promise(resolve => setTimeout(resolve, 2000));
 
-      console.log(`   - Searching for ${allPerformers.length - 1} other performers in movies table...`);
+      // Filter out the first performer since we're already on their page
+      const otherPerformers = allPerformers.filter(p => p.id !== firstPerformer.id);
+      
+      console.log(`   - Searching for ${otherPerformers.length} other performers in movies table...`);
       console.log(`   - (Skipping ${firstPerformer.name} since we're already on their page)`);
 
-      // Search for each performer (except the first one, since we're on their page)
+      // Search for each other performer
       const moviesByPerformer = new Map(); // Map of movie URL to {title, url, matchedPerformers[]}
 
-      for (let i = 1; i < allPerformers.length; i++) {
-        const performer = allPerformers[i];
-        console.log(`   - [${i}/${allPerformers.length - 1}] Searching for: ${performer.name}`);
+      for (let i = 0; i < otherPerformers.length; i++) {
+        const performer = otherPerformers[i];
+        console.log(`   - [${i + 1}/${otherPerformers.length}] Searching for: ${performer.name}`);
 
         // Clear the search box
         await page.evaluate(() => {
