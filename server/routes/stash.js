@@ -7848,7 +7848,10 @@ router.post('/studios/merge', asyncHandler(async (req, res) => {
       where: { id: { in: allStudioIds } },
       include: {
         _count: {
-          select: { scenes: true }
+          select: { 
+            scenes: true,
+            groups: true
+          }
         }
       }
     });
@@ -7860,9 +7863,9 @@ router.post('/studios/merge', asyncHandler(async (req, res) => {
     const primaryStudio = studios.find(s => s.id === primaryStudioId);
     const mergeStudios = studios.filter(s => s.id !== primaryStudioId);
 
-    console.log(`📊 Primary studio: ${primaryStudio.name} (${primaryStudio._count.scenes} scenes)`);
+    console.log(`📊 Primary studio: ${primaryStudio.name} (${primaryStudio._count.scenes} scenes, ${primaryStudio._count.groups} groups)`);
     mergeStudios.forEach(studio => {
-      console.log(`   Merging: ${studio.name} (${studio._count.scenes} scenes)`);
+      console.log(`   Merging: ${studio.name} (${studio._count.scenes} scenes, ${studio._count.groups} groups)`);
     });
 
     // Collect studio names as aliases
@@ -7902,6 +7905,18 @@ router.post('/studios/merge', asyncHandler(async (req, res) => {
     });
 
     console.log(`📁 Transferred ${transferredScenes.count} scenes to primary studio`);
+    
+    // Transfer all groups/movies from merge studios to primary studio
+    const transferredGroups = await prisma.stashGroup.updateMany({
+      where: {
+        studioId: { in: mergeStudioIds }
+      },
+      data: {
+        studioId: primaryStudioId
+      }
+    });
+
+    console.log(`🎬 Transferred ${transferredGroups.count} groups/movies to primary studio`);
 
     // Update in Stash via GraphQL
     try {
@@ -7910,30 +7925,6 @@ router.post('/studios/merge', asyncHandler(async (req, res) => {
       if (!stashService) {
         console.warn('⚠️ Stash service not available - skipping Stash update');
         throw new Error('Stash service not available');
-      }
-      
-      // Update primary studio in Stash with new aliases
-      console.log(`🔄 Updating primary studio in Stash with ${allAliases.length} aliases...`);
-      const updateStudioMutation = `
-        mutation StudioUpdate($input: StudioUpdateInput!) {
-          studioUpdate(input: $input) {
-            id
-            name
-            aliases
-          }
-        }
-      `;
-      
-      try {
-        await stashService.makeGraphQLRequest(updateStudioMutation, {
-          input: {
-            id: primaryStudioId,
-            aliases: allAliases
-          }
-        });
-        console.log(`✅ Updated primary studio aliases in Stash`);
-      } catch (aliasUpdateError) {
-        console.error(`⚠️  Failed to update studio aliases in Stash:`, aliasUpdateError.message);
       }
 
       // Update all transferred scenes in Stash to point to the primary studio
@@ -7969,8 +7960,42 @@ router.post('/studios/merge', asyncHandler(async (req, res) => {
       }
 
       console.log(`✅ Updated scenes in Stash`);
+      
+      // Update all transferred groups/movies in Stash to point to the primary studio
+      const groupsToUpdate = await prisma.stashGroup.findMany({
+        where: {
+          studioId: primaryStudioId
+        },
+        select: { id: true }
+      });
 
-      // Delete merged studios from Stash
+      console.log(`📤 Updating ${groupsToUpdate.length} groups/movies in Stash...`);
+
+      for (const group of groupsToUpdate) {
+        try {
+          const updateMutation = `
+            mutation GroupUpdate($input: GroupUpdateInput!) {
+              groupUpdate(input: $input) {
+                id
+                studio { id name }
+              }
+            }
+          `;
+
+          await stashService.makeGraphQLRequest(updateMutation, {
+            input: {
+              id: group.id,
+              studio_id: primaryStudioId
+            }
+          });
+        } catch (groupUpdateError) {
+          console.error(`   ❌ Failed to update group ${group.id} in Stash:`, groupUpdateError.message);
+        }
+      }
+
+      console.log(`✅ Updated groups/movies in Stash`);
+
+      // Delete merged studios from Stash FIRST (before updating aliases)
       console.log(`🗑️ Deleting ${mergeStudios.length} merged studio(s) from Stash...`);
       
       for (const studio of mergeStudios) {
@@ -7991,6 +8016,32 @@ router.post('/studios/merge', asyncHandler(async (req, res) => {
       }
       
       console.log(`✅ Finished deleting merged studios from Stash`);
+      
+      // NOW update primary studio in Stash with new aliases (after studios are deleted)
+      console.log(`🔄 Updating primary studio in Stash with ${allAliases.length} aliases...`);
+      const updateStudioMutation = `
+        mutation StudioUpdate($input: StudioUpdateInput!) {
+          studioUpdate(input: $input) {
+            id
+            name
+            aliases
+          }
+        }
+      `;
+      
+      try {
+        await stashService.makeGraphQLRequest(updateStudioMutation, {
+          input: {
+            id: primaryStudioId,
+            aliases: allAliases
+          }
+        });
+        console.log(`✅ Updated primary studio aliases in Stash`);
+      } catch (aliasUpdateError) {
+        console.error(`⚠️  Failed to update studio aliases in Stash:`, aliasUpdateError.message);
+      }
+      
+      console.log(`✅ Finished deleting merged studios from Stash`);
 
     } catch (stashError) {
       console.error('❌ CRITICAL: Failed to update Stash:', stashError.message);
@@ -8004,12 +8055,15 @@ router.post('/studios/merge', asyncHandler(async (req, res) => {
       where: { id: { in: mergeStudioIds } }
     });
 
-    // Fetch updated primary studio with scene count and aliases
+    // Fetch updated primary studio with scene/group counts and aliases
     const updatedStudio = await prisma.stashStudio.findUnique({
       where: { id: primaryStudioId },
       include: {
         _count: {
-          select: { scenes: true }
+          select: { 
+            scenes: true,
+            groups: true
+          }
         },
         aliases: {
           select: {
@@ -8020,7 +8074,7 @@ router.post('/studios/merge', asyncHandler(async (req, res) => {
     });
 
     console.log(`✅ Merged ${mergeStudioIds.length} studios into studio ${primaryStudioId}`);
-    console.log(`   Primary studio now has ${updatedStudio._count.scenes} scenes and ${updatedStudio.aliases.length} aliases`);
+    console.log(`   Primary studio now has ${updatedStudio._count.scenes} scenes, ${updatedStudio._count.groups} groups, and ${updatedStudio.aliases.length} aliases`);
     
     sendSuccess(res, {
       studio: {
@@ -8028,7 +8082,8 @@ router.post('/studios/merge', asyncHandler(async (req, res) => {
         aliases: updatedStudio.aliases.map(a => a.alias)
       },
       mergedCount: mergeStudioIds.length,
-      transferredScenes: transferredScenes.count
+      transferredScenes: transferredScenes.count,
+      transferredGroups: transferredGroups.count
     });
 
   } catch (error) {

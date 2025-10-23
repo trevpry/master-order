@@ -219,6 +219,7 @@ class PerformerSwapService {
         id: true,
         name: true,
         alias: true,
+        disambiguation: true,
         image: true,
         _count: {
           select: {
@@ -233,6 +234,7 @@ class PerformerSwapService {
       id: p.id,
       name: p.name,
       alias: p.alias,
+      disambiguation: p.disambiguation,
       image: p.image,
       scene_count: p._count?.scenes || 0
     }));

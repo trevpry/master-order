@@ -568,7 +568,10 @@ class YamlScraperService extends BaseScraperService {
 
   /**
    * Search for scenes using performers
-   * For GuyBone: builds URLs like https://guybone.com/model/aaron_burke
+   * Supports two workflows:
+   * 1. Direct scene extraction: performerSearchUrl points directly to performer page, extract scenes with performerSearchScraper
+   * 2. Two-stage search: performerSearchUrl points to search results, use performerSearchScraper to find performer URLs,
+   *    then visit each URL and use sceneScraper to extract scenes
    * Returns all scenes found on each performer's page that match ALL provided performers
    */
   async searchScenes(performers) {
@@ -582,6 +585,35 @@ class YamlScraperService extends BaseScraperService {
 
     const searchConfig = this.config.sceneByFragment[0];
     
+    // Get performer search URL pattern from config
+    const performerSearchUrlPattern = searchConfig.performerSearchUrl;
+    if (!performerSearchUrlPattern) {
+      throw new Error(`${this.siteName} sceneByFragment config missing performerSearchUrl`);
+    }
+
+    // Get spacesConvertTo value from config, default to underscore
+    const spacesConvertTo = searchConfig.spacesConvertTo || '_';
+
+    // Determine workflow based on config
+    // If performerSearchScraper is specified AND has 'performer' config (not 'scene'), use two-stage workflow
+    const performerSearchScraperName = searchConfig.performerSearchScraper;
+    const useTwoStageWorkflow = performerSearchScraperName && 
+                                this.config.xPathScrapers[performerSearchScraperName] &&
+                                this.config.xPathScrapers[performerSearchScraperName].performer;
+
+    if (useTwoStageWorkflow) {
+      console.log(`   🔄 Using two-stage workflow: search for performers, then extract scenes from their pages`);
+      return await this.searchScenesTwoStage(performers, searchConfig, spacesConvertTo);
+    } else {
+      console.log(`   ➡️  Using direct workflow: extract scenes directly from performer URLs`);
+      return await this.searchScenesDirect(performers, searchConfig, spacesConvertTo);
+    }
+  }
+
+  /**
+   * Direct workflow: performerSearchUrl points to performer page, extract scenes directly
+   */
+  async searchScenesDirect(performers, searchConfig, spacesConvertTo) {
     // Use performerSearchScraper if specified, otherwise fall back to scraper
     const scraperName = searchConfig.performerSearchScraper || searchConfig.scraper;
     if (!scraperName) {
@@ -594,11 +626,7 @@ class YamlScraperService extends BaseScraperService {
       throw new Error(`Performer search scraper configuration not found: ${scraperName}`);
     }
 
-    // Get performer search URL pattern from config
     const performerSearchUrlPattern = searchConfig.performerSearchUrl;
-    if (!performerSearchUrlPattern) {
-      throw new Error(`${this.siteName} sceneByFragment config missing performerSearchUrl`);
-    }
 
     try {
       // Collect all scenes from all performer pages
@@ -618,8 +646,8 @@ class YamlScraperService extends BaseScraperService {
 
         // Try each name/alias
         for (const name of namesToTry) {
-          // Build performer slug: replace spaces with underscores, lowercase
-          const performerSlug = name.toLowerCase().replace(/\s+/g, '_');
+          // Build performer slug: replace spaces with configured character, lowercase
+          const performerSlug = name.toLowerCase().replace(/\s+/g, spacesConvertTo);
           
           // Build performer URL from pattern
           const performerUrl = performerSearchUrlPattern.replace('{performer}', performerSlug);
@@ -732,6 +760,262 @@ class YamlScraperService extends BaseScraperService {
   }
 
   /**
+   * Two-stage workflow: search for performers, then extract scenes from their pages
+   * 1. Use performerSearchScraper to search and get performer URLs
+   * 2. Visit each performer URL and use sceneScraper (or performerSceneScraper if specified) to extract scenes
+   * 3. Filter scenes that contain ALL original performers
+   */
+  async searchScenesTwoStage(performers, searchConfig, spacesConvertTo) {
+    const performerSearchScraperName = searchConfig.performerSearchScraper;
+    const performerSearchConfig = this.config.xPathScrapers[performerSearchScraperName];
+    
+    if (!performerSearchConfig || !performerSearchConfig.performer) {
+      throw new Error(`Performer search scraper configuration not found or missing performer config: ${performerSearchScraperName}`);
+    }
+
+    // Check if performerSearchScraper specifies a custom scene scraper for performer pages
+    const performerPageSceneScraperName = performerSearchConfig.performer.performerSceneScraper;
+    
+    // Get scene scraper for extracting scenes from performer pages
+    let sceneScraperName;
+    let sceneScraperConfig;
+    
+    if (performerPageSceneScraperName) {
+      // Use custom scraper specified in performerSearchScraper config
+      sceneScraperName = performerPageSceneScraperName;
+      sceneScraperConfig = this.config.xPathScrapers[sceneScraperName];
+      console.log(`   📋 Using custom performer page scene scraper: ${sceneScraperName}`);
+    } else {
+      // Fall back to main scene scraper
+      sceneScraperName = searchConfig.scraper || 'sceneScraper';
+      sceneScraperConfig = this.config.xPathScrapers[sceneScraperName];
+    }
+    
+    if (!sceneScraperConfig || !sceneScraperConfig.scene) {
+      throw new Error(`Scene scraper configuration not found: ${sceneScraperName}`);
+    }
+
+    const performerSearchUrlPattern = searchConfig.performerSearchUrl;
+    const allScenes = [];
+
+    try {
+      // Stage 1: Search for each performer and collect their URLs
+      for (const performer of performers) {
+        // Build list of names to try: primary name + aliases
+        const namesToTry = [performer.name];
+        if (performer.alias) {
+          const aliases = performer.alias.split(',').map(a => a.trim()).filter(a => a);
+          namesToTry.push(...aliases);
+        }
+
+        console.log(`   🔍 Stage 1: Searching for performer "${performer.name}" (${namesToTry.length} name(s))`);
+
+        let performerUrlFound = null;
+
+        // Try each name/alias
+        for (const name of namesToTry) {
+          // Build search URL
+          const searchSlug = name.toLowerCase().replace(/\s+/g, spacesConvertTo);
+          const searchUrl = performerSearchUrlPattern.replace('{performer}', searchSlug);
+          
+          console.log(`      - Searching: ${searchUrl}`);
+
+          try {
+            const $ = await this.fetchHtml(searchUrl);
+            const performerConfig = performerSearchConfig.performer;
+
+            // Extract performer search results - first get element count
+            const performerElements = this.extractArrayElements($, performerConfig.Name);
+            const resultCount = performerElements.length;
+            
+            if (resultCount > 0) {
+              console.log(`      ✓ Found ${resultCount} performer result(s)`);
+
+              // Try to find exact match (case-insensitive)
+              const searchNameLower = name.toLowerCase();
+              let matchIndex = -1;
+
+              // Extract actual text values and compare
+              for (let i = 0; i < resultCount; i++) {
+                const resultName = this.extractValueAtIndex($, performerConfig.Name, i);
+                if (resultName && resultName.toLowerCase().trim() === searchNameLower) {
+                  matchIndex = i;
+                  console.log(`      ✓ Found exact match: "${resultName}" at index ${i}`);
+                  break;
+                }
+              }
+
+              // If no exact match, use first result
+              if (matchIndex === -1 && resultCount > 0) {
+                matchIndex = 0;
+                const firstResultName = this.extractValueAtIndex($, performerConfig.Name, 0);
+                console.log(`      ⚠️  No exact match, using first result: "${firstResultName}"`);
+              }
+
+              if (matchIndex >= 0) {
+                // Extract performer URL
+                const performerUrl = this.extractValueAtIndex($, performerConfig.URL, matchIndex);
+                
+                if (performerUrl) {
+                  performerUrlFound = performerUrl;
+                  console.log(`      ✓ Performer URL: ${performerUrl}`);
+                  break; // Found a match, no need to try other aliases
+                }
+              }
+            } else {
+              console.log(`      - No results for "${name}"`);
+            }
+          } catch (error) {
+            console.warn(`      ⚠️ Failed to search for "${name}":`, error.message);
+          }
+        }
+
+        if (!performerUrlFound) {
+          console.log(`      ⚠️ Could not find performer URL for "${performer.name}"`);
+          continue;
+        }
+
+        // Stage 2: Extract scenes from performer's page
+        console.log(`   🔍 Stage 2: Extracting scenes from ${performerUrlFound}`);
+
+        try {
+          const $ = await this.fetchHtml(performerUrlFound);
+          const sceneConfig = sceneScraperConfig.scene;
+
+          // Extract all scenes from the performer page
+          const titleElements = this.extractArrayElements($, sceneConfig.Title);
+          
+          if (titleElements.length > 0) {
+            console.log(`      ✓ Found ${titleElements.length} scene(s) for "${performer.name}"`);
+
+            for (let i = 0; i < titleElements.length; i++) {
+              const scene = {
+                title: null,
+                url: null,
+                coverImage: null,
+                date: null,
+                studio: this.siteName,
+                performers: [] // Will store performer info from scene page
+              };
+
+              // Extract scene details
+              if (sceneConfig.Title) {
+                scene.title = this.extractValueAtIndex($, sceneConfig.Title, i);
+              }
+
+              if (sceneConfig.URL) {
+                scene.url = this.extractValueAtIndex($, sceneConfig.URL, i);
+              }
+
+              if (sceneConfig.Image) {
+                scene.coverImage = this.extractValueAtIndex($, sceneConfig.Image, i);
+              }
+
+              if (sceneConfig.Date) {
+                scene.date = this.extractValueAtIndex($, sceneConfig.Date, i);
+              }
+
+              if (scene.title && scene.url) {
+                allScenes.push(scene);
+                console.log(`         Added scene: "${scene.title}" (${scene.url})`);
+              }
+            }
+          } else {
+            console.log(`      - No scenes found for "${performer.name}"`);
+          }
+        } catch (error) {
+          console.warn(`      ⚠️ Failed to extract scenes from performer page:`, error.message);
+        }
+      }
+
+      console.log(`   📊 Total scenes collected: ${allScenes.length}`);
+
+      // Stage 3: For each scene, scrape the scene page to get full performer list
+      // Then filter to scenes that contain ALL original performers
+      console.log(`   🔍 Stage 3: Filtering scenes by performers`);
+
+      const validScenes = [];
+      const sceneConfig = sceneScraperConfig.scene;
+
+      for (const scene of allScenes) {
+        try {
+          const $ = await this.fetchHtml(scene.url);
+          
+          // Extract performers from scene page
+          const scenePerformerNames = [];
+          if (sceneConfig.Performers && sceneConfig.Performers.Name) {
+            const performerElements = this.extractArrayElements($, sceneConfig.Performers.Name);
+            console.log(`      DEBUG: Found ${performerElements.length} performer elements for scene "${scene.title}"`);
+            console.log(`      DEBUG: Performers config:`, JSON.stringify(sceneConfig.Performers.Name));
+            
+            // Extract actual text values for each performer
+            for (let i = 0; i < performerElements.length; i++) {
+              const performerName = this.extractValueAtIndex($, sceneConfig.Performers.Name, i);
+              console.log(`      DEBUG: Performer ${i}: "${performerName}"`);
+              if (performerName) {
+                scenePerformerNames.push(performerName.toLowerCase().trim());
+              }
+            }
+          } else {
+            console.log(`      DEBUG: No Performers config found in sceneConfig`);
+          }
+
+          console.log(`      Scene "${scene.title}": ${scenePerformerNames.length} performer(s)`);
+
+          // Check if ALL original performers are in this scene
+          const allPerformersMatch = performers.every(performer => {
+            const performerNameLower = performer.name.toLowerCase();
+            const performerAliases = performer.alias 
+              ? performer.alias.split(',').map(a => a.trim().toLowerCase())
+              : [];
+            
+            // Check if performer name or any alias matches any scene performer
+            return scenePerformerNames.some(scenePerfName => {
+              return scenePerfName === performerNameLower || 
+                     performerAliases.some(alias => scenePerfName === alias);
+            });
+          });
+
+          if (allPerformersMatch) {
+            scene.performers = scenePerformerNames;
+            validScenes.push(scene);
+            console.log(`      ✓ Scene matches ALL performers`);
+          } else {
+            console.log(`      ✗ Scene missing some performers`);
+          }
+        } catch (error) {
+          console.warn(`      ⚠️ Failed to check performers for scene "${scene.title}":`, error.message);
+        }
+      }
+
+      // Deduplicate by URL
+      const uniqueScenes = [];
+      const seenUrls = new Set();
+      validScenes.forEach(scene => {
+        if (!seenUrls.has(scene.url)) {
+          seenUrls.add(scene.url);
+          uniqueScenes.push(scene);
+        }
+      });
+
+      console.log(`   ✅ Found ${uniqueScenes.length} scene(s) with ALL ${performers.length} performer(s)`);
+
+      return uniqueScenes.map(scene => ({
+        url: scene.url,
+        title: scene.title,
+        date: scene.date,
+        studio: { name: this.siteName },
+        image: scene.coverImage,
+        performers: performers.map(p => ({ name: p.name }))
+      }));
+
+    } catch (error) {
+      console.error(`❌ [${this.siteName}] Error in two-stage scene search:`, error);
+      throw new Error(`Failed to search ${this.siteName} scenes: ${error.message}`);
+    }
+  }
+
+  /**
    * Search for scenes by title on studio page
    * @param {string} title - Scene title to search for
    * @param {string} studioUrl - Optional studio URL to search on (uses studioSearchUrl from config if not provided)
@@ -765,10 +1049,13 @@ class YamlScraperService extends BaseScraperService {
       throw new Error(`${this.siteName} sceneByFragment config missing studioSearchUrl and no studioUrl provided`);
     }
 
+    // Get spacesConvertTo value from config, default to underscore
+    const spacesConvertTo = searchConfig.spacesConvertTo || '_';
+
     // Check if URL has {title} placeholder - if so, replace it with normalized title
     if (searchUrl.includes('{title}')) {
-      // Normalize title: lowercase, replace spaces with underscores
-      const titleSlug = title.toLowerCase().replace(/\s+/g, '_');
+      // Normalize title: lowercase, replace spaces with configured character
+      const titleSlug = title.toLowerCase().replace(/\s+/g, spacesConvertTo);
       searchUrl = searchUrl.replace('{title}', titleSlug);
       console.log(`   🔍 Using title-based URL: ${searchUrl}`);
       

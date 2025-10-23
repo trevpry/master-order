@@ -5,6 +5,18 @@ performerByURL:
     url:
       # Taken from https://www.gaynetwork.com/en/sites on 2025-05-17
       - berryboys.fr/en/modeles/detail/
+sceneByFragment:
+  - action: scrapeXPath
+    scraper: sceneScraper
+    performerSearchScraper: performerSearchScraper
+    titleSearchScraper: sceneSearchScraper
+    # Search for scenes by performers
+    # {performer} will be replaced with performer name (spaces converted to underscores, lowercased)
+    performerSearchUrl: https://www.hotcast.fr/en/modeles/text-search?page=0&name={performer}
+    # Search for scenes by title - direct scene URL
+    # {title} will be replaced with scene title (spaces converted to plus signs, lowercased)
+    studioSearchUrl: https://www.hotcast.fr/en/videos/text-search?page=0&name={title}
+    spacesConvertTo: +
 sceneByURL:
   - action: scrapeXPath
     scraper: sceneScraper
@@ -156,6 +168,43 @@ xPathScrapers:
         selector: //link[@rel="canonical"]/@content
       Image: 
         selector: //img[@class="border embed-responsive-item bg-light border-dark obj-cover"]/@src
-   
+  sceneSearchScraper:
+    # Search for scenes on a performer's page
+    scene:
+      Title: //a[@class="d-block h110 pt-3 pb-0 px-3 text-truncate text-center text-primary font-weight-bold"]/text()
+      URL:
+        selector: //a[@class="d-block h110 pt-3 pb-0 px-3 text-truncate text-center text-primary font-weight-bold"]/@href
+        postProcess:
+          - replace:
+              - regex: ^
+                with: https://www.hotcast.fr
+      Image:
+        selector: //div[@class="embed-responsive embed-responsive-16by9 rounded"]/img/@src
+  performerSearchScraper:
+    # Search for performers - returns list of matching performers with URLs
+    performer:
+      Name: //div[@class="b-0 l-0 r-0 h6 m-2 pb-1 text-truncate text-center text-dark"]/text()
+      URL:
+        selector: //a[@class="col-xxl-2 col-xl-3 col-md-3 col-sm-4 col-6 mb-3 "]/@href
+        postProcess:
+          - replace:
+              - regex: ^
+                with: https://www.hotcast.fr
+      Image:
+        selector: //div[@class="embed-responsive embed-responsive-16by9 rounded"]/img/@src    
+      performerSceneScraper: performerSceneScraper
+  performerSceneScraper:
+    # Extract scenes from a performer's detail page
+    scene:
+      Title: //a[@class="d-block h110 pt-3 pb-0 px-3 text-truncate text-center text-primary font-weight-bold"]/text()
+      URL:
+        selector: //a[@class="d-block h110 pt-3 pb-0 px-3 text-truncate text-center text-primary font-weight-bold"]/@href
+        postProcess:
+          - replace:
+              - regex: ^
+                with: https://www.hotcast.fr
+      Performers:
+        Name: //div[contains(@class, "text-terciary") and contains(@class, "text-truncate")]
+        URL: //div[@class="mt-4"]//a[contains(@class, "h100")]/@href    
 
 
