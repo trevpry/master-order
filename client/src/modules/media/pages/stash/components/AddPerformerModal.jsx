@@ -233,7 +233,20 @@ export default function AddPerformerModal({
                         }
                       }}
                     >
-                      <div style={{ fontWeight: 'bold' }}>{performer.name}</div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <span style={{ fontWeight: 'bold' }}>{performer.name}</span>
+                        {performer.disambiguation && (
+                          <span style={{ 
+                            fontSize: '12px', 
+                            color: '#666', 
+                            background: '#f0f0f0',
+                            padding: '2px 8px',
+                            borderRadius: '4px'
+                          }}>
+                            ({performer.disambiguation})
+                          </span>
+                        )}
+                      </div>
                       {performer.alias && (
                         <div style={{ fontSize: '12px', color: '#666', marginTop: '2px' }}>
                           Alias: {performer.alias}
@@ -272,8 +285,20 @@ export default function AddPerformerModal({
                 borderRadius: '4px',
                 marginBottom: '20px'
               }}>
-                <div style={{ fontWeight: 'bold', marginBottom: '4px' }}>
-                  Selected: {selectedPerformer.name}
+                <div style={{ fontWeight: 'bold', marginBottom: '4px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <span>Selected: {selectedPerformer.name}</span>
+                  {selectedPerformer.disambiguation && (
+                    <span style={{ 
+                      fontSize: '12px', 
+                      fontWeight: 'normal',
+                      color: '#666', 
+                      background: '#d4edda',
+                      padding: '2px 8px',
+                      borderRadius: '4px'
+                    }}>
+                      ({selectedPerformer.disambiguation})
+                    </span>
+                  )}
                 </div>
                 {selectedPerformer.alias && (
                   <div style={{ fontSize: '13px', color: '#555' }}>

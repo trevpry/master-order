@@ -1,0 +1,83 @@
+name: GuyBone
+sceneByURL:
+  - action: scrapeXPath
+    url:
+      - guybone.com
+    scraper: sceneScraper
+
+performerByURL:
+  - action: scrapeXPath
+    url:
+      - guybone.com
+    scraper: performerScraper
+
+xPathScrapers:
+  sceneScraper:
+    scene: 
+      Title: //h2
+      Details: 
+        selector: //section[@class="wrapper style1"]/div[@class="container 90%"]
+        concat: ' '
+      Performers:
+        Name: //div[@class="content"]/header/h4/a/text()
+        URL: 
+          selector: //div[@class="content"]//a/@href
+          postProcess:
+            - replace:
+                - regex: ^
+                  with: https://guybone.com
+      Date: 
+        selector: //header[contains(@class,'major')]/p
+        postProcess:
+          - replace:
+              - regex: ^\s+|\s+$
+                with: ""
+          - replace:
+              - regex: ^(\d{1,2})-0*(\d{1,2})-(\d{4})$
+                with: $1/$2/$3
+          - parseDate: 01/02/2006
+      Tags:
+        Name:
+          selector: //meta[@name='keywords']/@content
+          split: ', '
+      Image: //section[@id="banner"]//img/@src
+      Studio:
+        Name:
+          fixed: "Guy Bone"
+
+  performerScraper:
+    performer:
+      Name: //h2
+      Gender:
+        fixed: Male
+      Ethnicity:
+        selector: //td[contains(.,'Ethnicity:')]/following-sibling::td[1]
+      Tattoos:
+        selector: //td[contains(.,'Tattoos:')]/following-sibling::td[1]
+      Piercings:
+        selector: //td[contains(.,'Piercings:')]/following-sibling::td[1]
+      Height:
+        selector: //td[contains(.,'Height:')]/following-sibling::td[1]
+        postProcess:
+          - replace:
+              - regex: "''"
+                with: ''
+              - regex: "'"
+                with: '.'
+          - feetToCm: true
+      PenisLength:
+        selector: //td[contains(.,'Dick Size:')]/following-sibling::td[1]
+        postProcess:
+          - replace:
+              - regex: "''"
+                with: ''
+              - regex: ^
+                with: '0.' 
+          - feetToCm: true
+      Circumcised:
+        selector: //td[contains(.,'Dick:')]/following-sibling::td[1]
+      Details:
+        selector: //section[@id="one"]//h2/following-sibling::div/div[1]
+      Image: //section[@id='banner']//img/@src
+
+# Last Updated June 17, 2024

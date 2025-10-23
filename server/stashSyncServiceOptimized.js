@@ -699,8 +699,8 @@ class StashSyncServiceOptimized {
         return { performers: [], hasMore: false, totalCount: count };
       }
       
-      // Filter out performers with 0 scenes first
-      const validPerformers = performers.filter(performer => performer.scene_count > 0);
+      // Include all performers, even those with 0 scenes
+      const validPerformers = performers; // No longer filtering by scene_count
       
       // Phase 1: Process ethnicity tag mapping for all performers BEFORE transaction
       console.log('🏷️  Mapping performer ethnicities to tags...');

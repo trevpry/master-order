@@ -1036,7 +1036,7 @@ class StashSyncService {
       const ethnicityTagMap = new Map(); // performerId -> tagId
       
       for (const performer of performers) {
-        if (performer.scene_count > 0 && performer.ethnicity) {
+        if (performer.ethnicity) {
           try {
             const ethnicityTag = await this.tagMappingService.findOrCreateTag(
               performer.ethnicity,
@@ -1055,11 +1055,7 @@ class StashSyncService {
       console.log(`✅ Mapped ${ethnicityTagMap.size} ethnicities to tags`);
       
       for (const performer of performers) {
-        // Skip performers with 0 scenes
-        if (performer.scene_count === 0) {
-          console.log(`Skipping performer ${performer.name} (0 scenes)`);
-          continue;
-        }
+        // Include all performers, even those with 0 scenes
 
         const performerData = {
           id: performer.id,
