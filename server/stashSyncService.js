@@ -1150,6 +1150,7 @@ class StashSyncService {
             url
             image_path
             scene_count
+            aliases
           }
         }
       }
@@ -1194,6 +1195,40 @@ class StashSyncService {
           update: studioData,
           create: studioData
         });
+        
+        // Sync aliases
+        const aliases = studio.aliases || [];
+        if (aliases.length > 0) {
+          // Delete existing aliases not in the new list
+          await prisma.stashStudioAlias.deleteMany({
+            where: {
+              studioId: studio.id,
+              alias: { notIn: aliases }
+            }
+          });
+          
+          // Create new aliases
+          for (const alias of aliases) {
+            await prisma.stashStudioAlias.upsert({
+              where: {
+                studioId_alias: {
+                  studioId: studio.id,
+                  alias: alias
+                }
+              },
+              update: {},
+              create: {
+                studioId: studio.id,
+                alias: alias
+              }
+            });
+          }
+        } else {
+          // No aliases - delete all existing aliases
+          await prisma.stashStudioAlias.deleteMany({
+            where: { studioId: studio.id }
+          });
+        }
         
         syncedStudios.push(syncedStudio);
       }

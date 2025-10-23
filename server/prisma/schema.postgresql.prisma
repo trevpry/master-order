@@ -987,22 +987,34 @@ model StashPerformer {
 }
 
 model StashStudio {
-  id           String         @id
-  name         String         @unique
+  id           String              @id
+  name         String              @unique
   url          String?
   image        String?
-  geviUrl      String?        // GEVI company URL
-  scraperName  String?        // YAML scraper name (e.g., "GuyBone")
-  notes        String?        // Custom notes about the studio
-  createdAt    DateTime       @default(now())
-  updatedAt    DateTime       @updatedAt
-  lastSyncedAt DateTime       @default(now())
+  geviUrl      String?             // GEVI company URL
+  scraperName  String?             // YAML scraper name (e.g., "GuyBone")
+  notes        String?             // Custom notes about the studio
+  createdAt    DateTime            @default(now())
+  updatedAt    DateTime            @updatedAt
+  lastSyncedAt DateTime            @default(now())
   galleries    StashGallery[]
   images       StashImage[]
   scenes       StashScene[]
   groups       StashGroup[]
+  aliases      StashStudioAlias[]  // Studio aliases
 
   @@map("StashStudio")
+}
+
+model StashStudioAlias {
+  id        String       @id @default(cuid())
+  studioId  String
+  studio    StashStudio  @relation(fields: [studioId], references: [id], onDelete: Cascade)
+  alias     String
+  createdAt DateTime     @default(now())
+
+  @@unique([studioId, alias])
+  @@map("StashStudioAlias")
 }
 
 model StashTag {

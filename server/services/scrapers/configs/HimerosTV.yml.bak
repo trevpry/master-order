@@ -1,0 +1,33 @@
+name: HimerosTV
+sceneByURL:
+  - action: scrapeXPath
+    url:
+      - himeros.tv
+    scraper: sceneScraper
+xPathScrapers:
+  sceneScraper:
+    scene:
+      Title: //h1[@class="highlight"]/text()
+      Date:
+        selector: //div[@class="update-info-row text-gray"]/text()[1]
+        postProcess:
+          - replace:
+              - regex: \s*\|.*
+                with:
+          - parseDate: January 2, 2006
+      Details:
+        selector: //div[@class="update-info-block"]/div[@class="update-info-block"][1]/p/text()
+      Performers:
+        Name:
+          selector: //div[@class="item-title"]/a/text()
+        URL:
+          selector: //div[@class="item-title"]/a/@href
+      Tags:
+        Name:
+          selector: //ul[@class="tags"]/li/a/text()
+      Image:
+        selector: //img[id="set-target-767"]/@src
+      Studio:
+        Name:
+          fixed: "Himeros.TV"
+# Last Updated November 06, 2023

@@ -884,6 +884,7 @@ class StashSyncServiceOptimized {
             url
             image_path
             scene_count
+            aliases
           }
         }
       }
@@ -918,6 +919,7 @@ class StashSyncServiceOptimized {
         name: studio.name || '',
         url: studio.url || null,
         image: studio.image_path || null,
+        aliases: studio.aliases || [],
         lastSyncedAt: new Date()
       }));
       
@@ -931,13 +933,51 @@ class StashSyncServiceOptimized {
         
         // Use database transaction with studio-specific timeout for each batch
         const syncedBatch = await prisma.$transaction(async (tx) => {
-          const upsertPromises = batch.map(data =>
-            tx.stashStudio.upsert({
-              where: { id: data.id },
-              update: data,
-              create: data
-            })
-          );
+          const upsertPromises = batch.map(async (data) => {
+            const { aliases, ...studioData } = data;
+            
+            // Upsert studio
+            const studio = await tx.stashStudio.upsert({
+              where: { id: studioData.id },
+              update: studioData,
+              create: studioData
+            });
+            
+            // Sync aliases
+            if (aliases && aliases.length > 0) {
+              // Delete existing aliases not in the new list
+              await tx.stashStudioAlias.deleteMany({
+                where: {
+                  studioId: studio.id,
+                  alias: { notIn: aliases }
+                }
+              });
+              
+              // Create new aliases
+              for (const alias of aliases) {
+                await tx.stashStudioAlias.upsert({
+                  where: {
+                    studioId_alias: {
+                      studioId: studio.id,
+                      alias: alias
+                    }
+                  },
+                  update: {},
+                  create: {
+                    studioId: studio.id,
+                    alias: alias
+                  }
+                });
+              }
+            } else {
+              // No aliases - delete all existing aliases
+              await tx.stashStudioAlias.deleteMany({
+                where: { studioId: studio.id }
+              });
+            }
+            
+            return studio;
+          });
           
           return await Promise.all(upsertPromises);
         }, {

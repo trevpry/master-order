@@ -371,6 +371,7 @@ router.get('/scenes', asyncHandler(async (req, res) => {
       sortBy = 'date',
       sortOrder = 'desc',
       search,
+      title,
       performer,
       studio,
       tag,
@@ -386,12 +387,19 @@ router.get('/scenes', asyncHandler(async (req, res) => {
     // Build where clause for filtering
     const where = {};
     
+    // Handle both 'search' (general search) and 'title' (specific title search)
     if (search) {
       where.OR = [
         { title: { contains: search } },
         { details: { contains: search } },
         { synopsis: { contains: search } },
         { path: { contains: search } }
+      ];
+    } else if (title) {
+      // Specific title search (searches title and file path)
+      where.OR = [
+        { title: { contains: title } },
+        { path: { contains: title } }
       ];
     }
     
@@ -945,7 +953,15 @@ router.post('/scenes/:id/parse-filename', asyncHandler(async (req, res) => {
   
   // Get all performers and studios for matching
   const allPerformers = await prisma.stashPerformer.findMany();
-  const allStudios = await prisma.stashStudio.findMany();
+  const allStudios = await prisma.stashStudio.findMany({
+    include: {
+      aliases: {
+        select: {
+          alias: true
+        }
+      }
+    }
+  });
   
   // Helper function to match performers in a string
   const findPerformersInText = (text) => {
@@ -1077,9 +1093,20 @@ router.post('/scenes/:id/parse-filename', asyncHandler(async (req, res) => {
     const textLower = text.toLowerCase().replace(/\s+/g, '');
     
     for (const studio of allStudios) {
+      // Check studio name
       const normalizedName = studio.name.toLowerCase().replace(/\s+/g, '');
       if (textLower.includes(normalizedName)) {
         return studio;
+      }
+      
+      // Check studio aliases
+      if (studio.aliases && studio.aliases.length > 0) {
+        for (const aliasObj of studio.aliases) {
+          const normalizedAlias = aliasObj.alias.toLowerCase().replace(/\s+/g, '');
+          if (textLower.includes(normalizedAlias)) {
+            return studio;
+          }
+        }
       }
     }
     
@@ -7633,10 +7660,35 @@ router.get('/studios', asyncHandler(async (req, res) => {
   const skip = (parseInt(page) - 1) * parseInt(perPage);
   const take = parseInt(perPage);
   
-  // Build search filter (SQLite doesn't support mode: 'insensitive', but contains is case-insensitive by default)
-  const searchFilter = filter ? {
-    name: { contains: filter }
-  } : {};
+  // Build search filter - search in both name and aliases
+  let searchFilter = {};
+  if (filter) {
+    // Find studio IDs that match the filter in aliases
+    const matchingAliases = await prisma.stashStudioAlias.findMany({
+      where: {
+        alias: { contains: filter }
+      },
+      select: {
+        studioId: true
+      }
+    });
+    
+    const aliasStudioIds = matchingAliases.map(a => a.studioId);
+    
+    // Search in name OR in studios that have matching aliases
+    if (aliasStudioIds.length > 0) {
+      searchFilter = {
+        OR: [
+          { name: { contains: filter } },
+          { id: { in: aliasStudioIds } }
+        ]
+      };
+    } else {
+      searchFilter = {
+        name: { contains: filter }
+      };
+    }
+  }
   
   // Get total count
   const total = await prisma.stashStudio.count({
@@ -7652,6 +7704,11 @@ router.get('/studios', asyncHandler(async (req, res) => {
           id: true,
           title: true
         }
+      },
+      aliases: {
+        select: {
+          alias: true
+        }
       }
     },
     orderBy: { name: 'asc' },
@@ -7665,7 +7722,8 @@ router.get('/studios', asyncHandler(async (req, res) => {
     name: studio.name,
     url: studio.url,
     image: studio.image,
-    scene_count: studio.scenes.length
+    scene_count: studio.scenes.length,
+    aliases: studio.aliases.map(a => a.alias)
   }));
   
   res.json({
@@ -7703,6 +7761,11 @@ router.get('/studios/:id', asyncHandler(async (req, res) => {
         orderBy: {
           date: 'desc'
         }
+      },
+      aliases: {
+        select: {
+          alias: true
+        }
       }
     }
   });
@@ -7720,6 +7783,7 @@ router.get('/studios/:id', asyncHandler(async (req, res) => {
     geviUrl: studio.geviUrl,
     scraperName: studio.scraperName,
     notes: studio.notes,
+    aliases: studio.aliases.map(a => a.alias),
     scenes: studio.scenes.map(scene => ({
       id: scene.id,
       title: scene.title,
@@ -7801,6 +7865,32 @@ router.post('/studios/merge', asyncHandler(async (req, res) => {
       console.log(`   Merging: ${studio.name} (${studio._count.scenes} scenes)`);
     });
 
+    // Collect studio names as aliases
+    const newAliases = mergeStudios.map(s => s.name);
+    console.log(`🏷️  Adding ${newAliases.length} aliases to primary studio: ${newAliases.join(', ')}`);
+    
+    // Get existing aliases
+    const existingAliases = await prisma.stashStudioAlias.findMany({
+      where: { studioId: primaryStudioId },
+      select: { alias: true }
+    });
+    const existingAliasNames = existingAliases.map(a => a.alias);
+    
+    // Combine and deduplicate aliases
+    const allAliases = [...new Set([...existingAliasNames, ...newAliases])];
+    
+    // Add new aliases to local database
+    for (const alias of newAliases) {
+      if (!existingAliasNames.includes(alias)) {
+        await prisma.stashStudioAlias.create({
+          data: {
+            studioId: primaryStudioId,
+            alias: alias
+          }
+        });
+      }
+    }
+
     // Transfer all scenes from merge studios to primary studio
     const transferredScenes = await prisma.stashScene.updateMany({
       where: {
@@ -7820,6 +7910,30 @@ router.post('/studios/merge', asyncHandler(async (req, res) => {
       if (!stashService) {
         console.warn('⚠️ Stash service not available - skipping Stash update');
         throw new Error('Stash service not available');
+      }
+      
+      // Update primary studio in Stash with new aliases
+      console.log(`🔄 Updating primary studio in Stash with ${allAliases.length} aliases...`);
+      const updateStudioMutation = `
+        mutation StudioUpdate($input: StudioUpdateInput!) {
+          studioUpdate(input: $input) {
+            id
+            name
+            aliases
+          }
+        }
+      `;
+      
+      try {
+        await stashService.makeGraphQLRequest(updateStudioMutation, {
+          input: {
+            id: primaryStudioId,
+            aliases: allAliases
+          }
+        });
+        console.log(`✅ Updated primary studio aliases in Stash`);
+      } catch (aliasUpdateError) {
+        console.error(`⚠️  Failed to update studio aliases in Stash:`, aliasUpdateError.message);
       }
 
       // Update all transferred scenes in Stash to point to the primary studio
@@ -7890,21 +8004,29 @@ router.post('/studios/merge', asyncHandler(async (req, res) => {
       where: { id: { in: mergeStudioIds } }
     });
 
-    // Fetch updated primary studio with scene count
+    // Fetch updated primary studio with scene count and aliases
     const updatedStudio = await prisma.stashStudio.findUnique({
       where: { id: primaryStudioId },
       include: {
         _count: {
           select: { scenes: true }
+        },
+        aliases: {
+          select: {
+            alias: true
+          }
         }
       }
     });
 
     console.log(`✅ Merged ${mergeStudioIds.length} studios into studio ${primaryStudioId}`);
-    console.log(`   Primary studio now has ${updatedStudio._count.scenes} scenes`);
+    console.log(`   Primary studio now has ${updatedStudio._count.scenes} scenes and ${updatedStudio.aliases.length} aliases`);
     
     sendSuccess(res, {
-      studio: updatedStudio,
+      studio: {
+        ...updatedStudio,
+        aliases: updatedStudio.aliases.map(a => a.alias)
+      },
       mergedCount: mergeStudioIds.length,
       transferredScenes: transferredScenes.count
     });
@@ -8006,21 +8128,75 @@ router.get('/tags', asyncHandler(async (req, res) => {
   const skip = (parseInt(page) - 1) * parseInt(perPage);
   const take = parseInt(perPage);
   
-  // Build search filter (SQLite doesn't support mode: 'insensitive', but contains is case-insensitive by default in SQLite)
-  const searchFilter = filter ? {
-    OR: [
-      { name: { contains: filter } },
-      { description: { contains: filter } }
-    ]
-  } : {};
+  // Build search filter
+  let whereClause = {};
   
-  // Add root-only filter if requested
-  const whereClause = { ...searchFilter };
-  if (rootOnly === 'true') {
-    // Only get tags that have no parents
-    whereClause.parentTags = {
-      none: {}
+  if (filter) {
+    // When searching, find ALL tags that match (parent or child)
+    const allMatchingTags = await prisma.stashTag.findMany({
+      where: {
+        OR: [
+          { name: { contains: filter } },
+          { description: { contains: filter } }
+        ]
+      },
+      select: {
+        id: true,
+        parentTags: {
+          include: {
+            parentTag: {
+              select: {
+                id: true,
+                parentTags: {
+                  include: {
+                    parentTag: {
+                      select: { id: true }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    });
+    
+    // Build set of all tag IDs to include (matching tags + all their ancestors)
+    const tagIdsToInclude = new Set();
+    
+    for (const tag of allMatchingTags) {
+      // Add the matching tag itself
+      tagIdsToInclude.add(tag.id);
+      
+      // Add all parent tags (ancestors)
+      for (const parentRel of tag.parentTags) {
+        tagIdsToInclude.add(parentRel.parentTag.id);
+        
+        // Add grandparents
+        for (const grandparentRel of parentRel.parentTag.parentTags) {
+          tagIdsToInclude.add(grandparentRel.parentTag.id);
+        }
+      }
+    }
+    
+    // Filter to show only tags in our set
+    whereClause = {
+      id: { in: Array.from(tagIdsToInclude) }
     };
+    
+    // When searching, only show root tags (parents will have expanded children)
+    if (rootOnly === 'true') {
+      whereClause.parentTags = {
+        none: {}
+      };
+    }
+  } else {
+    // No search filter - apply normal root-only filter
+    if (rootOnly === 'true') {
+      whereClause.parentTags = {
+        none: {}
+      };
+    }
   }
   
   // Get total count
@@ -8096,32 +8272,65 @@ router.get('/tags', asyncHandler(async (req, res) => {
     take: take
   });
   
+  // Helper function to check if a tag or its descendants match the filter
+  const tagMatchesFilter = (tag, filterText) => {
+    if (!filterText) return true;
+    
+    const lowerFilter = filterText.toLowerCase();
+    return tag.name.toLowerCase().includes(lowerFilter) || 
+           (tag.description && tag.description.toLowerCase().includes(lowerFilter));
+  };
+  
+  // Recursive function to filter and transform child tags
+  const transformChildTag = (childTag, filterText) => {
+    const matches = tagMatchesFilter(childTag, filterText);
+    
+    // Recursively process grandchildren (safely handle undefined)
+    const filteredGrandchildren = (childTag.childTags || [])
+      .map(gct => transformChildTag(gct.childTag, filterText))
+      .filter(child => child !== null);
+    
+    // Include this tag if it matches OR if any of its descendants match
+    if (!matches && filteredGrandchildren.length === 0) {
+      return null;
+    }
+    
+    return {
+      id: childTag.id,
+      name: childTag.name,
+      description: childTag.description,
+      image: childTag.image,
+      favorite: childTag.favorite,
+      scene_count: (childTag.scenes || []).length,
+      performer_count: (childTag.performers || []).length,
+      child_count: filteredGrandchildren.length,
+      children: filteredGrandchildren
+    };
+  };
+  
   // Transform data to match expected format
-  const transformedTags = tags.map(tag => ({
-    id: tag.id,
-    name: tag.name,
-    description: tag.description,
-    image: tag.image,
-    favorite: tag.favorite,
-    ignoreAutoTag: tag.ignoreAutoTag,
-    scene_count: tag.scenes.length,
-    performer_count: tag.performers.length,
-    parent_count: tag.parentTags.length,
-    child_count: tag.childTags.length,
-    parents: tag.parentTags.map(pt => pt.parentTag),
-    children: tag.childTags.map(ct => ({
-      id: ct.childTag.id,
-      name: ct.childTag.name,
-      description: ct.childTag.description,
-      image: ct.childTag.image,
-      favorite: ct.childTag.favorite,
-      scene_count: ct.childTag.scenes.length,
-      performer_count: ct.childTag.performers.length,
-      child_count: ct.childTag.childTags.length,
-      children: ct.childTag.childTags.map(gct => gct.childTag)
-    })),
-    aliases: tag.aliases.map(a => a.alias)
-  }));
+  const transformedTags = tags.map(tag => {
+    // Filter children recursively based on search (safely handle undefined)
+    const filteredChildren = (tag.childTags || [])
+      .map(ct => transformChildTag(ct.childTag, filter))
+      .filter(child => child !== null);
+    
+    return {
+      id: tag.id,
+      name: tag.name,
+      description: tag.description,
+      image: tag.image,
+      favorite: tag.favorite,
+      ignoreAutoTag: tag.ignoreAutoTag,
+      scene_count: (tag.scenes || []).length,
+      performer_count: (tag.performers || []).length,
+      parent_count: (tag.parentTags || []).length,
+      child_count: filteredChildren.length,
+      parents: (tag.parentTags || []).map(pt => pt.parentTag),
+      children: filteredChildren,
+      aliases: (tag.aliases || []).map(a => a.alias)
+    };
+  });
   
   res.json({
     success: true,

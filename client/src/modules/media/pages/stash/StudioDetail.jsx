@@ -396,6 +396,43 @@ export default function StudioDetail() {
           )}
           <div className="studio-info-header">
             <h1>🏢 {data.name}</h1>
+            
+            {data.aliases && data.aliases.length > 0 && (
+              <div className="studio-aliases" style={{ 
+                marginTop: '10px',
+                marginBottom: '15px',
+                padding: '10px',
+                backgroundColor: '#f3f4f6',
+                borderRadius: '6px',
+                borderLeft: '3px solid #3b82f6'
+              }}>
+                <strong style={{ color: '#6b7280', fontSize: '14px' }}>🏷️ Aliases:</strong>
+                <div style={{ 
+                  marginTop: '6px',
+                  display: 'flex',
+                  flexWrap: 'wrap',
+                  gap: '6px'
+                }}>
+                  {data.aliases.map((alias, idx) => (
+                    <span 
+                      key={idx}
+                      style={{
+                        display: 'inline-block',
+                        padding: '4px 10px',
+                        backgroundColor: '#ffffff',
+                        border: '1px solid #d1d5db',
+                        borderRadius: '4px',
+                        fontSize: '13px',
+                        color: '#374151'
+                      }}
+                    >
+                      {alias}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
+            
             {data.url && (
               <p>
                 <a href={data.url} target="_blank" rel="noopener noreferrer" className="studio-link">

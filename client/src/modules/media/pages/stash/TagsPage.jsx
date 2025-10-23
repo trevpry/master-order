@@ -23,6 +23,21 @@ export default function TagsPage() {
   useEffect(() => {
     loadTags();
   }, [currentPage, searchQuery]);
+  
+  // Auto-expand all tags when searching to show matching sub-tags
+  useEffect(() => {
+    if (searchQuery && tags.length > 0) {
+      const allTagIds = new Set();
+      const collectTagIds = (tag) => {
+        allTagIds.add(tag.id);
+        if (tag.children && tag.children.length > 0) {
+          tag.children.forEach(collectTagIds);
+        }
+      };
+      tags.forEach(collectTagIds);
+      setExpandedTags(allTagIds);
+    }
+  }, [tags, searchQuery]);
 
   const loadTags = async () => {
     setIsLoading(true);
