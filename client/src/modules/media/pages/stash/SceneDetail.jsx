@@ -404,6 +404,111 @@ export default function SceneDetail() {
     }
   };
 
+  const handleSearchYamlScraper = async () => {
+    if (!data?.studio?.scraperName) {
+      alert('This studio does not have a scraper configured');
+      return;
+    }
+
+    if (!data?.performers || data.performers.length === 0) {
+      alert('Scene must have at least one performer to search');
+      return;
+    }
+
+    setIsSearching(true);
+    setSearchResults(null);
+
+    try {
+      const response = await fetch(`${config.apiBaseUrl}/api/stash/scenes/${id}/search-yaml`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          scraperName: data.studio.scraperName
+        })
+      });
+
+      const result = await response.json();
+
+      if (result.success) {
+        const { scenes, performers, source } = result.data;
+        
+        if (scenes.length === 0) {
+          alert(`No scenes found on ${source} with ${performers.map(p => p.name).join(' and ')}`);
+        } else {
+          setSearchResults({
+            firstPerformer: performers[0],
+            searchedPerformers: performers.slice(1).map(p => p.name),
+            scenes: scenes,
+            isSceneSearch: true,
+            source: source
+          });
+        }
+      } else {
+        alert(`Failed to search ${data.studio.scraperName}: ${result.error || 'Unknown error'}`);
+      }
+    } catch (error) {
+      console.error('Error searching with YAML scraper:', error);
+      alert('Failed to search with YAML scraper');
+    } finally {
+      setIsSearching(false);
+    }
+  };
+
+  const handleSearchYamlScraperByTitle = async () => {
+    if (!data?.studio?.scraperName) {
+      alert('This studio does not have a scraper configured');
+      return;
+    }
+
+    if (!data?.title) {
+      alert('Scene must have a title to search');
+      return;
+    }
+
+    setIsSearching(true);
+    setSearchResults(null);
+
+    try {
+      const response = await fetch(`${config.apiBaseUrl}/api/stash/scenes/${id}/search-yaml-title`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          scraperName: data.studio.scraperName
+          // Don't pass studioUrl - let the scraper use the configured studioSearchUrl pattern
+        })
+      });
+
+      const result = await response.json();
+
+      if (result.success) {
+        const { scenes, searchedTitle, source } = result.data;
+        
+        if (scenes.length === 0) {
+          alert(`No scenes found on ${source} matching title: "${searchedTitle}"`);
+        } else {
+          setSearchResults({
+            scenes: scenes,
+            isSceneSearch: true,
+            isSceneSearchByTitle: true,
+            searchedTitle: searchedTitle,
+            source: source
+          });
+        }
+      } else {
+        alert(`Failed to search ${data.studio.scraperName} by title: ${result.error || 'Unknown error'}`);
+      }
+    } catch (error) {
+      console.error('Error searching with YAML scraper by title:', error);
+      alert('Failed to search with YAML scraper by title');
+    } finally {
+      setIsSearching(false);
+    }
+  };
+
   const handleSelectSearchResult = (sceneUrl, movieData = null) => {
     // If this is a movie result with existing movie ID, link scene to movie
     if (movieData && movieData.existingMovieId) {
@@ -2537,7 +2642,11 @@ export default function SceneDetail() {
                   {searchResults.allPerformers ? ` (searched for: ${searchResults.allPerformers.join(', ')})` : 
                    searchResults.searchedPerformers ? 
                      ` (searched for: ${searchResults.searchedPerformers.join(', ')})` :
-                     ` with ${searchResults.firstPerformer.name} and ${searchResults.secondPerformer}`}:
+                   searchResults.searchedTitle ?
+                     ` (searched for title: "${searchResults.searchedTitle}")` :
+                   searchResults.firstPerformer ?
+                     ` with ${searchResults.firstPerformer.name} and ${searchResults.secondPerformer}` :
+                     ''}:
                 </h4>
                 {searchResults.scenes.map((scene, idx) => (
                   <div 
@@ -2648,12 +2757,12 @@ export default function SceneDetail() {
                       )}
                       {scene.studio && (
                         <div style={{ fontSize: '12px', color: '#8b5cf6', marginBottom: '2px' }}>
-                          🎬 {scene.studio}
+                          🎬 {typeof scene.studio === 'string' ? scene.studio : scene.studio.name}
                         </div>
                       )}
                       {scene.performers && (
                         <div style={{ fontSize: '12px', color: '#666', marginBottom: '2px' }}>
-                          👥 {scene.performers}
+                          👥 {typeof scene.performers === 'string' ? scene.performers : scene.performers.map(p => p.name).join(', ')}
                         </div>
                       )}
                       {scene.date && (
@@ -2696,28 +2805,46 @@ export default function SceneDetail() {
             )}
 
             <div className="modal-actions">
+              {/* Only show Search by Performers button when studio has a YAML scraper configured */}
+              {data?.studio?.scraperName && (
+                <button 
+                  className="btn-primary" 
+                  onClick={handleSearchYamlScraper}
+                  disabled={
+                    isScraping || 
+                    isSearching || 
+                    !data || 
+                    !data.performers || 
+                    data.performers.length < 1
+                  }
+                  style={{ marginRight: '10px' }}
+                  title={`Search ${data.studio.scraperName} by performers (requires 1+ performer)`}
+                >
+                  {isSearching ? '⏳ Searching...' : `🔎 Search by Performers (${data.studio.scraperName})`}
+                </button>
+              )}
               <button 
                 className="btn-primary" 
-                onClick={handleSearchGevi}
-                disabled={isScraping || isSearching || !data || !data.performers || data.performers.length < 2}
-                style={{ marginRight: '10px' }}
-              >
-                {isSearching ? '⏳ Searching...' : '🔎 Search by Performers'}
-              </button>
-              <button 
-                className="btn-primary" 
-                onClick={handleSearchGeviByTitle}
-                disabled={isScraping || isSearching || !data || !data.title || !data.studio || !data.studio.geviUrl}
+                onClick={data?.studio?.scraperName ? handleSearchYamlScraperByTitle : handleSearchGeviByTitle}
+                disabled={
+                  isScraping || 
+                  isSearching || 
+                  !data || 
+                  !data.title || 
+                  (!data.studio?.scraperName && (!data.studio || !data.studio.geviUrl))
+                }
                 style={{ marginRight: '10px' }}
                 title={
-                  !data?.studio?.geviUrl 
+                  data?.studio?.scraperName
+                    ? `Search ${data.studio.scraperName} by title (requires title)`
+                    : !data?.studio?.geviUrl 
                     ? 'Studio must have a GEVI URL set (go to studio page to set it)' 
                     : !data?.title 
                     ? 'Scene must have a title' 
                     : 'Search for this scene on the studio\'s GEVI page by title'
                 }
               >
-                {isSearching ? '⏳ Searching...' : '📝 Search by Title'}
+                {isSearching ? '⏳ Searching...' : `📝 Search by Title${data?.studio?.scraperName ? ` (${data.studio.scraperName})` : ' (GEVI)'}`}
               </button>
               <button 
                 className="btn-primary" 

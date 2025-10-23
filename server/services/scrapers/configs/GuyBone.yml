@@ -5,6 +5,17 @@ sceneByURL:
       - guybone.com
     scraper: sceneScraper
 
+sceneByFragment:
+  - action: scrapeXPath
+    performerSearchScraper: sceneSearchScraper
+    titleSearchScraper: sceneScraper
+    # Search for scenes by performers
+    # {performer} will be replaced with performer name (spaces converted to underscores, lowercased)
+    performerSearchUrl: https://guybone.com/model/{performer}
+    # Search for scenes by title - direct scene URL
+    # {title} will be replaced with scene title (spaces converted to underscores, lowercased)
+    studioSearchUrl: https://guybone.com/video/{title}
+
 performerByURL:
   - action: scrapeXPath
     url:
@@ -79,5 +90,28 @@ xPathScrapers:
       Details:
         selector: //section[@id="one"]//h2/following-sibling::div/div[1]
       Image: //section[@id='banner']//img/@src
+
+  sceneSearchScraper:
+    # Search for scenes on a performer's page
+    scene:
+      Title: //div[@class="row 150%"]/div[@class="4u 12u$(xsmall)"]//h4/text()
+      URL:
+        selector: //div[@class="row 150%"]/div[@class="4u 12u$(xsmall)"]/a/@href
+        postProcess:
+          - replace:
+              - regex: ^
+                with: https://guybone.com
+      Image:
+        selector: //div[@class="row 150%"]/div[@class="4u 12u$(xsmall)"]//img/@src
+      Date:
+        selector: //div[@class='content']//header/p
+        postProcess:
+          - replace:
+              - regex: ^\s+|\s+$
+                with: ""
+          - replace:
+              - regex: ^(\d{1,2})-0*(\d{1,2})-(\d{4})$
+                with: $1/$2/$3
+          - parseDate: 01/02/2006
 
 # Last Updated June 17, 2024

@@ -307,6 +307,12 @@ class StashSyncServiceOptimized {
               size
               duration
               mod_time
+              video_codec
+              audio_codec
+              width
+              height
+              frame_rate
+              bit_rate
               fingerprints {
                 type
                 value
@@ -399,16 +405,26 @@ class StashSyncServiceOptimized {
             oCounter: scene.o_counter || null,
             path: primaryFile?.path || null,
             fileModTime: primaryFile?.mod_time ? new Date(primaryFile.mod_time) : null,
+            // File information
+            fileSize: primaryFile?.size || null,
+            duration: primaryFile?.duration || null,
+            width: primaryFile?.width || null,
+            height: primaryFile?.height || null,
+            videoCodec: primaryFile?.video_codec || null,
+            audioCodec: primaryFile?.audio_codec || null,
+            frameRate: primaryFile?.frame_rate || null,
+            bitrate: primaryFile?.bit_rate || null,
+            // Studio info
             studio: scene.studio?.name || null,
             studioId: validatedStudioId,
             code: scene.code || null,
             director: scene.director || null,
             synopsis: null,
+            // Play status fields
             lastPlayedAt: scene.last_played_at ? new Date(scene.last_played_at) : null,
             resumeTime: scene.resume_time || null,
             playDuration: scene.play_duration || null,
             playCount: scene.play_count || null,
-            duration: primaryFile?.duration || null,
             lastSyncedAt: new Date()
           };
 

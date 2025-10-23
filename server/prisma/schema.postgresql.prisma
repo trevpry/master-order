@@ -992,6 +992,7 @@ model StashStudio {
   url          String?
   image        String?
   geviUrl      String?        // GEVI company URL
+  scraperName  String?        // YAML scraper name (e.g., "GuyBone")
   notes        String?        // Custom notes about the studio
   createdAt    DateTime       @default(now())
   updatedAt    DateTime       @updatedAt

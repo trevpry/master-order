@@ -41,6 +41,12 @@ export default function StudioDetail() {
   const [showNotesModal, setShowNotesModal] = useState(false);
   const [notesInput, setNotesInput] = useState('');
   const [isSavingNotes, setIsSavingNotes] = useState(false);
+  
+  // Scraper state
+  const [availableScrapers, setAvailableScrapers] = useState([]);
+  const [selectedScraper, setSelectedScraper] = useState('');
+  const [showScraperModal, setShowScraperModal] = useState(false);
+  const [isSavingScraper, setIsSavingScraper] = useState(false);
 
   useEffect(() => {
     const fetchStudio = async () => {
@@ -58,6 +64,22 @@ export default function StudioDetail() {
     };
     fetchStudio();
   }, [id]);
+  
+  // Fetch available scrapers
+  useEffect(() => {
+    const fetchScrapers = async () => {
+      try {
+        const res = await fetch(`${config.apiBaseUrl}/api/stash/scrapers`);
+        const json = await res.json();
+        if (json.success) {
+          setAvailableScrapers(json.data);
+        }
+      } catch (e) {
+        console.error('Failed to fetch scrapers:', e);
+      }
+    };
+    fetchScrapers();
+  }, []);
 
   // Load scenes when data is available or filter changes
   useEffect(() => {
@@ -317,6 +339,40 @@ export default function StudioDetail() {
     }
   };
 
+  const handleSaveScraper = async () => {
+    setIsSavingScraper(true);
+
+    try {
+      const response = await fetch(`${config.apiBaseUrl}/api/stash/studios/${id}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          scraperName: selectedScraper || null
+        })
+      });
+
+      const result = await response.json();
+      
+      if (result.success) {
+        setData(prevData => ({
+          ...prevData,
+          scraperName: selectedScraper || null
+        }));
+        setShowScraperModal(false);
+        alert('Scraper saved successfully!');
+      } else {
+        alert(`Failed to save scraper: ${result.error || 'Unknown error'}`);
+      }
+    } catch (error) {
+      console.error('Error saving scraper:', error);
+      alert('Failed to save scraper');
+    } finally {
+      setIsSavingScraper(false);
+    }
+  };
+
   if (loading) return <div className="page pad">Loading studio...</div>;
   if (error) return <div className="page pad">Error: {error}</div>;
   if (!data) return null;
@@ -377,6 +433,18 @@ export default function StudioDetail() {
               title={data?.notes ? "Edit Notes" : "Add Notes"}
             >
               {data?.notes ? '📝 Edit Notes' : '📝 Add Notes'}
+            </button>
+            
+            <button 
+              onClick={() => {
+                setSelectedScraper(data?.scraperName || '');
+                setShowScraperModal(true);
+              }}
+              className="btn-secondary"
+              style={{ marginTop: '10px', marginLeft: '10px' }}
+              title={data?.scraperName ? `Change Scraper (${data.scraperName})` : "Set Scraper"}
+            >
+              {data?.scraperName ? `🔧 Change Scraper (${data.scraperName})` : '🔧 Set Scraper'}
             </button>
             
             {data.notes && (
@@ -719,6 +787,64 @@ export default function StudioDetail() {
         </div>
       )}
 
+      {/* Scraper Selection Modal */}
+      {showScraperModal && (
+        <div className="modal-overlay" onClick={() => setShowScraperModal(false)}>
+          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+            <h3>🔧 {data?.scraperName ? 'Change' : 'Set'} Studio Scraper</h3>
+            
+            <div className="scrape-input-section">
+              <label htmlFor="scraper-select">Scraper:</label>
+              <select
+                id="scraper-select"
+                value={selectedScraper}
+                onChange={(e) => setSelectedScraper(e.target.value)}
+                disabled={isSavingScraper}
+                style={{
+                  width: '100%',
+                  padding: '10px',
+                  border: '1px solid #ddd',
+                  borderRadius: '4px',
+                  fontSize: '14px'
+                }}
+              >
+                <option value="">-- No Scraper --</option>
+                {availableScrapers.map(scraper => (
+                  <option key={scraper.name} value={scraper.name}>
+                    {scraper.name} {scraper.supportsSceneSearch ? '(Scene Search ✓)' : ''}
+                  </option>
+                ))}
+              </select>
+              <p style={{ fontSize: '0.9rem', color: '#666', marginTop: '0.5rem' }}>
+                Assign a YAML scraper to this studio. Scenes from this studio will have scraping options for the selected scraper.
+              </p>
+              {selectedScraper && availableScrapers.find(s => s.name === selectedScraper)?.supportsSceneSearch && (
+                <p style={{ fontSize: '0.9rem', color: '#059669', marginTop: '0.5rem', fontWeight: '500' }}>
+                  ✓ This scraper supports scene searching by performers
+                </p>
+              )}
+            </div>
+
+            <div className="modal-actions">
+              <button 
+                className="btn-accept" 
+                onClick={handleSaveScraper}
+                disabled={isSavingScraper}
+              >
+                {isSavingScraper ? '⏳ Saving...' : '💾 Save Scraper'}
+              </button>
+              <button 
+                className="btn-cancel" 
+                onClick={() => setShowScraperModal(false)}
+                disabled={isSavingScraper}
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Scene Merge Modal */}
       {showSceneMergeModal && (
         <div className="modal-overlay" onClick={() => !isMergingScenes && setShowSceneMergeModal(false)}>
@@ -753,96 +879,383 @@ export default function StudioDetail() {
               </select>
             </div>
 
-            {/* File Selection */}
-            <div style={{ marginBottom: '1.5rem' }}>
-              <label style={{ display: 'block', fontWeight: '600', marginBottom: '8px' }}>
-                Which File to Keep:
-              </label>
-              <select
-                value={mergeSceneData?.keepFileFromSceneId || ''}
-                onChange={(e) => handleUpdateMergeField('keepFileFromSceneId', e.target.value)}
-                style={{
-                  width: '100%',
-                  padding: '8px',
-                  border: '1px solid #d1d5db',
-                  borderRadius: '6px',
-                  fontSize: '14px'
-                }}
-              >
-                {scenesToMerge.map(scene => (
-                  <option key={scene.id} value={scene.id}>
-                    {scene.title || 'Untitled Scene'} - {scene.path ? scene.path.split('/').pop() : 'No path'} ({scene.fileSize ? `${(scene.fileSize / 1024 / 1024 / 1024).toFixed(2)}GB` : 'Unknown size'})
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            {/* Title Selection */}
-            <div style={{ marginBottom: '1.5rem' }}>
-              <label style={{ display: 'block', fontWeight: '600', marginBottom: '8px' }}>
-                Title:
-              </label>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                {scenesToMerge.map(scene => (
-                  <label
-                    key={scene.id}
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      padding: '8px',
-                      border: '1px solid #d1d5db',
-                      borderRadius: '6px',
-                      cursor: 'pointer',
-                      backgroundColor: mergeSceneData?.title === scene.title ? '#dbeafe' : 'white'
-                    }}
-                  >
-                    <input
-                      type="radio"
-                      name="title"
-                      checked={mergeSceneData?.title === scene.title}
-                      onChange={() => handleUpdateMergeField('title', scene.title)}
-                      style={{ marginRight: '8px' }}
-                    />
-                    <span style={{ flex: 1, fontSize: '14px' }}>
-                      {scene.title || <em style={{ color: '#9ca3af' }}>No title</em>}
-                    </span>
-                  </label>
-                ))}
+            {/* Data Selection Grid */}
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '1rem', marginBottom: '1.5rem' }}>
+              
+              {/* Title */}
+              <div>
+                <label style={{ display: 'block', fontWeight: '600', marginBottom: '8px' }}>
+                  Title:
+                </label>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                  {scenesToMerge.map(scene => (
+                    <label
+                      key={scene.id}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        padding: '8px',
+                        border: '1px solid #d1d5db',
+                        borderRadius: '6px',
+                        cursor: 'pointer',
+                        backgroundColor: mergeSceneData?.title === scene.title ? '#dbeafe' : 'white'
+                      }}
+                    >
+                      <input
+                        type="radio"
+                        name="title"
+                        checked={mergeSceneData?.title === scene.title}
+                        onChange={() => handleUpdateMergeField('title', scene.title)}
+                        style={{ marginRight: '8px' }}
+                      />
+                      <span style={{ flex: 1, fontSize: '14px' }}>
+                        {scene.title || <em style={{ color: '#9ca3af' }}>No title</em>}
+                      </span>
+                    </label>
+                  ))}
+                </div>
               </div>
-            </div>
 
-            {/* Date Selection */}
-            <div style={{ marginBottom: '1.5rem' }}>
-              <label style={{ display: 'block', fontWeight: '600', marginBottom: '8px' }}>
-                Date:
-              </label>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                {scenesToMerge.map(scene => (
-                  <label
-                    key={scene.id}
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      padding: '8px',
-                      border: '1px solid #d1d5db',
-                      borderRadius: '6px',
-                      cursor: 'pointer',
-                      backgroundColor: mergeSceneData?.date === scene.date ? '#dbeafe' : 'white'
-                    }}
-                  >
-                    <input
-                      type="radio"
-                      name="date"
-                      checked={mergeSceneData?.date === scene.date}
-                      onChange={() => handleUpdateMergeField('date', scene.date)}
-                      style={{ marginRight: '8px' }}
-                    />
-                    <span style={{ fontSize: '14px' }}>
-                      {scene.date || <em style={{ color: '#9ca3af' }}>No date</em>}
-                    </span>
-                  </label>
-                ))}
+              {/* Date */}
+              <div>
+                <label style={{ display: 'block', fontWeight: '600', marginBottom: '8px' }}>
+                  Date:
+                </label>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                  {scenesToMerge.map(scene => (
+                    <label
+                      key={scene.id}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        padding: '8px',
+                        border: '1px solid #d1d5db',
+                        borderRadius: '6px',
+                        cursor: 'pointer',
+                        backgroundColor: mergeSceneData?.date === scene.date ? '#dbeafe' : 'white'
+                      }}
+                    >
+                      <input
+                        type="radio"
+                        name="date"
+                        checked={mergeSceneData?.date === scene.date}
+                        onChange={() => handleUpdateMergeField('date', scene.date)}
+                        style={{ marginRight: '8px' }}
+                      />
+                      <span style={{ fontSize: '14px' }}>
+                        {scene.date || <em style={{ color: '#9ca3af' }}>No date</em>}
+                      </span>
+                    </label>
+                  ))}
+                </div>
               </div>
+
+              {/* Details */}
+              <div>
+                <label style={{ display: 'block', fontWeight: '600', marginBottom: '8px' }}>
+                  Details:
+                </label>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                  {scenesToMerge.map(scene => (
+                    <label
+                      key={scene.id}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'flex-start',
+                        padding: '8px',
+                        border: '1px solid #d1d5db',
+                        borderRadius: '6px',
+                        cursor: 'pointer',
+                        backgroundColor: mergeSceneData?.details === scene.details ? '#dbeafe' : 'white'
+                      }}
+                    >
+                      <input
+                        type="radio"
+                        name="details"
+                        checked={mergeSceneData?.details === scene.details}
+                        onChange={() => handleUpdateMergeField('details', scene.details)}
+                        style={{ marginRight: '8px', marginTop: '4px' }}
+                      />
+                      <span style={{ flex: 1, fontSize: '14px', whiteSpace: 'pre-wrap' }}>
+                        {scene.details ? (
+                          scene.details.length > 100 
+                            ? scene.details.substring(0, 100) + '...' 
+                            : scene.details
+                        ) : (
+                          <em style={{ color: '#9ca3af' }}>No details</em>
+                        )}
+                      </span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+
+              {/* Studio */}
+              <div>
+                <label style={{ display: 'block', fontWeight: '600', marginBottom: '8px' }}>
+                  Studio:
+                </label>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                  {scenesToMerge.map(scene => {
+                    const studioName = typeof scene.studio === 'string' ? scene.studio : scene.studio?.name;
+                    return (
+                      <label
+                        key={scene.id}
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          padding: '8px',
+                          border: '1px solid #d1d5db',
+                          borderRadius: '6px',
+                          cursor: 'pointer',
+                          backgroundColor: mergeSceneData?.studio === scene.studio ? '#dbeafe' : 'white'
+                        }}
+                      >
+                        <input
+                          type="radio"
+                          name="studio"
+                          checked={mergeSceneData?.studio === scene.studio}
+                          onChange={() => handleUpdateMergeField('studio', scene.studio)}
+                          style={{ marginRight: '8px' }}
+                        />
+                        <span style={{ fontSize: '14px' }}>
+                          {studioName || <em style={{ color: '#9ca3af' }}>No studio</em>}
+                        </span>
+                      </label>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* File Information - Select which file to keep */}
+              <div>
+                <label style={{ display: 'block', fontWeight: '600', marginBottom: '8px', color: '#dc2626' }}>
+                  ⚠️ File to Keep (others will be deleted from Stash):
+                </label>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                  {scenesToMerge.map(scene => {
+                    const formatFileSize = (bytes) => {
+                      if (!bytes) return 'Unknown size';
+                      const gb = bytes / (1024 * 1024 * 1024);
+                      if (gb >= 1) return `${gb.toFixed(2)} GB`;
+                      const mb = bytes / (1024 * 1024);
+                      return `${mb.toFixed(2)} MB`;
+                    };
+
+                    const formatResolution = (width, height) => {
+                      if (!width || !height) return 'Unknown resolution';
+                      // Common resolution names
+                      if (height >= 2160) return `${width}x${height} (4K)`;
+                      if (height >= 1080) return `${width}x${height} (1080p)`;
+                      if (height >= 720) return `${width}x${height} (720p)`;
+                      if (height >= 480) return `${width}x${height} (480p)`;
+                      return `${width}x${height}`;
+                    };
+
+                    const fileSize = formatFileSize(scene.fileSize);
+                    const resolution = formatResolution(scene.width, scene.height);
+                    const filePath = scene.path || 'Unknown path';
+                    const fileName = filePath.split(/[/\\]/).pop();
+
+                    return (
+                      <label
+                        key={scene.id}
+                        style={{
+                          display: 'flex',
+                          flexDirection: 'column',
+                          padding: '12px',
+                          border: '2px solid',
+                          borderColor: mergeSceneData?.keepFileFromSceneId === scene.id ? '#3b82f6' : '#d1d5db',
+                          borderRadius: '6px',
+                          cursor: 'pointer',
+                          backgroundColor: mergeSceneData?.keepFileFromSceneId === scene.id ? '#dbeafe' : 'white',
+                          transition: 'all 0.2s ease'
+                        }}
+                      >
+                        <div style={{ display: 'flex', alignItems: 'flex-start', marginBottom: '8px' }}>
+                          <input
+                            type="radio"
+                            name="keepFile"
+                            checked={mergeSceneData?.keepFileFromSceneId === scene.id}
+                            onChange={() => handleUpdateMergeField('keepFileFromSceneId', scene.id)}
+                            style={{ marginRight: '12px', marginTop: '4px' }}
+                          />
+                          <div style={{ flex: 1 }}>
+                            <div style={{ fontWeight: '600', fontSize: '14px', marginBottom: '4px', color: '#111827' }}>
+                              {scene.title || 'Untitled Scene'}
+                            </div>
+                            <div style={{ fontSize: '12px', color: '#6b7280', wordBreak: 'break-all', marginBottom: '8px' }}>
+                              📁 {fileName}
+                            </div>
+                            <div style={{ display: 'flex', gap: '16px', flexWrap: 'wrap' }}>
+                              <div style={{ fontSize: '13px' }}>
+                                <span style={{ fontWeight: '500', color: '#374151' }}>📏 Size:</span>{' '}
+                                <span style={{ color: '#6b7280' }}>{fileSize}</span>
+                              </div>
+                              <div style={{ fontSize: '13px' }}>
+                                <span style={{ fontWeight: '500', color: '#374151' }}>🎬 Resolution:</span>{' '}
+                                <span style={{ color: '#6b7280' }}>{resolution}</span>
+                              </div>
+                              {scene.duration && (
+                                <div style={{ fontSize: '13px' }}>
+                                  <span style={{ fontWeight: '500', color: '#374151' }}>⏱️ Duration:</span>{' '}
+                                  <span style={{ color: '#6b7280' }}>{Math.floor(scene.duration / 60)}:{String(Math.floor(scene.duration % 60)).padStart(2, '0')}</span>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                        {mergeSceneData?.keepFileFromSceneId === scene.id && (
+                          <div style={{ 
+                            fontSize: '12px', 
+                            color: '#3b82f6', 
+                            fontWeight: '500',
+                            marginTop: '4px',
+                            paddingLeft: '28px'
+                          }}>
+                            ✓ This file will be kept
+                          </div>
+                        )}
+                      </label>
+                    );
+                  })}
+                </div>
+                <p style={{ fontSize: '12px', color: '#dc2626', marginTop: '8px', fontStyle: 'italic' }}>
+                  ⚠️ Warning: Video files from unselected scenes will be permanently deleted from disk!
+                </p>
+              </div>
+
+              {/* Tags - Combine all unique tags */}
+              <div>
+                <label style={{ display: 'block', fontWeight: '600', marginBottom: '8px' }}>
+                  Tags (all will be combined):
+                </label>
+                <div style={{ padding: '8px', border: '1px solid #d1d5db', borderRadius: '6px', backgroundColor: '#f9fafb' }}>
+                  {(() => {
+                    const allTags = new Map();
+                    scenesToMerge.forEach(scene => {
+                      if (scene.tags) {
+                        scene.tags.forEach(tag => {
+                          allTags.set(tag.id, tag);
+                        });
+                      }
+                    });
+                    return Array.from(allTags.values()).map(tag => (
+                      <span
+                        key={tag.id}
+                        style={{
+                          display: 'inline-block',
+                          padding: '4px 8px',
+                          margin: '2px',
+                          backgroundColor: '#dbeafe',
+                          borderRadius: '4px',
+                          fontSize: '12px'
+                        }}
+                      >
+                        {tag.name}
+                      </span>
+                    ));
+                  })()}
+                </div>
+              </div>
+
+              {/* Performers - Combine all unique performers */}
+              <div>
+                <label style={{ display: 'block', fontWeight: '600', marginBottom: '8px' }}>
+                  Performers (all will be combined):
+                </label>
+                <div style={{ padding: '8px', border: '1px solid #d1d5db', borderRadius: '6px', backgroundColor: '#f9fafb' }}>
+                  {(() => {
+                    const allPerformers = new Map();
+                    scenesToMerge.forEach(scene => {
+                      if (scene.performers) {
+                        scene.performers.forEach(performer => {
+                          allPerformers.set(performer.id, performer);
+                        });
+                      }
+                    });
+                    return Array.from(allPerformers.values()).map(performer => (
+                      <span
+                        key={performer.id}
+                        style={{
+                          display: 'inline-block',
+                          padding: '4px 8px',
+                          margin: '2px',
+                          backgroundColor: '#dbeafe',
+                          borderRadius: '4px',
+                          fontSize: '12px'
+                        }}
+                      >
+                        {performer.name}
+                      </span>
+                    ));
+                  })()}
+                </div>
+              </div>
+
+              {/* URLs - Combine all unique URLs */}
+              <div>
+                <label style={{ display: 'block', fontWeight: '600', marginBottom: '8px' }}>
+                  URLs (all will be combined):
+                </label>
+                <div style={{ padding: '8px', border: '1px solid #d1d5db', borderRadius: '6px', backgroundColor: '#f9fafb' }}>
+                  {(() => {
+                    console.log('🔍 scenesToMerge in URL display:', scenesToMerge);
+                    const allUrls = new Set();
+                    scenesToMerge.forEach(scene => {
+                      console.log(`Scene ${scene.id}:`, {
+                        url: scene.url,
+                        geviUrl: scene.geviUrl,
+                        episodeUrls: scene.episodeUrls
+                      });
+                      if (scene.url) allUrls.add(scene.url);
+                      if (scene.geviUrl) allUrls.add(scene.geviUrl);
+                      // Parse and add episode URLs
+                      if (scene.episodeUrls) {
+                        try {
+                          const episodeUrls = typeof scene.episodeUrls === 'string' 
+                            ? JSON.parse(scene.episodeUrls) 
+                            : scene.episodeUrls;
+                          console.log(`  Parsed episodeUrls:`, episodeUrls);
+                          if (Array.isArray(episodeUrls)) {
+                            episodeUrls.forEach(urlItem => {
+                              // Handle both formats: plain strings and objects with url property
+                              if (typeof urlItem === 'string') {
+                                allUrls.add(urlItem);
+                              } else if (urlItem && urlItem.url) {
+                                allUrls.add(urlItem.url);
+                              }
+                            });
+                          }
+                        } catch (e) {
+                          console.error('Failed to parse episodeUrls:', e);
+                        }
+                      }
+                    });
+                    
+                    console.log('🔗 Total unique URLs collected:', allUrls.size, Array.from(allUrls));
+                    
+                    if (allUrls.size === 0) {
+                      return <span style={{ fontSize: '12px', color: '#9ca3af', fontStyle: 'italic' }}>No URLs found</span>;
+                    }
+                    
+                    return Array.from(allUrls).map((url, index) => (
+                      <div
+                        key={index}
+                        style={{
+                          fontSize: '11px',
+                          color: '#4b5563',
+                          padding: '4px 0',
+                          wordBreak: 'break-all'
+                        }}
+                      >
+                        🔗 {url}
+                      </div>
+                    ));
+                  })()}
+                </div>
+              </div>
+
             </div>
 
             {/* Actions */}

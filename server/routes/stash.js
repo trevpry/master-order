@@ -805,7 +805,9 @@ router.get('/scenes/:id', asyncHandler(async (req, res) => {
         name: scene.studioObject.name,
         url: scene.studioObject.url,
         image: scene.studioObject.image,
-        geviUrl: scene.studioObject.geviUrl
+        geviUrl: scene.studioObject.geviUrl,
+        scraperName: scene.studioObject.scraperName,
+        notes: scene.studioObject.notes
       } : scene.studio ? { name: scene.studio } : null,
       code: scene.code,
       director: scene.director,
@@ -4927,13 +4929,18 @@ router.get('/scenes/:id/available-scrapers', asyncHandler(async (req, res) => {
   
   console.log(`🔍 [Available Scrapers] Checking available scrapers for scene: ${id}`);
   
-  // Fetch scene with URLs
+  // Fetch scene with URLs and studio info
   const scene = await prisma.stashScene.findUnique({
     where: { id },
-    select: { 
-      id: true, 
-      url: true, 
-      episodeUrls: true 
+    include: {
+      studioObject: {
+        select: {
+          id: true,
+          name: true,
+          scraperName: true,
+          url: true
+        }
+      }
     }
   });
   
@@ -4983,8 +4990,32 @@ router.get('/scenes/:id/available-scrapers', asyncHandler(async (req, res) => {
     });
   });
   
-  // Get available scrapers
+  // Get available scrapers from URLs
   const availableScrapers = registry.getAvailableScrapers(urls);
+  
+  // Add studio's YAML scraper if configured and not already included
+  if (scene.studioObject?.scraperName) {
+    console.log(`   - Studio has YAML scraper: ${scene.studioObject.scraperName}`);
+    
+    const studioScraper = registry.scrapers.find(s => s.siteName === scene.studioObject.scraperName);
+    if (studioScraper) {
+      // Check if this scraper is already in the list
+      const alreadyIncluded = availableScrapers.some(s => s.scraper.siteName === scene.studioObject.scraperName);
+      
+      if (!alreadyIncluded) {
+        console.log(`   - Adding studio scraper to available scrapers: ${scene.studioObject.scraperName}`);
+        availableScrapers.push({
+          name: studioScraper.name,
+          scraper: studioScraper,
+          url: scene.studioObject.url || '' // Use studio URL as placeholder
+        });
+      } else {
+        console.log(`   - Studio scraper already included from URL matching`);
+      }
+    } else {
+      console.warn(`   - Studio scraper "${scene.studioObject.scraperName}" not found in registry`);
+    }
+  }
   
   console.log(`   - Found ${availableScrapers.length} available scraper(s):`, 
     availableScrapers.map(s => s.name).join(', '));
@@ -5020,6 +5051,29 @@ router.post('/scrapers/reload', asyncHandler(async (req, res) => {
   } catch (error) {
     console.error('❌ [Scraper Reload] Failed to reload scrapers:', error);
     return sendServerError(res, `Failed to reload scrapers: ${error.message}`);
+  }
+}));
+
+// GET /api/stash/scrapers - Get all available scrapers
+router.get('/scrapers', asyncHandler(async (req, res) => {
+  console.log('📋 [Get Scrapers] Fetching available scrapers...');
+  
+  try {
+    const registry = getScraperRegistry();
+    const allScrapers = registry.getAllScrapers();
+    
+    const scrapers = allScrapers.map(scraper => ({
+      name: scraper.siteName,
+      supportsSceneSearch: typeof scraper.searchScenes === 'function',
+      urlPatterns: scraper.sceneUrlPatterns || []
+    }));
+    
+    console.log(`✅ [Get Scrapers] Found ${scrapers.length} scraper(s)`);
+    
+    sendSuccess(res, scrapers);
+  } catch (error) {
+    console.error('❌ [Get Scrapers] Failed to get scrapers:', error);
+    return sendServerError(res, `Failed to get scrapers: ${error.message}`);
   }
 }));
 
@@ -5171,6 +5225,140 @@ router.post('/scenes/:id/scrape-generic', asyncHandler(async (req, res) => {
     },
     source: scraper.siteName,
     sourceUrl: url
+  });
+}));
+
+// POST /api/stash/scenes/:id/search-yaml - Search for scenes using YAML scraper
+router.post('/scenes/:id/search-yaml', asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  const { scraperName } = req.body;
+  
+  console.log(`🔍 [YAML Scene Search] Starting search for scene: ${id}`);
+  console.log(`   - Scraper: ${scraperName}`);
+  
+  if (!scraperName) {
+    return sendBadRequest(res, 'Scraper name is required');
+  }
+  
+  // Fetch scene with performers
+  const scene = await prisma.stashScene.findUnique({
+    where: { id },
+    include: {
+      performers: {
+        include: {
+          performer: true
+        }
+      }
+    }
+  });
+  
+  if (!scene) {
+    return sendBadRequest(res, 'Scene not found');
+  }
+  
+  const performers = scene.performers.map(sp => ({
+    id: sp.performer.id,
+    name: sp.performer.name,
+    alias: sp.performer.alias // Include alias for scraper to try alternate names
+  }));
+  
+  if (performers.length === 0) {
+    return sendBadRequest(res, 'Scene must have at least one performer to search');
+  }
+  
+  console.log(`   - Scene has ${performers.length} performer(s):`, performers.map(p => p.name));
+  
+  // Get the scraper
+  const registry = getScraperRegistry();
+  const scraper = registry.getAllScrapers().find(s => s.siteName === scraperName);
+  
+  if (!scraper) {
+    return sendBadRequest(res, `Unknown scraper: ${scraperName}`);
+  }
+  
+  // Check if scraper supports scene searching
+  if (!scraper.searchScenes) {
+    return sendBadRequest(res, `Scraper "${scraperName}" does not support scene searching`);
+  }
+  
+  console.log(`   - Using scraper: ${scraper.siteName}`);
+  
+  // Search for scenes
+  let searchResults;
+  try {
+    searchResults = await scraper.searchScenes(performers);
+  } catch (error) {
+    console.error(`❌ [YAML Scene Search] Error:`, error);
+    return sendServerError(res, `Failed to search scenes: ${error.message}`);
+  }
+  
+  console.log(`   ✅ Found ${searchResults.length} matching scene(s)`);
+  
+  sendSuccess(res, {
+    scenes: searchResults,
+    performers: performers,
+    source: scraper.siteName
+  });
+}));
+
+// POST /api/stash/scenes/:id/search-yaml-title - Search for scenes by title using YAML scraper
+router.post('/scenes/:id/search-yaml-title', asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  const { scraperName, studioUrl } = req.body;
+  
+  console.log(`🔍 [YAML Title Search] Starting search for scene: ${id}`);
+  console.log(`   - Scraper: ${scraperName}`);
+  console.log(`   - Studio URL: ${studioUrl || 'using config default'}`);
+  
+  if (!scraperName) {
+    return sendBadRequest(res, 'Scraper name is required');
+  }
+  
+  // Fetch scene with title
+  const scene = await prisma.stashScene.findUnique({
+    where: { id }
+  });
+  
+  if (!scene) {
+    return sendBadRequest(res, 'Scene not found');
+  }
+  
+  if (!scene.title) {
+    return sendBadRequest(res, 'Scene must have a title to search');
+  }
+  
+  console.log(`   - Searching for title: "${scene.title}"`);
+  
+  // Get the scraper
+  const registry = getScraperRegistry();
+  const scraper = registry.getAllScrapers().find(s => s.siteName === scraperName);
+  
+  if (!scraper) {
+    return sendBadRequest(res, `Unknown scraper: ${scraperName}`);
+  }
+  
+  // Check if scraper supports title search
+  if (!scraper.searchByTitle) {
+    return sendBadRequest(res, `Scraper "${scraperName}" does not support title searching`);
+  }
+  
+  console.log(`   - Using scraper: ${scraper.siteName}`);
+  
+  // Search for scenes by title
+  let searchResults;
+  try {
+    searchResults = await scraper.searchByTitle(scene.title, studioUrl);
+  } catch (error) {
+    console.error(`❌ [YAML Title Search] Error:`, error);
+    return sendServerError(res, `Failed to search scenes by title: ${error.message}`);
+  }
+  
+  console.log(`   ✅ Found ${searchResults.length} matching scene(s)`);
+  
+  sendSuccess(res, {
+    scenes: searchResults,
+    searchedTitle: scene.title,
+    source: scraper.siteName
   });
 }));
 
@@ -7527,6 +7715,8 @@ router.get('/studios/:id', asyncHandler(async (req, res) => {
     url: studio.url,
     image: studio.image,
     geviUrl: studio.geviUrl,
+    scraperName: studio.scraperName,
+    notes: studio.notes,
     scenes: studio.scenes.map(scene => ({
       id: scene.id,
       title: scene.title,
@@ -7544,7 +7734,7 @@ router.get('/studios/:id', asyncHandler(async (req, res) => {
 // PUT /studios/:id - Update studio details
 router.put('/studios/:id', asyncHandler(async (req, res) => {
   const { id } = req.params;
-  const { geviUrl, notes } = req.body;
+  const { geviUrl, notes, scraperName } = req.body;
 
   // Check if studio exists
   const studio = await prisma.stashStudio.findUnique({
@@ -7559,6 +7749,7 @@ router.put('/studios/:id', asyncHandler(async (req, res) => {
   const updateData = {};
   if (geviUrl !== undefined) updateData.geviUrl = geviUrl;
   if (notes !== undefined) updateData.notes = notes;
+  if (scraperName !== undefined) updateData.scraperName = scraperName;
 
   const updatedStudio = await prisma.stashStudio.update({
     where: { id },

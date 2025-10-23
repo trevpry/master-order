@@ -565,6 +565,391 @@ class YamlScraperService extends BaseScraperService {
       throw new Error(`Failed to scrape ${this.siteName} scene: ${error.message}`);
     }
   }
+
+  /**
+   * Search for scenes using performers
+   * For GuyBone: builds URLs like https://guybone.com/model/aaron_burke
+   * Returns all scenes found on each performer's page that match ALL provided performers
+   */
+  async searchScenes(performers) {
+    console.log(`🔍 [${this.siteName}] Searching scenes with ${performers.length} performer(s):`, 
+      performers.map(p => p.name));
+
+    // Check if scraper supports scene search
+    if (!this.config.sceneByFragment || this.config.sceneByFragment.length === 0) {
+      throw new Error(`${this.siteName} does not support scene searching by performers`);
+    }
+
+    const searchConfig = this.config.sceneByFragment[0];
+    
+    // Use performerSearchScraper if specified, otherwise fall back to scraper
+    const scraperName = searchConfig.performerSearchScraper || searchConfig.scraper;
+    if (!scraperName) {
+      throw new Error(`${this.siteName} sceneByFragment config missing performerSearchScraper or scraper`);
+    }
+    
+    const scraperConfig = this.config.xPathScrapers[scraperName];
+    
+    if (!scraperConfig || !scraperConfig.scene) {
+      throw new Error(`Performer search scraper configuration not found: ${scraperName}`);
+    }
+
+    // Get performer search URL pattern from config
+    const performerSearchUrlPattern = searchConfig.performerSearchUrl;
+    if (!performerSearchUrlPattern) {
+      throw new Error(`${this.siteName} sceneByFragment config missing performerSearchUrl`);
+    }
+
+    try {
+      // Collect all scenes from all performer pages
+      const allScenes = [];
+      const performerNames = performers.map(p => p.name.toLowerCase());
+
+      for (const performer of performers) {
+        // Build list of names to try: primary name + aliases
+        const namesToTry = [performer.name];
+        if (performer.alias) {
+          // Split aliases by comma and trim whitespace
+          const aliases = performer.alias.split(',').map(a => a.trim()).filter(a => a);
+          namesToTry.push(...aliases);
+        }
+
+        console.log(`   🔍 Trying ${namesToTry.length} name(s) for ${performer.name}:`, namesToTry);
+
+        // Try each name/alias
+        for (const name of namesToTry) {
+          // Build performer slug: replace spaces with underscores, lowercase
+          const performerSlug = name.toLowerCase().replace(/\s+/g, '_');
+          
+          // Build performer URL from pattern
+          const performerUrl = performerSearchUrlPattern.replace('{performer}', performerSlug);
+          
+          console.log(`      - Trying: ${performerUrl}`);
+
+          try {
+            const $ = await this.fetchHtml(performerUrl);
+            const sceneConfig = scraperConfig.scene;
+
+            // Extract all scenes from the performer page
+            const titleElements = this.extractArrayElements($, sceneConfig.Title);
+            
+            console.log(`      DEBUG: Title config:`, JSON.stringify(sceneConfig.Title));
+            console.log(`      DEBUG: URL config:`, JSON.stringify(sceneConfig.URL));
+            console.log(`      DEBUG: titleElements.length = ${titleElements.length}`);
+            
+            if (titleElements.length > 0) {
+              console.log(`      ✓ Found ${titleElements.length} scene(s) for "${name}"`);
+
+              for (let i = 0; i < titleElements.length; i++) {
+                const scene = {
+                  title: null,
+                  url: null,
+                  coverImage: null,
+                  date: null,
+                  studio: this.siteName
+                };
+
+                // Extract title
+                if (sceneConfig.Title) {
+                  scene.title = this.extractValueAtIndex($, sceneConfig.Title, i);
+                }
+
+                // Extract URL
+                if (sceneConfig.URL) {
+                  scene.url = this.extractValueAtIndex($, sceneConfig.URL, i);
+                }
+
+                // Extract cover image
+                if (sceneConfig.Image) {
+                  scene.coverImage = this.extractValueAtIndex($, sceneConfig.Image, i);
+                }
+
+                // Extract date
+                if (sceneConfig.Date) {
+                  scene.date = this.extractValueAtIndex($, sceneConfig.Date, i);
+                }
+
+                if (scene.title && scene.url) {
+                  allScenes.push(scene);
+                  console.log(`         Added scene: "${scene.title}" (${scene.url})`);
+                } else {
+                  console.log(`         Skipped scene ${i}: title="${scene.title}", url="${scene.url}"`);
+                }
+              }
+              
+              // If we found scenes with this name, don't try other aliases
+              break;
+            } else {
+              console.log(`      - No scenes found for "${name}"`);
+            }
+          } catch (error) {
+            console.warn(`      ⚠️ Failed to fetch scenes for "${name}":`, error.message);
+            // Continue with next alias
+          }
+        }
+      }
+
+      console.log(`   📊 Total scenes collected: ${allScenes.length}`);
+
+      // Filter scenes that appear for ALL performers (intersection)
+      // Count how many times each scene URL appears
+      const sceneUrlCounts = new Map();
+      allScenes.forEach(scene => {
+        const count = sceneUrlCounts.get(scene.url) || 0;
+        sceneUrlCounts.set(scene.url, count + 1);
+      });
+
+      // Keep only scenes that appear at least as many times as we have performers
+      const matchingScenes = allScenes.filter(scene => 
+        sceneUrlCounts.get(scene.url) >= performers.length
+      );
+
+      // Deduplicate by URL
+      const uniqueScenes = [];
+      const seenUrls = new Set();
+      matchingScenes.forEach(scene => {
+        if (!seenUrls.has(scene.url)) {
+          seenUrls.add(scene.url);
+          uniqueScenes.push(scene);
+        }
+      });
+
+      console.log(`   ✅ Found ${uniqueScenes.length} scene(s) with ALL ${performers.length} performer(s)`);
+
+      return uniqueScenes.map(scene => ({
+        url: scene.url,
+        title: scene.title,
+        date: scene.date,
+        studio: { name: this.siteName },
+        image: scene.coverImage,
+        performers: performers.map(p => ({ name: p.name }))
+      }));
+
+    } catch (error) {
+      console.error(`❌ [${this.siteName}] Error searching scenes:`, error);
+      throw new Error(`Failed to search ${this.siteName} scenes: ${error.message}`);
+    }
+  }
+
+  /**
+   * Search for scenes by title on studio page
+   * @param {string} title - Scene title to search for
+   * @param {string} studioUrl - Optional studio URL to search on (uses studioSearchUrl from config if not provided)
+   * @returns {Array} Array of matching scenes
+   */
+  async searchByTitle(title, studioUrl = null) {
+    console.log(`🔍 [${this.siteName}] Searching scenes by title: "${title}"`);
+
+    // Check if scraper supports scene search
+    if (!this.config.sceneByFragment || this.config.sceneByFragment.length === 0) {
+      throw new Error(`${this.siteName} does not support scene searching`);
+    }
+
+    const searchConfig = this.config.sceneByFragment[0];
+    
+    // Use titleSearchScraper if specified, otherwise fall back to scraper
+    const scraperName = searchConfig.titleSearchScraper || searchConfig.scraper;
+    if (!scraperName) {
+      throw new Error(`${this.siteName} sceneByFragment config missing titleSearchScraper or scraper`);
+    }
+    
+    const scraperConfig = this.config.xPathScrapers[scraperName];
+    
+    if (!scraperConfig || !scraperConfig.scene) {
+      throw new Error(`Title search scraper configuration not found: ${scraperName}`);
+    }
+
+    // Get studio search URL from config or parameter
+    let searchUrl = studioUrl || searchConfig.studioSearchUrl;
+    if (!searchUrl) {
+      throw new Error(`${this.siteName} sceneByFragment config missing studioSearchUrl and no studioUrl provided`);
+    }
+
+    // Check if URL has {title} placeholder - if so, replace it with normalized title
+    if (searchUrl.includes('{title}')) {
+      // Normalize title: lowercase, replace spaces with underscores
+      const titleSlug = title.toLowerCase().replace(/\s+/g, '_');
+      searchUrl = searchUrl.replace('{title}', titleSlug);
+      console.log(`   🔍 Using title-based URL: ${searchUrl}`);
+      
+      // For direct scene URL, we scrape that specific page instead of filtering
+      try {
+        const $ = await this.fetchHtml(searchUrl);
+        const sceneConfig = scraperConfig.scene;
+
+        const scene = {
+          title: null,
+          url: searchUrl,
+          coverImage: null,
+          date: null,
+          studio: this.siteName
+        };
+
+        // Extract title
+        if (sceneConfig.Title) {
+          scene.title = this.extractValue($, sceneConfig.Title);
+        }
+
+        // Extract URL (canonical if available)
+        if (sceneConfig.URL) {
+          const canonicalUrl = this.extractValue($, sceneConfig.URL);
+          if (canonicalUrl) {
+            scene.url = canonicalUrl;
+          }
+        }
+
+        // Extract cover image
+        if (sceneConfig.Image) {
+          scene.coverImage = this.extractValue($, sceneConfig.Image);
+        }
+
+        // Extract date
+        if (sceneConfig.Date) {
+          scene.date = this.extractValue($, sceneConfig.Date);
+        }
+
+        if (scene.title) {
+          console.log(`   ✅ Found scene: "${scene.title}"`);
+          return [{
+            url: scene.url,
+            title: scene.title,
+            date: scene.date,
+            studio: { name: this.siteName },
+            image: scene.coverImage
+          }];
+        } else {
+          console.log(`   ⚠️ No title found at URL, may be 404 or wrong format`);
+          return [];
+        }
+      } catch (error) {
+        console.error(`❌ [${this.siteName}] Error fetching scene at direct URL:`, error);
+        return []; // Return empty array if direct URL fails (likely 404)
+      }
+    }
+
+    // Original behavior: fetch page and filter by title
+    try {
+      console.log(`   🔍 Fetching scenes from: ${searchUrl}`);
+
+      const $ = await this.fetchHtml(searchUrl);
+      const sceneConfig = scraperConfig.scene;
+
+      // Extract all scenes from the page
+      const titleElements = this.extractArrayElements($, sceneConfig.Title);
+      
+      console.log(`   - Found ${titleElements.length} total scene(s) on page`);
+
+      const allScenes = [];
+      for (let i = 0; i < titleElements.length; i++) {
+        const scene = {
+          title: null,
+          url: null,
+          coverImage: null,
+          date: null,
+          studio: this.siteName
+        };
+
+        // Extract title
+        if (sceneConfig.Title) {
+          scene.title = this.extractValueAtIndex($, sceneConfig.Title, i);
+        }
+
+        // Extract URL
+        if (sceneConfig.URL) {
+          scene.url = this.extractValueAtIndex($, sceneConfig.URL, i);
+        }
+
+        // Extract cover image
+        if (sceneConfig.Image) {
+          scene.coverImage = this.extractValueAtIndex($, sceneConfig.Image, i);
+        }
+
+        // Extract date
+        if (sceneConfig.Date) {
+          scene.date = this.extractValueAtIndex($, sceneConfig.Date, i);
+        }
+
+        if (scene.title && scene.url) {
+          allScenes.push(scene);
+        }
+      }
+
+      console.log(`   📊 Total scenes extracted: ${allScenes.length}`);
+
+      // Filter scenes by title match (case-insensitive partial match)
+      const normalizedSearchTitle = title.toLowerCase().trim();
+      const matchingScenes = allScenes.filter(scene => 
+        scene.title && scene.title.toLowerCase().includes(normalizedSearchTitle)
+      );
+
+      console.log(`   ✅ Found ${matchingScenes.length} scene(s) matching title: "${title}"`);
+
+      return matchingScenes.map(scene => ({
+        url: scene.url,
+        title: scene.title,
+        date: scene.date,
+        studio: { name: this.siteName },
+        image: scene.coverImage
+      }));
+
+    } catch (error) {
+      console.error(`❌ [${this.siteName}] Error searching by title:`, error);
+      throw new Error(`Failed to search ${this.siteName} by title: ${error.message}`);
+    }
+  }
+
+  /**
+   * Extract array of elements (not just text values) for indexed extraction
+   */
+  extractArrayElements($, config) {
+    if (!config) return [];
+    
+    const selector = typeof config === 'string' ? config : config.selector;
+    if (!selector) return [];
+
+    const jquerySelector = this.xpathToJquery(selector);
+    const elements = $(jquerySelector);
+    return elements.toArray();
+  }
+
+  /**
+   * Extract value at specific index from array selector
+   */
+  extractValueAtIndex($, config, index) {
+    if (!config) return null;
+    
+    const selector = typeof config === 'string' ? config : config.selector;
+    if (!selector) return null;
+
+    try {
+      const jquerySelector = this.xpathToJquery(selector);
+      const elements = $(jquerySelector);
+      
+      if (index >= elements.length) return null;
+
+      const element = elements.eq(index);
+      
+      // Check if this is an attribute extraction
+      const attrMatch = selector.match(/\/@(\w+)$/);
+      let value;
+      
+      if (attrMatch) {
+        value = element.attr(attrMatch[1]);
+      } else {
+        value = element.text().trim();
+      }
+
+      // Apply post-processing if defined
+      if (typeof config === 'object' && config.postProcess) {
+        value = this.applyPostProcess(value, config.postProcess);
+      }
+
+      return value;
+    } catch (error) {
+      console.warn(`   ⚠️ Error extracting value at index ${index}:`, error.message);
+      return null;
+    }
+  }
 }
 
 module.exports = YamlScraperService;

@@ -1,2 +1,3 @@
--- AlterTable
-ALTER TABLE "StashScene" ALTER COLUMN "fileSize" TYPE BIGINT;
+-- AlterTable - SQLite doesn't support ALTER COLUMN TYPE, so we need to check if already BIGINT
+-- This migration is a no-op for SQLite as the schema already defines it as BigInt
+-- The Prisma client will handle the type correctly
