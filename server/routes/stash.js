@@ -936,7 +936,8 @@ router.post('/scenes/:id/parse-filename', asyncHandler(async (req, res) => {
     .replace(/__/g, ' & ')                       // Replace double underscores with ampersand separator (performer delimiter)
     .replace(/_-_/g, ' - ')                      // Replace _-_ pattern with dash separator (structure delimiter)
     .replace(/_/g, ' ')                          // Replace remaining single underscores with spaces
-    .replace(/\s+and\s+/gi, ' & ')               // Normalize "and" to "&"
+    .replace(/\b1080p\b/gi, '')                  // Remove "1080p"
+    .replace(/\bHD\b/gi, '')                     // Remove "HD"
     .replace(/\s*,\s*/g, ', ')                   // Normalize commas with consistent spacing
     .replace(/\s*&\s*/g, ' & ')                  // Normalize ampersands with consistent spacing
     .replace(/\s+/g, ' ')                        // Collapse multiple spaces
@@ -1365,6 +1366,7 @@ router.post('/performers/create', asyncHandler(async (req, res) => {
           career_length
           details
           url
+          urls
           stash_ids {
             endpoint
             stash_id
@@ -1388,6 +1390,7 @@ router.post('/performers/create', asyncHandler(async (req, res) => {
         fake_tits: fakeTits || null,
         penis_length: penisLength || null,
         url: url || null,
+        urls: url ? [url] : [], // Also set urls array for proper URL storage
         circumcised: circumcised || null,
         tattoos: tattoos || null,
         piercings: piercings || null,
@@ -7757,6 +7760,159 @@ router.put('/studios/:id', asyncHandler(async (req, res) => {
   });
 
   sendSuccess(res, updatedStudio);
+}));
+
+// POST /api/stash/studios/merge - Merge multiple studios into one
+router.post('/studios/merge', asyncHandler(async (req, res) => {
+  const { primaryStudioId, mergeStudioIds } = req.body;
+
+  if (!primaryStudioId || !mergeStudioIds || mergeStudioIds.length === 0) {
+    return sendBadRequest(res, 'Primary studio ID and merge studio IDs are required');
+  }
+
+  if (mergeStudioIds.includes(primaryStudioId)) {
+    return sendBadRequest(res, 'Cannot merge a studio into itself');
+  }
+
+  console.log(`🔀 Merging ${mergeStudioIds.length} studios into studio ${primaryStudioId}`);
+
+  try {
+    const allStudioIds = [primaryStudioId, ...mergeStudioIds];
+
+    // Fetch all studios to merge
+    const studios = await prisma.stashStudio.findMany({
+      where: { id: { in: allStudioIds } },
+      include: {
+        _count: {
+          select: { scenes: true }
+        }
+      }
+    });
+
+    if (studios.length !== allStudioIds.length) {
+      return sendBadRequest(res, 'One or more studios not found');
+    }
+
+    const primaryStudio = studios.find(s => s.id === primaryStudioId);
+    const mergeStudios = studios.filter(s => s.id !== primaryStudioId);
+
+    console.log(`📊 Primary studio: ${primaryStudio.name} (${primaryStudio._count.scenes} scenes)`);
+    mergeStudios.forEach(studio => {
+      console.log(`   Merging: ${studio.name} (${studio._count.scenes} scenes)`);
+    });
+
+    // Transfer all scenes from merge studios to primary studio
+    const transferredScenes = await prisma.stashScene.updateMany({
+      where: {
+        studioId: { in: mergeStudioIds }
+      },
+      data: {
+        studioId: primaryStudioId
+      }
+    });
+
+    console.log(`📁 Transferred ${transferredScenes.count} scenes to primary studio`);
+
+    // Update in Stash via GraphQL
+    try {
+      const stashService = getActiveSyncService();
+      
+      if (!stashService) {
+        console.warn('⚠️ Stash service not available - skipping Stash update');
+        throw new Error('Stash service not available');
+      }
+
+      // Update all transferred scenes in Stash to point to the primary studio
+      const scenesToUpdate = await prisma.stashScene.findMany({
+        where: {
+          studioId: primaryStudioId
+        },
+        select: { id: true }
+      });
+
+      console.log(`📤 Updating ${scenesToUpdate.length} scenes in Stash...`);
+
+      for (const scene of scenesToUpdate) {
+        try {
+          const updateMutation = `
+            mutation SceneUpdate($input: SceneUpdateInput!) {
+              sceneUpdate(input: $input) {
+                id
+                studio { id name }
+              }
+            }
+          `;
+
+          await stashService.makeGraphQLRequest(updateMutation, {
+            input: {
+              id: scene.id,
+              studio_id: primaryStudioId
+            }
+          });
+        } catch (sceneUpdateError) {
+          console.error(`   ❌ Failed to update scene ${scene.id} in Stash:`, sceneUpdateError.message);
+        }
+      }
+
+      console.log(`✅ Updated scenes in Stash`);
+
+      // Delete merged studios from Stash
+      console.log(`🗑️ Deleting ${mergeStudios.length} merged studio(s) from Stash...`);
+      
+      for (const studio of mergeStudios) {
+        console.log(`   🗑️ Deleting studio ${studio.id} (${studio.name}) from Stash`);
+        
+        const deleteMutation = `
+          mutation StudioDestroy($id: ID!) {
+            studioDestroy(input: { id: $id })
+          }
+        `;
+        
+        try {
+          await stashService.makeGraphQLRequest(deleteMutation, { id: studio.id });
+          console.log(`   ✅ Successfully deleted studio ${studio.id} from Stash`);
+        } catch (deleteError) {
+          console.error(`   ❌ Failed to delete studio ${studio.id} from Stash:`, deleteError.message);
+        }
+      }
+      
+      console.log(`✅ Finished deleting merged studios from Stash`);
+
+    } catch (stashError) {
+      console.error('❌ CRITICAL: Failed to update Stash:', stashError.message);
+      console.error('   Stack:', stashError.stack);
+      console.error('⚠️  WARNING: Studios merged locally but NOT in Stash!');
+      console.error('⚠️  You may need to manually merge the studios in Stash.');
+    }
+
+    // Delete merged studios from local database
+    await prisma.stashStudio.deleteMany({
+      where: { id: { in: mergeStudioIds } }
+    });
+
+    // Fetch updated primary studio with scene count
+    const updatedStudio = await prisma.stashStudio.findUnique({
+      where: { id: primaryStudioId },
+      include: {
+        _count: {
+          select: { scenes: true }
+        }
+      }
+    });
+
+    console.log(`✅ Merged ${mergeStudioIds.length} studios into studio ${primaryStudioId}`);
+    console.log(`   Primary studio now has ${updatedStudio._count.scenes} scenes`);
+    
+    sendSuccess(res, {
+      studio: updatedStudio,
+      mergedCount: mergeStudioIds.length,
+      transferredScenes: transferredScenes.count
+    });
+
+  } catch (error) {
+    console.error('Failed to merge studios:', error);
+    return sendServerError(res, `Failed to merge studios: ${error.message}`);
+  }
 }));
 
 // GET /tags/:id - Single tag details

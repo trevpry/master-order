@@ -2805,73 +2805,109 @@ export default function SceneDetail() {
             )}
 
             <div className="modal-actions">
-              {/* Only show Search by Performers button when studio has a YAML scraper configured */}
-              {data?.studio?.scraperName && (
-                <button 
-                  className="btn-primary" 
-                  onClick={handleSearchYamlScraper}
-                  disabled={
-                    isScraping || 
-                    isSearching || 
-                    !data || 
-                    !data.performers || 
-                    data.performers.length < 1
-                  }
-                  style={{ marginRight: '10px' }}
-                  title={`Search ${data.studio.scraperName} by performers (requires 1+ performer)`}
-                >
-                  {isSearching ? '⏳ Searching...' : `🔎 Search by Performers (${data.studio.scraperName})`}
-                </button>
+              {/* YAML Scraper specific buttons */}
+              {selectedScraper && (
+                <>
+                  <button 
+                    className="btn-primary" 
+                    onClick={handleSearchYamlScraper}
+                    disabled={
+                      isScraping || 
+                      isSearching || 
+                      !data || 
+                      !data.performers || 
+                      data.performers.length < 1
+                    }
+                    style={{ marginRight: '10px' }}
+                    title={`Search ${selectedScraper.siteName} by performers (requires 1+ performer)`}
+                  >
+                    {isSearching ? '⏳ Searching...' : `🔎 Search by Performers`}
+                  </button>
+                  <button 
+                    className="btn-primary" 
+                    onClick={handleSearchYamlScraperByTitle}
+                    disabled={
+                      isScraping || 
+                      isSearching || 
+                      !data || 
+                      !data.title
+                    }
+                    style={{ marginRight: '10px' }}
+                    title={`Search ${selectedScraper.siteName} by title (requires title)`}
+                  >
+                    {isSearching ? '⏳ Searching...' : `📝 Search by Title`}
+                  </button>
+                </>
               )}
-              <button 
-                className="btn-primary" 
-                onClick={data?.studio?.scraperName ? handleSearchYamlScraperByTitle : handleSearchGeviByTitle}
-                disabled={
-                  isScraping || 
-                  isSearching || 
-                  !data || 
-                  !data.title || 
-                  (!data.studio?.scraperName && (!data.studio || !data.studio.geviUrl))
-                }
-                style={{ marginRight: '10px' }}
-                title={
-                  data?.studio?.scraperName
-                    ? `Search ${data.studio.scraperName} by title (requires title)`
-                    : !data?.studio?.geviUrl 
-                    ? 'Studio must have a GEVI URL set (go to studio page to set it)' 
-                    : !data?.title 
-                    ? 'Scene must have a title' 
-                    : 'Search for this scene on the studio\'s GEVI page by title'
-                }
-              >
-                {isSearching ? '⏳ Searching...' : `📝 Search by Title${data?.studio?.scraperName ? ` (${data.studio.scraperName})` : ' (GEVI)'}`}
-              </button>
-              <button 
-                className="btn-primary" 
-                onClick={handleSearchGeviMovies}
-                disabled={
-                  isScraping || 
-                  isSearching || 
-                  !data || 
-                  (
-                    // Need either 2+ performers OR (studio with GEVI URL + title)
-                    (!data.performers || data.performers.length < 2) &&
-                    (!data.studio?.geviUrl || !data.title)
-                  )
-                }
-                style={{ marginRight: '10px' }}
-                title={
-                  !data 
-                    ? 'Loading scene data...' 
-                    : (data.performers && data.performers.length >= 2)
-                    ? 'Search GEVI movies table using scene performers'
-                    : (data.studio?.geviUrl && data.title)
-                    ? 'Search GEVI movies table on studio page by title'
-                    : 'Scene needs either:\n- At least 2 performers, OR\n- Studio with GEVI URL and scene title'
-                }
-              >
-                {isSearching ? '⏳ Searching...' : '🎬 Search Movies'}
-              </button>
+              
+              {/* GEVI specific buttons */}
+              {!selectedScraper && (
+                <>
+                  <button 
+                    className="btn-primary" 
+                    onClick={handleSearchGevi}
+                    disabled={
+                      isScraping || 
+                      isSearching || 
+                      !data || 
+                      !data.performers || 
+                      data.performers.length < 2
+                    }
+                    style={{ marginRight: '10px' }}
+                    title="Search GEVI by performers (requires 2+ performers)"
+                  >
+                    {isSearching ? '⏳ Searching...' : '🔎 Search by Performers'}
+                  </button>
+                  <button 
+                    className="btn-primary" 
+                    onClick={handleSearchGeviByTitle}
+                    disabled={
+                      isScraping || 
+                      isSearching || 
+                      !data || 
+                      !data.title || 
+                      !data.studio || 
+                      !data.studio.geviUrl
+                    }
+                    style={{ marginRight: '10px' }}
+                    title={
+                      !data?.studio?.geviUrl 
+                        ? 'Studio must have a GEVI URL set (go to studio page to set it)' 
+                        : !data?.title 
+                        ? 'Scene must have a title' 
+                        : 'Search for this scene on the studio\'s GEVI page by title'
+                    }
+                  >
+                    {isSearching ? '⏳ Searching...' : `📝 Search by Title`}
+                  </button>
+                  <button 
+                    className="btn-primary" 
+                    onClick={handleSearchGeviMovies}
+                    disabled={
+                      isScraping || 
+                      isSearching || 
+                      !data || 
+                      (
+                        // Need either 2+ performers OR (studio with GEVI URL + title)
+                        (!data.performers || data.performers.length < 2) &&
+                        (!data.studio?.geviUrl || !data.title)
+                      )
+                    }
+                    style={{ marginRight: '10px' }}
+                    title={
+                      !data 
+                        ? 'Loading scene data...' 
+                        : (data.performers && data.performers.length >= 2)
+                        ? 'Search GEVI movies table using scene performers'
+                        : (data.studio?.geviUrl && data.title)
+                        ? 'Search GEVI movies table on studio page by title'
+                        : 'Scene needs either:\n- At least 2 performers, OR\n- Studio with GEVI URL and scene title'
+                    }
+                  >
+                    {isSearching ? '⏳ Searching...' : '🎬 Search Movies'}
+                  </button>
+                </>
+              )}
               <button 
                 className="btn-accept" 
                 onClick={handleScrapeGevi}
