@@ -1,0 +1,24 @@
+{
+  "_comment": "URL replacements for Stash native scrapers",
+  "_format": {
+    "scraperID": [
+      {
+        "find": "string to replace",
+        "replace": "replacement string",
+        "regex": false
+      },
+      {
+        "pattern": "regex pattern",
+        "replace": "replacement with $1 $2 captures",
+        "regex": true
+      }
+    ]
+  },
+  "MileHighMedia_Gay": [
+    {
+      "find": "milehigh.com",
+      "replace": "iconmale.com",
+      "regex": false
+    }
+  ]
+}

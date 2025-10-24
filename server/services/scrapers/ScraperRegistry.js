@@ -4,22 +4,30 @@
  * Central registry for all scraper services.
  * Automatically detects which scraper to use based on URL.
  * Loads YAML-based scrapers from configs directory.
+ * Loads Stash native scrapers via GraphQL API.
  */
 
 const YamlScraperService = require('./YamlScraperService');
+const StashNativeScraperService = require('./StashNativeScraperService');
 const AebnScraper = require('./AebnScraper');
 const fs = require('fs');
 const path = require('path');
 
 class ScraperRegistry {
-  constructor() {
+  constructor(stashSyncService = null) {
     this.scrapers = [];
+    this.stashSyncService = stashSyncService;
+    this.stashNativeScrapers = [];
+    this.stashNativeScrapersLoaded = false; // Track loading status
     
     // Load code-based scrapers
     this.loadCodeScrapers();
     
     // Load all YAML-based scrapers from configs directory
     this.loadYamlScrapers();
+    
+    // Note: Stash native scrapers are loaded async via loadStashNativeScrapers()
+    // They are NOT loaded in the constructor to avoid race conditions
     
     console.log(`📚 Scraper Registry initialized with ${this.scrapers.length} scraper(s)`);
   }
@@ -38,6 +46,67 @@ class ScraperRegistry {
   }
 
   /**
+   * Load Stash native scrapers via GraphQL API
+   * Should be called after construction to ensure async loading completes
+   */
+  async loadStashNativeScrapers() {
+    if (!this.stashSyncService) {
+      console.log('⚠️ No StashSyncService provided - skipping Stash native scrapers');
+      return;
+    }
+
+    if (this.stashNativeScrapersLoaded) {
+      console.log('ℹ️ Stash native scrapers already loaded');
+      return;
+    }
+
+    try {
+      console.log('🔄 Loading Stash native scrapers...');
+      
+      // Load URL replacements config for Stash native scrapers
+      const { loadUrlReplacementsConfig } = require('../../utils/urlReplacements');
+      const configPath = path.join(__dirname, '../../config/stashScraperUrlReplacements.json');
+      const urlReplacementsConfig = loadUrlReplacementsConfig(configPath);
+      
+      const stashScrapers = await this.stashSyncService.listScrapers();
+      
+      console.log(`   - Found ${stashScrapers.length} Stash scraper(s)`);
+      
+      for (const stashScraper of stashScrapers) {
+        // Only load scrapers that support scene scraping
+        if (stashScraper.scene && stashScraper.scene.supported_scrapes.includes('URL')) {
+          const nativeScraper = new StashNativeScraperService(
+            this.stashSyncService,
+            stashScraper.id,
+            `${stashScraper.name} (Stash Native)`
+          );
+          
+          // Store supported URLs for matching
+          nativeScraper.supportedUrls = stashScraper.scene.urls || [];
+          
+          // Apply URL replacements from config if available
+          if (urlReplacementsConfig[stashScraper.id]) {
+            nativeScraper.urlReplacements = urlReplacementsConfig[stashScraper.id];
+            console.log(`   🔄 Loaded ${nativeScraper.urlReplacements.length} URL replacement(s) for ${stashScraper.name}`);
+          }
+          
+          this.scrapers.push(nativeScraper);
+          this.stashNativeScrapers.push(nativeScraper);
+          
+          console.log(`   ✅ Loaded Stash native: ${stashScraper.name} (${nativeScraper.supportedUrls.length} URL patterns)`);
+        }
+      }
+      
+      this.stashNativeScrapersLoaded = true;
+      console.log(`✅ Loaded ${this.stashNativeScrapers.length} Stash native scraper(s)`);
+      
+    } catch (error) {
+      console.error('❌ Failed to load Stash native scrapers:', error.message);
+      throw error;
+    }
+  }
+
+  /**
    * Load all YAML scraper configurations
    */
   loadYamlScrapers() {
@@ -49,22 +118,43 @@ class ScraperRegistry {
       return;
     }
     
-    // Read all .yml and .yaml files
-    const files = fs.readdirSync(configsDir).filter(file => 
-      file.endsWith('.yml') || file.endsWith('.yaml')
-    );
+    // Recursive function to find all YAML files
+    const findYamlFiles = (dir) => {
+      const results = [];
+      const entries = fs.readdirSync(dir, { withFileTypes: true });
+      
+      for (const entry of entries) {
+        const fullPath = path.join(dir, entry.name);
+        
+        if (entry.isDirectory()) {
+          // Recursively search subdirectories
+          results.push(...findYamlFiles(fullPath));
+        } else if (entry.isFile() && (entry.name.endsWith('.yml') || entry.name.endsWith('.yaml'))) {
+          // Skip backup files
+          if (!entry.name.endsWith('.bak')) {
+            results.push(fullPath);
+          }
+        }
+      }
+      
+      return results;
+    };
     
-    console.log(`📂 Found ${files.length} YAML scraper config(s) in ${configsDir}`);
+    // Find all YAML files recursively
+    const yamlFiles = findYamlFiles(configsDir);
+    
+    console.log(`📂 Found ${yamlFiles.length} YAML scraper config(s) in ${configsDir}`);
     
     // Load each YAML scraper
-    files.forEach(file => {
+    yamlFiles.forEach(yamlPath => {
       try {
-        const yamlPath = path.join(configsDir, file);
+        const relativePath = path.relative(configsDir, yamlPath);
         const scraper = new YamlScraperService(yamlPath);
         this.scrapers.push(scraper);
-        console.log(`   ✅ Loaded: ${scraper.siteName} (${file})`);
+        console.log(`   ✅ Loaded: ${scraper.siteName} (${relativePath})`);
       } catch (error) {
-        console.error(`   ❌ Failed to load ${file}:`, error.message);
+        const relativePath = path.relative(configsDir, yamlPath);
+        console.error(`   ❌ Failed to load ${relativePath}:`, error.message);
       }
     });
   }
@@ -97,20 +187,23 @@ class ScraperRegistry {
    * @returns {Array<{name: string, scraper: BaseScraperService, url: string}>} - Available scrapers with matching URLs
    */
   getAvailableScrapers(urls) {
-    const availableScrapers = [];
+    const scraperMap = new Map(); // Use Map to deduplicate by scraper instance
     
     urls.forEach(url => {
-      const scraper = this.getScraperForUrl(url);
-      if (scraper) {
-        availableScrapers.push({
-          name: scraper.siteName,
-          scraper: scraper,
-          url: url
-        });
-      }
+      // Find ALL scrapers that can handle this URL (not just the first)
+      this.scrapers.forEach(scraper => {
+        if (scraper.canHandle(url) && !scraperMap.has(scraper)) {
+          // Store by scraper instance to ensure uniqueness
+          scraperMap.set(scraper, {
+            name: scraper.siteName,
+            scraper: scraper,
+            url: url
+          });
+        }
+      });
     });
     
-    return availableScrapers;
+    return Array.from(scraperMap.values());
   }
 
   /**

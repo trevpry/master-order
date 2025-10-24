@@ -21,6 +21,13 @@ class YamlScraperService extends BaseScraperService {
     this.name = `${this.config.name} Scraper`;
     this.siteName = this.config.name;
     this.yamlPath = yamlFilePath;
+    this.yamlDir = path.dirname(yamlFilePath);
+    
+    // Check if this is a script-based scraper
+    this.isScriptBased = this._detectScriptBased();
+    
+    // Load URL replacements from config
+    this.urlReplacements = this.config.urlReplacements || [];
     
     // Extract URL patterns from sceneByURL configuration
     this.sceneUrlPatterns = [];
@@ -43,8 +50,95 @@ class YamlScraperService extends BaseScraperService {
     }
     
     console.log(`📋 Loaded YAML scraper: ${this.siteName}`);
+    console.log(`   - Type: ${this.isScriptBased ? 'Script-based' : 'XPath-based'}`);
+    if (this.urlReplacements.length > 0) {
+      console.log(`   - URL Replacements: ${this.urlReplacements.length} rule(s) configured`);
+    };
     console.log(`   - Scene URL patterns: ${this.sceneUrlPatterns.length}`);
     console.log(`   - Movie URL patterns: ${this.movieUrlPatterns.length}`);
+  }
+
+  /**
+   * Detect if this scraper uses external scripts
+   */
+  _detectScriptBased() {
+    const checkAction = (config) => {
+      if (!config) return false;
+      if (Array.isArray(config)) {
+        return config.some(item => item.action === 'script');
+      }
+      return config.action === 'script';
+    };
+
+    return (
+      checkAction(this.config.sceneByURL) ||
+      checkAction(this.config.sceneByFragment) ||
+      checkAction(this.config.sceneByName) ||
+      checkAction(this.config.galleryByURL) ||
+      checkAction(this.config.performerByName)
+    );
+  }
+
+  /**
+   * Execute an external script
+   */
+  async _executeScript(scriptConfig, operation, args) {
+    const { spawn } = require('child_process');
+    
+    if (!scriptConfig || !Array.isArray(scriptConfig) || scriptConfig.length < 2) {
+      throw new Error('Invalid script configuration');
+    }
+    
+    const [executor, scriptFile, ...scriptArgs] = scriptConfig;
+    const scriptPath = path.join(this.yamlDir, scriptFile);
+    
+    // Check if script file exists
+    if (!fs.existsSync(scriptPath)) {
+      throw new Error(`Script file not found: ${scriptPath}`);
+    }
+    
+    console.log(`   🔧 Executing script: ${executor} ${scriptFile} ${operation}`);
+    console.log(`   📝 Args:`, JSON.stringify(args));
+    
+    return new Promise((resolve, reject) => {
+      const process = spawn(executor, [scriptPath, operation, JSON.stringify(args)], {
+        cwd: this.yamlDir
+      });
+      
+      let stdout = '';
+      let stderr = '';
+      
+      process.stdout.on('data', (data) => {
+        stdout += data.toString();
+      });
+      
+      process.stderr.on('data', (data) => {
+        stderr += data.toString();
+      });
+      
+      process.on('close', (code) => {
+        if (code !== 0) {
+          console.error(`   ❌ Script failed with code ${code}`);
+          console.error(`   stderr:`, stderr);
+          reject(new Error(`Script exited with code ${code}: ${stderr}`));
+          return;
+        }
+        
+        try {
+          const result = JSON.parse(stdout);
+          console.log(`   ✅ Script completed successfully`);
+          resolve(result);
+        } catch (error) {
+          console.error(`   ❌ Failed to parse script output as JSON`);
+          console.error(`   stdout:`, stdout);
+          reject(new Error(`Failed to parse script output: ${error.message}`));
+        }
+      });
+      
+      process.on('error', (error) => {
+        reject(new Error(`Failed to execute script: ${error.message}`));
+      });
+    });
   }
 
   /**
@@ -71,6 +165,27 @@ class YamlScraperService extends BaseScraperService {
     });
     
     return matchesMovie;
+  }
+
+  /**
+   * Normalize script output to match expected format
+   */
+  _normalizeScriptResult(result) {
+    if (!result) return null;
+    
+    // Scripts may return data in various formats, normalize to our expected structure
+    return {
+      url: result.url || null,
+      title: result.title || null,
+      details: result.details || result.synopsis || null,
+      studio: result.studio?.name || result.studio || null, // Extract name if object, or use string directly
+      date: result.date || null,
+      coverImage: result.image || result.images?.[0] || null,
+      performers: result.performers || [],
+      tags: result.tags || [],
+      movies: result.movies || [],
+      duration: result.duration || null
+    };
   }
 
   /**
@@ -477,9 +592,28 @@ class YamlScraperService extends BaseScraperService {
    */
   async scrape(url) {
     console.log(`🔍 [${this.siteName}] Scraping scene: ${url}`);
+    
+    // Apply URL replacements if configured
+    const transformedUrl = this.applyUrlReplacements(url);
 
     try {
-      const $ = await this.fetchHtml(url);
+      // Check if this is a script-based scraper
+      if (this.isScriptBased && this.config.sceneByURL) {
+        const sceneConfig = Array.isArray(this.config.sceneByURL) 
+          ? this.config.sceneByURL[0] 
+          : this.config.sceneByURL;
+        
+        if (sceneConfig.action === 'script' && sceneConfig.script) {
+          console.log(`   🔧 Using script-based scraping`);
+          const result = await this._executeScript(sceneConfig.script, 'scene-by-url', { url: transformedUrl });
+          const normalized = this._normalizeScriptResult(result);
+          console.log(`✅ [${this.siteName}] Successfully scraped scene via script`);
+          return this.formatResult(normalized);
+        }
+      }
+
+      // XPath-based scraping (existing code)
+      const $ = await this.fetchHtml(transformedUrl);
 
       // Debug: Check what images exist in the HTML
       console.log(`   🔍 DEBUG - Checking all img tags in HTML:`);

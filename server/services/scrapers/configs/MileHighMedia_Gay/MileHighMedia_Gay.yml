@@ -1,0 +1,79 @@
+name: Mile High Media (Gay)
+# Standalone scraper - no external dependencies
+# scrapes: Icon Male, Noir Male, Taboo Male
+galleryByURL:
+  - action: script
+    url:
+      - iconmale.com/scene/
+      - noirmale.com/scene/
+    script:
+      - node
+      - MileHighMedia_Gay_standalone.js
+      - gallery-by-url
+galleryByFragment:
+  action: script
+  script:
+    - node
+    - MileHighMedia_Gay_standalone.js
+    - gallery-by-fragment
+sceneByURL:
+  - action: script
+    url:
+      - iconmale.com/scene/
+      - noirmale.com/scene/
+    script:
+      - node
+      - MileHighMedia_Gay_standalone.js
+      - scene-by-url
+sceneByFragment:
+  action: script
+  script:
+    - node
+    - MileHighMedia_Gay_standalone.js
+    - scene-by-fragment
+sceneByName:
+  action: script
+  script:
+    - node
+    - MileHighMedia_Gay_standalone.js
+    - scene-by-name
+sceneByQueryFragment:
+  action: script
+  script:
+    - node
+    - MileHighMedia_Gay_standalone.js
+    - scene-by-query-fragment
+performerByName:
+  action: script
+  script:
+    - node
+    - MileHighMedia_Gay_standalone.js
+    - performer-by-name
+performerByURL:
+  - action: script
+    url:
+      - iconmale.com/model/
+      - noirmale.com/model/
+    script:
+      - node
+      - MileHighMedia_Gay_standalone.js
+      - performer-by-url
+performerByFragment:
+  action: script
+  script:
+    - node
+    - MileHighMedia_Gay_standalone.js
+    - performer-by-fragment
+movieByURL:
+  - action: script
+    url:
+      - iconmale.com/movie/
+      - noirmale.com/movie/
+      # Since scenes link to the movie we can scrape movies from scenes
+      - iconmale.com/scene/
+      - noirmale.com/scene/
+    script:
+      - node
+      - MileHighMedia_Gay_standalone.js
+      - movie-by-url
+# Last Updated October 24, 2025

@@ -6,11 +6,22 @@
  */
 
 const cheerio = require('cheerio');
+const { applyUrlReplacements } = require('../../utils/urlReplacements');
 
 class BaseScraperService {
-  constructor() {
-    this.name = 'Base Scraper';
-    this.siteName = 'Unknown';
+  constructor(siteName = 'Unknown') {
+    this.name = siteName;
+    this.siteName = siteName;
+    this.urlReplacements = []; // Can be set by subclasses
+  }
+
+  /**
+   * Apply configured URL replacements to a URL
+   * @param {string} url - The URL to transform
+   * @returns {string} - The transformed URL
+   */
+  applyUrlReplacements(url) {
+    return applyUrlReplacements(url, this.urlReplacements);
   }
 
   /**

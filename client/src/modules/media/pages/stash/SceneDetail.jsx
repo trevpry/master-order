@@ -457,6 +457,56 @@ export default function SceneDetail() {
   };
 
   const handleSearchYamlScraperByTitle = async () => {
+    // For Stash native scrapers, use the selected scraper directly
+    if (selectedScraper?.isStashNative || selectedScraper?.type === 'StashNativeScraperService') {
+      if (!data?.title) {
+        alert('Scene must have a title to search');
+        return;
+      }
+
+      setIsSearching(true);
+      setSearchResults(null);
+
+      try {
+        const response = await fetch(`${config.apiBaseUrl}/api/stash/scenes/${id}/search-yaml-title`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            scraperName: selectedScraper.siteName
+          })
+        });
+
+        const result = await response.json();
+
+        if (result.success) {
+          const { scenes, searchedTitle, source } = result.data;
+          
+          if (scenes.length === 0) {
+            alert(`No scenes found on ${source} matching title: "${searchedTitle}"`);
+          } else {
+            setSearchResults({
+              scenes: scenes,
+              isSceneSearch: true,
+              isSceneSearchByTitle: true,
+              searchedTitle: searchedTitle,
+              source: source
+            });
+          }
+        } else {
+          alert(`Failed to search ${selectedScraper.siteName} by title: ${result.error || 'Unknown error'}`);
+        }
+      } catch (error) {
+        console.error('Error searching with Stash native scraper by title:', error);
+        alert('Failed to search with Stash native scraper by title');
+      } finally {
+        setIsSearching(false);
+      }
+      return;
+    }
+
+    // For YAML scrapers, require studio scraper configuration
     if (!data?.studio?.scraperName) {
       alert('This studio does not have a scraper configured');
       return;
@@ -1741,6 +1791,14 @@ export default function SceneDetail() {
               urlDisplay = scraper.url;
             }
             
+            // Determine button style and icon based on scraper type
+            const isStashNative = scraper.isStashNative || scraper.type === 'StashNativeScraperService';
+            const buttonStyle = isStashNative 
+              ? { background: '#8b5cf6', borderLeft: '4px solid #a78bfa' } // Purple for Stash native
+              : { background: '#10b981' }; // Green for custom scrapers
+            const icon = isStashNative ? '⚡' : '🌐';
+            const typeLabel = isStashNative ? ' (Stash)' : '';
+            
             return (
               <button
                 key={`${scraper.name}-${index}`}
@@ -1750,12 +1808,10 @@ export default function SceneDetail() {
                   setScrapeUrl(scraper.url || '');
                 }}
                 className="scrape-gevi-button"
-                title={`Scrape metadata from ${scraper.url}`}
-                style={{
-                  background: '#10b981', // Green for other scrapers
-                }}
+                title={`Scrape metadata from ${scraper.url}${isStashNative ? ' using Stash native scraper' : ''}`}
+                style={buttonStyle}
               >
-                🌐 Scrape {scraper.siteName}
+                {icon} Scrape {scraper.siteName}{typeLabel}
                 {availableScrapers.filter(s => s.siteName === scraper.siteName).length > 1 && (
                   <span style={{ fontSize: '11px', opacity: 0.8, marginLeft: '4px' }}>
                     ({urlDisplay})

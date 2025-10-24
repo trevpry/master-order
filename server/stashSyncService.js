@@ -2606,6 +2606,359 @@ class StashSyncService {
       };
     }
   }
+
+  /**
+   * Update a tag in Stash
+   */
+  async updateTag(tagId, updates) {
+    console.log(`📝 [updateTag] Updating tag ${tagId} in Stash...`);
+
+    try {
+      const mutation = `
+        mutation TagUpdate($input: TagUpdateInput!) {
+          tagUpdate(input: $input) {
+            id
+            name
+            aliases
+          }
+        }
+      `;
+
+      const input = {
+        id: String(tagId)
+      };
+
+      if (updates.aliases !== undefined) {
+        input.aliases = updates.aliases;
+      }
+
+      const variables = { input };
+
+      console.log('   - Input:', JSON.stringify(input, null, 2));
+
+      const result = await this.makeGraphQLRequest(mutation, variables);
+
+      if (result?.tagUpdate) {
+        console.log(`✅ [updateTag] Tag ${tagId} updated in Stash successfully!`);
+        return {
+          success: true,
+          tag: result.tagUpdate
+        };
+      } else {
+        console.error('❌ [updateTag] Unexpected response from Stash:', result);
+        return {
+          success: false,
+          error: 'Unexpected response from Stash API'
+        };
+      }
+
+    } catch (error) {
+      console.error(`❌ Error updating tag ${tagId} in Stash:`, error);
+      return {
+        success: false,
+        error: error.message
+      };
+    }
+  }
+
+  /**
+   * Merge one tag into another in Stash
+   */
+  async tagMerge(sourceTagId, destinationTagId) {
+    console.log(`🔄 [tagMerge] Merging tag ${sourceTagId} into ${destinationTagId} in Stash...`);
+
+    try {
+      const mutation = `
+        mutation TagMerge($source: ID!, $destination: ID!) {
+          tagMerge(source: $source, destination: $destination) {
+            id
+            name
+            aliases
+          }
+        }
+      `;
+
+      const variables = {
+        source: String(sourceTagId),
+        destination: String(destinationTagId)
+      };
+
+      console.log('   - Variables:', JSON.stringify(variables, null, 2));
+
+      const result = await this.makeGraphQLRequest(mutation, variables);
+
+      if (result?.tagMerge) {
+        console.log(`✅ [tagMerge] Tag ${sourceTagId} merged into ${destinationTagId} successfully!`);
+        return {
+          success: true,
+          tag: result.tagMerge
+        };
+      } else {
+        console.error('❌ [tagMerge] Unexpected response from Stash:', result);
+        return {
+          success: false,
+          error: 'Unexpected response from Stash API'
+        };
+      }
+
+    } catch (error) {
+      console.error(`❌ Error merging tags in Stash:`, error);
+      return {
+        success: false,
+        error: error.message
+      };
+    }
+  }
+
+  /**
+   * List all available scrapers in Stash
+   * @returns {Promise<Array>} Array of scraper objects
+   */
+  async listScrapers() {
+    console.log('🔍 [listScrapers] Fetching available scrapers from Stash...');
+
+    const query = `
+      query ListScrapers($types: [ScrapeContentType!]!) {
+        listScrapers(types: $types) {
+          id
+          name
+          scene {
+            urls
+            supported_scrapes
+          }
+          performer {
+            urls
+            supported_scrapes
+          }
+          gallery {
+            urls
+            supported_scrapes
+          }
+          movie {
+            urls
+            supported_scrapes
+          }
+        }
+      }
+    `;
+
+    const variables = {
+      types: ['SCENE', 'PERFORMER', 'GALLERY', 'MOVIE']
+    };
+
+    try {
+      const result = await this.makeGraphQLRequest(query, variables);
+      
+      if (result?.listScrapers) {
+        console.log(`✅ [listScrapers] Found ${result.listScrapers.length} scrapers`);
+        return result.listScrapers;
+      }
+      
+      return [];
+    } catch (error) {
+      console.error('❌ [listScrapers] Error fetching scrapers:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Scrape a URL using Stash's native scrapers
+   * @param {string} url - URL to scrape
+   * @param {string} type - Type of content (Scene, Performer, Gallery, Movie)
+   * @returns {Promise<Object>} Scraped content
+   */
+  async scrapeURL(url, type = 'Scene') {
+    console.log(`🔍 [scrapeURL] Scraping ${type} from URL: ${url}`);
+
+    const query = `
+      query ScrapeURL($url: String!, $type: ScrapeContentType!) {
+        scrapeURL(url: $url, ty: $type) {
+          ... on ScrapedScene {
+            title
+            details
+            url
+            date
+            image
+            studio {
+              name
+              url
+            }
+            tags {
+              name
+            }
+            performers {
+              name
+              url
+            }
+            movies {
+              name
+              url
+            }
+            scene_duration: duration
+          }
+          ... on ScrapedPerformer {
+            name
+            url
+            gender
+            birthdate
+            ethnicity
+            country
+            eye_color
+            height
+            measurements
+            fake_tits
+            career_length
+            tattoos
+            piercings
+            aliases
+            twitter
+            instagram
+            images
+            details
+            death_date
+            hair_color
+            weight
+            tags {
+              name
+            }
+          }
+          ... on ScrapedGallery {
+            title
+            url
+            date
+            details
+            studio {
+              name
+              url
+            }
+            tags {
+              name
+            }
+            performers {
+              name
+              url
+            }
+          }
+          ... on ScrapedMovie {
+            name
+            url
+            date
+            movie_duration: duration
+            synopsis
+            studio {
+              name
+              url
+            }
+            front_image
+            back_image
+            director
+          }
+        }
+      }
+    `;
+
+    const variables = {
+      url,
+      type: type.toUpperCase()
+    };
+
+    try {
+      const result = await this.makeGraphQLRequest(query, variables);
+      
+      if (result?.scrapeURL) {
+        console.log(`✅ [scrapeURL] Successfully scraped ${type} from URL`);
+        return result.scrapeURL;
+      }
+      
+      return null;
+    } catch (error) {
+      console.error('❌ [scrapeURL] Error scraping URL:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Scrape a single scene using Stash scrapers
+   * @param {Object} input - Scrape input (query, scene_id, or scene_input)
+   * @param {Object} source - Scraper source (scraper_id or stash_box_endpoint)
+   * @returns {Promise<Array>} Array of scraped scenes
+   */
+  async scrapeSingleScene(input, source) {
+    console.log('🔍 [scrapeSingleScene] Scraping scene with input:', input);
+
+    const query = `
+      query ScrapeSingleScene($source: ScraperSourceInput!, $input: ScrapeSingleSceneInput!) {
+        scrapeSingleScene(source: $source, input: $input) {
+          title
+          details
+          url
+          urls
+          date
+          image
+          studio {
+            name
+            url
+          }
+          tags {
+            name
+          }
+          performers {
+            name
+            url
+          }
+          movies {
+            name
+            url
+          }
+          scene_duration: duration
+        }
+      }
+    `;
+
+    const variables = { source, input };
+
+    try {
+      const result = await this.makeGraphQLRequest(query, variables);
+      
+      if (result?.scrapeSingleScene) {
+        console.log(`✅ [scrapeSingleScene] Found ${result.scrapeSingleScene.length} results`);
+        return result.scrapeSingleScene;
+      }
+      
+      return [];
+    } catch (error) {
+      console.error('❌ [scrapeSingleScene] Error scraping scene:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Reload Stash scrapers configuration
+   * @returns {Promise<boolean>} Success status
+   */
+  async reloadScrapers() {
+    console.log('🔄 [reloadScrapers] Reloading Stash scrapers...');
+
+    const mutation = `
+      mutation ReloadScrapers {
+        reloadScrapers
+      }
+    `;
+
+    try {
+      const result = await this.makeGraphQLRequest(mutation);
+      
+      if (result?.reloadScrapers) {
+        console.log('✅ [reloadScrapers] Scrapers reloaded successfully');
+        return true;
+      }
+      
+      return false;
+    } catch (error) {
+      console.error('❌ [reloadScrapers] Error reloading scrapers:', error);
+      throw error;
+    }
+  }
 }
 
 module.exports = StashSyncService;

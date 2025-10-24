@@ -26,9 +26,33 @@ const ScraperRegistry = require('../services/scrapers/ScraperRegistry');
 
 // Create global scraper registry singleton (shared across all routes)
 let globalScraperRegistry = null;
-function getScraperRegistry() {
+async function getScraperRegistry() {
   if (!globalScraperRegistry) {
-    globalScraperRegistry = new ScraperRegistry();
+    console.log('🔧 Initializing Scraper Registry...');
+    
+    // Create a temporary StashSyncService instance for loading native scrapers
+    const tempStashSync = new StashSyncService();
+    
+    // Check if Stash is configured before trying to load native scrapers
+    const isConfigured = await tempStashSync.isConfigured();
+    
+    if (isConfigured) {
+      console.log('✅ Stash is configured - will load native scrapers');
+      globalScraperRegistry = new ScraperRegistry(tempStashSync);
+      
+      // Wait for async loading of Stash native scrapers
+      try {
+        await globalScraperRegistry.loadStashNativeScrapers();
+        console.log(`✅ Registry ready with ${globalScraperRegistry.scrapers.length} total scrapers`);
+      } catch (error) {
+        console.error('❌ Failed to load Stash native scrapers:', error);
+        console.log('   - Continuing with YAML/code scrapers only');
+      }
+    } else {
+      // Create registry without Stash native scrapers
+      globalScraperRegistry = new ScraperRegistry();
+      console.log('⚠️ Stash not configured - native scrapers will not be loaded');
+    }
   }
   return globalScraperRegistry;
 }
@@ -2985,7 +3009,7 @@ router.post('/gevi/movie', asyncHandler(async (req, res) => {
   let source = 'gevi';
 
   // Check if this URL can be handled by a YAML scraper
-  const registry = getScraperRegistry();
+  const registry = await getScraperRegistry();
   const scraper = registry.getScraperForUrl(url);
   
   if (scraper && scraper.scrapeMovie) {
@@ -5029,7 +5053,7 @@ router.get('/scenes/:id/available-scrapers', asyncHandler(async (req, res) => {
   console.log(`   - Found ${urls.length} URL(s) to check:`, urls);
   
   // Use global scraper registry
-  const registry = getScraperRegistry();
+  const registry = await getScraperRegistry();
   
   console.log(`   - Registry has ${registry.scrapers.length} scrapers loaded`);
   
@@ -5081,7 +5105,9 @@ router.get('/scenes/:id/available-scrapers', asyncHandler(async (req, res) => {
     scrapers: availableScrapers.map(s => ({
       name: s.name,
       siteName: s.scraper.siteName,
-      url: s.url
+      url: s.url,
+      type: s.scraper.constructor.name,
+      isStashNative: s.scraper.constructor.name === 'StashNativeScraperService'
     }))
   });
 }));
@@ -5091,7 +5117,7 @@ router.post('/scrapers/reload', asyncHandler(async (req, res) => {
   console.log('🔄 [Scraper Reload] Reloading YAML scrapers...');
   
   try {
-    const registry = getScraperRegistry();
+    const registry = await getScraperRegistry();
     const result = registry.reloadYamlScrapers();
     
     console.log('✅ [Scraper Reload] Successfully reloaded scrapers');
@@ -5114,21 +5140,58 @@ router.get('/scrapers', asyncHandler(async (req, res) => {
   console.log('📋 [Get Scrapers] Fetching available scrapers...');
   
   try {
-    const registry = getScraperRegistry();
+    const registry = await getScraperRegistry();
     const allScrapers = registry.getAllScrapers();
     
     const scrapers = allScrapers.map(scraper => ({
       name: scraper.siteName,
+      type: scraper.constructor.name, // YamlScraperService, StashNativeScraperService, etc.
       supportsSceneSearch: typeof scraper.searchScenes === 'function',
-      urlPatterns: scraper.sceneUrlPatterns || []
+      urlPatterns: scraper.sceneUrlPatterns || scraper.supportedUrls || [],
+      isStashNative: scraper.constructor.name === 'StashNativeScraperService'
     }));
     
     console.log(`✅ [Get Scrapers] Found ${scrapers.length} scraper(s)`);
+    console.log(`   - Stash Native: ${scrapers.filter(s => s.isStashNative).length}`);
+    console.log(`   - YAML/Custom: ${scrapers.filter(s => !s.isStashNative).length}`);
     
     sendSuccess(res, scrapers);
   } catch (error) {
     console.error('❌ [Get Scrapers] Failed to get scrapers:', error);
     return sendServerError(res, `Failed to get scrapers: ${error.message}`);
+  }
+}));
+
+// POST /api/stash/scrapers/reload - Reload all scrapers
+router.post('/scrapers/reload', asyncHandler(async (req, res) => {
+  console.log('🔄 [Reload Scrapers] Reloading all scrapers...');
+  
+  try {
+    // Reset the global registry to force reload
+    globalScraperRegistry = null;
+    
+    // Get fresh registry (will reload everything)
+    const registry = await getScraperRegistry();
+    const allScrapers = registry.getAllScrapers();
+    
+    const stashNativeCount = allScrapers.filter(s => s.constructor.name === 'StashNativeScraperService').length;
+    const yamlCount = allScrapers.filter(s => s.constructor.name === 'YamlScraperService').length;
+    const codeCount = allScrapers.length - stashNativeCount - yamlCount;
+    
+    console.log(`✅ [Reload Scrapers] Successfully reloaded ${allScrapers.length} scraper(s)`);
+    console.log(`   - Stash Native: ${stashNativeCount}`);
+    console.log(`   - YAML: ${yamlCount}`);
+    console.log(`   - Code-based: ${codeCount}`);
+    
+    sendSuccess(res, {
+      total: allScrapers.length,
+      stashNative: stashNativeCount,
+      yaml: yamlCount,
+      codeBased: codeCount
+    });
+  } catch (error) {
+    console.error('❌ [Reload Scrapers] Failed to reload scrapers:', error);
+    return sendServerError(res, `Failed to reload scrapers: ${error.message}`);
   }
 }));
 
@@ -5168,7 +5231,7 @@ router.post('/scenes/:id/scrape-generic', asyncHandler(async (req, res) => {
   console.log(`   - Scene has ${scenePerformers.length} performer(s):`, scenePerformers.map(p => p.name));
   
   // Use global scraper registry
-  const registry = getScraperRegistry();
+  const registry = await getScraperRegistry();
   
   // Get the appropriate scraper
   let scraper;
@@ -5324,7 +5387,7 @@ router.post('/scenes/:id/search-yaml', asyncHandler(async (req, res) => {
   console.log(`   - Scene has ${performers.length} performer(s):`, performers.map(p => p.name));
   
   // Get the scraper
-  const registry = getScraperRegistry();
+  const registry = await getScraperRegistry();
   const scraper = registry.getAllScrapers().find(s => s.siteName === scraperName);
   
   if (!scraper) {
@@ -5385,7 +5448,7 @@ router.post('/scenes/:id/search-yaml-title', asyncHandler(async (req, res) => {
   console.log(`   - Searching for title: "${scene.title}"`);
   
   // Get the scraper
-  const registry = getScraperRegistry();
+  const registry = await getScraperRegistry();
   const scraper = registry.getAllScrapers().find(s => s.siteName === scraperName);
   
   if (!scraper) {
@@ -8401,6 +8464,53 @@ router.put('/tags/:id/parent', asyncHandler(async (req, res) => {
   };
   
   return sendSuccess(res, response);
+}));
+
+// POST /api/stash/tags/merge - Merge multiple tags into one
+router.post('/tags/merge', asyncHandler(async (req, res) => {
+  const { mainTagId, mergeTagIds } = req.body;
+  
+  console.log('🔄 [Merge Tags] Request received');
+  console.log(`   - Main tag: ${mainTagId}`);
+  console.log(`   - Merge tags: ${mergeTagIds?.join(', ')}`);
+  
+  // Validate inputs
+  validateRequiredFieldsDirect({ mainTagId, mergeTagIds }, ['mainTagId', 'mergeTagIds']);
+  
+  if (!Array.isArray(mergeTagIds) || mergeTagIds.length === 0) {
+    return sendBadRequest(res, 'mergeTagIds must be a non-empty array');
+  }
+  
+  if (mergeTagIds.includes(mainTagId)) {
+    return sendBadRequest(res, 'Cannot merge a tag into itself');
+  }
+  
+  // Initialize sync service if needed
+  if (!stashSyncService && !stashSyncServiceOptimized) {
+    await initializeStashSyncService();
+  }
+  
+  const syncService = getActiveSyncService();
+  
+  // Create merge service instance with sync service
+  const TagMergeService = require('../services/tagMergeService');
+  const mergeService = new TagMergeService(prisma, syncService);
+  
+  // Perform the merge
+  const result = await mergeService.mergeTags(mainTagId, mergeTagIds);
+  
+  if (!result.success) {
+    return sendServerError(res, result.error || 'Failed to merge tags');
+  }
+  
+  sendSuccess(res, {
+    message: `Successfully merged ${result.mergedCount} tag(s) into ${result.mainTag.name}`,
+    mainTag: result.mainTag,
+    mergedCount: result.mergedCount,
+    transferredPerformerTags: result.transferredPerformerTags,
+    transferredSceneTags: result.transferredSceneTags,
+    transferredPivotTags: result.transferredPivotTags
+  });
 }));
 
 // GET /tags - Stash tags endpoint

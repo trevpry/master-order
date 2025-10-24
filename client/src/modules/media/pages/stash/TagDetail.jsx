@@ -17,6 +17,12 @@ export default function TagDetail() {
   const [selectedParentId, setSelectedParentId] = useState('');
   const [savingParent, setSavingParent] = useState(false);
   
+  // Merge state
+  const [showMergeModal, setShowMergeModal] = useState(false);
+  const [selectedTargetTagId, setSelectedTargetTagId] = useState('');
+  const [merging, setMerging] = useState(false);
+  const [mergeSearchQuery, setMergeSearchQuery] = useState('');
+  
   // Scenes tab state
   const [scenes, setScenes] = useState([]);
   const [scenesLoading, setScenesLoading] = useState(false);
@@ -143,12 +149,80 @@ export default function TagDetail() {
         throw new Error(result.error || 'Failed to update parent');
       }
     } catch (err) {
-      console.error('Error saving parent:', err);
-      alert(`Error: ${err.message}`);
+      console.error('Error updating parent:', err);
+      alert(`Error updating parent: ${err.message}`);
     } finally {
       setSavingParent(false);
     }
   };
+
+  const handleMergeIntoClick = () => {
+    setShowMergeModal(true);
+    loadAllTags();
+  };
+
+  const handleMergeCancel = () => {
+    setShowMergeModal(false);
+    setSelectedTargetTagId('');
+    setMergeSearchQuery('');
+  };
+
+  const handleMergeConfirm = async () => {
+    if (!selectedTargetTagId) {
+      alert('Please select a tag to merge into');
+      return;
+    }
+
+    const targetTag = allTags.find(t => t.id === selectedTargetTagId);
+    if (!targetTag) {
+      alert('Selected tag not found');
+      return;
+    }
+
+    const confirmMessage = `Are you sure you want to merge "${data.name}" into "${targetTag.name}"?\n\n` +
+      `This will:\n` +
+      `- Add "${data.name}" as an alias to "${targetTag.name}"\n` +
+      `- Transfer all performer tags, scene tags, and pivot tags\n` +
+      `- Delete "${data.name}"\n\n` +
+      `This action cannot be undone.`;
+
+    if (!window.confirm(confirmMessage)) {
+      return;
+    }
+
+    setMerging(true);
+    try {
+      const response = await fetch(`${config.apiBaseUrl}/api/stash/tags/merge`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          mainTagId: selectedTargetTagId,
+          mergeTagIds: [id]
+        })
+      });
+
+      const result = await response.json();
+
+      if (result.success) {
+        alert(`Successfully merged "${data.name}" into "${targetTag.name}"`);
+        // Redirect to the target tag page
+        window.location.href = `/media/stash/tags/${selectedTargetTagId}`;
+      } else {
+        throw new Error(result.error || 'Failed to merge tags');
+      }
+    } catch (err) {
+      console.error('Error merging tags:', err);
+      alert(`Error merging tags: ${err.message}`);
+    } finally {
+      setMerging(false);
+    }
+  };
+
+  const filteredMergeTags = allTags.filter(tag => 
+    tag.name.toLowerCase().includes(mergeSearchQuery.toLowerCase())
+  );
 
   if (loading) return <div className="page pad">Loading tag...</div>;
   if (error) return <div className="page pad">Error: {error}</div>;
@@ -470,9 +544,87 @@ export default function TagDetail() {
                 )}
               </div>
             </div>
+
+            {/* Merge Tag Section */}
+            <div className="section">
+              <h3>Merge Tag</h3>
+              <p className="muted">Merge this tag into another tag. This will transfer all relationships and delete this tag.</p>
+              <Button onClick={handleMergeIntoClick} variant="danger" size="medium">
+                🔀 Merge Into Another Tag
+              </Button>
+            </div>
           </div>
         )}
       </div>
+
+      {/* Merge Modal */}
+      {showMergeModal && (
+        <div className="modal-overlay" onClick={handleMergeCancel}>
+          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h2>Merge "{data.name}" Into Another Tag</h2>
+              <button className="modal-close" onClick={handleMergeCancel}>×</button>
+            </div>
+
+            <div className="modal-body">
+              <p className="modal-description">
+                Select a target tag to merge "{data.name}" into. This will:
+              </p>
+              <ul className="modal-description">
+                <li>Add "{data.name}" as an alias to the target tag</li>
+                <li>Transfer all performer tags to the target tag</li>
+                <li>Transfer all scene tags to the target tag</li>
+                <li>Transfer all performer/scene pivot tags to the target tag</li>
+                <li>Delete "{data.name}" permanently</li>
+              </ul>
+              <p className="modal-warning">⚠️ This action cannot be undone!</p>
+
+              <div className="form-group">
+                <label htmlFor="merge-search">Search for target tag:</label>
+                <input
+                  id="merge-search"
+                  type="text"
+                  value={mergeSearchQuery}
+                  onChange={(e) => setMergeSearchQuery(e.target.value)}
+                  placeholder="Type to search tags..."
+                  className="form-control"
+                />
+              </div>
+
+              <div className="form-group">
+                <label htmlFor="target-tag">Select target tag:</label>
+                <select
+                  id="target-tag"
+                  value={selectedTargetTagId}
+                  onChange={(e) => setSelectedTargetTagId(e.target.value)}
+                  className="form-control"
+                  size="10"
+                >
+                  <option value="">-- Select a tag --</option>
+                  {filteredMergeTags.map(tag => (
+                    <option key={tag.id} value={tag.id}>
+                      {tag.name} ({tag.scene_count || 0} scenes)
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            <div className="modal-footer">
+              <Button onClick={handleMergeCancel} variant="secondary" disabled={merging}>
+                Cancel
+              </Button>
+              <Button 
+                onClick={handleMergeConfirm} 
+                variant="danger" 
+                disabled={!selectedTargetTagId || merging}
+              >
+                {merging ? '🔀 Merging...' : '🔀 Merge Tag'}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
