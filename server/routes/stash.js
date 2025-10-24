@@ -2970,25 +2970,50 @@ router.post('/scenes/:id/scrape-gevi', asyncHandler(async (req, res) => {
   });
 }));
 
-// POST /api/stash/gevi/movie - Fetch full movie details from GEVI URL
+// POST /api/stash/gevi/movie - Fetch full movie details from URL (GEVI or YAML scraper)
 router.post('/gevi/movie', asyncHandler(async (req, res) => {
   const { url, groupId } = req.body;
 
-  console.log('🎬 [GEVI Movie] Fetching movie details from:', url);
+  console.log('🎬 [Movie] Fetching movie details from:', url);
 
   // Validate URL provided
   if (!url || !url.trim()) {
     return sendBadRequest(res, 'URL is required');
   }
 
-  // Fetch movie details
-  const movie = await geviScraper.movieFromUrl(url);
+  let movie = null;
+  let source = 'gevi';
 
-  if (!movie) {
-    return sendServerError(res, 'Failed to fetch movie details from GEVI');
+  // Check if this URL can be handled by a YAML scraper
+  const registry = getScraperRegistry();
+  const scraper = registry.getScraperForUrl(url);
+  
+  if (scraper && scraper.scrapeMovie) {
+    console.log(`   - Using YAML scraper: ${scraper.siteName}`);
+    source = 'yaml';
+    
+    const result = await scraper.scrapeMovie(url);
+    if (result.success) {
+      movie = result.movie;
+      console.log('   - Movie details fetched from YAML scraper:', movie.name);
+    } else {
+      return sendServerError(res, `Failed to fetch movie details: ${result.error}`);
+    }
+  } else {
+    // Fall back to GEVI scraper
+    console.log('   - Using GEVI scraper');
+    movie = await geviScraper.movieFromUrl(url);
+    
+    if (!movie) {
+      return sendServerError(res, 'Failed to fetch movie details from GEVI');
+    }
+    
+    console.log('   - Movie details fetched from GEVI:', movie.name);
   }
 
-  console.log('   - Movie details fetched:', movie.name);
+  if (!movie) {
+    return sendServerError(res, 'Failed to fetch movie details');
+  }
 
   // If groupId is provided, try to match scenes
   let matchedScenes = [];

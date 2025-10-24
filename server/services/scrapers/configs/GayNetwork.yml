@@ -135,12 +135,7 @@ xPathScrapers:
                 - regex: DVD:\s*
                   with:
         URL:
-          selector: //div[@class="row mb-4 px-0"]//a[h3[i[contains(@class, "fa-scrubber")]]]/@href | //link[//div[@class="row mb-4 px-0"]//a[h3[i[contains(@class, "fa-scrubber")]]]/@href and @rel="alternate" and @hreflang="en"]/@href
-          concat: __SEPARATOR__
-          postProcess:
-            - replace:
-                - regex: (.*)__SEPARATOR__(https:\/\/[^\/]*)\/.*
-                  with: $2$1
+          selector: //a[@class="btn btn-sm btn-link mr-1 p-0"]/@href
         FrontImage:
           selector: //div[@class="row mb-4 px-0"]//a[h3[i[contains(@class, "fa-scrubber")]]]/@href | //link[//div[@class="row mb-4 px-0"]//a[h3[i[contains(@class, "fa-scrubber")]]]/@href and @rel="alternate" and @hreflang="en"]/@href
           concat: __SEPARATOR__
@@ -154,6 +149,12 @@ xPathScrapers:
         URL: //div[@class="mt-4"]//a[contains(@class, "h100")]/@href
       Tags:
         Name: //h3[@class="h120"]
+  movieScraper:
+    movie:
+      Title: 
+        selector: //h1[@class="h4 text-dark"]/text()     
+      Image: 
+        selector: //div[@class="embed-responsive embed-responsive-2by3 mb-2"]/img/@src
   performerScraper:
     performer:
       Name: 

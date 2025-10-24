@@ -32,8 +32,19 @@ class YamlScraperService extends BaseScraperService {
       });
     }
     
+    // Extract URL patterns from movieByURL configuration
+    this.movieUrlPatterns = [];
+    if (this.config.movieByURL) {
+      this.config.movieByURL.forEach(scraper => {
+        if (scraper.url) {
+          this.movieUrlPatterns.push(...scraper.url);
+        }
+      });
+    }
+    
     console.log(`📋 Loaded YAML scraper: ${this.siteName}`);
     console.log(`   - Scene URL patterns: ${this.sceneUrlPatterns.length}`);
+    console.log(`   - Movie URL patterns: ${this.movieUrlPatterns.length}`);
   }
 
   /**
@@ -43,12 +54,23 @@ class YamlScraperService extends BaseScraperService {
     if (!url) return false;
     
     // Check if URL matches any of the scene URL patterns
-    return this.sceneUrlPatterns.some(pattern => {
+    const matchesScene = this.sceneUrlPatterns.some(pattern => {
       // Remove protocol and www for comparison
       const normalizedUrl = url.toLowerCase().replace(/^https?:\/\/(www\.)?/, '');
       const normalizedPattern = pattern.toLowerCase().replace(/^https?:\/\/(www\.)?/, '');
       return normalizedUrl.includes(normalizedPattern);
     });
+    
+    if (matchesScene) return true;
+    
+    // Check if URL matches any of the movie URL patterns
+    const matchesMovie = this.movieUrlPatterns.some(pattern => {
+      const normalizedUrl = url.toLowerCase().replace(/^https?:\/\/(www\.)?/, '');
+      const normalizedPattern = pattern.toLowerCase().replace(/^https?:\/\/(www\.)?/, '');
+      return normalizedUrl.includes(normalizedPattern);
+    });
+    
+    return matchesMovie;
   }
 
   /**
@@ -1184,6 +1206,138 @@ class YamlScraperService extends BaseScraperService {
     } catch (error) {
       console.warn(`   ⚠️ Error extracting value at index ${index}:`, error.message);
       return null;
+    }
+  }
+
+  /**
+   * Scrape movie details from a movie URL
+   * @param {string} url - Movie URL to scrape
+   * @returns {Object} Movie metadata
+   */
+  async scrapeMovie(url) {
+    console.log(`🎬 [${this.siteName}] Scraping movie: ${url}`);
+
+    try {
+      // Check if URL matches movieByURL patterns
+      const movieScraper = this.config.movieByURL?.find(scraper => {
+        return scraper.url.some(pattern => {
+          const normalizedUrl = url.toLowerCase().replace(/^https?:\/\/(www\.)?/, '');
+          const normalizedPattern = pattern.toLowerCase().replace(/^https?:\/\/(www\.)?/, '');
+          return normalizedUrl.includes(normalizedPattern);
+        });
+      });
+
+      if (!movieScraper) {
+        throw new Error(`No movie scraper configuration found for URL: ${url}`);
+      }
+
+      const $ = await this.fetchHtml(url);
+
+      const scraperName = movieScraper.scraper;
+      const scraperConfig = this.config.xPathScrapers[scraperName];
+      
+      if (!scraperConfig || !scraperConfig.movie) {
+        throw new Error(`Movie scraper configuration not found: ${scraperName}`);
+      }
+
+      const movieConfig = scraperConfig.movie;
+      const metadata = {
+        url: url,
+        name: null,
+        synopsis: null,
+        studio: null,
+        date: null,
+        frontImage: null,
+        backImage: null,
+        director: null,
+        duration: null,
+        rating: null
+      };
+
+      // Extract Name/Title
+      if (movieConfig.Title) {
+        metadata.name = this.extractValue($, movieConfig.Title);
+        if (metadata.name) {
+          console.log(`   - Title: ${metadata.name}`);
+        }
+      }
+
+      // Extract Synopsis
+      if (movieConfig.Synopsis) {
+        metadata.synopsis = this.extractValue($, movieConfig.Synopsis);
+        if (metadata.synopsis) {
+          console.log(`   - Synopsis: ${metadata.synopsis.substring(0, 100)}...`);
+        }
+      }
+
+      // Extract Date
+      if (movieConfig.Date) {
+        metadata.date = this.extractValue($, movieConfig.Date);
+        if (metadata.date) {
+          console.log(`   - Date: ${metadata.date}`);
+        }
+      }
+
+      // Extract Front Image
+      if (movieConfig.Image || movieConfig.FrontImage) {
+        metadata.frontImage = this.extractValue($, movieConfig.Image || movieConfig.FrontImage);
+        if (metadata.frontImage) {
+          console.log(`   - Front Image: ${metadata.frontImage}`);
+        }
+      }
+
+      // Extract Back Image
+      if (movieConfig.BackImage) {
+        metadata.backImage = this.extractValue($, movieConfig.BackImage);
+        if (metadata.backImage) {
+          console.log(`   - Back Image: ${metadata.backImage}`);
+        }
+      }
+
+      // Extract Studio
+      if (movieConfig.Studio && movieConfig.Studio.Name) {
+        metadata.studio = this.extractValue($, movieConfig.Studio.Name);
+        if (metadata.studio) {
+          console.log(`   - Studio: ${metadata.studio}`);
+        }
+      }
+
+      // Extract Director
+      if (movieConfig.Director) {
+        metadata.director = this.extractValue($, movieConfig.Director);
+        if (metadata.director) {
+          console.log(`   - Director: ${metadata.director}`);
+        }
+      }
+
+      // Extract Duration
+      if (movieConfig.Duration) {
+        metadata.duration = this.extractValue($, movieConfig.Duration);
+        if (metadata.duration) {
+          console.log(`   - Duration: ${metadata.duration}`);
+        }
+      }
+
+      // Extract Rating
+      if (movieConfig.Rating) {
+        metadata.rating = this.extractValue($, movieConfig.Rating);
+        if (metadata.rating) {
+          console.log(`   - Rating: ${metadata.rating}`);
+        }
+      }
+
+      console.log(`✅ [${this.siteName}] Successfully scraped movie`);
+      return {
+        success: true,
+        movie: metadata
+      };
+
+    } catch (error) {
+      console.error(`❌ [${this.siteName}] Error scraping movie:`, error);
+      return {
+        success: false,
+        error: error.message
+      };
     }
   }
 }
