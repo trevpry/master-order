@@ -1179,9 +1179,32 @@ class YamlScraperService extends BaseScraperService {
       const titleSlug = title.toLowerCase().replace(/\s+/g, spacesConvertTo);
       searchUrl = searchUrl.replace('{title}', titleSlug);
       console.log(`   🔍 Using title-based URL: ${searchUrl}`);
+    }
+
+    // Check if titleSearchScraper is actually a direct scene scraper (not a search results scraper)
+    // This is indicated by the scraper being the same as the main scene scraper, which means
+    // the URL goes directly to a scene page, not a search results page
+    const isDirectSceneScraper = scraperName === this.config.sceneByURL?.[0]?.scraper;
+    
+    if (isDirectSceneScraper) {
+      console.log(`   🔍 Direct scene URL detected - scraping single scene`);
       
-      // Don't treat this as a direct scene URL - continue to the search results extraction below
-      // The URL may be a search results page with multiple scenes, not a single scene page
+      try {
+        // Scrape the page as a single scene using the main scrape method
+        const sceneData = await this.scrape(searchUrl);
+        
+        // Return as search result format
+        return [{
+          url: sceneData.url || searchUrl,
+          title: sceneData.title,
+          date: sceneData.date,
+          studio: { name: this.siteName },
+          image: sceneData.coverImage
+        }];
+      } catch (error) {
+        console.error(`❌ [${this.siteName}] Error scraping direct scene URL:`, error);
+        throw new Error(`Failed to scrape ${this.siteName} scene: ${error.message}`);
+      }
     }
 
     // Original behavior: fetch page and filter by title
