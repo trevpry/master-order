@@ -112,7 +112,22 @@ export default function TagDetail() {
                   <strong>Aliases:</strong> {data.aliases.join(', ')}
                 </div>
               )}
-              {data.parent && (
+              {data.parents && data.parents.length > 0 && (
+                <div className="meta-item">
+                  <strong>Parent Tags:</strong> 
+                  <div className="tag-chips-inline">
+                    {data.parents.map((parent, idx) => (
+                      <React.Fragment key={parent.id}>
+                        {idx > 0 && <span>, </span>}
+                        <Link to={`/media/stash/tags/${parent.id}`} className="tag-link">
+                          {parent.name}
+                        </Link>
+                      </React.Fragment>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {data.parent && !data.parents && (
                 <div className="meta-item">
                   <strong>Parent:</strong> 
                   <Link to={`/media/stash/tags/${data.parent.id}`} className="tag-link">
@@ -243,9 +258,36 @@ export default function TagDetail() {
           <div className="info-section">
             <h2>Tag Information</h2>
             
+            {/* Parent Tags Section */}
+            {((data.parents && data.parents.length > 0) || data.parent) && (
+              <div className="section">
+                <h3>Parent Tags</h3>
+                <div className="tag-chips">
+                  {data.parents && data.parents.map(parent => (
+                    <Link 
+                      key={parent.id} 
+                      to={`/media/stash/tags/${parent.id}`}
+                      className="chip tag-chip"
+                    >
+                      {parent.name}
+                    </Link>
+                  ))}
+                  {!data.parents && data.parent && (
+                    <Link 
+                      to={`/media/stash/tags/${data.parent.id}`}
+                      className="chip tag-chip"
+                    >
+                      {data.parent.name}
+                    </Link>
+                  )}
+                </div>
+              </div>
+            )}
+            
+            {/* Child Tags Section */}
             {data.children && data.children.length > 0 && (
               <div className="section">
-                <h3>Child Tags</h3>
+                <h3>Child Tags ({data.children.length})</h3>
                 <div className="tag-chips">
                   {data.children.map(child => (
                     <Link 
@@ -254,6 +296,9 @@ export default function TagDetail() {
                       className="chip tag-chip"
                     >
                       {child.name}
+                      {child.scene_count > 0 && (
+                        <span className="chip-count"> ({child.scene_count})</span>
+                      )}
                     </Link>
                   ))}
                 </div>
@@ -272,6 +317,11 @@ export default function TagDetail() {
                 <div className="detail-item">
                   <strong>Performer Count:</strong> {data.performer_count || 0}
                 </div>
+                {data.child_count > 0 && (
+                  <div className="detail-item">
+                    <strong>Child Tags:</strong> {data.child_count}
+                  </div>
+                )}
                 {data.created_at && (
                   <div className="detail-item">
                     <strong>Created:</strong> {new Date(data.created_at).toLocaleDateString()}

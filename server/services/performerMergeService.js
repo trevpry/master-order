@@ -119,8 +119,8 @@ class PerformerMergeService {
     const aliasSet = new Set();
 
     // Add main performer's existing aliases
-    if (mainPerformer.aliases) {
-      const existingAliases = mainPerformer.aliases.split(',').map(a => a.trim());
+    if (mainPerformer.alias) {
+      const existingAliases = mainPerformer.alias.split(',').map(a => a.trim());
       existingAliases.forEach(alias => aliasSet.add(alias));
     }
 
@@ -130,8 +130,8 @@ class PerformerMergeService {
       aliasSet.add(performer.name);
 
       // Add their existing aliases
-      if (performer.aliases) {
-        const performerAliases = performer.aliases.split(',').map(a => a.trim());
+      if (performer.alias) {
+        const performerAliases = performer.alias.split(',').map(a => a.trim());
         performerAliases.forEach(alias => aliasSet.add(alias));
       }
     }

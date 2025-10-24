@@ -2741,10 +2741,14 @@
 
 /* Hierarchical Tags Grid */
 .tags-grid-hierarchical {
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
   gap: 1rem;
   padding: 1rem 0;
+}
+
+.tag-card-wrapper {
+  display: contents;
 }
 
 .tag-children-container {
@@ -2754,6 +2758,7 @@
   margin-top: 0.5rem;
   padding-left: 0.5rem;
   border-left: 3px solid #e5e7eb;
+  width: 100%;
 }
 
 /* Enhanced Tag Card */
@@ -3075,6 +3080,7 @@
   }
   
   .tags-grid-hierarchical {
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
     gap: 0.875rem;
   }
   
@@ -3090,6 +3096,7 @@
   }
   
   .tags-grid-hierarchical {
+    grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
     gap: 0.75rem;
   }
   
@@ -3117,6 +3124,10 @@
 
 @media (max-width: 480px) {
   .tags-grid-enhanced {
+    grid-template-columns: 1fr;
+  }
+  
+  .tags-grid-hierarchical {
     grid-template-columns: 1fr;
   }
   
@@ -3917,6 +3928,13 @@
   gap: 0.5rem;
 }
 
+.tag-chips-inline {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 0.5rem;
+  align-items: center;
+}
+
 .tag-chip {
   padding: 0.5rem 1rem;
   background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
@@ -3925,11 +3943,19 @@
   text-decoration: none;
   font-weight: 500;
   transition: all 0.2s ease;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
 }
 
 .tag-chip:hover {
   transform: translateY(-2px);
   box-shadow: 0 4px 12px rgba(37, 99, 235, 0.3);
+}
+
+.chip-count {
+  opacity: 0.8;
+  font-size: 0.875rem;
 }
 
 .detail-grid {

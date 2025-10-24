@@ -1059,59 +1059,8 @@ class YamlScraperService extends BaseScraperService {
       searchUrl = searchUrl.replace('{title}', titleSlug);
       console.log(`   🔍 Using title-based URL: ${searchUrl}`);
       
-      // For direct scene URL, we scrape that specific page instead of filtering
-      try {
-        const $ = await this.fetchHtml(searchUrl);
-        const sceneConfig = scraperConfig.scene;
-
-        const scene = {
-          title: null,
-          url: searchUrl,
-          coverImage: null,
-          date: null,
-          studio: this.siteName
-        };
-
-        // Extract title
-        if (sceneConfig.Title) {
-          scene.title = this.extractValue($, sceneConfig.Title);
-        }
-
-        // Extract URL (canonical if available)
-        if (sceneConfig.URL) {
-          const canonicalUrl = this.extractValue($, sceneConfig.URL);
-          if (canonicalUrl) {
-            scene.url = canonicalUrl;
-          }
-        }
-
-        // Extract cover image
-        if (sceneConfig.Image) {
-          scene.coverImage = this.extractValue($, sceneConfig.Image);
-        }
-
-        // Extract date
-        if (sceneConfig.Date) {
-          scene.date = this.extractValue($, sceneConfig.Date);
-        }
-
-        if (scene.title) {
-          console.log(`   ✅ Found scene: "${scene.title}"`);
-          return [{
-            url: scene.url,
-            title: scene.title,
-            date: scene.date,
-            studio: { name: this.siteName },
-            image: scene.coverImage
-          }];
-        } else {
-          console.log(`   ⚠️ No title found at URL, may be 404 or wrong format`);
-          return [];
-        }
-      } catch (error) {
-        console.error(`❌ [${this.siteName}] Error fetching scene at direct URL:`, error);
-        return []; // Return empty array if direct URL fails (likely 404)
-      }
+      // Don't treat this as a direct scene URL - continue to the search results extraction below
+      // The URL may be a search results page with multiple scenes, not a single scene page
     }
 
     // Original behavior: fetch page and filter by title

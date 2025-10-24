@@ -104,10 +104,10 @@ export default function TagsPage() {
     const hasChildren = tag.children && tag.children.length > 0;
     
     return (
-      <React.Fragment key={tag.id}>
+      <div key={tag.id} className="tag-card-wrapper">
         <div 
           className={`content-card tag-card-enhanced ${tag.favorite ? 'favorite-tag' : ''}`}
-          style={{ marginLeft: `${level * 1.5}rem` }}
+          style={{ marginLeft: level > 0 ? `${level * 1.5}rem` : '0' }}
         >
           {/* Tag Image/Icon */}
           <div className="tag-visual">
@@ -191,13 +191,15 @@ export default function TagsPage() {
           </div>
         </div>
 
-        {/* Render Children */}
+        {/* Render Children - full width for child tags */}
         {hasChildren && isExpanded && (
-          <div className="tag-children-container">
-            {tag.children.map(child => renderTagCard(child, level + 1, isExpanded))}
+          <div className="tag-children-container" style={{ gridColumn: '1 / -1' }}>
+            <div className="tags-grid-hierarchical">
+              {tag.children.map(child => renderTagCard(child, level + 1, isExpanded))}
+            </div>
           </div>
         )}
-      </React.Fragment>
+      </div>
     );
   };
 

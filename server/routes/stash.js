@@ -5440,6 +5440,8 @@ router.put('/scenes/:id', asyncHandler(async (req, res) => {
   
   console.log('🎬 [PUT /scenes/:id] Scene update request received');
   console.log('   - Scene ID:', id);
+  console.log('   - Studio:', studio);
+  console.log('   - Studio ID:', studioId);
   console.log('   - Performer IDs:', performerIds);
   console.log('   - Tag IDs:', tagIds);
   console.log('   - Group IDs:', groupIds);
@@ -5454,7 +5456,36 @@ router.put('/scenes/:id', asyncHandler(async (req, res) => {
   const updateData = {};
   if (title !== undefined) updateData.title = title;
   if (studio !== undefined) updateData.studio = studio;
-  if (studioId !== undefined) updateData.studioId = studioId;
+  
+  // Handle studio: if studio name provided but no studioId, look up or create studio
+  let resolvedStudioId = studioId;
+  if (studio && !studioId) {
+    console.log(`🏢 [Studio] Studio name provided without ID: "${studio}"`);
+    
+    const syncService = getActiveSyncService();
+    if (syncService) {
+      try {
+        const studioName = typeof studio === 'string' ? studio : studio.name;
+        console.log(`   - Looking up or creating studio: "${studioName}"`);
+        resolvedStudioId = await getOrCreateStudio(studioName, syncService);
+        
+        if (resolvedStudioId) {
+          console.log(`   - ✅ Studio resolved to ID: ${resolvedStudioId}`);
+          updateData.studioId = resolvedStudioId;
+        } else {
+          console.warn(`   - ⚠️ Failed to resolve studio, continuing without studio link`);
+        }
+      } catch (error) {
+        console.error(`   - ❌ Error getting/creating studio:`, error.message);
+        // Continue without studio rather than failing the whole update
+      }
+    } else {
+      console.warn(`   - ⚠️ Stash sync service not available, cannot create studio`);
+    }
+  } else if (resolvedStudioId) {
+    updateData.studioId = resolvedStudioId;
+  }
+  
   if (details !== undefined) updateData.details = details;
   if (date !== undefined) updateData.date = date;
   if (url !== undefined) updateData.url = url;
@@ -5636,7 +5667,7 @@ router.put('/scenes/:id', asyncHandler(async (req, res) => {
   console.log('   - stashSyncService exists:', !!stashSyncService);
   console.log('   - Request body received:', {
     title: title !== undefined ? 'provided' : 'not provided',
-    studioId: studioId !== undefined ? studioId : 'not provided',
+    studioId: resolvedStudioId !== undefined ? resolvedStudioId : 'not provided',
     performerIds: performerIds !== undefined ? `${performerIds.length} performers` : 'not provided',
     tagIds: tagIds !== undefined ? `${tagIds.length} tags` : 'not provided',
     groupIds: groupIds !== undefined ? `${groupIds.length} groups` : 'not provided',
@@ -5656,7 +5687,7 @@ router.put('/scenes/:id', asyncHandler(async (req, res) => {
       console.log('📡 [STASH UPDATE] Preparing to update scene in Stash...');
       console.log('   - Scene ID:', id);
       console.log('   - Title:', title);
-      console.log('   - Studio ID:', studioId);
+      console.log('   - Studio ID (resolved):', resolvedStudioId);
       console.log('   - Performer IDs:', performerIds);
       console.log('   - Performer IDs type:', typeof performerIds, Array.isArray(performerIds));
       console.log('   - Details:', details ? `${details.substring(0, 50)}...` : 'none');
@@ -5666,7 +5697,7 @@ router.put('/scenes/:id', asyncHandler(async (req, res) => {
       
       const stashUpdates = {};
       if (title !== undefined) stashUpdates.title = title;
-      if (studioId !== undefined) stashUpdates.studioId = studioId;
+      if (resolvedStudioId !== undefined) stashUpdates.studioId = resolvedStudioId;
       if (performerIds !== undefined && Array.isArray(performerIds)) {
         console.log('✅ [STASH UPDATE] Performer IDs validation starting...');
         console.log('   - Input performer IDs:', performerIds);
@@ -8144,7 +8175,12 @@ router.get('/tags/:id', asyncHandler(async (req, res) => {
               id: true,
               name: true,
               description: true,
-              image: true
+              image: true,
+              _count: {
+                select: {
+                  scenes: true
+                }
+              }
             }
           }
         }
@@ -8165,8 +8201,16 @@ router.get('/tags/:id', asyncHandler(async (req, res) => {
     favorite: tag.favorite,
     scene_count: tag.scenes.length,
     performer_count: tag.performers.length,
-    parent: tag.parentTags.length > 0 ? tag.parentTags[0].parentTag : null,
-    children: tag.childTags.map(ct => ct.childTag),
+    child_count: tag.childTags.length,
+    parents: tag.parentTags.map(pt => pt.parentTag),
+    parent: tag.parentTags.length > 0 ? tag.parentTags[0].parentTag : null, // Keep for backward compatibility
+    children: tag.childTags.map(ct => ({
+      id: ct.childTag.id,
+      name: ct.childTag.name,
+      description: ct.childTag.description,
+      image: ct.childTag.image,
+      scene_count: ct.childTag._count?.scenes || 0
+    })),
     scenes: tag.scenes.map(ts => ts.scene),
     performers: tag.performers.map(tp => tp.performer),
     created_at: tag.created_at,

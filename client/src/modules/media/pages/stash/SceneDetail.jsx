@@ -2632,22 +2632,38 @@ export default function SceneDetail() {
                 padding: '15px', 
                 backgroundColor: '#f5f5f5', 
                 borderRadius: '8px',
-                maxHeight: '400px',
-                overflowY: 'auto'
+                maxHeight: '600px',
+                overflowY: 'auto',
+                border: '2px solid #3b82f6'
               }}>
-                <h4 style={{ marginBottom: '10px', fontSize: '14px', color: '#666' }}>
-                  Found {searchResults.scenes.length} {searchResults.isSceneSearch ? 
-                    (searchResults.scenes.length === 1 ? 'scene' : 'scenes') : 
-                    (searchResults.scenes.length === 1 ? 'movie' : 'movies')}
-                  {searchResults.allPerformers ? ` (searched for: ${searchResults.allPerformers.join(', ')})` : 
-                   searchResults.searchedPerformers ? 
-                     ` (searched for: ${searchResults.searchedPerformers.join(', ')})` :
-                   searchResults.searchedTitle ?
-                     ` (searched for title: "${searchResults.searchedTitle}")` :
-                   searchResults.firstPerformer ?
-                     ` with ${searchResults.firstPerformer.name} and ${searchResults.secondPerformer}` :
-                     ''}:
-                </h4>
+                <div style={{ 
+                  position: 'sticky', 
+                  top: 0, 
+                  backgroundColor: '#f5f5f5', 
+                  paddingBottom: '10px',
+                  marginBottom: '10px',
+                  borderBottom: '2px solid #e5e7eb',
+                  zIndex: 1
+                }}>
+                  <h4 style={{ marginBottom: '5px', fontSize: '16px', color: '#1f2937', fontWeight: '600' }}>
+                    Found {searchResults.scenes.length} {searchResults.isSceneSearch ? 
+                      (searchResults.scenes.length === 1 ? 'scene' : 'scenes') : 
+                      (searchResults.scenes.length === 1 ? 'movie' : 'movies')}
+                    {searchResults.allPerformers ? ` (searched for: ${searchResults.allPerformers.join(', ')})` : 
+                     searchResults.searchedPerformers ? 
+                       ` (searched for: ${searchResults.searchedPerformers.join(', ')})` :
+                     searchResults.searchedTitle ?
+                       ` (searched for title: "${searchResults.searchedTitle}")` :
+                     searchResults.firstPerformer ?
+                       ` with ${searchResults.firstPerformer.name} and ${searchResults.secondPerformer}` :
+                       ''}
+                  </h4>
+                  {searchResults.scenes.length > 3 && (
+                    <p style={{ fontSize: '12px', color: '#6b7280', margin: '5px 0 0 0' }}>
+                      💡 Scroll down to see all {searchResults.scenes.length} results
+                    </p>
+                  )}
+                </div>
                 {searchResults.scenes.map((scene, idx) => (
                   <div 
                     key={idx} 
