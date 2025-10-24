@@ -1,0 +1,96 @@
+name: LetThemWatch
+sceneByFragment:
+  - action: scrapeXPath
+    scraper: sceneScraper
+    performerSearchScraper: sceneSearchScraper
+    titleSearchScraper: sceneSearchScraper
+    # Search for scenes by performers
+    # {performer} will be replaced with performer name (spaces converted to underscores, lowercased)
+    performerSearchUrl: https://hungpapi.com/search.php?query={performer}
+    # Search for scenes by title - direct scene URL
+    # {title} will be replaced with scene title (spaces converted to plus signs, lowercased)
+    studioSearchUrl: https://hungpapi.com/search.php?query={title}
+    spacesConvertTo: +
+sceneByURL:
+  - action: scrapeXPath
+    url:
+      - letthemwatch.com
+      - cumdumpvan.com
+      - hungpapi.com
+      - uncutking.com
+      - uncutlatinos.com
+      - uncuttwinks.com
+    scraper: sceneScraper
+xPathScrapers:
+  sceneScraper:
+    scene:
+      Title: //div[@class="memberPicVid"]/h3/text()
+      Date:
+        selector: //div[@class="date"]
+        postProcess:
+          - parseDate: January 2, 2006
+      Details: //div[@class="memberContent"]/p/text()
+      Image:
+        selector: //img[contains(@class,"mejs__poster-img")]/@src
+#        postProcess:
+#          - replace:
+#            - regex: ^
+#              with: "https://www.hungpapi.com"
+      Studio:
+        Name: 
+          selector: //meta[@name="author"]/@content
+          postProcess:
+            - replace:
+                - regex: \.com$
+                  with: ''
+      Code:
+        selector: //link[@rel='canonical']/@href
+        postProcess:
+          - replace:
+              - regex: .+/(\d+).+$
+                with: $1
+      Tags:
+        Name: //div[@class="memberL"]/p[1]/a
+      Performers:
+        Name: //p[contains(.,'Guys')]/a
+        URL: //p[contains(.,'Guys')]/a/@href
+  sceneSearchScraper:
+    # Search for scenes on a performer's page
+    scene:
+      Title: //div[@class="videoBox"]/h3/a/text()
+      URL:
+        selector: //div[@class="videoBox"]/h3/a/@href
+      Image:
+        selector: //div[@class="videoBox"]/a/img/@src
+    pagination:
+      # Check for "no results" error message to stop pagination
+      noResultsSelector: //div[@class="errorMsg"]/h3/text()
+      # Maximum number of pages to scrape (safety limit)
+      maxPages: 10
+  performerSearchScraper:
+    # Search for performers - returns list of matching performers with URLs
+    performer:
+      Name: //div[@class="b-0 l-0 r-0 h6 m-2 pb-1 text-truncate text-center text-dark"]/text()
+      URL:
+        selector: //a[@class="col-xxl-2 col-xl-3 col-md-3 col-sm-4 col-6 mb-3 "]/@href
+        postProcess:
+          - replace:
+              - regex: ^
+                with: https://www.hotcast.fr
+      Image:
+        selector: //div[@class="embed-responsive embed-responsive-16by9 rounded"]/img/@src    
+      performerSceneScraper: performerSceneScraper
+  performerSceneScraper:
+    # Extract scenes from a performer's detail page
+    scene:
+      Title: //a[@class="d-block h110 pt-3 pb-0 px-3 text-truncate text-center text-primary font-weight-bold"]/text()
+      URL:
+        selector: //a[@class="d-block h110 pt-3 pb-0 px-3 text-truncate text-center text-primary font-weight-bold"]/@href
+        postProcess:
+          - replace:
+              - regex: ^
+                with: https://www.hotcast.fr
+      Performers:
+        Name: //div[contains(@class, "text-terciary") and contains(@class, "text-truncate")]
+        URL: //div[@class="mt-4"]//a[contains(@class, "h100")]/@href      
+# Last Updated November 7, 2024

@@ -158,9 +158,21 @@ class YamlScraperService extends BaseScraperService {
     // Example: //li[contains(text(),"Added:")] -> li:contains("Added:")
     selector = selector.replace(/\[contains\(text\(\),\s*["']([^"']+)["']\)\]/g, ':contains("$1")');
     
+    // Handle contains(., "value") - convert to :contains() selector
+    // Example: //p[contains(.,'Guys')]/a -> p:contains("Guys") a
+    selector = selector.replace(/\[contains\(\.,\s*["']([^"']+)["']\)\]/g, ':contains("$1")');
+    
     // Handle not() conditions
     // Example: [not(i)]
     selector = selector.replace(/\[not\(([^)]+)\)\]/g, ':not($1)');
+    
+    // Handle numeric position selectors [1], [2], etc.
+    // XPath uses 1-based indexing, jQuery uses 0-based
+    // Example: p[1] -> p:eq(0), div[3] -> div:eq(2)
+    selector = selector.replace(/\[(\d+)\]/g, (match, num) => {
+      const index = parseInt(num) - 1; // Convert from 1-based to 0-based
+      return `:eq(${index})`;
+    });
     
     // Handle descendant with specific path (but preserve attribute values)
     // Replace / with space, but be careful not to mess up attribute values
@@ -300,14 +312,26 @@ class YamlScraperService extends BaseScraperService {
       // Convert XPath to jQuery
       const selector = this.xpathToJquery(originalXpath);
       
+      console.log(`   🔍 extractValue - Original XPath: "${originalXpath}"`);
+      console.log(`   🔍 extractValue - Converted selector: "${selector}"`);
+      console.log(`   🔍 extractValue - Attribute to extract: "${attributeName}"`);
+      
       try {
         const element = $(selector).first();
         
-        if (element.length === 0) return null;
+        console.log(`   🔍 extractValue - Found ${$(selector).length} elements`);
+        console.log(`   🔍 extractValue - Element length: ${element.length}`);
+        
+        if (element.length === 0) {
+          console.log(`   ❌ extractValue - No elements found for selector: "${selector}"`);
+          return null;
+        }
         
         // Extract attribute or text
         if (attributeName) {
-          return element.attr(attributeName) || null;
+          const attrValue = element.attr(attributeName);
+          console.log(`   🔍 extractValue - Attribute "${attributeName}" value: "${attrValue}"`);
+          return attrValue || null;
         }
         
         return element.text().trim() || null;
@@ -327,15 +351,26 @@ class YamlScraperService extends BaseScraperService {
       // Convert XPath to jQuery
       const selector = this.xpathToJquery(originalXpath);
       
+      console.log(`   🔍 extractValue (complex) - Original XPath: "${originalXpath}"`);
+      console.log(`   🔍 extractValue (complex) - Converted selector: "${selector}"`);
+      console.log(`   🔍 extractValue (complex) - Attribute to extract: "${attributeName}"`);
+      
       try {
         const element = $(selector).first();
         
-        if (element.length === 0) return null;
+        console.log(`   🔍 extractValue (complex) - Found ${$(selector).length} elements`);
+        console.log(`   🔍 extractValue (complex) - Element length: ${element.length}`);
+        
+        if (element.length === 0) {
+          console.log(`   ❌ extractValue (complex) - No elements found for selector: "${selector}"`);
+          return null;
+        }
         
         // Get value (text or attribute)
         let value;
         if (attributeName) {
           value = element.attr(attributeName) || '';
+          console.log(`   🔍 extractValue (complex) - Attribute "${attributeName}" value: "${value}"`);
         } else {
           value = element.text() || element.html() || '';
         }
@@ -445,6 +480,36 @@ class YamlScraperService extends BaseScraperService {
 
     try {
       const $ = await this.fetchHtml(url);
+
+      // Debug: Check what images exist in the HTML
+      console.log(`   🔍 DEBUG - Checking all img tags in HTML:`);
+      const allImgs = $('img');
+      console.log(`   🔍 DEBUG - Found ${allImgs.length} total img tags`);
+      allImgs.each((i, el) => {
+        const src = $(el).attr('src');
+        const className = $(el).attr('class');
+        console.log(`   🔍 DEBUG - img[${i}]: class="${className}", src="${src}"`);
+      });
+      
+      // Debug: Check for div with id="preview"
+      const previewDiv = $('div[id="preview"]');
+      console.log(`   🔍 DEBUG - Found ${previewDiv.length} div with id="preview"`);
+      if (previewDiv.length > 0) {
+        console.log(`   🔍 DEBUG - Preview div HTML (first 500 chars):`, previewDiv.html().substring(0, 500));
+      }
+      
+      // Debug: Check for video tags
+      const videos = $('video');
+      console.log(`   🔍 DEBUG - Found ${videos.length} video tags`);
+      videos.each((i, el) => {
+        const poster = $(el).attr('poster');
+        const src = $(el).attr('src');
+        console.log(`   🔍 DEBUG - video[${i}]: poster="${poster}", src="${src}"`);
+      });
+      
+      // Debug: Check for mejs class
+      const mejsImgs = $('img[class*="mejs"]');
+      console.log(`   🔍 DEBUG - Found ${mejsImgs.length} img tags with "mejs" in class`);
 
       // Find the scene scraper configuration
       const sceneScraper = this.config.sceneByURL[0];
@@ -677,60 +742,94 @@ class YamlScraperService extends BaseScraperService {
           console.log(`      - Trying: ${performerUrl}`);
 
           try {
-            const $ = await this.fetchHtml(performerUrl);
-            const sceneConfig = scraperConfig.scene;
+            let pageCount = 0;
+            const maxPages = scraperConfig.pagination?.maxPages || 1;
+            let foundAnyScenes = false;
 
-            // Extract all scenes from the performer page
-            const titleElements = this.extractArrayElements($, sceneConfig.Title);
-            
-            console.log(`      DEBUG: Title config:`, JSON.stringify(sceneConfig.Title));
-            console.log(`      DEBUG: URL config:`, JSON.stringify(sceneConfig.URL));
-            console.log(`      DEBUG: titleElements.length = ${titleElements.length}`);
-            
-            if (titleElements.length > 0) {
-              console.log(`      ✓ Found ${titleElements.length} scene(s) for "${name}"`);
+            // Loop through paginated results using page numbers
+            while (pageCount < maxPages) {
+              pageCount++;
+              
+              // Build URL with page parameter
+              let currentUrl = performerUrl;
+              if (pageCount > 1) {
+                // Add page parameter to URL
+                const separator = performerUrl.includes('?') ? '&' : '?';
+                currentUrl = `${performerUrl}${separator}page=${pageCount}`;
+              }
+              
+              console.log(`      📄 Scraping page ${pageCount}: ${currentUrl}`);
 
-              for (let i = 0; i < titleElements.length; i++) {
-                const scene = {
-                  title: null,
-                  url: null,
-                  coverImage: null,
-                  date: null,
-                  studio: this.siteName
-                };
-
-                // Extract title
-                if (sceneConfig.Title) {
-                  scene.title = this.extractValueAtIndex($, sceneConfig.Title, i);
-                }
-
-                // Extract URL
-                if (sceneConfig.URL) {
-                  scene.url = this.extractValueAtIndex($, sceneConfig.URL, i);
-                }
-
-                // Extract cover image
-                if (sceneConfig.Image) {
-                  scene.coverImage = this.extractValueAtIndex($, sceneConfig.Image, i);
-                }
-
-                // Extract date
-                if (sceneConfig.Date) {
-                  scene.date = this.extractValueAtIndex($, sceneConfig.Date, i);
-                }
-
-                if (scene.title && scene.url) {
-                  allScenes.push(scene);
-                  console.log(`         Added scene: "${scene.title}" (${scene.url})`);
-                } else {
-                  console.log(`         Skipped scene ${i}: title="${scene.title}", url="${scene.url}"`);
+              const $ = await this.fetchHtml(currentUrl);
+              
+              // Check for "no results" error message
+              if (scraperConfig.pagination?.noResultsSelector) {
+                const noResults = this.extractValue($, scraperConfig.pagination.noResultsSelector);
+                if (noResults) {
+                  console.log(`      ✓ No more results (error message found on page ${pageCount})`);
+                  break;
                 }
               }
               
-              // If we found scenes with this name, don't try other aliases
+              const sceneConfig = scraperConfig.scene;
+
+              // Extract all scenes from the current page
+              const titleElements = this.extractArrayElements($, sceneConfig.Title);
+              
+              console.log(`      DEBUG: Title config:`, JSON.stringify(sceneConfig.Title));
+              console.log(`      DEBUG: URL config:`, JSON.stringify(sceneConfig.URL));
+              console.log(`      DEBUG: titleElements.length = ${titleElements.length}`);
+              
+              if (titleElements.length > 0) {
+                foundAnyScenes = true;
+                console.log(`      ✓ Found ${titleElements.length} scene(s) for "${name}" on page ${pageCount}`);
+
+                for (let i = 0; i < titleElements.length; i++) {
+                  const scene = {
+                    title: null,
+                    url: null,
+                    coverImage: null,
+                    date: null,
+                    studio: this.siteName
+                  };
+
+                  // Extract title
+                  if (sceneConfig.Title) {
+                    scene.title = this.extractValueAtIndex($, sceneConfig.Title, i);
+                  }
+
+                  // Extract URL
+                  if (sceneConfig.URL) {
+                    scene.url = this.extractValueAtIndex($, sceneConfig.URL, i);
+                  }
+
+                  // Extract cover image
+                  if (sceneConfig.Image) {
+                    scene.coverImage = this.extractValueAtIndex($, sceneConfig.Image, i);
+                  }
+
+                  // Extract date
+                  if (sceneConfig.Date) {
+                    scene.date = this.extractValueAtIndex($, sceneConfig.Date, i);
+                  }
+
+                  if (scene.title && scene.url) {
+                    allScenes.push(scene);
+                    console.log(`         Added scene: "${scene.title}" (${scene.url})`);
+                  } else {
+                    console.log(`         Skipped scene ${i}: title="${scene.title}", url="${scene.url}"`);
+                  }
+                }
+              } else {
+                console.log(`      - No scenes found for "${name}" on page ${pageCount}`);
+                // If no scenes found, break out of pagination loop
+                break;
+              }
+            }
+            
+            // If we found scenes with this name, don't try other aliases
+            if (foundAnyScenes) {
               break;
-            } else {
-              console.log(`      - No scenes found for "${name}"`);
             }
           } catch (error) {
             console.warn(`      ⚠️ Failed to fetch scenes for "${name}":`, error.message);
@@ -1089,50 +1188,84 @@ class YamlScraperService extends BaseScraperService {
     try {
       console.log(`   🔍 Fetching scenes from: ${searchUrl}`);
 
-      const $ = await this.fetchHtml(searchUrl);
-      const sceneConfig = scraperConfig.scene;
-
-      // Extract all scenes from the page
-      const titleElements = this.extractArrayElements($, sceneConfig.Title);
-      
-      console.log(`   - Found ${titleElements.length} total scene(s) on page`);
-
       const allScenes = [];
-      for (let i = 0; i < titleElements.length; i++) {
-        const scene = {
-          title: null,
-          url: null,
-          coverImage: null,
-          date: null,
-          studio: this.siteName
-        };
+      let pageCount = 0;
+      const maxPages = scraperConfig.pagination?.maxPages || 1;
 
-        // Extract title
-        if (sceneConfig.Title) {
-          scene.title = this.extractValueAtIndex($, sceneConfig.Title, i);
+      // Loop through paginated results using page numbers
+      while (pageCount < maxPages) {
+        pageCount++;
+        
+        // Build URL with page parameter
+        let currentUrl = searchUrl;
+        if (pageCount > 1) {
+          // Add page parameter to URL
+          const separator = searchUrl.includes('?') ? '&' : '?';
+          currentUrl = `${searchUrl}${separator}page=${pageCount}`;
+        }
+        
+        console.log(`   📄 Scraping page ${pageCount}: ${currentUrl}`);
+
+        const $ = await this.fetchHtml(currentUrl);
+        
+        // Check for "no results" error message
+        if (scraperConfig.pagination?.noResultsSelector) {
+          const noResults = this.extractValue($, scraperConfig.pagination.noResultsSelector);
+          if (noResults) {
+            console.log(`   ✓ No more results (error message found on page ${pageCount})`);
+            break;
+          }
+        }
+        
+        const sceneConfig = scraperConfig.scene;
+
+        // Extract all scenes from the current page
+        const titleElements = this.extractArrayElements($, sceneConfig.Title);
+        
+        console.log(`   - Found ${titleElements.length} scene(s) on page ${pageCount}`);
+        
+        // If no scenes found, we've reached the end
+        if (titleElements.length === 0) {
+          console.log(`   ✓ No more scenes found on page ${pageCount}`);
+          break;
         }
 
-        // Extract URL
-        if (sceneConfig.URL) {
-          scene.url = this.extractValueAtIndex($, sceneConfig.URL, i);
-        }
+        for (let i = 0; i < titleElements.length; i++) {
+          const scene = {
+            title: null,
+            url: null,
+            coverImage: null,
+            date: null,
+            studio: this.siteName
+          };
 
-        // Extract cover image
-        if (sceneConfig.Image) {
-          scene.coverImage = this.extractValueAtIndex($, sceneConfig.Image, i);
-        }
+          // Extract title
+          if (sceneConfig.Title) {
+            scene.title = this.extractValueAtIndex($, sceneConfig.Title, i);
+          }
 
-        // Extract date
-        if (sceneConfig.Date) {
-          scene.date = this.extractValueAtIndex($, sceneConfig.Date, i);
-        }
+          // Extract URL
+          if (sceneConfig.URL) {
+            scene.url = this.extractValueAtIndex($, sceneConfig.URL, i);
+          }
 
-        if (scene.title && scene.url) {
-          allScenes.push(scene);
+          // Extract cover image
+          if (sceneConfig.Image) {
+            scene.coverImage = this.extractValueAtIndex($, sceneConfig.Image, i);
+          }
+
+          // Extract date
+          if (sceneConfig.Date) {
+            scene.date = this.extractValueAtIndex($, sceneConfig.Date, i);
+          }
+
+          if (scene.title && scene.url) {
+            allScenes.push(scene);
+          }
         }
       }
 
-      console.log(`   📊 Total scenes extracted: ${allScenes.length}`);
+      console.log(`   📊 Total scenes extracted from ${pageCount} page(s): ${allScenes.length}`);
 
       // Filter scenes by title match (case-insensitive partial match)
       const normalizedSearchTitle = title.toLowerCase().trim();

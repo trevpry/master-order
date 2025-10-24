@@ -1,0 +1,45 @@
+name: LetThemWatch
+sceneByURL:
+  - action: scrapeXPath
+    url:
+      - letthemwatch.com
+      - cumdumpvan.com
+      - hungpapi.com
+      - uncutking.com
+      - uncutlatinos.com
+      - uncuttwinks.com
+    scraper: sceneScraper
+xPathScrapers:
+  sceneScraper:
+    scene:
+      Title: //div[@class="memberPicVid"]/h3/text()
+      Date:
+        selector: //div[@class="date"]
+        postProcess:
+          - parseDate: January 2, 2006
+      Details: //div[@class="memberContent"]/p/text()
+      Image:
+        selector: //img[contains(@class,"mejs__poster-img")]/@src
+#        postProcess:
+#          - replace:
+#            - regex: ^
+#              with: "https://www.hungpapi.com"
+      Studio:
+        Name: 
+          selector: //meta[@name="author"]/@content
+          postProcess:
+            - replace:
+                - regex: \.com$
+                  with: ''
+      Code:
+        selector: //link[@rel='canonical']/@href
+        postProcess:
+          - replace:
+              - regex: .+/(\d+).+$
+                with: $1
+      Tags:
+        Name: //div[@class="memberL"]/p[1]/a
+      Performers:
+        Name: //p[contains(.,'Guys')]/a
+        URL: //p[contains(.,'Guys')]/a/@href
+# Last Updated November 7, 2024
