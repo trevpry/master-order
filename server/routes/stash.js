@@ -5462,12 +5462,11 @@ router.put('/scenes/:id', asyncHandler(async (req, res) => {
   if (studio && !studioId) {
     console.log(`🏢 [Studio] Studio name provided without ID: "${studio}"`);
     
-    const syncService = getActiveSyncService();
-    if (syncService) {
+    if (stashSyncService) {
       try {
         const studioName = typeof studio === 'string' ? studio : studio.name;
         console.log(`   - Looking up or creating studio: "${studioName}"`);
-        resolvedStudioId = await getOrCreateStudio(studioName, syncService);
+        resolvedStudioId = await getOrCreateStudio(studioName, stashSyncService);
         
         if (resolvedStudioId) {
           console.log(`   - ✅ Studio resolved to ID: ${resolvedStudioId}`);
@@ -5697,7 +5696,7 @@ router.put('/scenes/:id', asyncHandler(async (req, res) => {
       
       const stashUpdates = {};
       if (title !== undefined) stashUpdates.title = title;
-      if (resolvedStudioId !== undefined) stashUpdates.studioId = resolvedStudioId;
+      if (resolvedStudioId !== undefined && resolvedStudioId !== null) stashUpdates.studioId = resolvedStudioId;
       if (performerIds !== undefined && Array.isArray(performerIds)) {
         console.log('✅ [STASH UPDATE] Performer IDs validation starting...');
         console.log('   - Input performer IDs:', performerIds);
@@ -8298,11 +8297,9 @@ router.put('/tags/:id/parent', asyncHandler(async (req, res) => {
     await initializeStashSyncService();
   }
   
-  const syncService = getActiveSyncService();
-  
-  if (syncService) {
+  if (stashSyncService) {
     try {
-      const isConfigured = await syncService.isConfigured();
+      const isConfigured = await stashSyncService.isConfigured();
       
       if (isConfigured) {
         console.log('📡 [STASH UPDATE] Updating tag parent in Stash...');
@@ -8335,7 +8332,7 @@ router.put('/tags/:id/parent', asyncHandler(async (req, res) => {
         
         console.log('   - GraphQL variables:', JSON.stringify(variables, null, 2));
         
-        const result = await syncService.makeGraphQLRequest(updateMutation, variables);
+        const result = await stashSyncService.makeGraphQLRequest(updateMutation, variables);
         
         console.log('   - GraphQL result:', JSON.stringify(result, null, 2));
         
