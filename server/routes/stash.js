@@ -5480,6 +5480,85 @@ router.post('/scenes/:id/search-yaml-title', asyncHandler(async (req, res) => {
   });
 }));
 
+// POST /api/stash/scenes/:id/smart-scrape - Smart/Fragment scraping using scene metadata
+router.post('/scenes/:id/smart-scrape', asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  const { scraperName } = req.body;
+  
+  console.log(`🧠 [Smart Scrape] Starting smart scrape for scene: ${id}`);
+  console.log(`   - Scraper: ${scraperName}`);
+  
+  if (!scraperName) {
+    return sendBadRequest(res, 'Scraper name is required');
+  }
+  
+  // Fetch scene with all metadata
+  const scene = await prisma.stashScene.findUnique({
+    where: { id },
+    include: {
+      performers: true,
+      tags: true
+    }
+  });
+  
+  if (!scene) {
+    return sendBadRequest(res, 'Scene not found');
+  }
+  
+  console.log(`   - Scene: "${scene.title || 'Untitled'}"`);
+  console.log(`   - Code: ${scene.code || 'N/A'}`);
+  console.log(`   - Date: ${scene.date || 'N/A'}`);
+  console.log(`   - URLs: ${scene.urls?.length || 0}`);
+  
+  // Get the scraper
+  const registry = await getScraperRegistry();
+  const scraper = registry.getAllScrapers().find(s => s.siteName === scraperName);
+  
+  if (!scraper) {
+    return sendBadRequest(res, `Unknown scraper: ${scraperName}`);
+  }
+  
+  // Check if scraper supports smart scraping
+  if (!scraper.scrapeByMetadata) {
+    return sendBadRequest(res, `Scraper "${scraperName}" does not support smart scraping`);
+  }
+  
+  console.log(`   - Using scraper: ${scraper.siteName}`);
+  
+  // Prepare clip data for smart scraping
+  const clipData = {
+    title: scene.title,
+    code: scene.code,
+    details: scene.details,
+    director: scene.director,
+    date: scene.date,
+    urls: scene.urls || [],
+    remote_site_id: scene.stashId
+  };
+  
+  // Search using scene metadata
+  let searchResults;
+  try {
+    searchResults = await scraper.scrapeByMetadata(clipData);
+  } catch (error) {
+    console.error(`❌ [Smart Scrape] Error:`, error);
+    return sendServerError(res, `Failed to smart scrape scene: ${error.message}`);
+  }
+  
+  console.log(`   ✅ Found ${searchResults.length} matching scene(s)`);
+  
+  sendSuccess(res, {
+    scenes: searchResults,
+    sourceMetadata: {
+      title: scene.title,
+      code: scene.code,
+      date: scene.date,
+      urlCount: scene.urls?.length || 0
+    },
+    source: scraper.siteName
+  });
+}));
+
 // GET /api/stash/performers/search - Search for performers
 router.get('/performers/search', asyncHandler(async (req, res) => {
   const { q, limit = 20 } = req.query;

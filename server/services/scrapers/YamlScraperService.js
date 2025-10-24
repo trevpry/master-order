@@ -645,8 +645,34 @@ class YamlScraperService extends BaseScraperService {
       const mejsImgs = $('img[class*="mejs"]');
       console.log(`   🔍 DEBUG - Found ${mejsImgs.length} img tags with "mejs" in class`);
 
-      // Find the scene scraper configuration
-      const sceneScraper = this.config.sceneByURL[0];
+      // Find the matching scene scraper configuration based on URL
+      let sceneScraper = null;
+      if (Array.isArray(this.config.sceneByURL)) {
+        // Find the scraper config that matches the URL
+        for (const config of this.config.sceneByURL) {
+          if (config.url && Array.isArray(config.url)) {
+            const normalizedUrl = transformedUrl.toLowerCase();
+            const matches = config.url.some(pattern => {
+              const normalizedPattern = pattern.toLowerCase();
+              return normalizedUrl.includes(normalizedPattern);
+            });
+            if (matches) {
+              sceneScraper = config;
+              console.log(`   📌 Matched scraper config for URL patterns: ${config.url.join(', ')}`);
+              break;
+            }
+          }
+        }
+        
+        // Fall back to first config if no match found
+        if (!sceneScraper) {
+          console.log(`   ⚠️ No URL pattern matched, using first scraper config`);
+          sceneScraper = this.config.sceneByURL[0];
+        }
+      } else {
+        sceneScraper = this.config.sceneByURL;
+      }
+      
       const scraperName = sceneScraper.scraper;
       const scraperConfig = this.config.xPathScrapers[scraperName];
       

@@ -559,6 +559,59 @@ export default function SceneDetail() {
     }
   };
 
+  const handleSmartScrape = async () => {
+    // Smart scraping only works with Stash native scrapers
+    if (!selectedScraper?.isStashNative && selectedScraper?.type !== 'StashNativeScraperService') {
+      alert('Smart scraping is only available for Stash native scrapers');
+      return;
+    }
+
+    if (!data?.title && !data?.code && (!data?.urls || data.urls.length === 0)) {
+      alert('Scene must have at least a title, code, or URL for smart scraping');
+      return;
+    }
+
+    setIsSearching(true);
+    setSearchResults(null);
+
+    try {
+      const response = await fetch(`${config.apiBaseUrl}/api/stash/scenes/${id}/smart-scrape`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          scraperName: selectedScraper.siteName
+        })
+      });
+
+      const result = await response.json();
+
+      if (result.success) {
+        const { scenes, sourceMetadata, source } = result.data;
+        
+        if (scenes.length === 0) {
+          alert(`No matches found on ${source} using scene metadata`);
+        } else {
+          setSearchResults({
+            scenes: scenes,
+            isSceneSearch: true,
+            isSmartScrape: true,
+            sourceMetadata: sourceMetadata,
+            source: source
+          });
+        }
+      } else {
+        alert(`Failed to smart scrape ${selectedScraper.siteName}: ${result.error || 'Unknown error'}`);
+      }
+    } catch (error) {
+      console.error('Error with smart scraping:', error);
+      alert('Failed to smart scrape scene');
+    } finally {
+      setIsSearching(false);
+    }
+  };
+
   const handleSelectSearchResult = (sceneUrl, movieData = null) => {
     // If this is a movie result with existing movie ID, link scene to movie
     if (movieData && movieData.existingMovieId) {
@@ -2758,7 +2811,7 @@ export default function SceneDetail() {
                       }}
                       onClick={() => {
                         // Only pass movieData if this is a movie search (not scene search)
-                        if (searchResults.isSceneSearch || searchResults.isSceneSearchByTitle) {
+                        if (searchResults.isSceneSearch || searchResults.isSceneSearchByTitle || searchResults.isSmartScrape) {
                           // Scene search - just populate URL for scraping
                           handleSelectSearchResult(scene.url);
                         } else if (scene.matchedPerformers) {
@@ -2779,7 +2832,7 @@ export default function SceneDetail() {
                       <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
                         <span style={{ fontWeight: '500', color: '#333' }}>{scene.title}</span>
                         {/* Only show movie badges for movie search results */}
-                        {!searchResults.isSceneSearch && !searchResults.isSceneSearchByTitle && scene.existingMovieId && (
+                        {!searchResults.isSceneSearch && !searchResults.isSceneSearchByTitle && !searchResults.isSmartScrape && scene.existingMovieId && (
                           <span style={{ 
                             fontSize: '11px', 
                             padding: '2px 6px', 
@@ -2791,7 +2844,7 @@ export default function SceneDetail() {
                             ✓ IN DATABASE
                           </span>
                         )}
-                        {!searchResults.isSceneSearch && !searchResults.isSceneSearchByTitle && scene.matchedPerformers && !scene.existingMovieId && (
+                        {!searchResults.isSceneSearch && !searchResults.isSceneSearchByTitle && !searchResults.isSmartScrape && scene.matchedPerformers && !scene.existingMovieId && (
                           <span style={{ 
                             fontSize: '11px', 
                             padding: '2px 6px', 
@@ -2811,18 +2864,18 @@ export default function SceneDetail() {
                         </div>
                       )}
                       {/* Only show movie action hints for movie searches */}
-                      {!searchResults.isSceneSearch && !searchResults.isSceneSearchByTitle && scene.existingMovieId && (
+                      {!searchResults.isSceneSearch && !searchResults.isSceneSearchByTitle && !searchResults.isSmartScrape && scene.existingMovieId && (
                         <div style={{ fontSize: '12px', color: '#059669', marginBottom: '4px', fontStyle: 'italic' }}>
                           → Will link scene to existing movie
                         </div>
                       )}
-                      {!searchResults.isSceneSearch && !searchResults.isSceneSearchByTitle && scene.matchedPerformers && !scene.existingMovieId && (
+                      {!searchResults.isSceneSearch && !searchResults.isSceneSearchByTitle && !searchResults.isSmartScrape && scene.matchedPerformers && !scene.existingMovieId && (
                         <div style={{ fontSize: '12px', color: '#d97706', marginBottom: '4px', fontStyle: 'italic' }}>
                           → Will create new movie and link scene
                         </div>
                       )}
                       {/* Show scene info hint for scene searches */}
-                      {(searchResults.isSceneSearch || searchResults.isSceneSearchByTitle) && (
+                      {(searchResults.isSceneSearch || searchResults.isSceneSearchByTitle || searchResults.isSmartScrape) && (
                         <div style={{ fontSize: '12px', color: '#6366f1', marginBottom: '4px', fontStyle: 'italic' }}>
                           → Click to populate URL and scrape scene metadata
                         </div>
@@ -2909,6 +2962,27 @@ export default function SceneDetail() {
                   >
                     {isSearching ? '⏳ Searching...' : `📝 Search by Title`}
                   </button>
+                  {/* Smart Scrape button - only for Stash native scrapers */}
+                  {(selectedScraper.isStashNative || selectedScraper.type === 'StashNativeScraperService') && (
+                    <button 
+                      className="btn-primary" 
+                      onClick={handleSmartScrape}
+                      disabled={
+                        isScraping || 
+                        isSearching || 
+                        !data || 
+                        (!data.title && !data.code && (!data.urls || data.urls.length === 0))
+                      }
+                      style={{ 
+                        marginRight: '10px',
+                        background: '#10b981',
+                        borderLeft: '4px solid #34d399'
+                      }}
+                      title={`Smart scrape using all available metadata (title, code, date, URLs)`}
+                    >
+                      {isSearching ? '⏳ Searching...' : `🧠 Smart Scrape`}
+                    </button>
+                  )}
                 </>
               )}
               
