@@ -11,6 +11,12 @@ export default function TagDetail() {
   const [error, setError] = useState(null);
   const [activeTab, setActiveTab] = useState('scenes');
   
+  // Edit parent state
+  const [isEditingParent, setIsEditingParent] = useState(false);
+  const [allTags, setAllTags] = useState([]);
+  const [selectedParentId, setSelectedParentId] = useState('');
+  const [savingParent, setSavingParent] = useState(false);
+  
   // Scenes tab state
   const [scenes, setScenes] = useState([]);
   const [scenesLoading, setScenesLoading] = useState(false);
@@ -72,6 +78,75 @@ export default function TagDetail() {
       console.error('Error loading scenes:', err);
     } finally {
       setScenesLoading(false);
+    }
+  };
+
+  const loadAllTags = async () => {
+    try {
+      const response = await fetch(`${config.apiBaseUrl}/api/stash/tags?perPage=1000&rootOnly=false`);
+      const result = await response.json();
+      if (result.success) {
+        // Filter out the current tag and its children to prevent circular relationships
+        const filteredTags = (result.data || []).filter(tag => {
+          if (tag.id === id) return false; // Can't be own parent
+          // Check if this tag is a child of the current tag
+          const isChild = data?.children?.some(child => child.id === tag.id);
+          return !isChild;
+        });
+        setAllTags(filteredTags);
+      }
+    } catch (err) {
+      console.error('Error loading tags:', err);
+    }
+  };
+
+  const handleEditParent = () => {
+    setIsEditingParent(true);
+    loadAllTags();
+    // Set current parent as selected
+    const currentParentId = data.parents?.[0]?.id || data.parent?.id || '';
+    setSelectedParentId(currentParentId);
+  };
+
+  const handleCancelEdit = () => {
+    setIsEditingParent(false);
+    setSelectedParentId('');
+  };
+
+  const handleSaveParent = async () => {
+    setSavingParent(true);
+    try {
+      const response = await fetch(`${config.apiBaseUrl}/api/stash/tags/${id}/parent`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          parentId: selectedParentId || null
+        })
+      });
+
+      const result = await response.json();
+      
+      if (result.success) {
+        // Update local data with new parent
+        setData(prev => ({
+          ...prev,
+          parents: result.data.parents,
+          parent: result.data.parent
+        }));
+        setIsEditingParent(false);
+        
+        // Show success message
+        alert(`Parent tag updated successfully`);
+      } else {
+        throw new Error(result.error || 'Failed to update parent');
+      }
+    } catch (err) {
+      console.error('Error saving parent:', err);
+      alert(`Error: ${err.message}`);
+    } finally {
+      setSavingParent(false);
     }
   };
 
@@ -258,31 +333,92 @@ export default function TagDetail() {
           <div className="info-section">
             <h2>Tag Information</h2>
             
-            {/* Parent Tags Section */}
-            {((data.parents && data.parents.length > 0) || data.parent) && (
-              <div className="section">
-                <h3>Parent Tags</h3>
-                <div className="tag-chips">
-                  {data.parents && data.parents.map(parent => (
-                    <Link 
-                      key={parent.id} 
-                      to={`/media/stash/tags/${parent.id}`}
-                      className="chip tag-chip"
-                    >
-                      {parent.name}
-                    </Link>
-                  ))}
-                  {!data.parents && data.parent && (
-                    <Link 
-                      to={`/media/stash/tags/${data.parent.id}`}
-                      className="chip tag-chip"
-                    >
-                      {data.parent.name}
-                    </Link>
-                  )}
-                </div>
+            {/* Parent Tags Section with Edit */}
+            <div className="section">
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+                <h3>Parent Tag</h3>
+                {!isEditingParent && (
+                  <Button onClick={handleEditParent} variant="secondary" size="small">
+                    ✏️ Edit Parent
+                  </Button>
+                )}
               </div>
-            )}
+              
+              {isEditingParent ? (
+                <div className="edit-parent-section">
+                  <div style={{ marginBottom: '1rem' }}>
+                    <label htmlFor="parent-select" style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 'bold' }}>
+                      Select Parent Tag:
+                    </label>
+                    <select
+                      id="parent-select"
+                      value={selectedParentId}
+                      onChange={(e) => setSelectedParentId(e.target.value)}
+                      style={{
+                        width: '100%',
+                        padding: '0.5rem',
+                        fontSize: '1rem',
+                        borderRadius: '4px',
+                        border: '1px solid var(--border-color)',
+                        backgroundColor: 'var(--bg-secondary)',
+                        color: 'var(--text-primary)'
+                      }}
+                      disabled={savingParent}
+                    >
+                      <option value="">-- No Parent (Root Tag) --</option>
+                      {allTags.map(tag => (
+                        <option key={tag.id} value={tag.id}>
+                          {tag.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  
+                  <div style={{ display: 'flex', gap: '0.5rem' }}>
+                    <Button 
+                      onClick={handleSaveParent} 
+                      disabled={savingParent}
+                      variant="primary"
+                    >
+                      {savingParent ? '💾 Saving...' : '💾 Save'}
+                    </Button>
+                    <Button 
+                      onClick={handleCancelEdit} 
+                      disabled={savingParent}
+                      variant="secondary"
+                    >
+                      Cancel
+                    </Button>
+                  </div>
+                </div>
+              ) : (
+                <>
+                  {((data.parents && data.parents.length > 0) || data.parent) ? (
+                    <div className="tag-chips">
+                      {data.parents && data.parents.map(parent => (
+                        <Link 
+                          key={parent.id} 
+                          to={`/media/stash/tags/${parent.id}`}
+                          className="chip tag-chip"
+                        >
+                          {parent.name}
+                        </Link>
+                      ))}
+                      {!data.parents && data.parent && (
+                        <Link 
+                          to={`/media/stash/tags/${data.parent.id}`}
+                          className="chip tag-chip"
+                        >
+                          {data.parent.name}
+                        </Link>
+                      )}
+                    </div>
+                  ) : (
+                    <p className="muted">No parent tag (this is a root tag)</p>
+                  )}
+                </>
+              )}
+            </div>
             
             {/* Child Tags Section */}
             {data.children && data.children.length > 0 && (

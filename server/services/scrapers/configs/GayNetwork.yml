@@ -129,20 +129,20 @@ xPathScrapers:
         Name: //span[@class="h95 text-uppercase"]/text()
       Movies:
         Name:
-          selector: //div[@class="px-0 mb-4 row"]//h3[i[contains(@class, "fa-scrubber")]]
+          selector: //a[@class="btn btn-sm btn-link mr-1 p-0"]/h3/text()
           postProcess:
             - replace:
                 - regex: DVD:\s*
                   with:
         URL:
-          selector: //div[@class="px-0 mb-4 row"]//a[h3[i[contains(@class, "fa-scrubber")]]]/@href | //link[//div[@class="px-0 mb-4 row"]//a[h3[i[contains(@class, "fa-scrubber")]]]/@href and @rel="alternate" and @hreflang="en"]/@href
+          selector: //div[@class="row mb-4 px-0"]//a[h3[i[contains(@class, "fa-scrubber")]]]/@href | //link[//div[@class="row mb-4 px-0"]//a[h3[i[contains(@class, "fa-scrubber")]]]/@href and @rel="alternate" and @hreflang="en"]/@href
           concat: __SEPARATOR__
           postProcess:
             - replace:
                 - regex: (.*)__SEPARATOR__(https:\/\/[^\/]*)\/.*
                   with: $2$1
         FrontImage:
-          selector: //div[@class="px-0 mb-4 row"]//a[h3[i[contains(@class, "fa-scrubber")]]]/@href | //link[//div[@class="px-0 mb-4 row"]//a[h3[i[contains(@class, "fa-scrubber")]]]/@href and @rel="alternate" and @hreflang="en"]/@href
+          selector: //div[@class="row mb-4 px-0"]//a[h3[i[contains(@class, "fa-scrubber")]]]/@href | //link[//div[@class="row mb-4 px-0"]//a[h3[i[contains(@class, "fa-scrubber")]]]/@href and @rel="alternate" and @hreflang="en"]/@href
           concat: __SEPARATOR__
           postProcess:
             - replace:
