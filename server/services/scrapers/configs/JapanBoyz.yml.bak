@@ -1,0 +1,52 @@
+name: "Japan Boyz"
+sceneByURL:
+  - action: scrapeXPath
+    url:
+      - japanboyz.com
+    scraper: sceneScraper
+performerByURL:
+  - action: scrapeXPath
+    url:
+      - japanboyz.com/models
+    scraper: performerScraper    
+xPathScrapers:
+  sceneScraper:
+    scene:
+      Title: //div[@class="movie-player"]/h2[@class="text-left"]
+      Details:
+        selector: //div[@class="description mt-3 mt-md-4"]/text()
+        concat: " "
+      Studio:
+        Name:
+          fixed: "Japan Boyz"
+      Tags:
+        Name:
+          selector: //div[@class="v-tags mt-3 mt-md-4 text-center"]/a
+          postProcess:
+            - replace: 
+                - regex: "#"
+                  with: ""  
+      Performers:
+        Name:
+          selector: //div[@class="row model-list p-2"]/div/div/div/div/a
+      Image:
+        selector: //div[@class="jw-preview jw-reset"]/@style
+        postProcess:
+          - replace:
+              - regex: 'background-image:\s*url\(["\']?([^"\']+)["\']?\)'
+                with: $1
+  performerScraper:
+    performer:
+      Name: //div[@class="model-info d-flex flex-column"]/h2[@class="text-left"]/text()
+      URL:
+        selector: //link[@rel="canonical"]/@content
+        postProcess:
+          - replace:
+              - regex: "^http://"
+                with: "https://"
+      Gender:
+        fixed: Male        
+      Image: //img[@class="img-fluid"]/@src
+      Country:
+        fixed: Japan      
+# Last Updated December 29, 2022

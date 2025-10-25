@@ -5148,7 +5148,8 @@ router.get('/scrapers', asyncHandler(async (req, res) => {
       type: scraper.constructor.name, // YamlScraperService, StashNativeScraperService, etc.
       supportsSceneSearch: typeof scraper.searchScenes === 'function',
       urlPatterns: scraper.sceneUrlPatterns || scraper.supportedUrls || [],
-      isStashNative: scraper.constructor.name === 'StashNativeScraperService'
+      isStashNative: scraper.constructor.name === 'StashNativeScraperService',
+      supportedScrapes: scraper.supportedScrapes || [] // NAME, FRAGMENT, URL
     }));
     
     console.log(`✅ [Get Scrapers] Found ${scrapers.length} scraper(s)`);

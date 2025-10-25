@@ -84,6 +84,9 @@ class ScraperRegistry {
           // Store supported URLs for matching
           nativeScraper.supportedUrls = stashScraper.scene.urls || [];
           
+          // Store supported scrape types (NAME, FRAGMENT, URL)
+          nativeScraper.supportedScrapes = stashScraper.scene.supported_scrapes || [];
+          
           // Apply URL replacements from config if available
           if (urlReplacementsConfig[stashScraper.id]) {
             nativeScraper.urlReplacements = urlReplacementsConfig[stashScraper.id];
@@ -93,7 +96,7 @@ class ScraperRegistry {
           this.scrapers.push(nativeScraper);
           this.stashNativeScrapers.push(nativeScraper);
           
-          console.log(`   ✅ Loaded Stash native: ${stashScraper.name} (${nativeScraper.supportedUrls.length} URL patterns)`);
+          console.log(`   ✅ Loaded Stash native: ${stashScraper.name} (${nativeScraper.supportedUrls.length} URL patterns, supports: ${nativeScraper.supportedScrapes.join(', ')})`);
         }
       }
       

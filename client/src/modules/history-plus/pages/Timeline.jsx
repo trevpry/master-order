@@ -14,22 +14,43 @@ const Timeline = () => {
     
     // Handle BCE dates (negative years in our format: "-YYYY...-MM-DD")
     if (dateString.startsWith('-')) {
-      const firstDashIndex = dateString.indexOf('-', 1);
-      const yearStr = firstDashIndex > 1 ? dateString.slice(1, firstDashIndex) : dateString.slice(1, 5);
+      // Find the second dash (after the year)
+      const secondDashIndex = dateString.indexOf('-', 1);
+      
+      if (secondDashIndex === -1) {
+        // No second dash found, treat entire string after '-' as year
+        const year = parseInt(dateString.slice(1));
+        return -(year * 10000 + 101); // Default to Jan 1
+      }
+      
+      // Extract year between first and second dash
+      const yearStr = dateString.slice(1, secondDashIndex);
       const year = parseInt(yearStr);
-      const remainingDate = firstDashIndex > 1 ? dateString.slice(firstDashIndex) : dateString.slice(5);
-      const month = parseInt(remainingDate.slice(1, 3)) || 1;
-      const day = parseInt(remainingDate.slice(4, 6)) || 1;
+      
+      // Extract month and day after second dash
+      const remainingDate = dateString.slice(secondDashIndex);
+      const parts = remainingDate.split('-');
+      const month = parseInt(parts[1]) || 1;
+      const day = parseInt(parts[2]) || 1;
       
       // For BCE, convert to negative number for sorting (higher BCE numbers = earlier in time)
       return -(year * 10000 + month * 100 + day);
     } else {
       // Handle CE dates (positive years: "YYYY...-MM-DD")
       const firstDashIndex = dateString.indexOf('-');
-      const yearStr = firstDashIndex > 0 ? dateString.slice(0, firstDashIndex) : dateString.slice(0, 4);
+      
+      if (firstDashIndex === -1) {
+        // No dash found, treat entire string as year
+        const year = parseInt(dateString);
+        return year * 10000 + 101; // Default to Jan 1
+      }
+      
+      const yearStr = dateString.slice(0, firstDashIndex);
       const year = parseInt(yearStr);
-      const month = parseInt(dateString.slice(firstDashIndex + 1, firstDashIndex + 3)) || 1;
-      const day = parseInt(dateString.slice(firstDashIndex + 4, firstDashIndex + 6)) || 1;
+      const remainingDate = dateString.slice(firstDashIndex);
+      const parts = remainingDate.split('-');
+      const month = parseInt(parts[1]) || 1;
+      const day = parseInt(parts[2]) || 1;
       
       // For CE, use positive number (normal chronological order)
       return year * 10000 + month * 100 + day;

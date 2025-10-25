@@ -2933,37 +2933,44 @@ export default function SceneDetail() {
               {/* YAML Scraper specific buttons */}
               {selectedScraper && (
                 <>
-                  <button 
-                    className="btn-primary" 
-                    onClick={handleSearchYamlScraper}
-                    disabled={
-                      isScraping || 
-                      isSearching || 
-                      !data || 
-                      !data.performers || 
-                      data.performers.length < 1
-                    }
-                    style={{ marginRight: '10px' }}
-                    title={`Search ${selectedScraper.siteName} by performers (requires 1+ performer)`}
-                  >
-                    {isSearching ? '⏳ Searching...' : `🔎 Search by Performers`}
-                  </button>
-                  <button 
-                    className="btn-primary" 
-                    onClick={handleSearchYamlScraperByTitle}
-                    disabled={
-                      isScraping || 
-                      isSearching || 
-                      !data || 
-                      !data.title
-                    }
-                    style={{ marginRight: '10px' }}
-                    title={`Search ${selectedScraper.siteName} by title (requires title)`}
-                  >
-                    {isSearching ? '⏳ Searching...' : `📝 Search by Title`}
-                  </button>
-                  {/* Smart Scrape button - only for Stash native scrapers */}
-                  {(selectedScraper.isStashNative || selectedScraper.type === 'StashNativeScraperService') && (
+                  {/* Search by Performers - only show if scraper supports NAME search */}
+                  {(!selectedScraper.supportedScrapes || selectedScraper.supportedScrapes.includes('NAME')) && (
+                    <button 
+                      className="btn-primary" 
+                      onClick={handleSearchYamlScraper}
+                      disabled={
+                        isScraping || 
+                        isSearching || 
+                        !data || 
+                        !data.performers || 
+                        data.performers.length < 1
+                      }
+                      style={{ marginRight: '10px' }}
+                      title={`Search ${selectedScraper.name} by performers (requires 1+ performer)`}
+                    >
+                      {isSearching ? '⏳ Searching...' : `🔎 Search by Performers`}
+                    </button>
+                  )}
+                  {/* Search by Title - only show if scraper supports NAME search */}
+                  {(!selectedScraper.supportedScrapes || selectedScraper.supportedScrapes.includes('NAME')) && (
+                    <button 
+                      className="btn-primary" 
+                      onClick={handleSearchYamlScraperByTitle}
+                      disabled={
+                        isScraping || 
+                        isSearching || 
+                        !data || 
+                        !data.title
+                      }
+                      style={{ marginRight: '10px' }}
+                      title={`Search ${selectedScraper.name} by title (requires title)`}
+                    >
+                      {isSearching ? '⏳ Searching...' : `📝 Search by Title`}
+                    </button>
+                  )}
+                  {/* Smart Scrape button - only for Stash native scrapers that support FRAGMENT */}
+                  {(selectedScraper.isStashNative || selectedScraper.type === 'StashNativeScraperService') && 
+                   (!selectedScraper.supportedScrapes || selectedScraper.supportedScrapes.includes('FRAGMENT')) && (
                     <button 
                       className="btn-primary" 
                       onClick={handleSmartScrape}
