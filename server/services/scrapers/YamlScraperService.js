@@ -893,8 +893,44 @@ class YamlScraperService extends BaseScraperService {
 
         // Try each name/alias
         for (const name of namesToTry) {
-          // Build performer slug: replace spaces with configured character, lowercase
-          const performerSlug = name.toLowerCase().replace(/\s+/g, spacesConvertTo);
+          // Build performer slug: replace spaces per config, then URL encode special chars
+          let performerSlug = name.toLowerCase().replace(/\s+/g, spacesConvertTo);
+          
+          // URL encode special characters using manual encoding map
+          const encodeMap = {
+            "'": '%27',
+            '"': '%22',
+            '!': '%21',
+            '#': '%23',
+            '$': '%24',
+            '%': '%25',
+            '&': '%26',
+            '(': '%28',
+            ')': '%29',
+            '*': '%2A',
+            ',': '%2C',
+            '/': '%2F',
+            ':': '%3A',
+            ';': '%3B',
+            '=': '%3D',
+            '?': '%3F',
+            '@': '%40',
+            '[': '%5B',
+            ']': '%5D'
+          };
+          
+          performerSlug = performerSlug.replace(/[^a-z0-9]/gi, (char) => {
+            // Don't encode the spacesConvertTo character
+            if (char === spacesConvertTo) {
+              return char;
+            }
+            // Use manual encoding map for common special characters
+            if (encodeMap[char]) {
+              return encodeMap[char];
+            }
+            // Fall back to encodeURIComponent for other characters
+            return encodeURIComponent(char);
+          });
           
           // Build performer URL from pattern
           const performerUrl = performerSearchUrlPattern.replace('{performer}', performerSlug);
@@ -1332,11 +1368,60 @@ class YamlScraperService extends BaseScraperService {
 
     // Get spacesConvertTo value from config, default to underscore
     const spacesConvertTo = searchConfig.spacesConvertTo || '_';
+    
+    console.log(`   🔧 spacesConvertTo: "${spacesConvertTo}"`);
 
     // Check if URL has {title} placeholder - if so, replace it with normalized title
     if (searchUrl.includes('{title}')) {
-      // Normalize title: lowercase, replace spaces with configured character
-      const titleSlug = title.toLowerCase().replace(/\s+/g, spacesConvertTo);
+      console.log(`   🔧 Original title: "${title}"`);
+      
+      // Normalize title: replace spaces per config, then URL encode special chars
+      let titleSlug = title.toLowerCase().replace(/\s+/g, spacesConvertTo);
+      console.log(`   🔧 After space replacement: "${titleSlug}"`);
+      
+      // URL encode special characters using manual encoding map
+      // This works around Node.js encodeURIComponent issues with apostrophes
+      const encodeMap = {
+        "'": '%27',
+        '"': '%22',
+        '!': '%21',
+        '#': '%23',
+        '$': '%24',
+        '%': '%25',
+        '&': '%26',
+        '(': '%28',
+        ')': '%29',
+        '*': '%2A',
+        ',': '%2C',
+        '/': '%2F',
+        ':': '%3A',
+        ';': '%3B',
+        '=': '%3D',
+        '?': '%3F',
+        '@': '%40',
+        '[': '%5B',
+        ']': '%5D'
+      };
+      
+      titleSlug = titleSlug.replace(/[^a-z0-9]/gi, (char) => {
+        // Don't encode the spacesConvertTo character
+        if (char === spacesConvertTo) {
+          console.log(`   🔧 Skipping "${char}" (spacesConvertTo character)`);
+          return char;
+        }
+        // Use manual encoding map for common special characters
+        if (encodeMap[char]) {
+          console.log(`   🔧 Encoding "${char}" → "${encodeMap[char]}"`);
+          return encodeMap[char];
+        }
+        // Fall back to encodeURIComponent for other characters
+        const encoded = encodeURIComponent(char);
+        console.log(`   🔧 Encoding "${char}" (via encodeURIComponent) → "${encoded}"`);
+        return encoded;
+      });
+      
+      console.log(`   🔧 Final titleSlug: "${titleSlug}"`);
+      
       searchUrl = searchUrl.replace('{title}', titleSlug);
       console.log(`   🔍 Using title-based URL: ${searchUrl}`);
     }

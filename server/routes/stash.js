@@ -414,16 +414,16 @@ router.get('/scenes', asyncHandler(async (req, res) => {
     // Handle both 'search' (general search) and 'title' (specific title search)
     if (search) {
       where.OR = [
-        { title: { contains: search } },
-        { details: { contains: search } },
-        { synopsis: { contains: search } },
-        { path: { contains: search } }
+        { title: { contains: search, mode: 'insensitive' } },
+        { details: { contains: search, mode: 'insensitive' } },
+        { synopsis: { contains: search, mode: 'insensitive' } },
+        { path: { contains: search, mode: 'insensitive' } }
       ];
     } else if (title) {
       // Specific title search (searches title and file path)
       where.OR = [
-        { title: { contains: title } },
-        { path: { contains: title } }
+        { title: { contains: title, mode: 'insensitive' } },
+        { path: { contains: title, mode: 'insensitive' } }
       ];
     }
     
@@ -431,7 +431,7 @@ router.get('/scenes', asyncHandler(async (req, res) => {
       where.performers = {
         some: {
           performer: {
-            name: { contains: performer }
+            name: { contains: performer, mode: 'insensitive' }
           }
         }
       };
@@ -7666,13 +7666,12 @@ router.get('/performers', asyncHandler(async (req, res) => {
   const useStartsWith = startsWith === 'true';
   
   // Build search filter for name and alias
-  // Note: Using 'contains' or 'startsWith' without 'mode' for SQLite compatibility
-  // This makes search case-sensitive in SQLite, case-insensitive in PostgreSQL
+  // Note: Using 'contains' or 'startsWith' with 'mode: insensitive' for case-insensitive search
   const searchFilter = searchQuery ? {
     OR: [
-      { name: useStartsWith ? { startsWith: searchQuery } : { contains: searchQuery } },
-      { alias: useStartsWith ? { startsWith: searchQuery } : { contains: searchQuery } },
-      { disambiguation: useStartsWith ? { startsWith: searchQuery } : { contains: searchQuery } }
+      { name: useStartsWith ? { startsWith: searchQuery, mode: 'insensitive' } : { contains: searchQuery, mode: 'insensitive' } },
+      { alias: useStartsWith ? { startsWith: searchQuery, mode: 'insensitive' } : { contains: searchQuery, mode: 'insensitive' } },
+      { disambiguation: useStartsWith ? { startsWith: searchQuery, mode: 'insensitive' } : { contains: searchQuery, mode: 'insensitive' } }
     ]
   } : {};
   
@@ -7858,44 +7857,68 @@ router.get('/studios', asyncHandler(async (req, res) => {
   const skip = (parseInt(page) - 1) * parseInt(perPage);
   const take = parseInt(perPage);
   
-  // Build search filter - search in both name and aliases
-  let searchFilter = {};
+  // If there's a filter, we need to do case-insensitive search in JavaScript
+  // since mode: 'insensitive' is not supported on this table
   if (filter) {
-    // Find studio IDs that match the filter in aliases
-    const matchingAliases = await prisma.stashStudioAlias.findMany({
-      where: {
-        alias: { contains: filter }
+    const lowerFilter = filter.toLowerCase();
+    
+    // Get all studios with their aliases
+    const allStudios = await prisma.stashStudio.findMany({
+      include: {
+        scenes: {
+          select: {
+            id: true,
+            title: true
+          }
+        },
+        aliases: {
+          select: {
+            alias: true
+          }
+        }
       },
-      select: {
-        studioId: true
-      }
+      orderBy: { name: 'asc' }
     });
     
-    const aliasStudioIds = matchingAliases.map(a => a.studioId);
+    // Filter studios case-insensitively in JavaScript
+    const filteredStudios = allStudios.filter(studio => {
+      // Check if name matches
+      if (studio.name.toLowerCase().includes(lowerFilter)) {
+        return true;
+      }
+      // Check if any alias matches
+      return studio.aliases.some(a => a.alias.toLowerCase().includes(lowerFilter));
+    });
     
-    // Search in name OR in studios that have matching aliases
-    if (aliasStudioIds.length > 0) {
-      searchFilter = {
-        OR: [
-          { name: { contains: filter } },
-          { id: { in: aliasStudioIds } }
-        ]
-      };
-    } else {
-      searchFilter = {
-        name: { contains: filter }
-      };
-    }
+    const total = filteredStudios.length;
+    
+    // Apply pagination in JavaScript
+    const paginatedStudios = filteredStudios.slice(skip, skip + take);
+    
+    // Transform data to match expected format
+    const transformedStudios = paginatedStudios.map(studio => ({
+      id: studio.id,
+      name: studio.name,
+      url: studio.url,
+      image: studio.image,
+      scene_count: studio.scenes.length,
+      aliases: studio.aliases.map(a => a.alias)
+    }));
+    
+    return res.json({
+      success: true,
+      data: transformedStudios,
+      total: total,
+      page: parseInt(page),
+      perPage: parseInt(perPage)
+    });
   }
   
-  // Get total count
-  const total = await prisma.stashStudio.count({
-    where: searchFilter
-  });
+  // No filter - use database queries for efficiency
+  const total = await prisma.stashStudio.count();
   
   // Get studios with scene counts using the relationship
   const studios = await prisma.stashStudio.findMany({
-    where: searchFilter,
     include: {
       scenes: {
         select: {

@@ -9,7 +9,31 @@ performerByURL:
     url:
       - japanboyz.com/models
     scraper: performerScraper    
+sceneByFragment:
+  - action: scrapeXPath
+    performerSearchScraper: sceneSearchScraper
+    titleSearchScraper: sceneSearchScraper
+    # Search for scenes by performers
+    # {performer} will be replaced with performer name (spaces converted to underscores, lowercased)
+    performerSearchUrl: https://guybone.com/model/{performer}
+    # Search for scenes by title - direct scene URL
+    # {title} will be replaced with scene title (spaces converted to underscores, lowercased)
+    studioSearchUrl: https://www.japanboyz.com/search.php?query={title}    
+    spacesConvertTo: +
 xPathScrapers:
+  sceneSearchScraper:
+    # Search for scenes on a performer's page
+    scene:
+      Title: //div[@class="title text-truncate"]/a/text()
+      URL:
+        selector: //div[@class="title text-truncate"]/a/@href
+      Image:
+        selector: //div[@class="v-img text-center h-100"]/a/img/@src
+    pagination:
+      # Check for "no results" error message to stop pagination
+      noResultsSelector: //div[@class="p-3"]/text()
+      # Maximum number of pages to scrape (safety limit)
+      maxPages: 10
   sceneScraper:
     scene:
       Title: //div[@class="movie-player"]/h2[@class="text-left"]
@@ -28,13 +52,11 @@ xPathScrapers:
                   with: ""  
       Performers:
         Name:
-          selector: //div[@class="row model-list p-2"]/div/div/div/div/a
+          selector: //div[@class="m-info"]/div/a/text()
+        URL: 
+          selector: //div[@class="m-info"]/div/a/@href
       Image:
-        selector: //div[@class="jw-preview jw-reset"]/@style
-        postProcess:
-          - replace: 
-              - regex: "background-image:\\s*url\\([\"']?([^\"']+)[\"']?\\)"
-                with: $1
+        selector: //meta[@property="og:image"]/@content
   performerScraper:
     performer:
       Name: //div[@class="model-info d-flex flex-column"]/h2[@class="text-left"]/text()
