@@ -57,7 +57,7 @@ export default function PerformerDetail() {
   const [showMergeModal, setShowMergeModal] = useState(false);
   const [mergeDirection, setMergeDirection] = useState('into'); // 'into' or 'from'
   const [searchQuery, setSearchQuery] = useState('');
-  const [searchResults, setSearchResults] = useState([]);
+  const [mergeSearchResults, setMergeSearchResults] = useState([]);
   const [isSearching, setIsSearching] = useState(false);
   const [selectedPerformers, setSelectedPerformers] = useState([]);
   const [isMerging, setIsMerging] = useState(false);
@@ -68,6 +68,18 @@ export default function PerformerDetail() {
   const [scenesToMerge, setScenesToMerge] = useState([]);
   const [mergeSceneData, setMergeSceneData] = useState(null);
   const [isMergingScenes, setIsMergingScenes] = useState(false);
+
+  // Stash-box scraping state
+  const [availableScrapers, setAvailableScrapers] = useState([]);
+  const [showStashBoxSearchModal, setShowStashBoxSearchModal] = useState(false);
+  const [stashBoxSearchType, setStashBoxSearchType] = useState('fragment');
+  const [stashBoxSearchQuery, setStashBoxSearchQuery] = useState('');
+  const [selectedStashBoxScraper, setSelectedStashBoxScraper] = useState(null);
+  const [searchResults, setSearchResults] = useState(null);
+  const [showScrapeModal, setShowScrapeModal] = useState(false);
+  const [showScrapeReviewModal, setShowScrapeReviewModal] = useState(false);
+  const [scrapeData, setScrapeData] = useState(null);
+  const [isApplyingScrape, setIsApplyingScrape] = useState(false);
 
   // Fetch Stash URL from settings
   useEffect(() => {
@@ -317,7 +329,7 @@ export default function PerformerDetail() {
   // Handle search for performers
   const handleSearchPerformers = async (query) => {
     if (!query || query.trim().length < 2) {
-      setSearchResults([]);
+      setMergeSearchResults([]);
       return;
     }
 
@@ -331,7 +343,7 @@ export default function PerformerDetail() {
       if (result.success) {
         // Filter out current performer from results
         const filtered = result.data.filter(p => p.id !== id);
-        setSearchResults(filtered);
+        setMergeSearchResults(filtered);
       }
     } catch (error) {
       console.error('Failed to search performers:', error);
@@ -357,7 +369,7 @@ export default function PerformerDetail() {
     setMergeDirection(direction);
     setShowMergeModal(true);
     setSearchQuery('');
-    setSearchResults([]);
+    setMergeSearchResults([]);
     setSelectedPerformers([]);
   };
 
@@ -433,6 +445,177 @@ export default function PerformerDetail() {
       alert(`Failed to merge performers: ${error.message}`);
     } finally {
       setIsMerging(false);
+    }
+  };
+
+  // Fetch available stash-box scrapers
+  useEffect(() => {
+    const fetchAvailableScrapers = async () => {
+      if (!id) return;
+      
+      try {
+        const response = await fetch(`${config.apiBaseUrl}/api/stash/performers/${id}/available-scrapers`);
+        const result = await response.json();
+        
+        if (result.success && result.data.scrapers) {
+          console.log('📦 Available stash-box scrapers:', result.data.scrapers);
+          setAvailableScrapers(result.data.scrapers);
+        }
+      } catch (error) {
+        console.error('Failed to fetch available scrapers:', error);
+      }
+    };
+    
+    fetchAvailableScrapers();
+  }, [id]);
+
+  // Handle stash-box scraper button click
+  const handleStashBoxScraperClick = (scraper) => {
+    console.log('📦 Opening stash-box search modal for:', scraper);
+    setSelectedStashBoxScraper(scraper);
+    setStashBoxSearchType('fragment');
+    setStashBoxSearchQuery('');
+    setShowStashBoxSearchModal(true);
+  };
+
+  // Handle stash-box search
+  const handleStashBoxSearch = async () => {
+    if (!selectedStashBoxScraper) return;
+    
+    console.log('🔍 Searching stash-box:', {
+      endpoint: selectedStashBoxScraper.endpoint,
+      searchType: stashBoxSearchType,
+      query: stashBoxSearchQuery
+    });
+    
+    setShowStashBoxSearchModal(false);
+    setShowScrapeModal(true);
+    
+    try {
+      const response = await fetch(`${config.apiBaseUrl}/api/stash/performers/${id}/scrape-stashbox`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          endpoint: selectedStashBoxScraper.endpoint,
+          searchType: stashBoxSearchType === 'query' ? 'query' : null,
+          query: stashBoxSearchType === 'query' ? (stashBoxSearchQuery || data?.name) : null
+        })
+      });
+      
+      const result = await response.json();
+      console.log('📦 Stash-box search results:', result);
+      
+      if (result.success) {
+        setSearchResults({
+          performers: result.data.results,
+          isPerformerSearch: true,
+          isStashBox: true,
+          searchType: result.data.searchType,
+          source: 'stash-box'
+        });
+      }
+    } catch (error) {
+      console.error('Stash-box search failed:', error);
+      alert(`Search failed: ${error.message}`);
+      setShowScrapeModal(false);
+    }
+  };
+
+  // Handle selecting a stash-box result
+  const handleSelectStashBoxResult = async (performer) => {
+    console.log('📦 Selected stash-box performer:', performer);
+    
+    setSearchResults(null);
+    
+    try {
+      const response = await fetch(`${config.apiBaseUrl}/api/stash/performers/${id}/scrape-stashbox-result`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ scraped: performer })
+      });
+      
+      const result = await response.json();
+      console.log('📦 Processed stash-box result:', result);
+      
+      if (result.success) {
+        setScrapeData(result.data);
+        setShowScrapeReviewModal(true);
+      }
+    } catch (error) {
+      console.error('Failed to process stash-box result:', error);
+      alert(`Failed to process result: ${error.message}`);
+    }
+  };
+
+  // Apply scraped performer data
+  const handleApplyScrape = async () => {
+    if (!scrapeData?.scraped) return;
+    
+    const confirmMessage = `Apply scraped data for "${scrapeData.scraped.name}"?\n\nThis will update the performer's information in your database and Stash.`;
+    if (!window.confirm(confirmMessage)) return;
+    
+    setIsApplyingScrape(true);
+    
+    try {
+      // Build update payload from scraped data
+      const updateData = {};
+      
+      // Only include fields that have values
+      if (scrapeData.scraped.name) updateData.name = scrapeData.scraped.name;
+      if (scrapeData.scraped.disambiguation) updateData.disambiguation = scrapeData.scraped.disambiguation;
+      if (scrapeData.scraped.aliases) updateData.alias = scrapeData.scraped.aliases.join(', ');
+      if (scrapeData.scraped.gender) updateData.gender = scrapeData.scraped.gender;
+      if (scrapeData.scraped.birthdate) updateData.birthdate = scrapeData.scraped.birthdate;
+      if (scrapeData.scraped.death_date) updateData.death_date = scrapeData.scraped.death_date;
+      if (scrapeData.scraped.ethnicity) updateData.ethnicity = scrapeData.scraped.ethnicity;
+      if (scrapeData.scraped.country) updateData.country = scrapeData.scraped.country;
+      if (scrapeData.scraped.eye_color) updateData.eye_color = scrapeData.scraped.eye_color;
+      if (scrapeData.scraped.hair_color) updateData.hair_color = scrapeData.scraped.hair_color;
+      if (scrapeData.scraped.height) updateData.height = scrapeData.scraped.height;
+      if (scrapeData.scraped.weight) updateData.weight = scrapeData.scraped.weight;
+      if (scrapeData.scraped.measurements) updateData.measurements = scrapeData.scraped.measurements;
+      if (scrapeData.scraped.fake_tits) updateData.fake_tits = scrapeData.scraped.fake_tits;
+      if (scrapeData.scraped.penis_length) updateData.penis_length = scrapeData.scraped.penis_length;
+      if (scrapeData.scraped.circumcised) updateData.circumcised = scrapeData.scraped.circumcised;
+      if (scrapeData.scraped.career_length) updateData.career_length = scrapeData.scraped.career_length;
+      if (scrapeData.scraped.tattoos) updateData.tattoos = scrapeData.scraped.tattoos;
+      if (scrapeData.scraped.piercings) updateData.piercings = scrapeData.scraped.piercings;
+      if (scrapeData.scraped.details) updateData.details = scrapeData.scraped.details;
+      if (scrapeData.scraped.url) updateData.url = scrapeData.scraped.url;
+      if (scrapeData.scraped.twitter) updateData.twitter = scrapeData.scraped.twitter;
+      if (scrapeData.scraped.instagram) updateData.instagram = scrapeData.scraped.instagram;
+      
+      // Add matched tags
+      if (scrapeData.matched?.tags?.length > 0) {
+        updateData.tagIds = scrapeData.matched.tags.map(t => t.id);
+      }
+      
+      console.log('📤 Applying scraped data:', updateData);
+      
+      const response = await fetch(`${config.apiBaseUrl}/api/stash/performers/${id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(updateData)
+      });
+      
+      const result = await response.json();
+      
+      if (!result.success) {
+        throw new Error(result.error || 'Failed to apply scraped data');
+      }
+      
+      alert('✅ Scraped data applied successfully!');
+      setShowScrapeReviewModal(false);
+      setScrapeData(null);
+      
+      // Reload page to show updated data
+      window.location.reload();
+      
+    } catch (error) {
+      console.error('Failed to apply scraped data:', error);
+      alert(`Failed to apply scraped data: ${error.message}`);
+    } finally {
+      setIsApplyingScrape(false);
     }
   };
 
@@ -735,6 +918,42 @@ export default function PerformerDetail() {
                     <span style={{ fontSize: '16px' }}>⬇️</span>
                     <span>Merge From</span>
                   </button>
+                  
+                  {/* Stash-box scraper buttons */}
+                  {availableScrapers.filter(s => s.isStashBox).map((scraper, idx) => (
+                    <button
+                      key={idx}
+                      onClick={() => handleStashBoxScraperClick(scraper)}
+                      title={`Scrape from ${scraper.name}`}
+                      style={{
+                        background: 'linear-gradient(135deg, #06b6d4 0%, #0891b2 100%)',
+                        border: '2px solid #06b6d4',
+                        color: 'white',
+                        padding: '8px 16px',
+                        borderRadius: '8px',
+                        fontSize: '13px',
+                        fontWeight: '600',
+                        cursor: 'pointer',
+                        transition: 'all 0.2s ease',
+                        boxShadow: '0 2px 4px rgba(6, 182, 212, 0.2)',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '6px'
+                      }}
+                      onMouseOver={(e) => {
+                        e.currentTarget.style.transform = 'translateY(-2px)';
+                        e.currentTarget.style.boxShadow = '0 4px 8px rgba(6, 182, 212, 0.3)';
+                      }}
+                      onMouseOut={(e) => {
+                        e.currentTarget.style.transform = 'translateY(0)';
+                        e.currentTarget.style.boxShadow = '0 2px 4px rgba(6, 182, 212, 0.2)';
+                      }}
+                    >
+                      <span style={{ fontSize: '16px' }}>📦</span>
+                      <span>{scraper.name}</span>
+                    </button>
+                  ))}
+                  
                   {stashUrl && (
                     <a 
                       href={`${stashUrl}/performers/${data.id}`} 
@@ -1205,13 +1424,13 @@ export default function PerformerDetail() {
                 </div>
               )}
 
-              {!isSearching && searchQuery.length >= 2 && searchResults.length === 0 && (
+              {!isSearching && searchQuery.length >= 2 && mergeSearchResults.length === 0 && (
                 <div style={{ textAlign: 'center', padding: '2rem', color: '#9ca3af' }}>
                   No performers found
                 </div>
               )}
 
-              {!isSearching && searchResults.length > 0 && (
+              {!isSearching && mergeSearchResults.length > 0 && (
                 <div style={{ 
                   maxHeight: '300px', 
                   overflowY: 'auto', 
@@ -1219,7 +1438,7 @@ export default function PerformerDetail() {
                   borderRadius: '6px',
                   marginBottom: '1rem'
                 }}>
-                  {searchResults.map((performer) => {
+                  {mergeSearchResults.map((performer) => {
                     const isSelected = selectedPerformers.find(p => p.id === performer.id);
                     const canSelectMore = mergeDirection === 'from' || selectedPerformers.length === 0;
                     
@@ -1817,6 +2036,318 @@ export default function PerformerDetail() {
                 className="btn-cancel" 
                 onClick={() => setShowSceneMergeModal(false)}
                 disabled={isMergingScenes}
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Stash-Box Search Modal */}
+      {showStashBoxSearchModal && (
+        <div className="modal-overlay" onClick={() => setShowStashBoxSearchModal(false)}>
+          <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '600px' }}>
+            <h3>📦 {selectedStashBoxScraper?.name} Search</h3>
+            
+            <div style={{ marginBottom: '1.5rem' }}>
+              <label style={{ display: 'block', fontWeight: '600', marginBottom: '12px' }}>
+                Search Type:
+              </label>
+              
+              <div style={{ marginBottom: '16px' }}>
+                <label style={{ display: 'block', marginBottom: '8px', cursor: 'pointer' }}>
+                  <input
+                    type="radio"
+                    value="fragment"
+                    checked={stashBoxSearchType === 'fragment'}
+                    onChange={(e) => {
+                      setStashBoxSearchType(e.target.value);
+                      setStashBoxSearchQuery('');
+                    }}
+                    style={{ marginRight: '8px' }}
+                  />
+                  <span style={{ fontWeight: '500' }}>Fragment Scrape (Recommended)</span>
+                  <p style={{ marginLeft: '24px', fontSize: '13px', color: '#6b7280', marginTop: '4px' }}>
+                    Stash will use the existing performer's data to find matches automatically
+                  </p>
+                </label>
+                
+                <label style={{ display: 'block', marginBottom: '8px', cursor: 'pointer' }}>
+                  <input
+                    type="radio"
+                    value="query"
+                    checked={stashBoxSearchType === 'query'}
+                    onChange={(e) => {
+                      setStashBoxSearchType(e.target.value);
+                    }}
+                    style={{ marginRight: '8px' }}
+                  />
+                  <span style={{ fontWeight: '500' }}>Search by Name</span>
+                  <p style={{ marginLeft: '24px', fontSize: '13px', color: '#6b7280', marginTop: '4px' }}>
+                    Manually search for the performer by name
+                  </p>
+                </label>
+              </div>
+              
+              {stashBoxSearchType === 'query' && (
+                <div style={{ marginTop: '12px' }}>
+                  <label style={{ display: 'block', marginBottom: '6px', fontWeight: '500' }}>
+                    Search Query:
+                  </label>
+                  <input
+                    type="text"
+                    value={stashBoxSearchQuery}
+                    onChange={(e) => setStashBoxSearchQuery(e.target.value)}
+                    placeholder={data?.name || 'Enter performer name...'}
+                    style={{
+                      width: '100%',
+                      padding: '8px',
+                      border: '1px solid #d1d5db',
+                      borderRadius: '6px',
+                      fontSize: '14px'
+                    }}
+                  />
+                </div>
+              )}
+            </div>
+            
+            <div className="modal-actions">
+              <button 
+                className="btn-accept" 
+                onClick={handleStashBoxSearch}
+              >
+                🔍 Search
+              </button>
+              <button 
+                className="btn-cancel" 
+                onClick={() => setShowStashBoxSearchModal(false)}
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Search Results Modal */}
+      {showScrapeModal && searchResults && (
+        <div className="modal-overlay" onClick={() => setShowScrapeModal(false)}>
+          <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '900px', maxHeight: '90vh', overflow: 'auto' }}>
+            <h3>📦 Stash-Box Search Results</h3>
+            
+            {searchResults.performers && searchResults.performers.length > 0 ? (
+              <div style={{ marginTop: '1rem' }}>
+                <p style={{ marginBottom: '1rem', color: '#666' }}>
+                  Found {searchResults.performers.length} result(s). Click a performer to view details.
+                </p>
+                
+                <div style={{ display: 'grid', gap: '12px' }}>
+                  {searchResults.performers.map((performer, idx) => (
+                    <div
+                      key={idx}
+                      onClick={() => handleSelectStashBoxResult(performer)}
+                      style={{
+                        padding: '16px',
+                        border: '2px solid #e5e7eb',
+                        borderRadius: '8px',
+                        cursor: 'pointer',
+                        transition: 'all 0.2s',
+                        background: 'white'
+                      }}
+                      onMouseOver={(e) => {
+                        e.currentTarget.style.borderColor = '#06b6d4';
+                        e.currentTarget.style.background = '#f0f9ff';
+                      }}
+                      onMouseOut={(e) => {
+                        e.currentTarget.style.borderColor = '#e5e7eb';
+                        e.currentTarget.style.background = 'white';
+                      }}
+                    >
+                      <div style={{ display: 'flex', gap: '16px' }}>
+                        {performer.images && performer.images.length > 0 && (
+                          <img
+                            src={performer.images[0]}
+                            alt={performer.name}
+                            style={{
+                              width: '80px',
+                              height: '80px',
+                              objectFit: 'cover',
+                              borderRadius: '6px'
+                            }}
+                            onError={(e) => e.target.style.display = 'none'}
+                          />
+                        )}
+                        <div style={{ flex: 1 }}>
+                          <h4 style={{ margin: '0 0 8px 0', fontSize: '16px', fontWeight: '600' }}>
+                            {performer.name}
+                          </h4>
+                          
+                          {performer.disambiguation && (
+                            <div style={{ fontSize: '13px', color: '#6b7280', marginBottom: '4px' }}>
+                              ({performer.disambiguation})
+                            </div>
+                          )}
+                          
+                          {performer.aliases && performer.aliases.length > 0 && (
+                            <div style={{ fontSize: '13px', color: '#6b7280', marginBottom: '4px' }}>
+                              Aliases: {performer.aliases.join(', ')}
+                            </div>
+                          )}
+                          
+                          <div style={{ fontSize: '12px', color: '#9ca3af', display: 'flex', gap: '12px', flexWrap: 'wrap', marginTop: '8px' }}>
+                            {performer.birthdate && <span>🎂 {performer.birthdate}</span>}
+                            {performer.gender && <span>⚧ {performer.gender}</span>}
+                            {performer.country && <span>🌍 {performer.country}</span>}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ) : (
+              <div style={{ padding: '3rem', textAlign: 'center', color: '#9ca3af' }}>
+                No results found
+              </div>
+            )}
+            
+            <div className="modal-actions" style={{ marginTop: '1.5rem' }}>
+              <button 
+                className="btn-cancel" 
+                onClick={() => setShowScrapeModal(false)}
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Scrape Review Modal */}
+      {showScrapeReviewModal && scrapeData && (
+        <div className="modal-overlay" onClick={() => !isApplyingScrape && setShowScrapeReviewModal(false)}>
+          <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '800px', maxHeight: '90vh', overflow: 'auto' }}>
+            <h3>📦 Review Scraped Data</h3>
+            
+            {scrapeData.scraped ? (
+              <div style={{ marginTop: '1rem' }}>
+                <p style={{ marginBottom: '1rem', color: '#666', fontSize: '14px' }}>
+                  <strong>Source:</strong> {scrapeData.source || 'Stash-Box'}
+                  {scrapeData.sourceUrl && (
+                    <> • <a href={scrapeData.sourceUrl} target="_blank" rel="noopener noreferrer" style={{ color: '#06b6d4' }}>View Source</a></>
+                  )}
+                </p>
+                
+                <div style={{ background: '#f9fafb', padding: '16px', borderRadius: '8px', marginBottom: '16px' }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', fontSize: '14px' }}>
+                    {scrapeData.scraped.name && (
+                      <div>
+                        <strong>Name:</strong> {scrapeData.scraped.name}
+                      </div>
+                    )}
+                    {scrapeData.scraped.disambiguation && (
+                      <div>
+                        <strong>Disambiguation:</strong> {scrapeData.scraped.disambiguation}
+                      </div>
+                    )}
+                    {scrapeData.scraped.aliases && scrapeData.scraped.aliases.length > 0 && (
+                      <div style={{ gridColumn: '1 / -1' }}>
+                        <strong>Aliases:</strong> {scrapeData.scraped.aliases.join(', ')}
+                      </div>
+                    )}
+                    {scrapeData.scraped.gender && (
+                      <div>
+                        <strong>Gender:</strong> {scrapeData.scraped.gender}
+                      </div>
+                    )}
+                    {scrapeData.scraped.birthdate && (
+                      <div>
+                        <strong>Birthdate:</strong> {scrapeData.scraped.birthdate}
+                      </div>
+                    )}
+                    {scrapeData.scraped.ethnicity && (
+                      <div>
+                        <strong>Ethnicity:</strong> {scrapeData.scraped.ethnicity}
+                      </div>
+                    )}
+                    {scrapeData.scraped.country && (
+                      <div>
+                        <strong>Country:</strong> {scrapeData.scraped.country}
+                      </div>
+                    )}
+                    {scrapeData.scraped.height && (
+                      <div>
+                        <strong>Height:</strong> {scrapeData.scraped.height}
+                      </div>
+                    )}
+                    {scrapeData.scraped.weight && (
+                      <div>
+                        <strong>Weight:</strong> {scrapeData.scraped.weight}
+                      </div>
+                    )}
+                  </div>
+                </div>
+                
+                {scrapeData.matched?.tags && scrapeData.matched.tags.length > 0 && (
+                  <div style={{ marginBottom: '12px' }}>
+                    <strong style={{ display: 'block', marginBottom: '8px' }}>✅ Matched Tags:</strong>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+                      {scrapeData.matched.tags.map(tag => (
+                        <span key={tag.id} style={{
+                          padding: '4px 10px',
+                          background: '#dbeafe',
+                          borderRadius: '12px',
+                          fontSize: '12px',
+                          color: '#1e40af'
+                        }}>
+                          {tag.name}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                
+                {scrapeData.unmatched?.tags && scrapeData.unmatched.tags.length > 0 && (
+                  <div style={{ marginBottom: '12px' }}>
+                    <strong style={{ display: 'block', marginBottom: '8px' }}>❌ Unmatched Tags:</strong>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+                      {scrapeData.unmatched.tags.map((tag, idx) => (
+                        <span key={idx} style={{
+                          padding: '4px 10px',
+                          background: '#fee2e2',
+                          borderRadius: '12px',
+                          fontSize: '12px',
+                          color: '#991b1b'
+                        }}>
+                          {tag}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div style={{ padding: '3rem', textAlign: 'center', color: '#9ca3af' }}>
+                <p style={{ fontSize: '16px', marginBottom: '8px' }}>❌ No Results Found</p>
+                <p style={{ fontSize: '14px' }}>The scraper couldn't find any matching data.</p>
+              </div>
+            )}
+            
+            <div className="modal-actions">
+              {scrapeData.scraped && (
+                <button 
+                  className="btn-accept" 
+                  onClick={handleApplyScrape}
+                  disabled={isApplyingScrape}
+                >
+                  {isApplyingScrape ? '⏳ Applying...' : '✅ Apply Scraped Data'}
+                </button>
+              )}
+              <button 
+                className="btn-cancel" 
+                onClick={() => setShowScrapeReviewModal(false)}
+                disabled={isApplyingScrape}
               >
                 Cancel
               </button>

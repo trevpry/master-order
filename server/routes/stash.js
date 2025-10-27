@@ -5008,6 +5008,9 @@ router.get('/scenes/:id/available-scrapers', asyncHandler(async (req, res) => {
   
   console.log(`🔍 [Available Scrapers] Checking available scrapers for scene: ${id}`);
   
+  // Ensure sync service is initialized
+  await initializeStashSyncService();
+  
   // Fetch scene with URLs and studio info
   const scene = await prisma.stashScene.findUnique({
     where: { id },
@@ -5096,26 +5099,47 @@ router.get('/scenes/:id/available-scrapers', asyncHandler(async (req, res) => {
     }
   }
   
-  // Add stash-box endpoints as fragment scrapers
+  // Add stash-box endpoints as fragment scrapers - ALWAYS show them
   try {
     const stashBoxConfig = await stashSyncService.getConfiguration();
     const stashBoxes = stashBoxConfig?.stashBoxes || [];
     
     console.log(`   - Found ${stashBoxes.length} configured stash-box endpoint(s)`);
     
-    stashBoxes.forEach((box, index) => {
-      const displayName = box.name || `Stash-Box #${index + 1}`;
-      console.log(`   - Adding stash-box: ${displayName} (${box.endpoint})`);
-      
-      availableScrapers.push({
-        name: displayName,
-        type: 'stash-box',
-        endpoint: box.endpoint,
-        supportedScrapes: ['fragment', 'query']
+    if (stashBoxes.length > 0) {
+      stashBoxes.forEach((box, index) => {
+        const displayName = box.name || `Stash-Box #${index + 1}`;
+        console.log(`   - Adding stash-box: ${displayName} (${box.endpoint})`);
+        
+        availableScrapers.push({
+          name: displayName,
+          type: 'stash-box',
+          endpoint: box.endpoint,
+          supportedScrapes: ['fragment', 'query'],
+          configured: true
+        });
       });
-    });
+    } else {
+      // No stash-box endpoints configured - add a placeholder to make feature discoverable
+      console.log(`   - No stash-box endpoints configured, adding unconfigured placeholder`);
+      availableScrapers.push({
+        name: 'Stash-Box (Not Configured)',
+        type: 'stash-box',
+        endpoint: null,
+        supportedScrapes: ['fragment', 'query'],
+        configured: false
+      });
+    }
   } catch (error) {
     console.warn('   - Failed to fetch stash-box configuration:', error.message);
+    // Still add unconfigured placeholder on error
+    availableScrapers.push({
+      name: 'Stash-Box (Not Configured)',
+      type: 'stash-box',
+      endpoint: null,
+      supportedScrapes: ['fragment', 'query'],
+      configured: false
+    });
   }
   
   console.log(`   - Found ${availableScrapers.length} available scraper(s):`, 
@@ -5133,6 +5157,7 @@ router.get('/scenes/:id/available-scrapers', asyncHandler(async (req, res) => {
           endpoint: s.endpoint,
           type: 'stash-box',
           isStashBox: true,
+          configured: s.configured !== false, // Default to true for backwards compatibility
           supportedScrapes: s.supportedScrapes
         };
       }
@@ -8053,6 +8078,236 @@ router.get('/performers/:id', asyncHandler(async (req, res) => {
   return sendSuccess(res, data);
 }));
 
+// GET /api/stash/performers/:id/available-scrapers - Get available stash-box scrapers for a performer
+router.get('/performers/:id/available-scrapers', asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  
+  console.log(`🔍 [Available Scrapers] Checking available scrapers for performer: ${id}`);
+  
+  // Ensure sync service is initialized
+  await initializeStashSyncService();
+  
+  const availableScrapers = [];
+  
+  // Add stash-box endpoints as fragment scrapers - ALWAYS show them
+  try {
+    const stashBoxConfig = await stashSyncService.getConfiguration();
+    const stashBoxes = stashBoxConfig?.stashBoxes || [];
+    
+    console.log(`   - Found ${stashBoxes.length} configured stash-box endpoint(s)`);
+    
+    if (stashBoxes.length > 0) {
+      stashBoxes.forEach((box, index) => {
+        const displayName = box.name || `Stash-Box #${index + 1}`;
+        console.log(`   - Adding stash-box: ${displayName} (${box.endpoint})`);
+        
+        availableScrapers.push({
+          name: displayName,
+          type: 'stash-box',
+          endpoint: box.endpoint,
+          supportedScrapes: ['fragment', 'query'],
+          configured: true
+        });
+      });
+    } else {
+      // No stash-box endpoints configured - add a placeholder to make feature discoverable
+      console.log(`   - No stash-box endpoints configured, adding unconfigured placeholder`);
+      availableScrapers.push({
+        name: 'Stash-Box (Not Configured)',
+        type: 'stash-box',
+        endpoint: null,
+        supportedScrapes: ['fragment', 'query'],
+        configured: false
+      });
+    }
+  } catch (error) {
+    console.warn('   - Failed to fetch stash-box configuration:', error.message);
+    // Still add unconfigured placeholder on error
+    availableScrapers.push({
+      name: 'Stash-Box (Not Configured)',
+      type: 'stash-box',
+      endpoint: null,
+      supportedScrapes: ['fragment', 'query'],
+      configured: false
+    });
+  }
+  
+  console.log(`   - Found ${availableScrapers.length} available scraper(s):`, 
+    availableScrapers.map(s => s.name).join(', '));
+  
+  sendSuccess(res, {
+    performerId: id,
+    scrapers: availableScrapers.map(s => ({
+      name: s.name,
+      siteName: s.name,
+      endpoint: s.endpoint,
+      type: 'stash-box',
+      isStashBox: true,
+      configured: s.configured !== false, // Default to true for backwards compatibility
+      supportedScrapes: s.supportedScrapes
+    }))
+  });
+}));
+
+// POST /api/stash/performers/:id/scrape-stashbox - Scrape performer using stash-box
+router.post('/performers/:id/scrape-stashbox', asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  const { endpoint, searchType, query } = req.body;
+  
+  if (!endpoint) {
+    return sendBadRequest(res, 'Stash-box endpoint is required');
+  }
+  
+  console.log(`🔍 [Stash-Box Scrape] Scraping performer ${id} from ${endpoint}`);
+  console.log(`   - Search type: ${searchType || 'performer_id'}`);
+  if (query) console.log(`   - Search query: ${query}`);
+  
+  // Fetch the performer
+  const performer = await prisma.stashPerformer.findUnique({
+    where: { id }
+  });
+  
+  if (!performer) {
+    return sendNotFound(res, 'Performer not found');
+  }
+  
+  // Ensure sync service is initialized
+  await initializeStashSyncService();
+  
+  try {
+    if (!stashSyncService) {
+      throw new Error('Stash sync service not initialized');
+    }
+    
+    const source = {
+      stash_box_endpoint: endpoint
+    };
+    
+    let input;
+    
+    if (searchType === 'query') {
+      // Search by query string (name)
+      input = { query: query || performer.name };
+      console.log(`   - Using query search: "${input.query}"`);
+    } else {
+      // Default: fragment scrape using performer ID
+      input = { performer_id: id };
+      console.log(`   - Using performer_id: ${id}`);
+    }
+    
+    console.log(`   - Calling scrapeSinglePerformer with source:`, source);
+    console.log(`   - Input:`, input);
+    
+    // Call Stash's scrapeSinglePerformer mutation
+    const scrapedPerformers = await stashSyncService.scrapeSinglePerformer(source, input);
+    
+    console.log(`   - Received ${scrapedPerformers?.length || 0} result(s) from stash-box`);
+    
+    if (!scrapedPerformers || scrapedPerformers.length === 0) {
+      console.log(`   - No results found`);
+      return sendSuccess(res, {
+        results: [],
+        searchType,
+        source: 'stash-box'
+      });
+    }
+    
+    // Log each result
+    scrapedPerformers.forEach((scraped, idx) => {
+      console.log(`   - Result ${idx + 1}: ${scraped.name || 'Unknown'} (${scraped.remote_site_id || 'no ID'})`);
+    });
+    
+    // Return all results for user selection
+    sendSuccess(res, {
+      results: scrapedPerformers,
+      searchType,
+      source: 'stash-box'
+    });
+    
+  } catch (error) {
+    console.error(`   - ❌ Stash-box scraping failed:`, error);
+    return sendServerError(res, `Stash-box scraping failed: ${error.message}`);
+  }
+}));
+
+// POST /api/stash/performers/:id/scrape-stashbox-result - Process selected stash-box performer result
+router.post('/performers/:id/scrape-stashbox-result', asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  const { scraped } = req.body;
+  
+  if (!scraped) {
+    return sendBadRequest(res, 'Scraped performer data is required');
+  }
+  
+  console.log(`🔍 [Process Stash-Box Result] Processing performer ${id}`);
+  console.log(`   - Scraped name: ${scraped.name || 'Unknown'}`);
+  
+  try {
+    // Match tags against local database
+    const matchedTags = [];
+    const unmatchedTags = [];
+    
+    if (scraped.tags && Array.isArray(scraped.tags)) {
+      for (const tagName of scraped.tags) {
+        const tag = await prisma.stashTag.findFirst({
+          where: { name: { equals: tagName, mode: 'insensitive' } }
+        });
+        
+        if (tag) {
+          matchedTags.push({ id: tag.id, name: tag.name });
+        } else {
+          unmatchedTags.push(tagName);
+        }
+      }
+    }
+    
+    console.log(`   - Matched ${matchedTags.length} tag(s), ${unmatchedTags.length} unmatched`);
+    
+    // Return processed data for review
+    sendSuccess(res, {
+      scraped: {
+        name: scraped.name,
+        disambiguation: scraped.disambiguation,
+        aliases: scraped.aliases,
+        gender: scraped.gender,
+        birthdate: scraped.birthdate,
+        death_date: scraped.death_date,
+        ethnicity: scraped.ethnicity,
+        country: scraped.country,
+        eye_color: scraped.eye_color,
+        hair_color: scraped.hair_color,
+        height: scraped.height,
+        weight: scraped.weight,
+        measurements: scraped.measurements,
+        fake_tits: scraped.fake_tits,
+        penis_length: scraped.penis_length,
+        circumcised: scraped.circumcised,
+        career_length: scraped.career_length,
+        tattoos: scraped.tattoos,
+        piercings: scraped.piercings,
+        details: scraped.details,
+        url: scraped.url,
+        twitter: scraped.twitter,
+        instagram: scraped.instagram,
+        images: scraped.images,
+        remote_site_id: scraped.remote_site_id
+      },
+      matched: {
+        tags: matchedTags
+      },
+      unmatched: {
+        tags: unmatchedTags
+      },
+      sourceUrl: scraped.url,
+      source: 'stash-box'
+    });
+    
+  } catch (error) {
+    console.error(`   - ❌ Failed to process stash-box result:`, error);
+    return sendServerError(res, `Failed to process result: ${error.message}`);
+  }
+}));
+
 // GET /studios - Stash studios endpoint
 router.get('/studios', asyncHandler(async (req, res) => {
   const { page = 1, perPage = 20, filter = '' } = req.query;
@@ -10807,8 +11062,21 @@ router.post('/scenes/merge', asyncHandler(async (req, res) => {
             scene_index: sg.sceneIndex
           })).filter(m => m.group_id);
 
+      // CRITICAL: Determine which scene to update in Stash
+      // If the file we're keeping is from a different scene than the primary,
+      // we need to update the kept file's scene in Stash (since Stash ties scenes to files)
+      // and then delete the others including the original primary scene
+      const stashSceneIdToUpdate = mergedData.keepFileFromSceneId;
+      const isKeepingDifferentFile = primaryScene.id !== mergedData.keepFileFromSceneId;
+      
+      if (isKeepingDifferentFile) {
+        console.log(`⚠️ IMPORTANT: Keeping file from scene ${mergedData.keepFileFromSceneId}, not primary scene ${primaryScene.id}`);
+        console.log(`   Will update scene ${stashSceneIdToUpdate} in Stash (the one with the kept file)`);
+        console.log(`   Will delete scene ${primaryScene.id} in Stash (original primary, but file not kept)`);
+      }
+
       const stashInput = {
-        id: primaryScene.id,
+        id: stashSceneIdToUpdate, // Use the scene with the kept file
         title: freshScene.title,
         date: freshScene.date,
         details: freshScene.details,
@@ -10819,7 +11087,7 @@ router.post('/scenes/merge', asyncHandler(async (req, res) => {
         movies: moviesInput
       };
 
-      console.log(`📤 Updating scene ${primaryScene.id} in Stash with:`, {
+      console.log(`📤 Updating scene ${stashSceneIdToUpdate} in Stash with:`, {
         title: stashInput.title,
         performers: stashInput.performer_ids?.length || 0,
         tags: stashInput.tag_ids?.length || 0,
@@ -10841,9 +11109,17 @@ router.post('/scenes/merge', asyncHandler(async (req, res) => {
       }
 
       // Delete merged scenes from Stash (including their files if not the kept file)
-      console.log(`🗑️ Deleting ${mergeScenes.length} merged scene(s) from Stash...`);
+      // IMPORTANT: If we kept a file from a different scene, we need to also delete the original primary scene
+      const scenesToDeleteFromStash = isKeepingDifferentFile 
+        ? [...mergeScenes, primaryScene] // Include primary scene since we're using a different file
+        : mergeScenes; // Only delete merge scenes, primary scene was updated
       
-      for (const scene of mergeScenes) {
+      console.log(`🗑️ Deleting ${scenesToDeleteFromStash.length} scene(s) from Stash...`);
+      if (isKeepingDifferentFile) {
+        console.log(`   ⚠️ Including original primary scene ${primaryScene.id} in deletion (kept different file)`);
+      }
+      
+      for (const scene of scenesToDeleteFromStash) {
         console.log(`   Processing scene ${scene.id} (title: ${scene.title})`);
         
         if (!scene.id) {
@@ -10875,15 +11151,11 @@ router.post('/scenes/merge', asyncHandler(async (req, res) => {
       }
       
       console.log(`✅ Finished deleting merged scenes from Stash`);
-
-      // If the primary scene has a different file than the one we're keeping, 
-      // we need to handle this specially since we're not deleting the primary scene
-      if (primaryScene.id !== mergedData.keepFileFromSceneId) {
-        console.log(`⚠️ Primary scene file will be replaced with kept file from scene ${mergedData.keepFileFromSceneId}`);
-        console.log(`   Old file: ${primaryScene.path}`);
-        console.log(`   New file: ${keepFileScene.path}`);
-        // Note: The primary scene now has the kept file's path/info, so it points to the correct file
-        // The old primary scene file will remain on disk but won't be referenced in Stash
+      
+      if (isKeepingDifferentFile) {
+        console.log(`✅ Successfully replaced primary scene ${primaryScene.id} with kept file's scene ${stashSceneIdToUpdate}`);
+        console.log(`   Old primary file: ${primaryScene.path}`);
+        console.log(`   Kept file: ${keepFileScene.path}`);
       }
 
     } catch (stashError) {

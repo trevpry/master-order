@@ -1944,6 +1944,11 @@ export default function SceneDetail() {
                 key={`${scraper.name}-${index}`}
                 onClick={() => {
                   if (isStashBox) {
+                    // Check if stash-box is configured
+                    if (scraper.configured === false) {
+                      alert('Stash-Box is not configured in your Stash instance.\n\nTo use Stash-Box scrapers:\n1. Open Stash Settings\n2. Go to Metadata Providers → Stash-Box\n3. Add a Stash-Box endpoint (e.g., https://stashdb.org/graphql)\n4. Save and return here to use the scraper');
+                      return;
+                    }
                     // For stash-box, show search options modal with auto-populated data
                     setSelectedStashBoxScraper(scraper);
                     setStashBoxSearchType('fragment'); // Default to fragment scraping
