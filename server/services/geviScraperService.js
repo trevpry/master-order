@@ -1511,13 +1511,61 @@ class GeviScraperService {
       }
       
       // Wait for any UI updates
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      await new Promise(resolve => setTimeout(resolve, 2000)); // Increased from 1s to 2s
       
-      // Find and fill the search input
+      // Find and fill the search input - try multiple selectors
       console.log(`   - Entering search term: "${title}"`);
-      const searchInputSelector = 'input[type="search"], input[name="q"], input.search-input, #searchInput';
-      await page.waitForSelector(searchInputSelector, { timeout: 10000 });
-      await page.type(searchInputSelector, title);
+      
+      // Expanded list of possible search input selectors
+      const searchInputSelectors = [
+        'input[type="search"]',
+        'input[name="q"]',
+        'input[name="search"]',
+        'input[placeholder*="Search" i]',
+        'input[placeholder*="search" i]',
+        'input.search-input',
+        'input.search',
+        '#searchInput',
+        '#search',
+        'input[aria-label*="search" i]',
+        'input[type="text"]' // Fallback to any text input
+      ];
+      
+      let searchInput = null;
+      let usedSelector = null;
+      
+      for (const selector of searchInputSelectors) {
+        try {
+          await page.waitForSelector(selector, { timeout: 2000, visible: true });
+          searchInput = await page.$(selector);
+          if (searchInput) {
+            usedSelector = selector;
+            console.log(`   - ✓ Found search input: ${selector}`);
+            break;
+          }
+        } catch (e) {
+          // Try next selector
+        }
+      }
+      
+      if (!searchInput) {
+        // Debug: List all inputs on the page
+        const inputInfo = await page.evaluate(() => {
+          const inputs = Array.from(document.querySelectorAll('input'));
+          return inputs.map(inp => ({
+            type: inp.type,
+            name: inp.name,
+            id: inp.id,
+            class: inp.className,
+            placeholder: inp.placeholder,
+            visible: inp.offsetParent !== null
+          }));
+        });
+        console.log(`   - Available inputs on page:`, inputInfo);
+        throw new Error('No search input found on page');
+      }
+      
+      await page.type(usedSelector, title);
       
       // Submit the search (press Enter or click search button)
       await page.keyboard.press('Enter');

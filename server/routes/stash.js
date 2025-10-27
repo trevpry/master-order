@@ -100,6 +100,43 @@ function createStashRouter(io) {
     }
   }
 
+  /**
+   * Retry a database operation with exponential backoff
+   * Handles SQLite timeout/lock errors by retrying with increasing delays
+   * @param {Function} operation - Async function to retry
+   * @param {number} maxRetries - Maximum number of retry attempts (default: 3)
+   * @param {number} baseDelay - Base delay in ms (default: 100)
+   * @returns {Promise} Result of the operation
+   */
+  async function retryDatabaseOperation(operation, maxRetries = 3, baseDelay = 100) {
+    let lastError;
+    
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      try {
+        return await operation();
+      } catch (error) {
+        lastError = error;
+        
+        // Check if it's a timeout or lock error
+        const isRetryableError = 
+          error.message?.includes('timeout') ||
+          error.message?.includes('database is locked') ||
+          error.message?.includes('SQLITE_BUSY');
+        
+        if (!isRetryableError || attempt === maxRetries) {
+          throw error; // Not retryable or out of retries
+        }
+        
+        // Exponential backoff: 100ms, 200ms, 400ms, etc.
+        const delay = baseDelay * Math.pow(2, attempt);
+        console.log(`   ⏳ Database busy, retrying in ${delay}ms (attempt ${attempt + 1}/${maxRetries})...`);
+        await new Promise(resolve => setTimeout(resolve, delay));
+      }
+    }
+    
+    throw lastError;
+  }
+
 // Utility function for generating optimized clips
 function generateOptimizedClips(sceneId, sceneDuration, clipDuration = 60) {
   const clipsToCreate = [];
@@ -5851,7 +5888,7 @@ router.put('/scenes/:id', asyncHandler(async (req, res) => {
   
   const updateData = {};
   if (title !== undefined) updateData.title = title;
-  if (studio !== undefined) updateData.studio = studio;
+  // Note: 'studio' is reference data only, not stored directly - use studioId instead
   
   // Handle studio: if studio name provided but no studioId, look up or create studio
   let resolvedStudioId = studioId;
@@ -5931,28 +5968,32 @@ router.put('/scenes/:id', asyncHandler(async (req, res) => {
     console.log(`   - Appending ${episodeUrls.length} new episode URL(s) to ${existingUrls.length} existing (total: ${allUrls.length})`);
   }
   
-  // Update local database
-  const updatedScene = await prisma.stashScene.update({
-    where: { id },
-    data: updateData
+  // Update local database with retry logic for SQLite timeouts
+  const updatedScene = await retryDatabaseOperation(async () => {
+    return await prisma.stashScene.update({
+      where: { id },
+      data: updateData
+    });
   });
   
   // Handle performer relationships if provided
   if (performerIds !== undefined && Array.isArray(performerIds)) {
     // Add new performer relationships (upsert to avoid duplicates)
     for (const performerId of performerIds) {
-      await prisma.stashScenePerformer.upsert({
-        where: {
-          sceneId_performerId: {
+      await retryDatabaseOperation(async () => {
+        return await prisma.stashScenePerformer.upsert({
+          where: {
+            sceneId_performerId: {
+              sceneId: id,
+              performerId: performerId
+            }
+          },
+          create: {
             sceneId: id,
             performerId: performerId
-          }
-        },
-        create: {
-          sceneId: id,
-          performerId: performerId
-        },
-        update: {} // No update needed, just ensure it exists
+          },
+          update: {} // No update needed, just ensure it exists
+        });
       });
     }
     
@@ -11054,13 +11095,13 @@ router.post('/scenes/merge', asyncHandler(async (req, res) => {
       // Use mergedData.groups if available (includes all collected groups), otherwise fall back to fresh data
       const moviesInput = (mergedData.groups && mergedData.groups.length > 0)
         ? mergedData.groups.map(g => ({
-            group_id: g.id,
+            movie_id: g.id,
             scene_index: g.sceneIndex
-          })).filter(m => m.group_id) // Only include if group has ID
+          })).filter(m => m.movie_id) // Only include if movie has ID
         : freshScene.groups.map(sg => ({
-            group_id: sg.group.id,
+            movie_id: sg.group.id,
             scene_index: sg.sceneIndex
-          })).filter(m => m.group_id);
+          })).filter(m => m.movie_id);
 
       // CRITICAL: Determine which scene to update in Stash
       // If the file we're keeping is from a different scene than the primary,
