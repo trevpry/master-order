@@ -161,6 +161,24 @@ export default function StudioDetail() {
       
       setScenesToMerge(scenes);
       
+      // Collect all unique groups/movies from all scenes
+      const allGroups = [];
+      const groupIds = new Set();
+      scenes.forEach(scene => {
+        if (scene.groups && Array.isArray(scene.groups)) {
+          scene.groups.forEach(g => {
+            if (!groupIds.has(g.group.id)) {
+              groupIds.add(g.group.id);
+              allGroups.push({
+                id: g.group.id,
+                name: g.group.name,
+                sceneIndex: g.sceneIndex
+              });
+            }
+          });
+        }
+      });
+      
       // Initialize merge data with first scene's data as default
       setMergeSceneData({
         title: scenes[0].title || '',
@@ -171,6 +189,7 @@ export default function StudioDetail() {
         studio: scenes[0].studio || null,
         performers: scenes[0].performers || [],
         tags: scenes[0].tags || [],
+        groups: allGroups, // Include all groups from all scenes
         episodeUrls: scenes[0].episodeUrls || [],
         geviUrl: scenes[0].geviUrl || '',
         // File information - which file to keep
@@ -1229,6 +1248,52 @@ export default function StudioDetail() {
                   })()}
                 </div>
               </div>
+
+              {/* Groups/Movies - Combine all unique groups */}
+              {(() => {
+                const allGroups = new Map();
+                scenesToMerge.forEach(scene => {
+                  if (scene.groups && Array.isArray(scene.groups)) {
+                    scene.groups.forEach(g => {
+                      if (!allGroups.has(g.group.id)) {
+                        allGroups.set(g.group.id, {
+                          id: g.group.id,
+                          name: g.group.name,
+                          sceneIndex: g.sceneIndex
+                        });
+                      }
+                    });
+                  }
+                });
+                
+                if (allGroups.size > 0) {
+                  return (
+                    <div>
+                      <label style={{ display: 'block', fontWeight: '600', marginBottom: '8px' }}>
+                        Movies/Compilations (all will be combined):
+                      </label>
+                      <div style={{ padding: '8px', border: '1px solid #d1d5db', borderRadius: '6px', backgroundColor: '#f9fafb' }}>
+                        {Array.from(allGroups.values()).map(group => (
+                          <span
+                            key={group.id}
+                            style={{
+                              display: 'inline-block',
+                              padding: '4px 8px',
+                              margin: '2px',
+                              backgroundColor: '#fef3c7',
+                              borderRadius: '4px',
+                              fontSize: '12px'
+                            }}
+                          >
+                            🎬 {group.name}{group.sceneIndex ? ` (#${group.sceneIndex})` : ''}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                }
+                return null;
+              })()}
 
               {/* URLs - Combine all unique URLs */}
               <div>

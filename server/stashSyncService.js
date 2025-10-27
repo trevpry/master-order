@@ -2226,6 +2226,102 @@ class StashSyncService {
     }
   }
 
+  /**
+   * Find duplicate scenes using Stash's built-in phash duplicate checker
+   * @param {number} distance - Phash distance threshold (0=exact, 1-4=increasingly permissive)
+   * @param {number} durationDiff - Maximum duration difference in seconds (-1=ignore duration)
+   * @returns {Promise<Array>} Array of duplicate scene groups
+   */
+  async findDuplicateScenes(distance = 0, durationDiff = -1) {
+    try {
+      await this.ensureConfigLoaded();
+      
+      console.log(`🔍 Finding duplicate scenes (distance: ${distance}, durationDiff: ${durationDiff})`);
+      
+      const query = `
+        query FindDuplicateScenes($distance: Int, $duration_diff: Float) {
+          findDuplicateScenes(distance: $distance, duration_diff: $duration_diff) {
+            id
+            title
+            date
+            rating100
+            organized
+            o_counter
+            files {
+              id
+              path
+              size
+              duration
+              width
+              height
+              video_codec
+              frame_rate
+              bit_rate
+              fingerprints {
+                type
+                value
+              }
+            }
+            studio {
+              id
+              name
+            }
+            performers {
+              id
+              name
+            }
+            tags {
+              id
+              name
+            }
+            paths {
+              screenshot
+              preview
+              stream
+            }
+          }
+        }
+      `;
+      
+      const variables = {
+        distance,
+        duration_diff: durationDiff
+      };
+      
+      const result = await this.makeGraphQLRequest(query, variables);
+      const duplicateGroups = result.findDuplicateScenes || [];
+      
+      console.log(`✅ Found ${duplicateGroups.length} duplicate scene groups`);
+      
+      // Log details about each group for debugging
+      duplicateGroups.forEach((group, idx) => {
+        console.log(`   Group ${idx + 1}: ${group.length} scenes`);
+        group.forEach((scene) => {
+          const phash = scene.files?.[0]?.fingerprints?.find(fp => fp.type === 'phash')?.value;
+          const duration = scene.files?.[0]?.duration;
+          console.log(`     - Scene ${scene.id}: "${scene.title || 'Untitled'}" (phash: ${phash?.substring(0, 16)}..., duration: ${duration}s)`);
+        });
+      });
+      
+      return {
+        success: true,
+        groups: duplicateGroups,
+        totalGroups: duplicateGroups.length,
+        totalScenes: duplicateGroups.reduce((sum, group) => sum + group.length, 0)
+      };
+      
+    } catch (error) {
+      console.error(`❌ Error finding duplicate scenes:`, error);
+      return {
+        success: false,
+        error: error.message,
+        groups: [],
+        totalGroups: 0,
+        totalScenes: 0
+      };
+    }
+  }
+
   async syncGroups(page = 1, perPage = 250) {
     console.log(`Syncing groups/movies (page ${page})...`);
     
@@ -2956,6 +3052,44 @@ class StashSyncService {
       return false;
     } catch (error) {
       console.error('❌ [reloadScrapers] Error reloading scrapers:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get Stash configuration including stash-box endpoints
+   * @returns {Promise<Object>} Configuration object
+   */
+  async getConfiguration() {
+    console.log('🔍 [getConfiguration] Fetching Stash configuration...');
+
+    const query = `
+      query Configuration {
+        configuration {
+          general {
+            stashBoxes {
+              name
+              endpoint
+            }
+          }
+        }
+      }
+    `;
+
+    try {
+      const result = await this.makeGraphQLRequest(query);
+      
+      if (result?.configuration?.general) {
+        const stashBoxCount = result.configuration.general.stashBoxes?.length || 0;
+        console.log(`✅ [getConfiguration] Found ${stashBoxCount} stash-box endpoint(s)`);
+        return {
+          stashBoxes: result.configuration.general.stashBoxes || []
+        };
+      }
+      
+      return { stashBoxes: [] };
+    } catch (error) {
+      console.error('❌ [getConfiguration] Error fetching configuration:', error);
       throw error;
     }
   }

@@ -5096,20 +5096,208 @@ router.get('/scenes/:id/available-scrapers', asyncHandler(async (req, res) => {
     }
   }
   
+  // Add stash-box endpoints as fragment scrapers
+  try {
+    const stashBoxConfig = await stashSyncService.getConfiguration();
+    const stashBoxes = stashBoxConfig?.stashBoxes || [];
+    
+    console.log(`   - Found ${stashBoxes.length} configured stash-box endpoint(s)`);
+    
+    stashBoxes.forEach((box, index) => {
+      const displayName = box.name || `Stash-Box #${index + 1}`;
+      console.log(`   - Adding stash-box: ${displayName} (${box.endpoint})`);
+      
+      availableScrapers.push({
+        name: displayName,
+        type: 'stash-box',
+        endpoint: box.endpoint,
+        supportedScrapes: ['fragment', 'query']
+      });
+    });
+  } catch (error) {
+    console.warn('   - Failed to fetch stash-box configuration:', error.message);
+  }
+  
   console.log(`   - Found ${availableScrapers.length} available scraper(s):`, 
     availableScrapers.map(s => s.name).join(', '));
   
   sendSuccess(res, {
     sceneId: id,
     urls,
-    scrapers: availableScrapers.map(s => ({
-      name: s.name,
-      siteName: s.scraper.siteName,
-      url: s.url,
-      type: s.scraper.constructor.name,
-      isStashNative: s.scraper.constructor.name === 'StashNativeScraperService'
-    }))
+    scrapers: availableScrapers.map(s => {
+      // Check if this is a stash-box scraper (has type and endpoint but no scraper object)
+      if (s.type === 'stash-box') {
+        return {
+          name: s.name,
+          siteName: s.name, // Use name as siteName for consistency
+          endpoint: s.endpoint,
+          type: 'stash-box',
+          isStashBox: true,
+          supportedScrapes: s.supportedScrapes
+        };
+      }
+      
+      // Otherwise it's a YAML scraper (has scraper object)
+      return {
+        name: s.name,
+        siteName: s.scraper.siteName,
+        url: s.url,
+        type: s.scraper.constructor.name,
+        isStashNative: s.scraper.constructor.name === 'StashNativeScraperService'
+      };
+    })
   });
+}));
+
+// POST /api/stash/scenes/:id/scrape-stashbox - Scrape scene using stash-box fragment scraping
+router.post('/scenes/:id/scrape-stashbox', asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  const { endpoint, searchType, query } = req.body;
+  
+  if (!endpoint) {
+    return sendBadRequest(res, 'Stash-box endpoint is required');
+  }
+  
+  console.log(`🔍 [Stash-Box Scrape] Scraping scene ${id} from ${endpoint}`);
+  console.log(`   - Search type: ${searchType || 'scene_id'}`);
+  if (query) console.log(`   - Search query: ${query}`);
+  
+  // Fetch the scene with all its data
+  const scene = await prisma.stashScene.findUnique({
+    where: { id },
+    include: {
+      studioObject: true,
+      performers: {
+        include: {
+          performer: true
+        }
+      },
+      tags: {
+        include: {
+          tag: true
+        }
+      }
+    }
+  });
+  
+  if (!scene) {
+    return sendNotFound(res, 'Scene not found');
+  }
+  
+  // Ensure sync service is initialized
+  await initializeStashSyncService();
+  
+  try {
+    // Use the legacy sync service (not optimized) as it has scrapeSingleScene method
+    if (!stashSyncService) {
+      throw new Error('Stash sync service not initialized');
+    }
+    
+    const source = {
+      stash_box_endpoint: endpoint
+    };
+    
+    let input;
+    
+    // Determine input based on search type
+    if (searchType === 'title') {
+      // Search by title
+      const searchQuery = query || scene.title;
+      input = { query: searchQuery };
+      console.log(`📤 Searching by title: "${searchQuery}"`);
+    } else if (searchType === 'performers') {
+      // Search by performer names
+      const performerNames = scene.performers.map(sp => sp.performer.name);
+      const searchQuery = query || performerNames.join(' ');
+      input = { query: searchQuery };
+      console.log(`📤 Searching by performers: "${searchQuery}"`);
+    } else {
+      // Default: fragment scraping using scene_id
+      input = { scene_id: scene.id.toString() };
+      console.log('📤 Sending fragment scrape request for scene:', {
+        id: scene.id,
+        title: scene.title,
+        studio: scene.studioObject?.name
+      });
+    }
+    
+    const scrapedScenes = await stashSyncService.scrapeSingleScene(input, source);
+    
+    if (!scrapedScenes || scrapedScenes.length === 0) {
+      console.log('❌ No results found from stash-box');
+      return sendSuccess(res, {
+        scraped: null,
+        matched: { performers: [], tags: [], studio: null },
+        unmatched: { performers: [], tags: [] }
+      });
+    }
+    
+    // Use the first result (best match)
+    const scraped = scrapedScenes[0];
+    
+    console.log(`✅ Found ${scrapedScenes.length} result(s), using first match:`, scraped.title);
+    
+    // Match performers and tags
+    const allPerformers = await prisma.stashPerformer.findMany();
+    const allTags = await prisma.stashTag.findMany();
+    
+    const matchedPerformers = [];
+    const unmatchedPerformers = [];
+    
+    if (scraped.performers) {
+      for (const scrapedPerformer of scraped.performers) {
+        const match = allPerformers.find(p => p.name === scrapedPerformer.name);
+        if (match) {
+          matchedPerformers.push(match);
+        } else {
+          unmatchedPerformers.push(scrapedPerformer);
+        }
+      }
+    }
+    
+    const matchedTags = [];
+    const unmatchedTags = [];
+    
+    if (scraped.tags) {
+      for (const scrapedTag of scraped.tags) {
+        const match = allTags.find(t => t.name === scrapedTag.name);
+        if (match) {
+          matchedTags.push(match);
+        } else {
+          unmatchedTags.push(scrapedTag);
+        }
+      }
+    }
+    
+    // Match studio
+    let matchedStudio = null;
+    if (scraped.studio) {
+      const studios = await prisma.stashStudio.findMany();
+      matchedStudio = studios.find(s => s.name === scraped.studio.name) || null;
+    }
+    
+    console.log(`   - Matched: ${matchedPerformers.length} performers, ${matchedTags.length} tags`);
+    console.log(`   - Unmatched: ${unmatchedPerformers.length} performers, ${unmatchedTags.length} tags`);
+    
+    sendSuccess(res, {
+      scraped,
+      matched: {
+        performers: matchedPerformers,
+        tags: matchedTags,
+        studio: matchedStudio
+      },
+      unmatched: {
+        performers: unmatchedPerformers,
+        tags: unmatchedTags
+      },
+      sourceUrl: scraped.url || scraped.urls?.[0],
+      source: 'stash-box'
+    });
+    
+  } catch (error) {
+    console.error('❌ [Stash-Box Scrape] Error:', error);
+    sendServerError(res, error.message || 'Failed to scrape from stash-box');
+  }
 }));
 
 // POST /api/stash/scrapers/reload - Reload all YAML scraper configurations
@@ -10592,11 +10780,17 @@ router.post('/scenes/merge', asyncHandler(async (req, res) => {
         }
       `;
 
-      // Prepare movies input with scene numbers
-      const moviesInput = freshScene.groups.map(sg => ({
-        group_id: sg.group.id,
-        scene_index: sg.sceneIndex
-      })).filter(m => m.group_id); // Only include if group has ID
+      // Prepare movies input with scene numbers from merged data
+      // Use mergedData.groups if available (includes all collected groups), otherwise fall back to fresh data
+      const moviesInput = (mergedData.groups && mergedData.groups.length > 0)
+        ? mergedData.groups.map(g => ({
+            group_id: g.id,
+            scene_index: g.sceneIndex
+          })).filter(m => m.group_id) // Only include if group has ID
+        : freshScene.groups.map(sg => ({
+            group_id: sg.group.id,
+            scene_index: sg.sceneIndex
+          })).filter(m => m.group_id);
 
       const stashInput = {
         id: primaryScene.id,
@@ -10701,6 +10895,150 @@ router.post('/scenes/merge', asyncHandler(async (req, res) => {
     console.error('Failed to merge scenes:', error);
     return sendServerError(res, `Failed to merge scenes: ${error.message}`);
   }
+}));
+
+// POST /api/stash/scenes/duplicates - Find duplicate scenes using Stash's perceptual hash comparison
+router.post('/scenes/duplicates', asyncHandler(async (req, res) => {
+  const { distance = 0, durationDiff = -1 } = req.body;
+  
+  console.log(`🔍 [Find Duplicates] Searching for duplicate scenes`);
+  console.log(`   - Distance (phash): ${distance}`);
+  console.log(`   - Duration diff: ${durationDiff}s`);
+  
+  // Initialize Stash sync service if not already initialized
+  if (!stashSyncService && !stashSyncServiceOptimized) {
+    console.log('   - Initializing Stash sync service...');
+    await initializeStashSyncService();
+  }
+  
+  const syncService = getActiveSyncService();
+  
+  if (!syncService) {
+    console.error('   - ❌ Sync service not available');
+    return sendServerError(res, 'Stash sync service not initialized');
+  }
+  
+  // Call the findDuplicateScenes method - returns object with success, groups, etc.
+  const result = await syncService.findDuplicateScenes(distance, durationDiff);
+  
+  if (!result.success) {
+    console.error(`   - ❌ Error from service: ${result.error}`);
+    return sendServerError(res, result.error || 'Failed to find duplicate scenes');
+  }
+  
+  let duplicateGroups = result.groups || [];
+  
+  // Filter out dismissed duplicate groups
+  const dismissedGroups = await prisma.stashDismissedDuplicateGroup.findMany();
+  const dismissedSceneIdSets = dismissedGroups.map(d => {
+    const sceneIds = JSON.parse(d.sceneIds);
+    return new Set(sceneIds);
+  });
+  
+  // Filter groups by checking if the group's scene IDs match any dismissed group
+  const filteredGroups = duplicateGroups.filter(group => {
+    const groupSceneIds = group.map(scene => scene.id).sort();
+    
+    // Check if this group matches any dismissed group
+    const isDismissed = dismissedSceneIdSets.some(dismissedSet => {
+      if (dismissedSet.size !== groupSceneIds.length) return false;
+      return groupSceneIds.every(id => dismissedSet.has(id));
+    });
+    
+    return !isDismissed;
+  });
+  
+  const filteredCount = duplicateGroups.length - filteredGroups.length;
+  if (filteredCount > 0) {
+    console.log(`   - 🙈 Filtered out ${filteredCount} dismissed group(s)`);
+  }
+  
+  duplicateGroups = filteredGroups;
+  
+  if (duplicateGroups.length === 0) {
+    console.log(`   - No duplicate scenes found (after filtering dismissed groups)`);
+    return sendSuccess(res, {
+      groups: [],
+      totalGroups: 0,
+      totalScenes: 0,
+      parameters: { distance, durationDiff }
+    });
+  }
+  
+  console.log(`   - ✅ Found ${duplicateGroups.length} group(s) of duplicates`);
+  console.log(`   - Total scenes in duplicate groups: ${duplicateGroups.reduce((sum, group) => sum + group.length, 0)}`);
+  
+  // Log some stats about each group
+  duplicateGroups.forEach((group, idx) => {
+    console.log(`   - Group ${idx + 1}: ${group.length} scenes`);
+    group.forEach((scene, sceneIdx) => {
+      const fileInfo = scene.files?.[0];
+      const resolution = fileInfo ? `${fileInfo.width}x${fileInfo.height}` : 'unknown';
+      const size = fileInfo ? `${(fileInfo.size / 1024 / 1024 / 1024).toFixed(2)}GB` : 'unknown';
+      console.log(`     ${sceneIdx + 1}. ${scene.title || 'Untitled'} (${resolution}, ${size})`);
+    });
+  });
+  
+  const totalScenes = duplicateGroups.reduce((sum, group) => sum + group.length, 0);
+  
+  sendSuccess(res, {
+    groups: duplicateGroups,
+    totalGroups: duplicateGroups.length,
+    totalScenes: totalScenes,
+    parameters: { distance, durationDiff }
+  });
+}));
+
+// POST /api/stash/scenes/duplicates/dismiss - Mark a duplicate group as dismissed
+router.post('/scenes/duplicates/dismiss', asyncHandler(async (req, res) => {
+  const { sceneIds } = req.body;
+  
+  if (!sceneIds || !Array.isArray(sceneIds) || sceneIds.length < 2) {
+    return sendBadRequest(res, 'Scene IDs array with at least 2 scenes is required');
+  }
+  
+  // Sort scene IDs for consistency (so same group is always identified the same way)
+  const sortedSceneIds = [...sceneIds].sort();
+  const sceneIdsJson = JSON.stringify(sortedSceneIds);
+  
+  console.log(`🙈 Dismissing duplicate group with ${sceneIds.length} scenes`);
+  
+  // Upsert to handle case where it's already dismissed
+  const dismissed = await prisma.stashDismissedDuplicateGroup.upsert({
+    where: { sceneIds: sceneIdsJson },
+    update: { dismissedAt: new Date() },
+    create: { sceneIds: sceneIdsJson }
+  });
+  
+  sendSuccess(res, { dismissed: true, id: dismissed.id });
+}));
+
+// DELETE /api/stash/scenes/duplicates/dismiss/:id - Un-dismiss a duplicate group
+router.delete('/scenes/duplicates/dismiss/:id', asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  
+  await prisma.stashDismissedDuplicateGroup.delete({
+    where: { id: parseInt(id) }
+  });
+  
+  console.log(`👁️ Un-dismissed duplicate group ${id}`);
+  
+  sendSuccess(res, { undismissed: true });
+}));
+
+// GET /api/stash/scenes/duplicates/dismissed - Get all dismissed duplicate groups
+router.get('/scenes/duplicates/dismissed', asyncHandler(async (req, res) => {
+  const dismissed = await prisma.stashDismissedDuplicateGroup.findMany({
+    orderBy: { dismissedAt: 'desc' }
+  });
+  
+  sendSuccess(res, { 
+    dismissed: dismissed.map(d => ({
+      id: d.id,
+      sceneIds: JSON.parse(d.sceneIds),
+      dismissedAt: d.dismissedAt
+    }))
+  });
 }));
 
   // Mount scene-performer metadata routes (mounted at router root, routes handle their own paths)

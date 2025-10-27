@@ -382,6 +382,23 @@ class StashSyncServiceOptimized {
         for (const scene of scenes) {
           // Extract file information from the files array
           const primaryFile = scene.files && scene.files.length > 0 ? scene.files[0] : null;
+          
+          // DEBUG: Log file metadata to verify it's being received from Stash
+          if (primaryFile) {
+            console.log(`📹 [OPTIMIZED] Scene ${scene.id} "${scene.title}" file metadata:`, {
+              size: primaryFile.size,
+              width: primaryFile.width,
+              height: primaryFile.height,
+              video_codec: primaryFile.video_codec,
+              audio_codec: primaryFile.audio_codec,
+              frame_rate: primaryFile.frame_rate,
+              bit_rate: primaryFile.bit_rate,
+              path: primaryFile.path
+            });
+          } else {
+            console.log(`⚠️ [OPTIMIZED] Scene ${scene.id} "${scene.title}" has no file data`);
+          }
+          
           const osHash = primaryFile?.fingerprints?.find(fp => fp.type === 'oshash')?.value || null;
           const checksum = primaryFile?.fingerprints?.find(fp => fp.type === 'md5')?.value || null;
           
@@ -2776,6 +2793,102 @@ class StashSyncServiceOptimized {
       return {
         success: false,
         error: error.message
+      };
+    }
+  }
+
+  /**
+   * Find duplicate scenes in Stash based on perceptual hash (phash) similarity
+   * @param {number} distance - Hamming distance for phash comparison (0=exact, 4=high accuracy, 8=medium, 16=low)
+   * @param {number} durationDiff - Maximum duration difference in seconds (-1 to disable)
+   * @returns {Promise<Object>} Object with groups array, totalGroups, totalScenes
+   */
+  async findDuplicateScenes(distance = 0, durationDiff = -1) {
+    try {
+      await this.ensureConfigLoaded();
+      
+      console.log(`🔍 Finding duplicate scenes (distance: ${distance}, durationDiff: ${durationDiff})`);
+      
+      const query = `
+        query FindDuplicateScenes($distance: Int, $duration_diff: Float) {
+          findDuplicateScenes(distance: $distance, duration_diff: $duration_diff) {
+            id
+            title
+            date
+            rating100
+            organized
+            o_counter
+            files {
+              id
+              path
+              size
+              duration
+              width
+              height
+              video_codec
+              frame_rate
+              bit_rate
+              fingerprints {
+                type
+                value
+              }
+            }
+            studio {
+              id
+              name
+            }
+            performers {
+              id
+              name
+            }
+            tags {
+              id
+              name
+            }
+            paths {
+              screenshot
+              preview
+              stream
+            }
+          }
+        }
+      `;
+      
+      const variables = {
+        distance,
+        duration_diff: durationDiff
+      };
+      
+      const result = await this.makeGraphQLRequestWithRetry(query, variables);
+      const duplicateGroups = result.findDuplicateScenes || [];
+      
+      console.log(`✅ Found ${duplicateGroups.length} duplicate scene groups`);
+      
+      // Log details about each group for debugging
+      duplicateGroups.forEach((group, idx) => {
+        console.log(`   Group ${idx + 1}: ${group.length} scenes`);
+        group.forEach((scene) => {
+          const phash = scene.files?.[0]?.fingerprints?.find(fp => fp.type === 'phash')?.value;
+          const duration = scene.files?.[0]?.duration;
+          console.log(`     - Scene ${scene.id}: "${scene.title || 'Untitled'}" (phash: ${phash?.substring(0, 16)}..., duration: ${duration}s)`);
+        });
+      });
+      
+      return {
+        success: true,
+        groups: duplicateGroups,
+        totalGroups: duplicateGroups.length,
+        totalScenes: duplicateGroups.reduce((sum, group) => sum + group.length, 0)
+      };
+      
+    } catch (error) {
+      console.error(`❌ Error finding duplicate scenes:`, error);
+      return {
+        success: false,
+        error: error.message,
+        groups: [],
+        totalGroups: 0,
+        totalScenes: 0
       };
     }
   }

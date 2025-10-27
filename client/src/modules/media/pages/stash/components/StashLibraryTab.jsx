@@ -46,7 +46,8 @@ const StashLibraryTab = ({
     performers: '👤 Performers',
     studios: '🏢 Studios',
     tags: '🏷️ Tags',
-    clips: '🎞️ Clips'
+    clips: '🎞️ Clips',
+    duplicates: '🔍 Duplicates'
   };
 
   return (
@@ -68,8 +69,8 @@ const StashLibraryTab = ({
             );
           }
           
-          // Scenes, Groups, Studios, Tags, and Clips should navigate to their dedicated pages
-          if (key === 'scenes' || key === 'groups' || key === 'studios' || key === 'tags' || key === 'clips') {
+          // Scenes, Groups, Studios, Tags, Clips, and Duplicates should navigate to their dedicated pages
+          if (key === 'scenes' || key === 'groups' || key === 'studios' || key === 'tags' || key === 'clips' || key === 'duplicates') {
             return (
               <Link
                 key={key}
@@ -77,7 +78,7 @@ const StashLibraryTab = ({
                 className="library-nav-tab"
               >
                 {label}
-                {pagination[key]?.total > 0 && (
+                {key !== 'duplicates' && pagination[key]?.total > 0 && (
                   <span className="tab-count">({pagination[key].total})</span>
                 )}
               </Link>

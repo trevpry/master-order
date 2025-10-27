@@ -1211,6 +1211,15 @@ model StashImageTag {
   @@map("StashImageTag")
 }
 
+model StashDismissedDuplicateGroup {
+  id          Int      @id @default(autoincrement())
+  sceneIds    String   // JSON array of sorted scene IDs
+  dismissedAt DateTime @default(now())
+
+  @@unique([sceneIds])
+  @@map("StashDismissedDuplicateGroup")
+}
+
 model PlexPlaylist {
   id               Int                 @id @default(autoincrement())
   ratingKey        String              @unique

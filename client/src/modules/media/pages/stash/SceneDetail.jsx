@@ -48,6 +48,10 @@ export default function SceneDetail() {
   }); // Track which version of each field to use
   const [hoveringPerformer, setHoveringPerformer] = useState(null); // Track which performer is being hovered
   const [showGeviUrlModal, setShowGeviUrlModal] = useState(false);
+  const [showStashBoxSearchModal, setShowStashBoxSearchModal] = useState(false);
+  const [stashBoxSearchType, setStashBoxSearchType] = useState('fragment'); // 'fragment', 'title', 'performers'
+  const [stashBoxSearchQuery, setStashBoxSearchQuery] = useState('');
+  const [selectedStashBoxScraper, setSelectedStashBoxScraper] = useState(null);
   const [geviUrlInput, setGeviUrlInput] = useState('');
   const [isSavingGeviUrl, setIsSavingGeviUrl] = useState(false);
   const [parseStudio, setParseStudio] = useState(true);
@@ -715,7 +719,10 @@ export default function SceneDetail() {
   };
 
   const handleScrapeGevi = async () => {
-    if (!scrapeUrl.trim()) {
+    // Check if this is a stash-box scraper (doesn't need URL)
+    const isStashBox = selectedScraper?.isStashBox || selectedScraper?.type === 'stash-box';
+    
+    if (!isStashBox && !scrapeUrl.trim()) {
       alert(`Please enter a ${selectedScraper ? selectedScraper.siteName : 'GEVI'} URL`);
       return;
     }
@@ -723,23 +730,33 @@ export default function SceneDetail() {
     setIsScraping(true);
 
     try {
-      // Use generic scraper if a specific scraper is selected, otherwise use GEVI
-      const endpoint = selectedScraper 
-        ? `/api/stash/scenes/${id}/scrape-generic`
-        : `/api/stash/scenes/${id}/scrape-gevi`;
+      let endpoint, requestBody;
       
-      const requestBody = selectedScraper
-        ? { 
-            url: scrapeUrl, 
-            scraperName: selectedScraper.siteName,
-            // Include scene number for AEBN if provided
-            ...(selectedScraper.siteName === 'AEBN' && aebnSceneNumber ? { sceneNumber: parseInt(aebnSceneNumber) } : {})
-          }
-        : { url: scrapeUrl };
-
-      console.log(`🔍 Scraping with ${selectedScraper ? selectedScraper.siteName : 'GEVI'}:`, scrapeUrl);
-      if (selectedScraper?.siteName === 'AEBN' && aebnSceneNumber) {
-        console.log(`   - Direct scene number: ${aebnSceneNumber}`);
+      if (isStashBox) {
+        // Stash-box fragment scraping - uses scene's existing metadata
+        endpoint = `/api/stash/scenes/${id}/scrape-stashbox`;
+        requestBody = {
+          endpoint: selectedScraper.endpoint
+        };
+        console.log(`📦 Fragment scraping with ${selectedScraper.name} from ${selectedScraper.endpoint}`);
+      } else if (selectedScraper) {
+        // YAML scraper with URL
+        endpoint = `/api/stash/scenes/${id}/scrape-generic`;
+        requestBody = { 
+          url: scrapeUrl, 
+          scraperName: selectedScraper.siteName,
+          // Include scene number for AEBN if provided
+          ...(selectedScraper.siteName === 'AEBN' && aebnSceneNumber ? { sceneNumber: parseInt(aebnSceneNumber) } : {})
+        };
+        console.log(`🔍 Scraping with ${selectedScraper.siteName}:`, scrapeUrl);
+        if (selectedScraper.siteName === 'AEBN' && aebnSceneNumber) {
+          console.log(`   - Direct scene number: ${aebnSceneNumber}`);
+        }
+      } else {
+        // GEVI scraping
+        endpoint = `/api/stash/scenes/${id}/scrape-gevi`;
+        requestBody = { url: scrapeUrl };
+        console.log(`🔍 Scraping with GEVI:`, scrapeUrl);
       }
 
       const response = await fetch(`${config.apiBaseUrl}${endpoint}`, {
@@ -1835,37 +1852,69 @@ export default function SceneDetail() {
 
           {/* Dynamic scraper buttons based on available scrapers */}
           {availableScrapers.map((scraper, index) => {
-            // Extract domain from URL for display
+            // Check if this is a stash-box scraper
+            const isStashBox = scraper.isStashBox || scraper.type === 'stash-box';
+            
+            // Extract domain from URL for display (only for YAML scrapers)
             let urlDisplay = '';
-            try {
-              const urlObj = new URL(scraper.url);
-              urlDisplay = urlObj.hostname.replace('www.', '');
-            } catch (e) {
-              urlDisplay = scraper.url;
+            if (!isStashBox && scraper.url) {
+              try {
+                const urlObj = new URL(scraper.url);
+                urlDisplay = urlObj.hostname.replace('www.', '');
+              } catch (e) {
+                urlDisplay = scraper.url;
+              }
             }
             
             // Determine button style and icon based on scraper type
             const isStashNative = scraper.isStashNative || scraper.type === 'StashNativeScraperService';
-            const buttonStyle = isStashNative 
-              ? { background: '#8b5cf6', borderLeft: '4px solid #a78bfa' } // Purple for Stash native
-              : { background: '#10b981' }; // Green for custom scrapers
-            const icon = isStashNative ? '⚡' : '🌐';
-            const typeLabel = isStashNative ? ' (Stash)' : '';
+            
+            let buttonStyle, icon, typeLabel;
+            
+            if (isStashBox) {
+              // Stash-box scrapers - blue/cyan color
+              buttonStyle = { background: '#06b6d4', borderLeft: '4px solid #22d3ee' };
+              icon = '📦';
+              typeLabel = ' (Stash-Box)';
+            } else if (isStashNative) {
+              // Stash native scrapers - purple
+              buttonStyle = { background: '#8b5cf6', borderLeft: '4px solid #a78bfa' };
+              icon = '⚡';
+              typeLabel = ' (Stash)';
+            } else {
+              // Custom scrapers - green
+              buttonStyle = { background: '#10b981' };
+              icon = '🌐';
+              typeLabel = '';
+            }
             
             return (
               <button
                 key={`${scraper.name}-${index}`}
                 onClick={() => {
-                  setShowScrapeModal(true);
-                  setSelectedScraper(scraper);
-                  setScrapeUrl(scraper.url || '');
+                  if (isStashBox) {
+                    // For stash-box, show search options modal with auto-populated data
+                    setSelectedStashBoxScraper(scraper);
+                    setStashBoxSearchType('fragment'); // Default to fragment scraping
+                    // Don't pre-populate - let it populate when user selects search type
+                    setStashBoxSearchQuery('');
+                    setShowStashBoxSearchModal(true);
+                  } else {
+                    setShowScrapeModal(true);
+                    setSelectedScraper(scraper);
+                    setScrapeUrl(scraper.url || '');
+                  }
                 }}
                 className="scrape-gevi-button"
-                title={`Scrape metadata from ${scraper.url}${isStashNative ? ' using Stash native scraper' : ''}`}
+                title={
+                  isStashBox 
+                    ? `Fragment scrape from ${scraper.name}` 
+                    : `Scrape metadata from ${scraper.url}${isStashNative ? ' using Stash native scraper' : ''}`
+                }
                 style={buttonStyle}
               >
                 {icon} Scrape {scraper.siteName}{typeLabel}
-                {availableScrapers.filter(s => s.siteName === scraper.siteName).length > 1 && (
+                {!isStashBox && availableScrapers.filter(s => s.siteName === scraper.siteName).length > 1 && (
                   <span style={{ fontSize: '11px', opacity: 0.8, marginLeft: '4px' }}>
                     ({urlDisplay})
                   </span>
@@ -3083,6 +3132,205 @@ export default function SceneDetail() {
         </div>
       )}
 
+      {/* Stash-Box Search Options Modal */}
+      {showStashBoxSearchModal && selectedStashBoxScraper && (
+        <div className="modal-overlay" onClick={() => setShowStashBoxSearchModal(false)}>
+          <div className="modal-content scrape-url-modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '600px' }}>
+            <h3>📦 {selectedStashBoxScraper.name} Search Options</h3>
+            
+            <div style={{ marginBottom: '20px' }}>
+              <p style={{ color: '#666', fontSize: '14px', marginBottom: '15px' }}>
+                Choose how to search {selectedStashBoxScraper.name}:
+              </p>
+              
+              {/* Search Type Selection */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginBottom: '20px' }}>
+                <label style={{ 
+                  padding: '12px', 
+                  border: stashBoxSearchType === 'fragment' ? '2px solid #06b6d4' : '1px solid #ddd',
+                  borderRadius: '6px',
+                  cursor: 'pointer',
+                  background: stashBoxSearchType === 'fragment' ? '#ecfeff' : 'white',
+                  transition: 'all 0.2s'
+                }}>
+                  <input
+                    type="radio"
+                    value="fragment"
+                    checked={stashBoxSearchType === 'fragment'}
+                    onChange={(e) => {
+                      setStashBoxSearchType(e.target.value);
+                      setStashBoxSearchQuery(''); // Clear query for fragment scraping
+                    }}
+                    style={{ marginRight: '10px' }}
+                  />
+                  <strong>Fragment Scrape (Recommended)</strong>
+                  <div style={{ fontSize: '13px', color: '#666', marginLeft: '24px', marginTop: '4px' }}>
+                    Uses existing scene data (title, performers, studio) to find matches
+                  </div>
+                </label>
+                
+                <label style={{ 
+                  padding: '12px', 
+                  border: stashBoxSearchType === 'title' ? '2px solid #06b6d4' : '1px solid #ddd',
+                  borderRadius: '6px',
+                  cursor: 'pointer',
+                  background: stashBoxSearchType === 'title' ? '#ecfeff' : 'white',
+                  transition: 'all 0.2s'
+                }}>
+                  <input
+                    type="radio"
+                    value="title"
+                    checked={stashBoxSearchType === 'title'}
+                    onChange={(e) => {
+                      setStashBoxSearchType(e.target.value);
+                      setStashBoxSearchQuery(data?.title || ''); // Auto-populate with scene title
+                    }}
+                    style={{ marginRight: '10px' }}
+                  />
+                  <strong>Search by Title</strong>
+                  <div style={{ fontSize: '13px', color: '#666', marginLeft: '24px', marginTop: '4px' }}>
+                    Search for scenes by title text
+                  </div>
+                </label>
+                
+                <label style={{ 
+                  padding: '12px', 
+                  border: stashBoxSearchType === 'performers' ? '2px solid #06b6d4' : '1px solid #ddd',
+                  borderRadius: '6px',
+                  cursor: 'pointer',
+                  background: stashBoxSearchType === 'performers' ? '#ecfeff' : 'white',
+                  transition: 'all 0.2s'
+                }}>
+                  <input
+                    type="radio"
+                    value="performers"
+                    checked={stashBoxSearchType === 'performers'}
+                    onChange={(e) => {
+                      setStashBoxSearchType(e.target.value);
+                      // Auto-populate with performer names
+                      const performerNames = data?.performers?.map(sp => {
+                        const performer = sp.performer || sp;
+                        return performer.name;
+                      }).join(', ') || '';
+                      setStashBoxSearchQuery(performerNames);
+                    }}
+                    style={{ marginRight: '10px' }}
+                  />
+                  <strong>Search by Performers</strong>
+                  <div style={{ fontSize: '13px', color: '#666', marginLeft: '24px', marginTop: '4px' }}>
+                    Search for scenes by performer names
+                  </div>
+                </label>
+              </div>
+              
+              {/* Query Input for title/performers search */}
+              {stashBoxSearchType !== 'fragment' && (
+                <div style={{ marginBottom: '20px' }}>
+                  <label style={{ display: 'block', marginBottom: '8px', fontWeight: '500' }}>
+                    {stashBoxSearchType === 'title' ? 'Scene Title:' : 'Performer Names (comma-separated):'}
+                  </label>
+                  <input
+                    type="text"
+                    value={stashBoxSearchType === 'title' 
+                      ? (stashBoxSearchQuery || data?.title || '') 
+                      : (stashBoxSearchQuery || data?.performers?.map(sp => {
+                          const performer = sp.performer || sp;
+                          return performer.name;
+                        }).join(', ') || '')
+                    }
+                    onChange={(e) => setStashBoxSearchQuery(e.target.value)}
+                    className="url-input"
+                    placeholder={stashBoxSearchType === 'title' ? 'Enter scene title...' : 'John Doe, Jane Smith'}
+                    disabled={isScraping}
+                    style={{ width: '100%' }}
+                  />
+                </div>
+              )}
+            </div>
+
+            <div className="modal-actions">
+              <button 
+                className="btn-accept" 
+                onClick={async () => {
+                  setIsScraping(true);
+                  setShowStashBoxSearchModal(false);
+                  
+                  try {
+                    const endpoint = `/api/stash/scenes/${id}/scrape-stashbox`;
+                    let requestBody = {
+                      endpoint: selectedStashBoxScraper.endpoint
+                    };
+                    
+                    // Build request based on search type
+                    if (stashBoxSearchType === 'fragment') {
+                      requestBody.searchType = 'scene_id';
+                    } else if (stashBoxSearchType === 'title') {
+                      requestBody.searchType = 'title';
+                      requestBody.query = stashBoxSearchQuery.trim();
+                    } else if (stashBoxSearchType === 'performers') {
+                      requestBody.searchType = 'performers';
+                      requestBody.query = stashBoxSearchQuery.trim();
+                    }
+                    
+                    console.log(`📦 Searching ${selectedStashBoxScraper.name} with type: ${stashBoxSearchType}`);
+                    
+                    const response = await fetch(`${config.apiBaseUrl}${endpoint}`, {
+                      method: 'POST',
+                      headers: {
+                        'Content-Type': 'application/json'
+                      },
+                      body: JSON.stringify(requestBody)
+                    });
+
+                    const result = await response.json();
+
+                    if (result.success) {
+                      const { scraped, matched, unmatched, sourceUrl, source } = result.data;
+                      
+                      setScrapeData({ 
+                        scraped, 
+                        matched, 
+                        unmatched,
+                        sourceUrl: sourceUrl,
+                        source: source
+                      });
+                      
+                      setFieldSelections({
+                        title: 'scraped',
+                        details: 'scraped',
+                        url: 'scraped',
+                        date: 'scraped',
+                        studio: 'scraped',
+                        image: 'scraped'
+                      });
+                      
+                      setShowScrapeReviewModal(true);
+                    } else {
+                      alert(`Scraping failed: ${result.error || 'Unknown error'}`);
+                    }
+                  } catch (error) {
+                    console.error('Error scraping with stash-box:', error);
+                    alert('Failed to scrape scene data');
+                  } finally {
+                    setIsScraping(false);
+                  }
+                }}
+                disabled={isScraping || (stashBoxSearchType !== 'fragment' && !stashBoxSearchQuery.trim())}
+              >
+                {isScraping ? '⏳ Searching...' : '🔍 Search'}
+              </button>
+              <button 
+                className="btn-cancel" 
+                onClick={() => setShowStashBoxSearchModal(false)}
+                disabled={isScraping}
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Scrape Review Modal */}
       {showScrapeReviewModal && scrapeData && (
         <div className="modal-overlay" onClick={() => setShowScrapeReviewModal(false)}>
@@ -3272,7 +3520,7 @@ export default function SceneDetail() {
                         {fieldSelections.studio === 'scraped' && <span style={{ color: '#10b981', fontSize: '18px' }}>✓</span>}
                       </div>
                       <div style={{ fontSize: '14px', color: '#111827' }}>
-                        {scrapeData.scraped.studio}
+                        {typeof scrapeData.scraped.studio === 'object' ? scrapeData.scraped.studio.name : scrapeData.scraped.studio}
                         {scrapeData.matched.studio && (
                           <span style={{ marginLeft: '8px', fontSize: '12px', color: '#10b981' }}>✓ Matched</span>
                         )}

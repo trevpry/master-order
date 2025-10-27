@@ -29,6 +29,7 @@ import StudiosPage from './modules/media/pages/stash/StudiosPage';
 import StudioDetail from './modules/media/pages/stash/StudioDetail';
 import ClipsPage from './modules/media/pages/stash/ClipsPage';
 import ClipDetail from './modules/media/pages/stash/ClipDetail';
+import DuplicateScenesPage from './modules/media/pages/stash/DuplicateScenesPage';
 import Music from './modules/media/pages/music/index';
 import Backgrounds from './modules/media/pages/backgrounds/index';
 import Books from './pages/Books'; // Unified Books component
@@ -76,6 +77,7 @@ function App() {
           <Route path="/media/stash/studios/:id" element={<StudioDetail />} />
           <Route path="/media/stash/clips" element={<ClipsPage />} />
           <Route path="/media/stash/clips/:id" element={<ClipDetail />} />
+          <Route path="/media/stash/duplicates" element={<DuplicateScenesPage />} />
           <Route path="/media/stash/performer/:id" element={<PerformerDetail />} />
           <Route path="/media/stash/performers/:id" element={<PerformerDetail />} />
           <Route path="/media/music" element={<Music />} />
@@ -100,6 +102,7 @@ function App() {
           <Route path="/stash/studios/:id" element={<StudioDetail />} />
           <Route path="/stash/clips" element={<ClipsPage />} />
           <Route path="/stash/clips/:id" element={<ClipDetail />} />
+          <Route path="/stash/duplicates" element={<DuplicateScenesPage />} />
           <Route path="/stash/performer/:id" element={<PerformerDetail />} />
           <Route path="/music" element={<Music />} />
           <Route path="/backgrounds" element={<Backgrounds />} />
