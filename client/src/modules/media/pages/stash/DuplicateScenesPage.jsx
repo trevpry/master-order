@@ -172,14 +172,15 @@ export default function DuplicateScenesPage() {
       const allGroups = [];
       const groupIds = new Set();
       fullScenes.forEach(scene => {
-        if (scene.groups && Array.isArray(scene.groups)) {
+        // Safety check: ensure scene and groups exist
+        if (scene && scene.groups && Array.isArray(scene.groups)) {
           scene.groups.forEach(g => {
-            if (!groupIds.has(g.group.id)) {
+            if (g && g.group && g.group.id && !groupIds.has(g.group.id)) {
               groupIds.add(g.group.id);
               allGroups.push({
                 id: g.group.id,
                 name: g.group.name,
-                sceneIndex: g.sceneIndex
+                sceneIndex: g.sceneIndex || null
               });
             }
           });

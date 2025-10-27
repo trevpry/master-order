@@ -11150,15 +11150,11 @@ router.post('/scenes/merge', asyncHandler(async (req, res) => {
       }
 
       // Delete merged scenes from Stash (including their files if not the kept file)
-      // IMPORTANT: If we kept a file from a different scene, we need to also delete the original primary scene
-      const scenesToDeleteFromStash = isKeepingDifferentFile 
-        ? [...mergeScenes, primaryScene] // Include primary scene since we're using a different file
-        : mergeScenes; // Only delete merge scenes, primary scene was updated
+      // IMPORTANT: Delete ALL scenes EXCEPT the one we just updated (the kept file's scene)
+      const allScenesToConsider = [primaryScene, ...mergeScenes];
+      const scenesToDeleteFromStash = allScenesToConsider.filter(scene => scene.id !== stashSceneIdToUpdate);
       
-      console.log(`🗑️ Deleting ${scenesToDeleteFromStash.length} scene(s) from Stash...`);
-      if (isKeepingDifferentFile) {
-        console.log(`   ⚠️ Including original primary scene ${primaryScene.id} in deletion (kept different file)`);
-      }
+      console.log(`🗑️ Deleting ${scenesToDeleteFromStash.length} scene(s) from Stash (keeping scene ${stashSceneIdToUpdate})...`);
       
       for (const scene of scenesToDeleteFromStash) {
         console.log(`   Processing scene ${scene.id} (title: ${scene.title})`);
@@ -11192,12 +11188,7 @@ router.post('/scenes/merge', asyncHandler(async (req, res) => {
       }
       
       console.log(`✅ Finished deleting merged scenes from Stash`);
-      
-      if (isKeepingDifferentFile) {
-        console.log(`✅ Successfully replaced primary scene ${primaryScene.id} with kept file's scene ${stashSceneIdToUpdate}`);
-        console.log(`   Old primary file: ${primaryScene.path}`);
-        console.log(`   Kept file: ${keepFileScene.path}`);
-      }
+      console.log(`✅ Scene ${stashSceneIdToUpdate} remains in Stash with merged data and kept file`);
 
     } catch (stashError) {
       console.error('❌ CRITICAL: Failed to update Stash:', stashError.message);
