@@ -718,6 +718,57 @@ export default function SceneDetail() {
     }
   };
 
+  const handleSelectStashBoxResult = async (sceneResult) => {
+    try {
+      setIsScraping(true);
+      setSearchResults(null); // Clear search results
+      
+      console.log(`📦 Processing stash-box result:`, sceneResult.title);
+      
+      const response = await fetch(`${config.apiBaseUrl}/api/stash/scenes/${id}/scrape-stashbox-result`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          scraped: sceneResult
+        })
+      });
+
+      const result = await response.json();
+
+      if (result.success) {
+        const { scraped, matched, unmatched, sourceUrl, source } = result.data;
+        
+        setScrapeData({ 
+          scraped, 
+          matched, 
+          unmatched,
+          sourceUrl: sourceUrl,
+          source: source
+        });
+        
+        setFieldSelections({
+          title: 'scraped',
+          details: 'scraped',
+          url: 'scraped',
+          date: 'scraped',
+          studio: 'scraped',
+          image: 'scraped'
+        });
+        
+        setShowScrapeReviewModal(true);
+      } else {
+        alert(`Failed to process result: ${result.error || 'Unknown error'}`);
+      }
+    } catch (error) {
+      console.error('Error processing stash-box result:', error);
+      alert('Failed to process stash-box result');
+    } finally {
+      setIsScraping(false);
+    }
+  };
+
   const handleScrapeGevi = async () => {
     // Check if this is a stash-box scraper (doesn't need URL)
     const isStashBox = selectedScraper?.isStashBox || selectedScraper?.type === 'stash-box';
@@ -2859,6 +2910,12 @@ export default function SceneDetail() {
                         cursor: 'pointer' 
                       }}
                       onClick={() => {
+                        // Handle stash-box results
+                        if (searchResults.isStashBox) {
+                          handleSelectStashBoxResult(scene);
+                          return;
+                        }
+                        
                         // Only pass movieData if this is a movie search (not scene search)
                         if (searchResults.isSceneSearch || searchResults.isSceneSearchByTitle || searchResults.isSmartScrape) {
                           // Scene search - just populate URL for scraping
@@ -3159,7 +3216,7 @@ export default function SceneDetail() {
                     checked={stashBoxSearchType === 'fragment'}
                     onChange={(e) => {
                       setStashBoxSearchType(e.target.value);
-                      setStashBoxSearchQuery(''); // Clear query for fragment scraping
+                      setStashBoxSearchQuery('');
                     }}
                     style={{ marginRight: '10px' }}
                   />
@@ -3183,7 +3240,7 @@ export default function SceneDetail() {
                     checked={stashBoxSearchType === 'title'}
                     onChange={(e) => {
                       setStashBoxSearchType(e.target.value);
-                      setStashBoxSearchQuery(data?.title || ''); // Auto-populate with scene title
+                      // Don't set query here - let the input value handle it
                     }}
                     style={{ marginRight: '10px' }}
                   />
@@ -3207,12 +3264,7 @@ export default function SceneDetail() {
                     checked={stashBoxSearchType === 'performers'}
                     onChange={(e) => {
                       setStashBoxSearchType(e.target.value);
-                      // Auto-populate with performer names
-                      const performerNames = data?.performers?.map(sp => {
-                        const performer = sp.performer || sp;
-                        return performer.name;
-                      }).join(', ') || '';
-                      setStashBoxSearchQuery(performerNames);
+                      // Don't set query here - let the input value handle it
                     }}
                     style={{ marginRight: '10px' }}
                   />
@@ -3254,6 +3306,7 @@ export default function SceneDetail() {
                 onClick={async () => {
                   setIsScraping(true);
                   setShowStashBoxSearchModal(false);
+                  setShowScrapeModal(true); // Keep scrape modal open to show results
                   
                   try {
                     const endpoint = `/api/stash/scenes/${id}/scrape-stashbox`;
@@ -3266,13 +3319,20 @@ export default function SceneDetail() {
                       requestBody.searchType = 'scene_id';
                     } else if (stashBoxSearchType === 'title') {
                       requestBody.searchType = 'title';
-                      requestBody.query = stashBoxSearchQuery.trim();
+                      // Use stashBoxSearchQuery if set, otherwise use scene title
+                      requestBody.query = (stashBoxSearchQuery || data?.title || '').trim();
                     } else if (stashBoxSearchType === 'performers') {
                       requestBody.searchType = 'performers';
-                      requestBody.query = stashBoxSearchQuery.trim();
+                      // Use stashBoxSearchQuery if set, otherwise calculate from scene performers
+                      const defaultQuery = data?.performers?.map(sp => {
+                        const performer = sp.performer || sp;
+                        return performer.name;
+                      }).join(', ') || '';
+                      requestBody.query = (stashBoxSearchQuery || defaultQuery).trim();
                     }
                     
                     console.log(`📦 Searching ${selectedStashBoxScraper.name} with type: ${stashBoxSearchType}`);
+                    console.log(`📦 Query: ${requestBody.query || '(fragment scraping)'}`);
                     
                     const response = await fetch(`${config.apiBaseUrl}${endpoint}`, {
                       method: 'POST',
@@ -3285,26 +3345,18 @@ export default function SceneDetail() {
                     const result = await response.json();
 
                     if (result.success) {
-                      const { scraped, matched, unmatched, sourceUrl, source } = result.data;
+                      const { results, searchType, source } = result.data;
                       
-                      setScrapeData({ 
-                        scraped, 
-                        matched, 
-                        unmatched,
-                        sourceUrl: sourceUrl,
+                      console.log(`📦 Stash-box search returned ${results.length} results`);
+                      
+                      // Show search results for selection
+                      setSearchResults({
+                        scenes: results,
+                        isSceneSearch: true,
+                        isStashBox: true,
+                        searchType: searchType,
                         source: source
                       });
-                      
-                      setFieldSelections({
-                        title: 'scraped',
-                        details: 'scraped',
-                        url: 'scraped',
-                        date: 'scraped',
-                        studio: 'scraped',
-                        image: 'scraped'
-                      });
-                      
-                      setShowScrapeReviewModal(true);
                     } else {
                       alert(`Scraping failed: ${result.error || 'Unknown error'}`);
                     }
@@ -3315,7 +3367,7 @@ export default function SceneDetail() {
                     setIsScraping(false);
                   }
                 }}
-                disabled={isScraping || (stashBoxSearchType !== 'fragment' && !stashBoxSearchQuery.trim())}
+                disabled={isScraping}
               >
                 {isScraping ? '⏳ Searching...' : '🔍 Search'}
               </button>
@@ -3337,14 +3389,37 @@ export default function SceneDetail() {
           <div className="modal-content scrape-review-modal" onClick={(e) => e.stopPropagation()}>
             <h3>📋 Review Scraped Metadata</h3>
             
-            <div className="scrape-results">
-              {/* Source Information */}
-              <div className="scrape-source">
-                <span className="source-label">Scraped from:</span>
-                <a href={scrapeData.scraped.url} target="_blank" rel="noopener noreferrer" className="source-url">
-                  GEVI Episode
-                </a>
+            {!scrapeData.scraped ? (
+              // No results found
+              <div style={{ padding: '2rem', textAlign: 'center' }}>
+                <div style={{ fontSize: '48px', marginBottom: '1rem' }}>🔍</div>
+                <h3 style={{ color: '#666', marginBottom: '0.5rem' }}>No Results Found</h3>
+                <p style={{ color: '#999', marginBottom: '2rem' }}>
+                  No matching scenes were found in {scrapeData.source === 'stash-box' ? 'Stash-Box' : 'the scraper'}.
+                  Try adjusting your search criteria or using a different search method.
+                </p>
+                <button 
+                  className="btn-cancel" 
+                  onClick={() => setShowScrapeReviewModal(false)}
+                  style={{ margin: '0 auto' }}
+                >
+                  Close
+                </button>
               </div>
+            ) : (
+              // Results found - show scrape data
+              <div className="scrape-results">
+                {/* Source Information */}
+                <div className="scrape-source">
+                  <span className="source-label">Scraped from:</span>
+                  {scrapeData.scraped.url ? (
+                    <a href={scrapeData.scraped.url} target="_blank" rel="noopener noreferrer" className="source-url">
+                      {scrapeData.source === 'stash-box' ? 'Stash-Box' : 'GEVI Episode'}
+                    </a>
+                  ) : (
+                    <span className="source-url">{scrapeData.source === 'stash-box' ? 'Stash-Box' : 'Unknown Source'}</span>
+                  )}
+                </div>
 
               {/* Scene Image */}
               {scrapeData.scraped.image && (
@@ -4153,7 +4228,9 @@ export default function SceneDetail() {
                 </div>
               )}
             </div>
+            )}
 
+            {scrapeData.scraped && (
             <div className="modal-actions">
               <button className="btn-accept" onClick={handleAcceptScrape}>
                 ✓ Accept & Update
@@ -4162,6 +4239,7 @@ export default function SceneDetail() {
                 Cancel
               </button>
             </div>
+            )}
           </div>
         </div>
       )}

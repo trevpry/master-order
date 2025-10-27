@@ -604,7 +604,7 @@ export default function DuplicateScenesPage() {
                               </div>
                               
                               <img
-                                src={`${config.apiBaseUrl}/api/stash/image-proxy/${scene.paths.screenshot}`}
+                                src={`${config.apiBaseUrl}/api/stash/image-proxy/${scene.paths.sprite || scene.paths.screenshot}`}
                                 alt={scene.title || 'Scene'}
                                 onClick={() => window.open(`/media/stash/scenes/${scene.id}`, '_blank')}
                                 style={{

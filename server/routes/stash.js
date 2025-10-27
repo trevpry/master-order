@@ -5226,71 +5226,17 @@ router.post('/scenes/:id/scrape-stashbox', asyncHandler(async (req, res) => {
     if (!scrapedScenes || scrapedScenes.length === 0) {
       console.log('❌ No results found from stash-box');
       return sendSuccess(res, {
-        scraped: null,
-        matched: { performers: [], tags: [], studio: null },
-        unmatched: { performers: [], tags: [] }
+        results: [],
+        searchType: searchType || 'scene_id'
       });
     }
     
-    // Use the first result (best match)
-    const scraped = scrapedScenes[0];
+    console.log(`✅ Found ${scrapedScenes.length} result(s) from stash-box`);
     
-    console.log(`✅ Found ${scrapedScenes.length} result(s), using first match:`, scraped.title);
-    
-    // Match performers and tags
-    const allPerformers = await prisma.stashPerformer.findMany();
-    const allTags = await prisma.stashTag.findMany();
-    
-    const matchedPerformers = [];
-    const unmatchedPerformers = [];
-    
-    if (scraped.performers) {
-      for (const scrapedPerformer of scraped.performers) {
-        const match = allPerformers.find(p => p.name === scrapedPerformer.name);
-        if (match) {
-          matchedPerformers.push(match);
-        } else {
-          unmatchedPerformers.push(scrapedPerformer);
-        }
-      }
-    }
-    
-    const matchedTags = [];
-    const unmatchedTags = [];
-    
-    if (scraped.tags) {
-      for (const scrapedTag of scraped.tags) {
-        const match = allTags.find(t => t.name === scrapedTag.name);
-        if (match) {
-          matchedTags.push(match);
-        } else {
-          unmatchedTags.push(scrapedTag);
-        }
-      }
-    }
-    
-    // Match studio
-    let matchedStudio = null;
-    if (scraped.studio) {
-      const studios = await prisma.stashStudio.findMany();
-      matchedStudio = studios.find(s => s.name === scraped.studio.name) || null;
-    }
-    
-    console.log(`   - Matched: ${matchedPerformers.length} performers, ${matchedTags.length} tags`);
-    console.log(`   - Unmatched: ${unmatchedPerformers.length} performers, ${unmatchedTags.length} tags`);
-    
+    // Return all results for user selection
     sendSuccess(res, {
-      scraped,
-      matched: {
-        performers: matchedPerformers,
-        tags: matchedTags,
-        studio: matchedStudio
-      },
-      unmatched: {
-        performers: unmatchedPerformers,
-        tags: unmatchedTags
-      },
-      sourceUrl: scraped.url || scraped.urls?.[0],
+      results: scrapedScenes,
+      searchType: searchType || 'scene_id',
       source: 'stash-box'
     });
     
@@ -5298,6 +5244,75 @@ router.post('/scenes/:id/scrape-stashbox', asyncHandler(async (req, res) => {
     console.error('❌ [Stash-Box Scrape] Error:', error);
     sendServerError(res, error.message || 'Failed to scrape from stash-box');
   }
+}));
+
+// POST /api/stash/scenes/:id/scrape-stashbox-result - Process a selected stash-box result
+router.post('/scenes/:id/scrape-stashbox-result', asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  const { scraped } = req.body;
+  
+  if (!scraped) {
+    return sendBadRequest(res, 'Scraped scene data is required');
+  }
+  
+  console.log(`🔍 [Stash-Box Result] Processing selected result for scene ${id}:`, scraped.title);
+  
+  // Match performers and tags
+  const allPerformers = await prisma.stashPerformer.findMany();
+  const allTags = await prisma.stashTag.findMany();
+  
+  const matchedPerformers = [];
+  const unmatchedPerformers = [];
+  
+  if (scraped.performers) {
+    for (const scrapedPerformer of scraped.performers) {
+      const match = allPerformers.find(p => p.name === scrapedPerformer.name);
+      if (match) {
+        matchedPerformers.push(match);
+      } else {
+        unmatchedPerformers.push(scrapedPerformer);
+      }
+    }
+  }
+  
+  const matchedTags = [];
+  const unmatchedTags = [];
+  
+  if (scraped.tags) {
+    for (const scrapedTag of scraped.tags) {
+      const match = allTags.find(t => t.name === scrapedTag.name);
+      if (match) {
+        matchedTags.push(match);
+      } else {
+        unmatchedTags.push(scrapedTag);
+      }
+    }
+  }
+  
+  // Match studio
+  let matchedStudio = null;
+  if (scraped.studio) {
+    const studios = await prisma.stashStudio.findMany();
+    matchedStudio = studios.find(s => s.name === (typeof scraped.studio === 'string' ? scraped.studio : scraped.studio.name)) || null;
+  }
+  
+  console.log(`   - Matched: ${matchedPerformers.length} performers, ${matchedTags.length} tags`);
+  console.log(`   - Unmatched: ${unmatchedPerformers.length} performers, ${unmatchedTags.length} tags`);
+  
+  sendSuccess(res, {
+    scraped,
+    matched: {
+      performers: matchedPerformers,
+      tags: matchedTags,
+      studio: matchedStudio
+    },
+    unmatched: {
+      performers: unmatchedPerformers,
+      tags: unmatchedTags
+    },
+    sourceUrl: scraped.url || scraped.urls?.[0],
+    source: 'stash-box'
+  });
 }));
 
 // POST /api/stash/scrapers/reload - Reload all YAML scraper configurations

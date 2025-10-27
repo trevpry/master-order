@@ -2849,6 +2849,7 @@ class StashSyncServiceOptimized {
               screenshot
               preview
               stream
+              sprite
             }
           }
         }
