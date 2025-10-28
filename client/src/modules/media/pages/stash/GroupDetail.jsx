@@ -30,37 +30,48 @@ export default function GroupDetail() {
       const response = await fetch(`${config.apiBaseUrl}/api/stash/scrapers`);
       const result = await response.json();
       
-      // Always include AEBN as a hardcoded scraper for movies
+      // Always include GEVI and AEBN as hardcoded scrapers for movies
+      const geviScraper = {
+        siteName: 'GEVI',
+        name: 'GEVI',
+        scrapeMovie: true
+      };
+      
       const aebnScraper = {
         siteName: 'AEBN',
         name: 'AEBN',
         scrapeMovie: true
       };
       
-      let movieScrapers = [aebnScraper];
+      let movieScrapers = [geviScraper, aebnScraper];
       
       if (result.success) {
-        // Add other scrapers that support movie scraping
+        // Add other scrapers that support movie scraping (exclude GEVI and AEBN)
         const otherScrapers = result.data.filter(s => 
-          s.siteName !== 'AEBN' && s.scrapeMovie
+          s.siteName !== 'AEBN' && s.siteName !== 'GEVI' && s.scrapeMovie
         );
         movieScrapers = [...movieScrapers, ...otherScrapers];
       }
       
       setAvailableScrapers(movieScrapers);
       
-      // Default to AEBN
-      setSelectedScraper(aebnScraper);
+      // Default to GEVI (for backwards compatibility)
+      setSelectedScraper(geviScraper);
     } catch (error) {
       console.error('Failed to load scrapers:', error);
-      // Even if loading fails, ensure AEBN is available
+      // Even if loading fails, ensure GEVI and AEBN are available
+      const geviScraper = {
+        siteName: 'GEVI',
+        name: 'GEVI',
+        scrapeMovie: true
+      };
       const aebnScraper = {
         siteName: 'AEBN',
         name: 'AEBN',
         scrapeMovie: true
       };
-      setAvailableScrapers([aebnScraper]);
-      setSelectedScraper(aebnScraper);
+      setAvailableScrapers([geviScraper, aebnScraper]);
+      setSelectedScraper(geviScraper);
     }
   };
 
@@ -526,7 +537,7 @@ export default function GroupDetail() {
                 setScrapeUrl(group?.geviUrl || '');
               }}
               className="scrape-gevi-button"
-              title="Scrape metadata from GEVI"
+              title="Scrape metadata from external sources"
               style={{
                 padding: '0.5rem 1rem',
                 background: '#667eea',
@@ -537,7 +548,7 @@ export default function GroupDetail() {
                 fontSize: '0.9rem'
               }}
             >
-              🌐 Scrape GEVI
+              🌐 Scrape Metadata
             </button>
             
             <button 
@@ -936,7 +947,7 @@ export default function GroupDetail() {
                 <label htmlFor="scraper-select"><strong>Select Scraper:</strong></label>
                 <select
                   id="scraper-select"
-                  value={selectedScraper?.siteName || 'GEVI'}
+                  value={selectedScraper?.siteName || ''}
                   onChange={(e) => {
                     const scraper = availableScrapers.find(s => s.siteName === e.target.value);
                     setSelectedScraper(scraper || null);
@@ -950,7 +961,6 @@ export default function GroupDetail() {
                   }}
                   disabled={isScraping}
                 >
-                  <option value="GEVI">GEVI</option>
                   {availableScrapers.map(scraper => (
                     <option key={scraper.siteName} value={scraper.siteName}>
                       {scraper.name}

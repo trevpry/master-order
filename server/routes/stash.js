@@ -9589,22 +9589,17 @@ router.post('/performers/:id/search-gevi', asyncHandler(async (req, res) => {
         performerData.displayImage = `${req.protocol}://${req.get('host')}/api/stash/gevi-image-proxy?url=${encodeURIComponent(performerData.image)}`;
       }
       
-      // Match tags against local database
-      const matchedTags = [];
-      const unmatchedTags = [];
+      // Match tags against local database using flexible matching with aliases
+      let matchedTags = [];
+      let unmatchedTags = [];
       
       if (performerData.tags && Array.isArray(performerData.tags)) {
-        for (const tagName of performerData.tags) {
-          const tag = await prisma.stashTag.findFirst({
-            where: { name: tagName }
-          });
-          
-          if (tag) {
-            matchedTags.push(tag);
-          } else {
-            unmatchedTags.push(tagName);
-          }
-        }
+        const tagMatchResult = await geviScraper.matchTags(performerData.tags, prisma);
+        matchedTags = tagMatchResult.matched;
+        unmatchedTags = tagMatchResult.unmatched;
+        
+        console.log(`   - Matched ${matchedTags.length} tags (${matchedTags.map(t => `${t.name}${t.matchedVia === 'alias' ? ` via alias "${t.matchedAlias}"` : ''}`).join(', ')})`);
+        console.log(`   - Unmatched ${unmatchedTags.length} tags (${unmatchedTags.join(', ')})`);
       }
       
       // Return scraped data directly (skip search results)
@@ -9679,22 +9674,17 @@ router.post('/performers/:id/scrape-gevi', asyncHandler(async (req, res) => {
       performerData.displayImage = `${req.protocol}://${req.get('host')}/api/stash/gevi-image-proxy?url=${encodeURIComponent(performerData.image)}`;
     }
     
-    // Match tags against local database (simple string matching)
-    const matchedTags = [];
-    const unmatchedTags = [];
+    // Match tags against local database using flexible matching with aliases
+    let matchedTags = [];
+    let unmatchedTags = [];
     
     if (performerData.tags && Array.isArray(performerData.tags)) {
-      for (const tagName of performerData.tags) {
-        const tag = await prisma.stashTag.findFirst({
-          where: { name: tagName }
-        });
-        
-        if (tag) {
-          matchedTags.push(tag);
-        } else {
-          unmatchedTags.push(tagName);
-        }
-      }
+      const tagMatchResult = await geviScraper.matchTags(performerData.tags, prisma);
+      matchedTags = tagMatchResult.matched;
+      unmatchedTags = tagMatchResult.unmatched;
+      
+      console.log(`   - Matched ${matchedTags.length} tags (${matchedTags.map(t => `${t.name}${t.matchedVia === 'alias' ? ` via alias "${t.matchedAlias}"` : ''}`).join(', ')})`);
+      console.log(`   - Unmatched ${unmatchedTags.length} tags (${unmatchedTags.join(', ')})`);
     }
     
     // Format response to match stash-box/native scraper structure
@@ -9730,22 +9720,17 @@ router.post('/performers/:id/scrape-native-result', asyncHandler(async (req, res
   console.log(`   - Scraper ID: ${scraperId}`);
   
   try {
-    // Match tags against local database (if any)
-    const matchedTags = [];
-    const unmatchedTags = [];
+    // Match tags against local database using flexible matching with aliases
+    let matchedTags = [];
+    let unmatchedTags = [];
     
     if (scraped.tags && Array.isArray(scraped.tags)) {
-      for (const tagName of scraped.tags) {
-        const tag = await prisma.stashTag.findFirst({
-          where: { name: tagName }
-        });
-        
-        if (tag) {
-          matchedTags.push(tag);
-        } else {
-          unmatchedTags.push(tagName);
-        }
-      }
+      const tagMatchResult = await geviScraper.matchTags(scraped.tags, prisma);
+      matchedTags = tagMatchResult.matched;
+      unmatchedTags = tagMatchResult.unmatched;
+      
+      console.log(`   - Matched ${matchedTags.length} tags (${matchedTags.map(t => `${t.name}${t.matchedVia === 'alias' ? ` via alias "${t.matchedAlias}"` : ''}`).join(', ')})`);
+      console.log(`   - Unmatched ${unmatchedTags.length} tags (${unmatchedTags.join(', ')})`);
     }
     
     // Return processed data for review
