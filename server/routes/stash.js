@@ -554,6 +554,12 @@ router.get('/scenes', asyncHandler(async (req, res) => {
         case '24h':
           hoursAgo = 24;
           break;
+        case '48h':
+          hoursAgo = 48;
+          break;
+        case '7d':
+          hoursAgo = 168; // 7 days * 24 hours
+          break;
         default:
           hoursAgo = null;
       }
@@ -575,6 +581,8 @@ router.get('/scenes', asyncHandler(async (req, res) => {
       orderBy.duration = sortOrderLower;
     } else if (sortBy === 'playCount') {
       orderBy.playCount = sortOrderLower;
+    } else if (sortBy === 'created') {
+      orderBy.createdAt = sortOrderLower;
     } else {
       orderBy.date = sortOrderLower;
     }
@@ -2049,9 +2057,19 @@ router.put('/performers/:id', asyncHandler(async (req, res) => {
         ? alias.split(',').map(a => a.trim()).filter(a => a !== '')
         : [];
       
-      // Combine existing and new aliases, removing duplicates
-      const allAliases = [...existingAliases];
+      // CRITICAL: Filter out the performer's main name from existing aliases first
+      // Stash rejects aliases that match the performer's name
+      const cleanedExistingAliases = existingAliases.filter(alias => 
+        alias.toLowerCase() !== performerName.trim().toLowerCase()
+      );
+      
+      // Combine cleaned existing and new aliases, removing duplicates
+      const allAliases = [...cleanedExistingAliases];
       for (const newAlias of newAliases) {
+        // Skip if it matches the performer's main name
+        if (newAlias.toLowerCase() === performerName.trim().toLowerCase()) {
+          continue;
+        }
         // Case-insensitive duplicate check
         if (!allAliases.some(existing => existing.toLowerCase() === newAlias.toLowerCase())) {
           allAliases.push(newAlias);
@@ -2060,6 +2078,7 @@ router.put('/performers/:id', asyncHandler(async (req, res) => {
       
       variables.input.alias_list = allAliases;
       console.log('   - Appending aliases:', newAliases);
+      console.log('   - Final alias_list (excluding main name):', allAliases);
       console.log('   - Final alias_list:', allAliases);
     } else {
       console.log('   - Preserving existing aliases (alias field not provided)');

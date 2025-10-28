@@ -133,6 +133,7 @@ export default function ScenesPage() {
             }}
           >
             <option value="date">Date</option>
+            <option value="created">Created Date</option>
             <option value="title">Title</option>
             <option value="rating">Rating</option>
             <option value="duration">Duration</option>
@@ -182,6 +183,8 @@ export default function ScenesPage() {
             <option value="6h">Past 6 Hours</option>
             <option value="12h">Past 12 Hours</option>
             <option value="24h">Past 24 Hours</option>
+            <option value="48h">Past 48 Hours</option>
+            <option value="7d">Past Week</option>
           </select>
         </div>
       </div>
