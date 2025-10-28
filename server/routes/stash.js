@@ -1897,7 +1897,7 @@ router.put('/performers/:id', asyncHandler(async (req, res) => {
             continue;
           }
           
-          // Create tag in Stash via GraphQL
+          // Try to create tag in Stash via GraphQL
           const createTagMutation = `
             mutation TagCreate($input: TagCreateInput!) {
               tagCreate(input: $input) {
@@ -1907,31 +1907,74 @@ router.put('/performers/:id', asyncHandler(async (req, res) => {
             }
           `;
           
-          const tagData = await syncService.makeGraphQLRequest(createTagMutation, {
-            input: { name: tagName }
-          });
-          
-          if (tagData && tagData.tagCreate) {
-            const newTag = tagData.tagCreate;
-            console.log(`   - Created tag "${tagName}" in Stash (ID: ${newTag.id})`);
-            
-            // Save to local database
-            const dbTag = await prisma.stashTag.upsert({
-              where: { id: newTag.id },
-              create: {
-                id: newTag.id,
-                name: newTag.name
-              },
-              update: {
-                name: newTag.name
-              }
+          try {
+            const tagData = await syncService.makeGraphQLRequest(createTagMutation, {
+              input: { name: tagName }
             });
             
-            finalTagIds.push(dbTag.id);
-            console.log(`   - Saved tag to local database`);
+            if (tagData && tagData.tagCreate) {
+              const newTag = tagData.tagCreate;
+              console.log(`   - Created tag "${tagName}" in Stash (ID: ${newTag.id})`);
+              
+              // Save to local database
+              const dbTag = await prisma.stashTag.upsert({
+                where: { id: newTag.id },
+                create: {
+                  id: newTag.id,
+                  name: newTag.name
+                },
+                update: {
+                  name: newTag.name
+                }
+              });
+              
+              finalTagIds.push(dbTag.id);
+              console.log(`   - Saved tag to local database`);
+            }
+          } catch (createError) {
+            // Tag might already exist in Stash - try to find it
+            console.log(`   - Tag "${tagName}" creation failed, searching in Stash...`);
+            
+            const findTagQuery = `
+              query FindTags($filter: FindFilterType, $tag_filter: TagFilterType) {
+                findTags(filter: $filter, tag_filter: $tag_filter) {
+                  tags {
+                    id
+                    name
+                  }
+                }
+              }
+            `;
+            
+            const findResult = await syncService.makeGraphQLRequest(findTagQuery, {
+              tag_filter: { name: { value: tagName, modifier: "EQUALS" } },
+              filter: { per_page: 1 }
+            });
+            
+            if (findResult?.findTags?.tags?.length > 0) {
+              const foundTag = findResult.findTags.tags[0];
+              console.log(`   - Found existing tag "${tagName}" in Stash (ID: ${foundTag.id})`);
+              
+              // Save to local database
+              const dbTag = await prisma.stashTag.upsert({
+                where: { id: foundTag.id },
+                create: {
+                  id: foundTag.id,
+                  name: foundTag.name
+                },
+                update: {
+                  name: foundTag.name
+                }
+              });
+              
+              finalTagIds.push(dbTag.id);
+              console.log(`   - Synced tag to local database`);
+            } else {
+              console.warn(`   - Could not find or create tag "${tagName}"`);
+            }
           }
         } catch (tagError) {
-          console.warn(`   - Failed to create tag "${tagName}":`, tagError.message);
+          console.warn(`   - Error processing tag "${tagName}":`, tagError.message);
           // Continue with other tags even if one fails
         }
       }

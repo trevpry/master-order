@@ -304,6 +304,26 @@ class GeviScraperService {
         return null;
       };
 
+      // Helper to get multiple values separated by <br> tags
+      const fromTableMultiple = (key) => {
+        const keyDiv = section.find('div').filter((i, el) => $(el).text().trim() === key).first();
+        if (keyDiv.length) {
+          const valueDiv = keyDiv.next('div');
+          if (valueDiv.length) {
+            // Get HTML content and split by <br> tags
+            const html = valueDiv.html();
+            if (html) {
+              // Split by <br> (case insensitive, with or without attributes)
+              const values = html.split(/<br\s*\/?>/i)
+                .map(v => $('<div>').html(v).text().trim())
+                .filter(v => v && v !== 'Unknown');
+              return values.length > 0 ? values : null;
+            }
+          }
+        }
+        return null;
+      };
+
       // Extract physical attributes
       const hairColor = fromTable('Hair:');
       if (hairColor) {
@@ -379,49 +399,70 @@ class GeviScraperService {
         tags.push(`Eyes: ${eyeColor}`);
       }
 
-      // Body Hair
-      const bodyHair = fromTable('Body Hair:');
-      if (bodyHair && bodyHair !== 'Unknown') {
-        tags.push(`Body Hair: ${bodyHair}`);
+      // Body Hair - can have multiple values separated by <br>
+      const bodyHairValues = fromTableMultiple('Body Hair:');
+      if (bodyHairValues) {
+        bodyHairValues.forEach(value => {
+          tags.push(`Body Hair: ${value}`);
+        });
       }
 
-      // Facial Hair
-      const facialHair = fromTable('Facial Hair:');
-      if (facialHair && facialHair !== 'Unknown') {
-        tags.push(`Facial Hair: ${facialHair}`);
+      // Facial Hair - can have multiple values separated by <br>
+      const facialHairValues = fromTableMultiple('Facial Hair:');
+      if (facialHairValues) {
+        facialHairValues.forEach(value => {
+          tags.push(`Facial Hair: ${value}`);
+        });
       }
 
-      // Build
-      const build = fromTable('Build:');
-      if (build && build !== 'Unknown') {
-        tags.push(`Build: ${build}`);
+      // Build - can have multiple values separated by <br>
+      const buildValues = fromTableMultiple('Build:');
+      if (buildValues) {
+        buildValues.forEach(value => {
+          tags.push(`Build: ${value}`);
+        });
       }
 
-      // Position
-      const position = fromTable('Position:');
-      if (position && position !== 'Unknown') {
-        tags.push(`Position: ${position}`);
+      // Position - can have multiple values separated by <br>
+      const positionValues = fromTableMultiple('Position:');
+      if (positionValues) {
+        positionValues.forEach(value => {
+          tags.push(`Position: ${value}`);
+        });
       }
 
-      // Skin (don't store as ethnicity, just as tag)
-      const skinColor = fromTable('Skin:');
-      if (skinColor && skinColor !== 'Unknown') {
-        tags.push(`Skin: ${skinColor}`);
+      // Skin - can have multiple values separated by <br>
+      const skinValues = fromTableMultiple('Skin:');
+      if (skinValues) {
+        skinValues.forEach(value => {
+          tags.push(`Skin: ${value}`);
+        });
       }
 
-      // Foreskin/Circumcision status
-      if (foreskin && foreskin !== 'Unknown') {
-        tags.push(`Foreskin: ${foreskin}`);
+      // Foreskin/Circumcision status - can have multiple values separated by <br>
+      const foreskinValues = fromTableMultiple('Foreskin:');
+      if (foreskinValues) {
+        foreskinValues.forEach(value => {
+          tags.push(`Foreskin: ${value}`);
+        });
       }
 
-      // Piercing
-      if (piercing && piercing !== 'Unknown') {
-        tags.push(`Piercing: ${piercing}`);
+      // Piercing - can have multiple values separated by <br>
+      const piercingValues = fromTableMultiple('Piercing:');
+      if (piercingValues) {
+        piercingValues.forEach(value => {
+          tags.push(`Piercing: ${value}`);
+        });
       }
 
-      // Tattoos
-      if (tattoos && tattoos !== 'None' && tattoos !== 'Unknown') {
-        tags.push(`Tattoos: ${tattoos}`);
+      // Tattoos - can have multiple values separated by <br>
+      const tattooValues = fromTableMultiple('Tattoos:');
+      if (tattooValues) {
+        tattooValues.forEach(value => {
+          if (value !== 'None') {
+            tags.push(`Tattoos: ${value}`);
+          }
+        });
       }
 
       if (tags.length > 0) {
