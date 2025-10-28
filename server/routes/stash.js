@@ -3933,11 +3933,16 @@ async function getOrCreateStudio(studioName, syncService) {
     studioName = studioName.name || studioName;
   }
 
-  // Search for existing studio
-  const existing = await prisma.stashStudio.findFirst({
-    where: {
-      name: studioName
-    }
+  const studioNameLower = studioName.toLowerCase();
+
+  // Search for existing studio by name or alias (case-insensitive)
+  const studios = await prisma.stashStudio.findMany({
+    include: { aliases: true }
+  });
+  
+  const existing = studios.find(s => {
+    if (s.name.toLowerCase() === studioNameLower) return true;
+    return s.aliases.some(a => a.alias.toLowerCase() === studioNameLower);
   });
 
   if (existing) {
@@ -5472,7 +5477,24 @@ router.post('/scenes/:id/scrape-stashbox-result', asyncHandler(async (req, res) 
   
   if (scraped.performers) {
     for (const scrapedPerformer of scraped.performers) {
-      const match = allPerformers.find(p => p.name === scrapedPerformer.name);
+      const scrapedPerformerNameLower = scrapedPerformer.name.toLowerCase();
+      
+      // Check name match or alias match (case-insensitive)
+      const match = allPerformers.find(p => {
+        // Check if name matches (case-insensitive)
+        if (p.name.toLowerCase() === scrapedPerformerNameLower) {
+          return true;
+        }
+        
+        // Check if any alias matches (case-insensitive)
+        if (p.alias) {
+          const aliases = p.alias.split(',').map(a => a.trim().toLowerCase());
+          return aliases.includes(scrapedPerformerNameLower);
+        }
+        
+        return false;
+      });
+      
       if (match) {
         matchedPerformers.push(match);
       } else {
@@ -5500,11 +5522,17 @@ router.post('/scenes/:id/scrape-stashbox-result', asyncHandler(async (req, res) 
     }
   }
   
-  // Match studio
+  // Match studio (case-insensitive, check name and aliases)
   let matchedStudio = null;
   if (scraped.studio) {
-    const studios = await prisma.stashStudio.findMany();
-    matchedStudio = studios.find(s => s.name === (typeof scraped.studio === 'string' ? scraped.studio : scraped.studio.name)) || null;
+    const studioName = (typeof scraped.studio === 'string' ? scraped.studio : scraped.studio.name).toLowerCase();
+    const studios = await prisma.stashStudio.findMany({
+      include: { aliases: true }
+    });
+    matchedStudio = studios.find(s => {
+      if (s.name.toLowerCase() === studioName) return true;
+      return s.aliases.some(a => a.alias.toLowerCase() === studioName);
+    }) || null;
   }
   
   console.log(`   - Matched: ${matchedPerformers.length} performers, ${matchedTags.length} tags`);
