@@ -389,14 +389,23 @@ class GeviScraperService {
       // Extract all physical attributes as simple tags
       const tags = [];
       
-      // Hair color tag
-      if (hairColor && hairColor !== 'Unknown') {
-        tags.push(`Hair: ${hairColor}`);
+      // Hair color tag - can have multiple values separated by <br>
+      const hairColorValues = fromTableMultiple('Hair:');
+      if (hairColorValues) {
+        hairColorValues.forEach(value => {
+          // Map GEVI values to standard values for the tag
+          const hairMap = { 'Blond': 'Blonde', 'Brown': 'Brunette' };
+          const mappedValue = hairMap[value] || value;
+          tags.push(`Hair: ${mappedValue}`);
+        });
       }
 
-      // Eye color tag
-      if (eyeColor && eyeColor !== 'Unknown') {
-        tags.push(`Eyes: ${eyeColor}`);
+      // Eye color tag - can have multiple values separated by <br>
+      const eyeColorValues = fromTableMultiple('Eyes:');
+      if (eyeColorValues) {
+        eyeColorValues.forEach(value => {
+          tags.push(`Eyes: ${value}`);
+        });
       }
 
       // Body Hair - can have multiple values separated by <br>

@@ -886,8 +886,19 @@ export default function PerformerDetail() {
       }
 
       console.log('✅ Merge successful, redirecting to existing performer');
+      
+      // Close modals and reset state before redirecting
+      setShowConflictModal(false);
+      setConflictData(null);
+      setPendingScrapeData(null);
+      setShowScrapeReviewModal(false);
+      setScrapeData(null);
+      setSelectedImage(null);
+      setAcceptedFields({});
+      setIsApplyingScrape(false);
+      
       // Redirect to the existing performer page
-      navigate(`/media/stash/performers/${conflictData.existingPerformer.id}`);
+      navigate(`/media/stash/performer/${conflictData.existingPerformer.id}`);
 
     } catch (error) {
       console.error('Failed to merge performers:', error);

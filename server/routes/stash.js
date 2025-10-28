@@ -8465,14 +8465,36 @@ router.get('/performers', asyncHandler(async (req, res) => {
   const useStartsWith = startsWith === 'true';
   
   // Build search filter for name and alias
-  // Note: SQLite is case-insensitive by default for LIKE operations (contains/startsWith)
-  const searchFilter = searchQuery ? {
-    OR: [
-      { name: useStartsWith ? { startsWith: searchQuery } : { contains: searchQuery } },
-      { alias: useStartsWith ? { startsWith: searchQuery } : { contains: searchQuery } },
-      { disambiguation: useStartsWith ? { startsWith: searchQuery } : { contains: searchQuery } }
-    ]
-  } : {};
+  // SQLite LIKE is case-insensitive by default for ASCII characters
+  // PostgreSQL requires mode: 'insensitive' for case-insensitive search
+  let searchFilter;
+  
+  if (searchQuery) {
+    // Detect database type from DATABASE_URL
+    const isPostgres = process.env.DATABASE_URL && process.env.DATABASE_URL.includes('postgresql');
+    
+    if (isPostgres) {
+      // PostgreSQL: Use mode: 'insensitive'
+      searchFilter = {
+        OR: [
+          { name: useStartsWith ? { startsWith: searchQuery, mode: 'insensitive' } : { contains: searchQuery, mode: 'insensitive' } },
+          { alias: useStartsWith ? { startsWith: searchQuery, mode: 'insensitive' } : { contains: searchQuery, mode: 'insensitive' } },
+          { disambiguation: useStartsWith ? { startsWith: searchQuery, mode: 'insensitive' } : { contains: searchQuery, mode: 'insensitive' } }
+        ]
+      };
+    } else {
+      // SQLite: LIKE is case-insensitive by default
+      searchFilter = {
+        OR: [
+          { name: useStartsWith ? { startsWith: searchQuery } : { contains: searchQuery } },
+          { alias: useStartsWith ? { startsWith: searchQuery } : { contains: searchQuery } },
+          { disambiguation: useStartsWith ? { startsWith: searchQuery } : { contains: searchQuery } }
+        ]
+      };
+    }
+  } else {
+    searchFilter = {};
+  }
   
   console.log(`🔍 [PERFORMERS] Searching with query: "${searchQuery}" (startsWith: ${useStartsWith})`);
   
