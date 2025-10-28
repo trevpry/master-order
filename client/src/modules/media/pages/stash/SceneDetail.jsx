@@ -993,12 +993,33 @@ export default function SceneDetail() {
         } else {
           console.log('📎 [URL Update] Non-GEVI scraper detected - preserving existing geviUrl');
         }
-        updatePayload.episodeUrls = scrapeData.scraped.episodeUrls || [];
+        
+        // Collect all URLs from scraped data
+        const allScrapedUrls = [];
+        
+        // Add main URL if it exists
+        if (scrapeData.scraped.url) {
+          allScrapedUrls.push(scrapeData.scraped.url);
+        }
+        
+        // Add urls array if it exists (stash-box returns this)
+        if (scrapeData.scraped.urls && Array.isArray(scrapeData.scraped.urls)) {
+          allScrapedUrls.push(...scrapeData.scraped.urls);
+        }
+        
+        // Add episodeUrls if they exist
+        if (scrapeData.scraped.episodeUrls && Array.isArray(scrapeData.scraped.episodeUrls)) {
+          allScrapedUrls.push(...scrapeData.scraped.episodeUrls);
+        }
+        
+        // Remove duplicates
+        updatePayload.episodeUrls = [...new Set(allScrapedUrls)];
+        
         console.log('📎 [URL Update] Including URLs in payload:');
         console.log('   - Main URL:', updatePayload.url);
         console.log('   - Scraper Source:', scrapeData.source);
-        console.log('   - Episode URLs:', updatePayload.episodeUrls);
-        console.log('   - Total URLs to add:', 1 + (updatePayload.episodeUrls?.length || 0));
+        console.log('   - All URLs to add:', updatePayload.episodeUrls);
+        console.log('   - Total URLs to add:', updatePayload.episodeUrls.length);
       } else if (fieldSelections.url === 'existing') {
         // Keep existing URLs - don't send url field
         console.log('📎 [URL Update] Keeping existing URLs (not sending url fields)');

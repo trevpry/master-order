@@ -6069,6 +6069,8 @@ router.put('/scenes/:id', asyncHandler(async (req, res) => {
   
   if (details !== undefined) updateData.details = details;
   if (date !== undefined) updateData.date = date;
+  
+  // Handle main URL - store in local DB for reference but will be merged with episodeUrls when syncing to Stash
   if (url !== undefined) updateData.url = url;
   if (geviUrl !== undefined) updateData.geviUrl = geviUrl;
   
@@ -6077,7 +6079,7 @@ router.put('/scenes/:id', asyncHandler(async (req, res) => {
     // Fetch existing scene to get current episodeUrls
     const existingScene = await prisma.stashScene.findUnique({
       where: { id },
-      select: { episodeUrls: true }
+      select: { episodeUrls: true, url: true }
     });
     
     let existingUrls = [];
@@ -6094,6 +6096,16 @@ router.put('/scenes/:id', asyncHandler(async (req, res) => {
         console.warn('   - Failed to parse existing episodeUrls, starting fresh:', e.message);
         existingUrls = [];
       }
+    }
+    
+    // Also include the main URL if it exists (to prevent losing it)
+    if (existingScene && existingScene.url && !existingUrls.includes(existingScene.url)) {
+      existingUrls.unshift(existingScene.url); // Add main URL at the beginning
+    }
+    
+    // If a new main URL is being set, add it to the URLs too
+    if (url && !existingUrls.includes(url)) {
+      existingUrls.unshift(url);
     }
     
     // Merge new URLs with existing ones (remove duplicates)
