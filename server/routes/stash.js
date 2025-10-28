@@ -451,18 +451,21 @@ router.get('/scenes', asyncHandler(async (req, res) => {
     const where = {};
     
     // Handle both 'search' (general search) and 'title' (specific title search)
+    // Note: SQLite's contains is case-insensitive by default, PostgreSQL needs mode: 'insensitive'
+    const searchMode = process.env.DATABASE_URL?.includes('postgresql') ? { mode: 'insensitive' } : {};
+    
     if (search) {
       where.OR = [
-        { title: { contains: search, mode: 'insensitive' } },
-        { details: { contains: search, mode: 'insensitive' } },
-        { synopsis: { contains: search, mode: 'insensitive' } },
-        { path: { contains: search, mode: 'insensitive' } }
+        { title: { contains: search, ...searchMode } },
+        { details: { contains: search, ...searchMode } },
+        { synopsis: { contains: search, ...searchMode } },
+        { path: { contains: search, ...searchMode } }
       ];
     } else if (title) {
       // Specific title search (searches title and file path)
       where.OR = [
-        { title: { contains: title, mode: 'insensitive' } },
-        { path: { contains: title, mode: 'insensitive' } }
+        { title: { contains: title, ...searchMode } },
+        { path: { contains: title, ...searchMode } }
       ];
     }
     
@@ -470,7 +473,7 @@ router.get('/scenes', asyncHandler(async (req, res) => {
       where.performers = {
         some: {
           performer: {
-            name: { contains: performer, mode: 'insensitive' }
+            name: { contains: performer, ...searchMode }
           }
         }
       };
@@ -5496,7 +5499,39 @@ router.post('/scenes/:id/scrape-stashbox-result', asyncHandler(async (req, res) 
       });
       
       if (match) {
-        matchedPerformers.push(match);
+        // Find alternatives (other performers with the same name, case-insensitive)
+        const alternatives = allPerformers.filter(p => 
+          p.id !== match.id && 
+          p.name.toLowerCase() === scrapedPerformerNameLower
+        ).map(p => ({
+          id: p.id,
+          name: p.name,
+          disambiguation: p.disambiguation || null,
+          matchedVia: 'name',
+          matchedAlias: null
+        }));
+        
+        // Determine how this performer was matched
+        let matchedVia = 'name';
+        let matchedAlias = null;
+        
+        if (match.name.toLowerCase() !== scrapedPerformerNameLower) {
+          matchedVia = 'alias';
+          if (match.alias) {
+            const aliases = match.alias.split(',').map(a => a.trim());
+            matchedAlias = aliases.find(a => a.toLowerCase() === scrapedPerformerNameLower) || null;
+          }
+        }
+        
+        matchedPerformers.push({
+          id: match.id,
+          name: match.name,
+          disambiguation: match.disambiguation || null,
+          originalName: scrapedPerformer.name,
+          matchedVia,
+          matchedAlias,
+          alternatives
+        });
       } else {
         unmatchedPerformers.push(scrapedPerformer);
       }
