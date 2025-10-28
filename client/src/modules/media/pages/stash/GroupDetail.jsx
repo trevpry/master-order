@@ -17,10 +17,34 @@ export default function GroupDetail() {
   const [searchResults, setSearchResults] = useState(null);
   const [scrapeData, setScrapeData] = useState(null);
   const [showScrapeReviewModal, setShowScrapeReviewModal] = useState(false);
+  const [selectedScraper, setSelectedScraper] = useState(null); // GEVI or AEBN
+  const [availableScrapers, setAvailableScrapers] = useState([]);
 
   useEffect(() => {
     fetchGroup();
+    loadScrapers();
   }, [id]);
+
+  const loadScrapers = async () => {
+    try {
+      const response = await fetch(`${config.apiBaseUrl}/api/stash/scrapers`);
+      const result = await response.json();
+      
+      if (result.success) {
+        // Filter scrapers that support movie scraping
+        const movieScrapers = result.data.filter(s => 
+          s.siteName === 'AEBN' || s.scrapeMovie
+        );
+        setAvailableScrapers(movieScrapers);
+        
+        // Default to AEBN if available, otherwise first scraper
+        const defaultScraper = movieScrapers.find(s => s.siteName === 'AEBN') || movieScrapers[0] || null;
+        setSelectedScraper(defaultScraper);
+      }
+    } catch (error) {
+      console.error('Failed to load scrapers:', error);
+    }
+  };
 
   const fetchGroup = async () => {
     setLoading(true);
@@ -88,22 +112,39 @@ export default function GroupDetail() {
 
   const handleScrapeGevi = async () => {
     if (!scrapeUrl || !scrapeUrl.trim()) {
-      alert('Please enter a GEVI movie URL');
+      alert(`Please enter a ${selectedScraper ? selectedScraper.siteName : 'GEVI'} movie URL`);
       return;
     }
 
     setIsScraping(true);
 
     try {
-      const response = await fetch(`${config.apiBaseUrl}/api/stash/gevi/movie`, {
+      let endpoint, requestBody;
+      
+      if (selectedScraper && selectedScraper.siteName !== 'GEVI') {
+        // YAML scraper (AEBN, etc.)
+        endpoint = `${config.apiBaseUrl}/api/stash/groups/${id}/scrape-generic`;
+        requestBody = { 
+          url: scrapeUrl, 
+          scraperName: selectedScraper.siteName
+        };
+        console.log(`🔍 Scraping movie with ${selectedScraper.siteName}:`, scrapeUrl);
+      } else {
+        // GEVI scraping
+        endpoint = `${config.apiBaseUrl}/api/stash/gevi/movie`;
+        requestBody = { 
+          url: scrapeUrl,
+          groupId: id // Pass group ID for scene matching
+        };
+        console.log(`🔍 Scraping movie with GEVI:`, scrapeUrl);
+      }
+
+      const response = await fetch(endpoint, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'
         },
-        body: JSON.stringify({ 
-          url: scrapeUrl,
-          groupId: id // Pass group ID for scene matching
-        })
+        body: JSON.stringify(requestBody)
       });
 
       const result = await response.json();
@@ -185,7 +226,8 @@ export default function GroupDetail() {
         studio: scrapeData.scraped.studio,
         front_image: scrapeData.scraped.originalFrontImage || scrapeData.scraped.front_image,
         back_image: scrapeData.scraped.originalBackImage || scrapeData.scraped.back_image,
-        geviUrl: scrapeData.sourceUrl || scrapeUrl
+        geviUrl: scrapeData.sourceUrl || scrapeUrl,
+        urls: scrapeData.scraped.externalUrls || [] // Add external URLs
       };
 
       const response = await fetch(`/api/stash/groups/${id}`, {
@@ -534,12 +576,48 @@ export default function GroupDetail() {
               </div>
             )}
             
-            {group.url && (
-              <div className="meta-row">
-                <strong>URL:</strong>
-                <a href={group.url} target="_blank" rel="noopener noreferrer">Open in Stash →</a>
-              </div>
-            )}
+            {group.url && (() => {
+              try {
+                // Try to parse as JSON array
+                const urls = JSON.parse(group.url);
+                if (Array.isArray(urls) && urls.length > 0) {
+                  return (
+                    <div className="meta-row" style={{ flexDirection: 'column', alignItems: 'flex-start' }}>
+                      <strong style={{ marginBottom: '0.5rem' }}>URLs ({urls.length}):</strong>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem', width: '100%' }}>
+                        {urls.map((url, idx) => (
+                          <a 
+                            key={idx}
+                            href={url} 
+                            target="_blank" 
+                            rel="noopener noreferrer"
+                            style={{ 
+                              fontSize: '0.875rem',
+                              color: '#3b82f6',
+                              textDecoration: 'none',
+                              wordBreak: 'break-all'
+                            }}
+                          >
+                            {url.includes('aebn.com') || url.includes('aebn.net') ? '🎬 ' : '🔗 '}
+                            {url}
+                          </a>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                }
+              } catch (e) {
+                // Not JSON, display as single URL
+              }
+              
+              // Fallback to single URL display
+              return (
+                <div className="meta-row">
+                  <strong>URL:</strong>
+                  <a href={group.url} target="_blank" rel="noopener noreferrer">Open in Stash →</a>
+                </div>
+              );
+            })()}
           </div>
 
           {group.synopsis && (
@@ -832,16 +910,48 @@ export default function GroupDetail() {
       {showScrapeModal && (
         <div className="modal-overlay" onClick={() => setShowScrapeModal(false)}>
           <div className="modal-content" onClick={(e) => e.stopPropagation()}>
-            <h2>🌐 Scrape GEVI Movie Metadata</h2>
+            <h2>🌐 Scrape Movie Metadata</h2>
+            
+            {/* Scraper Selection */}
+            {availableScrapers.length > 0 && (
+              <div style={{ marginBottom: '1rem' }}>
+                <label htmlFor="scraper-select"><strong>Select Scraper:</strong></label>
+                <select
+                  id="scraper-select"
+                  value={selectedScraper?.siteName || 'GEVI'}
+                  onChange={(e) => {
+                    const scraper = availableScrapers.find(s => s.siteName === e.target.value);
+                    setSelectedScraper(scraper || null);
+                  }}
+                  style={{
+                    width: '100%',
+                    padding: '0.5rem',
+                    marginTop: '0.5rem',
+                    border: '1px solid #cbd5e0',
+                    borderRadius: '4px'
+                  }}
+                  disabled={isScraping}
+                >
+                  <option value="GEVI">GEVI</option>
+                  {availableScrapers.map(scraper => (
+                    <option key={scraper.siteName} value={scraper.siteName}>
+                      {scraper.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
             
             <div style={{ marginBottom: '1rem' }}>
-              <label htmlFor="gevi-url"><strong>GEVI Movie URL:</strong></label>
+              <label htmlFor="gevi-url"><strong>{selectedScraper ? selectedScraper.siteName : 'GEVI'} Movie URL:</strong></label>
               <input
                 id="gevi-url"
                 type="text"
                 value={scrapeUrl}
                 onChange={(e) => setScrapeUrl(e.target.value)}
-                placeholder="https://gayeroticvideoindex.com/video/..."
+                placeholder={selectedScraper?.siteName === 'AEBN' 
+                  ? "https://gay.aebn.com/gay/movies/..." 
+                  : "https://gayeroticvideoindex.com/video/..."}
                 style={{
                   width: '100%',
                   padding: '0.5rem',
@@ -852,7 +962,7 @@ export default function GroupDetail() {
                 disabled={isScraping}
               />
               <small style={{ color: '#718096', display: 'block', marginTop: '0.25rem' }}>
-                Enter GEVI movie URL or use Search to find the movie
+                Enter {selectedScraper ? selectedScraper.siteName : 'GEVI'} movie URL or use Search to find the movie
               </small>
             </div>
 
@@ -1064,6 +1174,36 @@ export default function GroupDetail() {
                       overflowY: 'auto'
                     }}>
                       {scrapeData.scraped.synopsis}
+                    </div>
+                  </div>
+                )}
+
+                {scrapeData.scraped.externalUrls && scrapeData.scraped.externalUrls.length > 0 && (
+                  <div className="parse-field" style={{ marginTop: '1rem' }}>
+                    <label style={{ display: 'block', fontWeight: '600', marginBottom: '0.5rem', color: '#374151' }}>
+                      External URLs ({scrapeData.scraped.externalUrls.length}):
+                    </label>
+                    <div style={{ 
+                      padding: '0.75rem', 
+                      background: '#f9fafb', 
+                      borderRadius: '4px', 
+                      border: '1px solid #e5e7eb',
+                      maxHeight: '150px',
+                      overflowY: 'auto'
+                    }}>
+                      {scrapeData.scraped.externalUrls.map((url, idx) => (
+                        <div key={idx} style={{ marginBottom: '0.5rem', fontSize: '0.875rem' }}>
+                          <a 
+                            href={url} 
+                            target="_blank" 
+                            rel="noopener noreferrer"
+                            style={{ color: '#3b82f6', textDecoration: 'none', wordBreak: 'break-all' }}
+                          >
+                            {url.includes('aebn.com') || url.includes('aebn.net') ? '🎬 ' : '🔗 '}
+                            {url}
+                          </a>
+                        </div>
+                      ))}
                     </div>
                   </div>
                 )}

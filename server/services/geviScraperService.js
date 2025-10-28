@@ -738,6 +738,20 @@ class GeviScraperService {
           }
         }
       });
+      
+      // Also find ALL aebn.com links on the page
+      const aebnLinks = $('a[href*="aebn.com"], a[href*="aebn.net"]');
+      aebnLinks.each((i, link) => {
+        const href = $(link).attr('href');
+        if (href) {
+          const fullUrl = this.absUrl(href);
+          // Only add if not already in the list
+          if (!movie.externalUrls.includes(fullUrl)) {
+            movie.externalUrls.push(fullUrl);
+            console.log(`   - Found AEBN link: ${fullUrl}`);
+          }
+        }
+      });
 
       // Extract scenes from the movie page
       const scenesDiv = $('#scenes');

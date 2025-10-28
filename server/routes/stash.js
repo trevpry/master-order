@@ -3182,12 +3182,132 @@ router.post('/groups/:id/search-gevi', asyncHandler(async (req, res) => {
   }
 }));
 
+// POST /api/stash/groups/:id/scrape-generic - Scrape movie using any registered scraper
+router.post('/groups/:id/scrape-generic', asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  const { url, scraperName } = req.body;
+  
+  console.log(`🔍 [Generic Movie Scrape] Starting scrape for group: ${id}`);
+  console.log(`   - URL: ${url}`);
+  console.log(`   - Scraper: ${scraperName || 'auto-detect'}`);
+  
+  // Validate URL provided
+  if (!url || !url.trim()) {
+    return sendBadRequest(res, 'URL is required');
+  }
+  
+  // Fetch group data
+  const group = await prisma.stashGroup.findUnique({
+    where: { id }
+  });
+  
+  if (!group) {
+    return sendBadRequest(res, 'Group not found');
+  }
+  
+  // Use global scraper registry
+  const registry = await getScraperRegistry();
+  
+  // Get the appropriate scraper
+  let scraper;
+  if (scraperName) {
+    // Find scraper by name
+    scraper = registry.getAllScrapers().find(s => s.siteName === scraperName);
+    if (!scraper) {
+      return sendBadRequest(res, `Unknown scraper: ${scraperName}`);
+    }
+    if (!scraper.canHandle(url)) {
+      return sendBadRequest(res, `Scraper "${scraperName}" cannot handle URL: ${url}`);
+    }
+  } else {
+    // Auto-detect scraper from URL
+    scraper = registry.getScraperForUrl(url);
+    if (!scraper) {
+      return sendBadRequest(res, 'No scraper available for this URL');
+    }
+  }
+  
+  console.log(`   - Using scraper: ${scraper.siteName}`);
+  
+  // Check if scraper supports movie scraping
+  if (!scraper.scrapeMovie && !scraper.scrape) {
+    return sendBadRequest(res, `Scraper "${scraper.siteName}" does not support movie scraping`);
+  }
+  
+  // Scrape the URL
+  let scrapeResult;
+  try {
+    // Use scrapeMovie if available, otherwise fall back to scrape
+    if (scraper.scrapeMovie) {
+      scrapeResult = await scraper.scrapeMovie(url);
+    } else {
+      scrapeResult = await scraper.scrape(url);
+    }
+  } catch (error) {
+    console.error(`❌ [Generic Movie Scrape] Scrape failed:`, error);
+    return sendServerError(res, `Failed to scrape: ${error.message}`);
+  }
+  
+  // Check if scrape was successful
+  if (!scrapeResult || !scrapeResult.success) {
+    const errorMsg = scrapeResult?.error || 'Unknown scrape error';
+    console.error(`❌ [Generic Movie Scrape] Scrape unsuccessful:`, errorMsg);
+    return sendServerError(res, errorMsg);
+  }
+  
+  const metadata = scrapeResult.scraped;
+  
+  if (!metadata) {
+    console.error(`❌ [Generic Movie Scrape] No metadata returned from scraper`);
+    return sendServerError(res, 'No metadata returned from scraper');
+  }
+  
+  console.log(`   - Scraped metadata:`, JSON.stringify(metadata, null, 2));
+  
+  // Match studio and tags against database
+  let matchedStudio = null;
+  let matchedTags = { matched: [], unmatched: [] };
+  
+  if (metadata.studio) {
+    matchedStudio = await geviScraper.matchStudio(metadata.studio, prisma);
+  }
+
+  if (metadata.tags && metadata.tags.length > 0) {
+    matchedTags = await geviScraper.matchTags(metadata.tags, prisma);
+  }
+  
+  console.log(`   - Matched studio: ${matchedStudio ? matchedStudio.name : 'none'}`);
+  console.log(`   - Matched tags: ${matchedTags.matched.length}`);
+  console.log(`   - Unmatched tags:`, matchedTags.unmatched);
+  
+  // Image URL is used directly from scraper
+  if (metadata.image) {
+    console.log(`   - Image URL: ${metadata.image}`);
+  }
+  
+  // Return scraped data with matches
+  sendSuccess(res, {
+    scraped: metadata,
+    matched: {
+      studio: matchedStudio,
+      tags: matchedTags.matched
+    },
+    unmatched: {
+      studio: matchedStudio ? null : metadata.studio,
+      tags: matchedTags.unmatched
+    },
+    source: scraper.siteName,
+    sourceUrl: url
+  });
+}));
+
 // PUT /api/stash/groups/:id - Update group with scraped GEVI metadata
 router.put('/groups/:id', asyncHandler(async (req, res) => {
   const { id } = req.params;
-  const { name, date, duration, director, synopsis, studio, front_image, back_image, geviUrl } = req.body;
+  const { name, date, duration, director, synopsis, studio, front_image, back_image, geviUrl, urls } = req.body;
 
   console.log('📝 [Group Update] Updating group:', id);
+  console.log('   - URLs provided:', urls);
 
   // Initialize sync service if not already done
   if (!stashSyncService && !stashSyncServiceOptimized) {
@@ -3231,6 +3351,36 @@ router.put('/groups/:id', asyncHandler(async (req, res) => {
     if (synopsis) updateInput.synopsis = synopsis;
     if (front_image) updateInput.front_image = front_image;
     if (back_image) updateInput.back_image = back_image;
+    
+    // Handle URLs - append to existing URLs
+    if (urls && Array.isArray(urls) && urls.length > 0) {
+      // Fetch existing URLs from Stash
+      const fetchQuery = `
+        query FindMovie($id: ID!) {
+          findMovie(id: $id) {
+            id
+            urls
+          }
+        }
+      `;
+      
+      const currentData = await syncService.makeGraphQLRequest(fetchQuery, { id });
+      const existingUrls = currentData?.findMovie?.urls || [];
+      
+      console.log(`   - Existing URLs in Stash: ${existingUrls.length}`);
+      console.log(`   - New URLs to add: ${urls.length}`);
+      
+      // Merge URLs, removing duplicates
+      const allUrls = [...existingUrls];
+      for (const newUrl of urls) {
+        if (newUrl && !allUrls.includes(newUrl)) {
+          allUrls.push(newUrl);
+        }
+      }
+      
+      updateInput.urls = allUrls;
+      console.log(`   - Total URLs after merge: ${allUrls.length}`);
+    }
 
     // Handle studio
     if (studio) {
@@ -3300,6 +3450,7 @@ router.put('/groups/:id', asyncHandler(async (req, res) => {
           duration
           director
           synopsis
+          urls
           front_image_path
           back_image_path
           studio {
@@ -3331,7 +3482,19 @@ router.put('/groups/:id', asyncHandler(async (req, res) => {
     if (front_image) dbUpdateData.frontImage = front_image;
     if (back_image) dbUpdateData.backImage = back_image;
     if (geviUrl) dbUpdateData.geviUrl = geviUrl;
-    if (updatedMovie.studio) dbUpdateData.studioId = updatedMovie.studio.id;
+    
+    // Handle studio as relation
+    if (updatedMovie.studio) {
+      dbUpdateData.studio = {
+        connect: { id: updatedMovie.studio.id }
+      };
+    }
+    
+    // Save URLs as JSON string in local database (use 'url' field)
+    if (updatedMovie.urls && updatedMovie.urls.length > 0) {
+      dbUpdateData.url = JSON.stringify(updatedMovie.urls);
+      console.log(`   - Saved ${updatedMovie.urls.length} URLs to local database`);
+    }
 
     const updatedGroup = await prisma.stashGroup.update({
       where: { id },
@@ -6637,11 +6800,31 @@ router.put('/scenes/:id', asyncHandler(async (req, res) => {
     console.log('🎬 Processing group associations for scene...');
     console.log('   - Group IDs:', groupIds);
     console.log('   - Scene Numbers:', sceneNumbers);
+    console.log('   - GEVI URL:', geviUrl);
     
     // Get current groups to determine scene index
     const existingGroups = await prisma.stashGroupScene.findMany({
       where: { sceneId: id }
     });
+
+    // If scene was scraped from GEVI and has a geviUrl, check if scene needs studio from movies
+    let movieStudioToApply = null;
+    if (geviUrl && !resolvedStudioId) {
+      console.log('🏢 Scene has no studio but has GEVI URL - checking if movies have studio...');
+      
+      // Check first group for studio
+      if (groupIds.length > 0) {
+        const firstGroup = await prisma.stashGroup.findUnique({
+          where: { id: groupIds[0] },
+          include: { studio: true }
+        });
+        
+        if (firstGroup && firstGroup.studioId) {
+          movieStudioToApply = firstGroup.studioId;
+          console.log(`   - Found studio from movie "${firstGroup.name}": ${firstGroup.studio?.name} (${movieStudioToApply})`);
+        }
+      }
+    }
 
     // Add new group relationships
     for (let i = 0; i < groupIds.length; i++) {
@@ -6678,6 +6861,101 @@ router.put('/scenes/:id', asyncHandler(async (req, res) => {
 
         console.log(`   - Added scene to group ${groupId} at index ${sceneIndex}`);
       }
+      
+      // If scene was scraped from GEVI, add GEVI URL to the movie
+      if (geviUrl) {
+        const group = await prisma.stashGroup.findUnique({
+          where: { id: groupId },
+          select: { id: true, name: true, url: true }
+        });
+        
+        if (group) {
+          let existingUrls = [];
+          
+          // Parse existing URLs
+          if (group.url) {
+            try {
+              existingUrls = JSON.parse(group.url);
+              if (!Array.isArray(existingUrls)) {
+                existingUrls = [group.url]; // Convert single URL string to array
+              }
+            } catch (e) {
+              // If it's a plain string, treat as single URL
+              existingUrls = [group.url];
+            }
+          }
+          
+          // Check if GEVI URL already exists
+          if (!existingUrls.includes(geviUrl)) {
+            existingUrls.push(geviUrl);
+            
+            // Update group with new URL
+            await prisma.stashGroup.update({
+              where: { id: groupId },
+              data: { url: JSON.stringify(existingUrls) }
+            });
+            
+            console.log(`   - Added GEVI URL to movie "${group.name}": ${geviUrl}`);
+            
+            // Also update Stash if configured
+            if (stashSyncService && await stashSyncService.isConfigured()) {
+              try {
+                // Fetch existing URLs from Stash
+                const stashGroup = await stashSyncService.graphqlClient.request(`
+                  query FindGroup($id: ID!) {
+                    findGroup(id: $id) {
+                      id
+                      urls
+                    }
+                  }
+                `, { id: groupId });
+                
+                const stashUrls = stashGroup.findGroup?.urls || [];
+                
+                // Merge URLs
+                if (!stashUrls.includes(geviUrl)) {
+                  const mergedUrls = [...stashUrls, geviUrl];
+                  
+                  await stashSyncService.graphqlClient.request(`
+                    mutation MovieUpdate($input: MovieUpdateInput!) {
+                      movieUpdate(input: $input) {
+                        id
+                      }
+                    }
+                  `, {
+                    input: {
+                      id: groupId,
+                      urls: mergedUrls
+                    }
+                  });
+                  
+                  console.log(`   - Updated GEVI URL in Stash for movie ${groupId}`);
+                }
+              } catch (error) {
+                console.warn(`   - Failed to update movie URL in Stash: ${error.message}`);
+              }
+            }
+          } else {
+            console.log(`   - GEVI URL already exists for movie "${group.name}"`);
+          }
+        }
+      }
+    }
+    
+    // Apply movie studio to scene if scene has no studio
+    if (movieStudioToApply && !resolvedStudioId) {
+      console.log(`🏢 Applying movie studio ${movieStudioToApply} to scene...`);
+      
+      // Update local database
+      await prisma.stashScene.update({
+        where: { id },
+        data: { studioId: movieStudioToApply }
+      });
+      
+      // Set for Stash update below
+      resolvedStudioId = movieStudioToApply;
+      
+      console.log(`   - ✅ Scene studio updated from movie`);
     }
   }
   
