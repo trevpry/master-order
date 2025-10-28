@@ -1294,14 +1294,21 @@ class GeviScraperService {
       const performerName = typeof performer === 'string' ? performer : performer.name;
       const performerUrl = typeof performer === 'object' ? performer.url : null;
       
-      // Search by name (SQLite-compatible - filter in JS)
-      const normalizedName = performerName.toLowerCase().replace(/\s+/g, '');
+      // Normalize function that handles spaces and special characters
+      const normalize = (str) => {
+        return str.toLowerCase()
+          .replace(/[:\-_]/g, ' ')  // Convert colons, dashes, underscores to spaces
+          .replace(/\s+/g, ' ')      // Collapse multiple spaces to single space
+          .trim();
+      };
+      
+      const normalizedName = normalize(performerName);
       
       // Find all matches with scores
       const foundMatches = [];
       
       for (const dbPerformer of allPerformers) {
-        const dbNormalized = dbPerformer.name.toLowerCase().replace(/\s+/g, '');
+        const dbNormalized = normalize(dbPerformer.name);
         
         // Check if performer name contains or is contained in scraped name
         let score = 0;
@@ -1324,7 +1331,7 @@ class GeviScraperService {
         else if (dbPerformer.alias) {
           const aliases = dbPerformer.alias.split(',').map(a => a.trim());
           for (const alias of aliases) {
-            const normalizedAlias = alias.toLowerCase().replace(/\s+/g, '');
+            const normalizedAlias = normalize(alias);
             
             // Exact match
             if (normalizedAlias === normalizedName) {
