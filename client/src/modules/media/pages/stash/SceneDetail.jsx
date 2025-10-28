@@ -79,6 +79,13 @@ export default function SceneDetail() {
   const [editingUrls, setEditingUrls] = useState([]);
   const [isSavingUrls, setIsSavingUrls] = useState(false);
 
+  // Studio editor states
+  const [showStudioEditorModal, setShowStudioEditorModal] = useState(false);
+  const [availableStudios, setAvailableStudios] = useState([]);
+  const [studioSearchQuery, setStudioSearchQuery] = useState('');
+  const [selectedStudioId, setSelectedStudioId] = useState(null);
+  const [isUpdatingStudio, setIsUpdatingStudio] = useState(false);
+
   // Fetch Stash URL from settings
   useEffect(() => {
     const fetchStashUrl = async () => {
@@ -1817,6 +1824,100 @@ export default function SceneDetail() {
     }
   };
 
+  const handleOpenStudioEditor = async () => {
+    setShowStudioEditorModal(true);
+    setSelectedStudioId(data?.studio?.id || null);
+    setStudioSearchQuery('');
+    
+    // Fetch available studios (get all without pagination limit)
+    try {
+      const response = await fetch(`${config.apiBaseUrl}/api/stash/studios?perPage=1000`);
+      const result = await response.json();
+      if (result.success) {
+        setAvailableStudios(result.data || []);
+      }
+    } catch (error) {
+      console.error('Error fetching studios:', error);
+    }
+  };
+
+  const handleUpdateStudio = async () => {
+    if (!selectedStudioId) {
+      alert('Please select a studio');
+      return;
+    }
+
+    setIsUpdatingStudio(true);
+    
+    try {
+      const response = await fetch(`${config.apiBaseUrl}/api/stash/scenes/${id}/studio`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          studioId: selectedStudioId
+        })
+      });
+
+      const result = await response.json();
+      
+      if (result.success) {
+        // Refresh scene data
+        const sceneResponse = await fetch(`${config.apiBaseUrl}/api/stash/scenes/${id}`);
+        const sceneData = await sceneResponse.json();
+        setData(sceneData);
+        setShowStudioEditorModal(false);
+        alert('✅ Studio updated successfully!');
+      } else {
+        alert(`Failed to update studio: ${result.error || 'Unknown error'}`);
+      }
+    } catch (error) {
+      console.error('Error updating studio:', error);
+      alert('Failed to update studio');
+    } finally {
+      setIsUpdatingStudio(false);
+    }
+  };
+
+  const handleRemoveStudio = async () => {
+    if (!confirm('Remove studio from this scene?')) {
+      return;
+    }
+
+    setIsUpdatingStudio(true);
+    
+    try {
+      const response = await fetch(`${config.apiBaseUrl}/api/stash/scenes/${id}/studio`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          studioId: null
+        })
+      });
+
+      const result = await response.json();
+      
+      if (result.success) {
+        // Refresh scene data
+        const sceneResponse = await fetch(`${config.apiBaseUrl}/api/stash/scenes/${id}`);
+        const sceneData = await sceneResponse.json();
+        setData(sceneData);
+        setShowStudioEditorModal(false);
+        alert('✅ Studio removed successfully!');
+      } else {
+        alert(`Failed to remove studio: ${result.error || 'Unknown error'}`);
+      }
+    } catch (error) {
+      console.error('Error removing studio:', error);
+      alert('Failed to remove studio');
+    } finally {
+      setIsUpdatingStudio(false);
+    }
+  };
+
   if (loading) {
     return (
       <div className="page pad scene-detail">
@@ -2039,9 +2140,47 @@ export default function SceneDetail() {
               </div>
             )}
             {data.studio && (
-              <div className="meta-badge">
+              <div className="meta-badge" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                 <span className="badge-icon">🏢</span>
                 <span>{typeof data.studio === 'string' ? data.studio : data.studio?.name}</span>
+                <button
+                  onClick={handleOpenStudioEditor}
+                  style={{
+                    padding: '2px 6px',
+                    fontSize: '12px',
+                    background: '#3b82f6',
+                    color: 'white',
+                    border: 'none',
+                    borderRadius: '3px',
+                    cursor: 'pointer',
+                    marginLeft: 'auto'
+                  }}
+                  title="Edit studio"
+                >
+                  ✏️
+                </button>
+              </div>
+            )}
+            {!data.studio && (
+              <div className="meta-badge" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <span className="badge-icon">🏢</span>
+                <span style={{ color: '#9ca3af', fontStyle: 'italic' }}>No studio</span>
+                <button
+                  onClick={handleOpenStudioEditor}
+                  style={{
+                    padding: '2px 6px',
+                    fontSize: '12px',
+                    background: '#3b82f6',
+                    color: 'white',
+                    border: 'none',
+                    borderRadius: '3px',
+                    cursor: 'pointer',
+                    marginLeft: 'auto'
+                  }}
+                  title="Add studio"
+                >
+                  ➕
+                </button>
               </div>
             )}
             {data.geviUrl && (
@@ -4395,6 +4534,115 @@ export default function SceneDetail() {
                 className="btn-cancel" 
                 onClick={() => setShowUrlEditorModal(false)}
                 disabled={isSavingUrls}
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Studio Editor Modal */}
+      {showStudioEditorModal && (
+        <div className="modal-overlay" onClick={() => !isUpdatingStudio && setShowStudioEditorModal(false)}>
+          <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '600px', maxHeight: '80vh', overflow: 'auto' }}>
+            <h3>🏢 Edit Studio</h3>
+            
+            <div style={{ marginBottom: '1.5rem' }}>
+              <p style={{ fontSize: '0.9rem', color: '#666', marginBottom: '1rem' }}>
+                Select a studio for this scene or remove the current studio assignment.
+              </p>
+              
+              {data?.studio && (
+                <div style={{ 
+                  padding: '12px', 
+                  background: '#f3f4f6', 
+                  borderRadius: '6px', 
+                  marginBottom: '1rem'
+                }}>
+                  <strong>Current Studio:</strong> {data.studio.name}
+                </div>
+              )}
+              
+              <input
+                type="text"
+                value={studioSearchQuery}
+                onChange={(e) => setStudioSearchQuery(e.target.value)}
+                placeholder="Search studios..."
+                disabled={isUpdatingStudio}
+                style={{
+                  width: '100%',
+                  padding: '10px 12px',
+                  border: '1px solid #d1d5db',
+                  borderRadius: '6px',
+                  fontSize: '14px',
+                  marginBottom: '12px'
+                }}
+              />
+              
+              <div style={{ 
+                maxHeight: '300px', 
+                overflowY: 'auto', 
+                border: '1px solid #d1d5db', 
+                borderRadius: '6px'
+              }}>
+                {availableStudios
+                  .filter(studio => 
+                    !studioSearchQuery || 
+                    studio.name.toLowerCase().includes(studioSearchQuery.toLowerCase())
+                  )
+                  .map(studio => (
+                    <div
+                      key={studio.id}
+                      onClick={() => !isUpdatingStudio && setSelectedStudioId(studio.id)}
+                      style={{
+                        padding: '12px',
+                        cursor: isUpdatingStudio ? 'not-allowed' : 'pointer',
+                        background: selectedStudioId === studio.id ? '#dbeafe' : 'white',
+                        borderBottom: '1px solid #e5e7eb',
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'center',
+                        opacity: isUpdatingStudio ? 0.6 : 1
+                      }}
+                    >
+                      <span>{studio.name}</span>
+                      {selectedStudioId === studio.id && <span>✓</span>}
+                    </div>
+                  ))}
+                {availableStudios.filter(studio => 
+                  !studioSearchQuery || 
+                  studio.name.toLowerCase().includes(studioSearchQuery.toLowerCase())
+                ).length === 0 && (
+                  <div style={{ padding: '2rem', textAlign: 'center', color: '#9ca3af' }}>
+                    No studios found
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="modal-actions">
+              <button 
+                className="btn-accept" 
+                onClick={handleUpdateStudio}
+                disabled={isUpdatingStudio || !selectedStudioId}
+              >
+                {isUpdatingStudio ? '⏳ Updating...' : '💾 Update Studio'}
+              </button>
+              {data?.studio && (
+                <button 
+                  className="btn-danger" 
+                  onClick={handleRemoveStudio}
+                  disabled={isUpdatingStudio}
+                  style={{ marginLeft: '8px' }}
+                >
+                  {isUpdatingStudio ? '⏳ Removing...' : '🗑️ Remove Studio'}
+                </button>
+              )}
+              <button 
+                className="btn-cancel" 
+                onClick={() => setShowStudioEditorModal(false)}
+                disabled={isUpdatingStudio}
               >
                 Cancel
               </button>

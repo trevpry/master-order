@@ -6882,11 +6882,12 @@ router.put('/scenes/:id/studio', asyncHandler(async (req, res) => {
   const sceneId = req.params.id;
   const { studioId } = req.body;
 
-  if (!studioId) {
-    return sendBadRequest(res, 'studioId is required');
+  // Allow studioId to be null to remove studio
+  if (studioId === undefined) {
+    return sendBadRequest(res, 'studioId is required (use null to remove studio)');
   }
 
-  console.log(`🎬 Updating studio for scene ${sceneId} to studio ${studioId}`);
+  console.log(`🎬 Updating studio for scene ${sceneId} to studio ${studioId === null ? 'null (remove)' : studioId}`);
   console.log(`   Scene ID type: ${typeof sceneId}, Studio ID type: ${typeof studioId}`);
 
   // Get Stash settings for direct GraphQL access
