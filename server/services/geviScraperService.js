@@ -346,7 +346,14 @@ class GeviScraperService {
 
       const foreskin = fromTable('Foreskin:');
       if (foreskin) {
-        metadata.circumcised = foreskin;
+        // Map GEVI foreskin values to Stash CircumisedEnum: CUT, UNCUT
+        const circumcisedMap = {
+          'Cut': 'CUT',
+          'Circumcised': 'CUT',
+          'Uncut': 'UNCUT',
+          'Intact': 'UNCUT'
+        };
+        metadata.circumcised = circumcisedMap[foreskin] || null;
       }
 
       const tattoos = fromTable('Tattoos:');
@@ -354,17 +361,75 @@ class GeviScraperService {
         metadata.tattoos = tattoos;
       }
 
-      const skinColor = fromTable('Skin:');
-      if (skinColor) {
-        // Map GEVI skin colors to ethnicities
-        const ethnicityMap = { 'White': 'Caucasian' };
-        metadata.ethnicity = ethnicityMap[skinColor] || skinColor;
+      const piercing = fromTable('Piercing:');
+      if (piercing) {
+        metadata.piercings = piercing;
       }
 
-      const country = fromTable('From:');
-      if (country) {
-        metadata.country = country;
+      // Extract all physical attributes as simple tags
+      const tags = [];
+      
+      // Hair color tag
+      if (hairColor && hairColor !== 'Unknown') {
+        tags.push(`Hair: ${hairColor}`);
       }
+
+      // Eye color tag
+      if (eyeColor && eyeColor !== 'Unknown') {
+        tags.push(`Eyes: ${eyeColor}`);
+      }
+
+      // Body Hair
+      const bodyHair = fromTable('Body Hair:');
+      if (bodyHair && bodyHair !== 'Unknown') {
+        tags.push(`Body Hair: ${bodyHair}`);
+      }
+
+      // Facial Hair
+      const facialHair = fromTable('Facial Hair:');
+      if (facialHair && facialHair !== 'Unknown') {
+        tags.push(`Facial Hair: ${facialHair}`);
+      }
+
+      // Build
+      const build = fromTable('Build:');
+      if (build && build !== 'Unknown') {
+        tags.push(`Build: ${build}`);
+      }
+
+      // Position
+      const position = fromTable('Position:');
+      if (position && position !== 'Unknown') {
+        tags.push(`Position: ${position}`);
+      }
+
+      // Skin (don't store as ethnicity, just as tag)
+      const skinColor = fromTable('Skin:');
+      if (skinColor && skinColor !== 'Unknown') {
+        tags.push(`Skin: ${skinColor}`);
+      }
+
+      // Foreskin/Circumcision status
+      if (foreskin && foreskin !== 'Unknown') {
+        tags.push(`Foreskin: ${foreskin}`);
+      }
+
+      // Piercing
+      if (piercing && piercing !== 'Unknown') {
+        tags.push(`Piercing: ${piercing}`);
+      }
+
+      // Tattoos
+      if (tattoos && tattoos !== 'None' && tattoos !== 'Unknown') {
+        tags.push(`Tattoos: ${tattoos}`);
+      }
+
+      if (tags.length > 0) {
+        metadata.tags = tags;
+      }
+
+      // Get "From:" location
+      const fromLocation = fromTable('From:');
 
       const birthYear = fromTable('Born:');
       if (birthYear) {
@@ -389,8 +454,52 @@ class GeviScraperService {
       if (bioKeyDiv.length) {
         const bioDiv = bioKeyDiv.next('div');
         if (bioDiv.length) {
-          metadata.details = bioDiv.text().trim();
+          let details = bioDiv.text().trim();
+          
+          // Append "From:" location to details if available
+          if (fromLocation) {
+            if (details) {
+              details += `\n\nFrom: ${fromLocation}`;
+            } else {
+              details = `From: ${fromLocation}`;
+            }
+          }
+          
+          metadata.details = details;
         }
+      } else if (fromLocation) {
+        // If no Notes section exists, just use the From location as details
+        metadata.details = `From: ${fromLocation}`;
+      }
+
+      // Extract external URLs from "See this performer at:" section
+      const externalUrls = [];
+      
+      // Always include the GEVI URL itself as the first URL
+      externalUrls.push(url);
+      
+      const performerLinksDiv = section.find('div').filter((i, el) => {
+        return $(el).text().trim() === 'See this performer at:';
+      }).first();
+      
+      if (performerLinksDiv.length) {
+        // Get the parent div that contains the "See this performer at:" div
+        const linksContainer = performerLinksDiv.parent();
+        if (linksContainer.length) {
+          // Find all <a> links in the container
+          const links = linksContainer.find('a');
+          links.each((i, link) => {
+            const href = $(link).attr('href');
+            if (href && href.startsWith('http')) {
+              externalUrls.push(href);
+            }
+          });
+        }
+      }
+      
+      if (externalUrls.length > 0) {
+        metadata.urls = externalUrls;
+        console.log(`   - Found ${externalUrls.length} URL(s) (including GEVI):`, externalUrls);
       }
 
       // Extract aliases (h2 elements)

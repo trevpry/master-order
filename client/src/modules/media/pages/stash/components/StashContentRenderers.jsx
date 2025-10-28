@@ -13,7 +13,8 @@ const StashContentRenderers = ({
   setAutoSkipRetries,
   performerSelectionMode = false,
   selectedPerformers = new Set(),
-  onTogglePerformerSelection
+  onTogglePerformerSelection,
+  currentPerformerPage = 1
 }) => {
   const renderScenes = () => {
     const scenes = data.scenes || [];
@@ -133,6 +134,7 @@ const StashContentRenderers = ({
         selectionMode={performerSelectionMode}
         selectedPerformers={selectedPerformers}
         onToggleSelection={onTogglePerformerSelection}
+        currentPage={currentPerformerPage}
       />
     );
   };

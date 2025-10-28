@@ -54,7 +54,9 @@ class TagMergeService {
       });
 
       if (mergeTags.length !== mergeTagIds.length) {
-        throw new Error('Some tags to merge were not found');
+        const foundIds = mergeTags.map(t => t.id);
+        const missingIds = mergeTagIds.filter(id => !foundIds.includes(id));
+        throw new Error(`Tags not found: ${missingIds.join(', ')}. They may have already been deleted or merged.`);
       }
 
       console.log(`   - Found main tag: ${mainTag.name}`);
@@ -78,17 +80,21 @@ class TagMergeService {
         const transferredPivotTags = await this._transferPivotTags(tx, mainTagId, mergeTagIds);
         console.log(`   - Transferred ${transferredPivotTags} performer/scene pivot tag(s)`);
 
-        // 5. Update main tag with merged aliases
-        const updatedMainTag = await tx.stashTag.update({
-          where: { id: mainTagId },
-          data: { aliases: updatedAliases }
-        });
+        // 5. Merge aliases into main tag
+        await this._mergeAliases(tx, mainTag, mergeTags);
+        console.log(`   - Merged aliases into main tag`);
 
         // 6. Delete merged tags from database
         await tx.stashTag.deleteMany({
           where: { id: { in: mergeTagIds } }
         });
         console.log(`   - Deleted ${mergeTagIds.length} tag(s) from database`);
+
+        // 7. Fetch updated main tag with aliases
+        const updatedMainTag = await tx.stashTag.findUnique({
+          where: { id: mainTagId },
+          include: { aliases: true }
+        });
 
         return {
           mainTag: updatedMainTag,
@@ -129,32 +135,55 @@ class TagMergeService {
    * Merge aliases from all tags, removing duplicates
    * @private
    */
+  /**
+   * Merge aliases from merged tags into main tag
+   * @private
+   */
   async _mergeAliases(tx, mainTag, mergeTags) {
     const aliasSet = new Set();
 
-    // Add main tag's existing aliases
-    if (mainTag.aliases) {
-      const existingAliases = mainTag.aliases.split(',').map(a => a.trim());
-      existingAliases.forEach(alias => aliasSet.add(alias));
-    }
+    // Get existing aliases for the main tag
+    const existingAliases = await tx.stashTagAlias.findMany({
+      where: { tagId: mainTag.id }
+    });
+    existingAliases.forEach(a => aliasSet.add(a.alias));
 
-    // Add all merge tags' names and aliases
+    // Add all merge tags' names and their aliases
     for (const tag of mergeTags) {
-      // Add the tag's name as an alias
-      aliasSet.add(tag.name);
-
-      // Add their existing aliases
-      if (tag.aliases) {
-        const tagAliases = tag.aliases.split(',').map(a => a.trim());
-        tagAliases.forEach(alias => aliasSet.add(alias));
+      // Add the merged tag's name as an alias (don't merge into itself)
+      if (tag.name !== mainTag.name) {
+        aliasSet.add(tag.name);
       }
+
+      // Get and add their existing aliases
+      const tagAliases = await tx.stashTagAlias.findMany({
+        where: { tagId: tag.id }
+      });
+      tagAliases.forEach(a => aliasSet.add(a.alias));
     }
 
     // Remove the main tag's name from aliases (don't alias to itself)
     aliasSet.delete(mainTag.name);
 
-    // Convert back to comma-separated string
-    return Array.from(aliasSet).filter(a => a).join(', ');
+    // Create new alias records for any that don't exist
+    const newAliases = Array.from(aliasSet).filter(a => a);
+    for (const alias of newAliases) {
+      await tx.stashTagAlias.upsert({
+        where: {
+          tagId_alias: {
+            tagId: mainTag.id,
+            alias: alias
+          }
+        },
+        create: {
+          tagId: mainTag.id,
+          alias: alias
+        },
+        update: {} // No updates needed if it already exists
+      });
+    }
+
+    console.log(`   - Created/verified ${newAliases.length} alias(es) for main tag`);
   }
 
   /**
@@ -320,11 +349,16 @@ class TagMergeService {
     console.log('🔄 [TagMerge] Updating Stash...');
 
     try {
+      // Extract alias strings from StashTagAlias objects
+      const aliasStrings = updatedMainTag.aliases 
+        ? updatedMainTag.aliases.map(a => a.alias) 
+        : [];
+      
       // Update main tag with merged aliases
       await this.stashSyncService.updateTag(parseInt(mainTagId), {
-        aliases: updatedMainTag.aliases ? updatedMainTag.aliases.split(',').map(a => a.trim()) : []
+        aliases: aliasStrings
       });
-      console.log(`   - Updated main tag ${mainTagId} in Stash`);
+      console.log(`   - Updated main tag ${mainTagId} in Stash with ${aliasStrings.length} alias(es)`);
 
       // Merge tags in Stash
       for (const mergeTagId of mergeTagIds) {

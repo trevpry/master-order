@@ -1,5 +1,5 @@
-import React, { useEffect, useState } from 'react';
-import { useParams, Link, useNavigate } from 'react-router-dom';
+import React, { useEffect, useState, useCallback } from 'react';
+import { useParams, Link, useNavigate, useSearchParams } from 'react-router-dom';
 import config from '../../../../config';
 
 // Helper function to convert cm to feet and inches
@@ -37,6 +37,8 @@ const formatPenisLength = (lengthStr) => {
 export default function PerformerDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const fromPage = searchParams.get('fromPage') || '1';
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -80,6 +82,19 @@ export default function PerformerDetail() {
   const [showScrapeReviewModal, setShowScrapeReviewModal] = useState(false);
   const [scrapeData, setScrapeData] = useState(null);
   const [isApplyingScrape, setIsApplyingScrape] = useState(false);
+  const [selectedImage, setSelectedImage] = useState(null);
+  const [acceptedFields, setAcceptedFields] = useState({});
+
+  // GEVI scraping state
+  const [isSearchingGevi, setIsSearchingGevi] = useState(false);
+
+  // Name conflict state
+  const [showConflictModal, setShowConflictModal] = useState(false);
+  const [conflictData, setConflictData] = useState(null);
+  const [pendingScrapeData, setPendingScrapeData] = useState(null);
+
+  // URLs collapse state
+  const [isUrlsCollapsed, setIsUrlsCollapsed] = useState(true);
 
   // Fetch Stash URL from settings
   useEffect(() => {
@@ -101,71 +116,73 @@ export default function PerformerDetail() {
     fetchStashUrl();
   }, []);
 
-  useEffect(() => {
-    const fetchPerformer = async () => {
-      setLoading(true);
-      try {
-        const res = await fetch(`${config.apiBaseUrl}/api/stash/performers/${id}`);
-        const json = await res.json();
-        if (!json.success) throw new Error(json.error || 'Failed to load performer');
-        setData(json.data);
-        
-        // Merge all tags: performer tags + scene-specific tags
-        const tagMap = new Map();
-        
-        // Add general performer tags
-        if (json.data.tags) {
-          json.data.tags.forEach(tag => {
-            if (!tagMap.has(tag.id)) {
-              tagMap.set(tag.id, {
-                ...tag,
-                isGeneral: true,
-                sceneCount: 0,
-                scenes: []
-              });
-            }
-          });
-        }
-        
-        // Add ALL scene-specific tags from allScenePerformerTags
-        if (json.data.allScenePerformerTags) {
-          json.data.allScenePerformerTags.forEach(sceneTag => {
-            if (tagMap.has(sceneTag.tagId)) {
-              // Tag already exists, increment scene count
-              const existing = tagMap.get(sceneTag.tagId);
-              existing.sceneCount++;
-              existing.scenes.push({ id: sceneTag.sceneId, title: sceneTag.sceneTitle });
-            } else {
-              // New tag from scene
-              tagMap.set(sceneTag.tagId, {
-                id: sceneTag.tagId,
-                name: sceneTag.tagName,
-                isGeneral: false,
-                sceneCount: 1,
-                scenes: [{ id: sceneTag.sceneId, title: sceneTag.sceneTitle }]
-              });
-            }
-          });
-        }
-        
-        // Convert map to array and sort by name
-        const merged = Array.from(tagMap.values()).sort((a, b) => 
-          a.name.localeCompare(b.name)
-        );
-        console.log('Merged tags:', merged);
-        console.log('Tag map size:', tagMap.size);
-        console.log('Performer tags:', json.data.tags);
-        console.log('Scenes with tags:', json.data.scenes?.filter(s => s.performerTags?.length > 0));
-        setMergedTags(merged);
-        
-      } catch (e) {
-        setError(e.message);
-      } finally {
-        setLoading(false);
+  // Fetch performer data function (extracted for reuse)
+  const fetchPerformer = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await fetch(`${config.apiBaseUrl}/api/stash/performers/${id}`);
+      const json = await res.json();
+      if (!json.success) throw new Error(json.error || 'Failed to load performer');
+      setData(json.data);
+      
+      // Merge all tags: performer tags + scene-specific tags
+      const tagMap = new Map();
+      
+      // Add general performer tags
+      if (json.data.tags) {
+        json.data.tags.forEach(tag => {
+          if (!tagMap.has(tag.id)) {
+            tagMap.set(tag.id, {
+              ...tag,
+              isGeneral: true,
+              sceneCount: 0,
+              scenes: []
+            });
+          }
+        });
       }
-    };
-    fetchPerformer();
+      
+      // Add ALL scene-specific tags from allScenePerformerTags
+      if (json.data.allScenePerformerTags) {
+        json.data.allScenePerformerTags.forEach(sceneTag => {
+          if (tagMap.has(sceneTag.tagId)) {
+            // Tag already exists, increment scene count
+            const existing = tagMap.get(sceneTag.tagId);
+            existing.sceneCount++;
+            existing.scenes.push({ id: sceneTag.sceneId, title: sceneTag.sceneTitle });
+          } else {
+            // New tag from scene
+            tagMap.set(sceneTag.tagId, {
+              id: sceneTag.tagId,
+              name: sceneTag.tagName,
+              isGeneral: false,
+              sceneCount: 1,
+              scenes: [{ id: sceneTag.sceneId, title: sceneTag.sceneTitle }]
+            });
+          }
+        });
+      }
+      
+      // Convert map to array and sort by name
+      const merged = Array.from(tagMap.values()).sort((a, b) => 
+        a.name.localeCompare(b.name)
+      );
+      console.log('Merged tags:', merged);
+      console.log('Tag map size:', tagMap.size);
+      console.log('Performer tags:', json.data.tags);
+      console.log('Scenes with tags:', json.data.scenes?.filter(s => s.performerTags?.length > 0));
+      setMergedTags(merged);
+      
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setLoading(false);
+    }
   }, [id]);
+
+  useEffect(() => {
+    fetchPerformer();
+  }, [fetchPerformer]);
   
   // Handle edit mode toggle
   const handleEditClick = () => {
@@ -286,8 +303,8 @@ export default function PerformerDetail() {
       
       alert(result.message || 'Performer deleted successfully!');
       
-      // Navigate back to performers list
-      navigate('/stash?tab=performers');
+      // Navigate back to performers list with page number
+      navigate(`/media/stash?tab=performers&page=${fromPage}`);
       
     } catch (error) {
       console.error('Failed to delete performer:', error);
@@ -478,6 +495,54 @@ export default function PerformerDetail() {
     setShowStashBoxSearchModal(true);
   };
 
+  // Handle native scraper button click (IAFD, etc.)
+  const handleNativeScraperClick = async (scraper) => {
+    console.log('🔍 Scraping with native scraper:', scraper);
+    setShowScrapeModal(true);
+    
+    try {
+      // Scrape with native scraper using performer name
+      const response = await fetch(`${config.apiBaseUrl}/api/stash/performers/${id}/scrape-native`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          scraperId: scraper.id,
+          query: data?.name || ''
+        })
+      });
+      
+      const result = await response.json();
+      console.log('🔍 Native scraper results:', result);
+      
+      if (result.success && result.data.results && result.data.results.length > 0) {
+        // Check if this was auto-scraped from an existing URL
+        if (result.data.autoScraped && result.data.results.length === 1) {
+          console.log('✅ Auto-scraped from existing URL, applying directly');
+          // Directly open review modal with the scraped data
+          await handleSelectNativeScraperResult(result.data.results[0]);
+          setShowScrapeModal(false);
+          return;
+        }
+        
+        // Show search results for manual selection
+        setSearchResults({
+          performers: result.data.results,
+          isPerformerSearch: true,
+          isStashBox: false,
+          scraperId: scraper.id,
+          source: scraper.name
+        });
+      } else {
+        setShowScrapeModal(false);
+        alert(`No results found from ${scraper.name}`);
+      }
+    } catch (error) {
+      console.error('Native scraper failed:', error);
+      alert(`Scraping failed: ${error.message}`);
+      setShowScrapeModal(false);
+    }
+  };
+
   // Handle stash-box search
   const handleStashBoxSearch = async () => {
     if (!selectedStashBoxScraper) return;
@@ -521,11 +586,27 @@ export default function PerformerDetail() {
     }
   };
 
+  // Initialize all scraped fields as accepted by default
+  const initializeAcceptedFields = (scrapedData) => {
+    if (!scrapedData) return;
+    
+    const fields = {};
+    Object.keys(scrapedData).forEach(key => {
+      // Skip null/undefined values and arrays (like images, tags which have separate UI)
+      if (scrapedData[key] !== null && scrapedData[key] !== undefined && !Array.isArray(scrapedData[key])) {
+        fields[key] = true;
+      }
+    });
+    
+    setAcceptedFields(fields);
+  };
+
   // Handle selecting a stash-box result
   const handleSelectStashBoxResult = async (performer) => {
     console.log('📦 Selected stash-box performer:', performer);
     
     setSearchResults(null);
+    setSelectedImage(null); // Reset selected image
     
     try {
       const response = await fetch(`${config.apiBaseUrl}/api/stash/performers/${id}/scrape-stashbox-result`, {
@@ -539,6 +620,12 @@ export default function PerformerDetail() {
       
       if (result.success) {
         setScrapeData(result.data);
+        // Initialize all fields as accepted by default
+        initializeAcceptedFields(result.data.scraped);
+        // Auto-select first image if available
+        if (result.data?.scraped?.images && result.data.scraped.images.length > 0) {
+          setSelectedImage(result.data.scraped.images[0]);
+        }
         setShowScrapeReviewModal(true);
       }
     } catch (error) {
@@ -547,47 +634,191 @@ export default function PerformerDetail() {
     }
   };
 
+  // Handle selecting a native scraper result
+  const handleSelectNativeScraperResult = async (performer, scraperId) => {
+    console.log('🔍 Selected native scraper performer:', performer);
+    
+    setSearchResults(null);
+    setSelectedImage(null); // Reset selected image
+    setShowScrapeModal(false);
+    
+    try {
+      const response = await fetch(`${config.apiBaseUrl}/api/stash/performers/${id}/scrape-native-result`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          scraped: performer,
+          scraperId: scraperId 
+        })
+      });
+      
+      const result = await response.json();
+      console.log('🔍 Processed native scraper result:', result);
+      
+      if (result.success) {
+        setScrapeData(result.data);
+        // Initialize all fields as accepted by default
+        initializeAcceptedFields(result.data.scraped);
+        // Auto-select first image if available
+        if (result.data?.scraped?.images && result.data.scraped.images.length > 0) {
+          setSelectedImage(result.data.scraped.images[0]);
+        }
+        setShowScrapeReviewModal(true);
+      }
+    } catch (error) {
+      console.error('Failed to process native scraper result:', error);
+      alert(`Failed to process result: ${error.message}`);
+    }
+  };
+
+  // Handle GEVI search button click
+  const handleGeviSearch = async () => {
+    console.log('🔍 [GEVI] Starting search for performer:', data?.name);
+    setIsSearchingGevi(true);
+    setSearchResults(null);
+    setSelectedImage(null);
+
+    try {
+      const response = await fetch(`${config.apiBaseUrl}/api/stash/performers/${id}/search-gevi`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' }
+      });
+
+      const result = await response.json();
+
+      if (result.success) {
+        // Check if this was auto-scraped from an existing URL
+        if (result.data.autoScraped && result.data.scraped) {
+          console.log('✅ Auto-scraped from existing GEVI URL, showing review modal');
+          // Directly show the review modal with scraped data
+          setScrapeData(result.data);
+          initializeAcceptedFields(result.data.scraped);
+          setShowScrapeReviewModal(true);
+          setIsSearchingGevi(false);
+          return;
+        }
+        
+        // Show search results for manual selection
+        console.log(`   - Found ${result.data.results.length} GEVI performers`);
+        
+        const formattedResults = result.data.results.map(p => ({
+          name: p.name,
+          url: p.url,
+        }));
+        
+        setSearchResults({
+          performers: formattedResults,
+          source: 'GEVI',
+          isGevi: true
+        });
+        setShowScrapeModal(true);
+      } else {
+        alert(`Failed to search GEVI: ${result.error || 'Unknown error'}`);
+      }
+    } catch (error) {
+      console.error('GEVI search failed:', error);
+      alert('Failed to search GEVI');
+    } finally {
+      setIsSearchingGevi(false);
+    }
+  };
+
+  // Handle selecting a GEVI performer from search results
+  const handleSelectGeviPerformer = async (geviPerformer) => {
+    console.log('👤 [GEVI] Selected performer:', geviPerformer);
+    
+    setSearchResults(null);
+    setShowScrapeModal(false);
+    setSelectedImage(null); // Reset selected image
+    
+    try {
+      const response = await fetch(`${config.apiBaseUrl}/api/stash/performers/${id}/scrape-gevi`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url: geviPerformer.url })
+      });
+      
+      const result = await response.json();
+      console.log('👤 [GEVI] Scraped performer data:', result);
+      
+      if (result.success) {
+        setScrapeData(result.data);
+        // Initialize all fields as accepted by default
+        initializeAcceptedFields(result.data.scraped);
+        // Auto-select first image if available
+        if (result.data?.scraped?.image) {
+          setSelectedImage(result.data.scraped.displayImage || result.data.scraped.image);
+        }
+        setShowScrapeReviewModal(true);
+      } else {
+        alert(`Failed to scrape GEVI: ${result.error || 'Unknown error'}`);
+      }
+    } catch (error) {
+      console.error('GEVI scrape failed:', error);
+      alert('Failed to scrape GEVI');
+    }
+  };
+
   // Apply scraped performer data
   const handleApplyScrape = async () => {
     if (!scrapeData?.scraped) return;
     
-    const confirmMessage = `Apply scraped data for "${scrapeData.scraped.name}"?\n\nThis will update the performer's information in your database and Stash.`;
-    if (!window.confirm(confirmMessage)) return;
-    
     setIsApplyingScrape(true);
     
     try {
-      // Build update payload from scraped data
+      // Build update payload from scraped data, respecting accepted fields
       const updateData = {};
       
-      // Only include fields that have values
-      if (scrapeData.scraped.name) updateData.name = scrapeData.scraped.name;
-      if (scrapeData.scraped.disambiguation) updateData.disambiguation = scrapeData.scraped.disambiguation;
-      if (scrapeData.scraped.aliases) updateData.alias = scrapeData.scraped.aliases.join(', ');
-      if (scrapeData.scraped.gender) updateData.gender = scrapeData.scraped.gender;
-      if (scrapeData.scraped.birthdate) updateData.birthdate = scrapeData.scraped.birthdate;
-      if (scrapeData.scraped.death_date) updateData.death_date = scrapeData.scraped.death_date;
-      if (scrapeData.scraped.ethnicity) updateData.ethnicity = scrapeData.scraped.ethnicity;
-      if (scrapeData.scraped.country) updateData.country = scrapeData.scraped.country;
-      if (scrapeData.scraped.eye_color) updateData.eye_color = scrapeData.scraped.eye_color;
-      if (scrapeData.scraped.hair_color) updateData.hair_color = scrapeData.scraped.hair_color;
-      if (scrapeData.scraped.height) updateData.height = scrapeData.scraped.height;
-      if (scrapeData.scraped.weight) updateData.weight = scrapeData.scraped.weight;
-      if (scrapeData.scraped.measurements) updateData.measurements = scrapeData.scraped.measurements;
-      if (scrapeData.scraped.fake_tits) updateData.fake_tits = scrapeData.scraped.fake_tits;
-      if (scrapeData.scraped.penis_length) updateData.penis_length = scrapeData.scraped.penis_length;
-      if (scrapeData.scraped.circumcised) updateData.circumcised = scrapeData.scraped.circumcised;
-      if (scrapeData.scraped.career_length) updateData.career_length = scrapeData.scraped.career_length;
-      if (scrapeData.scraped.tattoos) updateData.tattoos = scrapeData.scraped.tattoos;
-      if (scrapeData.scraped.piercings) updateData.piercings = scrapeData.scraped.piercings;
-      if (scrapeData.scraped.details) updateData.details = scrapeData.scraped.details;
-      if (scrapeData.scraped.url) updateData.url = scrapeData.scraped.url;
-      if (scrapeData.scraped.twitter) updateData.twitter = scrapeData.scraped.twitter;
-      if (scrapeData.scraped.instagram) updateData.instagram = scrapeData.scraped.instagram;
+      // Helper to check if a field is accepted
+      const isAccepted = (fieldName) => acceptedFields[fieldName] !== false;
+      
+      // Only include fields that have values AND are accepted
+      if (scrapeData.scraped.name && isAccepted('name')) updateData.name = scrapeData.scraped.name;
+      if (scrapeData.scraped.disambiguation && isAccepted('disambiguation')) updateData.disambiguation = scrapeData.scraped.disambiguation;
+      if (scrapeData.scraped.aliases && isAccepted('aliases')) {
+        updateData.alias = Array.isArray(scrapeData.scraped.aliases) 
+          ? scrapeData.scraped.aliases.join(', ') 
+          : scrapeData.scraped.aliases;
+      }
+      if (scrapeData.scraped.gender && isAccepted('gender')) updateData.gender = scrapeData.scraped.gender;
+      if (scrapeData.scraped.birthdate && isAccepted('birthdate')) updateData.birthdate = scrapeData.scraped.birthdate;
+      if (scrapeData.scraped.death_date && isAccepted('death_date')) updateData.death_date = scrapeData.scraped.death_date;
+      if (scrapeData.scraped.country && isAccepted('country')) updateData.country = scrapeData.scraped.country;
+      if (scrapeData.scraped.eye_color && isAccepted('eye_color')) updateData.eye_color = scrapeData.scraped.eye_color;
+      if (scrapeData.scraped.hair_color && isAccepted('hair_color')) updateData.hair_color = scrapeData.scraped.hair_color;
+      if (scrapeData.scraped.height && isAccepted('height')) updateData.height = scrapeData.scraped.height;
+      if (scrapeData.scraped.weight && isAccepted('weight')) updateData.weight = scrapeData.scraped.weight;
+      if (scrapeData.scraped.measurements && isAccepted('measurements')) updateData.measurements = scrapeData.scraped.measurements;
+      if (scrapeData.scraped.fake_tits && isAccepted('fake_tits')) updateData.fake_tits = scrapeData.scraped.fake_tits;
+      if (scrapeData.scraped.penis_length && isAccepted('penis_length')) updateData.penis_length = scrapeData.scraped.penis_length;
+      if (scrapeData.scraped.circumcised && isAccepted('circumcised')) updateData.circumcised = scrapeData.scraped.circumcised;
+      if (scrapeData.scraped.career_length && isAccepted('career_length')) updateData.career_length = scrapeData.scraped.career_length;
+      if (scrapeData.scraped.tattoos && isAccepted('tattoos')) updateData.tattoos = scrapeData.scraped.tattoos;
+      if (scrapeData.scraped.piercings && isAccepted('piercings')) updateData.piercings = scrapeData.scraped.piercings;
+      if (scrapeData.scraped.details && isAccepted('details')) updateData.details = scrapeData.scraped.details;
+      if (scrapeData.scraped.url && isAccepted('url')) updateData.url = scrapeData.scraped.url;
+      if (scrapeData.scraped.twitter && isAccepted('twitter')) updateData.twitter = scrapeData.scraped.twitter;
+      if (scrapeData.scraped.instagram && isAccepted('instagram')) updateData.instagram = scrapeData.scraped.instagram;
+      
+      // Add URLs array (from GEVI or other scrapers that provide multiple URLs)
+      if (scrapeData.scraped.urls && Array.isArray(scrapeData.scraped.urls) && isAccepted('urls')) {
+        updateData.newUrls = scrapeData.scraped.urls;
+      }
+      
+      // Add selected image if one was chosen
+      // Note: selectedImage can be null (No Image option), a URL from single image, or a URL from images array
+      if (selectedImage) {
+        updateData.image = selectedImage;
+      }
       
       // Add matched tags
       if (scrapeData.matched?.tags?.length > 0) {
         updateData.tagIds = scrapeData.matched.tags.map(t => t.id);
+      }
+      
+      // Add unmatched tags (to be created)
+      if (scrapeData.unmatched?.tags?.length > 0) {
+        updateData.unmatchedTags = scrapeData.unmatched.tags;
       }
       
       console.log('📤 Applying scraped data:', updateData);
@@ -600,21 +831,177 @@ export default function PerformerDetail() {
       
       const result = await response.json();
       
+      // Check for name conflict (HTTP 409)
+      if (response.status === 409 && result.conflict) {
+        console.log('⚠️ Name conflict detected:', result);
+        setConflictData(result);
+        setPendingScrapeData(updateData);
+        setShowConflictModal(true);
+        setIsApplyingScrape(false);
+        return;
+      }
+      
       if (!result.success) {
         throw new Error(result.error || 'Failed to apply scraped data');
       }
       
-      alert('✅ Scraped data applied successfully!');
       setShowScrapeReviewModal(false);
       setScrapeData(null);
+      setSelectedImage(null);
+      setAcceptedFields({});
       
-      // Reload page to show updated data
-      window.location.reload();
+      // Reload performer data to show updated information
+      await fetchPerformer();
       
     } catch (error) {
       console.error('Failed to apply scraped data:', error);
       alert(`Failed to apply scraped data: ${error.message}`);
     } finally {
+      setIsApplyingScrape(false);
+    }
+  };
+
+  // Handle merging current performer into existing one
+  const handleMergeIntoExisting = async () => {
+    if (!conflictData || !pendingScrapeData) return;
+
+    try {
+      setIsApplyingScrape(true);
+      console.log('🔄 Merging current performer into existing:', conflictData.existingPerformer.id);
+
+      // Merge current performer into existing one
+      const response = await fetch(`${config.apiBaseUrl}/api/stash/performers/merge`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          mainPerformerId: conflictData.existingPerformer.id,
+          mergePerformerIds: [id]
+        })
+      });
+
+      const result = await response.json();
+
+      if (!result.success) {
+        throw new Error(result.error || 'Failed to merge performers');
+      }
+
+      console.log('✅ Merge successful, redirecting to existing performer');
+      // Redirect to the existing performer page
+      navigate(`/media/stash/performers/${conflictData.existingPerformer.id}`);
+
+    } catch (error) {
+      console.error('Failed to merge performers:', error);
+      alert(`Failed to merge performers: ${error.message}`);
+      setIsApplyingScrape(false);
+    }
+  };
+
+  // Handle merging existing performer into current one
+  const handleMergeFromExisting = async () => {
+    if (!conflictData || !pendingScrapeData) return;
+
+    try {
+      setIsApplyingScrape(true);
+      console.log('🔄 Merging existing performer into current:', id);
+
+      // First merge existing into current
+      const mergeResponse = await fetch(`${config.apiBaseUrl}/api/stash/performers/merge`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          mainPerformerId: id,
+          mergePerformerIds: [conflictData.existingPerformer.id]
+        })
+      });
+
+      const mergeResult = await mergeResponse.json();
+
+      if (!mergeResult.success) {
+        throw new Error(mergeResult.error || 'Failed to merge performers');
+      }
+
+      console.log('✅ Merge successful, now applying scraped data');
+
+      // Now apply the scraped data
+      const updateResponse = await fetch(`${config.apiBaseUrl}/api/stash/performers/${id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(pendingScrapeData)
+      });
+
+      const updateResult = await updateResponse.json();
+
+      if (!updateResult.success) {
+        throw new Error(updateResult.error || 'Failed to apply scraped data after merge');
+      }
+
+      console.log('✅ Update successful, reloading page');
+      window.location.reload();
+
+    } catch (error) {
+      console.error('Failed to merge and update performer:', error);
+      alert(`Failed to merge and update performer: ${error.message}`);
+      setIsApplyingScrape(false);
+    }
+  };
+
+  // Handle adding disambiguation to current performer
+  const handleAddDisambiguation = async () => {
+    if (!conflictData || !pendingScrapeData) return;
+
+    const disambiguation = prompt('Enter disambiguation text (e.g., "II", "Performer", etc.):');
+    
+    if (!disambiguation || disambiguation.trim() === '') {
+      alert('Disambiguation is required');
+      return;
+    }
+
+    try {
+      setIsApplyingScrape(true);
+      console.log('🏷️ Adding disambiguation:', disambiguation);
+
+      // Add disambiguation to the pending data
+      const updatedData = {
+        ...pendingScrapeData,
+        disambiguation: disambiguation.trim()
+      };
+
+      // Apply the scraped data with disambiguation
+      const response = await fetch(`${config.apiBaseUrl}/api/stash/performers/${id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(updatedData)
+      });
+
+      const result = await response.json();
+
+      // Check for conflict again (shouldn't happen, but just in case)
+      if (response.status === 409 && result.conflict) {
+        alert('Disambiguation did not resolve the conflict. Please try a different value.');
+        setIsApplyingScrape(false);
+        return;
+      }
+
+      if (!result.success) {
+        throw new Error(result.error || 'Failed to apply scraped data with disambiguation');
+      }
+
+      console.log('✅ Update with disambiguation successful');
+      
+      setShowConflictModal(false);
+      setConflictData(null);
+      setPendingScrapeData(null);
+      setShowScrapeReviewModal(false);
+      setScrapeData(null);
+      setSelectedImage(null);
+      setAcceptedFields({});
+      
+      // Reload page to show updated data
+      window.location.reload();
+
+    } catch (error) {
+      console.error('Failed to add disambiguation:', error);
+      alert(`Failed to add disambiguation: ${error.message}`);
       setIsApplyingScrape(false);
     }
   };
@@ -954,6 +1341,77 @@ export default function PerformerDetail() {
                     </button>
                   ))}
                   
+                  {/* Native scraper buttons (IAFD) */}
+                  {availableScrapers.filter(s => !s.isStashBox && s.performer?.supported).map((scraper, idx) => (
+                    <button
+                      key={`native-${idx}`}
+                      onClick={() => handleNativeScraperClick(scraper)}
+                      title={`Scrape from ${scraper.name}`}
+                      style={{
+                        background: 'linear-gradient(135deg, #8b5cf6 0%, #7c3aed 100%)',
+                        border: '2px solid #8b5cf6',
+                        color: 'white',
+                        padding: '8px 16px',
+                        borderRadius: '8px',
+                        fontSize: '13px',
+                        fontWeight: '600',
+                        cursor: 'pointer',
+                        transition: 'all 0.2s ease',
+                        boxShadow: '0 2px 4px rgba(139, 92, 246, 0.2)',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '6px'
+                      }}
+                      onMouseOver={(e) => {
+                        e.currentTarget.style.transform = 'translateY(-2px)';
+                        e.currentTarget.style.boxShadow = '0 4px 8px rgba(139, 92, 246, 0.3)';
+                      }}
+                      onMouseOut={(e) => {
+                        e.currentTarget.style.transform = 'translateY(0)';
+                        e.currentTarget.style.boxShadow = '0 2px 4px rgba(139, 92, 246, 0.2)';
+                      }}
+                    >
+                      <span style={{ fontSize: '16px' }}>🔍</span>
+                      <span>{scraper.name}</span>
+                    </button>
+                  ))}
+                  
+                  {/* GEVI scraper button (always available) */}
+                  <button
+                    onClick={handleGeviSearch}
+                    disabled={isSearchingGevi}
+                    title="Search Gay Erotic Video Index (GEVI)"
+                    style={{
+                      background: 'linear-gradient(135deg, #f59e0b 0%, #d97706 100%)',
+                      border: '2px solid #f59e0b',
+                      color: 'white',
+                      padding: '8px 16px',
+                      borderRadius: '8px',
+                      fontSize: '13px',
+                      fontWeight: '600',
+                      cursor: isSearchingGevi ? 'wait' : 'pointer',
+                      transition: 'all 0.2s ease',
+                      boxShadow: '0 2px 4px rgba(245, 158, 11, 0.2)',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '6px',
+                      opacity: isSearchingGevi ? 0.7 : 1
+                    }}
+                    onMouseOver={(e) => {
+                      if (!isSearchingGevi) {
+                        e.currentTarget.style.transform = 'translateY(-2px)';
+                        e.currentTarget.style.boxShadow = '0 4px 8px rgba(245, 158, 11, 0.3)';
+                      }
+                    }}
+                    onMouseOut={(e) => {
+                      e.currentTarget.style.transform = 'translateY(0)';
+                      e.currentTarget.style.boxShadow = '0 2px 4px rgba(245, 158, 11, 0.2)';
+                    }}
+                  >
+                    <span style={{ fontSize: '16px' }}>🎬</span>
+                    <span>{isSearchingGevi ? 'Searching...' : 'GEVI'}</span>
+                  </button>
+                  
                   {stashUrl && (
                     <a 
                       href={`${stashUrl}/performers/${data.id}`} 
@@ -996,6 +1454,38 @@ export default function PerformerDetail() {
                 </a>
               )}
             </div>
+
+            {/* URLs Section */}
+            {data.urls && data.urls.length > 0 && (
+              <div className="performer-urls-section">
+                <h4 
+                  className="urls-title" 
+                  onClick={() => setIsUrlsCollapsed(!isUrlsCollapsed)}
+                  style={{ cursor: 'pointer', userSelect: 'none' }}
+                >
+                  <span style={{ display: 'inline-block', transition: 'transform 0.2s', transform: isUrlsCollapsed ? 'rotate(-90deg)' : 'rotate(0deg)' }}>
+                    ▼
+                  </span>
+                  {' '}🔗 URLs
+                </h4>
+                {!isUrlsCollapsed && (
+                  <div className="urls-list">
+                    {data.urls.map((url, index) => (
+                      <a 
+                        key={index}
+                        href={url} 
+                        target="_blank" 
+                        rel="noopener noreferrer" 
+                        className="url-link"
+                        title={url}
+                      >
+                        {url}
+                      </a>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
           
           {/* Edit Form */}
@@ -2134,7 +2624,9 @@ export default function PerformerDetail() {
       {showScrapeModal && searchResults && (
         <div className="modal-overlay" onClick={() => setShowScrapeModal(false)}>
           <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '900px', maxHeight: '90vh', overflow: 'auto' }}>
-            <h3>📦 Stash-Box Search Results</h3>
+            <h3>
+              {searchResults.isStashBox ? '📦' : searchResults.isGevi ? '🎬' : '🔍'} {searchResults.source} Search Results
+            </h3>
             
             {searchResults.performers && searchResults.performers.length > 0 ? (
               <div style={{ marginTop: '1rem' }}>
@@ -2146,37 +2638,66 @@ export default function PerformerDetail() {
                   {searchResults.performers.map((performer, idx) => (
                     <div
                       key={idx}
-                      onClick={() => handleSelectStashBoxResult(performer)}
+                      onClick={() => {
+                        if (searchResults.isStashBox) {
+                          handleSelectStashBoxResult(performer);
+                        } else if (searchResults.isGevi) {
+                          handleSelectGeviPerformer(performer);
+                        } else {
+                          handleSelectNativeScraperResult(performer, searchResults.scraperId);
+                        }
+                      }}
                       style={{
                         padding: '16px',
-                        border: '2px solid #e5e7eb',
+                        border: searchResults.isGevi ? '2px solid #fef3c7' : '2px solid #e5e7eb',
                         borderRadius: '8px',
                         cursor: 'pointer',
                         transition: 'all 0.2s',
                         background: 'white'
                       }}
                       onMouseOver={(e) => {
-                        e.currentTarget.style.borderColor = '#06b6d4';
-                        e.currentTarget.style.background = '#f0f9ff';
+                        if (searchResults.isGevi) {
+                          e.currentTarget.style.borderColor = '#f59e0b';
+                          e.currentTarget.style.background = '#fffbeb';
+                        } else {
+                          e.currentTarget.style.borderColor = '#06b6d4';
+                          e.currentTarget.style.background = '#f0f9ff';
+                        }
                       }}
                       onMouseOut={(e) => {
-                        e.currentTarget.style.borderColor = '#e5e7eb';
+                        e.currentTarget.style.borderColor = searchResults.isGevi ? '#fef3c7' : '#e5e7eb';
                         e.currentTarget.style.background = 'white';
                       }}
                     >
                       <div style={{ display: 'flex', gap: '16px' }}>
-                        {performer.images && performer.images.length > 0 && (
-                          <img
-                            src={performer.images[0]}
-                            alt={performer.name}
-                            style={{
-                              width: '80px',
-                              height: '80px',
-                              objectFit: 'cover',
-                              borderRadius: '6px'
-                            }}
-                            onError={(e) => e.target.style.display = 'none'}
-                          />
+                        {/* Show placeholder for GEVI results (no images in search) */}
+                        {searchResults.isGevi ? (
+                          <div style={{ 
+                            width: '80px', 
+                            height: '80px', 
+                            borderRadius: '6px',
+                            background: 'linear-gradient(135deg, #f59e0b 0%, #d97706 100%)',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            fontSize: '36px'
+                          }}>
+                            🎬
+                          </div>
+                        ) : (
+                          performer.images && performer.images.length > 0 && (
+                            <img
+                              src={performer.images[0]}
+                              alt={performer.name}
+                              style={{
+                                width: '80px',
+                                height: '80px',
+                                objectFit: 'cover',
+                                borderRadius: '6px'
+                              }}
+                              onError={(e) => e.target.style.display = 'none'}
+                            />
+                          )
                         )}
                         <div style={{ flex: 1 }}>
                           <h4 style={{ margin: '0 0 8px 0', fontSize: '16px', fontWeight: '600' }}>
@@ -2189,9 +2710,9 @@ export default function PerformerDetail() {
                             </div>
                           )}
                           
-                          {performer.aliases && performer.aliases.length > 0 && (
+                          {performer.aliases && (
                             <div style={{ fontSize: '13px', color: '#6b7280', marginBottom: '4px' }}>
-                              Aliases: {performer.aliases.join(', ')}
+                              Aliases: {Array.isArray(performer.aliases) ? performer.aliases.join(', ') : performer.aliases}
                             </div>
                           )}
                           
@@ -2240,54 +2761,534 @@ export default function PerformerDetail() {
                 </p>
                 
                 <div style={{ background: '#f9fafb', padding: '16px', borderRadius: '8px', marginBottom: '16px' }}>
+                  <div style={{ marginBottom: '12px', paddingBottom: '12px', borderBottom: '1px solid #e5e7eb' }}>
+                    <p style={{ fontSize: '13px', color: '#6b7280', margin: 0 }}>
+                      ✓ Check fields to include • ✗ Uncheck to exclude
+                    </p>
+                  </div>
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', fontSize: '14px' }}>
                     {scrapeData.scraped.name && (
-                      <div>
-                        <strong>Name:</strong> {scrapeData.scraped.name}
+                      <div style={{ display: 'flex', alignItems: 'start', gap: '8px' }}>
+                        <input
+                          type="checkbox"
+                          checked={acceptedFields.name !== false}
+                          onChange={(e) => setAcceptedFields(prev => ({ ...prev, name: e.target.checked }))}
+                          style={{ marginTop: '2px', cursor: 'pointer' }}
+                        />
+                        <div>
+                          <strong>Name:</strong> {scrapeData.scraped.name}
+                        </div>
                       </div>
                     )}
                     {scrapeData.scraped.disambiguation && (
-                      <div>
-                        <strong>Disambiguation:</strong> {scrapeData.scraped.disambiguation}
+                      <div style={{ display: 'flex', alignItems: 'start', gap: '8px' }}>
+                        <input
+                          type="checkbox"
+                          checked={acceptedFields.disambiguation !== false}
+                          onChange={(e) => setAcceptedFields(prev => ({ ...prev, disambiguation: e.target.checked }))}
+                          style={{ marginTop: '2px', cursor: 'pointer' }}
+                        />
+                        <div>
+                          <strong>Disambiguation:</strong> {scrapeData.scraped.disambiguation}
+                        </div>
                       </div>
                     )}
-                    {scrapeData.scraped.aliases && scrapeData.scraped.aliases.length > 0 && (
-                      <div style={{ gridColumn: '1 / -1' }}>
-                        <strong>Aliases:</strong> {scrapeData.scraped.aliases.join(', ')}
+                    {scrapeData.scraped.aliases && (
+                      <div style={{ gridColumn: '1 / -1', display: 'flex', alignItems: 'start', gap: '8px' }}>
+                        <input
+                          type="checkbox"
+                          checked={acceptedFields.aliases !== false}
+                          onChange={(e) => setAcceptedFields(prev => ({ ...prev, aliases: e.target.checked }))}
+                          style={{ marginTop: '2px', cursor: 'pointer' }}
+                        />
+                        <div>
+                          <strong>Aliases:</strong> {Array.isArray(scrapeData.scraped.aliases) ? scrapeData.scraped.aliases.join(', ') : scrapeData.scraped.aliases}
+                        </div>
                       </div>
                     )}
                     {scrapeData.scraped.gender && (
-                      <div>
-                        <strong>Gender:</strong> {scrapeData.scraped.gender}
+                      <div style={{ display: 'flex', alignItems: 'start', gap: '8px' }}>
+                        <input
+                          type="checkbox"
+                          checked={acceptedFields.gender !== false}
+                          onChange={(e) => setAcceptedFields(prev => ({ ...prev, gender: e.target.checked }))}
+                          style={{ marginTop: '2px', cursor: 'pointer' }}
+                        />
+                        <div>
+                          <strong>Gender:</strong> {scrapeData.scraped.gender}
+                        </div>
                       </div>
                     )}
                     {scrapeData.scraped.birthdate && (
-                      <div>
-                        <strong>Birthdate:</strong> {scrapeData.scraped.birthdate}
+                      <div style={{ display: 'flex', alignItems: 'start', gap: '8px' }}>
+                        <input
+                          type="checkbox"
+                          checked={acceptedFields.birthdate !== false}
+                          onChange={(e) => setAcceptedFields(prev => ({ ...prev, birthdate: e.target.checked }))}
+                          style={{ marginTop: '2px', cursor: 'pointer' }}
+                        />
+                        <div>
+                          <strong>Birthdate:</strong> {scrapeData.scraped.birthdate}
+                        </div>
                       </div>
                     )}
-                    {scrapeData.scraped.ethnicity && (
-                      <div>
-                        <strong>Ethnicity:</strong> {scrapeData.scraped.ethnicity}
+                    {scrapeData.scraped.death_date && (
+                      <div style={{ display: 'flex', alignItems: 'start', gap: '8px' }}>
+                        <input
+                          type="checkbox"
+                          checked={acceptedFields.death_date !== false}
+                          onChange={(e) => setAcceptedFields(prev => ({ ...prev, death_date: e.target.checked }))}
+                          style={{ marginTop: '2px', cursor: 'pointer' }}
+                        />
+                        <div>
+                          <strong>Death Date:</strong> {scrapeData.scraped.death_date}
+                        </div>
                       </div>
                     )}
                     {scrapeData.scraped.country && (
-                      <div>
-                        <strong>Country:</strong> {scrapeData.scraped.country}
+                      <div style={{ display: 'flex', alignItems: 'start', gap: '8px' }}>
+                        <input
+                          type="checkbox"
+                          checked={acceptedFields.country !== false}
+                          onChange={(e) => setAcceptedFields(prev => ({ ...prev, country: e.target.checked }))}
+                          style={{ marginTop: '2px', cursor: 'pointer' }}
+                        />
+                        <div>
+                          <strong>Country:</strong> {scrapeData.scraped.country}
+                        </div>
+                      </div>
+                    )}
+                    {scrapeData.scraped.eye_color && (
+                      <div style={{ display: 'flex', alignItems: 'start', gap: '8px' }}>
+                        <input
+                          type="checkbox"
+                          checked={acceptedFields.eye_color !== false}
+                          onChange={(e) => setAcceptedFields(prev => ({ ...prev, eye_color: e.target.checked }))}
+                          style={{ marginTop: '2px', cursor: 'pointer' }}
+                        />
+                        <div>
+                          <strong>Eye Color:</strong> {scrapeData.scraped.eye_color}
+                        </div>
+                      </div>
+                    )}
+                    {scrapeData.scraped.hair_color && (
+                      <div style={{ display: 'flex', alignItems: 'start', gap: '8px' }}>
+                        <input
+                          type="checkbox"
+                          checked={acceptedFields.hair_color !== false}
+                          onChange={(e) => setAcceptedFields(prev => ({ ...prev, hair_color: e.target.checked }))}
+                          style={{ marginTop: '2px', cursor: 'pointer' }}
+                        />
+                        <div>
+                          <strong>Hair Color:</strong> {scrapeData.scraped.hair_color}
+                        </div>
                       </div>
                     )}
                     {scrapeData.scraped.height && (
-                      <div>
-                        <strong>Height:</strong> {scrapeData.scraped.height}
+                      <div style={{ display: 'flex', alignItems: 'start', gap: '8px' }}>
+                        <input
+                          type="checkbox"
+                          checked={acceptedFields.height !== false}
+                          onChange={(e) => setAcceptedFields(prev => ({ ...prev, height: e.target.checked }))}
+                          style={{ marginTop: '2px', cursor: 'pointer' }}
+                        />
+                        <div>
+                          <strong>Height:</strong> {scrapeData.scraped.height} cm
+                        </div>
                       </div>
                     )}
                     {scrapeData.scraped.weight && (
-                      <div>
-                        <strong>Weight:</strong> {scrapeData.scraped.weight}
+                      <div style={{ display: 'flex', alignItems: 'start', gap: '8px' }}>
+                        <input
+                          type="checkbox"
+                          checked={acceptedFields.weight !== false}
+                          onChange={(e) => setAcceptedFields(prev => ({ ...prev, weight: e.target.checked }))}
+                          style={{ marginTop: '2px', cursor: 'pointer' }}
+                        />
+                        <div>
+                          <strong>Weight:</strong> {scrapeData.scraped.weight} kg
+                        </div>
+                      </div>
+                    )}
+                    {scrapeData.scraped.penis_length && (
+                      <div style={{ display: 'flex', alignItems: 'start', gap: '8px' }}>
+                        <input
+                          type="checkbox"
+                          checked={acceptedFields.penis_length !== false}
+                          onChange={(e) => setAcceptedFields(prev => ({ ...prev, penis_length: e.target.checked }))}
+                          style={{ marginTop: '2px', cursor: 'pointer' }}
+                        />
+                        <div>
+                          <strong>Penis Length:</strong> {scrapeData.scraped.penis_length} cm
+                        </div>
+                      </div>
+                    )}
+                    {scrapeData.scraped.circumcised && (
+                      <div style={{ display: 'flex', alignItems: 'start', gap: '8px' }}>
+                        <input
+                          type="checkbox"
+                          checked={acceptedFields.circumcised !== false}
+                          onChange={(e) => setAcceptedFields(prev => ({ ...prev, circumcised: e.target.checked }))}
+                          style={{ marginTop: '2px', cursor: 'pointer' }}
+                        />
+                        <div>
+                          <strong>Circumcised:</strong> {scrapeData.scraped.circumcised}
+                        </div>
+                      </div>
+                    )}
+                    {scrapeData.scraped.measurements && (
+                      <div style={{ display: 'flex', alignItems: 'start', gap: '8px' }}>
+                        <input
+                          type="checkbox"
+                          checked={acceptedFields.measurements !== false}
+                          onChange={(e) => setAcceptedFields(prev => ({ ...prev, measurements: e.target.checked }))}
+                          style={{ marginTop: '2px', cursor: 'pointer' }}
+                        />
+                        <div>
+                          <strong>Measurements:</strong> {scrapeData.scraped.measurements}
+                        </div>
+                      </div>
+                    )}
+                    {scrapeData.scraped.tattoos && (
+                      <div style={{ gridColumn: '1 / -1', display: 'flex', alignItems: 'start', gap: '8px' }}>
+                        <input
+                          type="checkbox"
+                          checked={acceptedFields.tattoos !== false}
+                          onChange={(e) => setAcceptedFields(prev => ({ ...prev, tattoos: e.target.checked }))}
+                          style={{ marginTop: '2px', cursor: 'pointer' }}
+                        />
+                        <div>
+                          <strong>Tattoos:</strong> {scrapeData.scraped.tattoos}
+                        </div>
+                      </div>
+                    )}
+                    {scrapeData.scraped.piercings && (
+                      <div style={{ gridColumn: '1 / -1', display: 'flex', alignItems: 'start', gap: '8px' }}>
+                        <input
+                          type="checkbox"
+                          checked={acceptedFields.piercings !== false}
+                          onChange={(e) => setAcceptedFields(prev => ({ ...prev, piercings: e.target.checked }))}
+                          style={{ marginTop: '2px', cursor: 'pointer' }}
+                        />
+                        <div>
+                          <strong>Piercings:</strong> {scrapeData.scraped.piercings}
+                        </div>
+                      </div>
+                    )}
+                    {scrapeData.scraped.career_length && (
+                      <div style={{ display: 'flex', alignItems: 'start', gap: '8px' }}>
+                        <input
+                          type="checkbox"
+                          checked={acceptedFields.career_length !== false}
+                          onChange={(e) => setAcceptedFields(prev => ({ ...prev, career_length: e.target.checked }))}
+                          style={{ marginTop: '2px', cursor: 'pointer' }}
+                        />
+                        <div>
+                          <strong>Career:</strong> {scrapeData.scraped.career_length}
+                        </div>
+                      </div>
+                    )}
+                    {scrapeData.scraped.twitter && (
+                      <div style={{ display: 'flex', alignItems: 'start', gap: '8px' }}>
+                        <input
+                          type="checkbox"
+                          checked={acceptedFields.twitter !== false}
+                          onChange={(e) => setAcceptedFields(prev => ({ ...prev, twitter: e.target.checked }))}
+                          style={{ marginTop: '2px', cursor: 'pointer' }}
+                        />
+                        <div>
+                          <strong>Twitter:</strong> <a href={scrapeData.scraped.twitter} target="_blank" rel="noopener noreferrer" style={{ color: '#06b6d4' }}>@{scrapeData.scraped.twitter.split('/').pop()}</a>
+                        </div>
+                      </div>
+                    )}
+                    {scrapeData.scraped.instagram && (
+                      <div style={{ display: 'flex', alignItems: 'start', gap: '8px' }}>
+                        <input
+                          type="checkbox"
+                          checked={acceptedFields.instagram !== false}
+                          onChange={(e) => setAcceptedFields(prev => ({ ...prev, instagram: e.target.checked }))}
+                          style={{ marginTop: '2px', cursor: 'pointer' }}
+                        />
+                        <div>
+                          <strong>Instagram:</strong> <a href={scrapeData.scraped.instagram} target="_blank" rel="noopener noreferrer" style={{ color: '#06b6d4' }}>@{scrapeData.scraped.instagram.split('/').pop()}</a>
+                        </div>
+                      </div>
+                    )}
+                    {scrapeData.scraped.url && (
+                      <div style={{ gridColumn: '1 / -1', display: 'flex', alignItems: 'start', gap: '8px' }}>
+                        <input
+                          type="checkbox"
+                          checked={acceptedFields.url !== false}
+                          onChange={(e) => setAcceptedFields(prev => ({ ...prev, url: e.target.checked }))}
+                          style={{ marginTop: '2px', cursor: 'pointer' }}
+                        />
+                        <div>
+                          <strong>URL:</strong> <a href={scrapeData.scraped.url} target="_blank" rel="noopener noreferrer" style={{ color: '#06b6d4', wordBreak: 'break-all' }}>{scrapeData.scraped.url}</a>
+                        </div>
+                      </div>
+                    )}
+                    {scrapeData.scraped.urls && scrapeData.scraped.urls.length > 0 && (
+                      <div style={{ gridColumn: '1 / -1', display: 'flex', alignItems: 'start', gap: '8px' }}>
+                        <input
+                          type="checkbox"
+                          checked={acceptedFields.urls !== false}
+                          onChange={(e) => setAcceptedFields(prev => ({ ...prev, urls: e.target.checked }))}
+                          style={{ marginTop: '2px', cursor: 'pointer' }}
+                        />
+                        <div style={{ flex: 1 }}>
+                          <strong>URLs ({scrapeData.scraped.urls.length}):</strong>
+                          <div style={{ marginTop: '4px', display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                            {scrapeData.scraped.urls.map((url, idx) => (
+                              <a 
+                                key={idx} 
+                                href={url} 
+                                target="_blank" 
+                                rel="noopener noreferrer" 
+                                style={{ color: '#06b6d4', wordBreak: 'break-all', fontSize: '13px' }}
+                              >
+                                {url}
+                              </a>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                    {scrapeData.scraped.details && (
+                      <div style={{ gridColumn: '1 / -1', display: 'flex', alignItems: 'start', gap: '8px' }}>
+                        <input
+                          type="checkbox"
+                          checked={acceptedFields.details !== false}
+                          onChange={(e) => setAcceptedFields(prev => ({ ...prev, details: e.target.checked }))}
+                          style={{ marginTop: '2px', cursor: 'pointer' }}
+                        />
+                        <div>
+                          <strong>Details:</strong> {scrapeData.scraped.details}
+                        </div>
                       </div>
                     )}
                   </div>
                 </div>
+                
+                {/* Single Image Selection (e.g., from GEVI) */}
+                {scrapeData.scraped.displayImage && !scrapeData.scraped.images && (
+                  <div style={{ marginBottom: '16px' }}>
+                    <strong style={{ display: 'block', marginBottom: '8px' }}>📷 Select Image:</strong>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))', gap: '12px', maxWidth: '400px' }}>
+                      {/* No Image Option */}
+                      <div
+                        onClick={() => setSelectedImage(null)}
+                        style={{
+                          position: 'relative',
+                          cursor: 'pointer',
+                          border: selectedImage === null ? '3px solid #06b6d4' : '2px solid #e5e7eb',
+                          borderRadius: '8px',
+                          overflow: 'hidden',
+                          aspectRatio: '2/3',
+                          transition: 'all 0.2s',
+                          background: '#f3f4f6',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          flexDirection: 'column',
+                          padding: '1rem'
+                        }}
+                      >
+                        <div style={{ fontSize: '3rem', marginBottom: '0.5rem' }}>🚫</div>
+                        <div style={{ fontSize: '0.875rem', color: '#6b7280', textAlign: 'center', fontWeight: 600 }}>
+                          No Image
+                        </div>
+                        {selectedImage === null && (
+                          <div style={{
+                            position: 'absolute',
+                            top: '8px',
+                            right: '8px',
+                            background: '#06b6d4',
+                            color: 'white',
+                            borderRadius: '50%',
+                            width: '24px',
+                            height: '24px',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            fontSize: '16px',
+                            fontWeight: 'bold'
+                          }}>
+                            ✓
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Scraped Image */}
+                      <div
+                        onClick={() => setSelectedImage(scrapeData.scraped.displayImage)}
+                        style={{
+                          position: 'relative',
+                          cursor: 'pointer',
+                          border: selectedImage === scrapeData.scraped.displayImage ? '3px solid #06b6d4' : '2px solid #e5e7eb',
+                          borderRadius: '8px',
+                          overflow: 'hidden',
+                          aspectRatio: '2/3',
+                          transition: 'all 0.2s'
+                        }}
+                      >
+                        <img
+                          src={scrapeData.scraped.displayImage}
+                          alt="Scraped performer"
+                          style={{
+                            width: '100%',
+                            height: '100%',
+                            objectFit: 'cover'
+                          }}
+                          onError={(e) => {
+                            e.target.style.display = 'none';
+                            e.target.parentElement.innerHTML = '<div style="display: flex; align-items: center; justify-content: center; height: 100%; background: #f3f4f6; color: #9ca3af;">Failed to load</div>';
+                          }}
+                        />
+                        {selectedImage === scrapeData.scraped.displayImage && (
+                          <div style={{
+                            position: 'absolute',
+                            top: '8px',
+                            right: '8px',
+                            background: '#06b6d4',
+                            color: 'white',
+                            borderRadius: '50%',
+                            width: '24px',
+                            height: '24px',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            fontSize: '16px',
+                            fontWeight: 'bold'
+                          }}>
+                            ✓
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                )}
+                
+                {/* Image Selection */}
+                {scrapeData.scraped.images && scrapeData.scraped.images.length > 0 && (
+                  <div style={{ marginBottom: '16px' }}>
+                    <strong style={{ display: 'block', marginBottom: '8px' }}>📷 Select Image:</strong>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))', gap: '12px' }}>
+                      {/* No Image Option */}
+                      <div
+                        onClick={() => setSelectedImage(null)}
+                        style={{
+                          position: 'relative',
+                          cursor: 'pointer',
+                          border: selectedImage === null ? '3px solid #06b6d4' : '2px solid #e5e7eb',
+                          borderRadius: '8px',
+                          overflow: 'hidden',
+                          aspectRatio: '2/3',
+                          transition: 'all 0.2s',
+                          background: '#f3f4f6',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          flexDirection: 'column',
+                          padding: '1rem'
+                        }}
+                      >
+                        <div style={{ fontSize: '3rem', marginBottom: '0.5rem' }}>🚫</div>
+                        <div style={{ fontSize: '0.875rem', color: '#6b7280', textAlign: 'center', fontWeight: 600 }}>
+                          No Image
+                        </div>
+                        {selectedImage === null && (
+                          <div style={{
+                            position: 'absolute',
+                            top: '8px',
+                            right: '8px',
+                            background: '#06b6d4',
+                            color: 'white',
+                            borderRadius: '50%',
+                            width: '24px',
+                            height: '24px',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            fontSize: '16px',
+                            fontWeight: 'bold'
+                          }}>
+                            ✓
+                          </div>
+                        )}
+                      </div>
+                      
+                      {/* Image Options */}
+                      {scrapeData.scraped.images.map((imageUrl, idx) => (
+                        <div
+                          key={idx}
+                          onClick={() => setSelectedImage(selectedImage === imageUrl ? null : imageUrl)}
+                          style={{
+                            position: 'relative',
+                            cursor: 'pointer',
+                            border: selectedImage === imageUrl ? '3px solid #06b6d4' : '2px solid #e5e7eb',
+                            borderRadius: '8px',
+                            overflow: 'hidden',
+                            aspectRatio: '2/3',
+                            transition: 'all 0.2s'
+                          }}
+                        >
+                          <img
+                            src={imageUrl}
+                            alt={`Option ${idx + 1}`}
+                            style={{
+                              width: '100%',
+                              height: '100%',
+                              objectFit: 'cover'
+                            }}
+                            onError={(e) => {
+                              e.target.style.display = 'none';
+                              e.target.parentElement.innerHTML = '<div style="display: flex; align-items: center; justify-content: center; height: 100%; background: #f3f4f6; color: #9ca3af;">Failed to load</div>';
+                            }}
+                          />
+                          {selectedImage === imageUrl && (
+                            <div style={{
+                              position: 'absolute',
+                              top: '8px',
+                              right: '8px',
+                              background: '#06b6d4',
+                              color: 'white',
+                              borderRadius: '50%',
+                              width: '24px',
+                              height: '24px',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              fontSize: '16px',
+                              fontWeight: 'bold'
+                            }}>
+                              ✓
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                
+                {/* Display scraped tags (e.g., from GEVI) */}
+                {scrapeData.scraped?.tags && scrapeData.scraped.tags.length > 0 && (
+                  <div style={{ marginBottom: '12px' }}>
+                    <strong style={{ display: 'block', marginBottom: '8px' }}>🏷️ Scraped Tags:</strong>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+                      {scrapeData.scraped.tags.map((tag, idx) => (
+                        <span key={idx} style={{
+                          padding: '4px 10px',
+                          background: '#fef3c7',
+                          borderRadius: '12px',
+                          fontSize: '12px',
+                          color: '#92400e'
+                        }}>
+                          {tag}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
                 
                 {scrapeData.matched?.tags && scrapeData.matched.tags.length > 0 && (
                   <div style={{ marginBottom: '12px' }}>
@@ -2347,6 +3348,132 @@ export default function PerformerDetail() {
               <button 
                 className="btn-cancel" 
                 onClick={() => setShowScrapeReviewModal(false)}
+                disabled={isApplyingScrape}
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Name Conflict Resolution Modal */}
+      {showConflictModal && conflictData && (
+        <div className="modal-overlay" onClick={() => setShowConflictModal(false)}>
+          <div className="modal-content conflict-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h2>⚠️ Performer Name Conflict</h2>
+              <button 
+                className="modal-close" 
+                onClick={() => setShowConflictModal(false)}
+                disabled={isApplyingScrape}
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="modal-body">
+              <div className="conflict-message">
+                <p style={{ marginBottom: '1rem', fontSize: '16px' }}>
+                  A performer with the name <strong>"{conflictData.existingPerformer.name}"</strong> already exists in Stash.
+                </p>
+                <p style={{ marginBottom: '1.5rem', color: '#666' }}>
+                  Choose how to resolve this conflict:
+                </p>
+              </div>
+
+              <div className="conflict-performers">
+                <div className="conflict-performer-card">
+                  <h4>📍 Current Performer</h4>
+                  <div className="performer-info">
+                    {data?.image_path && (
+                      <img 
+                        src={data.image_path} 
+                        alt={data.name}
+                        style={{ width: '80px', height: '80px', objectFit: 'cover', borderRadius: '8px' }}
+                      />
+                    )}
+                    <div>
+                      <p><strong>ID:</strong> {conflictData.currentPerformer.id}</p>
+                      <p><strong>Current Name:</strong> {data?.name}</p>
+                      <p><strong>New Name:</strong> {conflictData.currentPerformer.name}</p>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="conflict-performer-card existing">
+                  <h4>🔍 Existing Performer</h4>
+                  <div className="performer-info">
+                    {conflictData.existingPerformer.image_path && (
+                      <img 
+                        src={conflictData.existingPerformer.image_path} 
+                        alt={conflictData.existingPerformer.name}
+                        style={{ width: '80px', height: '80px', objectFit: 'cover', borderRadius: '8px' }}
+                      />
+                    )}
+                    <div>
+                      <p><strong>ID:</strong> {conflictData.existingPerformer.id}</p>
+                      <p><strong>Name:</strong> {conflictData.existingPerformer.name}</p>
+                      {conflictData.existingPerformer.alias && (
+                        <p><strong>Alias:</strong> {conflictData.existingPerformer.alias}</p>
+                      )}
+                      {conflictData.existingPerformer.disambiguation && (
+                        <p><strong>Disambiguation:</strong> {conflictData.existingPerformer.disambiguation}</p>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="conflict-options">
+                <button
+                  className="conflict-option-btn merge-into"
+                  onClick={handleMergeIntoExisting}
+                  disabled={isApplyingScrape}
+                >
+                  <span className="option-icon">🔀</span>
+                  <div className="option-text">
+                    <strong>Merge Into Existing</strong>
+                    <small>Delete current performer and merge all its scenes into the existing one</small>
+                  </div>
+                </button>
+
+                <button
+                  className="conflict-option-btn merge-from"
+                  onClick={handleMergeFromExisting}
+                  disabled={isApplyingScrape}
+                >
+                  <span className="option-icon">🔄</span>
+                  <div className="option-text">
+                    <strong>Merge Existing Into Current</strong>
+                    <small>Delete existing performer, merge its scenes into current, and apply scraped data</small>
+                  </div>
+                </button>
+
+                <button
+                  className="conflict-option-btn add-disambiguation"
+                  onClick={handleAddDisambiguation}
+                  disabled={isApplyingScrape}
+                >
+                  <span className="option-icon">🏷️</span>
+                  <div className="option-text">
+                    <strong>Add Disambiguation</strong>
+                    <small>Keep both performers and add a disambiguation tag (e.g., "II", "Performer")</small>
+                  </div>
+                </button>
+              </div>
+
+              {isApplyingScrape && (
+                <div className="conflict-loading">
+                  <p>⏳ Processing...</p>
+                </div>
+              )}
+            </div>
+
+            <div className="modal-actions">
+              <button 
+                className="btn-cancel" 
+                onClick={() => setShowConflictModal(false)}
                 disabled={isApplyingScrape}
               >
                 Cancel

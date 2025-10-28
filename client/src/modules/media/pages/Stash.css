@@ -4577,6 +4577,51 @@ span.clip-tag-badge,
   border-color: rgba(255, 255, 255, 0.4);
 }
 
+/* Performer URLs Section */
+.performer-urls-section {
+  background: linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%);
+  border-radius: 0.75rem;
+  padding: 1rem;
+  margin: 1rem 0;
+  border: 2px solid #93c5fd;
+}
+
+.performer-urls-section .urls-title {
+  font-size: 1rem;
+  font-weight: 600;
+  color: #1e40af;
+  margin: 0 0 0.75rem 0;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.urls-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.url-link {
+  display: inline-block;
+  color: #2563eb;
+  text-decoration: none;
+  font-size: 0.875rem;
+  padding: 0.5rem;
+  background: white;
+  border-radius: 0.375rem;
+  border: 1px solid #bfdbfe;
+  transition: all 0.2s ease;
+  word-break: break-all;
+}
+
+.url-link:hover {
+  background: #eff6ff;
+  border-color: #3b82f6;
+  transform: translateX(4px);
+  box-shadow: 0 2px 8px rgba(59, 130, 246, 0.2);
+}
+
 /* Physical attributes inline in hero */
 .performer-physical-attributes-inline {
   background: linear-gradient(135deg, #f3f4f6 0%, #e5e7eb 100%);
@@ -6408,6 +6453,155 @@ span.clip-tag-badge,
   text-decoration: none;
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
 }
+
+/* Name Conflict Modal Styles */
+.conflict-modal {
+  max-width: 900px;
+  max-height: 90vh;
+  overflow-y: auto;
+}
+
+.conflict-message {
+  background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%);
+  border-left: 4px solid #f59e0b;
+  padding: 1rem;
+  border-radius: 0.5rem;
+  margin-bottom: 1.5rem;
+}
+
+.conflict-performers {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+}
+
+.conflict-performer-card {
+  background: linear-gradient(135deg, #f3f4f6 0%, #e5e7eb 100%);
+  border: 2px solid #d1d5db;
+  border-radius: 0.75rem;
+  padding: 1rem;
+}
+
+.conflict-performer-card.existing {
+  background: linear-gradient(135deg, #dbeafe 0%, #bfdbfe 100%);
+  border-color: #3b82f6;
+}
+
+.conflict-performer-card h4 {
+  margin: 0 0 0.75rem 0;
+  font-size: 1rem;
+  color: #374151;
+}
+
+.conflict-performer-card.existing h4 {
+  color: #1e40af;
+}
+
+.performer-info {
+  display: flex;
+  gap: 1rem;
+  align-items: flex-start;
+}
+
+.performer-info p {
+  margin: 0.25rem 0;
+  font-size: 0.875rem;
+  line-height: 1.5;
+}
+
+.conflict-options {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+}
+
+.conflict-option-btn {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 1rem;
+  background: white;
+  border: 2px solid #e5e7eb;
+  border-radius: 0.75rem;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  text-align: left;
+}
+
+.conflict-option-btn:hover:not(:disabled) {
+  transform: translateX(4px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+}
+
+.conflict-option-btn.merge-into:hover:not(:disabled) {
+  border-color: #3b82f6;
+  background: linear-gradient(135deg, #eff6ff 0%, white 100%);
+}
+
+.conflict-option-btn.merge-from:hover:not(:disabled) {
+  border-color: #8b5cf6;
+  background: linear-gradient(135deg, #f5f3ff 0%, white 100%);
+}
+
+.conflict-option-btn.add-disambiguation:hover:not(:disabled) {
+  border-color: #f59e0b;
+  background: linear-gradient(135deg, #fffbeb 0%, white 100%);
+}
+
+.conflict-option-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.option-icon {
+  font-size: 2rem;
+  flex-shrink: 0;
+}
+
+.option-text {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.option-text strong {
+  font-size: 1rem;
+  color: #1f2937;
+}
+
+.option-text small {
+  font-size: 0.875rem;
+  color: #6b7280;
+  line-height: 1.4;
+}
+
+.conflict-loading {
+  text-align: center;
+  padding: 1rem;
+  background: linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%);
+  border-radius: 0.5rem;
+  margin-bottom: 1rem;
+}
+
+.conflict-loading p {
+  margin: 0;
+  font-size: 1rem;
+  color: #1e40af;
+  font-weight: 600;
+}
+
+@media (max-width: 768px) {
+  .conflict-performers {
+    grid-template-columns: 1fr;
+  }
+  
+  .conflict-modal {
+    max-width: 95%;
+  }
+}
+
 
 .view-stash-btn:hover {
   background: linear-gradient(135deg, #0052a3 0%, #003d7a 100%);

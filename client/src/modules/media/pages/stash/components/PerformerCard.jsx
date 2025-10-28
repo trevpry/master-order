@@ -123,7 +123,8 @@ export default function PerformerCard({
   performer, 
   selectionMode = false, 
   isSelected = false, 
-  onToggleSelection 
+  onToggleSelection,
+  currentPage = 1
 }) {
   const imageUrl = performer.image_path || performer.image;
   const sceneCount = performer.scene_count || performer.scenes?.length || 0;
@@ -250,7 +251,7 @@ export default function PerformerCard({
   // Normal mode: render as Link
   return (
     <Link 
-      to={`/media/stash/performer/${performer.id}`} 
+      to={`/media/stash/performer/${performer.id}?fromPage=${currentPage}`} 
       style={styles.card}
       className="performer-card"
       onMouseEnter={(e) => {

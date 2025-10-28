@@ -970,6 +970,7 @@ model StashPerformer {
   instagram       String?
   twitter         String?
   url             String?
+  urls            String?                 // JSON array of all URLs from Stash
   gender          String?
   details         String?
   rating          Int?

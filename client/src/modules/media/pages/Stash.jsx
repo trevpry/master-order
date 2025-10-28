@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import Button from '../../../shared/components/Button';
 import StashVideoPlayer from './stash/components/StashVideoPlayer';
 import StashUpNextTab from './stash/components/StashUpNextTab';
@@ -13,6 +14,8 @@ import './Stash.css';
 import config from '../../../config';
 
 export default function Stash() {
+  const [searchParams, setSearchParams] = useSearchParams();
+  
   // State Management
   const [connectionStatus, setConnectionStatus] = useState({ 
     configured: false, 
@@ -119,6 +122,19 @@ export default function Stash() {
     });
   }, []);
 
+  // Handle library tab change with URL update for performers
+  const handleLibraryTabChange = useCallback((tab) => {
+    setLibraryTab(tab);
+    
+    // Update URL when switching to performers tab
+    if (tab === 'performers') {
+      const newParams = new URLSearchParams(searchParams);
+      newParams.set('tab', 'performers');
+      newParams.set('page', currentPage.performers.toString());
+      setSearchParams(newParams, { replace: true });
+    }
+  }, [searchParams, setSearchParams, currentPage.performers]);
+
   // Initialize content renderers
   const contentRenderers = StashContentRenderers({
     data,
@@ -130,7 +146,8 @@ export default function Stash() {
     setAutoSkipRetries,
     performerSelectionMode,
     selectedPerformers,
-    onTogglePerformerSelection: handleTogglePerformerSelection
+    onTogglePerformerSelection: handleTogglePerformerSelection,
+    currentPerformerPage: currentPage.performers
   });
 
   // API Functions
@@ -389,8 +406,16 @@ export default function Stash() {
         [type]: page
       }));
       loadData(type, page);
+      
+      // Update URL for performers tab to enable proper back navigation
+      if (type === 'performers' && libraryTab === 'performers') {
+        const newParams = new URLSearchParams(searchParams);
+        newParams.set('tab', 'performers');
+        newParams.set('page', page.toString());
+        setSearchParams(newParams, { replace: true });
+      }
     }
-  }, [pagination, loadData]);
+  }, [pagination, loadData, libraryTab, searchParams, setSearchParams]);
 
   const goToNextPage = useCallback((type) => {
     const nextPage = currentPage[type] + 1;
@@ -866,9 +891,23 @@ export default function Stash() {
 
   useEffect(() => {
     if (connectionStatus.connected) {
+      // Reset to page 1 when filters change
+      setCurrentPage(prev => ({
+        ...prev,
+        [libraryTab]: 1
+      }));
+      
+      // Update URL if we're on performers tab
+      if (libraryTab === 'performers') {
+        const newParams = new URLSearchParams(searchParams);
+        newParams.set('tab', 'performers');
+        newParams.set('page', '1');
+        setSearchParams(newParams, { replace: true });
+      }
+      
       loadData(libraryTab, 1); // Always start from page 1 when filters change
     }
-  }, [libraryTab, sortBy, sortDirection, watchStatusFilter, searchQuery, searchStartsWith, connectionStatus.connected, loadData]);
+  }, [libraryTab, sortBy, sortDirection, watchStatusFilter, searchQuery, searchStartsWith, connectionStatus.connected, loadData, searchParams, setSearchParams]);
 
   // Load clip tags when clips tab is selected
   useEffect(() => {
@@ -890,6 +929,40 @@ export default function Stash() {
       loadAllLibraryData();
     }
   }, [connectionStatus.connected, loadAllLibraryData]);
+
+  // Read page parameter from URL and update currentPage state
+  useEffect(() => {
+    const pageParam = searchParams.get('page');
+    const tabParam = searchParams.get('tab');
+    
+    if (pageParam && tabParam === 'performers' && connectionStatus.connected) {
+      const pageNum = parseInt(pageParam, 10);
+      if (!isNaN(pageNum) && pageNum > 0) {
+        // Ensure we're on library tab
+        if (mainTab !== 'library') {
+          setMainTab('library');
+        }
+        
+        // Set the library tab
+        if (libraryTab !== 'performers') {
+          setLibraryTab('performers');
+        }
+        
+        // Set the page
+        setCurrentPage(prev => ({
+          ...prev,
+          performers: pageNum
+        }));
+        
+        // Load the correct page (this will happen after libraryTab change loads page 1)
+        setTimeout(() => {
+          if (currentPage.performers !== pageNum) {
+            loadData('performers', pageNum);
+          }
+        }, 100);
+      }
+    }
+  }, [searchParams, connectionStatus.connected, mainTab, libraryTab, currentPage.performers, loadData]);
 
   return (
     <div className="stash-page">
@@ -1000,7 +1073,7 @@ export default function Stash() {
             {mainTab === 'library' && (
               <StashLibraryTab 
                 libraryTab={libraryTab}
-                setLibraryTab={setLibraryTab}
+                setLibraryTab={handleLibraryTabChange}
                 searchQuery={searchQuery}
                 setSearchQuery={setSearchQuery}
                 searchStartsWith={searchStartsWith}

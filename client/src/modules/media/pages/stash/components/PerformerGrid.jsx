@@ -5,7 +5,8 @@ export default function PerformerGrid({
   performers, 
   selectionMode = false, 
   selectedPerformers = new Set(), 
-  onToggleSelection 
+  onToggleSelection,
+  currentPage = 1
 }) {
   if (!performers || performers.length === 0) {
     return (
@@ -24,6 +25,7 @@ export default function PerformerGrid({
           selectionMode={selectionMode}
           isSelected={selectedPerformers.has(performer.id)}
           onToggleSelection={onToggleSelection}
+          currentPage={currentPage}
         />
       ))}
     </div>

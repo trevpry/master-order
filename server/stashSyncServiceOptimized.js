@@ -695,6 +695,7 @@ class StashSyncServiceOptimized {
             instagram
             twitter
             url
+            urls
             gender
             details
             rating100
@@ -795,6 +796,7 @@ class StashSyncServiceOptimized {
             instagram: performer.instagram || null,
             twitter: performer.twitter || null,
             url: performer.url || null,
+            urls: performer.urls ? JSON.stringify(performer.urls) : null,
             rating: performer.rating100 ? Math.round(performer.rating100 / 20) : null,
             lastSyncedAt: new Date()
           };

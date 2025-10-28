@@ -2961,6 +2961,8 @@ class StashSyncService {
     try {
       const result = await this.makeGraphQLRequest(query, variables);
       
+      console.log(`🔍 [scrapeURL] Raw result:`, JSON.stringify(result, null, 2));
+      
       if (result?.scrapeURL) {
         console.log(`✅ [scrapeURL] Successfully scraped ${type} from URL`);
         return result.scrapeURL;
@@ -3024,6 +3026,140 @@ class StashSyncService {
       return [];
     } catch (error) {
       console.error('❌ [scrapeSingleScene] Error scraping scene:', error);
+      throw error;
+    }
+  }
+
+  async scrapeSinglePerformer(source, input, filterMaleOnly = false) {
+    console.log('🔍 [scrapeSinglePerformer] Scraping performer with input:', input);
+    console.log(`   - Source:`, JSON.stringify(source));
+    console.log(`   - Male-only filter: ${filterMaleOnly}`);
+
+    const query = `
+      query ScrapeSinglePerformer($source: ScraperSourceInput!, $input: ScrapeSinglePerformerInput!) {
+        scrapeSinglePerformer(source: $source, input: $input) {
+          name
+          disambiguation
+          gender
+          url
+          twitter
+          instagram
+          birthdate
+          ethnicity
+          country
+          eye_color
+          height
+          measurements
+          fake_tits
+          career_length
+          tattoos
+          piercings
+          aliases
+          images
+          details
+          death_date
+          hair_color
+          weight
+          remote_site_id
+          tags {
+            name
+          }
+          penis_length
+          circumcised
+        }
+      }
+    `;
+
+    const variables = { source, input };
+
+    try {
+      const result = await this.makeGraphQLRequest(query, variables);
+      
+      console.log('🔍 [scrapeSinglePerformer] Raw GraphQL result:', JSON.stringify(result, null, 2));
+      
+      if (result?.scrapeSinglePerformer) {
+        let performers = result.scrapeSinglePerformer;
+        
+        console.log(`🔍 [scrapeSinglePerformer] Parsed ${performers.length} performer(s)`);
+        performers.forEach((p, idx) => {
+          console.log(`   - Performer ${idx + 1}: ${p.name || 'NO NAME'} (${Object.keys(p).filter(k => p[k]).length} fields populated)`);
+        });
+        
+        // Only filter to male performers if explicitly requested (stash-box)
+        if (filterMaleOnly) {
+          performers = performers.filter(p => 
+            p.gender && p.gender.toLowerCase() === 'male'
+          );
+          console.log(`✅ [scrapeSinglePerformer] Found ${result.scrapeSinglePerformer.length} results, ${performers.length} male`);
+        } else {
+          console.log(`✅ [scrapeSinglePerformer] Found ${performers.length} results (no gender filter)`);
+        }
+        
+        return performers;
+      }
+      
+      return [];
+    } catch (error) {
+      console.error('❌ [scrapeSinglePerformer] Error scraping performer:', error);
+      throw error;
+    }
+  }
+
+  async scrapePerformerURL(scraperId, input) {
+    console.log('🔍 [scrapePerformerURL] Scraping performer with scraper:', scraperId);
+
+    const query = `
+      query ScrapePerformerURL($url: String!) {
+        scrapePerformerURL(url: $url) {
+          name
+          disambiguation
+          gender
+          url
+          twitter
+          instagram
+          birthdate
+          ethnicity
+          country
+          eye_color
+          height
+          measurements
+          fake_tits
+          career_length
+          tattoos
+          piercings
+          aliases
+          images
+          details
+          death_date
+          hair_color
+          weight
+          tags {
+            name
+          }
+        }
+      }
+    `;
+
+    const variables = { 
+      url: input.query || ''
+    };
+
+    try {
+      const result = await this.makeGraphQLRequest(query, variables);
+      
+      if (result?.scrapePerformerURL) {
+        const performers = Array.isArray(result.scrapePerformerURL) ? result.scrapePerformerURL : [result.scrapePerformerURL];
+        // Filter to only male performers
+        const malePerformers = performers.filter(p => 
+          p.gender && p.gender.toLowerCase() === 'male'
+        );
+        console.log(`✅ [scrapePerformerURL] Found ${performers.length} results, ${malePerformers.length} male`);
+        return malePerformers;
+      }
+      
+      return [];
+    } catch (error) {
+      console.error('❌ [scrapePerformerURL] Error scraping performer:', error);
       throw error;
     }
   }
