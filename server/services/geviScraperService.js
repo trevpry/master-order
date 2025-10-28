@@ -1311,8 +1311,24 @@ class GeviScraperService {
           const aliases = dbPerformer.alias.split(',').map(a => a.trim());
           for (const alias of aliases) {
             const normalizedAlias = alias.toLowerCase().replace(/\s+/g, '');
-            if (normalizedAlias === normalizedName || normalizedName.includes(normalizedAlias)) {
+            
+            // Exact match
+            if (normalizedAlias === normalizedName) {
+              score = 1.0;
+              matchedVia = 'alias';
+              matchedText = alias;
+              break;
+            }
+            // Check if scraped name contains alias
+            else if (normalizedName.includes(normalizedAlias)) {
               score = normalizedAlias.length / normalizedName.length;
+              matchedVia = 'alias';
+              matchedText = alias;
+              break;
+            }
+            // Check if alias contains scraped name
+            else if (normalizedAlias.includes(normalizedName)) {
+              score = normalizedName.length / normalizedAlias.length;
               matchedVia = 'alias';
               matchedText = alias;
               break;
