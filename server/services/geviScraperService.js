@@ -1479,9 +1479,21 @@ class GeviScraperService {
     // Get all tags with their aliases
     const allTags = await prisma.stashTag.findMany({
       include: {
-        aliases: true
+        aliases: {
+          select: {
+            alias: true
+          }
+        }
       }
     });
+
+    // Normalize function that handles spaces and special characters
+    const normalize = (str) => {
+      return str.toLowerCase()
+        .replace(/[:\-_]/g, ' ')  // Convert colons, dashes, underscores to spaces
+        .replace(/\s+/g, ' ')      // Collapse multiple spaces to single space
+        .trim();
+    };
 
     for (const tag of scrapedTags) {
       // Extract name from object or use string directly
@@ -1490,7 +1502,7 @@ class GeviScraperService {
       if (!tagName) continue;
 
       // Search by name (case-insensitive)
-      const normalizedName = tagName.toLowerCase().trim();
+      const normalizedName = normalize(tagName);
       
       // Look for exact match or alias match
       let foundTag = null;
@@ -1498,7 +1510,7 @@ class GeviScraperService {
       let matchedAlias = null;
       
       for (const dbTag of allTags) {
-        const dbNormalized = dbTag.name.toLowerCase().trim();
+        const dbNormalized = normalize(dbTag.name);
         
         // Exact match on name
         if (dbNormalized === normalizedName) {
@@ -1509,9 +1521,10 @@ class GeviScraperService {
         
         // Check aliases if present
         if (dbTag.aliases && dbTag.aliases.length > 0) {
-          const matchingAlias = dbTag.aliases.find(a => 
-            a.alias.toLowerCase().trim() === normalizedName
-          );
+          const matchingAlias = dbTag.aliases.find(a => {
+            const normalizedAlias = normalize(a.alias);
+            return normalizedAlias === normalizedName;
+          });
           
           if (matchingAlias) {
             foundTag = dbTag;

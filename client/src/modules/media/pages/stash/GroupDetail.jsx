@@ -30,19 +30,37 @@ export default function GroupDetail() {
       const response = await fetch(`${config.apiBaseUrl}/api/stash/scrapers`);
       const result = await response.json();
       
+      // Always include AEBN as a hardcoded scraper for movies
+      const aebnScraper = {
+        siteName: 'AEBN',
+        name: 'AEBN',
+        scrapeMovie: true
+      };
+      
+      let movieScrapers = [aebnScraper];
+      
       if (result.success) {
-        // Filter scrapers that support movie scraping
-        const movieScrapers = result.data.filter(s => 
-          s.siteName === 'AEBN' || s.scrapeMovie
+        // Add other scrapers that support movie scraping
+        const otherScrapers = result.data.filter(s => 
+          s.siteName !== 'AEBN' && s.scrapeMovie
         );
-        setAvailableScrapers(movieScrapers);
-        
-        // Default to AEBN if available, otherwise first scraper
-        const defaultScraper = movieScrapers.find(s => s.siteName === 'AEBN') || movieScrapers[0] || null;
-        setSelectedScraper(defaultScraper);
+        movieScrapers = [...movieScrapers, ...otherScrapers];
       }
+      
+      setAvailableScrapers(movieScrapers);
+      
+      // Default to AEBN
+      setSelectedScraper(aebnScraper);
     } catch (error) {
       console.error('Failed to load scrapers:', error);
+      // Even if loading fails, ensure AEBN is available
+      const aebnScraper = {
+        siteName: 'AEBN',
+        name: 'AEBN',
+        scrapeMovie: true
+      };
+      setAvailableScrapers([aebnScraper]);
+      setSelectedScraper(aebnScraper);
     }
   };
 
