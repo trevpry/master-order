@@ -183,9 +183,28 @@ export default function TagsPage() {
 
             {/* Aliases */}
             {tag.aliases && tag.aliases.length > 0 && (
-              <div className="tag-aliases-enhanced">
-                <span className="aliases-label">Aliases:</span>
-                <span className="aliases-text">{tag.aliases.join(', ')}</span>
+              <div className="tag-aliases-enhanced" style={{ marginTop: '0.5rem' }}>
+                <span className="aliases-label" style={{ fontWeight: '500', marginRight: '0.5rem', fontSize: '0.875rem' }}>
+                  Aliases:
+                </span>
+                <div style={{ display: 'inline-flex', flexWrap: 'wrap', gap: '0.25rem', alignItems: 'center' }}>
+                  {tag.aliases.map((alias, idx) => (
+                    <span 
+                      key={idx}
+                      style={{
+                        backgroundColor: '#e3f2fd',
+                        color: '#1976d2',
+                        padding: '0.125rem 0.5rem',
+                        borderRadius: '10px',
+                        fontSize: '0.75rem',
+                        fontWeight: '500',
+                        border: '1px solid #bbdefb'
+                      }}
+                    >
+                      {alias}
+                    </span>
+                  ))}
+                </div>
               </div>
             )}
           </div>

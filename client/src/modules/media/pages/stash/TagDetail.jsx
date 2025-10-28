@@ -17,6 +17,11 @@ export default function TagDetail() {
   const [selectedParentId, setSelectedParentId] = useState('');
   const [savingParent, setSavingParent] = useState(false);
   
+  // Edit name state
+  const [isEditingName, setIsEditingName] = useState(false);
+  const [editedName, setEditedName] = useState('');
+  const [savingName, setSavingName] = useState(false);
+  
   // Merge state
   const [showMergeModal, setShowMergeModal] = useState(false);
   const [selectedTargetTagId, setSelectedTargetTagId] = useState('');
@@ -41,6 +46,8 @@ export default function TagDetail() {
         const res = await fetch(`${config.apiBaseUrl}/api/stash/tags/${id}`);
         const json = await res.json();
         if (!json.success) throw new Error(json.error || 'Failed to load tag');
+        console.log('Tag data received:', json.data);
+        console.log('Aliases:', json.data.aliases);
         setData(json.data);
       } catch (e) {
         setError(e.message);
@@ -156,6 +163,62 @@ export default function TagDetail() {
     }
   };
 
+  const handleEditName = () => {
+    setEditedName(data.name);
+    setIsEditingName(true);
+  };
+
+  const handleCancelEditName = () => {
+    setIsEditingName(false);
+    setEditedName('');
+  };
+
+  const handleSaveName = async () => {
+    if (!editedName.trim()) {
+      alert('Tag name cannot be empty');
+      return;
+    }
+
+    if (editedName.trim() === data.name) {
+      setIsEditingName(false);
+      return;
+    }
+
+    setSavingName(true);
+    try {
+      const response = await fetch(`${config.apiBaseUrl}/api/stash/tags/${id}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          name: editedName.trim()
+        })
+      });
+
+      const result = await response.json();
+      
+      if (result.success) {
+        // Update local data with new name
+        setData(prev => ({
+          ...prev,
+          name: result.data.name
+        }));
+        setIsEditingName(false);
+        
+        // Show success message
+        alert(`Tag name updated successfully to "${result.data.name}"`);
+      } else {
+        throw new Error(result.error || 'Failed to update tag name');
+      }
+    } catch (err) {
+      console.error('Error updating tag name:', err);
+      alert(`Error updating tag name: ${err.message}`);
+    } finally {
+      setSavingName(false);
+    }
+  };
+
   const handleMergeIntoClick = () => {
     setShowMergeModal(true);
     loadAllTags();
@@ -252,13 +315,84 @@ export default function TagDetail() {
             </div>
           )}
           <div className="tag-info-header">
-            <h1>🏷️ {data.name}</h1>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', marginBottom: '0.5rem' }}>
+              {isEditingName ? (
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flex: 1 }}>
+                  <input
+                    type="text"
+                    value={editedName}
+                    onChange={(e) => setEditedName(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') handleSaveName();
+                      if (e.key === 'Escape') handleCancelEditName();
+                    }}
+                    style={{
+                      fontSize: '2rem',
+                      padding: '0.5rem',
+                      border: '2px solid #4a9eff',
+                      borderRadius: '4px',
+                      flex: 1,
+                      fontWeight: 'bold'
+                    }}
+                    autoFocus
+                    disabled={savingName}
+                  />
+                  <Button 
+                    onClick={handleSaveName} 
+                    variant="primary" 
+                    size="small"
+                    disabled={savingName || !editedName.trim()}
+                  >
+                    {savingName ? '💾 Saving...' : '✓ Save'}
+                  </Button>
+                  <Button 
+                    onClick={handleCancelEditName} 
+                    variant="secondary" 
+                    size="small"
+                    disabled={savingName}
+                  >
+                    ✕ Cancel
+                  </Button>
+                </div>
+              ) : (
+                <>
+                  <h1>🏷️ {data.name}</h1>
+                  <Button onClick={handleEditName} variant="secondary" size="small">
+                    ✏️ Edit Name
+                  </Button>
+                </>
+              )}
+            </div>
             {data.description && <p className="tag-description">{data.description}</p>}
             
             <div className="tag-meta">
-              {data.aliases && data.aliases.length > 0 && (
-                <div className="meta-item">
-                  <strong>Aliases:</strong> {data.aliases.join(', ')}
+              {data.aliases && Array.isArray(data.aliases) && data.aliases.length > 0 && (
+                <div className="meta-item" style={{ marginBottom: '0.75rem' }}>
+                  <strong>Aliases:</strong>
+                  <div style={{ 
+                    display: 'flex', 
+                    flexWrap: 'wrap', 
+                    gap: '0.5rem', 
+                    marginTop: '0.5rem' 
+                  }}>
+                    {data.aliases.map((alias, idx) => (
+                      <span 
+                        key={idx} 
+                        style={{
+                          backgroundColor: '#e3f2fd',
+                          color: '#1976d2',
+                          padding: '0.5rem 0.75rem',
+                          borderRadius: '12px',
+                          fontSize: '0.9rem',
+                          fontWeight: '500',
+                          border: '1px solid #bbdefb',
+                          display: 'inline-block'
+                        }}
+                      >
+                        {alias}
+                      </span>
+                    ))}
+                  </div>
                 </div>
               )}
               {data.parents && data.parents.length > 0 && (
@@ -510,6 +644,39 @@ export default function TagDetail() {
                         <span className="chip-count"> ({child.scene_count})</span>
                       )}
                     </Link>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Aliases Section */}
+            {data.aliases && Array.isArray(data.aliases) && data.aliases.length > 0 && (
+              <div className="section">
+                <h3>Aliases ({data.aliases.length})</h3>
+                <div style={{ 
+                  display: 'flex', 
+                  flexWrap: 'wrap', 
+                  gap: '0.75rem',
+                  padding: '1rem',
+                  backgroundColor: 'var(--bg-secondary)',
+                  borderRadius: '8px'
+                }}>
+                  {data.aliases.map((alias, idx) => (
+                    <span 
+                      key={idx} 
+                      style={{
+                        backgroundColor: '#e3f2fd',
+                        color: '#1976d2',
+                        padding: '0.5rem 1rem',
+                        borderRadius: '16px',
+                        fontSize: '0.95rem',
+                        fontWeight: '500',
+                        border: '1px solid #bbdefb',
+                        display: 'inline-block'
+                      }}
+                    >
+                      {alias}
+                    </span>
                   ))}
                 </div>
               </div>

@@ -10317,6 +10317,11 @@ router.get('/tags/:id', asyncHandler(async (req, res) => {
             }
           }
         }
+      },
+      aliases: {
+        select: {
+          alias: true
+        }
       }
     }
   });
@@ -10329,7 +10334,7 @@ router.get('/tags/:id', asyncHandler(async (req, res) => {
     id: tag.id,
     name: tag.name,
     description: tag.description,
-    aliases: tag.aliases ? tag.aliases.split(',').map(a => a.trim()) : [],
+    aliases: tag.aliases ? tag.aliases.map(a => a.alias) : [],
     image: tag.image,
     favorite: tag.favorite,
     scene_count: tag.scenes.length,
@@ -10510,6 +10515,118 @@ router.put('/tags/:id/parent', asyncHandler(async (req, res) => {
   };
   
   return sendSuccess(res, response);
+}));
+
+// PUT /api/stash/tags/:id - Update tag name
+router.put('/tags/:id', asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  const { name } = req.body;
+  
+  console.log('🏷️  [Update Tag Name] Request received');
+  console.log('   - Tag ID:', id);
+  console.log('   - New Name:', name);
+  
+  // Validate inputs
+  if (!name || !name.trim()) {
+    return sendBadRequest(res, 'Tag name is required');
+  }
+  
+  const trimmedName = name.trim();
+  
+  // Validate tag exists
+  const tag = await prisma.stashTag.findUnique({
+    where: { id }
+  });
+  
+  if (!tag) {
+    return sendNotFound(res, 'Tag not found');
+  }
+  
+  // Check if new name is the same as current name
+  if (tag.name === trimmedName) {
+    console.log('   - Name unchanged, skipping update');
+    return sendSuccess(res, {
+      id: tag.id,
+      name: tag.name
+    });
+  }
+  
+  // Check if another tag already has this name
+  const existingTag = await prisma.stashTag.findFirst({
+    where: {
+      name: trimmedName,
+      id: { not: id }
+    }
+  });
+  
+  if (existingTag) {
+    return sendBadRequest(res, `A tag named "${trimmedName}" already exists`);
+  }
+  
+  // Update tag name in local database
+  const updatedTag = await prisma.stashTag.update({
+    where: { id },
+    data: { name: trimmedName }
+  });
+  
+  console.log(`   - Updated tag name in local database: "${tag.name}" → "${trimmedName}"`);
+  
+  // Update in Stash via GraphQL
+  if (!stashSyncService) {
+    await initializeStashSyncService();
+  }
+  
+  if (stashSyncService) {
+    try {
+      const isConfigured = await stashSyncService.isConfigured();
+      
+      if (isConfigured) {
+        console.log('📡 [STASH UPDATE] Updating tag name in Stash...');
+        
+        const updateMutation = `
+          mutation TagUpdate($input: TagUpdateInput!) {
+            tagUpdate(input: $input) {
+              id
+              name
+            }
+          }
+        `;
+        
+        // Convert ID to integer for Stash
+        const tagIdInt = parseInt(id);
+        
+        const variables = {
+          input: {
+            id: tagIdInt,
+            name: trimmedName
+          }
+        };
+        
+        console.log('   - GraphQL variables:', JSON.stringify(variables, null, 2));
+        
+        const result = await stashSyncService.makeGraphQLRequest(updateMutation, variables);
+        
+        console.log('   - GraphQL result:', JSON.stringify(result, null, 2));
+        
+        if (result && result.tagUpdate) {
+          console.log('   - ✅ Tag name updated in Stash successfully');
+        } else {
+          console.warn('   - ⚠️ Unexpected response from Stash:', result);
+        }
+      } else {
+        console.warn('   - ⚠️ Stash not configured, skipping Stash update');
+      }
+    } catch (error) {
+      console.error('   - ❌ Error updating tag in Stash:', error.message);
+      console.error('   - Error stack:', error.stack);
+      // Continue anyway - local DB is updated
+    }
+  }
+  
+  return sendSuccess(res, {
+    id: updatedTag.id,
+    name: updatedTag.name
+  });
 }));
 
 // POST /api/stash/tags/merge - Merge multiple tags into one
