@@ -533,11 +533,13 @@ export default function GroupDetail() {
           <div className="group-actions" style={{ margin: '1rem 0', display: 'flex', gap: '0.75rem' }}>
             <button 
               onClick={() => {
+                const geviScraper = availableScrapers.find(s => s.siteName === 'GEVI');
+                setSelectedScraper(geviScraper);
                 setShowScrapeModal(true);
                 setScrapeUrl(group?.geviUrl || '');
               }}
               className="scrape-gevi-button"
-              title="Scrape metadata from external sources"
+              title="Scrape metadata from GEVI"
               style={{
                 padding: '0.5rem 1rem',
                 background: '#667eea',
@@ -548,7 +550,29 @@ export default function GroupDetail() {
                 fontSize: '0.9rem'
               }}
             >
-              🌐 Scrape Metadata
+              🌐 Scrape GEVI
+            </button>
+            
+            <button 
+              onClick={() => {
+                const aebnScraper = availableScrapers.find(s => s.siteName === 'AEBN');
+                setSelectedScraper(aebnScraper);
+                setShowScrapeModal(true);
+                setScrapeUrl('');
+              }}
+              className="scrape-aebn-button"
+              title="Scrape metadata from AEBN"
+              style={{
+                padding: '0.5rem 1rem',
+                background: '#10b981',
+                color: 'white',
+                border: 'none',
+                borderRadius: '4px',
+                cursor: 'pointer',
+                fontSize: '0.9rem'
+              }}
+            >
+              📀 Scrape AEBN
             </button>
             
             <button 

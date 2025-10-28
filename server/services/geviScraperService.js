@@ -1344,47 +1344,41 @@ class GeviScraperService {
         else if (baseName && dbBaseName && baseName.includes(dbBaseName) && dbBaseName.length > 3) {
           score = dbBaseName.length / baseName.length * 0.9;
         }
-        // Check aliases
-        else if (dbPerformer.alias) {
+        
+        // ALWAYS check aliases independently (not in else-if chain)
+        if (dbPerformer.alias) {
           const aliases = dbPerformer.alias.split(',').map(a => a.trim());
           for (const alias of aliases) {
             const normalizedAlias = normalize(alias);
             const aliasBaseName = normalize(getBaseName(alias));
+            let aliasScore = 0;
             
             // Exact match
             if (normalizedAlias === normalizedName) {
-              score = 1.0;
-              matchedVia = 'alias';
-              matchedText = alias;
-              break;
+              aliasScore = 1.0;
             }
             // Base name match
             else if (aliasBaseName && baseName && aliasBaseName === baseName) {
-              score = 0.95;
-              matchedVia = 'alias';
-              matchedText = alias;
-              break;
+              aliasScore = 0.95;
             }
             // Check if scraped name contains alias
             else if (normalizedName.includes(normalizedAlias)) {
-              score = normalizedAlias.length / normalizedName.length;
-              matchedVia = 'alias';
-              matchedText = alias;
-              break;
+              aliasScore = normalizedAlias.length / normalizedName.length;
             }
             // Check if alias contains scraped name
             else if (normalizedAlias.includes(normalizedName)) {
-              score = normalizedName.length / normalizedAlias.length;
-              matchedVia = 'alias';
-              matchedText = alias;
-              break;
+              aliasScore = normalizedName.length / normalizedAlias.length;
             }
             // Check base name contains
             else if (baseName && aliasBaseName && baseName.includes(aliasBaseName) && aliasBaseName.length > 3) {
-              score = aliasBaseName.length / baseName.length * 0.9;
+              aliasScore = aliasBaseName.length / baseName.length * 0.9;
+            }
+            
+            // Use alias match if it's better than name match
+            if (aliasScore > score) {
+              score = aliasScore;
               matchedVia = 'alias';
               matchedText = alias;
-              break;
             }
           }
         }
