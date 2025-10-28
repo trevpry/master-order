@@ -899,14 +899,14 @@ export default function SceneDetail() {
         if (matchedPerformer.scrapedUrl) {
           try {
             console.log(`📝 Updating URL for performer ${matchedPerformer.name}: ${matchedPerformer.scrapedUrl}`);
+            // CRITICAL: Only send newUrls, NOT name or other fields
+            // This prevents wiping performer data (especially aliases) when matched via alias
             const updateResponse = await fetch(`${config.apiBaseUrl}/api/stash/performers/${matchedPerformer.id}`, {
               method: 'PUT',
               headers: {
                 'Content-Type': 'application/json'
               },
               body: JSON.stringify({
-                name: matchedPerformer.name,
-                disambiguation: matchedPerformer.disambiguation || null,
                 newUrls: [matchedPerformer.scrapedUrl]
               })
             });

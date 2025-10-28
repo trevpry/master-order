@@ -1845,20 +1845,23 @@ router.put('/performers/:id', asyncHandler(async (req, res) => {
   }
 
   try {
-    // First, fetch current performer data from Stash to get existing URLs
+    // First, fetch current performer data from Stash to get existing URLs and aliases
     const fetchQuery = `
       query FindPerformer($id: ID!) {
         findPerformer(id: $id) {
           id
           urls
+          alias_list
         }
       }
     `;
 
     const currentData = await syncService.makeGraphQLRequest(fetchQuery, { id });
     const existingUrls = currentData?.findPerformer?.urls || [];
+    const existingAliases = currentData?.findPerformer?.alias_list || [];
     
     console.log('   - Existing URLs:', existingUrls.length);
+    console.log('   - Existing aliases:', existingAliases);
     
     // Prepare new URLs to append (filter out duplicates)
     const urlsToAdd = (newUrls || [])
@@ -2030,20 +2033,42 @@ router.put('/performers/:id', asyncHandler(async (req, res) => {
       }
     `;
 
-    // Prepare variables - convert alias to array if provided
-    const aliasList = alias && alias.trim() !== '' 
-      ? alias.split(',').map(a => a.trim()).filter(a => a !== '')
-      : [];
-
+    // Prepare variables - only include alias_list if provided
     const variables = {
       input: {
         id: id,
         name: performerName.trim(),
-        alias_list: aliasList,
-        disambiguation: disambiguation && disambiguation.trim() !== '' ? disambiguation.trim() : null,
         urls: allUrls // Send complete URLs array (existing + new)
       }
     };
+
+    // Only include alias_list if alias field is provided
+    // APPEND new aliases to existing ones instead of replacing
+    if (alias !== undefined && alias !== null) {
+      const newAliases = alias.trim() !== '' 
+        ? alias.split(',').map(a => a.trim()).filter(a => a !== '')
+        : [];
+      
+      // Combine existing and new aliases, removing duplicates
+      const allAliases = [...existingAliases];
+      for (const newAlias of newAliases) {
+        // Case-insensitive duplicate check
+        if (!allAliases.some(existing => existing.toLowerCase() === newAlias.toLowerCase())) {
+          allAliases.push(newAlias);
+        }
+      }
+      
+      variables.input.alias_list = allAliases;
+      console.log('   - Appending aliases:', newAliases);
+      console.log('   - Final alias_list:', allAliases);
+    } else {
+      console.log('   - Preserving existing aliases (alias field not provided)');
+    }
+
+    // Add disambiguation if provided
+    if (disambiguation && disambiguation.trim() !== '') {
+      variables.input.disambiguation = disambiguation.trim();
+    }
 
     // Add all optional fields if provided
     if (gender) {
