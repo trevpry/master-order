@@ -347,7 +347,7 @@ export default function GroupsPage() {
         </>
       )}
 
-      <style jsx>{`
+      <style>{`
         .groups-grid {
           display: grid;
           grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));

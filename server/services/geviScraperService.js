@@ -1298,26 +1298,39 @@ class GeviScraperService {
       const normalize = (str) => {
         return str.toLowerCase()
           .replace(/[:\-_]/g, ' ')  // Convert colons, dashes, underscores to spaces
+          .replace(/[()]/g, ' ')    // Convert parentheses to spaces
           .replace(/\s+/g, ' ')      // Collapse multiple spaces to single space
           .trim();
       };
       
+      // Get base name without disambiguation for more flexible matching
+      const getBaseName = (str) => {
+        // Remove content in parentheses and normalize
+        return str.replace(/\s*\([^)]*\)\s*/g, ' ').trim();
+      };
+      
       const normalizedName = normalize(performerName);
+      const baseName = normalize(getBaseName(performerName));
       
       // Find all matches with scores
       const foundMatches = [];
       
       for (const dbPerformer of allPerformers) {
         const dbNormalized = normalize(dbPerformer.name);
+        const dbBaseName = normalize(getBaseName(dbPerformer.name));
         
         // Check if performer name contains or is contained in scraped name
         let score = 0;
         let matchedVia = 'name';
         let matchedText = dbPerformer.name;
         
-        // Exact match
+        // Exact match (full normalized)
         if (dbNormalized === normalizedName) {
           score = 1.0;
+        }
+        // Exact match on base name (without disambiguation)
+        else if (dbBaseName && baseName && dbBaseName === baseName) {
+          score = 0.95;  // Slightly lower than exact but very high
         }
         // Check if scraped name contains db name
         else if (normalizedName.includes(dbNormalized)) {
@@ -1327,15 +1340,27 @@ class GeviScraperService {
         else if (dbNormalized.includes(normalizedName)) {
           score = normalizedName.length / dbNormalized.length;
         }
+        // Check base name contains
+        else if (baseName && dbBaseName && baseName.includes(dbBaseName) && dbBaseName.length > 3) {
+          score = dbBaseName.length / baseName.length * 0.9;
+        }
         // Check aliases
         else if (dbPerformer.alias) {
           const aliases = dbPerformer.alias.split(',').map(a => a.trim());
           for (const alias of aliases) {
             const normalizedAlias = normalize(alias);
+            const aliasBaseName = normalize(getBaseName(alias));
             
             // Exact match
             if (normalizedAlias === normalizedName) {
               score = 1.0;
+              matchedVia = 'alias';
+              matchedText = alias;
+              break;
+            }
+            // Base name match
+            else if (aliasBaseName && baseName && aliasBaseName === baseName) {
+              score = 0.95;
               matchedVia = 'alias';
               matchedText = alias;
               break;
@@ -1350,6 +1375,13 @@ class GeviScraperService {
             // Check if alias contains scraped name
             else if (normalizedAlias.includes(normalizedName)) {
               score = normalizedName.length / normalizedAlias.length;
+              matchedVia = 'alias';
+              matchedText = alias;
+              break;
+            }
+            // Check base name contains
+            else if (baseName && aliasBaseName && baseName.includes(aliasBaseName) && aliasBaseName.length > 3) {
+              score = aliasBaseName.length / baseName.length * 0.9;
               matchedVia = 'alias';
               matchedText = alias;
               break;

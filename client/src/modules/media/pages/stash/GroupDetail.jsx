@@ -706,7 +706,7 @@ export default function GroupDetail() {
         })()}
       </div>
 
-      <style jsx>{`
+      <style>{`
         .group-header {
           display: grid;
           grid-template-columns: 600px 1fr;
