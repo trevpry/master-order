@@ -13,12 +13,14 @@ export default function DuplicateScenesPage() {
   const [distance, setDistance] = useState(0);
   const [durationDiff, setDurationDiff] = useState(-1);
   const [totalScenes, setTotalScenes] = useState(0);
+  const [duplicateType, setDuplicateType] = useState('phash'); // 'phash' or 'performers'
   
   // Scene merge state
   const [showSceneMergeModal, setShowSceneMergeModal] = useState(false);
   const [scenesToMerge, setScenesToMerge] = useState([]);
   const [mergeSceneData, setMergeSceneData] = useState(null);
   const [isMergingScenes, setIsMergingScenes] = useState(false);
+  const [currentMergeGroupIndex, setCurrentMergeGroupIndex] = useState(null);
   
   // Expanded groups tracking
   const [expandedGroups, setExpandedGroups] = useState(new Set());
@@ -51,6 +53,7 @@ export default function DuplicateScenesPage() {
       
       setDuplicateGroups(result.data.groups);
       setTotalScenes(result.data.totalScenes);
+      setDuplicateType('phash');
       
       // Expand all groups by default
       const allGroupIndexes = new Set(result.data.groups.map((_, idx) => idx));
@@ -58,6 +61,41 @@ export default function DuplicateScenesPage() {
       
     } catch (err) {
       console.error('Failed to find duplicates:', err);
+      setError(err.message);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // Find duplicates by performers
+  const findDuplicatesByPerformers = async () => {
+    setIsLoading(true);
+    setError(null);
+    
+    try {
+      const response = await fetch(`${config.apiBaseUrl}/api/stash/scenes/duplicates/performers`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        }
+      });
+      
+      const result = await response.json();
+      
+      if (!result.success) {
+        throw new Error(result.error || 'Failed to find duplicates by performers');
+      }
+      
+      setDuplicateGroups(result.data.groups);
+      setTotalScenes(result.data.totalScenes);
+      setDuplicateType('performers');
+      
+      // Expand all groups by default
+      const allGroupIndexes = new Set(result.data.groups.map((_, idx) => idx));
+      setExpandedGroups(allGroupIndexes);
+      
+    } catch (err) {
+      console.error('Failed to find duplicates by performers:', err);
       setError(err.message);
     } finally {
       setIsLoading(false);
@@ -153,6 +191,9 @@ export default function DuplicateScenesPage() {
       alert('Please select at least 2 scenes to merge');
       return;
     }
+
+    // Store the group index for later use
+    setCurrentMergeGroupIndex(groupIndex);
 
     // Filter to only selected scenes
     const scenesToProcess = group.filter(scene => selectedInGroup.has(scene.id));
@@ -275,8 +316,43 @@ export default function DuplicateScenesPage() {
       
       setShowSceneMergeModal(false);
       
-      // Reload duplicates to refresh the list
-      findDuplicates();
+      // Remove merged scenes from the specific group (keep the primary scene)
+      if (currentMergeGroupIndex !== null) {
+        const mergedSceneIds = new Set(scenesToMerge.map(s => s.id));
+        const primarySceneId = mergeSceneData.primarySceneId;
+        
+        setDuplicateGroups(prev => {
+          const newGroups = [...prev];
+          const group = newGroups[currentMergeGroupIndex];
+          
+          // Remove all merged scenes except the primary scene from this group
+          const updatedGroup = group.filter(scene => 
+            !mergedSceneIds.has(scene.id) || scene.id === primarySceneId
+          );
+          
+          // If only 1 scene remains in the group (no longer a duplicate), remove the entire group
+          if (updatedGroup.length < 2) {
+            return newGroups.filter((_, idx) => idx !== currentMergeGroupIndex);
+          }
+          
+          // Otherwise, update the group with remaining scenes
+          newGroups[currentMergeGroupIndex] = updatedGroup;
+          return newGroups;
+        });
+        
+        // Update total scenes count
+        const numScenesRemoved = scenesToMerge.length - 1; // Keep primary, remove others
+        setTotalScenes(prev => prev - numScenesRemoved);
+        
+        // Clear selections for this group
+        setSelectedScenes(prev => ({
+          ...prev,
+          [currentMergeGroupIndex]: new Set()
+        }));
+        
+        // Reset merge group index
+        setCurrentMergeGroupIndex(null);
+      }
     } catch (error) {
       console.error('Failed to merge scenes:', error);
       alert(`Failed to merge scenes: ${error.message}`);
@@ -384,10 +460,29 @@ export default function DuplicateScenesPage() {
             fontSize: '14px',
             fontWeight: '600',
             cursor: isLoading ? 'not-allowed' : 'pointer',
+            opacity: isLoading ? 0.6 : 1,
+            marginRight: '12px'
+          }}
+        >
+          {isLoading && duplicateType === 'phash' ? '🔍 Searching...' : '🔍 Find Duplicates (phash)'}
+        </button>
+
+        <button
+          onClick={findDuplicatesByPerformers}
+          disabled={isLoading}
+          style={{
+            padding: '10px 20px',
+            backgroundColor: '#10b981',
+            color: 'white',
+            border: 'none',
+            borderRadius: '6px',
+            fontSize: '14px',
+            fontWeight: '600',
+            cursor: isLoading ? 'not-allowed' : 'pointer',
             opacity: isLoading ? 0.6 : 1
           }}
         >
-          {isLoading ? '🔍 Searching...' : '🔍 Find Duplicates'}
+          {isLoading && duplicateType === 'performers' ? '👥 Searching...' : '👥 Duplicates by Performers'}
         </button>
       </div>
 
@@ -549,7 +644,7 @@ export default function DuplicateScenesPage() {
               {/* Group Content */}
               {expandedGroups.has(groupIndex) && (
                 <div style={{ padding: '16px' }}>
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: '16px' }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '16px' }}>
                     {group.map((scene, sceneIndex) => {
                       const fileInfo = scene.files && scene.files[0];
                       const resolution = fileInfo ? formatResolution(fileInfo.width, fileInfo.height) : 'Unknown';
@@ -572,7 +667,7 @@ export default function DuplicateScenesPage() {
                           {scene.paths && (
                             <div style={{
                               width: '100%',
-                              height: '180px',
+                              height: '360px',
                               backgroundColor: '#f3f4f6',
                               position: 'relative',
                               overflow: 'hidden'
@@ -615,7 +710,12 @@ export default function DuplicateScenesPage() {
                                   cursor: 'pointer'
                                 }}
                                 onError={(e) => {
-                                  e.target.style.display = 'none';
+                                  // If sprite fails, try screenshot instead
+                                  if (scene.paths.sprite && e.target.src.includes(scene.paths.sprite)) {
+                                    e.target.src = `${config.apiBaseUrl}/api/stash/image-proxy/${scene.paths.screenshot}`;
+                                  } else {
+                                    e.target.style.display = 'none';
+                                  }
                                 }}
                               />
                             </div>

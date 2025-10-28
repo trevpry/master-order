@@ -23,6 +23,7 @@ const ActionCodeService = require('../services/actionCodeService');
 const PerformerSwapService = require('../services/performerSwapService');
 const PerformerMergeService = require('../services/performerMergeService');
 const ScraperRegistry = require('../services/scrapers/ScraperRegistry');
+const DuplicateDetectionService = require('../services/duplicateDetectionService');
 
 // Create global scraper registry singleton (shared across all routes)
 let globalScraperRegistry = null;
@@ -439,7 +440,8 @@ router.get('/scenes', asyncHandler(async (req, res) => {
       minRating,
       maxRating,
       watched,
-      noPerformers
+      noPerformers,
+      time
     } = req.query;
     
     const skip = (parseInt(page) - 1) * parseInt(perPage);
@@ -529,6 +531,34 @@ router.get('/scenes', asyncHandler(async (req, res) => {
           { playCount: null }
         ]
       });
+    }
+    
+    // Handle time filter (added recently)
+    if (time && time !== 'all') {
+      const now = new Date();
+      let hoursAgo;
+      
+      switch(time) {
+        case '1h':
+          hoursAgo = 1;
+          break;
+        case '6h':
+          hoursAgo = 6;
+          break;
+        case '12h':
+          hoursAgo = 12;
+          break;
+        case '24h':
+          hoursAgo = 24;
+          break;
+        default:
+          hoursAgo = null;
+      }
+      
+      if (hoursAgo) {
+        const cutoffDate = new Date(now.getTime() - (hoursAgo * 60 * 60 * 1000));
+        where.createdAt = { gte: cutoffDate };
+      }
     }
     
     // Build order by clause
@@ -770,6 +800,81 @@ router.get('/scenes/next', asyncHandler(async (req, res) => {
       totalUnwatched: unwatchedScenes.length,
       message: `Selected 1 of ${unwatchedScenes.length} unwatched scenes`
     });
+}));
+
+// POST /api/stash/scenes/duplicates/performers - Find duplicate scenes by matching performers
+router.post('/scenes/duplicates/performers', asyncHandler(async (req, res) => {
+  const duplicateService = new DuplicateDetectionService();
+  
+  try {
+    let duplicateGroups = await duplicateService.findDuplicatesByPerformers();
+    
+    // Format for frontend - array of arrays (like phash duplicates)
+    let formattedGroups = duplicateGroups.map(group => 
+      group.scenes.map(scene => ({
+        id: scene.id,
+        stashId: scene.stashId,
+        title: scene.title || 'Untitled',
+        date: scene.date,
+        rating: scene.rating,
+        performers: scene.performers,
+        paths: scene.paths, // Include paths for image display
+        files: [{ // Format file info to match phash duplicates structure
+          size: scene.fileSize,
+          duration: scene.duration,
+          width: scene.width,
+          height: scene.height,
+          video_codec: scene.videoCodec
+        }]
+      }))
+    );
+    
+    // Filter out dismissed duplicate groups (same logic as phash duplicates)
+    const dismissedGroups = await prisma.stashDismissedDuplicateGroup.findMany();
+    const dismissedSceneIdSets = dismissedGroups.map(d => {
+      const sceneIds = JSON.parse(d.sceneIds);
+      return new Set(sceneIds);
+    });
+    
+    // Filter groups by checking if the group's scene IDs match any dismissed group
+    // Also filter out groups with more than 6 scenes
+    const filteredGroups = formattedGroups.filter(group => {
+      // Filter out groups with more than 6 scenes
+      if (group.length > 6) {
+        return false;
+      }
+      
+      const groupSceneIds = group.map(scene => scene.id).sort();
+      
+      // Check if this group matches any dismissed group
+      const isDismissed = dismissedSceneIdSets.some(dismissedSet => {
+        if (dismissedSet.size !== groupSceneIds.length) return false;
+        return groupSceneIds.every(id => dismissedSet.has(id));
+      });
+      
+      return !isDismissed;
+    });
+    
+    const filteredCount = formattedGroups.length - filteredGroups.length;
+    if (filteredCount > 0) {
+      console.log(`   - 🙈 Filtered out ${filteredCount} dismissed group(s) from performer duplicates`);
+    }
+    
+    formattedGroups = filteredGroups;
+    
+    const totalScenes = formattedGroups.reduce((sum, group) => sum + group.length, 0);
+    
+    sendSuccess(res, {
+      groups: formattedGroups,
+      totalGroups: formattedGroups.length,
+      totalScenes
+    });
+    
+  } catch (error) {
+    return sendServerError(res, `Failed to find duplicates by performers: ${error.message}`);
+  } finally {
+    await duplicateService.disconnect();
+  }
 }));
 
 // GET /api/stash/scenes/:id - Stash scene by ID endpoint
@@ -11255,7 +11360,13 @@ router.post('/scenes/duplicates', asyncHandler(async (req, res) => {
   });
   
   // Filter groups by checking if the group's scene IDs match any dismissed group
+  // Also filter out groups with more than 6 scenes
   const filteredGroups = duplicateGroups.filter(group => {
+    // Filter out groups with more than 6 scenes
+    if (group.length > 6) {
+      return false;
+    }
+    
     const groupSceneIds = group.map(scene => scene.id).sort();
     
     // Check if this group matches any dismissed group

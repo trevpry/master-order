@@ -14,6 +14,7 @@ export default function ScenesPage() {
   const [sortBy, setSortBy] = useState(searchParams.get('sort') || 'date');
   const [sortDirection, setSortDirection] = useState(searchParams.get('direction') || 'DESC');
   const [watchStatusFilter, setWatchStatusFilter] = useState(searchParams.get('watched') || 'all');
+  const [timeFilter, setTimeFilter] = useState(searchParams.get('time') || 'all');
   const [pagination, setPagination] = useState({
     page: 1,
     total: 0,
@@ -26,7 +27,7 @@ export default function ScenesPage() {
 
   useEffect(() => {
     loadScenes();
-  }, [currentPage, searchQuery, sortBy, sortDirection, watchStatusFilter]);
+  }, [currentPage, searchQuery, sortBy, sortDirection, watchStatusFilter, timeFilter]);
 
   const loadScenes = async () => {
     setIsLoading(true);
@@ -40,6 +41,7 @@ export default function ScenesPage() {
       params.set('sortOrder', sortDirection);
       if (searchQuery) params.set('search', searchQuery);
       if (watchStatusFilter !== 'all') params.set('watched', watchStatusFilter);
+      if (timeFilter !== 'all') params.set('time', timeFilter);
 
       const response = await fetch(`${config.apiBaseUrl}/api/stash/scenes?${params}`);
       const result = await response.json();
@@ -80,6 +82,7 @@ export default function ScenesPage() {
     if (updates.sort || sortBy !== 'date') params.sort = updates.sort || sortBy;
     if (updates.direction || sortDirection !== 'DESC') params.direction = updates.direction || sortDirection;
     if (updates.watched || watchStatusFilter !== 'all') params.watched = updates.watched || watchStatusFilter;
+    if (updates.time || timeFilter !== 'all') params.time = updates.time || timeFilter;
     setSearchParams(params);
   };
 
@@ -162,6 +165,23 @@ export default function ScenesPage() {
             <option value="all">All</option>
             <option value="true">Watched</option>
             <option value="false">Unwatched</option>
+          </select>
+        </div>
+
+        <div className="filter-group">
+          <label>Added:</label>
+          <select
+            value={timeFilter}
+            onChange={(e) => {
+              setTimeFilter(e.target.value);
+              updateParams({ time: e.target.value, page: '1' });
+            }}
+          >
+            <option value="all">All Time</option>
+            <option value="1h">Past Hour</option>
+            <option value="6h">Past 6 Hours</option>
+            <option value="12h">Past 12 Hours</option>
+            <option value="24h">Past 24 Hours</option>
           </select>
         </div>
       </div>
