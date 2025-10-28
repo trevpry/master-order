@@ -1683,6 +1683,41 @@ router.post('/tags/create', asyncHandler(async (req, res) => {
   }
 
   try {
+    // Check if a tag already exists with this name as an alias (case-insensitive)
+    const allTags = await prisma.stashTag.findMany({
+      include: {
+        aliases: true
+      }
+    });
+
+    const nameLower = name.toLowerCase();
+    
+    // Check for alias match (case-insensitive)
+    const existingTagWithAlias = allTags.find(t => 
+      t.aliases.some(a => a.alias.toLowerCase() === nameLower)
+    );
+
+    if (existingTagWithAlias) {
+      console.log(`   - Tag name "${name}" already exists as alias for "${existingTagWithAlias.name}"`);
+      return sendSuccess(res, {
+        tag: existingTagWithAlias,
+        message: `Tag "${name}" already exists as an alias for "${existingTagWithAlias.name}". Using existing tag instead.`,
+        wasExisting: true
+      });
+    }
+
+    // Check if tag already exists by name (case-insensitive)
+    const existingTag = allTags.find(t => t.name.toLowerCase() === nameLower);
+
+    if (existingTag) {
+      console.log(`   - Tag "${name}" already exists with ID ${existingTag.id}`);
+      return sendSuccess(res, {
+        tag: existingTag,
+        message: `Tag "${name}" already exists.`,
+        wasExisting: true
+      });
+    }
+
     // First, create tag in Stash via GraphQL
     const createMutation = `
       mutation TagCreate($input: TagCreateInput!) {
@@ -5426,7 +5461,11 @@ router.post('/scenes/:id/scrape-stashbox-result', asyncHandler(async (req, res) 
   
   // Match performers and tags
   const allPerformers = await prisma.stashPerformer.findMany();
-  const allTags = await prisma.stashTag.findMany();
+  const allTags = await prisma.stashTag.findMany({
+    include: {
+      aliases: true // Include aliases for matching
+    }
+  });
   
   const matchedPerformers = [];
   const unmatchedPerformers = [];
@@ -5447,7 +5486,12 @@ router.post('/scenes/:id/scrape-stashbox-result', asyncHandler(async (req, res) 
   
   if (scraped.tags) {
     for (const scrapedTag of scraped.tags) {
-      const match = allTags.find(t => t.name === scrapedTag.name);
+      // Check exact name match or alias match (case-insensitive)
+      const scrapedTagLower = scrapedTag.name.toLowerCase();
+      const match = allTags.find(t => 
+        t.name.toLowerCase() === scrapedTagLower || 
+        t.aliases.some(a => a.alias.toLowerCase() === scrapedTagLower)
+      );
       if (match) {
         matchedTags.push(match);
       } else {
