@@ -1809,10 +1809,20 @@ router.put('/performers/:id', asyncHandler(async (req, res) => {
     image, tagIds, unmatchedTags
   } = req.body;
 
-  // Validate required fields
-  validateRequiredFieldsDirect(req.body, ['name']);
+  // Name is not required for updates - the performer already has a name
+  // Only validate that the performer exists
+  const existingPerformer = await prisma.stashPerformer.findUnique({
+    where: { id }
+  });
 
-  console.log('✏️ [Update Performer] Updating performer:', id, name);
+  if (!existingPerformer) {
+    return sendBadRequest(res, 'Performer not found');
+  }
+
+  // Use existing name if not provided in update
+  const performerName = name || existingPerformer.name;
+
+  console.log('✏️ [Update Performer] Updating performer:', id, performerName);
 
   // Initialize sync service if not already done
   if (!stashSyncService && !stashSyncServiceOptimized) {
@@ -2028,7 +2038,7 @@ router.put('/performers/:id', asyncHandler(async (req, res) => {
     const variables = {
       input: {
         id: id,
-        name: name.trim(),
+        name: performerName.trim(),
         alias_list: aliasList,
         disambiguation: disambiguation && disambiguation.trim() !== '' ? disambiguation.trim() : null,
         urls: allUrls // Send complete URLs array (existing + new)
@@ -2169,7 +2179,7 @@ router.put('/performers/:id', asyncHandler(async (req, res) => {
 
     sendSuccess(res, {
       performer: updatedPerformer,
-      message: `Performer "${name}" updated successfully`
+      message: `Performer "${performerName}" updated successfully`
     });
 
   } catch (error) {
