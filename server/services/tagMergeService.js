@@ -350,49 +350,37 @@ class TagMergeService {
 
     try {
       // Check if Stash is configured
-      const isConfigured = await this.stashSyncService.isConfigured();
-      if (!isConfigured) {
-        console.log('   - ⚠️ Stash not configured, skipping Stash update');
-        return;
-      }
-
-      // Extract alias strings from StashTagAlias objects
-      const aliasStrings = updatedMainTag.aliases 
-        ? updatedMainTag.aliases.map(a => a.alias) 
-        : [];
-      
-      // Update main tag with merged aliases using GraphQL
-      const updateMutation = `
-        mutation TagUpdate($input: TagUpdateInput!) {
-          tagUpdate(input: $input) {
-            id
-            name
-            aliases
-          }
+      // Use optional chaining for backward compatibility with old Docker images
+      if (typeof this.stashSyncService?.isConfigured === 'function') {
+        const isConfigured = await this.stashSyncService.isConfigured();
+        if (!isConfigured) {
+          console.log('   - ⚠️ Stash not configured, skipping Stash update');
+          return;
         }
-      `;
-      
-      const updateVariables = {
-        input: {
-          id: parseInt(mainTagId),
-          aliases: aliasStrings
-        }
-      };
-      
-      const updateResult = await this.stashSyncService.makeGraphQLRequest(updateMutation, updateVariables);
-      
-      if (updateResult && updateResult.tagUpdate) {
-        console.log(`   - ✅ Updated main tag ${mainTagId} in Stash with ${aliasStrings.length} alias(es)`);
       } else {
-        console.warn(`   - ⚠️ Unexpected response when updating tag ${mainTagId}:`, updateResult);
+        // Fallback: Try to ensure config is loaded (old method)
+        try {
+          await this.stashSyncService.ensureConfigLoaded();
+          if (!this.stashSyncService.stashUrl) {
+            console.log('   - ⚠️ Stash not configured, skipping Stash update');
+            return;
+          }
+        } catch (configError) {
+          console.log('   - ⚠️ Stash not configured, skipping Stash update');
+          return;
+        }
       }
 
-      // Merge tags in Stash using tagsMerge mutation
+      // Use Stash's native tagsMerge mutation which automatically handles:
+      // - Merging tag relationships (scenes, performers, etc.)
+      // - Converting merged tag names into aliases
+      // - Deleting the source tags
       const mergeMutation = `
         mutation TagsMerge($source: [ID!]!, $destination: ID!) {
           tagsMerge(input: { source: $source, destination: $destination }) {
             id
             name
+            aliases
           }
         }
       `;
@@ -402,10 +390,16 @@ class TagMergeService {
         destination: parseInt(mainTagId)
       };
       
+      console.log('   - Calling Stash tagsMerge mutation...');
+      console.log(`   - Source tags: ${mergeTagIds.join(', ')}`);
+      console.log(`   - Destination tag: ${mainTagId}`);
+      
       const mergeResult = await this.stashSyncService.makeGraphQLRequest(mergeMutation, mergeVariables);
       
       if (mergeResult && mergeResult.tagsMerge) {
         console.log(`   - ✅ Merged ${mergeTagIds.length} tag(s) into ${mainTagId} in Stash`);
+        console.log(`   - Updated tag: ${mergeResult.tagsMerge.name}`);
+        console.log(`   - Aliases: ${mergeResult.tagsMerge.aliases?.join(', ') || 'none'}`);
       } else {
         console.warn(`   - ⚠️ Unexpected response when merging tags:`, mergeResult);
       }

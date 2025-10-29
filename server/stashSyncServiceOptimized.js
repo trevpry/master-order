@@ -49,6 +49,19 @@ class StashSyncServiceOptimized {
     };
   }
 
+  /**
+   * Check if the service is properly configured
+   * @returns {Promise<boolean>} True if configured, false otherwise
+   */
+  async isConfigured() {
+    try {
+      await this.ensureConfigLoaded();
+      return !!this.stashUrl;
+    } catch (error) {
+      return false;
+    }
+  }
+
   // Phase 2: Chunked batch processing for large datasets
   async processInChunks(items, chunkSize, processor) {
     const results = [];

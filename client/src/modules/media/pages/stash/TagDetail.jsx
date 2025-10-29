@@ -269,7 +269,6 @@ export default function TagDetail() {
       const result = await response.json();
 
       if (result.success) {
-        alert(`Successfully merged "${data.name}" into "${targetTag.name}"`);
         // Redirect to the target tag page
         window.location.href = `/media/stash/tags/${selectedTargetTagId}`;
       } else {

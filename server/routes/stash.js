@@ -2144,7 +2144,42 @@ router.put('/performers/:id', asyncHandler(async (req, res) => {
         variables.input.image = image;
       }
     }
-    if (finalTagIds && finalTagIds.length > 0) variables.input.tag_ids = finalTagIds;
+    if (finalTagIds && finalTagIds.length > 0) {
+      // Validate that all tag IDs exist in Stash before applying
+      console.log(`   - Validating ${finalTagIds.length} tag ID(s) in Stash...`);
+      const validTagIds = [];
+      
+      for (const tagId of finalTagIds) {
+        try {
+          const tagQuery = `
+            query FindTag($id: ID!) {
+              findTag(id: $id) {
+                id
+                name
+              }
+            }
+          `;
+          
+          const tagResult = await syncService.makeGraphQLRequest(tagQuery, { id: tagId });
+          
+          if (tagResult?.findTag) {
+            validTagIds.push(tagId);
+            console.log(`   - ✓ Tag ${tagId} (${tagResult.findTag.name}) exists in Stash`);
+          } else {
+            console.warn(`   - ✗ Tag ${tagId} not found in Stash, skipping`);
+          }
+        } catch (tagError) {
+          console.warn(`   - ✗ Tag ${tagId} validation failed, skipping:`, tagError.message);
+        }
+      }
+      
+      if (validTagIds.length > 0) {
+        variables.input.tag_ids = validTagIds;
+        console.log(`   - Applying ${validTagIds.length} validated tag(s)`);
+      } else {
+        console.log(`   - No valid tags to apply`);
+      }
+    }
 
     console.log('   - Updating in Stash with variables:', JSON.stringify(variables, null, 2));
 
