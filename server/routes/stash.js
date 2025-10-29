@@ -2964,10 +2964,11 @@ router.delete('/groups/:groupId/scenes/:sceneId', asyncHandler(async (req, res) 
 // POST /api/stash/groups/:id/apply-matched-scenes - Apply action codes from matched scenes after user acceptance
 router.post('/groups/:id/apply-matched-scenes', asyncHandler(async (req, res) => {
   const { id } = req.params;
-  const { matchedScenes } = req.body;
+  const { matchedScenes, tagsToCreate } = req.body;
 
   console.log('🎬 [Apply Matched Scenes] Processing action codes for group:', id);
   console.log(`   - Received ${matchedScenes?.length || 0} matched scenes`);
+  console.log(`   - Tags to create:`, tagsToCreate);
 
   validateRequiredFieldsDirect(req.body, ['matchedScenes']);
 
@@ -2980,6 +2981,7 @@ router.post('/groups/:id/apply-matched-scenes', asyncHandler(async (req, res) =>
     processedScenes: 0,
     totalPerformers: 0,
     appliedActionCodes: 0,
+    createdTags: 0,
     errors: []
   };
 
@@ -2990,6 +2992,95 @@ router.post('/groups/:id/apply-matched-scenes', asyncHandler(async (req, res) =>
     }
 
     console.log(`\n   🎭 Processing scene ${match.sceneId} with ${match.performers.length} performers`);
+    
+    // Apply scene number and tags from matched scene metadata
+    try {
+      // Update scene number in the group-scene pivot table
+      if (match.sceneNumber) {
+        await prisma.stashGroupScene.updateMany({
+          where: {
+            sceneId: match.sceneId,
+            groupId: id
+          },
+          data: {
+            sceneIndex: match.sceneNumber
+          }
+        });
+        console.log(`      ✅ Updated scene number to ${match.sceneNumber}`);
+      }
+      
+      // Get scene index (for tagsToCreate lookup)
+      const sceneIndex = matchedScenes.indexOf(match);
+      
+      // Create tags if user checked them
+      const tagsToCreateForScene = tagsToCreate?.[sceneIndex] || {};
+      const tagNamesToCreate = Object.keys(tagsToCreateForScene).filter(name => tagsToCreateForScene[name]);
+      
+      if (tagNamesToCreate.length > 0) {
+        console.log(`      🏷️  Creating ${tagNamesToCreate.length} new tags`);
+        
+        for (const tagName of tagNamesToCreate) {
+          // Check if tag already exists
+          let tag = await prisma.stashTag.findFirst({
+            where: { name: tagName }
+          });
+          
+          if (!tag) {
+            // Create the tag
+            tag = await prisma.stashTag.create({
+              data: { name: tagName }
+            });
+            console.log(`      ✅ Created tag: ${tagName}`);
+            results.createdTags++;
+          }
+          
+          // Link tag to scene if not already linked
+          const existingLink = await prisma.stashSceneTag.findFirst({
+            where: {
+              sceneId: match.sceneId,
+              tagId: tag.id
+            }
+          });
+          
+          if (!existingLink) {
+            await prisma.stashSceneTag.create({
+              data: {
+                sceneId: match.sceneId,
+                tagId: tag.id
+              }
+            });
+          }
+        }
+      }
+      
+      // Apply matched tags if provided
+      if (match.matchedTags && Array.isArray(match.matchedTags) && match.matchedTags.length > 0) {
+        console.log(`      🏷️  Applying ${match.matchedTags.length} matched tags`);
+        
+        // Get existing scene tags
+        const existingTags = await prisma.stashSceneTag.findMany({
+          where: { sceneId: match.sceneId }
+        });
+        const existingTagIds = new Set(existingTags.map(st => st.tagId));
+        
+        // Add new tags that don't already exist
+        for (const tag of match.matchedTags) {
+          if (!existingTagIds.has(tag.id)) {
+            await prisma.stashSceneTag.create({
+              data: {
+                sceneId: match.sceneId,
+                tagId: tag.id
+              }
+            });
+          }
+        }
+        
+        console.log(`      ✅ Applied ${match.matchedTags.length} tags`);
+      }
+    } catch (error) {
+      console.error(`      ❌ Failed to update scene metadata:`, error.message);
+      results.errors.push({ sceneId: match.sceneId, error: error.message });
+    }
 
     // Get scene with performers
     const dbScene = await prisma.stashScene.findUnique({
@@ -3119,6 +3210,7 @@ router.post('/groups/:id/apply-matched-scenes', asyncHandler(async (req, res) =>
   console.log(`   - Processed: ${results.processedScenes}/${results.totalScenes} scenes`);
   console.log(`   - Total performers: ${results.totalPerformers}`);
   console.log(`   - Applied action codes: ${results.appliedActionCodes}`);
+  console.log(`   - Created tags: ${results.createdTags}`);
   console.log(`   - Errors: ${results.errors.length}`);
 
   sendSuccess(res, {
@@ -3221,6 +3313,14 @@ router.post('/groups/:id/scrape-generic', asyncHandler(async (req, res) => {
     return sendBadRequest(res, 'Group not found');
   }
   
+  // Save the URL to the group immediately when scraping begins
+  console.log(`   - Saving URL to group: ${url}`);
+  await prisma.stashGroup.update({
+    where: { id },
+    data: { url }
+  });
+  console.log(`   - ✅ URL saved to group`);
+  
   // Use global scraper registry
   const registry = await getScraperRegistry();
   
@@ -3250,6 +3350,39 @@ router.post('/groups/:id/scrape-generic', asyncHandler(async (req, res) => {
     return sendBadRequest(res, `Scraper "${scraper.siteName}" does not support movie scraping`);
   }
   
+  // Fetch scenes linked to this group to get performers for matching
+  const groupScenes = await prisma.stashGroupScene.findMany({
+    where: { groupId: id },
+    include: {
+      scene: {
+        include: {
+          performers: {
+            include: {
+              performer: true
+            }
+          }
+        }
+      }
+    }
+  });
+  
+  console.log(`   - Found ${groupScenes.length} scenes linked to this group`);
+  
+  // Collect all unique performers from linked scenes
+  const scenePerformers = [];
+  if (groupScenes.length > 0) {
+    const performerSet = new Set();
+    groupScenes.forEach(gs => {
+      gs.scene.performers.forEach(sp => {
+        if (!performerSet.has(sp.performer.name)) {
+          performerSet.add(sp.performer.name);
+          scenePerformers.push({ name: sp.performer.name });
+        }
+      });
+    });
+    console.log(`   - Collected ${scenePerformers.length} unique performers from linked scenes`);
+  }
+  
   // Scrape the URL
   let scrapeResult;
   try {
@@ -3257,7 +3390,8 @@ router.post('/groups/:id/scrape-generic', asyncHandler(async (req, res) => {
     if (scraper.scrapeMovie) {
       scrapeResult = await scraper.scrapeMovie(url);
     } else {
-      scrapeResult = await scraper.scrape(url);
+      // Pass scene performers to scraper for matching
+      scrapeResult = await scraper.scrape(url, scenePerformers);
     }
   } catch (error) {
     console.error(`❌ [Generic Movie Scrape] Scrape failed:`, error);
@@ -3296,6 +3430,80 @@ router.post('/groups/:id/scrape-generic', asyncHandler(async (req, res) => {
   console.log(`   - Matched tags: ${matchedTags.matched.length}`);
   console.log(`   - Unmatched tags:`, matchedTags.unmatched);
   
+  // Match scenes if allScenes is provided (like GEVI movie scraping)
+  let matchedScenes = [];
+  if (metadata.allScenes && metadata.allScenes.length > 0 && groupScenes.length > 0) {
+    console.log(`   - Attempting to match ${metadata.allScenes.length} scraped scenes with ${groupScenes.length} database scenes`);
+    
+    // Add groups array with sceneIndex to each scene for position matching
+    const dbScenes = groupScenes.map(gs => ({
+      ...gs.scene,
+      groups: [{
+        groupId: gs.groupId,
+        sceneIndex: gs.sceneIndex
+      }]
+    }));
+    
+    console.log(`   - DB scenes with scene numbers:`, dbScenes.map(s => ({ 
+      id: s.id, 
+      title: s.title, 
+      sceneIndex: s.groups[0].sceneIndex 
+    })));
+    
+    matchedScenes = await geviScraper.matchMovieScenes(metadata.allScenes, dbScenes);
+    
+    console.log(`   - Matched ${matchedScenes.length} scenes`);
+    
+    // Match tags for each scene
+    for (const scene of matchedScenes) {
+      if (scene.tags && scene.tags.length > 0) {
+        const sceneTags = await geviScraper.matchTags(scene.tags, prisma);
+        scene.matchedTags = sceneTags.matched;
+        scene.unmatchedTags = sceneTags.unmatched;
+      } else {
+        scene.matchedTags = [];
+        scene.unmatchedTags = [];
+      }
+    }
+  } else if (groupScenes.length > 0 && metadata.movies && metadata.movies.length > 0 && metadata.movies[0].sceneNumber) {
+    // Single scene was matched by scraper (AEBN with specific scene)
+    // Create a matched scene entry for the review modal
+    console.log(`   - Single scene matched by scraper (scene number: ${metadata.movies[0].sceneNumber})`);
+    
+    const dbScene = groupScenes[0].scene; // Should only be one scene linked
+    
+    // Match tags for this scene
+    let sceneMatchedTags = { matched: [], unmatched: [] };
+    if (metadata.tags && metadata.tags.length > 0) {
+      sceneMatchedTags = await geviScraper.matchTags(metadata.tags, prisma);
+    }
+    
+    matchedScenes = [{
+      sceneId: dbScene.id,
+      sceneNumber: metadata.movies[0].sceneNumber,
+      title: metadata.title,
+      details: metadata.details,
+      performers: metadata.performers,
+      tags: metadata.tags,
+      matchedTags: sceneMatchedTags.matched,
+      unmatchedTags: sceneMatchedTags.unmatched,
+      date: metadata.date,
+      image: metadata.image,
+      episodeUrl: metadata.movies[0].url,
+      confidence: 100, // Direct match via performers
+      updates: {
+        title: metadata.title,
+        details: metadata.details,
+        performers: metadata.performers,
+        tags: metadata.tags,
+        date: metadata.date,
+        image: metadata.image
+      }
+    }];
+    
+    console.log(`   - Created matched scene entry for scene ${dbScene.id}`);
+  }
+  
   // Image URL is used directly from scraper
   if (metadata.image) {
     console.log(`   - Image URL: ${metadata.image}`);
@@ -3312,6 +3520,7 @@ router.post('/groups/:id/scrape-generic', asyncHandler(async (req, res) => {
       studio: matchedStudio ? null : metadata.studio,
       tags: matchedTags.unmatched
     },
+    matchedScenes: matchedScenes, // Include matched scenes like GEVI
     source: scraper.siteName,
     sourceUrl: url
   });
@@ -3510,6 +3719,10 @@ router.put('/groups/:id', asyncHandler(async (req, res) => {
     if (updatedMovie.urls && updatedMovie.urls.length > 0) {
       dbUpdateData.url = JSON.stringify(updatedMovie.urls);
       console.log(`   - Saved ${updatedMovie.urls.length} URLs to local database`);
+    } else if (urls && Array.isArray(urls) && urls.length === 0) {
+      // Empty array was sent - preserve existing URL (don't overwrite)
+      console.log(`   - Empty URLs array provided, preserving existing URL`);
+      // Don't update the url field
     }
 
     const updatedGroup = await prisma.stashGroup.update({
@@ -3530,6 +3743,137 @@ router.put('/groups/:id', asyncHandler(async (req, res) => {
   } catch (error) {
     console.error('❌ Error updating group:', error);
     return sendServerError(res, error.message || 'Failed to update group');
+  }
+}));
+
+// POST /api/stash/groups/merge - Merge multiple groups into one
+router.post('/groups/merge', asyncHandler(async (req, res) => {
+  const { primaryGroupId, mergeGroupIds, mergedData } = req.body;
+
+  if (!primaryGroupId || !mergeGroupIds || mergeGroupIds.length === 0) {
+    return sendBadRequest(res, 'Primary group ID and merge group IDs are required');
+  }
+
+  console.log(`🔀 Merging ${mergeGroupIds.length} groups into group ${primaryGroupId}`);
+
+  try {
+    const allGroupIds = [primaryGroupId, ...mergeGroupIds];
+
+    // Fetch all groups to merge
+    const groups = await prisma.stashGroup.findMany({
+      where: { id: { in: allGroupIds } },
+      include: {
+        studio: true,
+        scenes: {
+          include: {
+            scene: true
+          }
+        }
+      }
+    });
+
+    if (groups.length !== allGroupIds.length) {
+      return sendBadRequest(res, 'One or more groups not found');
+    }
+
+    const primaryGroup = groups.find(g => g.id === primaryGroupId);
+    const mergeGroups = groups.filter(g => g.id !== primaryGroupId);
+
+    // Collect all unique scenes from all groups
+    const allSceneLinks = new Map(); // Map<sceneId, sceneIndex>
+    
+    groups.forEach(group => {
+      group.scenes.forEach(gs => {
+        const sceneId = gs.sceneId;
+        
+        if (!allSceneLinks.has(sceneId)) {
+          // First time seeing this scene, store with scene index
+          allSceneLinks.set(sceneId, gs.sceneIndex);
+        } else {
+          // Scene already exists, keep existing scene index if present
+          const existingIndex = allSceneLinks.get(sceneId);
+          if (existingIndex === null && gs.sceneIndex !== null) {
+            allSceneLinks.set(sceneId, gs.sceneIndex);
+          }
+        }
+      });
+    });
+
+    const totalScenes = allSceneLinks.size;
+    console.log(`🎬 Merging ${totalScenes} unique scenes from ${groups.length} groups`);
+
+    // Update primary group with merged data
+    const updateData = {
+      name: mergedData.name || primaryGroup.name,
+      date: mergedData.date || primaryGroup.date,
+      duration: mergedData.duration || primaryGroup.duration,
+      director: mergedData.director || primaryGroup.director,
+      synopsis: mergedData.synopsis || primaryGroup.synopsis,
+      frontImage: mergedData.frontImage || primaryGroup.frontImage,
+      backImage: mergedData.backImage || primaryGroup.backImage,
+      geviUrl: mergedData.geviUrl || primaryGroup.geviUrl,
+      url: mergedData.url || primaryGroup.url
+    };
+
+    if (mergedData.studioId) {
+      updateData.studio = { connect: { id: mergedData.studioId } };
+    }
+
+    const updatedGroup = await prisma.stashGroup.update({
+      where: { id: primaryGroupId },
+      data: updateData,
+      include: {
+        studio: true
+      }
+    });
+
+    // Delete existing scene links for primary group
+    await prisma.stashGroupScene.deleteMany({
+      where: { groupId: primaryGroupId }
+    });
+
+    // Create all scene links for primary group
+    const sceneLinks = Array.from(allSceneLinks.entries()).map(([sceneId, sceneIndex]) => ({
+      groupId: primaryGroupId,
+      sceneId: sceneId,
+      sceneIndex: sceneIndex
+    }));
+
+    await prisma.stashGroupScene.createMany({
+      data: sceneLinks
+    });
+
+    console.log(`✅ Added ${sceneLinks.length} scene links to primary group`);
+
+    // Delete merged groups from database
+    await prisma.stashGroup.deleteMany({
+      where: { id: { in: mergeGroupIds } }
+    });
+
+    console.log(`🗑️  Deleted ${mergeGroupIds.length} merged groups`);
+
+    // Fetch updated primary group with all scenes
+    const finalGroup = await prisma.stashGroup.findUnique({
+      where: { id: primaryGroupId },
+      include: {
+        studio: true,
+        scenes: {
+          include: {
+            scene: true
+          }
+        }
+      }
+    });
+
+    sendSuccess(res, {
+      message: `Successfully merged ${mergeGroupIds.length} groups into primary group`,
+      group: finalGroup,
+      mergedSceneCount: totalScenes
+    });
+
+  } catch (error) {
+    console.error('❌ Error merging groups:', error);
+    return sendServerError(res, error.message || 'Failed to merge groups');
   }
 }));
 

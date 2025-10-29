@@ -877,7 +877,12 @@ class GeviScraperService {
     }
 
     const matches = [];
+    const matchedMovieSceneNumbers = new Set(); // Track which movie scenes have been matched
+    const unmatchedDbScenes = []; // Track DB scenes that didn't match by performers
 
+    // PASS 1: Match by performers (with position bonus)
+    console.log(`\n🎯 PASS 1: Matching by performers...`);
+    
     for (const dbScene of dbScenes) {
       console.log(`\n   🔍 Checking DB scene: "${dbScene.title || dbScene.id}"`);
       console.log(`      - DB scene performers structure:`, JSON.stringify(dbScene.performers, null, 2));
@@ -890,6 +895,11 @@ class GeviScraperService {
       console.log(`      - DB performer names:`, dbPerformerNames);
 
       for (const movieScene of movieScenes) {
+        // Skip if this movie scene was already matched
+        if (matchedMovieSceneNumbers.has(movieScene.sceneNumber)) {
+          continue;
+        }
+        
         let score = 0;
         
         console.log(`\n      📽️ Comparing with movie scene ${movieScene.sceneNumber}`);
@@ -902,6 +912,12 @@ class GeviScraperService {
           typeof p === 'string' ? p.toLowerCase() : p.name.toLowerCase()
         );
         console.log(`         - Movie performer names (lowercase):`, moviePerformerNames);
+        
+        // Skip this comparison if movie scene has no performers (will be handled in pass 2)
+        if (moviePerformerNames.length === 0 || moviePerformerNames.every(p => !p || p.trim() === '')) {
+          console.log(`         - ⚠️  Movie scene has no performers, skipping for pass 1`);
+          continue;
+        }
         
         // Method 1: Direct name matching (partial match allowed)
         const matchingPerformers = moviePerformerNames.filter(mp => 
@@ -970,54 +986,120 @@ class GeviScraperService {
         
         // Method 4: Position bonus - if we're on the right movie, scene order likely matches
         // Give a small bonus based on how close the scene numbers are
+        let positionMatchScore = 0;
         if (dbScene.groups && dbScene.groups.length > 0) {
           const sceneIndex = dbScene.groups[0].sceneIndex;
           if (sceneIndex !== null && sceneIndex !== undefined) {
-            const positionDiff = Math.abs(sceneIndex - (movieScene.sceneNumber - 1)); // sceneNumber is 1-based
+            // sceneIndex is stored as 1-based (same as sceneNumber)
+            const positionDiff = Math.abs(sceneIndex - movieScene.sceneNumber);
             if (positionDiff === 0) {
-              score += 20; // Exact position match
-              console.log(`         - Exact position match! (score: +20)`);
+              positionMatchScore = 15; // Position bonus for pass 1 (not primary indicator)
+              console.log(`         - Exact position match! (score: +15)`);
             } else if (positionDiff <= 2) {
-              const proximityScore = 10 * (1 - positionDiff / 3);
-              score += proximityScore;
+              const proximityScore = 8 * (1 - positionDiff / 3);
+              positionMatchScore = proximityScore;
               console.log(`         - Close position match (diff: ${positionDiff}) (score: +${proximityScore.toFixed(1)})`);
             }
           }
         }
+        
+        score += positionMatchScore;
 
         console.log(`         - Total score: ${score.toFixed(1)}`);
 
-        // Keep the best match for this database scene
-        // Lower threshold from 50 to 30 since we're already on the correct movie
-        if (score > bestScore && score > 30) {
+        // For pass 1, require at least 25 points (some performer matching required)
+        if (score > bestScore && score >= 25) {
           console.log(`         - ✅ New best match! (score: ${score.toFixed(1)})`);
           bestScore = score;
           bestMatch = movieScene;
         } else if (score > 0) {
-          console.log(`         - ❌ Score too low (${score.toFixed(1)} vs threshold 30)`);
+          console.log(`         - ❌ Score too low (${score.toFixed(1)} vs threshold 25)`);
         }
       }
 
       if (bestMatch) {
         const matchData = {
           sceneId: dbScene.id,
+          dbSceneTitle: dbScene.title || null, // Database scene title for comparison
           sceneNumber: bestMatch.sceneNumber,
+          title: bestMatch.title || null,
           date: bestMatch.date,
           details: bestMatch.details,
           episodeUrl: bestMatch.episodeUrl,
           performers: bestMatch.performers, // Include performers with action codes
-          confidence: Math.round(bestScore)
+          tags: bestMatch.tags || [], // Include tags for tag matching
+          confidence: Math.round(bestScore),
+          matchMethod: 'performers'
         };
         matches.push(matchData);
+        matchedMovieSceneNumbers.add(bestMatch.sceneNumber);
         
-        console.log(`   ✅ Matched scene "${dbScene.title || dbScene.id}" to Scene ${bestMatch.sceneNumber} (${bestScore.toFixed(0)}% confidence)`);
-        console.log(`      Match data:`, JSON.stringify(matchData, null, 2));
+        console.log(`   ✅ PASS 1: Matched scene "${dbScene.title || dbScene.id}" to Scene ${bestMatch.sceneNumber} (${bestScore.toFixed(0)}% confidence, method: performers)`);
       } else {
-        console.log(`   ❌ No match found for scene "${dbScene.title || dbScene.id}"`);
+        console.log(`   ⏭️  PASS 1: No performer match for scene "${dbScene.title || dbScene.id}", deferring to pass 2`);
+        unmatchedDbScenes.push(dbScene);
       }
     }
+    
+    console.log(`\n🎯 PASS 1 Complete: ${matches.length} scenes matched by performers, ${unmatchedDbScenes.length} remaining`);
 
-    console.log(`\n🎯 [matchMovieScenes] Complete: ${matches.length} matches found\n`);
+    // PASS 2: Match remaining scenes by position (scene number)
+    if (unmatchedDbScenes.length > 0) {
+      console.log(`\n🎯 PASS 2: Matching remaining scenes by position...`);
+      
+      for (const dbScene of unmatchedDbScenes) {
+        console.log(`\n   🔍 Checking DB scene: "${dbScene.title || dbScene.id}" (position matching)`);
+        
+        // Get the scene's position in the group
+        if (!dbScene.groups || dbScene.groups.length === 0) {
+          console.log(`      - ⚠️  No group info, cannot match by position`);
+          continue;
+        }
+        
+        const sceneIndex = dbScene.groups[0].sceneIndex;
+        if (sceneIndex === null || sceneIndex === undefined) {
+          console.log(`      - ⚠️  No scene index, cannot match by position`);
+          continue;
+        }
+        
+        console.log(`      - DB scene index: ${sceneIndex} (looking for movie scene number ${sceneIndex})`);
+        
+        // Look for exact position match
+        // sceneIndex is stored as 1-based (same as sceneNumber from scrapers)
+        const expectedSceneNumber = sceneIndex;
+        let bestMatch = movieScenes.find(ms => 
+          ms.sceneNumber === expectedSceneNumber && !matchedMovieSceneNumbers.has(ms.sceneNumber)
+        );
+        
+        if (bestMatch) {
+          console.log(`      - ✅ Found exact position match: Scene ${bestMatch.sceneNumber}`);
+          
+          const matchData = {
+            sceneId: dbScene.id,
+            dbSceneTitle: dbScene.title || null, // Database scene title for comparison
+            sceneNumber: bestMatch.sceneNumber,
+            title: bestMatch.title || null,
+            date: bestMatch.date,
+            details: bestMatch.details,
+            episodeUrl: bestMatch.episodeUrl,
+            performers: bestMatch.performers,
+            tags: bestMatch.tags || [],
+            confidence: 50, // Position-only matching gets 50% confidence
+            matchMethod: 'position'
+          };
+          matches.push(matchData);
+          matchedMovieSceneNumbers.add(bestMatch.sceneNumber);
+          
+          console.log(`   ✅ PASS 2: Matched scene "${dbScene.title || dbScene.id}" to Scene ${bestMatch.sceneNumber} (50% confidence, method: position)`);
+        } else {
+          console.log(`      - ❌ No unmatched movie scene at position ${expectedSceneNumber}`);
+        }
+      }
+      
+      console.log(`\n🎯 PASS 2 Complete: ${matches.filter(m => m.matchMethod === 'position').length} additional scenes matched by position`);
+    }
+
+    console.log(`\n🎯 [matchMovieScenes] Complete: ${matches.length} total matches found\n`);
     return matches;
   }
 

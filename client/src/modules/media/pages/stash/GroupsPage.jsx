@@ -20,6 +20,13 @@ export default function GroupsPage() {
     perPage: 50
   });
 
+  // Merge functionality
+  const [selectedGroups, setSelectedGroups] = useState(new Set());
+  const [showMergeModal, setShowMergeModal] = useState(false);
+  const [groupsToMerge, setGroupsToMerge] = useState([]);
+  const [mergeGroupData, setMergeGroupData] = useState(null);
+  const [isMerging, setIsMerging] = useState(false);
+
   const currentPage = parseInt(searchParams.get('page') || '1', 10);
 
   useEffect(() => {
@@ -92,6 +99,120 @@ export default function GroupsPage() {
     return remainingMins > 0 ? `${hours}h ${remainingMins}m` : `${hours}h`;
   };
 
+  // Toggle group selection
+  const toggleGroupSelection = (groupId) => {
+    setSelectedGroups(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(groupId)) {
+        newSet.delete(groupId);
+      } else {
+        newSet.add(groupId);
+      }
+      return newSet;
+    });
+  };
+
+  // Handle opening merge modal
+  const handleOpenMergeModal = async () => {
+    if (selectedGroups.size < 2) {
+      alert('Please select at least 2 groups to merge');
+      return;
+    }
+
+    try {
+      // Fetch full details for selected groups
+      const groupIds = Array.from(selectedGroups);
+      const groupPromises = groupIds.map(id =>
+        fetch(`${config.apiBaseUrl}/api/stash/groups/${id}`).then(r => r.json())
+      );
+      
+      const groupResults = await Promise.all(groupPromises);
+      const groupsWithDetails = groupResults.map(r => r.data);
+      
+      setGroupsToMerge(groupsWithDetails);
+      
+      // Initialize merge data with first group's data as default
+      setMergeGroupData({
+        name: groupsWithDetails[0].name || '',
+        date: groupsWithDetails[0].date || '',
+        synopsis: groupsWithDetails[0].synopsis || '',
+        director: groupsWithDetails[0].director || '',
+        rating: groupsWithDetails[0].rating || null,
+        duration: groupsWithDetails[0].duration || null,
+        urls: groupsWithDetails[0].urls || '',
+        frontImage: groupsWithDetails[0].frontImage || '',
+        backImage: groupsWithDetails[0].backImage || '',
+        studio: groupsWithDetails[0].studio || null,
+        tags: groupsWithDetails[0].tags || [],
+        primaryGroupId: groupsWithDetails[0].id
+      });
+      
+      setShowMergeModal(true);
+    } catch (error) {
+      console.error('Failed to load group details:', error);
+      alert(`Failed to load group details: ${error.message}`);
+    }
+  };
+
+  // Handle merge execution
+  const handleMergeGroups = async () => {
+    if (!mergeGroupData || !mergeGroupData.primaryGroupId) {
+      alert('Please select a primary group');
+      return;
+    }
+
+    const primaryGroup = groupsToMerge.find(g => g.id === mergeGroupData.primaryGroupId);
+    const otherGroups = groupsToMerge.filter(g => g.id !== mergeGroupData.primaryGroupId);
+    
+    // Count total scenes
+    const totalScenes = groupsToMerge.reduce((sum, g) => sum + (g.scenes?.length || 0), 0);
+    
+    const confirmMessage = 
+      `Merge ${groupsToMerge.length} groups?\n\n` +
+      `Primary group (ID kept): ${primaryGroup.name}\n` +
+      `Total scenes to consolidate: ${totalScenes}\n` +
+      `Groups to delete: ${otherGroups.map(g => g.name).join(', ')}\n\n` +
+      `This action cannot be undone.`;
+
+    if (!window.confirm(confirmMessage)) {
+      return;
+    }
+
+    setIsMerging(true);
+    try {
+      const response = await fetch(`${config.apiBaseUrl}/api/stash/groups/merge`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          primaryGroupId: mergeGroupData.primaryGroupId,
+          mergeGroupIds: groupsToMerge.filter(g => g.id !== mergeGroupData.primaryGroupId).map(g => g.id),
+          mergedData: mergeGroupData
+        })
+      });
+
+      const result = await response.json();
+
+      if (!result.success) {
+        throw new Error(result.error || 'Failed to merge groups');
+      }
+
+      alert('✅ Successfully merged groups!');
+      
+      setShowMergeModal(false);
+      setSelectedGroups(new Set());
+      
+      // Reload groups
+      loadGroups();
+    } catch (error) {
+      console.error('Failed to merge groups:', error);
+      alert(`Failed to merge groups: ${error.message}`);
+    } finally {
+      setIsMerging(false);
+    }
+  };
+
   return (
     <div className="page pad groups-page">
       <div className="breadcrumb">
@@ -101,6 +222,21 @@ export default function GroupsPage() {
       <div className="header">
         <h1>🎬 Groups (Movies)</h1>
         <p className="muted">Browse your movie/series collections</p>
+        {selectedGroups.size >= 2 && (
+          <Button 
+            onClick={handleOpenMergeModal}
+            style={{
+              marginTop: '1rem',
+              backgroundColor: '#667eea',
+              color: 'white',
+              padding: '0.75rem 1.5rem',
+              fontSize: '1rem',
+              fontWeight: '600'
+            }}
+          >
+            🔀 Merge {selectedGroups.size} Selected Groups
+          </Button>
+        )}
       </div>
 
       {/* Search */}
@@ -185,9 +321,41 @@ export default function GroupsPage() {
                 <div 
                   key={group.id} 
                   className="group-card"
-                  onClick={() => navigate(`/media/stash/groups/${group.id}`)}
-                  style={{ cursor: 'pointer' }}
+                  style={{
+                    border: selectedGroups.has(group.id) ? '3px solid #667eea' : undefined,
+                    backgroundColor: selectedGroups.has(group.id) ? '#f3f4f6' : undefined
+                  }}
                 >
+                  {/* Selection checkbox */}
+                  <div
+                    style={{
+                      position: 'absolute',
+                      top: '8px',
+                      right: '8px',
+                      zIndex: 10
+                    }}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      toggleGroupSelection(group.id);
+                    }}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={selectedGroups.has(group.id)}
+                      onChange={() => {}}
+                      style={{
+                        width: '20px',
+                        height: '20px',
+                        cursor: 'pointer'
+                      }}
+                    />
+                  </div>
+
+                  {/* Clickable area for navigation */}
+                  <div
+                    onClick={() => navigate(`/media/stash/groups/${group.id}`)}
+                    style={{ cursor: 'pointer' }}
+                  >
                   {group.frontImage ? (
                     <img 
                       src={group.frontImage} 
@@ -246,6 +414,8 @@ export default function GroupsPage() {
                       </div>
                     )}
                   </div>
+                  </div>
+                  {/* End clickable area */}
                 </div>
               ))}
             </div>
@@ -345,6 +515,140 @@ export default function GroupsPage() {
             </div>
           )}
         </>
+      )}
+
+      {/* Merge Modal */}
+      {showMergeModal && groupsToMerge.length > 0 && (
+        <div className="modal-overlay">
+          <div className="modal-content" style={{ maxWidth: '600px', maxHeight: '90vh', overflowY: 'auto' }}>
+            <div className="modal-header">
+              <h2>🔀 Merge {groupsToMerge.length} Groups</h2>
+              <button 
+                className="btn-close" 
+                onClick={() => setShowMergeModal(false)}
+                disabled={isMerging}
+              >
+                ×
+              </button>
+            </div>
+
+            <div className="modal-body" style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+              {/* Select Primary Group */}
+              <div>
+                <label style={{ display: 'block', fontWeight: '600', marginBottom: '8px' }}>
+                  Primary Group (ID will be kept):
+                </label>
+                <select
+                  value={mergeGroupData?.primaryGroupId || ''}
+                  onChange={(e) => {
+                    const selectedId = parseInt(e.target.value);
+                    const selectedGroup = groupsToMerge.find(g => g.id === selectedId);
+                    if (selectedGroup) {
+                      setMergeGroupData({
+                        ...mergeGroupData,
+                        name: selectedGroup.name,
+                        date: selectedGroup.date || '',
+                        synopsis: selectedGroup.synopsis || '',
+                        director: selectedGroup.director || '',
+                        rating: selectedGroup.rating || null,
+                        duration: selectedGroup.duration || null,
+                        urls: selectedGroup.urls || '',
+                        frontImage: selectedGroup.frontImage || '',
+                        backImage: selectedGroup.backImage || '',
+                        studio: selectedGroup.studio || null,
+                        tags: selectedGroup.tags || [],
+                        primaryGroupId: selectedId
+                      });
+                    }
+                  }}
+                  style={{
+                    width: '100%',
+                    padding: '8px',
+                    border: '1px solid #d1d5db',
+                    borderRadius: '6px',
+                    fontSize: '14px'
+                  }}
+                >
+                  {groupsToMerge.map(group => (
+                    <option key={group.id} value={group.id}>
+                      {group.name} ({group.scenes?.length || 0} scenes)
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Groups Being Merged */}
+              <div>
+                <label style={{ display: 'block', fontWeight: '600', marginBottom: '8px' }}>
+                  Groups Being Merged:
+                </label>
+                <div style={{ padding: '8px', border: '1px solid #d1d5db', borderRadius: '6px', backgroundColor: '#f9fafb' }}>
+                  {groupsToMerge.map(group => (
+                    <div
+                      key={group.id}
+                      style={{
+                        padding: '8px',
+                        marginBottom: '4px',
+                        backgroundColor: group.id === mergeGroupData?.primaryGroupId ? '#dcfce7' : '#fef3c7',
+                        borderRadius: '4px',
+                        fontSize: '12px',
+                        display: 'flex',
+                        justifyContent: 'space-between'
+                      }}
+                    >
+                      <span>
+                        {group.id === mergeGroupData?.primaryGroupId && '⭐ '}
+                        {group.name}
+                      </span>
+                      <span style={{ color: '#6b7280' }}>
+                        {group.scenes?.length || 0} scenes
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Total Scenes Summary */}
+              <div style={{
+                padding: '12px',
+                backgroundColor: '#eff6ff',
+                borderRadius: '6px',
+                border: '1px solid #3b82f6'
+              }}>
+                <strong>Total Scenes:</strong> {groupsToMerge.reduce((sum, g) => sum + (g.scenes?.length || 0), 0)} scenes will be consolidated into the primary group
+              </div>
+
+              {/* Warning */}
+              <div style={{
+                padding: '12px',
+                backgroundColor: '#fef2f2',
+                borderRadius: '6px',
+                border: '1px solid #ef4444',
+                fontSize: '12px'
+              }}>
+                <strong>⚠️ Warning:</strong> This action cannot be undone. Groups other than the primary will be deleted, and all their scenes will be added to the primary group.
+              </div>
+            </div>
+
+            {/* Actions */}
+            <div className="modal-actions">
+              <button 
+                className="btn-accept" 
+                onClick={handleMergeGroups}
+                disabled={isMerging}
+              >
+                {isMerging ? '⏳ Merging...' : '🔀 Merge Groups'}
+              </button>
+              <button 
+                className="btn-cancel" 
+                onClick={() => setShowMergeModal(false)}
+                disabled={isMerging}
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       <style>{`
@@ -507,6 +811,122 @@ export default function GroupsPage() {
           color: #718096;
           font-size: 0.9rem;
           padding: 0 0.5rem;
+        }
+
+        .group-card {
+          position: relative;
+        }
+
+        /* Modal Styles */
+        .modal-overlay {
+          position: fixed;
+          top: 0;
+          left: 0;
+          right: 0;
+          bottom: 0;
+          background: rgba(0, 0, 0, 0.6);
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          z-index: 1000;
+          padding: 1rem;
+        }
+
+        .modal-content {
+          background: white;
+          border-radius: 12px;
+          box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
+          width: 100%;
+          max-width: 600px;
+        }
+
+        .modal-header {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          padding: 1.5rem;
+          border-bottom: 1px solid #e5e7eb;
+        }
+
+        .modal-header h2 {
+          margin: 0;
+          font-size: 1.5rem;
+          color: #1f2937;
+        }
+
+        .btn-close {
+          background: none;
+          border: none;
+          font-size: 2rem;
+          color: #9ca3af;
+          cursor: pointer;
+          line-height: 1;
+          padding: 0;
+          width: 32px;
+          height: 32px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          border-radius: 4px;
+          transition: all 0.2s;
+        }
+
+        .btn-close:hover {
+          background: #f3f4f6;
+          color: #1f2937;
+        }
+
+        .modal-body {
+          padding: 1.5rem;
+        }
+
+        .modal-actions {
+          display: flex;
+          gap: 0.75rem;
+          padding: 1.5rem;
+          border-top: 1px solid #e5e7eb;
+          justify-content: flex-end;
+        }
+
+        .btn-accept {
+          padding: 0.625rem 1.5rem;
+          background: #667eea;
+          color: white;
+          border: none;
+          border-radius: 6px;
+          font-weight: 600;
+          cursor: pointer;
+          transition: all 0.2s;
+        }
+
+        .btn-accept:hover:not(:disabled) {
+          background: #5568d3;
+          transform: translateY(-1px);
+        }
+
+        .btn-accept:disabled {
+          opacity: 0.5;
+          cursor: not-allowed;
+        }
+
+        .btn-cancel {
+          padding: 0.625rem 1.5rem;
+          background: #f3f4f6;
+          color: #1f2937;
+          border: 1px solid #d1d5db;
+          border-radius: 6px;
+          font-weight: 600;
+          cursor: pointer;
+          transition: all 0.2s;
+        }
+
+        .btn-cancel:hover:not(:disabled) {
+          background: #e5e7eb;
+        }
+
+        .btn-cancel:disabled {
+          opacity: 0.5;
+          cursor: not-allowed;
         }
       `}</style>
     </div>

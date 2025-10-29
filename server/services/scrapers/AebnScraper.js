@@ -259,12 +259,11 @@ class AebnScraper {
         };
       }
 
-      // Match scene: either by scene number (direct) or by performers (matching)
+      // Match scene: either by scene number (direct) or return all scenes for backend matching
       let matchedScene = null;
-      let matchScore = 0;
       
       if (sceneNumber) {
-        // Direct scene selection by number
+        // Direct scene selection by number (used for single scene scraping from scene detail page)
         console.log(`   - Looking for scene with number: ${sceneNumber}`);
         
         matchedScene = scenes.find(scene => scene.number === sceneNumber);
@@ -279,59 +278,91 @@ class AebnScraper {
             error: `Scene ${sceneNumber} not found on AEBN page. Available scenes: ${scenes.map(s => s.number).join(', ')}`
           };
         }
-      } else if (scenePerformers && scenePerformers.length > 0) {
-        // Match scene by performers
-        // Uses the performers extracted earlier (supports both old and new HTML formats)
-        const scenePerformerNames = scenePerformers.map(p => 
-          (p.name || p).toLowerCase().trim()
-        );
-
-        console.log(`   - Attempting to match scene by performers:`, scenePerformerNames);
-
-        // Find scene with most matching performers
-        scenes.forEach((scene, index) => {
-          // Count exact matches
-          const exactMatches = scene.performers.filter(p => 
-            scenePerformerNames.some(spn => {
-              const pLower = p.toLowerCase().trim();
-              return pLower === spn;
-            })
-          ).length;
-
-          // Count partial matches (one name contains another)
-          const partialMatches = scene.performers.filter(p => {
-            const pLower = p.toLowerCase().trim();
-            return scenePerformerNames.some(spn => 
-              pLower.includes(spn) || spn.includes(pLower)
-            );
-          }).length;
-
-          // Calculate match score (exact matches worth 2 points, partial worth 1)
-          const score = (exactMatches * 2) + partialMatches;
-
-          console.log(`   - ${scene.title}: ${scene.performers.join(', ')} (exact: ${exactMatches}, partial: ${partialMatches}, score: ${score})`);
-
-          if (score > matchScore) {
-            matchScore = score;
-            matchedScene = scene;
+      } else {
+        // When scraping from movie page (with or without performers), always return all scenes
+        // for the backend to do hybrid matching (performers + scene numbers)
+        console.log(`   ℹ️ Movie page scraping - returning all scenes for backend hybrid matching`);
+        matchedScene = null; // Force return of all scenes
+      }
+      
+      // If no matched scene (movie page scraping), return movie metadata with all scenes
+      if (!matchedScene) {
+        console.log(`   ℹ️ Returning movie metadata with all ${scenes.length} scenes for backend matching`);
+        
+        // Collect all unique performers from all scenes
+        const allPerformersSet = new Set();
+        scenes.forEach(scene => {
+          scene.performers.forEach(performer => {
+            allPerformersSet.add(performer);
+          });
+        });
+        const allPerformers = Array.from(allPerformersSet);
+        
+        console.log(`   - Collected ${allPerformers.length} unique performers from ${scenes.length} scenes`);
+        
+        // Format all scenes with full metadata for matching
+        const formattedScenes = scenes.map(scene => {
+          const allTags = [
+            ...scene.sexActs,
+            ...scene.positions,
+            ...scene.settings
+          ];
+          
+          return {
+            sceneNumber: scene.number,
+            title: scene.title,
+            duration: scene.duration,
+            performers: scene.performers.map(name => ({ name })),
+            tags: allTags.map(tag => ({ name: tag })),
+            image: scene.image,
+            details: synopsis || '', // Use movie synopsis for all scenes
+            _raw: {
+              id: scene.id,
+              sexActs: scene.sexActs,
+              positions: scene.positions,
+              settings: scene.settings
+            }
+          };
+        });
+        
+        // Return movie-level metadata with all scenes for matching
+        const metadata = {
+          title: movieTitle || null,
+          details: synopsis || '',
+          date: releaseDate || null,
+          director: director || null,
+          studio: studioName || null,
+          image: fixedMovieImage || null,
+          performers: allPerformers.map(name => ({ name })), // All performers from all scenes
+          tags: [], // No movie-level tags
+          movies: movieTitle ? [{
+            name: movieTitle,
+            url: url,
+            date: releaseDate,
+            studio: studioName
+          }] : [],
+          // Include all scenes with full metadata for backend matching
+          allScenes: formattedScenes,
+          _debug: {
+            totalScenes: scenes.length,
+            totalPerformers: allPerformers.length,
+            reason: 'No scene matching criteria provided - returned movie metadata with all scenes'
           }
+        };
+
+        console.log(`   ✓ Returning movie metadata:`, {
+          title: metadata.title,
+          studio: metadata.studio,
+          date: metadata.date,
+          performers: metadata.performers.length,
+          scenes: metadata.allScenes.length
         });
 
-        if (matchedScene) {
-          console.log(`   ✓ Matched scene: "${matchedScene.title}" with ${matchScore} points`);
-        } else {
-          console.log(`   ⚠️ No scene matched by performers`);
-          return {
-            success: false,
-            error: 'Could not match scene by performers on AEBN page'
-          };
-        }
-      } else {
-        // No scene number or performers provided - can't match
-        console.log(`   ⚠️ No scene number or performers provided for matching`);
         return {
-          success: false,
-          error: 'Scene performers required to match scene on AEBN movie page'
+          success: true,
+          scraped: metadata, // Use 'scraped' key to match expected format
+          source: this.siteName,
+          sourceUrl: url
         };
       }
 

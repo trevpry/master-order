@@ -19,6 +19,7 @@ export default function GroupDetail() {
   const [showScrapeReviewModal, setShowScrapeReviewModal] = useState(false);
   const [selectedScraper, setSelectedScraper] = useState(null); // GEVI or AEBN
   const [availableScrapers, setAvailableScrapers] = useState([]);
+  const [tagsToCreate, setTagsToCreate] = useState({}); // Track which unmatched tags to create {sceneIndex: {tagName: true}}
 
   useEffect(() => {
     fetchGroup();
@@ -182,9 +183,11 @@ export default function GroupDetail() {
         console.log('🎬 Full API Response:', result);
         console.log('🎬 result.data structure:', Object.keys(result.data));
         
-        const { movie, sourceUrl, matchedScenes, compilations } = result.data;
+        // Handle both GEVI (movie) and generic scraper (scraped) response formats
+        const movieData = result.data.movie || result.data.scraped;
+        const { sourceUrl, matchedScenes, compilations } = result.data;
         
-        console.log('🎬 Scraped movie data:', movie);
+        console.log('🎬 Scraped movie data:', movieData);
         console.log('🎬 Source URL:', sourceUrl);
         console.log('🎬 Matched Scenes:', matchedScenes);
         console.log('🎬 Matched Scenes type:', typeof matchedScenes);
@@ -192,27 +195,27 @@ export default function GroupDetail() {
         console.log('🎬 Compilations:', compilations);
         
         // Store original image URLs for sending to Stash
-        const originalFrontImage = movie.front_image;
-        const originalBackImage = movie.back_image;
+        const originalFrontImage = movieData.front_image;
+        const originalBackImage = movieData.back_image;
         
         // Convert GEVI image URLs to proxied URLs for browser display (to avoid CORS issues)
-        let displayFrontImage = movie.front_image;
-        let displayBackImage = movie.back_image;
+        let displayFrontImage = movieData.front_image;
+        let displayBackImage = movieData.back_image;
         
-        if (movie.front_image && movie.front_image.startsWith('https://gayeroticvideoindex.com/')) {
-          displayFrontImage = `${config.apiBaseUrl}/api/stash/gevi-image-proxy?url=${encodeURIComponent(movie.front_image)}`;
+        if (movieData.front_image && movieData.front_image.startsWith('https://gayeroticvideoindex.com/')) {
+          displayFrontImage = `${config.apiBaseUrl}/api/stash/gevi-image-proxy?url=${encodeURIComponent(movieData.front_image)}`;
           console.log('📸 Proxied Front Image URL:', displayFrontImage);
         }
         
-        if (movie.back_image && movie.back_image.startsWith('https://gayeroticvideoindex.com/')) {
-          displayBackImage = `${config.apiBaseUrl}/api/stash/gevi-image-proxy?url=${encodeURIComponent(movie.back_image)}`;
+        if (movieData.back_image && movieData.back_image.startsWith('https://gayeroticvideoindex.com/')) {
+          displayBackImage = `${config.apiBaseUrl}/api/stash/gevi-image-proxy?url=${encodeURIComponent(movieData.back_image)}`;
           console.log('📸 Proxied Back Image URL:', displayBackImage);
         }
         
         // Store scrape results for review with both display and original URLs
         const scrapeDataToSet = {
           scraped: {
-            ...movie,
+            ...movieData,
             front_image: displayFrontImage, // For browser display
             back_image: displayBackImage, // For browser display
             originalFrontImage: originalFrontImage, // For sending to Stash
@@ -279,7 +282,10 @@ export default function GroupDetail() {
         const scenesResponse = await fetch(`/api/stash/groups/${id}/apply-matched-scenes`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ matchedScenes: scrapeData.matchedScenes })
+          body: JSON.stringify({ 
+            matchedScenes: scrapeData.matchedScenes,
+            tagsToCreate: tagsToCreate // Include tags to create
+          })
         });
 
         if (!scenesResponse.ok) {
@@ -558,7 +564,23 @@ export default function GroupDetail() {
                 const aebnScraper = availableScrapers.find(s => s.siteName === 'AEBN');
                 setSelectedScraper(aebnScraper);
                 setShowScrapeModal(true);
-                setScrapeUrl('');
+                // Auto-populate AEBN URL if it's saved to the group
+                const groupUrl = group?.url || '';
+                let aebnUrl = '';
+                
+                try {
+                  // Try to parse as JSON array and find AEBN URL
+                  const urls = JSON.parse(groupUrl);
+                  if (Array.isArray(urls)) {
+                    aebnUrl = urls.find(url => url.includes('aebn.com') || url.includes('aebn.net')) || '';
+                  }
+                } catch (e) {
+                  // Not JSON, check if single URL is AEBN
+                  const isAebnUrl = groupUrl.includes('aebn.com') || groupUrl.includes('aebn.net');
+                  aebnUrl = isAebnUrl ? groupUrl : '';
+                }
+                
+                setScrapeUrl(aebnUrl);
               }}
               className="scrape-aebn-button"
               title="Scrape metadata from AEBN"
@@ -1283,12 +1305,91 @@ export default function GroupDetail() {
                   </div>
                 )}
 
+                {/* Tag Matching Section */}
+                {scrapeData.matched && scrapeData.unmatched && (scrapeData.matched.tags?.length > 0 || scrapeData.unmatched.tags?.length > 0) && (
+                  <div style={{ marginTop: '1.5rem', borderTop: '2px solid #e5e7eb', paddingTop: '1.5rem' }}>
+                    <h4 style={{ fontSize: '1.125rem', fontWeight: '600', marginBottom: '1rem', color: '#1f2937' }}>
+                      🏷️ Tags ({(scrapeData.matched.tags?.length || 0) + (scrapeData.unmatched.tags?.length || 0)})
+                    </h4>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginBottom: '1rem' }}>
+                      {/* Matched tags from scrape */}
+                      {scrapeData.matched.tags?.map((tag, index) => (
+                        <div key={`matched-${index}`} style={{
+                          padding: '6px 12px',
+                          background: '#d1fae5',
+                          color: '#065f46',
+                          borderRadius: '12px',
+                          fontSize: '0.875rem',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '4px',
+                          fontWeight: '500'
+                        }}>
+                          <span>✓</span>
+                          <span>{tag.name}</span>
+                        </div>
+                      ))}
+                      
+                      {/* Unmatched tags */}
+                      {scrapeData.unmatched.tags?.map((tag, index) => {
+                        const tagName = typeof tag === 'string' ? tag : tag.name;
+                        
+                        return (
+                          <div key={`unmatched-${index}`} style={{
+                            padding: '6px 12px',
+                            background: '#fef3c7',
+                            color: '#92400e',
+                            borderRadius: '12px',
+                            fontSize: '0.875rem',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '6px',
+                            border: '1px dashed #f59e0b',
+                            fontWeight: '500'
+                          }}>
+                            <span>✗</span>
+                            <span>{tagName}</span>
+                            <span style={{
+                              fontSize: '0.75rem',
+                              color: '#b45309',
+                              fontWeight: '400'
+                            }}>
+                              (not in database)
+                            </span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                    <div style={{ 
+                      padding: '0.75rem', 
+                      background: '#f0f9ff', 
+                      borderRadius: '6px',
+                      fontSize: '0.875rem',
+                      color: '#1e40af',
+                      border: '1px solid #bfdbfe'
+                    }}>
+                      ℹ️ Tags with ✓ exist in your database and will be applied. Tags with ✗ are not in your database and will be skipped.
+                    </div>
+                  </div>
+                )}
+
                 {/* Matched Scenes Section */}
                 {scrapeData.matchedScenes && scrapeData.matchedScenes.length > 0 && (
                   <div style={{ marginTop: '1.5rem', borderTop: '2px solid #e5e7eb', paddingTop: '1.5rem' }}>
-                    <h4 style={{ fontSize: '1.125rem', fontWeight: '600', marginBottom: '1rem', color: '#1f2937' }}>
+                    <h4 style={{ fontSize: '1.125rem', fontWeight: '600', marginBottom: '0.5rem', color: '#1f2937' }}>
                       🎬 Matched Scenes ({scrapeData.matchedScenes.length})
                     </h4>
+                    <div style={{ 
+                      padding: '0.75rem', 
+                      background: '#fef3c7', 
+                      borderRadius: '6px',
+                      fontSize: '0.875rem',
+                      color: '#92400e',
+                      border: '1px solid #fbbf24',
+                      marginBottom: '1rem'
+                    }}>
+                      💡 Tags with checkboxes are not in your database. Check them to create and apply them to the scene.
+                    </div>
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
                       {scrapeData.matchedScenes.map((match, idx) => (
                         <div 
@@ -1316,6 +1417,19 @@ export default function GroupDetail() {
                                   {match.confidence}% match
                                 </span>
                               )}
+                              {match.matchMethod && (
+                                <span style={{ 
+                                  marginLeft: '0.5rem', 
+                                  padding: '0.125rem 0.5rem', 
+                                  background: match.matchMethod === 'performers' ? '#3b82f6' : '#f59e0b', 
+                                  color: 'white', 
+                                  borderRadius: '9999px',
+                                  fontSize: '0.7rem',
+                                  fontWeight: '500'
+                                }}>
+                                  {match.matchMethod === 'performers' ? '👥' : '#️⃣'} {match.matchMethod}
+                                </span>
+                              )}
                             </div>
                             {match.date && (
                               <div style={{ fontSize: '0.75rem', color: '#6b7280' }}>
@@ -1323,17 +1437,142 @@ export default function GroupDetail() {
                               </div>
                             )}
                           </div>
+                          
+                          {/* Database Scene Title */}
+                          {match.dbSceneTitle && (
+                            <div style={{ 
+                              fontSize: '0.85rem', 
+                              fontWeight: '600',
+                              color: '#6b7280', 
+                              marginBottom: '0.25rem'
+                            }}>
+                              📁 Your Scene: {match.dbSceneTitle}
+                            </div>
+                          )}
+                          
+                          {/* Scraped Title */}
+                          {match.title && (
+                            <div style={{ 
+                              fontSize: '0.9rem', 
+                              fontWeight: '600',
+                              color: '#1f2937', 
+                              marginBottom: '0.5rem'
+                            }}>
+                              🎬 Scraped: {match.title}
+                            </div>
+                          )}
+                          
+                          {/* Performers */}
+                          {match.performers && match.performers.length > 0 && (
+                            <div style={{ marginBottom: '0.5rem' }}>
+                              <span style={{ fontSize: '0.75rem', fontWeight: '600', color: '#6b7280' }}>
+                                Performers:{' '}
+                              </span>
+                              <span style={{ fontSize: '0.875rem', color: '#374151' }}>
+                                {match.performers.map(p => p.name || p).join(', ')}
+                              </span>
+                            </div>
+                          )}
+                          
+                          {/* Tags */}
+                          {((match.matchedTags && match.matchedTags.length > 0) || (match.unmatchedTags && match.unmatchedTags.length > 0)) && (
+                            <div style={{ marginBottom: '0.5rem' }}>
+                              <span style={{ fontSize: '0.75rem', fontWeight: '600', color: '#6b7280', display: 'block', marginBottom: '0.25rem' }}>
+                                Tags:
+                              </span>
+                              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.25rem' }}>
+                                {/* Matched tags */}
+                                {match.matchedTags?.map((tag, tagIdx) => (
+                                  <span 
+                                    key={`matched-${tagIdx}`}
+                                    style={{
+                                      fontSize: '0.75rem',
+                                      padding: '0.125rem 0.5rem',
+                                      background: '#d1fae5',
+                                      color: '#065f46',
+                                      borderRadius: '9999px',
+                                      display: 'flex',
+                                      alignItems: 'center',
+                                      gap: '4px'
+                                    }}
+                                  >
+                                    <span>✓</span>
+                                    <span>{tag.name || tag}</span>
+                                  </span>
+                                ))}
+                                
+                                {/* Unmatched tags with checkboxes */}
+                                {match.unmatchedTags?.map((tag, tagIdx) => {
+                                  const tagName = typeof tag === 'string' ? tag : tag.name;
+                                  const isChecked = tagsToCreate[idx]?.[tagName] || false;
+                                  
+                                  return (
+                                    <label
+                                      key={`unmatched-${tagIdx}`}
+                                      style={{
+                                        fontSize: '0.75rem',
+                                        padding: '0.125rem 0.5rem',
+                                        background: '#fef3c7',
+                                        color: '#92400e',
+                                        borderRadius: '9999px',
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        gap: '4px',
+                                        border: '1px dashed #f59e0b',
+                                        cursor: 'pointer',
+                                        userSelect: 'none'
+                                      }}
+                                    >
+                                      <input
+                                        type="checkbox"
+                                        checked={isChecked}
+                                        onChange={(e) => {
+                                          setTagsToCreate(prev => ({
+                                            ...prev,
+                                            [idx]: {
+                                              ...(prev[idx] || {}),
+                                              [tagName]: e.target.checked
+                                            }
+                                          }));
+                                        }}
+                                        style={{ width: '12px', height: '12px', cursor: 'pointer' }}
+                                      />
+                                      <span>✗</span>
+                                      <span>{tagName}</span>
+                                    </label>
+                                  );
+                                })}
+                              </div>
+                              {match.unmatchedTags && match.unmatchedTags.length > 0 && (
+                                <div style={{ 
+                                  fontSize: '0.7rem',
+                                  color: '#92400e',
+                                  marginTop: '0.25rem',
+                                  fontStyle: 'italic'
+                                }}>
+                                  💡 Check tags to create them in your database
+                                </div>
+                              )}
+                            </div>
+                          )}
+                          
+                          {/* Details/Synopsis */}
                           {match.details && (
                             <div style={{ 
                               fontSize: '0.875rem', 
                               color: '#374151', 
                               lineHeight: '1.5',
                               maxHeight: '100px',
-                              overflowY: 'auto'
+                              overflowY: 'auto',
+                              marginTop: '0.5rem',
+                              paddingTop: '0.5rem',
+                              borderTop: '1px solid #86efac'
                             }}>
                               {match.details.substring(0, 200)}{match.details.length > 200 ? '...' : ''}
                             </div>
                           )}
+                          
+                          {/* Episode URL */}
                           {match.episodeUrl && (
                             <div style={{ marginTop: '0.5rem' }}>
                               <a 
