@@ -624,18 +624,128 @@ export default function SceneDetail() {
   };
 
   const handleSelectSearchResult = (sceneUrl, movieData = null) => {
-    // If this is a movie result with existing movie ID, link scene to movie
+    // If this is a movie result with existing movie ID, add to groups
     if (movieData && movieData.existingMovieId) {
-      handleLinkToExistingMovie(movieData.existingMovieId);
+      handleAddExistingMovieToGroups(movieData.existingMovieId, movieData.title);
     } 
-    // If this is a movie result without existing movie, create new movie
+    // If this is a movie result without existing movie, create and add to groups
     else if (movieData && !movieData.existingMovieId) {
-      handleCreateNewMovie(movieData);
+      handleCreateAndAddMovie(movieData);
     }
     // Otherwise, it's a scene search result - just populate URL
     else {
       setScrapeUrl(sceneUrl);
       setSearchResults(null); // Clear search results
+    }
+  };
+
+  const handleAddExistingMovieToGroups = async (movieId, movieTitle) => {
+    try {
+      setIsSearching(true);
+      
+      // Fetch the full movie details
+      const response = await fetch(`${config.apiBaseUrl}/api/stash/groups/${movieId}`);
+      const result = await response.json();
+
+      if (result.success) {
+        const movie = result.data;
+        
+        // Add to scrapeData matched groups (or create scrapeData if it doesn't exist)
+        setScrapeData(prev => {
+          const current = prev || { matched: { groups: [] }, unmatched: { groups: [] } };
+          
+          // Check if already added
+          const alreadyAdded = current.matched?.groups?.some(g => g.id === movieId);
+          if (alreadyAdded) {
+            alert(`Movie "${movieTitle}" is already added`);
+            return current;
+          }
+          
+          return {
+            ...current,
+            matched: {
+              ...current.matched,
+              groups: [
+                ...(current.matched?.groups || []),
+                {
+                  id: movie.id,
+                  name: movie.name,
+                  studio: movie.studio?.name,
+                  date: movie.date,
+                  matchedVia: 'existing',
+                  url: movie.geviUrl
+                }
+              ]
+            }
+          };
+        });
+        
+        alert(`✅ Movie "${movieTitle}" added! You can add more or submit the scrape.`);
+        setSearchResults(null); // Clear search results
+      } else {
+        alert(`Failed to fetch movie details: ${result.error || 'Unknown error'}`);
+      }
+    } catch (error) {
+      console.error('Error adding movie to groups:', error);
+      alert('Failed to add movie');
+    } finally {
+      setIsSearching(false);
+    }
+  };
+
+  const handleCreateAndAddMovie = async (movieData) => {
+    try {
+      setIsSearching(true);
+      
+      // Create new movie with GEVI URL
+      const response = await fetch(`${config.apiBaseUrl}/api/stash/groups/create`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          name: movieData.title,
+          geviUrl: movieData.url
+        })
+      });
+
+      const result = await response.json();
+
+      if (result.success) {
+        const newMovie = result.data.group;
+        
+        // Add to scrapeData matched groups
+        setScrapeData(prev => {
+          const current = prev || { matched: { groups: [] }, unmatched: { groups: [] } };
+          return {
+            ...current,
+            matched: {
+              ...current.matched,
+              groups: [
+                ...(current.matched?.groups || []),
+                {
+                  id: newMovie.id,
+                  name: newMovie.name,
+                  studio: newMovie.studio?.name,
+                  date: newMovie.date,
+                  matchedVia: 'created',
+                  url: movieData.url
+                }
+              ]
+            }
+          };
+        });
+        
+        alert(`✅ Movie "${movieData.title}" created and added! You can add more or submit the scrape.`);
+        setSearchResults(null); // Clear search results
+      } else {
+        alert(`Failed to create movie: ${result.error || 'Unknown error'}`);
+      }
+    } catch (error) {
+      console.error('Error creating movie:', error);
+      alert('Failed to create movie');
+    } finally {
+      setIsSearching(false);
     }
   };
 
@@ -2163,7 +2273,18 @@ export default function SceneDetail() {
             {data.studio && (
               <div className="meta-badge" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                 <span className="badge-icon">🏢</span>
-                <span>{typeof data.studio === 'string' ? data.studio : data.studio?.name}</span>
+                {typeof data.studio === 'object' && data.studio.id ? (
+                  <Link 
+                    to={`/stash/studios/${data.studio.id}`}
+                    style={{ color: '#667eea', textDecoration: 'none' }}
+                    onMouseOver={(e) => e.target.style.textDecoration = 'underline'}
+                    onMouseOut={(e) => e.target.style.textDecoration = 'none'}
+                  >
+                    {data.studio.name}
+                  </Link>
+                ) : (
+                  <span>{typeof data.studio === 'string' ? data.studio : data.studio?.name}</span>
+                )}
                 <button
                   onClick={handleOpenStudioEditor}
                   style={{
@@ -2677,6 +2798,46 @@ export default function SceneDetail() {
               <div className="info-row">
                 <span className="info-label">Organized:</span>
                 <span className="info-value">{data.organized ? '✅ Yes' : '❌ No'}</span>
+              </div>
+            )}
+            {(
+              <div className="info-row">
+                <span className="info-label">Identification:</span>
+                <span className="info-value">
+                  <select
+                    value={data.identification || 'Not Identified'}
+                    onChange={async (e) => {
+                      const newValue = e.target.value;
+                      try {
+                        const response = await fetch(`${config.apiBaseUrl}/api/stash/scenes/${id}`, {
+                          method: 'PUT',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({ identification: newValue })
+                        });
+                        const result = await response.json();
+                        if (result.success) {
+                          setData(prev => ({ ...prev, identification: newValue }));
+                        } else {
+                          alert(`Failed to update identification: ${result.error || 'Unknown error'}`);
+                        }
+                      } catch (error) {
+                        console.error('Error updating identification:', error);
+                        alert('Failed to update identification');
+                      }
+                    }}
+                    style={{
+                      padding: '4px 8px',
+                      borderRadius: '4px',
+                      border: '1px solid #cbd5e0',
+                      backgroundColor: 'white',
+                      cursor: 'pointer'
+                    }}
+                  >
+                    <option value="Not Identified">Not Identified</option>
+                    <option value="Identified">Identified</option>
+                    <option value="Identified and Scraped">Identified and Scraped</option>
+                  </select>
+                </span>
               </div>
             )}
             {data.playCount !== undefined && data.playCount > 0 && (

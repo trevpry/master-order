@@ -441,7 +441,8 @@ router.get('/scenes', asyncHandler(async (req, res) => {
       maxRating,
       watched,
       noPerformers,
-      time
+      time,
+      identification
     } = req.query;
     
     const skip = (parseInt(page) - 1) * parseInt(perPage);
@@ -568,6 +569,11 @@ router.get('/scenes', asyncHandler(async (req, res) => {
         const cutoffDate = new Date(now.getTime() - (hoursAgo * 60 * 60 * 1000));
         where.createdAt = { gte: cutoffDate };
       }
+    }
+    
+    // Handle identification filter
+    if (identification && identification !== 'all') {
+      where.identification = identification;
     }
     
     // Build order by clause
@@ -6598,6 +6604,35 @@ router.post('/performers', asyncHandler(async (req, res) => {
   }, syncService);
 
   sendSuccess(res, performer);
+}));
+
+// PUT /api/stash/scenes/bulk-identification - Bulk update identification status
+// IMPORTANT: This must come BEFORE /scenes/:id to avoid route matching issues
+router.put('/scenes/bulk-identification', asyncHandler(async (req, res) => {
+  const { sceneIds, identification } = req.body;
+
+  if (!Array.isArray(sceneIds) || sceneIds.length === 0) {
+    return sendBadRequest(res, 'sceneIds array is required');
+  }
+
+  if (!identification || !['Not Identified', 'Identified', 'Identified and Scraped'].includes(identification)) {
+    return sendBadRequest(res, 'Valid identification value is required');
+  }
+
+  // Update all scenes with the new identification status
+  const result = await prisma.stashScene.updateMany({
+    where: {
+      id: { in: sceneIds }
+    },
+    data: {
+      identification: identification
+    }
+  });
+
+  sendSuccess(res, {
+    updated: result.count,
+    identification: identification
+  });
 }));
 
 // PUT /api/stash/scenes/:id - Update scene details

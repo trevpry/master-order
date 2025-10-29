@@ -61,6 +61,17 @@ const styles = {
     fontWeight: '700',
     boxShadow: '0 2px 4px rgba(0, 0, 0, 0.2)',
   },
+  checkboxContainer: {
+    position: 'absolute',
+    bottom: '0.5rem',
+    left: '0.5rem',
+    zIndex: 10,
+  },
+  checkbox: {
+    width: '1.25rem',
+    height: '1.25rem',
+    cursor: 'pointer',
+  },
   cardBody: {
     padding: '1rem',
     display: 'flex',
@@ -140,7 +151,7 @@ const styles = {
   },
 };
 
-export default function SceneCard({ scene, onSceneClick, sceneNumber = null, onUnlinkClick = null }) {
+export default function SceneCard({ scene, onSceneClick, sceneNumber = null, onUnlinkClick = null, isSelected = false, onToggleSelect = null }) {
   const handleMouseEnter = (e) => {
     e.currentTarget.style.boxShadow = '0 4px 6px -1px rgba(0, 0, 0, 0.1)';
     e.currentTarget.style.transform = 'translateY(-2px)';
@@ -196,6 +207,20 @@ export default function SceneCard({ scene, onSceneClick, sceneNumber = null, onU
               ▶️ {scene.o_counter}
             </div>
           )}
+          {onToggleSelect && (
+            <div style={styles.checkboxContainer} onClick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              onToggleSelect(scene.id);
+            }}>
+              <input
+                type="checkbox"
+                checked={isSelected}
+                onChange={() => {}}
+                style={styles.checkbox}
+              />
+            </div>
+          )}
         </div>
       </Link>
       
@@ -215,12 +240,23 @@ export default function SceneCard({ scene, onSceneClick, sceneNumber = null, onU
           {scene.studio && (
             <div style={styles.metaItem}>
               <span style={styles.metaIcon}>🏢</span>
-              <span>
-                {typeof scene.studio === 'string' 
-                  ? scene.studio 
-                  : scene.studio.name || scene.studio
-                }
-              </span>
+              {typeof scene.studio === 'object' && scene.studio.id ? (
+                <Link 
+                  to={`/stash/studios/${scene.studio.id}`}
+                  style={{ color: '#667eea', textDecoration: 'none' }}
+                  onMouseOver={(e) => e.target.style.textDecoration = 'underline'}
+                  onMouseOut={(e) => e.target.style.textDecoration = 'none'}
+                >
+                  {scene.studio.name}
+                </Link>
+              ) : (
+                <span>
+                  {typeof scene.studio === 'string' 
+                    ? scene.studio 
+                    : scene.studio.name || scene.studio
+                  }
+                </span>
+              )}
             </div>
           )}
           

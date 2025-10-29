@@ -811,6 +811,7 @@ model StashScene {
   actionIntensity     Float?
   geviUrl             String?
   episodeUrls         String?                  // JSON array of episode URLs from GEVI
+  identification      String?                  // "Identified", "Identified and Scraped", "Not Identified"
   clips               StashClip[]
   markers             StashMarker[]
   studioObject        StashStudio?             @relation(fields: [studioId], references: [id])

@@ -15,6 +15,9 @@ export default function ScenesPage() {
   const [sortDirection, setSortDirection] = useState(searchParams.get('direction') || 'DESC');
   const [watchStatusFilter, setWatchStatusFilter] = useState(searchParams.get('watched') || 'all');
   const [timeFilter, setTimeFilter] = useState(searchParams.get('time') || 'all');
+  const [identificationFilter, setIdentificationFilter] = useState(searchParams.get('identification') || 'all');
+  const [selectedScenes, setSelectedScenes] = useState([]);
+  const [bulkIdentification, setBulkIdentification] = useState('Not Identified');
   const [pagination, setPagination] = useState({
     page: 1,
     total: 0,
@@ -27,7 +30,7 @@ export default function ScenesPage() {
 
   useEffect(() => {
     loadScenes();
-  }, [currentPage, searchQuery, sortBy, sortDirection, watchStatusFilter, timeFilter]);
+  }, [currentPage, searchQuery, sortBy, sortDirection, watchStatusFilter, timeFilter, identificationFilter]);
 
   const loadScenes = async () => {
     setIsLoading(true);
@@ -42,6 +45,7 @@ export default function ScenesPage() {
       if (searchQuery) params.set('search', searchQuery);
       if (watchStatusFilter !== 'all') params.set('watched', watchStatusFilter);
       if (timeFilter !== 'all') params.set('time', timeFilter);
+      if (identificationFilter !== 'all') params.set('identification', identificationFilter);
 
       const response = await fetch(`${config.apiBaseUrl}/api/stash/scenes?${params}`);
       const result = await response.json();
@@ -83,11 +87,61 @@ export default function ScenesPage() {
     if (updates.direction || sortDirection !== 'DESC') params.direction = updates.direction || sortDirection;
     if (updates.watched || watchStatusFilter !== 'all') params.watched = updates.watched || watchStatusFilter;
     if (updates.time || timeFilter !== 'all') params.time = updates.time || timeFilter;
+    if (updates.identification || identificationFilter !== 'all') params.identification = updates.identification || identificationFilter;
     setSearchParams(params);
   };
 
   const goToPage = (page) => {
     updateParams({ page: page.toString() });
+  };
+
+  const toggleSceneSelection = (sceneId) => {
+    setSelectedScenes(prev => 
+      prev.includes(sceneId) 
+        ? prev.filter(id => id !== sceneId)
+        : [...prev, sceneId]
+    );
+  };
+
+  const toggleSelectAll = () => {
+    if (selectedScenes.length === scenes.length) {
+      setSelectedScenes([]);
+    } else {
+      setSelectedScenes(scenes.map(s => s.id));
+    }
+  };
+
+  const handleBulkIdentificationUpdate = async () => {
+    if (selectedScenes.length === 0) {
+      alert('Please select at least one scene');
+      return;
+    }
+
+    if (!confirm(`Update ${selectedScenes.length} scene(s) to "${bulkIdentification}"?`)) {
+      return;
+    }
+
+    try {
+      const response = await fetch(`${config.apiBaseUrl}/api/stash/scenes/bulk-identification`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          sceneIds: selectedScenes,
+          identification: bulkIdentification
+        })
+      });
+
+      const result = await response.json();
+
+      if (result.success) {
+        setSelectedScenes([]);
+        loadScenes(); // Reload to show updated data
+      } else {
+        console.error('Bulk identification update error:', result.error);
+      }
+    } catch (error) {
+      console.error('Bulk identification update error:', error);
+    }
   };
 
   return (
@@ -187,7 +241,66 @@ export default function ScenesPage() {
             <option value="7d">Past Week</option>
           </select>
         </div>
+
+        <div className="filter-group">
+          <label>Identification:</label>
+          <select
+            value={identificationFilter}
+            onChange={(e) => {
+              setIdentificationFilter(e.target.value);
+              updateParams({ identification: e.target.value, page: '1' });
+            }}
+          >
+            <option value="all">All Scenes</option>
+            <option value="Not Identified">Not Identified</option>
+            <option value="Identified">Identified</option>
+            <option value="Identified and Scraped">Identified and Scraped</option>
+          </select>
+        </div>
       </div>
+
+      {/* Bulk Operations */}
+      {scenes.length > 0 && (
+        <div className="bulk-operations" style={{ 
+          padding: '1rem', 
+          marginTop: '1rem', 
+          backgroundColor: '#2a2a2a', 
+          borderRadius: '8px',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '1rem',
+          flexWrap: 'wrap'
+        }}>
+          <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer' }}>
+            <input
+              type="checkbox"
+              checked={selectedScenes.length === scenes.length && scenes.length > 0}
+              onChange={toggleSelectAll}
+            />
+            <span>Select All ({selectedScenes.length} selected)</span>
+          </label>
+          
+          {selectedScenes.length > 0 && (
+            <>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                <label>Set Identification:</label>
+                <select
+                  value={bulkIdentification}
+                  onChange={(e) => setBulkIdentification(e.target.value)}
+                  style={{ padding: '0.5rem' }}
+                >
+                  <option value="Not Identified">Not Identified</option>
+                  <option value="Identified">Identified</option>
+                  <option value="Identified and Scraped">Identified and Scraped</option>
+                </select>
+                <Button onClick={handleBulkIdentificationUpdate}>
+                  Update {selectedScenes.length} Scene(s)
+                </Button>
+              </div>
+            </>
+          )}
+        </div>
+      )}
 
       {/* Error State */}
       {error && (
@@ -207,7 +320,12 @@ export default function ScenesPage() {
       {/* Scenes Grid */}
       {!isLoading && !error && (
         <>
-          <SceneGrid scenes={scenes} onSceneClick={setSelectedScene} />
+          <SceneGrid 
+            scenes={scenes} 
+            onSceneClick={setSelectedScene}
+            selectedScenes={selectedScenes}
+            onToggleSelect={toggleSceneSelection}
+          />
 
           {/* Pagination */}
           {pagination.totalPages > 1 && (
