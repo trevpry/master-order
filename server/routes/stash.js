@@ -573,7 +573,16 @@ router.get('/scenes', asyncHandler(async (req, res) => {
     
     // Handle identification filter
     if (identification && identification !== 'all') {
-      where.identification = identification;
+      if (identification === 'null') {
+        // Show scenes with no identification set (NULL or empty)
+        where.OR = where.OR || [];
+        where.OR.push(
+          { identification: null },
+          { identification: '' }
+        );
+      } else {
+        where.identification = identification;
+      }
     }
     
     // Build order by clause
@@ -979,6 +988,7 @@ router.get('/scenes/:id', asyncHandler(async (req, res) => {
       checksum: scene.checksum,
       phash: scene.phash,
       oCounter: scene.oCounter,
+      identification: scene.identification, // Add identification field
       path: scene.path,
       duration: scene.duration,
       fileModTime: scene.fileModTime,
@@ -6638,7 +6648,7 @@ router.put('/scenes/bulk-identification', asyncHandler(async (req, res) => {
 // PUT /api/stash/scenes/:id - Update scene details
 router.put('/scenes/:id', asyncHandler(async (req, res) => {
   const { id } = req.params;
-  const { title, studio, studioId, performerIds, tagIds, groupIds, sceneNumbers, details, date, url, coverImage, actionCodes, geviUrl, episodeUrls } = req.body;
+  const { title, studio, studioId, performerIds, tagIds, groupIds, sceneNumbers, details, date, url, coverImage, actionCodes, geviUrl, episodeUrls, identification } = req.body;
   
   console.log('🎬 [PUT /scenes/:id] Scene update request received');
   console.log('   - Scene ID:', id);
@@ -6689,6 +6699,7 @@ router.put('/scenes/:id', asyncHandler(async (req, res) => {
   
   if (details !== undefined) updateData.details = details;
   if (date !== undefined) updateData.date = date;
+  if (identification !== undefined) updateData.identification = identification;
   
   // Handle main URL - store in local DB for reference but will be merged with episodeUrls when syncing to Stash
   if (url !== undefined) updateData.url = url;
@@ -6749,6 +6760,9 @@ router.put('/scenes/:id', asyncHandler(async (req, res) => {
     console.log(`   - Appending ${episodeUrls.length} new episode URL(s) to ${existingUrls.length} existing (total: ${allUrls.length})`);
   }
   
+  // Log what we're about to update
+  console.log('📝 [UPDATE DATA] About to update scene with:', updateData);
+  
   // Update local database with retry logic for SQLite timeouts
   const updatedScene = await retryDatabaseOperation(async () => {
     return await prisma.stashScene.update({
@@ -6756,6 +6770,16 @@ router.put('/scenes/:id', asyncHandler(async (req, res) => {
       data: updateData
     });
   });
+  
+  console.log('✅ [DATABASE UPDATE] Scene updated in database');
+  console.log('   - Updated scene identification:', updatedScene.identification);
+  
+  // VERIFY: Query database directly to confirm write
+  const verifyScene = await prisma.stashScene.findUnique({
+    where: { id },
+    select: { id: true, identification: true }
+  });
+  console.log('🔍 [VERIFY] Direct database query result:', verifyScene);
   
   // Handle performer relationships if provided
   if (performerIds !== undefined && Array.isArray(performerIds)) {
@@ -6995,19 +7019,33 @@ router.put('/scenes/:id', asyncHandler(async (req, res) => {
   }
   
   // Update scene in Stash itself if configured
-  console.log('🔍 [STASH UPDATE] Checking Stash sync configuration...');
-  console.log('   - stashSyncService exists:', !!stashSyncService);
-  console.log('   - Request body received:', {
-    title: title !== undefined ? 'provided' : 'not provided',
-    studioId: resolvedStudioId !== undefined ? resolvedStudioId : 'not provided',
-    performerIds: performerIds !== undefined ? `${performerIds.length} performers` : 'not provided',
-    tagIds: tagIds !== undefined ? `${tagIds.length} tags` : 'not provided',
-    groupIds: groupIds !== undefined ? `${groupIds.length} groups` : 'not provided',
-    details: details !== undefined ? 'provided' : 'not provided',
-    date: date !== undefined ? date : 'not provided',
-    url: url !== undefined ? 'provided' : 'not provided',
-    coverImage: coverImage !== undefined ? 'provided' : 'not provided'
-  });
+  // Skip Stash update if only local-only fields are being updated (e.g., identification)
+  const hasStashRelevantUpdates = title !== undefined || 
+                                   resolvedStudioId !== undefined || 
+                                   performerIds !== undefined || 
+                                   tagIds !== undefined || 
+                                   groupIds !== undefined || 
+                                   details !== undefined || 
+                                   date !== undefined || 
+                                   url !== undefined || 
+                                   coverImage !== undefined;
+  
+  if (!hasStashRelevantUpdates) {
+    console.log('ℹ️ [STASH UPDATE] Skipping Stash update - only local fields modified (e.g., identification)');
+  } else {
+    console.log('🔍 [STASH UPDATE] Checking Stash sync configuration...');
+    console.log('   - stashSyncService exists:', !!stashSyncService);
+    console.log('   - Request body received:', {
+      title: title !== undefined ? 'provided' : 'not provided',
+      studioId: resolvedStudioId !== undefined ? resolvedStudioId : 'not provided',
+      performerIds: performerIds !== undefined ? `${performerIds.length} performers` : 'not provided',
+      tagIds: tagIds !== undefined ? `${tagIds.length} tags` : 'not provided',
+      groupIds: groupIds !== undefined ? `${groupIds.length} groups` : 'not provided',
+      details: details !== undefined ? 'provided' : 'not provided',
+      date: date !== undefined ? date : 'not provided',
+      url: url !== undefined ? 'provided' : 'not provided',
+      coverImage: coverImage !== undefined ? 'provided' : 'not provided'
+    });
   
   if (!stashSyncService) {
     console.warn('⚠️ [STASH UPDATE] stashSyncService is not available');
@@ -7132,7 +7170,8 @@ router.put('/scenes/:id', asyncHandler(async (req, res) => {
     } else {
       console.warn('⚠️ [STASH UPDATE] Stash service not configured, skipping update');
     }
-  }
+  } // End of stashSyncService check
+  } // End of hasStashRelevantUpdates check
   
   sendSuccess(res, updatedScene);
 }));

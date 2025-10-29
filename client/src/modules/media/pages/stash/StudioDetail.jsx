@@ -24,6 +24,7 @@ export default function StudioDetail() {
   const [filterNoPerformers, setFilterNoPerformers] = useState(false);
   const [searchTitle, setSearchTitle] = useState('');
   const [searchPerformer, setSearchPerformer] = useState('');
+  const [identificationFilter, setIdentificationFilter] = useState('all');
   
   // Scene merge state
   const [selectedScenes, setSelectedScenes] = useState(new Set());
@@ -86,7 +87,7 @@ export default function StudioDetail() {
     if (data) {
       loadScenes();
     }
-  }, [scenesPage, data, filterNoPerformers, searchTitle, searchPerformer]);
+  }, [scenesPage, data, filterNoPerformers, searchTitle, searchPerformer, identificationFilter]);
 
   const loadScenes = async () => {
     setScenesLoading(true);
@@ -108,6 +109,10 @@ export default function StudioDetail() {
       
       if (searchPerformer.trim()) {
         params.set('performer', searchPerformer.trim());
+      }
+
+      if (identificationFilter !== 'all') {
+        params.set('identification', identificationFilter);
       }
 
       const response = await fetch(`${config.apiBaseUrl}/api/stash/scenes?${params}`);
@@ -602,7 +607,7 @@ export default function StudioDetail() {
           </div>
           
           {/* Filter Checkbox */}
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '16px' }}>
             <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
               <input
                 type="checkbox"
@@ -616,13 +621,40 @@ export default function StudioDetail() {
               <span>Show only scenes with no performers</span>
             </label>
             
+            {/* Identification Filter */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <label>Identification:</label>
+              <select
+                value={identificationFilter}
+                onChange={(e) => {
+                  setIdentificationFilter(e.target.value);
+                  setScenesPage(1);
+                }}
+                style={{
+                  padding: '6px 12px',
+                  borderRadius: '6px',
+                  border: '1px solid #cbd5e0',
+                  backgroundColor: 'white',
+                  fontSize: '0.9rem',
+                  cursor: 'pointer'
+                }}
+              >
+                <option value="all">All Scenes</option>
+                <option value="null">All Scenes - No Identification</option>
+                <option value="Not Identified">Not Identified</option>
+                <option value="Identified">Identified</option>
+                <option value="Identified and Scraped">Identified and Scraped</option>
+              </select>
+            </div>
+            
             {/* Clear Filters Button */}
-            {(searchTitle || searchPerformer || filterNoPerformers) && (
+            {(searchTitle || searchPerformer || filterNoPerformers || identificationFilter !== 'all') && (
               <button
                 onClick={() => {
                   setSearchTitle('');
                   setSearchPerformer('');
                   setFilterNoPerformers(false);
+                  setIdentificationFilter('all');
                   setScenesPage(1);
                 }}
                 style={{

@@ -252,6 +252,7 @@ export default function ScenesPage() {
             }}
           >
             <option value="all">All Scenes</option>
+            <option value="null">All Scenes - No Identification</option>
             <option value="Not Identified">Not Identified</option>
             <option value="Identified">Identified</option>
             <option value="Identified and Scraped">Identified and Scraped</option>

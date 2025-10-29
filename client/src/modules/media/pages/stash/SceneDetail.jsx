@@ -2815,14 +2815,14 @@ export default function SceneDetail() {
                           body: JSON.stringify({ identification: newValue })
                         });
                         const result = await response.json();
-                        if (result.success) {
-                          setData(prev => ({ ...prev, identification: newValue }));
+                        if (result.success && result.data) {
+                          // Use the actual database value from the response
+                          setData(prev => ({ ...prev, identification: result.data.identification }));
                         } else {
-                          alert(`Failed to update identification: ${result.error || 'Unknown error'}`);
+                          console.error('Failed to update identification:', result.error);
                         }
                       } catch (error) {
                         console.error('Error updating identification:', error);
-                        alert('Failed to update identification');
                       }
                     }}
                     style={{
