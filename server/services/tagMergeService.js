@@ -349,30 +349,71 @@ class TagMergeService {
     console.log('🔄 [TagMerge] Updating Stash...');
 
     try {
+      // Check if Stash is configured
+      const isConfigured = await this.stashSyncService.isConfigured();
+      if (!isConfigured) {
+        console.log('   - ⚠️ Stash not configured, skipping Stash update');
+        return;
+      }
+
       // Extract alias strings from StashTagAlias objects
       const aliasStrings = updatedMainTag.aliases 
         ? updatedMainTag.aliases.map(a => a.alias) 
         : [];
       
-      // Update main tag with merged aliases
-      await this.stashSyncService.updateTag(parseInt(mainTagId), {
-        aliases: aliasStrings
-      });
-      console.log(`   - Updated main tag ${mainTagId} in Stash with ${aliasStrings.length} alias(es)`);
-
-      // Merge tags in Stash
-      for (const mergeTagId of mergeTagIds) {
-        try {
-          await this.stashSyncService.tagMerge(parseInt(mergeTagId), parseInt(mainTagId));
-          console.log(`   - Merged tag ${mergeTagId} into ${mainTagId} in Stash`);
-        } catch (error) {
-          console.error(`   - Error merging tag ${mergeTagId} in Stash:`, error.message);
+      // Update main tag with merged aliases using GraphQL
+      const updateMutation = `
+        mutation TagUpdate($input: TagUpdateInput!) {
+          tagUpdate(input: $input) {
+            id
+            name
+            aliases
+          }
         }
+      `;
+      
+      const updateVariables = {
+        input: {
+          id: parseInt(mainTagId),
+          aliases: aliasStrings
+        }
+      };
+      
+      const updateResult = await this.stashSyncService.makeGraphQLRequest(updateMutation, updateVariables);
+      
+      if (updateResult && updateResult.tagUpdate) {
+        console.log(`   - ✅ Updated main tag ${mainTagId} in Stash with ${aliasStrings.length} alias(es)`);
+      } else {
+        console.warn(`   - ⚠️ Unexpected response when updating tag ${mainTagId}:`, updateResult);
+      }
+
+      // Merge tags in Stash using tagsMerge mutation
+      const mergeMutation = `
+        mutation TagsMerge($source: [ID!]!, $destination: ID!) {
+          tagsMerge(input: { source: $source, destination: $destination }) {
+            id
+            name
+          }
+        }
+      `;
+      
+      const mergeVariables = {
+        source: mergeTagIds.map(id => parseInt(id)),
+        destination: parseInt(mainTagId)
+      };
+      
+      const mergeResult = await this.stashSyncService.makeGraphQLRequest(mergeMutation, mergeVariables);
+      
+      if (mergeResult && mergeResult.tagsMerge) {
+        console.log(`   - ✅ Merged ${mergeTagIds.length} tag(s) into ${mainTagId} in Stash`);
+      } else {
+        console.warn(`   - ⚠️ Unexpected response when merging tags:`, mergeResult);
       }
 
     } catch (error) {
       console.error('❌ [TagMerge] Error updating Stash:', error);
-      throw error;
+      // Don't throw - local DB merge succeeded, Stash sync is secondary
+      console.log('   - ⚠️ Continuing despite Stash sync error (local DB merge succeeded)');
     }
   }
 }
