@@ -5495,8 +5495,13 @@ router.post('/scenes/:id/search-gevi-movies', asyncHandler(async (req, res) => {
 
     // If not found by URL, try fuzzy match on name
     if (!existingMovie) {
-      // Remove common suffixes/prefixes for better matching
-      const cleanTitle = movie.title
+      // For matching, only use the part before the colon and before parentheses
+      // This handles cases like:
+      // - "Hard Luck: The Series" vs "Hard Luck"
+      // - "Hard Luck (ChocolateCream)" vs "Hard Luck"
+      const titleBeforeColon = movie.title.split(':')[0].trim();
+      const titleBeforeParentheses = titleBeforeColon.split('(')[0].trim();
+      const cleanTitle = titleBeforeParentheses
         .toLowerCase()
         .replace(/\s+/g, ' ')
         .trim();
@@ -5506,12 +5511,19 @@ router.post('/scenes/:id/search-gevi-movies', asyncHandler(async (req, res) => {
       });
 
       existingMovie = allMovies.find(m => {
-        const cleanDbTitle = m.name
+        // Also only compare the part before the colon and parentheses in the database title
+        const dbTitleBeforeColon = m.name.split(':')[0].trim();
+        const dbTitleBeforeParentheses = dbTitleBeforeColon.split('(')[0].trim();
+        const cleanDbTitle = dbTitleBeforeParentheses
           .toLowerCase()
           .replace(/\s+/g, ' ')
           .trim();
         return cleanDbTitle === cleanTitle;
       });
+      
+      if (existingMovie) {
+        console.log(`     🎯 Matched movie by title prefix: "${movie.title}" -> "${existingMovie.name}"`);
+      }
     }
 
     if (existingMovie) {
@@ -5754,23 +5766,30 @@ router.post('/scenes/:id/search-gevi-movies-by-title', asyncHandler(async (req, 
     const existingMovie = localMovies.find(m => {
       if (m.geviUrl === movie.url) return true;
       
-      const cleanDbTitle = m.name
+      // For matching, only use the part before the colon and before parentheses
+      const dbTitleBeforeColon = m.name.split(':')[0].trim();
+      const dbTitleBeforeParentheses = dbTitleBeforeColon.split('(')[0].trim();
+      const cleanDbTitle = dbTitleBeforeParentheses
         .toLowerCase()
         .replace(/[^\w\s]/g, '')
         .replace(/\s+/g, ' ')
         .trim();
-      const cleanTitle = movie.title
+      
+      const titleBeforeColon = movie.title.split(':')[0].trim();
+      const titleBeforeParentheses = titleBeforeColon.split('(')[0].trim();
+      const cleanTitle = titleBeforeParentheses
         .toLowerCase()
         .replace(/[^\w\s]/g, '')
         .replace(/\s+/g, ' ')
         .trim();
+      
       return cleanDbTitle === cleanTitle;
     });
 
     if (existingMovie) {
       movie.existingMovieId = existingMovie.id;
       movie.existingMovieName = existingMovie.name;
-      console.log(`     ✓ "${movie.title}" matches existing movie: ${existingMovie.name} (ID: ${existingMovie.id})`);
+      console.log(`     ✓ "${movie.title}" matches existing movie: ${existingMovie.name}" (ID: ${existingMovie.id})`);
     }
   }
 

@@ -1430,30 +1430,45 @@ class GeviScraperService {
         // ALWAYS check aliases independently (not in else-if chain)
         if (dbPerformer.alias) {
           const aliases = dbPerformer.alias.split(',').map(a => a.trim());
+          
+          // Debug logging for alias checking
+          if (aliases.length > 0) {
+            console.log(`   🔍 Checking ${aliases.length} alias(es) for ${dbPerformer.name}:`, aliases);
+          }
+          
           for (const alias of aliases) {
             const normalizedAlias = normalize(alias);
             const aliasBaseName = normalize(getBaseName(alias));
             let aliasScore = 0;
             
+            console.log(`      - Comparing alias "${alias}" (normalized: "${normalizedAlias}") with scraped "${performerName}" (normalized: "${normalizedName}")`);
+            
             // Exact match
             if (normalizedAlias === normalizedName) {
               aliasScore = 1.0;
+              console.log(`        ✅ EXACT MATCH! Score: ${aliasScore}`);
             }
             // Base name match
             else if (aliasBaseName && baseName && aliasBaseName === baseName) {
               aliasScore = 0.95;
+              console.log(`        ✅ BASE NAME MATCH! Score: ${aliasScore}`);
             }
             // Check if scraped name contains alias
             else if (normalizedName.includes(normalizedAlias)) {
               aliasScore = normalizedAlias.length / normalizedName.length;
+              console.log(`        ✓ Scraped contains alias. Score: ${aliasScore}`);
             }
             // Check if alias contains scraped name
             else if (normalizedAlias.includes(normalizedName)) {
               aliasScore = normalizedName.length / normalizedAlias.length;
+              console.log(`        ✓ Alias contains scraped. Score: ${aliasScore}`);
             }
             // Check base name contains
             else if (baseName && aliasBaseName && baseName.includes(aliasBaseName) && aliasBaseName.length > 3) {
               aliasScore = aliasBaseName.length / baseName.length * 0.9;
+              console.log(`        ✓ Base name contains. Score: ${aliasScore}`);
+            } else {
+              console.log(`        ✗ No match`);
             }
             
             // Use alias match if it's better than name match
@@ -1461,6 +1476,7 @@ class GeviScraperService {
               score = aliasScore;
               matchedVia = 'alias';
               matchedText = alias;
+              console.log(`        🎯 Using alias match! New score: ${score}`);
             }
           }
         }
