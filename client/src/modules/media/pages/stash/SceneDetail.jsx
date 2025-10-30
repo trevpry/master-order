@@ -650,6 +650,31 @@ export default function SceneDetail() {
       if (result.success) {
         const movie = result.data;
         
+        // Check if scene is already in this movie
+        const alreadyLinked = movie.scenes?.some(s => s.id === id);
+        if (alreadyLinked) {
+          alert(`Scene is already linked to movie "${movieTitle}"`);
+          setIsSearching(false);
+          return;
+        }
+        
+        // Link the scene to the movie in the database
+        const linkResponse = await fetch(`${config.apiBaseUrl}/api/stash/groups/${movieId}/scenes/${id}`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            sceneIndex: movie.scenes?.length ? movie.scenes.length + 1 : 1
+          })
+        });
+        
+        const linkResult = await linkResponse.json();
+        
+        if (!linkResult.success) {
+          throw new Error(linkResult.error || 'Failed to link scene to movie');
+        }
+        
         // Add to scrapeData matched groups (or create scrapeData if it doesn't exist)
         setScrapeData(prev => {
           const current = prev || { matched: { groups: [] }, unmatched: { groups: [] } };
@@ -657,7 +682,6 @@ export default function SceneDetail() {
           // Check if already added
           const alreadyAdded = current.matched?.groups?.some(g => g.id === movieId);
           if (alreadyAdded) {
-            alert(`Movie "${movieTitle}" is already added`);
             return current;
           }
           
@@ -680,8 +704,11 @@ export default function SceneDetail() {
           };
         });
         
-        alert(`✅ Movie "${movieTitle}" added! You can add more or submit the scrape.`);
+        alert(`✅ Scene linked to movie "${movieTitle}"!`);
         setSearchResults(null); // Clear search results
+        
+        // Reload scene data to show the new group link
+        loadScene();
       } else {
         alert(`Failed to fetch movie details: ${result.error || 'Unknown error'}`);
       }
@@ -714,6 +741,23 @@ export default function SceneDetail() {
       if (result.success) {
         const newMovie = result.data.group;
         
+        // Link the scene to the newly created movie
+        const linkResponse = await fetch(`${config.apiBaseUrl}/api/stash/groups/${newMovie.id}/scenes/${id}`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            sceneIndex: 1 // First scene in the new movie
+          })
+        });
+        
+        const linkResult = await linkResponse.json();
+        
+        if (!linkResult.success) {
+          throw new Error(linkResult.error || 'Failed to link scene to movie');
+        }
+        
         // Add to scrapeData matched groups
         setScrapeData(prev => {
           const current = prev || { matched: { groups: [] }, unmatched: { groups: [] } };
@@ -736,8 +780,11 @@ export default function SceneDetail() {
           };
         });
         
-        alert(`✅ Movie "${movieData.title}" created and added! You can add more or submit the scrape.`);
+        alert(`✅ Movie "${movieData.title}" created and scene linked!`);
         setSearchResults(null); // Clear search results
+        
+        // Reload scene data to show the new group link
+        loadScene();
       } else {
         alert(`Failed to create movie: ${result.error || 'Unknown error'}`);
       }
