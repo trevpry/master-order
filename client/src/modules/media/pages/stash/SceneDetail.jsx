@@ -264,6 +264,35 @@ export default function SceneDetail() {
     }
   };
 
+  // Helper function to regenerate title based on current performers
+  const regenerateTitle = (performers, currentTitle) => {
+    if (!currentTitle || !performers || performers.length === 0) {
+      return currentTitle;
+    }
+
+    // Try to detect if the title follows the pattern: "Performer1 & Performer2 - Scene Title"
+    // or "Performer1, Performer2 - Scene Title"
+    const separatorMatch = currentTitle.match(/^(.+?)\s*[-–—]\s*(.+)$/);
+    
+    if (separatorMatch) {
+      const performersPart = separatorMatch[1];
+      const scenePart = separatorMatch[2];
+      
+      // Check if the performers part contains performer names
+      const hasPerformers = performers.some(p => 
+        performersPart.toLowerCase().includes(p.toLowerCase())
+      );
+      
+      if (hasPerformers) {
+        // Regenerate with new performer names
+        const newPerformersPart = performers.join(' & ');
+        return `${newPerformersPart} - ${scenePart}`;
+      }
+    }
+    
+    return currentTitle;
+  };
+
   const handleRefreshParse = async () => {
     if (!editedFilename.trim()) {
       alert('Please enter a filename to parse');
@@ -1843,46 +1872,42 @@ export default function SceneDetail() {
         .map(editedName => {
           const normalizedEditedName = editedName.toLowerCase().replace(/\s+/g, '');
           
-          // Find the matched performer that corresponds to this edited name
-          // Check both the primary match and alternatives
-          const matchedPerformer = parseData.matched.performers.find(p => {
+          // First check if it's a direct match (primary performer)
+          const directMatch = parseData.matched.performers.find(p => {
             const normalizedPName = p.name.toLowerCase().replace(/\s+/g, '');
-            
-            // Check if it's the primary match
-            if (normalizedPName === normalizedEditedName) return true;
-            
-            // Check if it's an alternative
-            if (p.alternatives && p.alternatives.length > 0) {
-              return p.alternatives.some(alt => {
-                const normalizedAltName = alt.name.toLowerCase().replace(/\s+/g, '');
-                return normalizedAltName === normalizedEditedName;
-              });
-            }
-            
-            // Check if matched via alias
-            if (p.matchedAlias) {
-              const normalizedAlias = p.matchedAlias.toLowerCase().replace(/\s+/g, '');
-              return normalizedAlias === normalizedEditedName;
-            }
-            
-            return false;
+            return normalizedPName === normalizedEditedName;
           });
           
-          // If we found a match, check if the edited name is an alternative
-          if (matchedPerformer) {
-            // If the edited name differs from the primary match, it's an alternative
-            const normalizedPrimaryName = matchedPerformer.name.toLowerCase().replace(/\s+/g, '');
-            if (normalizedEditedName !== normalizedPrimaryName) {
-              // Find the alternative performer to get their ID
-              const alternative = matchedPerformer.alternatives?.find(alt => {
+          if (directMatch) {
+            return directMatch.id;
+          }
+          
+          // Check if it's an alternative of any matched performer
+          for (const performer of parseData.matched.performers) {
+            if (performer.alternatives && performer.alternatives.length > 0) {
+              const alternative = performer.alternatives.find(alt => {
                 const normalizedAltName = alt.name.toLowerCase().replace(/\s+/g, '');
                 return normalizedAltName === normalizedEditedName;
               });
               
-              return alternative ? alternative.id : matchedPerformer.id;
+              if (alternative) {
+                // Return the alternative's ID, not the primary performer's ID
+                return alternative.id;
+              }
             }
-            
-            return matchedPerformer.id;
+          }
+          
+          // Check if matched via alias
+          const aliasMatch = parseData.matched.performers.find(p => {
+            if (p.matchedAlias) {
+              const normalizedAlias = p.matchedAlias.toLowerCase().replace(/\s+/g, '');
+              return normalizedAlias === normalizedEditedName;
+            }
+            return false;
+          });
+          
+          if (aliasMatch) {
+            return aliasMatch.id;
           }
           
           return null;
@@ -3107,13 +3132,31 @@ export default function SceneDetail() {
                 <label>Performers:</label>
                 <div className="performers-list">
                   {editedPerformers.map((performer, index) => {
-                    // Check if matched by name
+                    // Check if matched by name (could be primary match or alternative)
                     let matched = parseData.matched.performers.find(
                       p => p.name.toLowerCase().replace(/\s+/g, '') === performer.toLowerCase().replace(/\s+/g, '')
                     );
                     
-                    // Check if matched by alias
+                    // Check if it's an alternative of any matched performer
+                    let selectedAlternative = null;
+                    let primaryMatch = null;
                     if (!matched) {
+                      for (const p of parseData.matched.performers) {
+                        if (p.alternatives && p.alternatives.length > 0) {
+                          const alt = p.alternatives.find(a => 
+                            a.name.toLowerCase().replace(/\s+/g, '') === performer.toLowerCase().replace(/\s+/g, '')
+                          );
+                          if (alt) {
+                            selectedAlternative = alt;
+                            primaryMatch = p;
+                            break;
+                          }
+                        }
+                      }
+                    }
+                    
+                    // Check if matched by alias
+                    if (!matched && !selectedAlternative) {
                       matched = parseData.matched.performers.find(
                         p => p.matchedAlias && p.matchedAlias.toLowerCase().replace(/\s+/g, '') === performer.toLowerCase().replace(/\s+/g, '')
                       );
@@ -3124,7 +3167,13 @@ export default function SceneDetail() {
                       return pName === performer;
                     });
                     
-                    const hasAlternatives = matched && matched.alternatives && matched.alternatives.length > 0;
+                    // Use primaryMatch for alternatives check (the original match that has alternatives)
+                    const hasAlternatives = primaryMatch 
+                      ? (primaryMatch.alternatives && primaryMatch.alternatives.length > 0)
+                      : (matched && matched.alternatives && matched.alternatives.length > 0);
+                    
+                    // Get the actual match to display (either the selected alternative or the primary match)
+                    const displayMatch = selectedAlternative || matched;
                     
                     return (
                       <div key={index} className="performer-item">
@@ -3136,6 +3185,8 @@ export default function SceneDetail() {
                               const newPerformers = [...editedPerformers];
                               newPerformers[index] = e.target.value;
                               setEditedPerformers(newPerformers);
+                              // Regenerate title with updated performers
+                              setEditedTitle(regenerateTitle(newPerformers, editedTitle));
                             }}
                             className="parse-input performer-input"
                           />
@@ -3147,12 +3198,14 @@ export default function SceneDetail() {
                                   const newPerformers = [...editedPerformers];
                                   newPerformers[index] = e.target.value;
                                   setEditedPerformers(newPerformers);
+                                  // Regenerate title with updated performers
+                                  setEditedTitle(regenerateTitle(newPerformers, editedTitle));
                                 }
                               }}
                               value=""
                             >
                               <option value="">Switch to alternative...</option>
-                              {matched.alternatives.map((alt, altIndex) => (
+                              {(primaryMatch || matched).alternatives.map((alt, altIndex) => (
                                 <option key={altIndex} value={alt.name}>
                                   {alt.name}
                                   {alt.disambiguation ? ` (${alt.disambiguation})` : ''}
@@ -3163,19 +3216,24 @@ export default function SceneDetail() {
                           )}
                         </div>
                         <div className="performer-status-actions">
-                          {matched && (
+                          {displayMatch && (
                             <span className="match-status matched">
-                              ✓ {matched.name}
-                              {matched.disambiguation && (
+                              ✓ {displayMatch.name}
+                              {displayMatch.disambiguation && (
                                 <span style={{ color: '#6b7280', marginLeft: '0.25rem', fontSize: '0.875rem' }}>
-                                  ({matched.disambiguation})
+                                  ({displayMatch.disambiguation})
                                 </span>
                               )}
-                              {matched.matchedVia === 'alias' && matched.matchedAlias && (
-                                <span className="alias-info"> (via alias: {matched.matchedAlias})</span>
+                              {displayMatch.matchedVia === 'alias' && displayMatch.matchedAlias && (
+                                <span className="alias-info"> (via alias: {displayMatch.matchedAlias})</span>
                               )}
-                              {hasAlternatives && (
-                                <span className="alternatives-count"> (+{matched.alternatives.length} more)</span>
+                              {selectedAlternative && (
+                                <span className="alternatives-info" style={{ color: '#10b981', marginLeft: '0.25rem' }}>
+                                  (Alternative selected)
+                                </span>
+                              )}
+                              {hasAlternatives && !selectedAlternative && (
+                                <span className="alternatives-count"> (+{(primaryMatch || matched).alternatives.length} more)</span>
                               )}
                             </span>
                           )}
