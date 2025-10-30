@@ -658,14 +658,15 @@ export default function SceneDetail() {
           return;
         }
         
-        // Link the scene to the movie in the database
-        const linkResponse = await fetch(`${config.apiBaseUrl}/api/stash/groups/${movieId}/scenes/${id}`, {
+        // Link the scene to the movie in the database using the existing compilations endpoint
+        const linkResponse = await fetch(`${config.apiBaseUrl}/api/stash/compilations/link-scene`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json'
           },
           body: JSON.stringify({
-            sceneIndex: movie.scenes?.length ? movie.scenes.length + 1 : 1
+            groupId: movieId,
+            sceneId: id
           })
         });
         
@@ -741,14 +742,15 @@ export default function SceneDetail() {
       if (result.success) {
         const newMovie = result.data.group;
         
-        // Link the scene to the newly created movie
-        const linkResponse = await fetch(`${config.apiBaseUrl}/api/stash/groups/${newMovie.id}/scenes/${id}`, {
+        // Link the scene to the newly created movie using the existing compilations endpoint
+        const linkResponse = await fetch(`${config.apiBaseUrl}/api/stash/compilations/link-scene`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json'
           },
           body: JSON.stringify({
-            sceneIndex: 1 // First scene in the new movie
+            groupId: newMovie.id,
+            sceneId: id
           })
         });
         
