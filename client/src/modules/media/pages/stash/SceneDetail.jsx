@@ -670,46 +670,54 @@ export default function SceneDetail() {
           })
         });
         
-        const linkResult = await linkResponse.json();
-        
-        if (!linkResult.success) {
-          throw new Error(linkResult.error || 'Failed to link scene to movie');
+        if (!linkResponse.ok) {
+          const errorData = await linkResponse.json();
+          console.error('Link scene error response:', errorData);
+          throw new Error(errorData.error || 'Failed to link scene to movie');
         }
         
+        const linkResult = await linkResponse.json();
+        console.log('Link scene success response:', linkResult);
+        
         // Add to scrapeData matched groups (or create scrapeData if it doesn't exist)
-        setScrapeData(prev => {
-          const current = prev || { matched: { groups: [] }, unmatched: { groups: [] } };
-          
-          // Check if already added
-          const alreadyAdded = current.matched?.groups?.some(g => g.id === movieId);
-          if (alreadyAdded) {
-            return current;
-          }
-          
-          return {
-            ...current,
-            matched: {
-              ...current.matched,
-              groups: [
-                ...(current.matched?.groups || []),
-                {
-                  id: movie.id,
-                  name: movie.name,
-                  studio: movie.studio?.name,
-                  date: movie.date,
-                  matchedVia: 'existing',
-                  url: movie.geviUrl
-                }
-              ]
+        try {
+          setScrapeData(prev => {
+            const current = prev || { matched: { groups: [] }, unmatched: { groups: [] } };
+            
+            // Check if already added
+            const alreadyAdded = current.matched?.groups?.some(g => g.id === movieId);
+            if (alreadyAdded) {
+              return current;
             }
-          };
-        });
+            
+            return {
+              ...current,
+              matched: {
+                ...current.matched,
+                groups: [
+                  ...(current.matched?.groups || []),
+                  {
+                    id: movie.id,
+                    name: movie.name,
+                    studio: movie.studio?.name || null,
+                    date: movie.date || null,
+                    matchedVia: 'existing',
+                    url: movie.geviUrl || null
+                  }
+                ]
+              }
+            };
+          });
+        } catch (stateError) {
+          console.warn('Failed to update scrapeData state:', stateError);
+          // Continue anyway - this is not critical
+        }
         
         alert(`✅ Scene linked to movie "${movieTitle}"!`);
         setSearchResults(null); // Clear search results
         
         // Reload scene data to show the new group link
-        loadScene();
+        await loadScene();
       } else {
         alert(`Failed to fetch movie details: ${result.error || 'Unknown error'}`);
       }
@@ -754,39 +762,47 @@ export default function SceneDetail() {
           })
         });
         
-        const linkResult = await linkResponse.json();
-        
-        if (!linkResult.success) {
-          throw new Error(linkResult.error || 'Failed to link scene to movie');
+        if (!linkResponse.ok) {
+          const errorData = await linkResponse.json();
+          console.error('Link scene error response:', errorData);
+          throw new Error(errorData.error || 'Failed to link scene to movie');
         }
         
-        // Add to scrapeData matched groups
-        setScrapeData(prev => {
-          const current = prev || { matched: { groups: [] }, unmatched: { groups: [] } };
-          return {
-            ...current,
-            matched: {
-              ...current.matched,
-              groups: [
-                ...(current.matched?.groups || []),
-                {
-                  id: newMovie.id,
-                  name: newMovie.name,
-                  studio: newMovie.studio?.name,
-                  date: newMovie.date,
-                  matchedVia: 'created',
-                  url: movieData.url
-                }
-              ]
-            }
-          };
-        });
+        const linkResult = await linkResponse.json();
+        console.log('Link scene success response:', linkResult);
+        
+        // Add to scrapeData matched groups (safely)
+        try {
+          setScrapeData(prev => {
+            const current = prev || { matched: { groups: [] }, unmatched: { groups: [] } };
+            return {
+              ...current,
+              matched: {
+                ...current.matched,
+                groups: [
+                  ...(current.matched?.groups || []),
+                  {
+                    id: newMovie.id,
+                    name: newMovie.name,
+                    studio: newMovie.studio?.name || null,
+                    date: newMovie.date || null,
+                    matchedVia: 'created',
+                    url: movieData.url
+                  }
+                ]
+              }
+            };
+          });
+        } catch (stateError) {
+          console.warn('Failed to update scrapeData state:', stateError);
+          // Continue anyway - this is not critical
+        }
         
         alert(`✅ Movie "${movieData.title}" created and scene linked!`);
         setSearchResults(null); // Clear search results
         
         // Reload scene data to show the new group link
-        loadScene();
+        await loadScene();
       } else {
         alert(`Failed to create movie: ${result.error || 'Unknown error'}`);
       }
