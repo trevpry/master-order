@@ -1838,17 +1838,56 @@ export default function SceneDetail() {
 
   const handleAcceptParse = async () => {
     try {
-      // Collect matched performer IDs
-      const performerIds = parseData.matched.performers
-        .filter(p => {
-          // Only include performers that are still in editedPerformers list
-          const normalizedPName = p.name.toLowerCase().replace(/\s+/g, '');
-          return editedPerformers.some(ep => 
-            ep.toLowerCase().replace(/\s+/g, '') === normalizedPName ||
-            (p.matchedAlias && ep.toLowerCase().replace(/\s+/g, '') === p.matchedAlias.toLowerCase().replace(/\s+/g, ''))
-          );
+      // Collect matched performer IDs based on edited performer names
+      const performerIds = editedPerformers
+        .map(editedName => {
+          const normalizedEditedName = editedName.toLowerCase().replace(/\s+/g, '');
+          
+          // Find the matched performer that corresponds to this edited name
+          // Check both the primary match and alternatives
+          const matchedPerformer = parseData.matched.performers.find(p => {
+            const normalizedPName = p.name.toLowerCase().replace(/\s+/g, '');
+            
+            // Check if it's the primary match
+            if (normalizedPName === normalizedEditedName) return true;
+            
+            // Check if it's an alternative
+            if (p.alternatives && p.alternatives.length > 0) {
+              return p.alternatives.some(alt => {
+                const normalizedAltName = alt.name.toLowerCase().replace(/\s+/g, '');
+                return normalizedAltName === normalizedEditedName;
+              });
+            }
+            
+            // Check if matched via alias
+            if (p.matchedAlias) {
+              const normalizedAlias = p.matchedAlias.toLowerCase().replace(/\s+/g, '');
+              return normalizedAlias === normalizedEditedName;
+            }
+            
+            return false;
+          });
+          
+          // If we found a match, check if the edited name is an alternative
+          if (matchedPerformer) {
+            // If the edited name differs from the primary match, it's an alternative
+            const normalizedPrimaryName = matchedPerformer.name.toLowerCase().replace(/\s+/g, '');
+            if (normalizedEditedName !== normalizedPrimaryName) {
+              // Find the alternative performer to get their ID
+              const alternative = matchedPerformer.alternatives?.find(alt => {
+                const normalizedAltName = alt.name.toLowerCase().replace(/\s+/g, '');
+                return normalizedAltName === normalizedEditedName;
+              });
+              
+              return alternative ? alternative.id : matchedPerformer.id;
+            }
+            
+            return matchedPerformer.id;
+          }
+          
+          return null;
         })
-        .map(p => p.id);
+        .filter(id => id !== null);
 
       // Determine studio ID if matched
       const studioId = parseData.matched.studio ? parseData.matched.studio.id : null;
