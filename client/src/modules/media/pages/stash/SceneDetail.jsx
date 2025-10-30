@@ -2805,9 +2805,9 @@ export default function SceneDetail() {
                 <span className="info-label">Identification:</span>
                 <span className="info-value">
                   <select
-                    value={data.identification || 'Not Identified'}
+                    value={data.identification || ''}
                     onChange={async (e) => {
-                      const newValue = e.target.value;
+                      const newValue = e.target.value || null;
                       try {
                         const response = await fetch(`${config.apiBaseUrl}/api/stash/scenes/${id}`, {
                           method: 'PUT',
@@ -2833,6 +2833,7 @@ export default function SceneDetail() {
                       cursor: 'pointer'
                     }}
                   >
+                    <option value="">None</option>
                     <option value="Not Identified">Not Identified</option>
                     <option value="Identified">Identified</option>
                     <option value="Identified and Scraped">Identified and Scraped</option>

@@ -574,12 +574,14 @@ router.get('/scenes', asyncHandler(async (req, res) => {
     // Handle identification filter
     if (identification && identification !== 'all') {
       if (identification === 'null') {
-        // Show scenes with no identification set (NULL or empty)
-        where.OR = where.OR || [];
-        where.OR.push(
-          { identification: null },
-          { identification: '' }
-        );
+        // Show scenes with no identification set (exclude all three identification values)
+        where.AND = where.AND || [];
+        where.AND.push({
+          OR: [
+            { identification: null },
+            { identification: '' }
+          ]
+        });
       } else {
         where.identification = identification;
       }
