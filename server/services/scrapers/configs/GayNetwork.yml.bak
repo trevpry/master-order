@@ -149,6 +149,12 @@ xPathScrapers:
         URL: //div[@class="mt-4"]//a[contains(@class, "h100")]/@href
       Tags:
         Name: //h3[@class="h120"]
+  movieScraper:
+    movie:
+      Title: 
+        selector: //h1[@class="h4 text-dark"]/text()     
+      Image: 
+        selector: //div[@class="embed-responsive embed-responsive-2by3 mb-2"]/img/@src
   performerScraper:
     performer:
       Name: 
