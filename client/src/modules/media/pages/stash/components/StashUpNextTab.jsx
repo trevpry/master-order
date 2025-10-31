@@ -26,7 +26,8 @@ const StashUpNextTab = ({
   upNextLoading,
   markingWatched,
   deletingScene,
-  connectionStatus
+  connectionStatus,
+  onStartImageTagging
 }) => {
   return (
     <div className="up-next-content">
@@ -77,6 +78,19 @@ const StashUpNextTab = ({
             }}
           >
             {mixedMode.isLoading ? '🎭 Loading...' : mixedMode.isActive ? '🛑 Stop Mixed' : '🎭 Clips + Slideshow'}
+          </Button>
+
+          <Button
+            onClick={onStartImageTagging}
+            disabled={!connectionStatus.connected}
+            className="tag-images-button"
+            style={{
+              backgroundColor: '#16a085',
+              color: '#fff',
+              marginLeft: '10px'
+            }}
+          >
+            🏷️ Tag Images
           </Button>
 
           {/* Mixed Mode Status */}

@@ -1867,10 +1867,13 @@ export default function SceneDetail() {
 
   const handleAcceptParse = async () => {
     try {
+      console.log('📋 handleAcceptParse - editedPerformers:', editedPerformers);
+      
       // Collect matched performer IDs based on edited performer names
       const performerIds = editedPerformers
-        .map(editedName => {
+        .map((editedName, idx) => {
           const normalizedEditedName = editedName.toLowerCase().replace(/\s+/g, '');
+          console.log(`   Processing performer ${idx}: "${editedName}" (normalized: "${normalizedEditedName}")`);
           
           // First check if it's a direct match (primary performer)
           const directMatch = parseData.matched.performers.find(p => {
@@ -1879,6 +1882,7 @@ export default function SceneDetail() {
           });
           
           if (directMatch) {
+            console.log(`   ✓ Direct match found: ${directMatch.name} (ID: ${directMatch.id})`);
             return directMatch.id;
           }
           
@@ -1891,6 +1895,7 @@ export default function SceneDetail() {
               });
               
               if (alternative) {
+                console.log(`   ✓ Alternative found: ${alternative.name} (ID: ${alternative.id}) - Primary was: ${performer.name}`);
                 // Return the alternative's ID, not the primary performer's ID
                 return alternative.id;
               }
@@ -1907,12 +1912,16 @@ export default function SceneDetail() {
           });
           
           if (aliasMatch) {
+            console.log(`   ✓ Alias match found: ${aliasMatch.name} (ID: ${aliasMatch.id})`);
             return aliasMatch.id;
           }
           
+          console.log(`   ✗ No match found for "${editedName}"`);
           return null;
         })
         .filter(id => id !== null);
+
+      console.log('📋 Final performer IDs to add:', performerIds);
 
       // Determine studio ID if matched
       const studioId = parseData.matched.studio ? parseData.matched.studio.id : null;
@@ -3195,11 +3204,15 @@ export default function SceneDetail() {
                               className="performer-alternatives-dropdown"
                               onChange={(e) => {
                                 if (e.target.value) {
+                                  console.log(`🔄 Switching performer at index ${index} from "${performer}" to "${e.target.value}"`);
                                   const newPerformers = [...editedPerformers];
                                   newPerformers[index] = e.target.value;
                                   setEditedPerformers(newPerformers);
+                                  console.log('   Updated editedPerformers:', newPerformers);
                                   // Regenerate title with updated performers
-                                  setEditedTitle(regenerateTitle(newPerformers, editedTitle));
+                                  const newTitle = regenerateTitle(newPerformers, editedTitle);
+                                  console.log('   New title:', newTitle);
+                                  setEditedTitle(newTitle);
                                 }
                               }}
                               value=""

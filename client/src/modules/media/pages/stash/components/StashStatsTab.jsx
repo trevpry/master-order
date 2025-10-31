@@ -1,5 +1,10 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import Button from '../../../../../shared/components/Button';
+import { Chart as ChartJS, ArcElement, Tooltip, Legend } from 'chart.js';
+import { Pie } from 'react-chartjs-2';
+import config from '../../../../../config';
+
+ChartJS.register(ArcElement, Tooltip, Legend);
 
 const StashStatsTab = ({
   refreshStats,
@@ -12,6 +17,163 @@ const StashStatsTab = ({
   loadStats,
   setSelectedPerformer
 }) => {
+  const [tagStats, setTagStats] = useState({ scenes: [], performers: [] });
+  const [loadingTags, setLoadingTags] = useState(false);
+  const [selectedSceneTag, setSelectedSceneTag] = useState(null);
+  const [selectedPerformerTag, setSelectedPerformerTag] = useState(null);
+  const [sceneTagBreadcrumb, setSceneTagBreadcrumb] = useState([]);
+  const [performerTagBreadcrumb, setPerformerTagBreadcrumb] = useState([]);
+
+  // Load tag statistics
+  const loadTagStats = async (parentId = null, type = 'both') => {
+    setLoadingTags(true);
+    try {
+      const url = parentId 
+        ? `${config.apiBaseUrl}/api/stash/stats/tags?parentId=${parentId}`
+        : `${config.apiBaseUrl}/api/stash/stats/tags`;
+      
+      const response = await fetch(url);
+      const result = await response.json();
+      
+      if (result.success) {
+        if (type === 'both' || type === 'scenes') {
+          setTagStats(prev => ({ ...prev, scenes: result.data }));
+        }
+        if (type === 'both' || type === 'performers') {
+          setTagStats(prev => ({ ...prev, performers: result.data }));
+        }
+      }
+    } catch (error) {
+      console.error('Error loading tag stats:', error);
+    } finally {
+      setLoadingTags(false);
+    }
+  };
+
+  // Load tags on mount
+  useEffect(() => {
+    loadTagStats();
+  }, []);
+
+  // Handle clicking on a tag in the scene chart
+  const handleSceneTagClick = async (tagId, tagName) => {
+    setSelectedSceneTag(tagId);
+    setSceneTagBreadcrumb([...sceneTagBreadcrumb, { id: tagId, name: tagName }]);
+    await loadTagStats(tagId, 'scenes');
+  };
+
+  // Handle clicking on a tag in the performer chart
+  const handlePerformerTagClick = async (tagId, tagName) => {
+    setSelectedPerformerTag(tagId);
+    setPerformerTagBreadcrumb([...performerTagBreadcrumb, { id: tagId, name: tagName }]);
+    await loadTagStats(tagId, 'performers');
+  };
+
+  // Reset to top-level tags
+  const resetSceneTags = () => {
+    setSelectedSceneTag(null);
+    setSceneTagBreadcrumb([]);
+    loadTagStats(null, 'scenes');
+  };
+
+  const resetPerformerTags = () => {
+    setSelectedPerformerTag(null);
+    setPerformerTagBreadcrumb([]);
+    loadTagStats(null, 'performers');
+  };
+
+  // Navigate breadcrumb
+  const navigateSceneBreadcrumb = (index) => {
+    if (index === -1) {
+      resetSceneTags();
+    } else {
+      const tag = sceneTagBreadcrumb[index];
+      setSelectedSceneTag(tag.id);
+      setSceneTagBreadcrumb(sceneTagBreadcrumb.slice(0, index + 1));
+      loadTagStats(tag.id, 'scenes');
+    }
+  };
+
+  const navigatePerformerBreadcrumb = (index) => {
+    if (index === -1) {
+      resetPerformerTags();
+    } else {
+      const tag = performerTagBreadcrumb[index];
+      setSelectedPerformerTag(tag.id);
+      setPerformerTagBreadcrumb(performerTagBreadcrumb.slice(0, index + 1));
+      loadTagStats(tag.id, 'performers');
+    }
+  };
+
+  // Generate colors for pie chart
+  const generateColors = (count) => {
+    const colors = [];
+    for (let i = 0; i < count; i++) {
+      const hue = (i * 360) / count;
+      colors.push(`hsl(${hue}, 70%, 60%)`);
+    }
+    return colors;
+  };
+
+  // Prepare chart data for scenes
+  const sceneChartData = {
+    labels: tagStats.scenes.filter(t => t.sceneCount > 0).slice(0, 20).map(t => t.name),
+    datasets: [{
+      data: tagStats.scenes.filter(t => t.sceneCount > 0).slice(0, 20).map(t => t.sceneCount),
+      backgroundColor: generateColors(Math.min(20, tagStats.scenes.filter(t => t.sceneCount > 0).length)),
+      borderWidth: 1
+    }]
+  };
+
+  // Prepare chart data for performers
+  const performerChartData = {
+    labels: tagStats.performers.filter(t => t.performerCount > 0).slice(0, 20).map(t => t.name),
+    datasets: [{
+      data: tagStats.performers.filter(t => t.performerCount > 0).slice(0, 20).map(t => t.performerCount),
+      backgroundColor: generateColors(Math.min(20, tagStats.performers.filter(t => t.performerCount > 0).length)),
+      borderWidth: 1
+    }]
+  };
+
+  // Chart options
+  const chartOptions = (type, clickHandler) => ({
+    responsive: true,
+    maintainAspectRatio: false,
+    plugins: {
+      legend: {
+        position: 'right',
+        labels: {
+          boxWidth: 12,
+          font: { size: 11 },
+          padding: 10
+        }
+      },
+      tooltip: {
+        callbacks: {
+          label: function(context) {
+            const label = context.label || '';
+            const value = context.parsed || 0;
+            const total = context.dataset.data.reduce((a, b) => a + b, 0);
+            const percentage = ((value / total) * 100).toFixed(1);
+            return `${label}: ${value} (${percentage}%)`;
+          }
+        }
+      }
+    },
+    onClick: (event, elements) => {
+      if (elements.length > 0) {
+        const index = elements[0].index;
+        const tag = type === 'scenes' 
+          ? tagStats.scenes.filter(t => t.sceneCount > 0)[index]
+          : tagStats.performers.filter(t => t.performerCount > 0)[index];
+        
+        if (tag && tag.hasChildren) {
+          clickHandler(tag.id, tag.name);
+        }
+      }
+    }
+  });
+
   const openPerformerImageModal = (performer) => {
     setSelectedPerformer(performer);
   };
@@ -226,6 +388,89 @@ const StashStatsTab = ({
               ) : (
                 <div className="no-data">No studio data available</div>
               )}
+            </div>
+          </div>
+
+          {/* Tag Charts Section */}
+          <div className="tag-charts-section">
+            <h3 className="section-title">🏷️ Tag Distribution</h3>
+            
+            <div className="charts-grid">
+              {/* Tags by Scene Chart */}
+              <div className="chart-container">
+                <div className="chart-header">
+                  <h4>Tags by Scene Count</h4>
+                  {sceneTagBreadcrumb.length > 0 && (
+                    <div className="breadcrumb">
+                      <button onClick={() => navigateSceneBreadcrumb(-1)} className="breadcrumb-item">
+                        All Tags
+                      </button>
+                      {sceneTagBreadcrumb.map((crumb, index) => (
+                        <React.Fragment key={crumb.id}>
+                          <span className="breadcrumb-separator">›</span>
+                          <button 
+                            onClick={() => navigateSceneBreadcrumb(index)} 
+                            className="breadcrumb-item"
+                          >
+                            {crumb.name}
+                          </button>
+                        </React.Fragment>
+                      ))}
+                    </div>
+                  )}
+                </div>
+                {loadingTags ? (
+                  <div className="chart-loading">Loading...</div>
+                ) : tagStats.scenes.filter(t => t.sceneCount > 0).length > 0 ? (
+                  <div className="chart-wrapper">
+                    <Pie 
+                      data={sceneChartData} 
+                      options={chartOptions('scenes', handleSceneTagClick)} 
+                    />
+                    <p className="chart-hint">💡 Click on a tag with children to drill down</p>
+                  </div>
+                ) : (
+                  <div className="no-data">No tag data available</div>
+                )}
+              </div>
+
+              {/* Tags by Performer Chart */}
+              <div className="chart-container">
+                <div className="chart-header">
+                  <h4>Tags by Performer Count</h4>
+                  {performerTagBreadcrumb.length > 0 && (
+                    <div className="breadcrumb">
+                      <button onClick={() => navigatePerformerBreadcrumb(-1)} className="breadcrumb-item">
+                        All Tags
+                      </button>
+                      {performerTagBreadcrumb.map((crumb, index) => (
+                        <React.Fragment key={crumb.id}>
+                          <span className="breadcrumb-separator">›</span>
+                          <button 
+                            onClick={() => navigatePerformerBreadcrumb(index)} 
+                            className="breadcrumb-item"
+                          >
+                            {crumb.name}
+                          </button>
+                        </React.Fragment>
+                      ))}
+                    </div>
+                  )}
+                </div>
+                {loadingTags ? (
+                  <div className="chart-loading">Loading...</div>
+                ) : tagStats.performers.filter(t => t.performerCount > 0).length > 0 ? (
+                  <div className="chart-wrapper">
+                    <Pie 
+                      data={performerChartData} 
+                      options={chartOptions('performers', handlePerformerTagClick)} 
+                    />
+                    <p className="chart-hint">💡 Click on a tag with children to drill down</p>
+                  </div>
+                ) : (
+                  <div className="no-data">No tag data available</div>
+                )}
+              </div>
             </div>
           </div>
 

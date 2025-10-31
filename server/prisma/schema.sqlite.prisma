@@ -1157,6 +1157,7 @@ model StashImage {
   url          String?
   rating       Int?
   organized    Boolean               @default(false)
+  tagged       Boolean               @default(false)
   studio       String?
   studioId     String?
   path         String?

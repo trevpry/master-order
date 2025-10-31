@@ -1679,6 +1679,143 @@ router.post('/performers/create', asyncHandler(async (req, res) => {
   }
 }));
 
+// POST /api/stash/studios/create - Create a new studio in both Stash and local DB
+router.post('/studios/create', asyncHandler(async (req, res) => {
+  console.log('🎬 [Create Studio] Request received');
+  console.log('   - Body:', JSON.stringify(req.body, null, 2));
+  
+  const { name, url, aliases } = req.body;
+
+  // Validate required fields
+  validateRequiredFieldsDirect(req.body, ['name']);
+
+  console.log('🎬 [Create Studio] Creating studio:', name);
+
+  // Initialize sync service if not already done
+  if (!stashSyncService && !stashSyncServiceOptimized) {
+    await initializeStashSyncService();
+  }
+
+  // Ensure sync service is available
+  const syncService = getActiveSyncService();
+  if (!syncService) {
+    console.error('   - Sync service not initialized');
+    return sendServerError(res, 'Stash sync service not initialized');
+  }
+
+  // Ensure Stash URL is configured
+  try {
+    await syncService.ensureConfigLoaded();
+  } catch (error) {
+    console.error('   - Stash not configured:', error.message);
+    return sendServerError(res, 'Stash server not configured. Please configure in Settings.');
+  }
+
+  try {
+    // Check if studio already exists (case-insensitive)
+    const allStudios = await prisma.stashStudio.findMany({
+      select: {
+        id: true,
+        name: true
+      }
+    });
+    
+    const nameLower = name.toLowerCase();
+    const existingStudio = allStudios.find(s => s.name.toLowerCase() === nameLower);
+
+    if (existingStudio) {
+      console.log(`   - Studio "${name}" already exists with ID ${existingStudio.id}`);
+      // Fetch full studio with aliases
+      const fullStudio = await prisma.stashStudio.findUnique({
+        where: { id: existingStudio.id },
+        include: {
+          aliases: true
+        }
+      });
+      return sendSuccess(res, {
+        studio: fullStudio,
+        message: `Studio "${name}" already exists.`,
+        wasExisting: true
+      });
+    }
+
+    // Create studio in Stash via GraphQL
+    const createMutation = `
+      mutation StudioCreate($input: StudioCreateInput!) {
+        studioCreate(input: $input) {
+          id
+          name
+          url
+          aliases
+        }
+      }
+    `;
+
+    const variables = {
+      input: {
+        name: name,
+        url: url || null,
+        aliases: aliases || []
+      }
+    };
+
+    console.log('   - Creating in Stash with variables:', JSON.stringify(variables, null, 2));
+
+    const data = await syncService.makeGraphQLRequest(createMutation, variables);
+
+    console.log('   - GraphQL response data:', JSON.stringify(data, null, 2));
+
+    if (!data || !data.studioCreate) {
+      console.error('   - Failed to create studio in Stash. Response:', data);
+      return sendServerError(res, 'Failed to create studio in Stash - no data returned');
+    }
+
+    const stashStudio = data.studioCreate;
+    console.log('   - Created in Stash:', stashStudio.id, stashStudio.name);
+
+    // Now create in local database
+    const localStudio = await prisma.stashStudio.create({
+      data: {
+        id: stashStudio.id,
+        name: stashStudio.name,
+        url: stashStudio.url || null,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        lastSyncedAt: new Date(),
+        // Create aliases as nested records if provided
+        ...(stashStudio.aliases && stashStudio.aliases.length > 0 && {
+          aliases: {
+            create: stashStudio.aliases.map(aliasName => ({
+              alias: aliasName
+            }))
+          }
+        })
+      }
+    });
+
+    console.log('   - Created in local DB:', localStudio.id, localStudio.name);
+
+    // Fetch the complete studio with aliases
+    const fullStudio = await prisma.stashStudio.findUnique({
+      where: { id: localStudio.id },
+      include: {
+        aliases: true
+      }
+    });
+
+    sendSuccess(res, {
+      studio: fullStudio,
+      message: `Studio "${name}" created successfully`
+    });
+
+  } catch (error) {
+    console.error('❌ [Create Studio] Error:', error);
+    console.error('   - Error message:', error.message);
+    console.error('   - Error stack:', error.stack);
+    return sendServerError(res, error.message || 'Failed to create studio');
+  }
+}));
+
 // POST /api/stash/tags/create - Create a new tag in both Stash and local DB
 router.post('/tags/create', asyncHandler(async (req, res) => {
   console.log('🏷️ [Create Tag] Request received');
@@ -1712,17 +1849,41 @@ router.post('/tags/create', asyncHandler(async (req, res) => {
   }
 
   try {
-    // Check if a tag already exists with this name as an alias (case-insensitive)
+    const nameLower = name.toLowerCase();
+    
+    // Check if tag already exists by name (case-insensitive)
+    // SQLite doesn't support mode: 'insensitive', so we'll do it manually
     const allTags = await prisma.stashTag.findMany({
+      select: {
+        id: true,
+        name: true
+      }
+    });
+    
+    const existingTag = allTags.find(t => t.name.toLowerCase() === nameLower);
+
+    if (existingTag) {
+      console.log(`   - Tag "${name}" already exists with ID ${existingTag.id}`);
+      // Fetch full tag with aliases
+      const fullTag = await prisma.stashTag.findUnique({
+        where: { id: existingTag.id },
+        include: { aliases: true }
+      });
+      return sendSuccess(res, {
+        tag: fullTag,
+        message: `Tag "${name}" already exists.`,
+        wasExisting: true
+      });
+    }
+
+    // Check if a tag already exists with this name as an alias (case-insensitive)
+    const allTagsWithAliases = await prisma.stashTag.findMany({
       include: {
         aliases: true
       }
     });
-
-    const nameLower = name.toLowerCase();
     
-    // Check for alias match (case-insensitive)
-    const existingTagWithAlias = allTags.find(t => 
+    const existingTagWithAlias = allTagsWithAliases.find(t => 
       t.aliases.some(a => a.alias.toLowerCase() === nameLower)
     );
 
@@ -1731,18 +1892,6 @@ router.post('/tags/create', asyncHandler(async (req, res) => {
       return sendSuccess(res, {
         tag: existingTagWithAlias,
         message: `Tag "${name}" already exists as an alias for "${existingTagWithAlias.name}". Using existing tag instead.`,
-        wasExisting: true
-      });
-    }
-
-    // Check if tag already exists by name (case-insensitive)
-    const existingTag = allTags.find(t => t.name.toLowerCase() === nameLower);
-
-    if (existingTag) {
-      console.log(`   - Tag "${name}" already exists with ID ${existingTag.id}`);
-      return sendSuccess(res, {
-        tag: existingTag,
-        message: `Tag "${name}" already exists.`,
         wasExisting: true
       });
     }
@@ -9181,10 +9330,12 @@ router.get('/stats', asyncHandler(async (req, res) => {
   console.log('📊 Fetching Stash database statistics...');
   
   // Get counts from each table
-  const [scenesCount, performersCount, studiosCount] = await Promise.all([
+  const [scenesCount, performersCount, studiosCount, tagsCount, clipsCount] = await Promise.all([
     prisma.stashScene.count(),
     prisma.stashPerformer.count(),
-    prisma.stashStudio.count()
+    prisma.stashStudio.count(),
+    prisma.stashTag.count(),
+    prisma.stashClip.count()
   ]);
 
   // Get top 10 performers by scene count
@@ -9236,6 +9387,8 @@ router.get('/stats', asyncHandler(async (req, res) => {
     scenes: scenesCount,
     performers: performersCount,
     studios: studiosCount,
+    tags: tagsCount,
+    clips: clipsCount,
     topPerformers: topPerformers.map(p => ({
       id: p.id,
       name: p.name,
@@ -9256,6 +9409,84 @@ router.get('/stats', asyncHandler(async (req, res) => {
   res.json({
     success: true,
     stats
+  });
+}));
+
+// GET /stats/tags - Get tag statistics for charts
+router.get('/stats/tags', asyncHandler(async (req, res) => {
+  const { parentId } = req.query;
+  
+  console.log('📊 Fetching tag statistics...', parentId ? `for parent: ${parentId}` : 'top-level');
+  
+  let tags;
+  
+  if (parentId) {
+    // Get child tags of the specified parent
+    const hierarchies = await prisma.stashTagHierarchy.findMany({
+      where: { parentTagId: parentId },
+      select: {
+        childTag: {
+          select: {
+            id: true,
+            name: true,
+            _count: {
+              select: {
+                scenes: true,
+                performers: true,
+                childTags: true
+              }
+            }
+          }
+        }
+      }
+    });
+    
+    tags = hierarchies.map(h => h.childTag);
+    
+    // Filter out excluded tags
+    tags = tags.filter(tag => tag.name !== 'zzHide' && tag.name !== '__Watched');
+  } else {
+    // Get all tags with counts
+    const allTags = await prisma.stashTag.findMany({
+      where: {
+        name: {
+          notIn: ['zzHide', '__Watched']
+        }
+      },
+      select: {
+        id: true,
+        name: true,
+        _count: {
+          select: {
+            scenes: true,
+            performers: true,
+            childTags: true,
+            parentTags: true
+          }
+        }
+      }
+    });
+    
+    // Filter to only include top-level tags (tags with no parents)
+    tags = allTags.filter(tag => tag._count.parentTags === 0);
+  }
+  
+  // Sort by scene count descending
+  tags.sort((a, b) => b._count.scenes - a._count.scenes);
+  
+  const tagStats = tags.map(tag => ({
+    id: tag.id,
+    name: tag.name,
+    sceneCount: tag._count.scenes,
+    performerCount: tag._count.performers,
+    hasChildren: tag._count.childTags > 0
+  }));
+  
+  console.log(`📊 Found ${tagStats.length} tags`);
+  
+  res.json({
+    success: true,
+    data: tagStats
   });
 }));
 
@@ -11850,6 +12081,358 @@ router.get('/images', asyncHandler(async (req, res) => {
       perPage: parseInt(perPage),
       total: total,
       totalPages: Math.ceil(total / parseInt(perPage))
+    }
+  });
+}));
+
+// GET /images/next-untagged - Get next image that hasn't been tagged
+router.get('/images/next-untagged', asyncHandler(async (req, res) => {
+  console.log('📸 Getting next untagged image...');
+  
+  const image = await prisma.stashImage.findFirst({
+    where: {
+      galleryId: null, // Only standalone images
+      tagged: false // Only untagged images
+    },
+    include: {
+      performers: {
+        include: {
+          performer: true
+        }
+      },
+      tags: {
+        include: {
+          tag: true
+        }
+      },
+      studioObject: true,
+      gallery: true
+    },
+    orderBy: {
+      createdAt: 'asc' // Oldest first
+    }
+  });
+  
+  if (!image) {
+    return res.json({
+      success: true,
+      data: null,
+      message: 'No untagged images found'
+    });
+  }
+  
+  const transformedImage = {
+    id: image.id,
+    title: image.title,
+    code: image.code,
+    date: image.date,
+    details: image.details,
+    photographer: image.photographer,
+    url: image.url,
+    rating: image.rating,
+    organized: image.organized,
+    studio: image.studio,
+    studioId: image.studioId,
+    path: image.path,
+    checksum: image.checksum,
+    fileModTime: image.fileModTime,
+    tagged: image.tagged,
+    performers: image.performers.map(p => p.performer),
+    tags: image.tags.map(t => t.tag),
+    studioObject: image.studioObject,
+    gallery: image.gallery
+  };
+  
+  console.log(`📸 Found untagged image: ${image.id}`);
+  
+  res.json({
+    success: true,
+    data: transformedImage
+  });
+}));
+
+// PUT /images/:id/tagged - Mark image as tagged
+router.put('/images/:id/tagged', asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  const { tagged = true } = req.body;
+  
+  console.log(`📸 Marking image ${id} as ${tagged ? 'tagged' : 'untagged'}...`);
+  
+  const image = await prisma.stashImage.update({
+    where: { id },
+    data: { tagged }
+  });
+  
+  res.json({
+    success: true,
+    data: image
+  });
+}));
+
+// PUT /images/:id/tags - Update image tags
+router.put('/images/:id/tags', asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  const { tagIds } = req.body;
+  
+  console.log(`📸 Updating tags for image ${id}...`, tagIds);
+  
+  // Delete existing tags in local DB
+  await prisma.stashImageTag.deleteMany({
+    where: { imageId: id }
+  });
+  
+  // Add new tags in local DB
+  if (tagIds && tagIds.length > 0) {
+    await prisma.stashImageTag.createMany({
+      data: tagIds.map(tagId => ({
+        imageId: id,
+        tagId
+      }))
+    });
+  }
+  
+  // Sync to Stash
+  try {
+    if (!stashSyncService && !stashSyncServiceOptimized) {
+      await initializeStashSyncService();
+    }
+    
+    const syncService = getActiveSyncService();
+    if (syncService) {
+      await syncService.ensureConfigLoaded();
+      
+      // Verify which tags exist in Stash before syncing
+      let validTagIds = tagIds || [];
+      if (validTagIds.length > 0) {
+        const existingTags = await prisma.stashTag.findMany({
+          where: { id: { in: validTagIds } },
+          select: { id: true }
+        });
+        
+        const existingTagIds = existingTags.map(t => t.id);
+        const missingTagIds = validTagIds.filter(id => !existingTagIds.includes(id));
+        
+        if (missingTagIds.length > 0) {
+          console.warn(`   - ⚠️ Warning: ${missingTagIds.length} tag(s) don't exist in Stash: ${missingTagIds.join(', ')}`);
+          console.warn(`   - Syncing only valid tags to Stash`);
+          validTagIds = existingTagIds;
+        }
+      }
+      
+      const updateMutation = `
+        mutation ImageUpdate($input: ImageUpdateInput!) {
+          imageUpdate(input: $input) {
+            id
+          }
+        }
+      `;
+      
+      const variables = {
+        input: {
+          id: id,
+          tag_ids: validTagIds
+        }
+      };
+      
+      console.log(`   - Syncing ${validTagIds.length} valid tag(s) to Stash...`);
+      await syncService.makeGraphQLRequest(updateMutation, variables);
+      console.log(`   - ✅ Tags synced to Stash`);
+    }
+  } catch (error) {
+    console.error(`   - ⚠️ Failed to sync tags to Stash:`, error.message);
+    // Continue anyway - local DB is updated
+  }
+  
+  // Fetch updated image with tags
+  const image = await prisma.stashImage.findUnique({
+    where: { id },
+    include: {
+      tags: {
+        include: {
+          tag: true
+        }
+      }
+    }
+  });
+  
+  res.json({
+    success: true,
+    data: {
+      id: image.id,
+      tags: image.tags.map(t => t.tag)
+    }
+  });
+}));
+
+// PUT /images/:id/performers - Update image performers
+router.put('/images/:id/performers', asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  const { performerIds } = req.body;
+  
+  console.log(`📸 Updating performers for image ${id}...`, performerIds);
+  
+  // Delete existing performers in local DB
+  await prisma.stashImagePerformer.deleteMany({
+    where: { imageId: id }
+  });
+  
+  // Add new performers in local DB
+  if (performerIds && performerIds.length > 0) {
+    await prisma.stashImagePerformer.createMany({
+      data: performerIds.map(performerId => ({
+        imageId: id,
+        performerId
+      }))
+    });
+  }
+  
+  // Sync to Stash
+  try {
+    if (!stashSyncService && !stashSyncServiceOptimized) {
+      await initializeStashSyncService();
+    }
+    
+    const syncService = getActiveSyncService();
+    if (syncService) {
+      await syncService.ensureConfigLoaded();
+      
+      // Verify which performers exist in Stash before syncing
+      let validPerformerIds = performerIds || [];
+      if (validPerformerIds.length > 0) {
+        const existingPerformers = await prisma.stashPerformer.findMany({
+          where: { id: { in: validPerformerIds } },
+          select: { id: true }
+        });
+        
+        const existingPerformerIds = existingPerformers.map(p => p.id);
+        const missingPerformerIds = validPerformerIds.filter(id => !existingPerformerIds.includes(id));
+        
+        if (missingPerformerIds.length > 0) {
+          console.warn(`   - ⚠️ Warning: ${missingPerformerIds.length} performer(s) don't exist in Stash: ${missingPerformerIds.join(', ')}`);
+          console.warn(`   - Syncing only valid performers to Stash`);
+          validPerformerIds = existingPerformerIds;
+        }
+      }
+      
+      const updateMutation = `
+        mutation ImageUpdate($input: ImageUpdateInput!) {
+          imageUpdate(input: $input) {
+            id
+          }
+        }
+      `;
+      
+      const variables = {
+        input: {
+          id: id,
+          performer_ids: validPerformerIds
+        }
+      };
+      
+      console.log(`   - Syncing ${validPerformerIds.length} valid performer(s) to Stash...`);
+      await syncService.makeGraphQLRequest(updateMutation, variables);
+      console.log(`   - ✅ Performers synced to Stash`);
+    }
+  } catch (error) {
+    console.error(`   - ⚠️ Failed to sync performers to Stash:`, error.message);
+    // Continue anyway - local DB is updated
+  }
+  
+  // Fetch updated image with performers
+  const image = await prisma.stashImage.findUnique({
+    where: { id },
+    include: {
+      performers: {
+        include: {
+          performer: true
+        }
+      }
+    }
+  });
+  
+  res.json({
+    success: true,
+    data: {
+      id: image.id,
+      performers: image.performers.map(p => p.performer)
+    }
+  });
+}));
+
+// PUT /images/:id/studio - Update image studio
+router.put('/images/:id/studio', asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  const { studioId } = req.body;
+  
+  console.log(`📸 Updating studio for image ${id}...`, studioId);
+  
+  // Update studio in local DB
+  const image = await prisma.stashImage.update({
+    where: { id },
+    data: { 
+      studioId: studioId || null,
+      studio: studioId || null
+    },
+    include: {
+      studioObject: true
+    }
+  });
+  
+  // Sync to Stash
+  try {
+    if (!stashSyncService && !stashSyncServiceOptimized) {
+      await initializeStashSyncService();
+    }
+    
+    const syncService = getActiveSyncService();
+    if (syncService) {
+      await syncService.ensureConfigLoaded();
+      
+      // Verify studio exists in Stash before syncing
+      let validStudioId = studioId;
+      if (validStudioId) {
+        const existingStudio = await prisma.stashStudio.findUnique({
+          where: { id: validStudioId },
+          select: { id: true }
+        });
+        
+        if (!existingStudio) {
+          console.warn(`   - ⚠️ Warning: Studio ${validStudioId} doesn't exist in Stash`);
+          console.warn(`   - Skipping Stash sync for studio`);
+          validStudioId = null;
+        }
+      }
+      
+      const updateMutation = `
+        mutation ImageUpdate($input: ImageUpdateInput!) {
+          imageUpdate(input: $input) {
+            id
+          }
+        }
+      `;
+      
+      const variables = {
+        input: {
+          id: id,
+          studio_id: validStudioId || null
+        }
+      };
+      
+      console.log(`   - Syncing studio to Stash...`);
+      await syncService.makeGraphQLRequest(updateMutation, variables);
+      console.log(`   - ✅ Studio synced to Stash`);
+    }
+  } catch (error) {
+    console.error(`   - ⚠️ Failed to sync studio to Stash:`, error.message);
+    // Continue anyway - local DB is updated
+  }
+  
+  res.json({
+    success: true,
+    data: {
+      id: image.id,
+      studioId: image.studioId,
+      studioObject: image.studioObject
     }
   });
 }));

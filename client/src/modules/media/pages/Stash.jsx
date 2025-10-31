@@ -9,6 +9,7 @@ import StashSlideshowModal from './stash/components/StashSlideshowModal';
 import StashContentRenderers from './stash/components/StashContentRenderers';
 import StashModals from './stash/components/StashModals';
 import MergePerformersModal from '../../../components/stash/MergePerformersModal';
+import ImageTagger from './stash/components/ImageTagger';
 import { getSceneDisplayTitle, getSceneImageUrl, formatDate, formatDuration, formatTime, isVideoFormatSupported } from '../utils/stashUtils';
 import './Stash.css';
 import config from '../../../config';
@@ -103,6 +104,9 @@ export default function Stash() {
 
   // Mixed Mode State
   const [mixedMode, setMixedMode] = useState(false);
+
+  // Image Tagging State
+  const [showImageTagger, setShowImageTagger] = useState(false);
 
   // Up Next State
   const [upNextData, setUpNextData] = useState(null);
@@ -672,6 +676,11 @@ export default function Stash() {
     }
   };
 
+  // Handle image tagging
+  const handleStartImageTagging = () => {
+    setShowImageTagger(true);
+  };
+
   const startSlideshow = async () => {
     console.log('🖼️ Starting slideshow...');
     setSlideshow(prev => ({ ...prev, isLoading: true }));
@@ -1067,6 +1076,7 @@ export default function Stash() {
                 connectionStatus={connectionStatus}
                 isLoading={isLoading}
                 upNextData={upNextData}
+                onStartImageTagging={handleStartImageTagging}
               />
             )}
 
@@ -1154,6 +1164,14 @@ export default function Stash() {
           performers={data.performers.filter(p => selectedPerformers.has(p.id))}
           onClose={() => setShowMergeModal(false)}
           onSuccess={handleMergeSuccess}
+        />
+      )}
+
+      {/* Image Tagger */}
+      {showImageTagger && (
+        <ImageTagger
+          onClose={() => setShowImageTagger(false)}
+          connectionStatus={connectionStatus}
         />
       )}
     </div>
