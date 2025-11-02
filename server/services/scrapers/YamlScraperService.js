@@ -152,7 +152,13 @@ class YamlScraperService extends BaseScraperService {
       // Remove protocol and www for comparison
       const normalizedUrl = url.toLowerCase().replace(/^https?:\/\/(www\.)?/, '');
       const normalizedPattern = pattern.toLowerCase().replace(/^https?:\/\/(www\.)?/, '');
-      return normalizedUrl.includes(normalizedPattern);
+      
+      // Extract domain from both URL and pattern (everything before first /)
+      const urlDomain = normalizedUrl.split('/')[0];
+      const patternDomain = normalizedPattern.split('/')[0];
+      
+      // Domain must match, then check if URL starts with the full pattern
+      return urlDomain === patternDomain && normalizedUrl.startsWith(normalizedPattern);
     });
     
     if (matchesScene) return true;
@@ -161,7 +167,13 @@ class YamlScraperService extends BaseScraperService {
     const matchesMovie = this.movieUrlPatterns.some(pattern => {
       const normalizedUrl = url.toLowerCase().replace(/^https?:\/\/(www\.)?/, '');
       const normalizedPattern = pattern.toLowerCase().replace(/^https?:\/\/(www\.)?/, '');
-      return normalizedUrl.includes(normalizedPattern);
+      
+      // Extract domain from both URL and pattern
+      const urlDomain = normalizedUrl.split('/')[0];
+      const patternDomain = normalizedPattern.split('/')[0];
+      
+      // Domain must match, then check if URL starts with the full pattern
+      return urlDomain === patternDomain && normalizedUrl.startsWith(normalizedPattern);
     });
     
     return matchesMovie;

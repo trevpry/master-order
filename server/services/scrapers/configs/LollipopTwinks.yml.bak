@@ -1,0 +1,37 @@
+name: "GayLifeNetwork"
+sceneByURL:
+  - action: scrapeXPath
+    url:
+      - lollipoptwinks.com/scenes/
+    scraper: sceneScraper
+xPathScrapers:
+  sceneScraper:
+    common:
+      $perf: //li[contains(text(),'Added:')]/../li[2]
+    scene:
+      Title:
+        selector: //h2[@class="title"]
+      Details:
+        selector: //p[@class="desc"]/text()
+      Performers:
+        Name:
+          selector: //a[@class="model-name"]/text()
+        URL:
+          selector: //a[@class="model-name"]/@href
+          postProcess:
+            - replace:
+                - regex: ^
+                  with: "https://www.lollipoptwinks.com"
+      Tags:
+        Name: 
+          selector: //a[@class="tag-name"]/text()
+      Image:
+        selector: //video/@poster
+        postProcess:
+          - replace:
+              - regex: ^
+                with: "https:"
+      Studio:
+        Name:
+           fixed: "Lollipop Twinks" 
+# Last Updated July 27, 2025
