@@ -24,7 +24,7 @@ xPathScrapers:
               with: $1
           - parseDate: "August 15, 2012"
       Details:
-        selector: //div[@class="videoContainer"]/p/text()
+        selector: //div[@class="videoContainer"]/text()
       Performers:
         Name:
           selector: //div[@class="videoContainer"]/h2/a/text()

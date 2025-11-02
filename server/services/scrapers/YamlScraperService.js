@@ -240,6 +240,19 @@ class YamlScraperService extends BaseScraperService {
     // Convert // to nothing (descendant)
     selector = selector.replace(/^\/\//, '');
     
+    // Handle mixed attribute conditions with 'and' (e.g., [@class="value" and contains(@href, "text")])
+    // This must come BEFORE other replacements
+    selector = selector.replace(
+      /\[@(\w+)="([^"]+)"\s+and\s+contains\(@(\w+),\s*["']([^"']+)["']\)\]/g,
+      '[$1="$2"][$3*="$4"]'
+    );
+    
+    // Handle reverse order (e.g., [contains(@href, "text") and @class="value"])
+    selector = selector.replace(
+      /\[contains\(@(\w+),\s*["']([^"']+)["']\)\s+and\s+@(\w+)="([^"]+)"\]/g,
+      '[$1*="$2"][$3="$4"]'
+    );
+    
     // Handle complex attribute conditions with 'and'
     // Example: [@rel="alternate" and @hreflang="en"]
     selector = selector.replace(/\[@(\w+)="([^"]+)"\s+and\s+@(\w+)="([^"]+)"\]/g, '[$1="$2"][$3="$4"]');
@@ -260,6 +273,10 @@ class YamlScraperService extends BaseScraperService {
     // Handle simple attribute conditions
     // Example: [@class="test"]
     selector = selector.replace(/\[@(\w+)="([^"]+)"\]/g, '[$1="$2"]');
+    
+    // Handle text() = "value" - convert to :contains() selector
+    // Example: //strong[text() = "From:"] -> strong:contains("From:")
+    selector = selector.replace(/\[text\(\)\s*=\s*["']([^"']+)["']\]/g, ':contains("$1")');
     
     // Handle contains() for class attributes
     // Example: [contains(@class, "value")]
@@ -423,6 +440,54 @@ class YamlScraperService extends BaseScraperService {
       // Check if it's an attribute selector
       const attrMatch = originalXpath.match(/\/@(\w+)$/);
       const attributeName = attrMatch ? attrMatch[1] : null;
+      
+      // Special handling for following-sibling:: which jQuery doesn't support directly
+      if (originalXpath.includes('/following-sibling::')) {
+        const parts = originalXpath.split('/following-sibling::');
+        const basePath = parts[0];
+        const siblingPath = parts[1];
+        
+        // Extract just the element name and position from sibling path
+        const siblingMatch = siblingPath.match(/^(\w+)\[(\d+)\](\/text\(\)|\/\@(\w+))?$/);
+        if (siblingMatch) {
+          const siblingTag = siblingMatch[1];
+          const position = parseInt(siblingMatch[2]) - 1; // Convert 1-based to 0-based
+          const extractAttr = siblingMatch[4] || attributeName;
+          
+          // Convert base path to jQuery selector
+          const baseSelector = this.xpathToJquery(basePath);
+          
+          console.log(`   🔍 extractValue (following-sibling) - Base selector: "${baseSelector}"`);
+          console.log(`   🔍 extractValue (following-sibling) - Looking for sibling: ${siblingTag} at position ${position}`);
+          
+          try {
+            const baseElement = $(baseSelector).first();
+            if (baseElement.length > 0) {
+              // Get all following siblings of the matching tag
+              const siblings = baseElement.nextAll(siblingTag);
+              console.log(`   🔍 extractValue (following-sibling) - Found ${siblings.length} ${siblingTag} siblings`);
+              
+              if (siblings.length > position) {
+                const targetElement = siblings.eq(position);
+                if (extractAttr) {
+                  const value = targetElement.attr(extractAttr);
+                  console.log(`   🔍 extractValue (following-sibling) - Extracted attribute "${extractAttr}": "${value}"`);
+                  return value || null;
+                } else {
+                  const value = targetElement.text().trim();
+                  console.log(`   🔍 extractValue (following-sibling) - Extracted text: "${value}"`);
+                  return value || null;
+                }
+              }
+            }
+            console.log(`   ❌ extractValue (following-sibling) - No matching sibling found`);
+            return null;
+          } catch (error) {
+            console.warn(`   ⚠️ following-sibling error:`, error.message);
+            return null;
+          }
+        }
+      }
       
       // Convert XPath to jQuery
       const selector = this.xpathToJquery(originalXpath);
@@ -750,12 +815,42 @@ class YamlScraperService extends BaseScraperService {
 
       // Extract Performers
       if (sceneConfig.Performers && sceneConfig.Performers.Name) {
-        const performerNames = this.extractArray($, sceneConfig.Performers.Name);
+        // Resolve variable references from common section
+        let performerNameSelector = sceneConfig.Performers.Name;
+        let performerUrlSelector = sceneConfig.Performers.URL;
+        
+        // Check if selectors reference variables (start with $)
+        if (scraperConfig.common) {
+          // Replace variable references
+          if (typeof performerNameSelector === 'string' && performerNameSelector.startsWith('$')) {
+            const varMatch = performerNameSelector.match(/^\$(\w+)(.*)/);
+            if (varMatch) {
+              const varName = '$' + varMatch[1];
+              const suffix = varMatch[2];
+              if (scraperConfig.common[varName]) {
+                performerNameSelector = scraperConfig.common[varName] + suffix;
+              }
+            }
+          }
+          
+          if (typeof performerUrlSelector === 'string' && performerUrlSelector.startsWith('$')) {
+            const varMatch = performerUrlSelector.match(/^\$(\w+)(.*)/);
+            if (varMatch) {
+              const varName = '$' + varMatch[1];
+              const suffix = varMatch[2];
+              if (scraperConfig.common[varName]) {
+                performerUrlSelector = scraperConfig.common[varName] + suffix;
+              }
+            }
+          }
+        }
+        
+        const performerNames = this.extractArray($, performerNameSelector);
         metadata.performers = performerNames.map(name => ({ name, url: null }));
         
         // Extract performer URLs if configured
-        if (sceneConfig.Performers.URL) {
-          const performerUrls = this.extractArray($, sceneConfig.Performers.URL);
+        if (performerUrlSelector) {
+          const performerUrls = this.extractArray($, performerUrlSelector);
           // Match URLs to performers by index
           performerUrls.forEach((url, index) => {
             if (metadata.performers[index]) {
@@ -784,15 +879,45 @@ class YamlScraperService extends BaseScraperService {
         }
       }
 
-      // Extract Movies
-      if (sceneConfig.Movies && sceneConfig.Movies.Name) {
-        const movieName = this.extractValue($, sceneConfig.Movies.Name);
+      // Extract Movies/Groups
+      const moviesConfig = sceneConfig.Movies || sceneConfig.Groups;
+      if (moviesConfig && moviesConfig.Name) {
+        console.log(`   �️ Extracting movie/group with selector: ${moviesConfig.Name}`);
+        
+        // Resolve variable references if needed
+        let nameSelector = moviesConfig.Name;
+        let urlSelector = moviesConfig.URL;
+        
+        if (scraperConfig.common && typeof nameSelector === 'string' && nameSelector.startsWith('$')) {
+          const varMatch = nameSelector.match(/^\$(\w+)(.*)/);
+          if (varMatch) {
+            const varName = '$' + varMatch[1];
+            const suffix = varMatch[2];
+            if (scraperConfig.common[varName]) {
+              nameSelector = scraperConfig.common[varName] + suffix;
+            }
+          }
+        }
+        
+        if (scraperConfig.common && typeof urlSelector === 'string' && urlSelector.startsWith('$')) {
+          const varMatch = urlSelector.match(/^\$(\w+)(.*)/);
+          if (varMatch) {
+            const varName = '$' + varMatch[1];
+            const suffix = varMatch[2];
+            if (scraperConfig.common[varName]) {
+              urlSelector = scraperConfig.common[varName] + suffix;
+            }
+          }
+        }
+        
+        const movieName = this.extractValue($, nameSelector);
+        
         if (movieName) {
           const movie = { name: movieName, url: null };
           
           // Extract movie URL if configured
-          if (sceneConfig.Movies.URL) {
-            movie.url = this.extractValue($, sceneConfig.Movies.URL);
+          if (urlSelector) {
+            movie.url = this.extractValue($, urlSelector);
             // Convert relative URL to absolute
             if (movie.url && !movie.url.startsWith('http')) {
               movie.url = this.absUrl(movie.url, url);
@@ -801,6 +926,8 @@ class YamlScraperService extends BaseScraperService {
           
           metadata.movies.push(movie);
           console.log(`   - Found movie: ${movieName}`, movie.url ? `(${movie.url})` : '');
+        } else {
+          console.log(`   ⚠️ Movie selector didn't match anything`);
         }
       }
 
@@ -1619,8 +1746,8 @@ class YamlScraperService extends BaseScraperService {
     console.log(`🎬 [${this.siteName}] Scraping movie: ${url}`);
 
     try {
-      // Check if URL matches movieByURL patterns
-      const movieScraper = this.config.movieByURL?.find(scraper => {
+      // Check if URL matches movieByURL or groupByURL patterns (groupByURL is the standard Stash term)
+      const movieScraper = (this.config.movieByURL || this.config.groupByURL)?.find(scraper => {
         return scraper.url.some(pattern => {
           const normalizedUrl = url.toLowerCase().replace(/^https?:\/\/(www\.)?/, '');
           const normalizedPattern = pattern.toLowerCase().replace(/^https?:\/\/(www\.)?/, '');
@@ -1637,11 +1764,12 @@ class YamlScraperService extends BaseScraperService {
       const scraperName = movieScraper.scraper;
       const scraperConfig = this.config.xPathScrapers[scraperName];
       
-      if (!scraperConfig || !scraperConfig.movie) {
+      // Support both 'movie' and 'group' config names
+      if (!scraperConfig || (!scraperConfig.movie && !scraperConfig.group)) {
         throw new Error(`Movie scraper configuration not found: ${scraperName}`);
       }
 
-      const movieConfig = scraperConfig.movie;
+      const movieConfig = scraperConfig.movie || scraperConfig.group;
       const metadata = {
         url: url,
         name: null,
