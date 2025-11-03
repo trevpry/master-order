@@ -24,7 +24,7 @@ sceneByURL:
       # Taken from https://www.gaynetwork.com/en/sites on 2025-05-17
       - rawhole.com/scenes/
       - sdboy.com/scenes/
-      
+      - menoboy.com/scenes/
 
 movieByURL:
   - action: scrapeXPath

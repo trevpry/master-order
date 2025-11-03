@@ -1,4 +1,4 @@
-name: GayNetwork
+name: GayPornMegaSites
 performerByURL:
   - action: scrapeXPath
     scraper: sceneScraper
@@ -22,48 +22,9 @@ sceneByURL:
     scraper: sceneScraper
     url:
       # Taken from https://www.gaynetwork.com/en/sites on 2025-05-17
-      - adamjacques.fr/en/videos/detail/
-      - alphamales.com/en/videos/detail/
-      - andolinixxl.com/en/videos/detail/
-      - attackboys.com/en/videos/detail/
-      - berryboys.fr/en/videos/detail/
-      - bolatino.com/en/videos/detail/
-      - bravofucker.com/en/videos/detail/
-      - brett-tyler.com/en/videos/detail/
-      - bulldogxxx.com/en/videos/detail/
-      - cadinot.fr/en/videos/detail/
-      - cazzofilm.com/en/videos/detail/
-      - citebeur.com/en/videos/detail/
-      - clairprod.com/en/videos/detail/
-      - cocksuckerprod.com/en/videos/detail/
-      - crunchboy.com/en/videos/detail/
-      - darkcruising.com/en/videos/detail/
-      - enzorimenez.com/en/videos/detail/
-      - eurocreme.com/en/videos/detail/
-      - frenchporn.fr/en/videos/detail/
-      - gayarabclub.com/en/videos/detail/
-      - gayfrenchkiss.fr/en/videos/detail/
-      - gaynetwork.com/en/videos/detail/
-      - hardkinks.com/en/videos/detail/
-      - harlemsex.com/en/videos/detail/
-      - hotcast.fr/en/videos/detail/
-      - jessroyan.com/en/videos/detail/
-      - jnrc.fr/en/videos/detail/
-      - kinkytwink.com/en/videos/detail/
-      - mackstudio.com/en/videos/detail/
-      - maxence-angel.com/en/videos/detail/
-      - menoboy.com/en/videos/detail/
-      - mika-ayden.com/en/videos/detail/
-      - militarygayxxx.com/en/videos/detail/
-      - mistermale.com/en/videos/detail/
-      - philippwants.com/en/videos/detail/
-      - rawfuck.com/en/videos/detail/
-      - ridleydovarez.com/en/videos/detail/
-      - sketboy.com/en/videos/detail/
-      - universblack.com/en/videos/detail/
-      - viktor-rom.com/en/videos/detail/
-      - vintagegaymovies.com/en/videos/detail/
-      - wurstfilm.com/en/videos/detail/
+      - rawhole.com/scenes/
+      - sdboy.com/scenes/
+      
 
 movieByURL:
   - action: scrapeXPath
@@ -114,8 +75,8 @@ movieByURL:
 xPathScrapers:
   sceneScraper:
     scene:
-      Title: //h1
-      Details: //h2
+      Title: //div[@class="product-page vid-block"]//h1/text()
+      Details: //div[@class="description"]/text()
       URL: &url //link[@rel="alternate" and hreflang="en"]/@href
       # Date: &date
       #   selector: //script[@type="application/ld+json"]/text()
@@ -124,31 +85,19 @@ xPathScrapers:
       #         - regex: .*"datePublished"\s*:\s*"([^"]+)".*
       #           with: $1
       Image:
-        selector: //img[@class="embed-responsive-item bg-light border-border-dark obj-adapt "]/@src
+        selector: //video/@poster
       Studio:
-        Name: //span[@class="h95 text-uppercase"]/text()
-      Movies:
-        Name:
-          selector: //a[@class="btn btn-sm btn-link mr-1 p-0"]/h3/text()
-          postProcess:
-            - replace:
-                - regex: DVD:\s*
-                  with:
-        URL:
-          selector: //a[@class="btn btn-sm btn-link mr-1 p-0"]/@href
-        FrontImage:
-          selector: //div[@class="row mb-4 px-0"]//a[h3[i[contains(@class, "fa-scrubber")]]]/@href | //link[//div[@class="row mb-4 px-0"]//a[h3[i[contains(@class, "fa-scrubber")]]]/@href and @rel="alternate" and @hreflang="en"]/@href
-          concat: __SEPARATOR__
-          postProcess:
-            - replace:
-                - regex: (.*)__SEPARATOR__(https:\/\/[^\/]*)\/.*
-                  with: $2$1
-            - subScraper: &dvdCover //div[@class="px-0 pt-4 col-sm-8 col-lg-3 px-lg-2 align-items-center"]//img/@src
+        Name: //a[@class="site-logo"]/img/@alt
       Performers:
         Name: //div[contains(@class, "text-terciary") and contains(@class, "text-truncate")]
         URL: //div[@class="mt-4"]//a[contains(@class, "h100")]/@href
       Tags:
-        Name: //h3[@class="h120"]
+        Name: 
+          selector: //li[@class="list-group-item clearfix cat"]/a/text()
+          postProcess:
+          - replace:
+              - regex: "#"
+                with: ""
   movieScraper:
     movie:
       Title: 

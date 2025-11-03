@@ -156,12 +156,30 @@ const CourseAIAssignment = ({
     }
 
     try {
+      console.log('📥 Attempting to parse imported JSON...');
       const parsedData = JSON.parse(jsonInput);
+      console.log('✅ JSON parsed successfully:', parsedData);
+      
+      // Validate the structure
+      if (!parsedData.suggestions || !Array.isArray(parsedData.suggestions)) {
+        setError('Invalid JSON structure. Expected an object with a "suggestions" array.');
+        console.error('❌ Invalid structure:', parsedData);
+        return;
+      }
+      
+      if (parsedData.suggestions.length === 0) {
+        setError('No suggestions found in the imported JSON.');
+        return;
+      }
+      
+      console.log(`✅ Found ${parsedData.suggestions.length} suggestions`);
       setAiResponse(parsedData);
       setShowJsonImport(false);
       setShowAIResult(true);
+      setError(null);
     } catch (error) {
-      setError('Invalid JSON format. Please check your input.');
+      console.error('❌ JSON parse error:', error);
+      setError(`Invalid JSON format: ${error.message}`);
     }
   };
 
@@ -298,12 +316,23 @@ const CourseAIAssignment = ({
           <div className="bg-white rounded-lg max-w-2xl w-full max-h-[80vh] overflow-hidden">
             <div className="p-4 border-b">
               <h3 className="text-lg font-semibold">Import Course Analysis JSON</h3>
+              <p className="text-sm text-gray-600 mt-1">
+                Paste the complete JSON response from the AI analysis (must include "suggestions" array)
+              </p>
             </div>
             
             <div className="p-4">
+              {error && (
+                <div className="mb-3 p-3 bg-red-50 border border-red-200 rounded text-sm text-red-700">
+                  <strong>Error:</strong> {error}
+                </div>
+              )}
               <textarea
                 value={jsonInput}
-                onChange={(e) => setJsonInput(e.target.value)}
+                onChange={(e) => {
+                  setJsonInput(e.target.value);
+                  setError(null); // Clear error when user types
+                }}
                 placeholder="Paste your course analysis JSON here..."
                 className="w-full h-64 p-3 border border-gray-300 rounded font-mono text-sm"
               />

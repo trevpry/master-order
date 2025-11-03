@@ -222,8 +222,8 @@ const validateCustomOrderItem = [
   validateComicFields,
   validateBookFields,
   validateShortStoryFields,
-  validateWebVideoFields,
-  validatePlexKeyForMediaType
+  validateWebVideoFields
+  // Note: validatePlexKeyForMediaType removed - routes handle plexKey validation with appropriate context
 ];
 
 /**
