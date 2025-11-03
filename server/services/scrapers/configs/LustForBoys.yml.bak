@@ -1,8 +1,7 @@
-name: KBProductions
+name: LustForBoys
 sceneByURL:
   - action: scrapeXPath
     url:
-      - jizzaddiction.com/scenes
       - lustforboys.com/video
     scraper: sceneScraper
 
@@ -26,20 +25,16 @@ performerByURL:
 xPathScrapers:
   sceneScraper:
     scene: 
-      Title: //h2[@class="title"]/text()
+      Title: //div[@class="col-xs-12 col-md-6"][1]/text()
       Details: 
-        selector: //p[@class="desc"]/text()
+        selector: //div[@class="col-xs-12"]/div[@class="text-justify"]/text()
       Performers:
-        Name: //p[@class="models"]/a/text()
+        Name: //div[@class="row"]/span[@class="name"]/text()
         URL: 
-          selector: //p[@class="models"]/a/@href
-          postProcess:
-            - replace:
-                - regex: ^
-                  with: https://www.jizzaddiction.com/
+          selector: //div[@class="col-xs-6 col-sm-6 item"]/a[2]/@href
       Tags:
         Name:
-          selector: //a[@class="tag-name"]/text()
+          selector: //div[@class="tags"]/a/text()
           split: ', '
       Image: 
           selector: //video/@poster
@@ -49,7 +44,7 @@ xPathScrapers:
                   with: "http:"
       Studio:
         Name:
-          fixed: "Jizz Addiction"
+          fixed: "Lust For Boys"
 
   performerScraper:
     performer:
