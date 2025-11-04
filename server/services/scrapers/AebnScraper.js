@@ -261,6 +261,7 @@ class AebnScraper {
 
       // Match scene: either by scene number (direct) or return all scenes for backend matching
       let matchedScene = null;
+      let matchScore = 0; // Initialize match score
       
       if (sceneNumber) {
         // Direct scene selection by number (used for single scene scraping from scene detail page)
@@ -270,6 +271,7 @@ class AebnScraper {
         
         if (matchedScene) {
           console.log(`   ✓ Found scene by number: "${matchedScene.title}" (Scene ${matchedScene.number})`);
+          matchScore = 1.0; // Perfect match when scene is found by number
         } else {
           console.log(`   ⚠️ No scene found with number ${sceneNumber}`);
           console.log(`   - Available scene numbers: ${scenes.map(s => s.number).join(', ')}`);
