@@ -10,6 +10,7 @@ const ImageTagger = ({ onClose, connectionStatus }) => {
   const [allTags, setAllTags] = useState([]);
   const [selectedTags, setSelectedTags] = useState([]);
   const [searchQuery, setSearchQuery] = useState('');
+  const [showSelectedOnly, setShowSelectedOnly] = useState(false); // Filter toggle
   const [saving, setSaving] = useState(false);
   const [showCreateTag, setShowCreateTag] = useState(false);
   const [newTagName, setNewTagName] = useState('');
@@ -365,11 +366,23 @@ const ImageTagger = ({ onClose, connectionStatus }) => {
     loadNextImage();
   };
 
-  const filteredTags = searchQuery
-    ? allTags.filter(tag =>
+  const filteredTags = (() => {
+    let tags = allTags;
+    
+    // Apply search filter
+    if (searchQuery) {
+      tags = tags.filter(tag =>
         tag.name.toLowerCase().includes(searchQuery.toLowerCase())
-      )
-    : allTags;
+      );
+    }
+    
+    // Apply "show selected only" filter
+    if (showSelectedOnly) {
+      tags = tags.filter(tag => selectedTags.includes(tag.id));
+    }
+    
+    return tags;
+  })();
     
   // Performers are filtered server-side via searchPerformers()
   const filteredPerformers = allPerformers;
@@ -477,6 +490,22 @@ const ImageTagger = ({ onClose, connectionStatus }) => {
                   onChange={(e) => setSearchQuery(e.target.value)}
                   className="tag-search"
                 />
+
+                <div className="tag-filter-controls">
+                  <label className="filter-checkbox">
+                    <input
+                      type="checkbox"
+                      checked={showSelectedOnly}
+                      onChange={(e) => setShowSelectedOnly(e.target.checked)}
+                    />
+                    <span>Show selected only</span>
+                  </label>
+                  {(showSelectedOnly || searchQuery) && (
+                    <div className="filter-results-count">
+                      Showing {filteredTags.length} of {allTags.length} tags
+                    </div>
+                  )}
+                </div>
 
             {!showCreateTag ? (
               <button 
