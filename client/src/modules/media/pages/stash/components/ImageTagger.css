@@ -427,6 +427,7 @@
   flex-shrink: 0;
 }
 
+.copy-previous-button,
 .skip-button,
 .next-button {
   padding: 0.75rem 2rem;
@@ -436,6 +437,17 @@
   border-radius: 6px;
   cursor: pointer;
   transition: all 0.2s;
+}
+
+.copy-previous-button {
+  background: #3498db;
+  color: #fff;
+}
+
+.copy-previous-button:hover:not(:disabled) {
+  background: #2980b9;
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(52, 152, 219, 0.3);
 }
 
 .skip-button {
@@ -458,6 +470,7 @@
   box-shadow: 0 4px 12px rgba(22, 160, 133, 0.3);
 }
 
+.copy-previous-button:disabled,
 .skip-button:disabled,
 .next-button:disabled {
   opacity: 0.5;

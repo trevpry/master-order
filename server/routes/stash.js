@@ -12089,29 +12089,91 @@ router.get('/images', asyncHandler(async (req, res) => {
 router.get('/images/next-untagged', asyncHandler(async (req, res) => {
   console.log('📸 Getting next untagged image...');
   
-  const image = await prisma.stashImage.findFirst({
+  // First, try to get an image from the same folder as the last processed one
+  const lastProcessedImage = await prisma.stashImage.findFirst({
     where: {
-      galleryId: null, // Only standalone images
-      tagged: false // Only untagged images
-    },
-    include: {
-      performers: {
-        include: {
-          performer: true
-        }
-      },
-      tags: {
-        include: {
-          tag: true
-        }
-      },
-      studioObject: true,
-      gallery: true
+      galleryId: null,
+      tagged: true
     },
     orderBy: {
-      createdAt: 'asc' // Oldest first
+      updatedAt: 'desc' // Most recently tagged
+    },
+    select: {
+      path: true
     }
   });
+  
+  let image = null;
+  
+  if (lastProcessedImage && lastProcessedImage.path) {
+    // Extract folder path (everything before the last slash/backslash)
+    const folderPath = lastProcessedImage.path.replace(/[\\/][^\\/]+$/, '');
+    console.log(`📁 Last processed folder: ${folderPath}`);
+    
+    // Try to find an untagged image in the same folder
+    image = await prisma.stashImage.findFirst({
+      where: {
+        galleryId: null,
+        tagged: false,
+        path: {
+          startsWith: folderPath
+        }
+      },
+      include: {
+        performers: {
+          include: {
+            performer: true
+          }
+        },
+        tags: {
+          include: {
+            tag: true
+          }
+        },
+        studioObject: true,
+        gallery: true
+      },
+      orderBy: {
+        path: 'asc' // Alphabetical within folder
+      }
+    });
+    
+    if (image) {
+      console.log(`📸 Found untagged image in same folder: ${image.id}`);
+    }
+  }
+  
+  // If no image found in same folder, get the oldest untagged image from any folder
+  if (!image) {
+    image = await prisma.stashImage.findFirst({
+      where: {
+        galleryId: null,
+        tagged: false
+      },
+      include: {
+        performers: {
+          include: {
+            performer: true
+          }
+        },
+        tags: {
+          include: {
+            tag: true
+          }
+        },
+        studioObject: true,
+        gallery: true
+      },
+      orderBy: [
+        { path: 'asc' }, // Group by folder (path prefix)
+        { createdAt: 'asc' } // Then oldest first
+      ]
+    });
+    
+    if (image) {
+      console.log(`📸 Found untagged image from new folder: ${image.id}`);
+    }
+  }
   
   if (!image) {
     return res.json({
@@ -12143,7 +12205,7 @@ router.get('/images/next-untagged', asyncHandler(async (req, res) => {
     gallery: image.gallery
   };
   
-  console.log(`📸 Found untagged image: ${image.id}`);
+  console.log(`📸 Returning image: ${image.id} from ${image.path}`);
   
   res.json({
     success: true,

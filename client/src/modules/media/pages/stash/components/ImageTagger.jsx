@@ -4,6 +4,7 @@ import './ImageTagger.css';
 
 const ImageTagger = ({ onClose, connectionStatus }) => {
   const [currentImage, setCurrentImage] = useState(null);
+  const [previousImage, setPreviousImage] = useState(null); // Store previous image data
   const [loading, setLoading] = useState(false);
   const [tags, setTags] = useState([]);
   const [allTags, setAllTags] = useState([]);
@@ -161,6 +162,24 @@ const ImageTagger = ({ onClose, connectionStatus }) => {
       } else {
         return [...prev, performerId];
       }
+    });
+  };
+  
+  const handleCopyFromPrevious = () => {
+    if (!previousImage) {
+      alert('No previous image data available');
+      return;
+    }
+    
+    // Copy tags, performers, and studio from previous image
+    setSelectedTags(previousImage.tags?.map(t => t.id) || []);
+    setSelectedPerformers(previousImage.performers?.map(p => p.id) || []);
+    setSelectedStudio(previousImage.studioId || null);
+    
+    console.log('📋 Copied from previous image:', {
+      tags: previousImage.tags?.length || 0,
+      performers: previousImage.performers?.length || 0,
+      studio: previousImage.studioId ? 'Yes' : 'No'
     });
   };
   
@@ -322,6 +341,14 @@ const ImageTagger = ({ onClose, connectionStatus }) => {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ tagged: true })
+      });
+
+      // Save current image data as previous before loading next
+      setPreviousImage({
+        ...currentImage,
+        tags: allTags.filter(t => selectedTags.includes(t.id)),
+        performers: allPerformers.filter(p => selectedPerformers.includes(p.id)),
+        studioId: selectedStudio
       });
 
       // Load next image
@@ -698,6 +725,14 @@ const ImageTagger = ({ onClose, connectionStatus }) => {
             )}
           </div>
           <div className="footer-actions">
+            <button 
+              className="copy-previous-button" 
+              onClick={handleCopyFromPrevious} 
+              disabled={!previousImage || saving}
+              title={previousImage ? 'Copy tags, performers, and studio from previous image' : 'No previous image available'}
+            >
+              📋 Copy from Previous
+            </button>
             <button className="skip-button" onClick={handleSkip} disabled={saving}>
               Skip
             </button>
