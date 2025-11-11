@@ -30,18 +30,18 @@ services:
     environment:
       - NODE_ENV=production
       # Connect to PostgreSQL using Unraid IP address
-      - "DATABASE_URL=postgresql://master_order_user:secure_password_change_me@192.168.1.119:5432/master_order"
+      - "DATABASE_URL=postgresql://master_order_user:secure_password_change_me@192.168.1.122:5432/master_order"
       - "POSTGRES_PASSWORD=secure_password_change_me"
       - PORT=3001
       # Data directory for persistent uploads and user data
       - "DATA_PATH=/app/data"
       # External IP for Android API responses - UPDATE THIS WHEN IP CHANGES
-      - "EXTERNAL_IP=192.168.1.119"
+      - "EXTERNAL_IP=192.168.1.122"
       # Stash server configuration - Now managed in database settings
       # Primary URL should be configured in Eddie settings, fallbacks still available
       # - "STASH_URL=http://stash.internal:9999"
       - "STASH_URL_FALLBACK_1=http://192.168.1.154:9999"
-      - "STASH_URL_FALLBACK_2=http://192.168.1.119:9999"
+      - "STASH_URL_FALLBACK_2=http://192.168.1.122:9999"
       - "STASH_URL_FALLBACK_3=http://localhost:9999"
       - "STASH_URL_FALLBACK_4=http://host.docker.internal:9999"
       # Add your API keys and settings here or use a .env file
