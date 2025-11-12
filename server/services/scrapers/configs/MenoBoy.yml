@@ -81,6 +81,19 @@ xPathScrapers:
       #     - replace:
       #         - regex: .*"datePublished"\s*:\s*"([^"]+)".*
       #           with: $1
+      Groups:
+        Name: 
+          selector: //h3[@class="h90"]/text()
+          postProcess:
+          - replace:
+              - regex: "DVD: "
+                with: ""
+        URL: 
+          selector: //a[@class="btn btn-sm btn-link mr-1 p-0"]/@href
+          postProcess:
+          - replace:
+              - regex: ^
+                with: https://www.menoboy.com
       Image:
         selector: //div[@class="row pb-2 pl-1"]/div[1]//img/@src
       Studio:
