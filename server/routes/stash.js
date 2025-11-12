@@ -1042,7 +1042,7 @@ router.get('/scenes/:id', asyncHandler(async (req, res) => {
         career_length: sp.performer.career_length,
         tattoos: sp.performer.tattoos,
         piercings: sp.performer.piercings,
-        image: sp.performer.image,
+        image: sp.performer.image ? `/api/stash/image-proxy${sp.performer.image}` : null,
         instagram: sp.performer.instagram,
         twitter: sp.performer.twitter,
         url: sp.performer.url,

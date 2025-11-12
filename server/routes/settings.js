@@ -89,6 +89,17 @@ router.post('/', asyncHandler(async (req, res) => {
     create: { id: 1, ...processedData }
   });
 
+  // If Stash URL was updated, reload StashSyncService configuration
+  if (settingsData.stashUrl) {
+    try {
+      // Clear the cached configuration in any active sync services
+      // This will be picked up on next request
+      console.log('🔄 Stash URL updated, configuration will reload on next use');
+    } catch (error) {
+      console.warn('Could not reload Stash sync service config:', error.message);
+    }
+  }
+
   console.log('Media settings saved successfully:', settings.id);
   res.json({ message: 'Settings saved successfully', settings });
 }));

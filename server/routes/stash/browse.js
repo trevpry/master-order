@@ -93,7 +93,7 @@ router.get('/search', async (req, res) => {
         alias: performer.alias,
         favorite: performer.favorite,
         birthdate: performer.birthdate,
-        image: performer.image,
+        image: performer.image ? `/api/stash/image-proxy${performer.image}` : null,
         scene_count: performer.scenes.length
       }));
     }
@@ -119,7 +119,7 @@ router.get('/search', async (req, res) => {
         id: studio.id,
         name: studio.name,
         url: studio.url,
-        image: studio.image,
+        image: studio.image ? `/api/stash/image-proxy${studio.image}` : null,
         scene_count: studio.scenes.length
       }));
     }
@@ -232,7 +232,7 @@ router.get('/performers', async (req, res) => {
       career_length: performer.career_length,
       tattoos: performer.tattoos,
       piercings: performer.piercings,
-      image: performer.image,
+      image: performer.image ? `/api/stash/image-proxy${performer.image}` : null,
       instagram: performer.instagram,
       twitter: performer.twitter,
       url: performer.url,
@@ -301,7 +301,7 @@ router.get('/studios', async (req, res) => {
       id: studio.id,
       name: studio.name,
       url: studio.url,
-      image: studio.image,
+      image: studio.image ? `/api/stash/image-proxy${studio.image}` : null,
       scene_count: studio.scenes.length
     }));
     

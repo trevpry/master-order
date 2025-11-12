@@ -1,4 +1,4 @@
-name: GayPornMegaSites
+name: GayNetwork
 performerByURL:
   - action: scrapeXPath
     scraper: sceneScraper
@@ -24,7 +24,7 @@ sceneByURL:
       # Taken from https://www.gaynetwork.com/en/sites on 2025-05-17
       - rawhole.com/scenes/
       - sdboy.com/scenes/
-      - menoboy.com/scenes/
+      - menoboy.com/en/videos
 
 movieByURL:
   - action: scrapeXPath
@@ -124,10 +124,6 @@ xPathScrapers:
       Title: //a[@class="d-block h110 pt-3 pb-0 px-3 text-truncate text-center text-primary font-weight-bold"]/text()
       URL:
         selector: //a[@class="d-block h110 pt-3 pb-0 px-3 text-truncate text-center text-primary font-weight-bold"]/@href
-        postProcess:
-          - replace:
-              - regex: ^
-                with: https://www.hotcast.fr
       Image:
         selector: //div[@class="embed-responsive embed-responsive-16by9 rounded"]/img/@src
   performerSearchScraper:
