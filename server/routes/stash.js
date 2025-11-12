@@ -804,7 +804,7 @@ router.get('/scenes/next', asyncHandler(async (req, res) => {
         career_length: sp.performer.career_length,
         tattoos: sp.performer.tattoos,
         piercings: sp.performer.piercings,
-        image: sp.performer.image,
+        image: sp.performer.image ? `/api/stash/image-proxy${sp.performer.image}` : null,
         instagram: sp.performer.instagram,
         twitter: sp.performer.twitter,
         url: sp.performer.url
@@ -813,7 +813,7 @@ router.get('/scenes/next', asyncHandler(async (req, res) => {
         id: st.tag.id,
         name: st.tag.name,
         description: st.tag.description,
-        image: st.tag.image
+        image: st.tag.image ? `/api/stash/image-proxy${st.tag.image}` : null
       })),
       // Add scene image URL using our image proxy
       image: `/api/stash/image-proxy/scene/${randomScene.id}/screenshot?t=${Date.now()}`,
@@ -1007,7 +1007,7 @@ router.get('/scenes/:id', asyncHandler(async (req, res) => {
         id: scene.studioObject.id, 
         name: scene.studioObject.name,
         url: scene.studioObject.url,
-        image: scene.studioObject.image,
+        image: scene.studioObject.image ? `/api/stash/image-proxy${scene.studioObject.image}` : null,
         geviUrl: scene.studioObject.geviUrl,
         scraperName: scene.studioObject.scraperName,
         notes: scene.studioObject.notes

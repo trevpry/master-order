@@ -128,7 +128,7 @@ router.get('/', async (req, res) => {
         id: scene.studioObject.id, 
         name: scene.studioObject.name,
         url: scene.studioObject.url,
-        image: scene.studioObject.image
+        image: scene.studioObject.image ? `/api/stash/image-proxy${scene.studioObject.image}` : null
       } : scene.studio ? { name: scene.studio } : null,
       code: scene.code,
       director: scene.director,
@@ -359,7 +359,7 @@ router.get('/:id', async (req, res) => {
         id: scene.studioObject.id, 
         name: scene.studioObject.name,
         url: scene.studioObject.url,
-        image: scene.studioObject.image
+        image: scene.studioObject.image ? `/api/stash/image-proxy${scene.studioObject.image}` : null
       } : scene.studio ? { name: scene.studio } : null,
       code: scene.code,
       director: scene.director,
