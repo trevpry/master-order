@@ -1,0 +1,167 @@
+name: MisterMale
+performerByURL:
+  - action: scrapeXPath
+    scraper: sceneScraper
+    url:
+      # Taken from https://www.gaynetwork.com/en/sites on 2025-05-17
+      - berryboys.fr/en/modeles/detail/
+sceneByFragment:
+  - action: scrapeXPath
+    scraper: sceneScraper
+    performerSearchScraper: performerSearchScraper
+    titleSearchScraper: sceneSearchScraper
+    # Search for scenes by performers
+    # {performer} will be replaced with performer name (spaces converted to underscores, lowercased)
+    performerSearchUrl: https://www.mistermale.com/en/modeles/text-search?page=0&name={performer}
+    # Search for scenes by title - direct scene URL
+    # {title} will be replaced with scene title (spaces converted to plus signs, lowercased)
+    studioSearchUrl: https://www.mistermale.com/en/videos/text-search?page=0&name={title}
+    spacesConvertTo: +
+sceneByURL:
+  - action: scrapeXPath
+    scraper: sceneScraper
+    url:
+      # Taken from https://www.gaynetwork.com/en/sites on 2025-05-17
+      - mistermale.com/en/videos
+movieByURL:
+  - action: scrapeXPath
+    scraper: movieScraper
+    url:
+      - adamjacques.fr/en/dvd/detail/
+      - alphamales.com/en/dvd/detail/
+      - andolinixxl.com/en/dvd/detail/
+      - attackboys.com/en/dvd/detail/
+      - berryboys.fr/en/dvd/detail/
+      - bolatino.com/en/dvd/detail/
+      - bravofucker.com/en/dvd/detail/
+      - brett-tyler.com/en/dvd/detail/
+      - bulldogxxx.com/en/dvd/detail/
+      - cadinot.fr/en/dvd/detail/
+      - cazzofilm.com/en/dvd/detail/
+      - citebeur.com/en/dvd/detail/
+      - clairprod.com/en/dvd/detail/
+      - cocksuckerprod.com/en/dvd/detail/
+      - crunchboy.com/en/dvd/detail/
+      - darkcruising.com/en/dvd/detail/
+      - enzorimenez.com/en/dvd/detail/
+      - eurocreme.com/en/dvd/detail/
+      - frenchporn.fr/en/dvd/detail/
+      - gayarabclub.com/en/dvd/detail/
+      - gayfrenchkiss.fr/en/dvd/detail/
+      - gaynetwork.com/en/dvd/detail/
+      - hardkinks.com/en/dvd/detail/
+      - harlemsex.com/en/dvd/detail/
+      - hotcast.fr/en/dvd/detail/
+      - jessroyan.com/en/dvd/detail/
+      - jnrc.fr/en/dvd/detail/
+      - kinkytwink.com/en/dvd/detail/
+      - mackstudio.com/en/dvd/detail/
+      - maxence-angel.com/en/dvd/detail/
+      - menoboy.com/en/dvd/detail/
+      - mika-ayden.com/en/dvd/detail/
+      - militarygayxxx.com/en/dvd/detail/
+      - mistermale.com/en/dvd/detail/
+      - philippwants.com/en/dvd/detail/
+      - rawfuck.com/en/dvd/detail/
+      - ridleydovarez.com/en/dvd/detail/
+      - sketboy.com/en/dvd/detail/
+      - universblack.com/en/dvd/detail/
+      - viktor-rom.com/en/dvd/detail/
+      - vintagegaymovies.com/en/dvd/detail/
+      - wurstfilm.com/en/dvd/detail/
+xPathScrapers:
+  sceneScraper:
+    scene:
+      Title: //h1[@class="h5 mt-3 mb-1"]/text()
+      Details: //span[@class="lh15 opacity-70"]/text()
+      URL: &url //link[@rel="alternate" and hreflang="en"]/@href
+      # Date: &date
+      #   selector: //script[@type="application/ld+json"]/text()
+      #   postProcess:
+      #     - replace:
+      #         - regex: .*"datePublished"\s*:\s*"([^"]+)".*
+      #           with: $1
+      Groups:
+        Name: 
+          selector: //h3[@class="h90"]/text()
+          postProcess:
+          - replace:
+              - regex: "DVD: "
+                with: ""
+        URL: 
+          selector: //a[@class="btn btn-sm btn-link mr-1 p-0"]/@href
+          postProcess:
+          - replace:
+              - regex: ^
+                with: https://www.mistermale.com
+      Image:
+        selector: //div[@class="row pb-2 pl-1"]/div[1]//img/@src
+      Studio:
+        Name: 
+          fixed: "MisterMale"
+      Performers:
+        Name: //div[contains(@class, "text-terciary") and contains(@class, "text-truncate")]
+        URL: //div[@class="mt-4"]//a[contains(@class, "h100")]/@href
+      Tags:
+        Name: 
+          selector: //h3[@class="h120"]/text()
+  movieScraper:
+    movie:
+      Title: 
+        selector: //h1[@class="h4 text-dark"]/text()     
+      Image: 
+        selector: //div[@class="embed-responsive embed-responsive-2by3 mb-2"]/img/@src
+  performerScraper:
+    performer:
+      Name: 
+        selector: //div[@class="p-1 pt-2 text-center h90 text-terciary -bg-black-50 text-truncate"]/text()
+        postProcess:
+          - replace:
+              - regex: "\""
+                with: "" 
+      Gender:
+        fixed: Male       
+      URL:
+        selector: //link[@rel="canonical"]/@content
+      Image: 
+        selector: //img[@class="border embed-responsive-item bg-light border-dark obj-cover"]/@src
+  sceneSearchScraper:
+    # Search for scenes on a performer's page
+    scene:
+      Title: //a[@class="d-block h110 pt-3 pb-0 px-3 text-truncate text-center text-primary font-weight-bold"]/text()
+      URL:
+        selector: //a[@class="d-block h110 pt-3 pb-0 px-3 text-truncate text-center text-primary font-weight-bold"]/@href
+        postProcess:
+          - replace:
+              - regex: ^
+                with: https://www.mistermale.com
+      Image:
+        selector: //div[@class="embed-responsive embed-responsive-16by9 rounded"]/img/@src
+  performerSearchScraper:
+    # Search for performers - returns list of matching performers with URLs
+    performer:
+      Name: //div[@class="b-0 l-0 r-0 h6 m-2 pb-1 text-truncate text-center text-dark"]/text()
+      URL:
+        selector: //a[@class="col-xxl-2 col-xl-3 col-md-3 col-sm-4 col-6 mb-3 "]/@href 
+        postProcess:
+          - replace:
+              - regex: ^
+                with: https://www.mistermale.com
+      Image:
+        selector: //div[@class="embed-responsive embed-responsive-16by9 rounded"]/img/@src    
+      performerSceneScraper: performerSceneScraper
+  performerSceneScraper:
+    # Extract scenes from a performer's detail page
+    scene:
+      Title: //a[@class="d-block h110 pt-3 pb-0 px-3 text-truncate text-center text-primary font-weight-bold"]/text()
+      URL:
+        selector: //a[@class="d-block h110 pt-3 pb-0 px-3 text-truncate text-center text-primary font-weight-bold"]/@href
+        postProcess:
+          - replace:
+              - regex: ^
+                with: https://www.mistermale.com
+      Performers:
+        Name: //div[contains(@class, "text-terciary") and contains(@class, "text-truncate")]
+        URL: //div[@class="mt-4"]//a[contains(@class, "h100")]/@href    
+
+
