@@ -4,11 +4,27 @@ sceneByURL:
     url:
       - mundomais.com.br/en/scene/
     scraper: sceneScraper
+performerByName:
+  - action: scrapeXPath
+    queryURL: https://www.mundomais.com.br/en/models
+    scraper: performerSearchScraper
+sceneByFragment:
+  - action: scrapeXPath
+    performerSearchUrl: https://www.mundomais.com.br/en/models
+    performerSearchScraper: performerSearchScraper
+    studioSearchUrl: https://www.mundomais.com.br/en/scenes
+    titleSearchScraper: sceneSearchScraper
+    spacesConvertTo: " "
 xPathScrapers:
   sceneScraper:
     scene:
       Title: //div[@class="barra-titulo p-2 p-sm-3 ps-xxl-5"]/h3/text()
-      Details: //div[@class="descricao-video"]/p
+      Details: 
+        selector: //div[@class="descricao-video"]
+        postProcess:
+          - replace:
+              - regex: "Description"
+                with: ""
       Tags:
         Name: 
           selector: //div[@class="lista-tags"]/a/text()
@@ -35,4 +51,44 @@ xPathScrapers:
       Studio:
         Name:
           fixed: "MundoMais"
-# Last Updated February 3, 2024
+  sceneSearchScraper:
+    pagination:
+      maxPages: 30
+      startPage: 1
+      urlPattern: "{url}/page/{page}"
+    scene:
+      Title:
+        selector: //article[contains(@class, "video-thumb-post")]//button[contains(@class, "accordion-button")]
+        postProcess:
+          - trim: true
+      URL:
+        selector: //article[contains(@class, "video-thumb-post")]//header/a/@href
+        postProcess:
+          - replace:
+              - regex: ^
+                with: https://www.mundomais.com.br
+  performerSearchScraper:
+    performer:
+      Name:
+        selector: //div[@style="float:left"][@class="text-center"]/a[@class="small"]
+        postProcess:
+          - trim: true
+      URL:
+        selector: //div[@style="float:left"][@class="text-center"]/a[@class="small"]/@href
+        postProcess:
+          - replace:
+              - regex: ^
+                with: https://www.mundomais.com.br
+      performerSceneScraper: performerPageScraper
+  performerPageScraper:
+    scene:
+      Title:
+        selector: //strong/text()
+      URL:
+        selector: //div[@class="col-lg-3 col-md-4 col-sm-6 mb-4"]/a/@href
+        postProcess:
+          - replace:
+              - regex: ^
+                with: https://www.mundomais.com.br
+
+# Last Updated November 13, 2025

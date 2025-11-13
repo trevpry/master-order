@@ -784,6 +784,8 @@ class YamlScraperService extends BaseScraperService {
       if (sceneConfig.Details) {
         metadata.details = this.extractValue($, sceneConfig.Details);
         if (metadata.details) {
+          // Convert acute accent to apostrophe
+          metadata.details = metadata.details.replace(/´/g, "'");
           console.log(`   - Details: ${metadata.details}`);
         }
       }
@@ -1088,9 +1090,15 @@ class YamlScraperService extends BaseScraperService {
               // Build URL with page parameter
               let currentUrl = performerUrl;
               if (pageCount > 1) {
-                // Add page parameter to URL
-                const separator = performerUrl.includes('?') ? '&' : '?';
-                currentUrl = `${performerUrl}${separator}page=${pageCount}`;
+                // Check if custom pagination URL pattern is specified
+                if (scraperConfig.pagination?.urlPattern) {
+                  // Replace {page} placeholder with page number
+                  currentUrl = scraperConfig.pagination.urlPattern.replace('{url}', performerUrl).replace('{page}', pageCount);
+                } else {
+                  // Default: Add page parameter to URL as query string
+                  const separator = performerUrl.includes('?') ? '&' : '?';
+                  currentUrl = `${performerUrl}${separator}page=${pageCount}`;
+                }
               }
               
               console.log(`      📄 Scraping page ${pageCount}: ${currentUrl}`);
@@ -1252,10 +1260,10 @@ class YamlScraperService extends BaseScraperService {
     }
 
     const performerSearchUrlPattern = searchConfig.performerSearchUrl;
-    const allScenes = [];
+    const performerSceneSets = []; // Array of Sets, one per performer
 
     try {
-      // Stage 1: Search for each performer and collect their URLs
+      // Stage 1: For each performer, collect all their scene URLs
       for (const performer of performers) {
         // Build list of names to try: primary name + aliases
         const namesToTry = [performer.name];
@@ -1334,6 +1342,8 @@ class YamlScraperService extends BaseScraperService {
         // Stage 2: Extract scenes from performer's page
         console.log(`   🔍 Stage 2: Extracting scenes from ${performerUrlFound}`);
 
+        const performerScenes = new Map(); // Map of URL -> scene object
+
         try {
           const $ = await this.fetchHtml(performerUrlFound);
           const sceneConfig = sceneScraperConfig.scene;
@@ -1351,7 +1361,7 @@ class YamlScraperService extends BaseScraperService {
                 coverImage: null,
                 date: null,
                 studio: this.siteName,
-                performers: [] // Will store performer info from scene page
+                performers: []
               };
 
               // Extract scene details
@@ -1372,8 +1382,7 @@ class YamlScraperService extends BaseScraperService {
               }
 
               if (scene.title && scene.url) {
-                allScenes.push(scene);
-                console.log(`         Added scene: "${scene.title}" (${scene.url})`);
+                performerScenes.set(scene.url, scene);
               }
             }
           } else {
@@ -1382,81 +1391,40 @@ class YamlScraperService extends BaseScraperService {
         } catch (error) {
           console.warn(`      ⚠️ Failed to extract scenes from performer page:`, error.message);
         }
+
+        performerSceneSets.push(performerScenes);
       }
 
-      console.log(`   📊 Total scenes collected: ${allScenes.length}`);
+      console.log(`   📊 Collected scenes for ${performerSceneSets.length} performer(s)`);
 
-      // Stage 3: For each scene, scrape the scene page to get full performer list
-      // Then filter to scenes that contain ALL original performers
-      console.log(`   🔍 Stage 3: Filtering scenes by performers`);
+      // Stage 3: Find scenes that appear in ALL performer lists (intersection)
+      console.log(`   🔍 Stage 3: Finding scenes with ALL performers`);
 
-      const validScenes = [];
-      const sceneConfig = sceneScraperConfig.scene;
+      if (performerSceneSets.length === 0) {
+        console.log(`   ⚠️  No performers found`);
+        return [];
+      }
 
-      for (const scene of allScenes) {
-        try {
-          const $ = await this.fetchHtml(scene.url);
-          
-          // Extract performers from scene page
-          const scenePerformerNames = [];
-          if (sceneConfig.Performers && sceneConfig.Performers.Name) {
-            const performerElements = this.extractArrayElements($, sceneConfig.Performers.Name);
-            console.log(`      DEBUG: Found ${performerElements.length} performer elements for scene "${scene.title}"`);
-            console.log(`      DEBUG: Performers config:`, JSON.stringify(sceneConfig.Performers.Name));
-            
-            // Extract actual text values for each performer
-            for (let i = 0; i < performerElements.length; i++) {
-              const performerName = this.extractValueAtIndex($, sceneConfig.Performers.Name, i);
-              console.log(`      DEBUG: Performer ${i}: "${performerName}"`);
-              if (performerName) {
-                scenePerformerNames.push(performerName.toLowerCase().trim());
-              }
-            }
-          } else {
-            console.log(`      DEBUG: No Performers config found in sceneConfig`);
+      // Start with the first performer's scenes
+      const commonScenes = new Map(performerSceneSets[0]);
+
+      // Keep only scenes that appear in all other performer sets
+      for (let i = 1; i < performerSceneSets.length; i++) {
+        const performerScenes = performerSceneSets[i];
+        const performerUrls = new Set(performerScenes.keys());
+
+        // Remove scenes that aren't in this performer's list
+        for (const [url, scene] of commonScenes) {
+          if (!performerUrls.has(url)) {
+            commonScenes.delete(url);
           }
-
-          console.log(`      Scene "${scene.title}": ${scenePerformerNames.length} performer(s)`);
-
-          // Check if ALL original performers are in this scene
-          const allPerformersMatch = performers.every(performer => {
-            const performerNameLower = performer.name.toLowerCase();
-            const performerAliases = performer.alias 
-              ? performer.alias.split(',').map(a => a.trim().toLowerCase())
-              : [];
-            
-            // Check if performer name or any alias matches any scene performer
-            return scenePerformerNames.some(scenePerfName => {
-              return scenePerfName === performerNameLower || 
-                     performerAliases.some(alias => scenePerfName === alias);
-            });
-          });
-
-          if (allPerformersMatch) {
-            scene.performers = scenePerformerNames;
-            validScenes.push(scene);
-            console.log(`      ✓ Scene matches ALL performers`);
-          } else {
-            console.log(`      ✗ Scene missing some performers`);
-          }
-        } catch (error) {
-          console.warn(`      ⚠️ Failed to check performers for scene "${scene.title}":`, error.message);
         }
       }
 
-      // Deduplicate by URL
-      const uniqueScenes = [];
-      const seenUrls = new Set();
-      validScenes.forEach(scene => {
-        if (!seenUrls.has(scene.url)) {
-          seenUrls.add(scene.url);
-          uniqueScenes.push(scene);
-        }
-      });
+      const validScenes = Array.from(commonScenes.values());
+      console.log(`   ✅ Found ${validScenes.length} scene(s) with ALL ${performers.length} performer(s)`);
 
-      console.log(`   ✅ Found ${uniqueScenes.length} scene(s) with ALL ${performers.length} performer(s)`);
-
-      return uniqueScenes.map(scene => ({
+      return validScenes.map(scene => ({
         url: scene.url,
         title: scene.title,
         date: scene.date,
@@ -1606,9 +1574,15 @@ class YamlScraperService extends BaseScraperService {
         // Build URL with page parameter
         let currentUrl = searchUrl;
         if (pageCount > 1) {
-          // Add page parameter to URL
-          const separator = searchUrl.includes('?') ? '&' : '?';
-          currentUrl = `${searchUrl}${separator}page=${pageCount}`;
+          // Check if custom pagination URL pattern is specified
+          if (scraperConfig.pagination?.urlPattern) {
+            // Replace {page} placeholder with page number
+            currentUrl = scraperConfig.pagination.urlPattern.replace('{url}', searchUrl).replace('{page}', pageCount);
+          } else {
+            // Default: Add page parameter to URL as query string
+            const separator = searchUrl.includes('?') ? '&' : '?';
+            currentUrl = `${searchUrl}${separator}page=${pageCount}`;
+          }
         }
         
         console.log(`   📄 Scraping page ${pageCount}: ${currentUrl}`);
