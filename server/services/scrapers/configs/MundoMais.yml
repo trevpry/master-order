@@ -1,0 +1,38 @@
+name: "MundoMais"
+sceneByURL:
+  - action: scrapeXPath
+    url:
+      - mundomais.com.br/en/scene/
+    scraper: sceneScraper
+xPathScrapers:
+  sceneScraper:
+    scene:
+      Title: //div[@class="barra-titulo p-2 p-sm-3 ps-xxl-5"]/h3/text()
+      Details: //div[@class="descricao-video"]/p
+      Tags:
+        Name: 
+          selector: //div[@class="lista-tags"]/a/text()
+          postProcess:
+          - replace:
+              - regex: "&nbsp;"
+                with: " "
+      Performers:
+        Name:
+          selector: //div[@class="ator-icone"]/a[@class="small text-center"]/text()
+        URL:
+          selector: //div[@class="ator-icone"]/a[@class="small text-center"]/@href
+          postProcess:
+          - replace:
+              - regex: ^
+                with: https://www.mundomais.com.br
+      Date:
+        selector : //div[@class="barra-titulo p-2 p-sm-3 ps-xxl-5"]/p/text()
+        postProcess:
+          - replace:
+              - regex: "Published on "
+                with: ""
+          - parseDate: January 2, 2006
+      Studio:
+        Name:
+          fixed: "MundoMais"
+# Last Updated February 3, 2024
