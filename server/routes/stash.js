@@ -667,6 +667,7 @@ router.get('/scenes', asyncHandler(async (req, res) => {
         id: sp.performer.id,
         performerId: sp.performerId,
         name: sp.performer.name,
+        disambiguation: sp.performer.disambiguation,
         // Include scene-specific metadata from pivot table
         notes: sp.notes,
         tags: sp.tags.map(t => ({
@@ -1269,6 +1270,56 @@ router.post('/scenes/:id/parse-filename', asyncHandler(async (req, res) => {
             });
             break;
           }
+        }
+      }
+      
+      // Check combined name + disambiguation (e.g., "Mike Jones" for name="Mike" disambiguation="Jones")
+      if (performer.disambiguation && !isMatch) {
+        const combined1 = `${performer.name} ${performer.disambiguation}`.toLowerCase();
+        const combined2 = `${performer.name} (${performer.disambiguation})`.toLowerCase();
+        const normalizedCombined1 = combined1.replace(/\s+/g, '');
+        const normalizedCombined2 = combined2.replace(/\s+/g, '');
+        
+        let disambigMatch = false;
+        let disambigScore = 0;
+        let disambigExact = false;
+        
+        if (textLower === combined1 || textLower === combined2) {
+          disambigMatch = true;
+          disambigExact = true;
+          disambigScore = 1.0;
+        } else if (textNormalized === normalizedCombined1 || textNormalized === normalizedCombined2) {
+          disambigMatch = true;
+          disambigExact = true;
+          disambigScore = 1.0;
+        } else if (textNormalized.includes(normalizedCombined1) || textNormalized.includes(normalizedCombined2)) {
+          // Check if combined name appears as consecutive words
+          const combined1Words = combined1.split(/\s+/);
+          const textWords = textLower.split(/\s+/);
+          
+          let foundConsecutive = false;
+          for (let i = 0; i <= textWords.length - combined1Words.length; i++) {
+            const slice = textWords.slice(i, i + combined1Words.length);
+            if (slice.join(' ') === combined1Words.join(' ')) {
+              foundConsecutive = true;
+              break;
+            }
+          }
+          
+          if (foundConsecutive) {
+            disambigMatch = true;
+            disambigScore = normalizedCombined1.length / textNormalized.length * 0.95;
+          }
+        }
+        
+        if (disambigMatch) {
+          matched.push({
+            performer,
+            matchedVia: 'name+disambiguation',
+            matchedText: `${performer.name} (${performer.disambiguation})`,
+            score: disambigScore,
+            isExactMatch: disambigExact
+          });
         }
       }
     }
@@ -7126,15 +7177,15 @@ router.post('/scenes/:id/smart-scrape', asyncHandler(async (req, res) => {
 
 // GET /api/stash/performers/search - Search for performers
 router.get('/performers/search', asyncHandler(async (req, res) => {
-  const { q, limit = 20 } = req.query;
+  const { q, limit } = req.query;
 
-  console.log(`🔍 [SEARCH PERFORMERS] Query: "${q}"`);
+  console.log(`🔍 [SEARCH PERFORMERS] Query: "${q}"${limit ? ` (limit: ${limit})` : ' (no limit)'}`);
 
   if (!q || q.trim().length < 2) {
     return sendSuccess(res, []);
   }
 
-  const performers = await performerSwapService.searchPerformers(q, parseInt(limit));
+  const performers = await performerSwapService.searchPerformers(q, limit ? parseInt(limit) : null);
 
   console.log(`   - Found ${performers.length} matches`);
 

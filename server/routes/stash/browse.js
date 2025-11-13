@@ -82,11 +82,34 @@ router.get('/search', async (req, res) => {
             }
           }
         },
-        take: 20,
         orderBy: { name: 'asc' }
       });
       
-      results.performers = performers.map(performer => ({
+      // Filter performers to include those where query matches "name disambiguation" or "name (disambiguation)"
+      const queryLower = query.toLowerCase().trim();
+      const matchedPerformers = performers.filter(performer => {
+        // Already matched by basic search
+        if (performer.name.toLowerCase().includes(queryLower) || 
+            performer.alias?.toLowerCase().includes(queryLower) ||
+            performer.disambiguation?.toLowerCase().includes(queryLower)) {
+          return true;
+        }
+        
+        // Check if query matches "name disambiguation" format
+        if (performer.disambiguation) {
+          const combined1 = `${performer.name} ${performer.disambiguation}`.toLowerCase();
+          const combined2 = `${performer.name} (${performer.disambiguation})`.toLowerCase();
+          
+          if (combined1.includes(queryLower) || combined2.includes(queryLower)) {
+            return true;
+          }
+        }
+        
+        return false;
+      });
+      
+      // Return ALL matched performers (no limit)
+      results.performers = matchedPerformers.map(performer => ({
         id: performer.id,
         name: performer.name,
         disambiguation: performer.disambiguation,
@@ -184,13 +207,8 @@ router.get('/performers', async (req, res) => {
       ]
     } : {};
     
-    // Get total count
-    const total = await prisma.stashPerformer.count({
-      where: searchFilter
-    });
-    
     // Get performers with related data
-    const performers = await prisma.stashPerformer.findMany({
+    const allPerformers = await prisma.stashPerformer.findMany({
       where: searchFilter,
       include: {
         tags: {
@@ -209,13 +227,43 @@ router.get('/performers', async (req, res) => {
           }
         }
       },
-      orderBy: { name: 'asc' },
-      skip: skip,
-      take: take
+      orderBy: { name: 'asc' }
     });
     
+    // Apply additional filtering for combined name + disambiguation search
+    let performers = allPerformers;
+    if (filter) {
+      const filterLower = filter.toLowerCase().trim();
+      performers = allPerformers.filter(performer => {
+        // Already matched by basic search
+        if (performer.name.toLowerCase().includes(filterLower) || 
+            performer.alias?.toLowerCase().includes(filterLower) ||
+            performer.disambiguation?.toLowerCase().includes(filterLower)) {
+          return true;
+        }
+        
+        // Check if filter matches "name disambiguation" format
+        if (performer.disambiguation) {
+          const combined1 = `${performer.name} ${performer.disambiguation}`.toLowerCase();
+          const combined2 = `${performer.name} (${performer.disambiguation})`.toLowerCase();
+          
+          if (combined1.includes(filterLower) || combined2.includes(filterLower)) {
+            return true;
+          }
+        }
+        
+        return false;
+      });
+    }
+    
+    // Get total count after filtering
+    const total = performers.length;
+    
+    // Apply pagination
+    const paginatedPerformers = performers.slice(skip, skip + take);
+    
     // Transform data to match expected format
-    const transformedPerformers = performers.map(performer => ({
+    const transformedPerformers = paginatedPerformers.map(performer => ({
       id: performer.id,
       name: performer.name,
       disambiguation: performer.disambiguation,

@@ -184,12 +184,12 @@ class PerformerSwapService {
   }
 
   /**
-   * Search for performers by name
+   * Search for performers by name, alias, or disambiguation
    * @param {string} query - Search query
-   * @param {number} limit - Maximum results to return
+   * @param {number} limit - Maximum results to return (null = no limit)
    * @returns {Promise<Array>} Array of matching performers
    */
-  async searchPerformers(query, limit = 20) {
+  async searchPerformers(query, limit = null) {
     if (!query || query.trim().length < 2) {
       return [];
     }
@@ -208,10 +208,15 @@ class PerformerSwapService {
             alias: {
               contains: query
             }
+          },
+          {
+            disambiguation: {
+              contains: query
+            }
           }
         ]
       },
-      take: limit,
+      take: limit || undefined,
       orderBy: {
         name: 'asc'
       },
@@ -229,8 +234,31 @@ class PerformerSwapService {
       }
     });
 
+    // Filter to include combined "name disambiguation" matches
+    const queryLower = query.toLowerCase().trim();
+    const filteredPerformers = performers.filter(performer => {
+      // Already matched by basic search
+      if (performer.name.toLowerCase().includes(queryLower) || 
+          performer.alias?.toLowerCase().includes(queryLower) ||
+          performer.disambiguation?.toLowerCase().includes(queryLower)) {
+        return true;
+      }
+      
+      // Check if query matches "name disambiguation" format
+      if (performer.disambiguation) {
+        const combined1 = `${performer.name} ${performer.disambiguation}`.toLowerCase();
+        const combined2 = `${performer.name} (${performer.disambiguation})`.toLowerCase();
+        
+        if (combined1.includes(queryLower) || combined2.includes(queryLower)) {
+          return true;
+        }
+      }
+      
+      return false;
+    });
+
     // Add scene_count to match expected format and improve display
-    return performers.map(p => ({
+    return filteredPerformers.map(p => ({
       id: p.id,
       name: p.name,
       alias: p.alias,

@@ -140,7 +140,8 @@ router.get('/', async (req, res) => {
       playDuration: scene.playDuration,
       performers: scene.performers.map(sp => ({
         id: sp.performer.id,
-        name: sp.performer.name
+        name: sp.performer.name,
+        disambiguation: sp.performer.disambiguation
       })),
       tags: scene.tags.map(st => ({
         id: st.tag.id,
