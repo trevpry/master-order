@@ -52,7 +52,7 @@ export default function AddPerformerModal({
       setError(null);
 
       try {
-        const response = await fetch(`${config.apiBaseUrl}/api/stash/performers/search?q=${encodeURIComponent(searchQuery)}&limit=20`);
+        const response = await fetch(`${config.apiBaseUrl}/api/stash/performers/search?q=${encodeURIComponent(searchQuery)}`);
         
         if (!response.ok) {
           throw new Error('Failed to search performers');

@@ -141,7 +141,12 @@ router.get('/', async (req, res) => {
       performers: scene.performers.map(sp => ({
         id: sp.performer.id,
         name: sp.performer.name,
-        disambiguation: sp.performer.disambiguation
+        disambiguation: sp.performer.disambiguation,
+        image: sp.performer.image 
+          ? (sp.performer.image.startsWith('http') 
+              ? `/api/stash/image-proxy/${sp.performer.image}` 
+              : `/api/stash/image-proxy${sp.performer.image}`)
+          : null
       })),
       tags: scene.tags.map(st => ({
         id: st.tag.id,
@@ -278,7 +283,11 @@ router.get('/next', async (req, res) => {
         career_length: sp.performer.career_length,
         tattoos: sp.performer.tattoos,
         piercings: sp.performer.piercings,
-        image: sp.performer.image ? `/api/stash/image-proxy${sp.performer.image}` : null,
+        image: sp.performer.image 
+          ? (sp.performer.image.startsWith('http') 
+              ? `/api/stash/image-proxy/${sp.performer.image}` 
+              : `/api/stash/image-proxy${sp.performer.image}`)
+          : null,
         instagram: sp.performer.instagram,
         twitter: sp.performer.twitter,
         url: sp.performer.url
@@ -386,7 +395,11 @@ router.get('/:id', async (req, res) => {
         career_length: sp.performer.career_length,
         tattoos: sp.performer.tattoos,
         piercings: sp.performer.piercings,
-        image: sp.performer.image ? `/api/stash/image-proxy${sp.performer.image}` : null,
+        image: sp.performer.image 
+          ? (sp.performer.image.startsWith('http') 
+              ? `/api/stash/image-proxy/${sp.performer.image}` 
+              : `/api/stash/image-proxy${sp.performer.image}`)
+          : null,
         instagram: sp.performer.instagram,
         twitter: sp.performer.twitter,
         url: sp.performer.url
