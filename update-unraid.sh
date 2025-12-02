@@ -24,7 +24,7 @@ CONTAINER_PORT="3001"
 BACKUP_DIR="$REPO_PATH/database-backups"
 
 # PostgreSQL Configuration
-POSTGRES_HOST="192.168.1.122"
+POSTGRES_HOST="192.168.1.113"
 POSTGRES_PORT="5432"
 POSTGRES_DB="master_order"
 POSTGRES_USER="master_order_user"
@@ -485,10 +485,10 @@ docker run -d \
     -e "DATABASE_URL=$DATABASE_URL" \
     -e "POSTGRES_PASSWORD=$POSTGRES_PASSWORD" \
     -e PORT=3001 \
-    -e "EXTERNAL_IP=192.168.1.122" \
+    -e "EXTERNAL_IP=192.168.1.113" \
     -e "STASH_URL=http://stash.internal:9999" \
     -e "STASH_URL_FALLBACK_1=http://192.168.1.154:9999" \
-    -e "STASH_URL_FALLBACK_2=http://192.168.1.122:9999" \
+    -e "STASH_URL_FALLBACK_2=http://192.168.1.113:9999" \
     -e "STASH_URL_FALLBACK_3=http://localhost:9999" \
     -e "STASH_URL_FALLBACK_4=http://host.docker.internal:9999" \
     $IMAGE_NAME
