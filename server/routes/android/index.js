@@ -27,6 +27,7 @@ const createStashPerformerRoutes = require('./stashPerformer');
 const createViewingSessionRoutes = require('./viewingSession');
 const createGalleryPlaylistRoutes = require('./galleryPlaylist');
 const createWeatherRoutes = require('./weather');
+const createCustomOrdersRoutes = require('./customOrders');
 
 /**
  * Create complete Android router with core modules
@@ -99,7 +100,10 @@ function createAndroidRouter(options = {}) {
   // Weather services
   router.use('/', createWeatherRoutes());
   
-  console.log('Android router: All 13 modules mounted successfully');
+  // Custom orders browsing
+  router.use('/', createCustomOrdersRoutes(prisma));
+  
+  console.log('Android router: All 14 modules mounted successfully');
   
   return router;
 }

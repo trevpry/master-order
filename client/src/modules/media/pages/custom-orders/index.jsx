@@ -42,6 +42,7 @@ import WebVideoFormModal from './components/modals/WebVideoFormModal';
 import EpisodeFormModal from './components/modals/EpisodeFormModal';
 import BulkImportFormModal from './components/modals/BulkImportFormModal';
 import DetailedBookFormModal from './components/modals/DetailedBookFormModal';
+import GameFormModal from './components/modals/GameFormModal';
 
 // Utility imports
 import {
@@ -119,6 +120,12 @@ function CustomOrders() {
     url: '',
     description: ''
   });
+  
+  // Video Game Form state
+  const [showGameForm, setShowGameForm] = useState(false);
+  const [gameSearchQuery, setGameSearchQuery] = useState('');
+  const [gameSearchResults, setGameSearchResults] = useState([]);
+  const [gameSearchLoading, setGameSearchLoading] = useState(false);
   
   // Drag and Drop state
   const [draggedItem, setDraggedItem] = useState(null);
@@ -3054,7 +3061,73 @@ function CustomOrders() {
       console.error('Error selecting book:', error);
       setMessage('Error selecting book. Please try again.');
     }
-  };const handleSearchComics = async (e) => {
+  };
+
+  // Video Game handlers
+  const handleSearchGames = async (e) => {
+    e.preventDefault();
+    
+    if (!gameSearchQuery.trim()) {
+      setMessage('Please enter a game title to search');
+      return;
+    }
+
+    setGameSearchLoading(true);
+    setGameSearchResults([]);
+    
+    try {
+      const response = await fetch(`${config.apiBaseUrl}/api/rawg/library?search=${encodeURIComponent(gameSearchQuery.trim())}`);
+      
+      if (response.ok) {
+        const responseData = await response.json();
+        // Handle wrapped response format: { success: true, data: [...] }
+        const results = responseData.data || responseData;
+        setGameSearchResults(results);
+        
+        if (results.length === 0) {
+          setMessage('No games found in your library. Try a different title or import games from RAWG first.');
+        }
+      } else {
+        setMessage('Error searching for games. Please try again.');
+        setGameSearchResults([]);
+      }
+    } catch (error) {
+      console.error('Error searching games:', error);
+      setMessage('Error searching for games. Please try again.');
+      setGameSearchResults([]);
+    } finally {
+      setGameSearchLoading(false);
+    }
+  };
+
+  const handleSelectGame = async (selectedGame) => {
+    try {
+      const gameMedia = {
+        type: 'game',
+        title: selectedGame.title,
+        gameTitle: selectedGame.title,
+        gameReleaseDate: selectedGame.releaseDate || null,
+        gamePlatforms: selectedGame.platforms ? JSON.stringify(selectedGame.platforms) : null,
+        gameGenres: selectedGame.genres ? JSON.stringify(selectedGame.genres) : null,
+        gameRawgId: selectedGame.rawgId || null,
+        gameCoverUrl: selectedGame.coverUrl || null,
+        gameRating: selectedGame.rating || null,
+        originalArtworkUrl: selectedGame.coverUrl || null  // For artwork display in custom orders
+      };
+
+      const success = await handleAddMediaToOrder(viewingOrderItems.id, gameMedia);
+      if (success !== false) {
+        setShowGameForm(false);
+        setGameSearchQuery('');
+        setGameSearchResults([]);
+      }
+    } catch (error) {
+      console.error('Error selecting game:', error);
+      setMessage('Error selecting game. Please try again.');
+    }
+  };
+
+const handleSearchComics = async (e) => {
     e.preventDefault();
     
     if (!comicFormData.series.trim()) {
@@ -3360,6 +3433,7 @@ function CustomOrders() {
             setShowComicForm={setShowComicForm}
             setShowShortStoryForm={setShowShortStoryForm}
             setShowWebVideoForm={setShowWebVideoForm}
+            setShowGameForm={setShowGameForm}
             setShowBulkImportModal={setShowBulkImportModal}
             setShowCmroBulkImportModal={setShowCmroBulkImportModal}
             setMovieFormData={setMovieFormData}
@@ -3368,6 +3442,7 @@ function CustomOrders() {
             setComicFormData={setComicFormData}
             setShortStoryFormData={setShortStoryFormData}
             setWebVideoFormData={setWebVideoFormData}
+            setGameSearchQuery={setGameSearchQuery}
             setBulkImportData={setBulkImportData}
             setCmroBulkImportData={setCmroBulkImportData}
           />
@@ -3908,6 +3983,23 @@ function CustomOrders() {
           setEditingItem(null);
         }}
         onSubmit={handleAddWebVideo}
+      />
+
+      {/* Video Game Form Modal */}
+      <GameFormModal
+        show={showGameForm}
+        gameSearchLoading={gameSearchLoading}
+        gameSearchResults={gameSearchResults}
+        gameSearchQuery={gameSearchQuery}
+        setGameSearchQuery={setGameSearchQuery}
+        viewingOrderItems={viewingOrderItems}
+        onSubmit={handleSearchGames}
+        onSelectGame={handleSelectGame}
+        onClose={() => {
+          setShowGameForm(false);
+          setGameSearchQuery('');
+          setGameSearchResults([]);
+        }}
       />
 
       {/* Error Modal */}

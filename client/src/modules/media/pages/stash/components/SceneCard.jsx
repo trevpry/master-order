@@ -208,16 +208,22 @@ export default function SceneCard({ scene, onSceneClick, sceneNumber = null, onU
             </div>
           )}
           {onToggleSelect && (
-            <div style={styles.checkboxContainer} onClick={(e) => {
-              e.preventDefault();
-              e.stopPropagation();
-              onToggleSelect(scene.id);
-            }}>
+            <div 
+              style={styles.checkboxContainer} 
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                onToggleSelect(scene.id);
+              }}
+            >
               <input
                 type="checkbox"
                 checked={isSelected}
-                onChange={() => {}}
-                style={styles.checkbox}
+                readOnly
+                style={{
+                  ...styles.checkbox,
+                  pointerEvents: 'none'
+                }}
               />
             </div>
           )}

@@ -16,8 +16,11 @@ export default function ScenesPage() {
   const [watchStatusFilter, setWatchStatusFilter] = useState(searchParams.get('watched') || 'all');
   const [timeFilter, setTimeFilter] = useState(searchParams.get('time') || 'all');
   const [identificationFilter, setIdentificationFilter] = useState(searchParams.get('identification') || 'all');
+  const [studioFilter, setStudioFilter] = useState(searchParams.get('studio') || 'all');
   const [selectedScenes, setSelectedScenes] = useState([]);
   const [bulkIdentification, setBulkIdentification] = useState('Not Identified');
+  const [bulkStudioId, setBulkStudioId] = useState('');
+  const [studios, setStudios] = useState([]);
   const [pagination, setPagination] = useState({
     page: 1,
     total: 0,
@@ -30,7 +33,23 @@ export default function ScenesPage() {
 
   useEffect(() => {
     loadScenes();
-  }, [currentPage, searchQuery, sortBy, sortDirection, watchStatusFilter, timeFilter, identificationFilter]);
+  }, [currentPage, searchQuery, sortBy, sortDirection, watchStatusFilter, timeFilter, identificationFilter, studioFilter]);
+
+  useEffect(() => {
+    loadStudios();
+  }, []);
+
+  const loadStudios = async () => {
+    try {
+      const response = await fetch(`${config.apiBaseUrl}/api/stash/studios?perPage=1000`);
+      const result = await response.json();
+      if (result.success) {
+        setStudios(result.data || []);
+      }
+    } catch (err) {
+      console.error('Error loading studios:', err);
+    }
+  };
 
   const loadScenes = async () => {
     setIsLoading(true);
@@ -46,6 +65,7 @@ export default function ScenesPage() {
       if (watchStatusFilter !== 'all') params.set('watched', watchStatusFilter);
       if (timeFilter !== 'all') params.set('time', timeFilter);
       if (identificationFilter !== 'all') params.set('identification', identificationFilter);
+      if (studioFilter !== 'all') params.set('studio', studioFilter);
 
       const response = await fetch(`${config.apiBaseUrl}/api/stash/scenes?${params}`);
       const result = await response.json();
@@ -88,6 +108,7 @@ export default function ScenesPage() {
     if (updates.watched || watchStatusFilter !== 'all') params.watched = updates.watched || watchStatusFilter;
     if (updates.time || timeFilter !== 'all') params.time = updates.time || timeFilter;
     if (updates.identification || identificationFilter !== 'all') params.identification = updates.identification || identificationFilter;
+    if (updates.studio || studioFilter !== 'all') params.studio = updates.studio || studioFilter;
     setSearchParams(params);
   };
 
@@ -141,6 +162,53 @@ export default function ScenesPage() {
       }
     } catch (error) {
       console.error('Bulk identification update error:', error);
+    }
+  };
+
+  const handleBulkStudioUpdate = async () => {
+    if (selectedScenes.length === 0) {
+      alert('Please select at least one scene');
+      return;
+    }
+
+    if (!bulkStudioId) {
+      alert('Please select a studio');
+      return;
+    }
+
+    const selectedStudio = studios.find(s => s.id === bulkStudioId);
+    if (!selectedStudio) {
+      alert('Invalid studio selected');
+      return;
+    }
+
+    if (!confirm(`Add studio "${selectedStudio.name}" to ${selectedScenes.length} scene(s)?`)) {
+      return;
+    }
+
+    try {
+      const response = await fetch(`${config.apiBaseUrl}/api/stash/scenes/bulk-studio`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          sceneIds: selectedScenes,
+          studioId: bulkStudioId
+        })
+      });
+
+      const result = await response.json();
+
+      if (result.success) {
+        alert(`✅ Successfully updated ${selectedScenes.length} scene(s)`);
+        setSelectedScenes([]);
+        setBulkStudioId('');
+        loadScenes(); // Reload to show updated data
+      } else {
+        alert(`Error: ${result.error || 'Failed to update scenes'}`);
+      }
+    } catch (error) {
+      console.error('Bulk studio update error:', error);
+      alert(`Error: ${error.message}`);
     }
   };
 
@@ -258,6 +326,21 @@ export default function ScenesPage() {
             <option value="Identified and Scraped">Identified and Scraped</option>
           </select>
         </div>
+
+        <div className="filter-group">
+          <label>Studio:</label>
+          <select
+            value={studioFilter}
+            onChange={(e) => {
+              setStudioFilter(e.target.value);
+              updateParams({ studio: e.target.value, page: '1' });
+            }}
+          >
+            <option value="all">All Scenes</option>
+            <option value="with">With Studio</option>
+            <option value="without">Without Studio</option>
+          </select>
+        </div>
       </div>
 
       {/* Bulk Operations */}
@@ -296,6 +379,28 @@ export default function ScenesPage() {
                 </select>
                 <Button onClick={handleBulkIdentificationUpdate}>
                   Update {selectedScenes.length} Scene(s)
+                </Button>
+              </div>
+
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                <label>Add Studio:</label>
+                <select
+                  value={bulkStudioId}
+                  onChange={(e) => setBulkStudioId(e.target.value)}
+                  style={{ padding: '0.5rem', minWidth: '200px' }}
+                >
+                  <option value="">-- Select Studio --</option>
+                  {studios.map(studio => (
+                    <option key={studio.id} value={studio.id}>
+                      {studio.name}
+                    </option>
+                  ))}
+                </select>
+                <Button 
+                  onClick={handleBulkStudioUpdate}
+                  disabled={!bulkStudioId}
+                >
+                  Add to {selectedScenes.length} Scene(s)
                 </Button>
               </div>
             </>

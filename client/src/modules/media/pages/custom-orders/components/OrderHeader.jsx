@@ -13,6 +13,7 @@ const OrderHeader = ({
   setShowComicForm,
   setShowShortStoryForm,
   setShowWebVideoForm,
+  setShowGameForm,
   setShowBulkImportModal,
   setShowCmroBulkImportModal,
   setMovieFormData,
@@ -21,6 +22,7 @@ const OrderHeader = ({
   setComicFormData,
   setShortStoryFormData,
   setWebVideoFormData,
+  setGameSearchQuery,
   setBulkImportData,
   setCmroBulkImportData
 }) => {
@@ -110,6 +112,15 @@ const OrderHeader = ({
           className="secondary"
         >
           Add Web Video
+        </Button>
+        <Button
+          onClick={() => {
+            setShowGameForm(true);
+            setGameSearchQuery('');
+          }}
+          className="secondary"
+        >
+          🎮 Add Video Game
         </Button>
         <Button
           onClick={() => {

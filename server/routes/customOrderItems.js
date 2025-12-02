@@ -217,6 +217,19 @@ router.post('/:id/items', validateMediaTypeAndTitle, asyncHandler(async (req, re
     });
 
   console.log(`✅ Added ${mediaType} "${customOrderItem.title}" to custom order "${customOrderItem.customOrder.name}"`);
+  
+  // Trigger artwork caching asynchronously for comics, books, short stories, and episodes
+  // This ensures thumbnails display properly on the custom order page
+  if (['comic', 'book', 'shortstory', 'episode'].includes(mediaType)) {
+    const ArtworkCacheService = require('../artworkCacheService');
+    const artworkCache = new ArtworkCacheService();
+    
+    // Cache artwork asynchronously - don't wait for it to complete
+    artworkCache.ensureArtworkCached(customOrderItem).catch(error => {
+      console.warn(`Failed to cache artwork for ${mediaType} "${customOrderItem.title}":`, error.message);
+    });
+  }
+  
   res.status(201).json(customOrderItem);
 }));
 

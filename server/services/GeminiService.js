@@ -685,9 +685,22 @@ CRITICAL REQUIREMENTS:
         if (suggestion.action === 'ASSIGN_TO_EXISTING' && suggestion.existingEventTitle) {
           const matchingEvent = availableEvents.find(event => event.title === suggestion.existingEventTitle);
           if (!matchingEvent) {
-            console.warn(`⚠️ Unknown event "${suggestion.existingEventTitle}" for lecture ${suggestion.lectureNumber}, converting to CREATE_NEW_EVENT`);
-            suggestion.action = 'CREATE_NEW_EVENT';
-            suggestion.confidence = Math.max(30, suggestion.confidence - 20);
+            // Check if this event will be created by a previous suggestion in this batch
+            const willBeCreated = parsed.suggestions.slice(0, index).find(
+              s => (s.action === 'CREATE_NEW_EVENT' || s.action === 'PAIR_WITH_NEXT') && 
+                   s.newEventSuggestion?.title === suggestion.existingEventTitle
+            );
+            
+            if (willBeCreated) {
+              console.log(`✅ Event "${suggestion.existingEventTitle}" for lecture ${suggestion.lectureNumber} will be created by lecture ${willBeCreated.lectureNumber} - keeping ASSIGN_TO_EXISTING`);
+              // Keep the action as ASSIGN_TO_EXISTING but flag it for runtime resolution
+              suggestion.existingEvent = null; // Will be resolved at runtime
+              suggestion.willBeCreated = true;
+            } else {
+              console.warn(`⚠️ Unknown event "${suggestion.existingEventTitle}" for lecture ${suggestion.lectureNumber}, converting to CREATE_NEW_EVENT`);
+              suggestion.action = 'CREATE_NEW_EVENT';
+              suggestion.confidence = Math.max(30, suggestion.confidence - 20);
+            }
           } else {
             suggestion.existingEvent = matchingEvent;
           }

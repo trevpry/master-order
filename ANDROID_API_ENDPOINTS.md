@@ -1967,6 +1967,283 @@ GET /api/android/weather
 
 ---
 
+## Custom Orders Browsing Endpoints
+
+These endpoints allow the Android app to browse and play items directly from custom orders, enabling a dedicated custom orders viewing experience within the app.
+
+### 1. Get All Custom Orders
+
+**Endpoint**: `GET /api/android/custom-orders`
+
+**Description**: Retrieves a list of all custom orders with summary statistics, allowing users to browse available custom orders in the Android app.
+
+**Response Format**:
+```json
+{
+  "type": "CUSTOM_ORDERS_LIST",
+  "data": {
+    "orders": [
+      {
+        "id": 1,
+        "name": "Star Wars Canon Timeline",
+        "description": "Complete Star Wars canon content in chronological order",
+        "icon": "🌟",
+        "createdAt": "2024-01-15T10:00:00.000Z",
+        "updatedAt": "2024-01-20T15:30:00.000Z",
+        "totalItems": 150,
+        "watchedItems": 75,
+        "unwatchedItems": 75,
+        "playlistName": "Star Wars Music",
+        "playlistType": "plex",
+        "backgroundGalleryName": "Space Backgrounds"
+      },
+      {
+        "id": 2,
+        "name": "Marvel Cinematic Universe",
+        "description": "All MCU content in timeline order",
+        "icon": "🦸",
+        "createdAt": "2024-01-10T09:00:00.000Z",
+        "updatedAt": "2024-01-18T12:00:00.000Z",
+        "totalItems": 85,
+        "watchedItems": 40,
+        "unwatchedItems": 45,
+        "playlistName": "Epic Soundtracks",
+        "playlistType": "custom",
+        "backgroundGalleryName": null
+      }
+    ],
+    "totalOrders": 2
+  }
+}
+```
+
+**Response Fields**:
+- `orders`: Array of custom order objects
+  - `id`: Unique identifier for the custom order
+  - `name`: Name of the custom order
+  - `description`: Optional description text
+  - `icon`: Emoji or icon character for the order
+  - `createdAt`: ISO timestamp when order was created
+  - `updatedAt`: ISO timestamp when order was last modified
+  - `totalItems`: Total number of items in the order (excluding reference books)
+  - `watchedItems`: Number of items marked as watched/completed
+  - `unwatchedItems`: Number of unwatched items remaining
+  - `playlistName`: Name of linked Plex or custom playlist (if any)
+  - `playlistType`: Type of linked playlist (`"plex"`, `"custom"`, or `null`)
+  - `backgroundGalleryName`: Name of linked background gallery (if any)
+- `totalOrders`: Total count of custom orders
+
+**Example Usage**:
+```bash
+curl -X GET "http://localhost:3001/api/android/custom-orders"
+```
+
+---
+
+### 2. Get Custom Order Items
+
+**Endpoint**: `GET /api/android/custom-orders/:id/items`
+
+**Description**: Retrieves all items for a specific custom order with complete details needed for playback and display. This allows the Android app to show the full order content and play individual items.
+
+**URL Parameters**:
+- `id`: The custom order ID
+
+**Response Format**:
+```json
+{
+  "type": "CUSTOM_ORDER_ITEMS",
+  "data": {
+    "customOrder": {
+      "id": 1,
+      "name": "Star Wars Canon Timeline",
+      "description": "Complete Star Wars canon content in chronological order",
+      "icon": "🌟",
+      "createdAt": "2024-01-15T10:00:00.000Z",
+      "updatedAt": "2024-01-20T15:30:00.000Z",
+      "playlistName": "Star Wars Music",
+      "playlistType": "plex",
+      "backgroundGalleryName": "Space Backgrounds"
+    },
+    "items": [
+      {
+        "id": 101,
+        "customOrderId": 1,
+        "customOrderName": "Star Wars Canon Timeline",
+        "mediaType": "episode",
+        "title": "The Phantom Menace - Chapter 1",
+        "sortOrder": 0,
+        "isWatched": true,
+        "watchedAt": "2024-01-15T12:00:00.000Z",
+        "plexKey": "12345",
+        "artworkUrl": "http://localhost:3001/api/artwork/episode-1-thumb.jpg",
+        "localArtworkPath": "/app/server/artwork-cache/episode-1-thumb.jpg",
+        "originalArtworkUrl": "https://tvdb.com/image/123.jpg",
+        "seriesTitle": "Star Wars: The Clone Wars",
+        "seasonNumber": 1,
+        "episodeNumber": 1
+      },
+      {
+        "id": 102,
+        "customOrderId": 1,
+        "customOrderName": "Star Wars Canon Timeline",
+        "mediaType": "comic",
+        "title": "Star Wars (2015) #1",
+        "sortOrder": 1,
+        "isWatched": false,
+        "watchedAt": null,
+        "plexKey": "comic-star-wars-2015-1",
+        "artworkUrl": "http://localhost:3001/api/comicvine/artwork?url=https%3A%2F%2Fcomicvine.com%2Fimage.jpg",
+        "localArtworkPath": null,
+        "originalArtworkUrl": "https://comicvine.com/image.jpg",
+        "comicSeries": "Star Wars",
+        "comicYear": 2015,
+        "comicIssue": "1",
+        "comicPublisher": "Marvel Comics",
+        "comicIssueName": "Skywalker Strikes",
+        "comicDescription": "The first issue of the new series...",
+        "comicWriter": "Jason Aaron",
+        "comicCoverDate": "2015-01-14"
+      },
+      {
+        "id": 103,
+        "customOrderId": 1,
+        "customOrderName": "Star Wars Canon Timeline",
+        "mediaType": "book",
+        "title": "Ahsoka",
+        "sortOrder": 2,
+        "isWatched": false,
+        "watchedAt": null,
+        "plexKey": "book-ahsoka-e-k-johnston",
+        "artworkUrl": "http://localhost:3001/api/openlibrary/artwork?url=https%3A%2F%2Fcovers.openlibrary.org%2Fb%2Fid%2F12345-M.jpg",
+        "bookTitle": "Ahsoka",
+        "bookAuthor": "E. K. Johnston",
+        "bookYear": 2016,
+        "bookPublisher": "Disney Lucasfilm Press",
+        "bookPageCount": 336,
+        "bookCurrentPage": 0,
+        "bookPercentRead": 0,
+        "bookId": 45,
+        "hasUnifiedProgress": true
+      },
+      {
+        "id": 104,
+        "customOrderId": 1,
+        "customOrderName": "Star Wars Canon Timeline",
+        "mediaType": "webvideo",
+        "title": "Star Wars Galaxy of Adventures - Episode 1",
+        "sortOrder": 3,
+        "isWatched": false,
+        "watchedAt": null,
+        "plexKey": "webvideo-star-wars-galaxy-1",
+        "webTitle": "Star Wars Galaxy of Adventures - Episode 1",
+        "webUrl": "https://www.youtube.com/watch?v=example",
+        "webDescription": "Animated short featuring Luke Skywalker"
+      }
+    ],
+    "statistics": {
+      "totalItems": 150,
+      "watchedItems": 75,
+      "unwatchedItems": 75,
+      "progressPercentage": 50
+    }
+  }
+}
+```
+
+**Response Fields**:
+- `customOrder`: Summary information about the custom order
+  - `id`: Custom order ID
+  - `name`: Order name
+  - `description`: Order description
+  - `icon`: Order icon/emoji
+  - `createdAt`: Creation timestamp
+  - `updatedAt`: Last update timestamp
+  - `playlistName`: Linked playlist name (if any)
+  - `playlistType`: Playlist type (`"plex"`, `"custom"`, or `null`)
+  - `backgroundGalleryName`: Linked gallery name (if any)
+
+- `items`: Array of custom order items with media-type-specific fields
+  - **Common fields** (all media types):
+    - `id`: Item ID
+    - `customOrderId`: Parent custom order ID
+    - `customOrderName`: Parent custom order name
+    - `mediaType`: Type of media (`"episode"`, `"movie"`, `"comic"`, `"book"`, `"shortstory"`, `"webvideo"`, `"suborder"`)
+    - `title`: Item title
+    - `sortOrder`: Position in the order
+    - `isWatched`: Whether item has been completed
+    - `watchedAt`: Completion timestamp (if watched)
+    - `plexKey`: Plex rating key or generated identifier
+    - `artworkUrl`: Full URL to item artwork/thumbnail
+    - `localArtworkPath`: Local cached artwork path
+    - `originalArtworkUrl`: Original remote artwork URL
+  
+  - **Episode-specific fields**:
+    - `seriesTitle`: TV series name
+    - `seasonNumber`: Season number
+    - `episodeNumber`: Episode number
+  
+  - **Comic-specific fields**:
+    - `comicSeries`: Comic series name
+    - `comicYear`: Publication year
+    - `comicIssue`: Issue number
+    - `comicPublisher`: Publisher name
+    - `comicIssueName`: Issue title/name
+    - `comicDescription`: Issue description/synopsis
+    - `comicWriter`: Writer(s) name(s)
+    - `comicCoverDate`: Cover date
+  
+  - **Book-specific fields**:
+    - `bookTitle`: Book title
+    - `bookAuthor`: Author name
+    - `bookYear`: Publication year
+    - `bookPublisher`: Publisher name
+    - `bookPageCount`: Total pages
+    - `bookCurrentPage`: Current reading position
+    - `bookPercentRead`: Reading progress percentage
+    - `bookId`: Unified book system ID (if linked)
+    - `hasUnifiedProgress`: Whether book uses unified progress tracking
+  
+  - **Short story-specific fields**:
+    - `storyTitle`: Story title
+    - `storyAuthor`: Author name
+    - `storyYear`: Publication year
+    - `storyUrl`: External URL (if available)
+  
+  - **Web video-specific fields**:
+    - `webTitle`: Video title
+    - `webUrl`: Video URL (YouTube, Vimeo, etc.)
+    - `webDescription`: Video description
+  
+  - **Sub-order fields**:
+    - `referencedCustomOrderId`: ID of referenced order
+    - `referencedCustomOrder`: Object with `id`, `name`, and `icon`
+
+- `statistics`: Aggregate statistics
+  - `totalItems`: Total item count
+  - `watchedItems`: Completed item count
+  - `unwatchedItems`: Remaining item count
+  - `progressPercentage`: Overall progress (0-100)
+
+**Error Responses**:
+- `404`: Custom order not found
+- `500`: Server error
+
+**Example Usage**:
+```bash
+curl -X GET "http://localhost:3001/api/android/custom-orders/1/items"
+```
+
+**Notes**:
+- Reference books (books containing short stories) are filtered out from both endpoints
+- Artwork URLs are fully qualified and ready for direct use in image loading libraries
+- Items are returned in their sort order (as configured in the custom order)
+- For episodes with Plex keys, the app can use existing `/api/android/play-plex` endpoint
+- For web videos, use the `webUrl` field for playback
+- For books/comics, integrate with reading session endpoints (`/api/android/reading/start`)
+
+---
+
 ## Stash Integration Endpoints
 
 > **🔔 Real-Time Overlay Feature**: When the Android app requests a clip via `/api/android/stash/next`, the web application automatically displays an overlay with comprehensive clip and scene metadata. This provides real-time visibility into what content is being played on connected Android devices. See [STASH_CLIP_OVERLAY.md](./STASH_CLIP_OVERLAY.md) for technical details.

@@ -24,6 +24,15 @@ export default function StudiosPage() {
   const [primaryStudioId, setPrimaryStudioId] = useState('');
   const [isMerging, setIsMerging] = useState(false);
 
+  // Create studio state
+  const [showCreateModal, setShowCreateModal] = useState(false);
+  const [createStudioData, setCreateStudioData] = useState({
+    name: '',
+    url: '',
+    aliases: ''
+  });
+  const [isCreating, setIsCreating] = useState(false);
+
   const currentPage = parseInt(searchParams.get('page') || '1', 10);
 
   useEffect(() => {
@@ -160,6 +169,59 @@ export default function StudiosPage() {
     }
   };
 
+  // Handle create studio
+  const handleCreateStudio = async (e) => {
+    e.preventDefault();
+    
+    if (!createStudioData.name.trim()) {
+      alert('Please enter a studio name');
+      return;
+    }
+
+    setIsCreating(true);
+    try {
+      const payload = {
+        name: createStudioData.name.trim(),
+        url: createStudioData.url.trim() || null,
+        aliases: createStudioData.aliases.trim() 
+          ? createStudioData.aliases.split(',').map(a => a.trim()).filter(Boolean)
+          : []
+      };
+
+      const response = await fetch(`${config.apiBaseUrl}/api/stash/studios/create`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(payload)
+      });
+
+      const result = await response.json();
+
+      if (!result.success) {
+        throw new Error(result.error || 'Failed to create studio');
+      }
+
+      if (result.data.wasExisting) {
+        alert(`ℹ️ Studio "${createStudioData.name}" already exists in your library.`);
+      } else {
+        alert(`✅ Successfully created studio "${createStudioData.name}"!`);
+      }
+
+      // Reset form and close modal
+      setCreateStudioData({ name: '', url: '', aliases: '' });
+      setShowCreateModal(false);
+
+      // Reload studios
+      loadStudios();
+    } catch (error) {
+      console.error('Failed to create studio:', error);
+      alert(`Failed to create studio: ${error.message}`);
+    } finally {
+      setIsCreating(false);
+    }
+  };
+
   return (
     <div className="page pad studios-page">
       <div className="breadcrumb">
@@ -169,6 +231,13 @@ export default function StudiosPage() {
       <div className="header">
         <h1>🏢 Studios</h1>
         <p className="muted">Browse your studio library</p>
+      </div>
+
+      {/* Action Buttons */}
+      <div style={{ marginBottom: '1rem', display: 'flex', gap: '0.5rem' }}>
+        <Button onClick={() => setShowCreateModal(true)} className="primary">
+          ➕ Add New Studio
+        </Button>
       </div>
 
       {/* Search and Merge Controls */}
@@ -251,21 +320,33 @@ export default function StudiosPage() {
                   style={{ position: 'relative' }}
                 >
                   {/* Checkbox for selection */}
-                  <input
-                    type="checkbox"
-                    checked={selectedStudios.has(studio.id)}
-                    onChange={() => handleToggleStudio(studio.id)}
+                  <div
                     style={{
                       position: 'absolute',
                       top: '8px',
                       left: '8px',
                       width: '20px',
                       height: '20px',
-                      cursor: 'pointer',
                       zIndex: 10
                     }}
-                    onClick={(e) => e.stopPropagation()}
-                  />
+                    onClick={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      handleToggleStudio(studio.id);
+                    }}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={selectedStudios.has(studio.id)}
+                      onChange={() => {}}
+                      style={{
+                        width: '20px',
+                        height: '20px',
+                        cursor: 'pointer',
+                        pointerEvents: 'none'
+                      }}
+                    />
+                  </div>
                   
                   <Link 
                     to={`/media/stash/studios/${studio.id}`}
@@ -401,6 +482,105 @@ export default function StudiosPage() {
                 {isMerging ? 'Merging...' : 'Merge Studios'}
               </Button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Create Studio Modal */}
+      {showCreateModal && (
+        <div className="modal-overlay" onClick={() => !isCreating && setShowCreateModal(false)}>
+          <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '500px' }}>
+            <h3>➕ Add New Studio</h3>
+            
+            <form onSubmit={handleCreateStudio}>
+              {/* Studio Name */}
+              <div style={{ marginBottom: '1rem' }}>
+                <label style={{ display: 'block', fontWeight: '600', marginBottom: '8px' }}>
+                  Studio Name <span style={{ color: '#dc2626' }}>*</span>
+                </label>
+                <input
+                  type="text"
+                  value={createStudioData.name}
+                  onChange={(e) => setCreateStudioData({ ...createStudioData, name: e.target.value })}
+                  placeholder="Enter studio name..."
+                  style={{
+                    width: '100%',
+                    padding: '8px',
+                    border: '1px solid #d1d5db',
+                    borderRadius: '6px',
+                    fontSize: '14px'
+                  }}
+                  disabled={isCreating}
+                  autoFocus
+                  required
+                />
+              </div>
+
+              {/* Studio URL */}
+              <div style={{ marginBottom: '1rem' }}>
+                <label style={{ display: 'block', fontWeight: '600', marginBottom: '8px' }}>
+                  Website URL <span style={{ fontSize: '12px', fontWeight: '400', color: '#666' }}>(optional)</span>
+                </label>
+                <input
+                  type="url"
+                  value={createStudioData.url}
+                  onChange={(e) => setCreateStudioData({ ...createStudioData, url: e.target.value })}
+                  placeholder="https://..."
+                  style={{
+                    width: '100%',
+                    padding: '8px',
+                    border: '1px solid #d1d5db',
+                    borderRadius: '6px',
+                    fontSize: '14px'
+                  }}
+                  disabled={isCreating}
+                />
+              </div>
+
+              {/* Studio Aliases */}
+              <div style={{ marginBottom: '1.5rem' }}>
+                <label style={{ display: 'block', fontWeight: '600', marginBottom: '8px' }}>
+                  Aliases <span style={{ fontSize: '12px', fontWeight: '400', color: '#666' }}>(optional)</span>
+                </label>
+                <input
+                  type="text"
+                  value={createStudioData.aliases}
+                  onChange={(e) => setCreateStudioData({ ...createStudioData, aliases: e.target.value })}
+                  placeholder="Alias 1, Alias 2, Alias 3..."
+                  style={{
+                    width: '100%',
+                    padding: '8px',
+                    border: '1px solid #d1d5db',
+                    borderRadius: '6px',
+                    fontSize: '14px'
+                  }}
+                  disabled={isCreating}
+                />
+                <div style={{ fontSize: '12px', color: '#666', marginTop: '4px' }}>
+                  Separate multiple aliases with commas
+                </div>
+              </div>
+
+              <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end' }}>
+                <Button 
+                  type="button"
+                  onClick={() => {
+                    setShowCreateModal(false);
+                    setCreateStudioData({ name: '', url: '', aliases: '' });
+                  }}
+                  disabled={isCreating}
+                >
+                  Cancel
+                </Button>
+                <Button 
+                  type="submit"
+                  disabled={isCreating || !createStudioData.name.trim()}
+                  className="primary"
+                >
+                  {isCreating ? 'Creating...' : 'Create Studio'}
+                </Button>
+              </div>
+            </form>
           </div>
         </div>
       )}

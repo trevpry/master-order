@@ -92,6 +92,25 @@ function extractComicVineMetadata(comicVineDetailsJson) {
       extracted.comicCoverUrl = data.series.image.original_url;
     }
     
+    // Extract originalArtworkUrl for thumbnail display
+    // This is critical for the frontend to display thumbnails properly
+    if (data.issue?.image?.medium_url) {
+      extracted.originalArtworkUrl = data.issue.image.medium_url;
+    } else if (data.issue?.image?.small_url) {
+      extracted.originalArtworkUrl = data.issue.image.small_url;
+    } else if (data.issue?.image?.original_url) {
+      extracted.originalArtworkUrl = data.issue.image.original_url;
+    } else if (data.series?.image?.medium_url) {
+      extracted.originalArtworkUrl = data.series.image.medium_url;
+    } else if (data.series?.image?.small_url) {
+      extracted.originalArtworkUrl = data.series.image.small_url;
+    } else if (data.series?.image?.original_url) {
+      extracted.originalArtworkUrl = data.series.image.original_url;
+    } else if (extracted.comicCoverUrl) {
+      // Fallback to comicCoverUrl if no specific image URL found
+      extracted.originalArtworkUrl = extracted.comicCoverUrl;
+    }
+    
     console.log('Extracted ComicVine metadata:', extracted);
     return extracted;
   } catch (error) {

@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import { formatDuration } from '../../../../utils/timeUtils';
 import { getSceneDisplayTitle, getSceneImageUrl, formatDate } from '../../utils/stashUtils';
+import Button from '../../../../shared/components/Button';
 import StashPerformerOverlay from '../../../../components/overlays/StashPerformerOverlay';
 import PerformerSwapModal from './components/PerformerSwapModal';
 import AddPerformerModal from './components/AddPerformerModal';
@@ -85,6 +86,13 @@ export default function SceneDetail() {
   const [studioSearchQuery, setStudioSearchQuery] = useState('');
   const [selectedStudioId, setSelectedStudioId] = useState(null);
   const [isUpdatingStudio, setIsUpdatingStudio] = useState(false);
+
+  // Group/Movie search states
+  const [showGroupSearchModal, setShowGroupSearchModal] = useState(false);
+  const [groupSearchQuery, setGroupSearchQuery] = useState('');
+  const [groupSearchResults, setGroupSearchResults] = useState([]);
+  const [isSearchingGroups, setIsSearchingGroups] = useState(false);
+  const [isAddingGroup, setIsAddingGroup] = useState(false);
 
   // Fetch Stash URL from settings
   useEffect(() => {
@@ -926,6 +934,83 @@ export default function SceneDetail() {
       alert('Failed to create movie');
     } finally {
       setIsSearching(false);
+    }
+  };
+
+  // Group/Movie search handlers
+  const handleSearchGroups = async () => {
+    if (!groupSearchQuery.trim()) {
+      return;
+    }
+
+    setIsSearchingGroups(true);
+    setGroupSearchResults([]);
+
+    try {
+      const response = await fetch(`${config.apiBaseUrl}/api/stash/groups?search=${encodeURIComponent(groupSearchQuery)}&limit=20`);
+      const result = await response.json();
+
+      if (result.success) {
+        setGroupSearchResults(result.data.groups || []);
+      } else {
+        alert(`Failed to search groups: ${result.error || 'Unknown error'}`);
+      }
+    } catch (error) {
+      console.error('Error searching groups:', error);
+      alert('Failed to search groups');
+    } finally {
+      setIsSearchingGroups(false);
+    }
+  };
+
+  const handleAddGroupToScene = async (groupId, groupName) => {
+    try {
+      setIsAddingGroup(true);
+
+      // Check if scene is already in this group
+      const checkResponse = await fetch(`${config.apiBaseUrl}/api/stash/groups/${groupId}`);
+      const checkResult = await checkResponse.json();
+
+      if (checkResult.success) {
+        const group = checkResult.data;
+        const alreadyLinked = group.scenes?.some(s => s.sceneId === id);
+        
+        if (alreadyLinked) {
+          alert(`Scene is already linked to group "${groupName}"`);
+          setIsAddingGroup(false);
+          return;
+        }
+      }
+
+      // Add scene to group
+      const response = await fetch(`${config.apiBaseUrl}/api/stash/groups/${groupId}/add-scene`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          sceneId: id
+        })
+      });
+
+      const result = await response.json();
+
+      if (result.success) {
+        alert(`✅ Scene added to group "${groupName}"!`);
+        setShowGroupSearchModal(false);
+        setGroupSearchQuery('');
+        setGroupSearchResults([]);
+        
+        // Reload scene data to show the new group link
+        await loadScene();
+      } else {
+        alert(`Failed to add scene to group: ${result.error || 'Unknown error'}`);
+      }
+    } catch (error) {
+      console.error('Error adding scene to group:', error);
+      alert('Failed to add scene to group');
+    } finally {
+      setIsAddingGroup(false);
     }
   };
 
@@ -2821,56 +2906,71 @@ export default function SceneDetail() {
         </div>
 
         {/* Groups Section */}
-        {data.groups && data.groups.length > 0 && (
-          <div className="card">
-            <h3>🎬 Groups / Movies ({data.groups.length})</h3>
-            <p className="text-sm text-gray-600 mb-3">
-              This scene appears in the following groups/movies
-            </p>
-            <div className="groups-list">
-              {data.groups
-                .sort((a, b) => a.sceneIndex - b.sceneIndex)
-                .map((groupWrapper) => {
-                  const group = groupWrapper.group;
-                  return (
-                    <Link
-                      key={group.id}
-                      to={`/media/stash/groups/${group.id}`}
-                      className="group-item"
-                    >
-                      <div className="group-item-content">
-                        {group.front_image && (
-                          <div className="group-thumbnail">
-                            <img src={group.front_image} alt={group.name} />
-                          </div>
-                        )}
-                        <div className="group-info">
-                          <div className="group-title">
-                            <span className="scene-number">#{groupWrapper.sceneIndex || '?'}</span>
-                            <span className="group-name">{group.name}</span>
-                          </div>
-                          <div className="group-meta">
-                            {group.studio && (
-                              <span className="group-studio">🏢 {group.studio.name}</span>
-                            )}
-                            {group.date && (
-                              <span className="group-date">📅 {group.date}</span>
-                            )}
-                            {group.director && (
-                              <span className="group-director">🎬 {group.director}</span>
-                            )}
-                            {group.duration && (
-                              <span className="group-duration">⏱️ {formatDuration(group.duration)}</span>
-                            )}
+        <div className="card">
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+            <h3 style={{ margin: 0 }}>🎬 Groups / Movies ({data.groups?.length || 0})</h3>
+            <Button
+              onClick={() => setShowGroupSearchModal(true)}
+              variant="primary"
+              size="sm"
+            >
+              + Add Group/Movie
+            </Button>
+          </div>
+          {data.groups && data.groups.length > 0 ? (
+            <>
+              <p className="text-sm text-gray-600 mb-3">
+                This scene appears in the following groups/movies
+              </p>
+              <div className="groups-list">
+                {data.groups
+                  .sort((a, b) => a.sceneIndex - b.sceneIndex)
+                  .map((groupWrapper) => {
+                    const group = groupWrapper.group;
+                    return (
+                      <Link
+                        key={group.id}
+                        to={`/media/stash/groups/${group.id}`}
+                        className="group-item"
+                      >
+                        <div className="group-item-content">
+                          {group.front_image && (
+                            <div className="group-thumbnail">
+                              <img src={group.front_image} alt={group.name} />
+                            </div>
+                          )}
+                          <div className="group-info">
+                            <div className="group-title">
+                              <span className="scene-number">#{groupWrapper.sceneIndex || '?'}</span>
+                              <span className="group-name">{group.name}</span>
+                            </div>
+                            <div className="group-meta">
+                              {group.studio && (
+                                <span className="group-studio">🏢 {group.studio.name}</span>
+                              )}
+                              {group.date && (
+                                <span className="group-date">📅 {group.date}</span>
+                              )}
+                              {group.director && (
+                                <span className="group-director">🎬 {group.director}</span>
+                              )}
+                              {group.duration && (
+                                <span className="group-duration">⏱️ {formatDuration(group.duration)}</span>
+                              )}
+                            </div>
                           </div>
                         </div>
-                      </div>
-                    </Link>
-                  );
-                })}
-            </div>
-          </div>
-        )}
+                      </Link>
+                    );
+                  })}
+              </div>
+            </>
+          ) : (
+            <p className="text-sm text-gray-500 italic">
+              No groups/movies assigned. Click "Add Group/Movie" to add this scene to a group.
+            </p>
+          )}
+        </div>
 
         {/* Tags Section - Merged scene + performer tags */}
         {mergedTags.length > 0 && (
@@ -5003,6 +5103,134 @@ export default function SceneDetail() {
                 disabled={isUpdatingStudio}
               >
                 Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Group/Movie Search Modal */}
+      {showGroupSearchModal && (
+        <div className="modal-overlay" onClick={() => !isAddingGroup && setShowGroupSearchModal(false)}>
+          <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '800px', maxHeight: '80vh', overflow: 'auto' }}>
+            <h3>🎬 Add Group/Movie</h3>
+            
+            <div style={{ marginBottom: '1.5rem' }}>
+              <p style={{ fontSize: '0.9rem', color: '#666', marginBottom: '1rem' }}>
+                Search for a group/movie to add this scene to.
+              </p>
+              
+              <div style={{ display: 'flex', gap: '8px', marginBottom: '1rem' }}>
+                <input
+                  type="text"
+                  value={groupSearchQuery}
+                  onChange={(e) => setGroupSearchQuery(e.target.value)}
+                  onKeyPress={(e) => e.key === 'Enter' && handleSearchGroups()}
+                  placeholder="Search groups by name..."
+                  disabled={isSearchingGroups || isAddingGroup}
+                  style={{
+                    flex: 1,
+                    padding: '10px 12px',
+                    border: '1px solid #d1d5db',
+                    borderRadius: '6px',
+                    fontSize: '14px'
+                  }}
+                />
+                <Button
+                  onClick={handleSearchGroups}
+                  disabled={isSearchingGroups || isAddingGroup || !groupSearchQuery.trim()}
+                  variant="primary"
+                >
+                  {isSearchingGroups ? '🔍 Searching...' : '🔍 Search'}
+                </Button>
+              </div>
+
+              {isSearchingGroups && (
+                <div style={{ padding: '2rem', textAlign: 'center', color: '#6b7280' }}>
+                  🔍 Searching groups...
+                </div>
+              )}
+
+              {!isSearchingGroups && groupSearchResults.length > 0 && (
+                <div style={{ 
+                  maxHeight: '400px', 
+                  overflowY: 'auto', 
+                  border: '1px solid #d1d5db', 
+                  borderRadius: '6px'
+                }}>
+                  {groupSearchResults.map(group => (
+                    <div
+                      key={group.id}
+                      style={{
+                        padding: '12px',
+                        borderBottom: '1px solid #e5e7eb',
+                        display: 'flex',
+                        gap: '12px',
+                        alignItems: 'center',
+                        background: 'white'
+                      }}
+                    >
+                      {group.frontImage && (
+                        <img 
+                          src={group.frontImage} 
+                          alt={group.name}
+                          style={{
+                            width: '80px',
+                            height: '120px',
+                            objectFit: 'cover',
+                            borderRadius: '4px'
+                          }}
+                        />
+                      )}
+                      <div style={{ flex: 1 }}>
+                        <div style={{ fontWeight: '600', marginBottom: '4px' }}>{group.name}</div>
+                        <div style={{ fontSize: '0.85rem', color: '#6b7280' }}>
+                          {group.studio?.name && <span>🏢 {group.studio.name}</span>}
+                          {group.date && <span style={{ marginLeft: '8px' }}>📅 {group.date}</span>}
+                          {group.scenes?.length > 0 && (
+                            <span style={{ marginLeft: '8px' }}>
+                              🎬 {group.scenes.length} scene{group.scenes.length !== 1 ? 's' : ''}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                      <Button
+                        onClick={() => handleAddGroupToScene(group.id, group.name)}
+                        disabled={isAddingGroup}
+                        variant="primary"
+                        size="sm"
+                      >
+                        {isAddingGroup ? '⏳ Adding...' : '+ Add'}
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {!isSearchingGroups && groupSearchResults.length === 0 && groupSearchQuery && (
+                <div style={{ 
+                  padding: '2rem', 
+                  textAlign: 'center', 
+                  color: '#9ca3af',
+                  border: '1px solid #d1d5db',
+                  borderRadius: '6px'
+                }}>
+                  No groups found matching "{groupSearchQuery}"
+                </div>
+              )}
+            </div>
+
+            <div className="modal-actions">
+              <button 
+                className="btn-cancel" 
+                onClick={() => {
+                  setShowGroupSearchModal(false);
+                  setGroupSearchQuery('');
+                  setGroupSearchResults([]);
+                }}
+                disabled={isAddingGroup}
+              >
+                Close
               </button>
             </div>
           </div>

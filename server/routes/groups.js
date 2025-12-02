@@ -35,11 +35,8 @@ router.get('/', asyncHandler(async (req, res) => {
     // PostgreSQL needs mode: 'insensitive' for case-insensitive search
     const searchFilter = { contains: search };
     
-    where.OR = [
-      { name: searchFilter },
-      { synopsis: searchFilter },
-      { director: searchFilter }
-    ];
+    // Only search in name field (not synopsis or director)
+    where.name = searchFilter;
   }
 
   if (studioId) {

@@ -489,20 +489,41 @@ router.get('/scenes', asyncHandler(async (req, res) => {
     }
     
     if (studio) {
-      // Use AND to combine with other filters
-      where.AND = where.AND || [];
-      where.AND.push({
-        OR: [
-          {
-            studioObject: {
-              name: { contains: studio }
+      // Check if studio filter is for presence/absence (new filters)
+      if (studio === 'with') {
+        // Show only scenes with a studio
+        where.AND = where.AND || [];
+        where.AND.push({
+          OR: [
+            { studioObject: { isNot: null } },
+            { studio: { not: null } }
+          ]
+        });
+      } else if (studio === 'without') {
+        // Show only scenes without a studio
+        where.AND = where.AND || [];
+        where.AND.push({
+          AND: [
+            { studioObject: null },
+            { OR: [{ studio: null }, { studio: '' }] }
+          ]
+        });
+      } else {
+        // Original behavior: filter by studio name
+        where.AND = where.AND || [];
+        where.AND.push({
+          OR: [
+            {
+              studioObject: {
+                name: { contains: studio }
+              }
+            },
+            {
+              studio: { contains: studio }
             }
-          },
-          {
-            studio: { contains: studio }
-          }
-        ]
-      });
+          ]
+        });
+      }
     }
     
     if (tag) {
@@ -3080,34 +3101,43 @@ router.post('/groups/:id/add-scene', asyncHandler(async (req, res) => {
 
     // Also update in Stash via GraphQL if we have the IDs
     if (group.id && scene.id) {
+      const syncService = getActiveSyncService();
+      
+      // In Stash, we update the SCENE with its movie assignments, not the group
       const mutation = `
-        mutation UpdateGroup($input: GroupUpdateInput!) {
-          groupUpdate(input: $input) {
+        mutation SceneUpdate($input: SceneUpdateInput!) {
+          sceneUpdate(input: $input) {
             id
+            title
+            movies {
+              movie { id name }
+              scene_index
+            }
           }
         }
       `;
 
-      // First get the existing scene IDs
-      const existingScenes = await prisma.stashGroupScene.findMany({
-        where: { groupId: id },
-        include: { scene: true }
+      // Get all groups this scene is part of (including the one we just added)
+      const sceneGroups = await prisma.stashGroupScene.findMany({
+        where: { sceneId: sceneId },
+        include: { group: true }
       });
 
-      const sceneIds = existingScenes
-        .map(gs => gs.scene.id)
-        .filter(sid => sid); // Filter out nulls
+      const moviesInput = sceneGroups.map(sg => ({
+        movie_id: sg.groupId,
+        scene_index: sg.sceneIndex
+      }));
 
       const variables = {
         input: {
-          id: group.id,
-          scene_ids: sceneIds
+          id: scene.id,
+          movies: moviesInput
         }
       };
 
       try {
-        await makeStashGraphQLRequest(mutation, variables);
-        console.log('✅ Scene linked to group in Stash');
+        await syncService.makeGraphQLRequest(mutation, variables);
+        console.log('✅ Scene updated with group assignment in Stash');
       } catch (stashError) {
         console.error('⚠️  Warning: Failed to update Stash, but database was updated:', stashError.message);
         // Continue anyway since database update succeeded
@@ -3179,34 +3209,43 @@ router.delete('/groups/:groupId/scenes/:sceneId', asyncHandler(async (req, res) 
 
   // Also update in Stash via GraphQL if we have the IDs
   if (group.id && scene.id) {
+    const syncService = getActiveSyncService();
+    
+    // In Stash, we update the SCENE with its movie assignments, not the group
     const mutation = `
-      mutation UpdateGroup($input: GroupUpdateInput!) {
-        groupUpdate(input: $input) {
+      mutation SceneUpdate($input: SceneUpdateInput!) {
+        sceneUpdate(input: $input) {
           id
+          title
+          movies {
+            movie { id name }
+            scene_index
+          }
         }
       }
     `;
 
-    // Get the remaining scene IDs (after deletion)
-    const remainingScenes = await prisma.stashGroupScene.findMany({
-      where: { groupId: groupId },
-      include: { scene: true }
+    // Get remaining groups this scene is part of (after deletion)
+    const remainingGroups = await prisma.stashGroupScene.findMany({
+      where: { sceneId: sceneId },
+      include: { group: true }
     });
 
-    const sceneIds = remainingScenes
-      .map(gs => gs.scene.id)
-      .filter(sid => sid); // Filter out nulls
+    const moviesInput = remainingGroups.map(sg => ({
+      movie_id: sg.groupId,
+      scene_index: sg.sceneIndex
+    }));
 
     const variables = {
       input: {
-        id: group.id,
-        scene_ids: sceneIds
+        id: scene.id,
+        movies: moviesInput
       }
     };
 
     try {
-      await makeStashGraphQLRequest(mutation, variables);
-      console.log('✅ Scene unlinked from group in Stash');
+      await syncService.makeGraphQLRequest(mutation, variables);
+      console.log('✅ Scene updated with remaining group assignments in Stash');
     } catch (stashError) {
       console.error('⚠️  Warning: Failed to update Stash, but database was updated:', stashError.message);
       // Continue anyway since database update succeeded
@@ -7263,6 +7302,87 @@ router.put('/scenes/bulk-identification', asyncHandler(async (req, res) => {
     updated: result.count,
     identification: identification
   });
+}));
+
+// PUT /api/stash/scenes/bulk-studio - Bulk update studio for scenes
+// IMPORTANT: This must come BEFORE /scenes/:id to avoid route matching issues
+router.put('/scenes/bulk-studio', asyncHandler(async (req, res) => {
+  const { sceneIds, studioId } = req.body;
+
+  if (!Array.isArray(sceneIds) || sceneIds.length === 0) {
+    return sendBadRequest(res, 'sceneIds array is required');
+  }
+
+  if (!studioId) {
+    return sendBadRequest(res, 'studioId is required');
+  }
+
+  // Verify studio exists
+  const studio = await prisma.stashStudio.findUnique({
+    where: { id: studioId }
+  });
+
+  if (!studio) {
+    return sendBadRequest(res, 'Studio not found');
+  }
+
+  // Initialize Stash sync service if not already initialized
+  if (!stashSyncService && !stashSyncServiceOptimized) {
+    await initializeStashSyncService();
+  }
+
+  const syncService = getActiveSyncService();
+  if (!syncService) {
+    return sendServerError(res, 'Stash sync service not initialized');
+  }
+
+  try {
+    // Update each scene in Stash via GraphQL
+    const updatePromises = sceneIds.map(async (sceneId) => {
+      const mutation = `
+        mutation SceneUpdate($input: SceneUpdateInput!) {
+          sceneUpdate(input: $input) {
+            id
+            studio {
+              id
+              name
+            }
+          }
+        }
+      `;
+
+      const variables = {
+        input: {
+          id: sceneId,
+          studio_id: studioId
+        }
+      };
+
+      return syncService.makeGraphQLRequest(mutation, variables);
+    });
+
+    await Promise.all(updatePromises);
+
+    // Update local database
+    const result = await prisma.stashScene.updateMany({
+      where: {
+        id: { in: sceneIds }
+      },
+      data: {
+        studioId: studioId,
+        studio: studio.name
+      }
+    });
+
+    sendSuccess(res, {
+      updated: result.count,
+      studioId: studioId,
+      studioName: studio.name
+    });
+  } catch (error) {
+    console.error('Error updating scenes with studio:', error);
+    return sendServerError(res, `Failed to update scenes: ${error.message}`);
+  }
 }));
 
 // PUT /api/stash/scenes/:id - Update scene details

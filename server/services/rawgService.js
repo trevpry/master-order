@@ -195,9 +195,9 @@ class RawgService {
       const where = {};
       
       if (search) {
+        // Note: SQLite doesn't support mode: 'insensitive', but contains is case-insensitive by default
         where.title = {
-          contains: search,
-          mode: 'insensitive'
+          contains: search
         };
       }
       
