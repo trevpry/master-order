@@ -827,9 +827,7 @@ router.get('/scenes/next', asyncHandler(async (req, res) => {
         tattoos: sp.performer.tattoos,
         piercings: sp.performer.piercings,
         image: sp.performer.image 
-          ? (sp.performer.image.startsWith('http') 
-              ? `/api/stash/image-proxy/${sp.performer.image}` 
-              : `/api/stash/image-proxy${sp.performer.image}`)
+          ? `/api/stash/image-proxy${sp.performer.image.replace(/^https?:\/\/[^\/]+/, '')}` 
           : null,
         instagram: sp.performer.instagram,
         twitter: sp.performer.twitter,
@@ -1034,9 +1032,7 @@ router.get('/scenes/:id', asyncHandler(async (req, res) => {
         name: scene.studioObject.name,
         url: scene.studioObject.url,
         image: scene.studioObject.image 
-          ? (scene.studioObject.image.startsWith('http') 
-              ? `/api/stash/image-proxy/${scene.studioObject.image}` 
-              : `/api/stash/image-proxy${scene.studioObject.image}`)
+          ? `/api/stash/image-proxy${scene.studioObject.image.replace(/^https?:\/\/[^\/]+/, '')}` 
           : null,
         geviUrl: scene.studioObject.geviUrl,
         scraperName: scene.studioObject.scraperName,
@@ -1073,9 +1069,7 @@ router.get('/scenes/:id', asyncHandler(async (req, res) => {
         tattoos: sp.performer.tattoos,
         piercings: sp.performer.piercings,
         image: sp.performer.image 
-          ? (sp.performer.image.startsWith('http') 
-              ? `/api/stash/image-proxy/${sp.performer.image}` 
-              : `/api/stash/image-proxy${sp.performer.image}`)
+          ? `/api/stash/image-proxy${sp.performer.image.replace(/^https?:\/\/[^\/]+/, '')}` 
           : null,
         instagram: sp.performer.instagram,
         twitter: sp.performer.twitter,
@@ -1095,9 +1089,7 @@ router.get('/scenes/:id', asyncHandler(async (req, res) => {
         name: st.tag.name,
         description: st.tag.description,
         image: st.tag.image 
-          ? (st.tag.image.startsWith('http') 
-              ? `/api/stash/image-proxy/${st.tag.image}` 
-              : `/api/stash/image-proxy${st.tag.image}`)
+          ? `/api/stash/image-proxy${st.tag.image.replace(/^https?:\/\/[^\/]+/, '')}` 
           : null
       })),
       clipTags: (() => {
@@ -1111,9 +1103,7 @@ router.get('/scenes/:id', asyncHandler(async (req, res) => {
                 name: ct.tag.name,
                 description: ct.tag.description,
                 image: ct.tag.image 
-                  ? (ct.tag.image.startsWith('http') 
-                      ? `/api/stash/image-proxy/${ct.tag.image}` 
-                      : `/api/stash/image-proxy${ct.tag.image}`)
+                  ? `/api/stash/image-proxy${ct.tag.image.replace(/^https?:\/\/[^\/]+/, '')}` 
                   : null
               });
             }
@@ -9875,7 +9865,9 @@ router.get('/performers/:id', asyncHandler(async (req, res) => {
     career_length: performer.career_length,
     tattoos: performer.tattoos,
     piercings: performer.piercings,
-    image: performer.image,
+    image: performer.image 
+      ? `/api/stash/image-proxy${performer.image.replace(/^https?:\/\/[^\/]+/, '')}` 
+      : null,
     instagram: performer.instagram,
     twitter: performer.twitter,
     url: performer.url,
