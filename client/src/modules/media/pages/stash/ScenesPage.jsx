@@ -33,6 +33,21 @@ export default function ScenesPage() {
 
   const currentPage = parseInt(searchParams.get('page') || '1', 10);
 
+  // Initialize URL params on mount if they're missing
+  useEffect(() => {
+    const hasSort = searchParams.has('sort');
+    const hasDirection = searchParams.has('direction');
+    const hasPerPage = searchParams.has('perPage');
+    
+    if (!hasSort || !hasDirection || !hasPerPage) {
+      const params = Object.fromEntries(searchParams);
+      if (!hasSort) params.sort = sortBy;
+      if (!hasDirection) params.direction = sortDirection;
+      if (!hasPerPage) params.perPage = perPage.toString();
+      setSearchParams(params, { replace: true });
+    }
+  }, []);
+
   useEffect(() => {
     loadScenes();
   }, [currentPage, searchQuery, sortBy, sortDirection, watchStatusFilter, timeFilter, identificationFilter, studioFilter, perPage]);
@@ -105,8 +120,9 @@ export default function ScenesPage() {
     } else if (searchQuery) {
       params.search = searchQuery;
     }
-    if (updates.sort || sortBy !== 'date') params.sort = updates.sort || sortBy;
-    if (updates.direction || sortDirection !== 'DESC') params.direction = updates.direction || sortDirection;
+    // Always include sort and direction to persist sorting
+    params.sort = updates.sort || sortBy;
+    params.direction = updates.direction || sortDirection;
     if (updates.watched || watchStatusFilter !== 'all') params.watched = updates.watched || watchStatusFilter;
     if (updates.time || timeFilter !== 'all') params.time = updates.time || timeFilter;
     if (updates.identification || identificationFilter !== 'all') params.identification = updates.identification || identificationFilter;
@@ -235,11 +251,6 @@ export default function ScenesPage() {
     const confirmMessage = `⚠️ WARNING: You are about to delete ${selectedScenes.length} scene(s).\n\nThis will:\n• Delete the scenes from the local database\n• Delete the scenes from Stash\n• Delete the video files from disk\n• Delete all associated clips\n\nThis action CANNOT be undone!\n\nAre you absolutely sure?`;
     
     if (!confirm(confirmMessage)) {
-      return;
-    }
-
-    // Double confirmation for safety
-    if (!confirm(`Last chance! Really delete ${selectedScenes.length} scene(s) and their files?`)) {
       return;
     }
 

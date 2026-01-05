@@ -2154,7 +2154,10 @@ export default function SceneDetail() {
       }
     } catch (error) {
       console.error('Error deleting scene:', error);
-      alert('Failed to delete scene');
+      toast.error('Failed to delete scene', {
+        duration: 5000,
+        position: 'bottom-right'
+      });
     } finally {
       setIsDeleting(false);
       setShowDeleteModal(false);
@@ -2316,13 +2319,22 @@ export default function SceneDetail() {
         const sceneData = await sceneResponse.json();
         setData(sceneData);
         setShowStudioEditorModal(false);
-        alert('✅ Studio updated successfully!');
+        toast.success('Studio updated successfully', {
+          duration: 3000,
+          position: 'bottom-right'
+        });
       } else {
-        alert(`Failed to update studio: ${result.error || 'Unknown error'}`);
+        toast.error(result.error || 'Failed to update studio', {
+          duration: 5000,
+          position: 'bottom-right'
+        });
       }
     } catch (error) {
       console.error('Error updating studio:', error);
-      alert('Failed to update studio');
+      toast.error('Failed to update studio', {
+        duration: 5000,
+        position: 'bottom-right'
+      });
     } finally {
       setIsUpdatingStudio(false);
     }

@@ -610,19 +610,37 @@ router.get('/scenes', asyncHandler(async (req, res) => {
     
     // Build order by clause
     const sortOrderLower = sortOrder.toLowerCase();
-    const orderBy = {};
+    let orderBy = {};
+    
     if (sortBy === 'title') {
-      orderBy.title = sortOrderLower;
+      orderBy = [
+        { title: sortOrderLower }
+      ];
     } else if (sortBy === 'rating') {
-      orderBy.rating = sortOrderLower;
+      orderBy = [
+        { rating: sortOrderLower },
+        { date: 'desc' } // Secondary sort
+      ];
     } else if (sortBy === 'duration') {
-      orderBy.duration = sortOrderLower;
+      orderBy = [
+        { duration: sortOrderLower },
+        { date: 'desc' } // Secondary sort
+      ];
     } else if (sortBy === 'playCount') {
-      orderBy.playCount = sortOrderLower;
+      orderBy = [
+        { playCount: sortOrderLower },
+        { date: 'desc' } // Secondary sort
+      ];
     } else if (sortBy === 'created') {
-      orderBy.createdAt = sortOrderLower;
+      orderBy = [
+        { createdAt: sortOrderLower }
+      ];
     } else {
-      orderBy.date = sortOrderLower;
+      // Default: sort by date
+      orderBy = [
+        { date: sortOrderLower },
+        { createdAt: sortOrderLower } // Secondary sort for scenes without dates
+      ];
     }
     
     // Get total count for pagination
