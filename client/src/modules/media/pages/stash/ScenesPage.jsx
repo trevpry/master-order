@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
+import toast from 'react-hot-toast';
 import Button from '../../../../shared/components/Button';
 import SceneGrid from './components/SceneGrid';
 import config from '../../../../config';
@@ -21,6 +22,7 @@ export default function ScenesPage() {
   const [bulkIdentification, setBulkIdentification] = useState('Not Identified');
   const [bulkStudioId, setBulkStudioId] = useState('');
   const [studios, setStudios] = useState([]);
+  const [perPage, setPerPage] = useState(parseInt(searchParams.get('perPage') || '20', 10));
   const [pagination, setPagination] = useState({
     page: 1,
     total: 0,
@@ -33,7 +35,7 @@ export default function ScenesPage() {
 
   useEffect(() => {
     loadScenes();
-  }, [currentPage, searchQuery, sortBy, sortDirection, watchStatusFilter, timeFilter, identificationFilter, studioFilter]);
+  }, [currentPage, searchQuery, sortBy, sortDirection, watchStatusFilter, timeFilter, identificationFilter, studioFilter, perPage]);
 
   useEffect(() => {
     loadStudios();
@@ -58,7 +60,7 @@ export default function ScenesPage() {
     try {
       const params = new URLSearchParams();
       params.set('page', currentPage);
-      params.set('perPage', pagination.perPage);
+      params.set('perPage', perPage);
       params.set('sortBy', sortBy);
       params.set('sortOrder', sortDirection);
       if (searchQuery) params.set('search', searchQuery);
@@ -109,11 +111,17 @@ export default function ScenesPage() {
     if (updates.time || timeFilter !== 'all') params.time = updates.time || timeFilter;
     if (updates.identification || identificationFilter !== 'all') params.identification = updates.identification || identificationFilter;
     if (updates.studio || studioFilter !== 'all') params.studio = updates.studio || studioFilter;
+    if (updates.perPage || perPage !== 20) params.perPage = updates.perPage || perPage;
     setSearchParams(params);
   };
 
   const goToPage = (page) => {
     updateParams({ page: page.toString() });
+  };
+
+  const handlePerPageChange = (newPerPage) => {
+    setPerPage(newPerPage);
+    updateParams({ page: '1', perPage: newPerPage.toString() });
   };
 
   const toggleSceneSelection = (sceneId) => {
@@ -199,15 +207,82 @@ export default function ScenesPage() {
       const result = await response.json();
 
       if (result.success) {
-        alert(`✅ Successfully updated ${selectedScenes.length} scene(s)`);
+        toast.success(`Successfully updated ${selectedScenes.length} scene(s)`, {
+          duration: 3000,
+          position: 'bottom-right'
+        });
         setSelectedScenes([]);
         setBulkStudioId('');
         loadScenes(); // Reload to show updated data
       } else {
-        alert(`Error: ${result.error || 'Failed to update scenes'}`);
+        toast.error(result.error || 'Failed to update scenes', {
+          duration: 5000,
+          position: 'bottom-right'
+        });
       }
     } catch (error) {
       console.error('Bulk studio update error:', error);
+      alert(`Error: ${error.message}`);
+    }
+  };
+
+  const handleBulkDelete = async () => {
+    if (selectedScenes.length === 0) {
+      alert('Please select at least one scene');
+      return;
+    }
+
+    const confirmMessage = `⚠️ WARNING: You are about to delete ${selectedScenes.length} scene(s).\n\nThis will:\n• Delete the scenes from the local database\n• Delete the scenes from Stash\n• Delete the video files from disk\n• Delete all associated clips\n\nThis action CANNOT be undone!\n\nAre you absolutely sure?`;
+    
+    if (!confirm(confirmMessage)) {
+      return;
+    }
+
+    // Double confirmation for safety
+    if (!confirm(`Last chance! Really delete ${selectedScenes.length} scene(s) and their files?`)) {
+      return;
+    }
+
+    try {
+      const response = await fetch(`${config.apiBaseUrl}/api/stash/scenes/bulk-delete`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          sceneIds: selectedScenes,
+          deleteFile: true,
+          deleteGenerated: true
+        })
+      });
+
+      const result = await response.json();
+
+      if (result.success) {
+        const successCount = result.results?.filter(r => r.success).length || 0;
+        const failCount = result.results?.filter(r => !r.success).length || 0;
+        
+        if (failCount > 0) {
+          toast.error(`Partially completed: Deleted ${successCount}, Failed ${failCount}. Check console for details.`, {
+            duration: 6000,
+            position: 'bottom-right'
+          });
+          console.error('Failed deletions:', result.results.filter(r => !r.success));
+        } else {
+          toast.success(`Successfully deleted ${successCount} scene(s)`, {
+            duration: 4000,
+            position: 'bottom-right'
+          });
+        }
+        
+        setSelectedScenes([]);
+        loadScenes(); // Reload to show updated list
+      } else {
+        toast.error(result.error || 'Failed to delete scenes', {
+          duration: 5000,
+          position: 'bottom-right'
+        });
+      }
+    } catch (error) {
+      console.error('Bulk delete error:', error);
       alert(`Error: ${error.message}`);
     }
   };
@@ -341,6 +416,20 @@ export default function ScenesPage() {
             <option value="without">Without Studio</option>
           </select>
         </div>
+
+        <div className="filter-group">
+          <label>Per Page:</label>
+          <select
+            value={perPage}
+            onChange={(e) => handlePerPageChange(parseInt(e.target.value, 10))}
+          >
+            <option value="10">10</option>
+            <option value="20">20</option>
+            <option value="30">30</option>
+            <option value="50">50</option>
+            <option value="100">100</option>
+          </select>
+        </div>
       </div>
 
       {/* Bulk Operations */}
@@ -401,6 +490,20 @@ export default function ScenesPage() {
                   disabled={!bulkStudioId}
                 >
                   Add to {selectedScenes.length} Scene(s)
+                </Button>
+              </div>
+
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginLeft: 'auto' }}>
+                <Button 
+                  onClick={handleBulkDelete}
+                  style={{ 
+                    backgroundColor: '#dc2626',
+                    borderColor: '#dc2626'
+                  }}
+                  onMouseOver={(e) => e.target.style.backgroundColor = '#b91c1c'}
+                  onMouseOut={(e) => e.target.style.backgroundColor = '#dc2626'}
+                >
+                  🗑️ Delete {selectedScenes.length} Scene(s)
                 </Button>
               </div>
             </>

@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
+import toast from 'react-hot-toast';
 import config from '../../../../config';
 import '../Stash.css';
 
@@ -315,7 +316,10 @@ export default function DuplicateScenesPage() {
         throw new Error(result.error || 'Failed to merge scenes');
       }
 
-      alert('✅ Successfully merged scenes!');
+      toast.success('Successfully merged scenes', {
+        duration: 3000,
+        position: 'bottom-right'
+      });
       
       setShowSceneMergeModal(false);
       

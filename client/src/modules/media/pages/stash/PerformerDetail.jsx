@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { useParams, Link, useNavigate, useSearchParams } from 'react-router-dom';
+import toast from 'react-hot-toast';
 import config from '../../../../config';
 
 // Helper function to convert cm to feet and inches
@@ -267,11 +268,17 @@ export default function PerformerDetail() {
       setData(result.data.performer);
       
       setIsEditing(false);
-      alert('Performer updated successfully in both local database and Stash!');
+      toast.success('Performer updated successfully', {
+        duration: 3000,
+        position: 'bottom-right'
+      });
       
     } catch (error) {
       console.error('Failed to update performer:', error);
-      alert(`Failed to update performer: ${error.message}`);
+      toast.error(`Failed to update performer: ${error.message}`, {
+        duration: 5000,
+        position: 'bottom-right'
+      });
     } finally {
       setIsSaving(false);
     }
@@ -301,14 +308,20 @@ export default function PerformerDetail() {
         throw new Error(result.error || 'Failed to delete performer');
       }
       
-      alert(result.message || 'Performer deleted successfully!');
+      toast.success(result.message || 'Performer deleted successfully', {
+        duration: 3000,
+        position: 'bottom-right'
+      });
       
       // Navigate back to performers list with page number
       navigate(`/media/stash?tab=performers&page=${fromPage}`);
       
     } catch (error) {
       console.error('Failed to delete performer:', error);
-      alert(`Failed to delete performer: ${error.message}`);
+      toast.error(`Failed to delete performer: ${error.message}`, {
+        duration: 5000,
+        position: 'bottom-right'
+      });
     }
   };
 
@@ -334,10 +347,16 @@ export default function PerformerDetail() {
       
       console.log('✅ Performer synced from Stash:', result.data.message);
       
-      alert('✅ Performer synced successfully from Stash!');
+      toast.success('Performer synced successfully from Stash', {
+        duration: 3000,
+        position: 'bottom-right'
+      });
     } catch (error) {
       console.error('Failed to sync performer:', error);
-      alert(`Failed to sync performer: ${error.message}`);
+      toast.error(`Failed to sync performer: ${error.message}`, {
+        duration: 5000,
+        position: 'bottom-right'
+      });
     } finally {
       setLoading(false);
     }
@@ -440,11 +459,13 @@ export default function PerformerDetail() {
         throw new Error(result.error || 'Failed to merge performers');
       }
 
-      alert(
-        `✅ Successfully merged performer(s)!\n\n` +
-        `Main performer: ${mainPerformer.name}\n` +
-        `Scenes transferred: ${result.data.scenesTransferred || 0}\n` +
-        `${result.data.stashSyncFailed ? '\n⚠️ Warning: Stash sync had issues. Check logs.' : ''}`
+      toast.success(
+        `Successfully merged performer(s)! Main: ${mainPerformer.name}, Scenes transferred: ${result.data.scenesTransferred || 0}` +
+        `${result.data.stashSyncFailed ? ' (Warning: Stash sync had issues)' : ''}`,
+        {
+          duration: 4000,
+          position: 'bottom-right'
+        }
       );
 
       setShowMergeModal(false);

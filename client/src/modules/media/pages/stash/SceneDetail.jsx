@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
+import toast from 'react-hot-toast';
 import { formatDuration } from '../../../../utils/timeUtils';
 import { getSceneDisplayTitle, getSceneImageUrl, formatDate } from '../../utils/stashUtils';
 import Button from '../../../../shared/components/Button';
@@ -750,13 +751,19 @@ export default function SceneDetail() {
           // Continue anyway - this is not critical
         }
         
-        alert(`✅ Scene linked to movie "${movieTitle}"!`);
+        toast.success(`Scene linked to movie "${movieTitle}"`, {
+          duration: 3000,
+          position: 'bottom-right'
+        });
         setSearchResults(null); // Clear search results
         
         // Reload scene data to show the new group link
         await loadScene();
       } else {
-        alert(`Failed to fetch movie details: ${result.error || 'Unknown error'}`);
+        toast.error(result.error || 'Failed to fetch movie details', {
+          duration: 5000,
+          position: 'bottom-right'
+        });
       }
     } catch (error) {
       console.error('Error adding movie to groups:', error);
@@ -835,13 +842,19 @@ export default function SceneDetail() {
           // Continue anyway - this is not critical
         }
         
-        alert(`✅ Movie "${movieData.title}" created and scene linked!`);
+        toast.success(`Movie "${movieData.title}" created and scene linked`, {
+          duration: 3000,
+          position: 'bottom-right'
+        });
         setSearchResults(null); // Clear search results
         
         // Reload scene data to show the new group link
         await loadScene();
       } else {
-        alert(`Failed to create movie: ${result.error || 'Unknown error'}`);
+        toast.error(result.error || 'Failed to create movie', {
+          duration: 5000,
+          position: 'bottom-right'
+        });
       }
     } catch (error) {
       console.error('Error creating movie:', error);
@@ -870,11 +883,17 @@ export default function SceneDetail() {
       const result = await response.json();
 
       if (result.success) {
-        alert(`✅ Scene linked to existing movie successfully!`);
+        toast.success('Scene linked to existing movie', {
+          duration: 3000,
+          position: 'bottom-right'
+        });
         // Navigate to movie detail page
         window.location.href = `/media/stash/groups/${movieId}`;
       } else {
-        alert(`Failed to link scene to movie: ${result.error || 'Unknown error'}`);
+        toast.error(result.error || 'Failed to link scene to movie', {
+          duration: 5000,
+          position: 'bottom-right'
+        });
       }
     } catch (error) {
       console.error('Error linking scene to movie:', error);
@@ -920,11 +939,17 @@ export default function SceneDetail() {
         const linkResult = await linkResponse.json();
 
         if (linkResult.success) {
-          alert(`✅ New movie created and scene linked successfully!`);
+          toast.success('New movie created and scene linked', {
+            duration: 3000,
+            position: 'bottom-right'
+          });
           // Navigate to new movie detail page
           window.location.href = `/media/stash/groups/${movieId}`;
         } else {
-          alert(`Movie created but failed to link scene: ${linkResult.error || 'Unknown error'}`);
+          toast.warning(`Movie created but failed to link scene: ${linkResult.error || 'Unknown error'}`, {
+            duration: 5000,
+            position: 'bottom-right'
+          });
         }
       } else {
         alert(`Failed to create movie: ${result.error || 'Unknown error'}`);
@@ -996,7 +1021,10 @@ export default function SceneDetail() {
       const result = await response.json();
 
       if (result.success) {
-        alert(`✅ Scene added to group "${groupName}"!`);
+        toast.success(`Scene added to group "${groupName}"`, {
+          duration: 3000,
+          position: 'bottom-right'
+        });
         setShowGroupSearchModal(false);
         setGroupSearchQuery('');
         setGroupSearchResults([]);
@@ -1392,9 +1420,15 @@ export default function SceneDetail() {
           }
         }));
 
-        alert(`✅ Performer "${performerName}" created successfully!`);
+        toast.success(`Performer "${performerName}" created`, {
+          duration: 3000,
+          position: 'bottom-right'
+        });
       } else {
-        alert(`Failed to create performer: ${result.error || 'Unknown error'}`);
+        toast.error(result.error || 'Failed to create performer', {
+          duration: 5000,
+          position: 'bottom-right'
+        });
       }
     } catch (error) {
       console.error('Error creating performer:', error);
@@ -1490,9 +1524,15 @@ export default function SceneDetail() {
           }
         }));
 
-        alert(`✅ Performer "${performerName}" created successfully!`);
+        toast.success(`Performer "${performerName}" created`, {
+          duration: 3000,
+          position: 'bottom-right'
+        });
       } else {
-        alert(`Failed to create performer: ${createResult.error || 'Unknown error'}`);
+        toast.error(createResult.error || 'Failed to create performer', {
+          duration: 5000,
+          position: 'bottom-right'
+        });
       }
     } catch (error) {
       console.error('Error creating performer:', error);
@@ -1557,9 +1597,15 @@ export default function SceneDetail() {
           }
         }));
 
-        alert(`✅ Tag "${tagName}" created successfully!`);
+        toast.success(`Tag "${tagName}" created`, {
+          duration: 3000,
+          position: 'bottom-right'
+        });
       } else {
-        alert(`Failed to create tag: ${createResult.error || 'Unknown error'}`);
+        toast.error(createResult.error || 'Failed to create tag', {
+          duration: 5000,
+          position: 'bottom-right'
+        });
       }
     } catch (error) {
       console.error('Error creating tag:', error);
@@ -1623,9 +1669,15 @@ export default function SceneDetail() {
           }
         }));
 
-        alert(`✅ Movie "${scrapeData.scraped.title}" created and scene linked with index ${sceneNumber || 'auto'}!`);
+        toast.success(`Movie "${scrapeData.scraped.title}" created and scene linked with index ${sceneNumber || 'auto'}`, {
+          duration: 3000,
+          position: 'bottom-right'
+        });
       } else {
-        alert(`Failed to create movie: ${createResult.error || 'Unknown error'}`);
+        toast.error(createResult.error || 'Failed to create movie', {
+          duration: 5000,
+          position: 'bottom-right'
+        });
       }
     } catch (error) {
       console.error('Error creating movie from AEBN:', error);
@@ -1687,9 +1739,15 @@ export default function SceneDetail() {
             }
           }));
 
-          alert(`✅ Movie "${group.name}" created successfully!`);
+          toast.success(`Movie "${group.name}" created`, {
+            duration: 3000,
+            position: 'bottom-right'
+          });
         } else {
-          alert(`Failed to create movie: ${createResult.error || 'Unknown error'}`);
+          toast.error(createResult.error || 'Failed to create movie', {
+            duration: 5000,
+            position: 'bottom-right'
+          });
         }
       } catch (error) {
         console.error('Error creating AEBN movie:', error);
@@ -1805,9 +1863,15 @@ export default function SceneDetail() {
           }
         }));
 
-        alert(`✅ Group "${movie.name || group.name}" created successfully!`);
+        toast.success(`Group "${movie.name || group.name}" created`, {
+          duration: 3000,
+          position: 'bottom-right'
+        });
       } else {
-        alert(`Failed to create group: ${createResult.error || 'Unknown error'}`);
+        toast.error(createResult.error || 'Failed to create group', {
+          duration: 5000,
+          position: 'bottom-right'
+        });
       }
     } catch (error) {
       console.error('Error creating group:', error);
@@ -1849,10 +1913,16 @@ export default function SceneDetail() {
         performers: result.data.performers
       }));
 
-      alert(`${performerName} removed from scene successfully!`);
+      toast.success(`${performerName} removed from scene`, {
+        duration: 3000,
+        position: 'bottom-right'
+      });
     } catch (error) {
       console.error('Error removing performer:', error);
-      alert(`Failed to remove performer: ${error.message}`);
+      toast.error(`Failed to remove performer: ${error.message}`, {
+        duration: 5000,
+        position: 'bottom-right'
+      });
     }
   };
 
@@ -1938,9 +2008,15 @@ export default function SceneDetail() {
           geviUrl: geviUrlInput
         }));
         setShowGeviUrlModal(false);
-        alert('GEVI URL saved successfully!');
+        toast.success('GEVI URL saved successfully', {
+          duration: 3000,
+          position: 'bottom-right'
+        });
       } else {
-        alert(`Failed to save GEVI URL: ${result.error || 'Unknown error'}`);
+        toast.error(result.error || 'Failed to save GEVI URL', {
+          duration: 5000,
+          position: 'bottom-right'
+        });
       }
     } catch (error) {
       console.error('Error saving GEVI URL:', error);
@@ -2065,10 +2141,16 @@ export default function SceneDetail() {
       const result = await response.json();
       
       if (result.success) {
-        alert('Scene deleted successfully from both database and Stash!');
+        toast.success('Scene deleted successfully', {
+          duration: 3000,
+          position: 'bottom-right'
+        });
         navigate('/media/stash/scenes');
       } else {
-        alert(`Failed to delete scene: ${result.error || 'Unknown error'}`);
+        toast.error(result.error || 'Failed to delete scene', {
+          duration: 5000,
+          position: 'bottom-right'
+        });
       }
     } catch (error) {
       console.error('Error deleting scene:', error);
@@ -2094,11 +2176,17 @@ export default function SceneDetail() {
       const result = await response.json();
       
       if (result.success) {
-        alert('✅ Scene synced successfully from Stash!');
+        toast.success('Scene synced successfully from Stash', {
+          duration: 3000,
+          position: 'bottom-right'
+        });
         // Reload the page to show updated data
         window.location.reload();
       } else {
-        alert(`Failed to sync scene: ${result.error || 'Unknown error'}`);
+        toast.error(result.error || 'Failed to sync scene', {
+          duration: 5000,
+          position: 'bottom-right'
+        });
       }
     } catch (error) {
       console.error('Error syncing scene:', error);
@@ -2166,9 +2254,15 @@ export default function SceneDetail() {
           episodeUrls: validUrls
         }));
         setShowUrlEditorModal(false);
-        alert('✅ URLs saved successfully!');
+        toast.success('URLs saved successfully', {
+          duration: 3000,
+          position: 'bottom-right'
+        });
       } else {
-        alert(`Failed to save URLs: ${result.error || 'Unknown error'}`);
+        toast.error(result.error || 'Failed to save URLs', {
+          duration: 5000,
+          position: 'bottom-right'
+        });
       }
     } catch (error) {
       console.error('Error saving URLs:', error);

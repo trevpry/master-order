@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Link, useSearchParams, useNavigate } from 'react-router-dom';
+import toast from 'react-hot-toast';
 import Button from '../../../../shared/components/Button';
 import config from '../../../../config';
 
@@ -198,7 +199,10 @@ export default function GroupsPage() {
         throw new Error(result.error || 'Failed to merge groups');
       }
 
-      alert('✅ Successfully merged groups!');
+      toast.success('Successfully merged groups', {
+        duration: 3000,
+        position: 'bottom-right'
+      });
       
       setShowMergeModal(false);
       setSelectedGroups(new Set());
@@ -207,7 +211,10 @@ export default function GroupsPage() {
       loadGroups();
     } catch (error) {
       console.error('Failed to merge groups:', error);
-      alert(`Failed to merge groups: ${error.message}`);
+      toast.error(`Failed to merge groups: ${error.message}`, {
+        duration: 5000,
+        position: 'bottom-right'
+      });
     } finally {
       setIsMerging(false);
     }

@@ -8229,6 +8229,147 @@ router.post('/scenes/:id/sync', asyncHandler(async (req, res) => {
   }
 }));
 
+// DELETE /api/stash/scenes/bulk-delete - Delete multiple scenes
+router.delete('/scenes/bulk-delete', asyncHandler(async (req, res) => {
+  const { sceneIds, deleteFile = true, deleteGenerated = true } = req.body;
+
+  if (!sceneIds || !Array.isArray(sceneIds) || sceneIds.length === 0) {
+    return sendBadRequest(res, 'sceneIds array is required');
+  }
+
+  console.log(`🗑️ Bulk deleting ${sceneIds.length} scenes...`);
+  console.log(`   - Delete files: ${deleteFile}`);
+  console.log(`   - Delete generated: ${deleteGenerated}`);
+
+  const results = [];
+  let successCount = 0;
+  let failCount = 0;
+
+  // Get Stash settings once for all deletions
+  const settings = await prisma.settings.findUnique({ where: { id: 1 } });
+  const stashUrl = settings?.stashUrl;
+  const stashApiKey = settings?.stashApiKey;
+
+  for (const sceneId of sceneIds) {
+    try {
+      console.log(`   Processing scene ${sceneId}...`);
+
+      // Delete from local database first
+      let localDeleted = false;
+      let clipsDeleted = 0;
+      
+      try {
+        // First, delete all clips associated with this scene
+        const clipDeletionResult = await prisma.stashClip.deleteMany({
+          where: { sceneId: sceneId }
+        });
+        clipsDeleted = clipDeletionResult.count;
+        
+        // Then delete the scene
+        await prisma.stashScene.delete({
+          where: { id: sceneId }
+        });
+        localDeleted = true;
+      } catch (localError) {
+        if (localError.code === 'P2025') {
+          console.log(`   ℹ️ Scene ${sceneId} not found in local database`);
+        } else {
+          throw localError;
+        }
+      }
+
+      // Delete from Stash itself
+      let stashDeleted = false;
+      let stashError = null;
+
+      if (stashUrl) {
+        try {
+          const mutation = `
+            mutation SceneDestroy($id: ID!, $delete_file: Boolean, $delete_generated: Boolean) {
+              sceneDestroy(input: {
+                id: $id
+                delete_file: $delete_file
+                delete_generated: $delete_generated
+              })
+            }
+          `;
+
+          const variables = {
+            id: sceneId,
+            delete_file: deleteFile,
+            delete_generated: deleteGenerated
+          };
+
+          const baseUrl = stashUrl.endsWith('/') ? stashUrl.slice(0, -1) : stashUrl;
+          const graphqlUrl = `${baseUrl}/graphql`;
+
+          const headers = {
+            'Content-Type': 'application/json',
+            'Accept': 'application/json'
+          };
+
+          if (stashApiKey) {
+            headers['ApiKey'] = stashApiKey;
+          }
+
+          const fetch = require('node-fetch');
+          const response = await fetch(graphqlUrl, {
+            method: 'POST',
+            headers,
+            body: JSON.stringify({
+              query: mutation,
+              variables
+            })
+          });
+
+          if (response.ok) {
+            const jsonData = await response.json();
+            if (jsonData.data?.sceneDestroy !== undefined) {
+              stashDeleted = true;
+            } else if (jsonData.errors) {
+              stashError = `GraphQL errors: ${JSON.stringify(jsonData.errors)}`;
+            }
+          } else {
+            stashError = `HTTP ${response.status}`;
+          }
+        } catch (error) {
+          stashError = error.message;
+        }
+      }
+
+      results.push({
+        sceneId,
+        success: true,
+        localDeleted,
+        clipsDeleted,
+        stashDeleted,
+        stashError
+      });
+      successCount++;
+      console.log(`   ✅ Scene ${sceneId} deleted successfully`);
+
+    } catch (error) {
+      console.error(`   ❌ Failed to delete scene ${sceneId}:`, error.message);
+      results.push({
+        sceneId,
+        success: false,
+        error: error.message
+      });
+      failCount++;
+    }
+  }
+
+  console.log(`✅ Bulk delete complete: ${successCount} succeeded, ${failCount} failed`);
+
+  res.json({
+    success: true,
+    message: `Deleted ${successCount} scene(s)${failCount > 0 ? `, ${failCount} failed` : ''}`,
+    successCount,
+    failCount,
+    results
+  });
+}));
+
 router.delete('/scenes/:id', asyncHandler(async (req, res) => {
   try {
     const sceneId = req.params.id;
