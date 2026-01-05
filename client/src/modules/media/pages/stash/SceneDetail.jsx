@@ -2183,9 +2183,9 @@ export default function SceneDetail() {
     setSelectedStudioId(data?.studio?.id || null);
     setStudioSearchQuery('');
     
-    // Fetch available studios (get all without pagination limit)
+    // Fetch all available studios (no pagination limit)
     try {
-      const response = await fetch(`${config.apiBaseUrl}/api/stash/studios?perPage=1000`);
+      const response = await fetch(`${config.apiBaseUrl}/api/stash/studios?perPage=999999`);
       const result = await response.json();
       if (result.success) {
         setAvailableStudios(result.data || []);

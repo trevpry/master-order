@@ -80,10 +80,12 @@ class DuplicateDetectionService {
 
   /**
    * Find scenes with identical performer sets
+   * @param {number} durationDiff - Maximum duration difference in seconds (-1 to disable)
    * @returns {Promise<Array>} Array of duplicate groups with scenes and metadata
    */
-  async findDuplicatesByPerformers() {
+  async findDuplicatesByPerformers(durationDiff = -1) {
     console.log('🔍 [Duplicate Detection] Finding scenes with identical performers...');
+    console.log(`   - Duration difference threshold: ${durationDiff === -1 ? 'disabled' : durationDiff + ' seconds'}`);
     
     try {
       // Get all scenes with their performers
@@ -152,32 +154,40 @@ class DuplicateDetectionService {
             .map(p => p.name)
             .join(', ');
           
-          // Sub-group scenes by similar duration (within 5 seconds)
+          // Sub-group scenes by similar duration (or skip duration check if disabled)
           const durationGroups = [];
           const processedScenes = new Set();
           
-          scenes.forEach(sceneA => {
-            if (processedScenes.has(sceneA.id)) return;
-            
-            // Find all scenes with similar duration to this one
-            const similarDurationScenes = scenes.filter(sceneB => {
-              // Skip if already processed
-              if (processedScenes.has(sceneB.id)) return false;
-              
-              // Skip scenes without duration
-              if (!sceneA.duration || !sceneB.duration) return false;
-              
-              // Check if durations are within 5 seconds
-              const durationDiff = Math.abs(sceneA.duration - sceneB.duration);
-              return durationDiff <= 5;
-            });
-            
-            // Only create a group if there are 2+ scenes with similar duration
-            if (similarDurationScenes.length >= 2) {
-              similarDurationScenes.forEach(s => processedScenes.add(s.id));
-              durationGroups.push(similarDurationScenes);
+          // If duration check is disabled (-1), treat all scenes as one group
+          if (durationDiff === -1) {
+            if (scenes.length >= 2) {
+              durationGroups.push(scenes);
             }
-          });
+          } else {
+            // Group by similar duration
+            scenes.forEach(sceneA => {
+              if (processedScenes.has(sceneA.id)) return;
+              
+              // Find all scenes with similar duration to this one
+              const similarDurationScenes = scenes.filter(sceneB => {
+                // Skip if already processed
+                if (processedScenes.has(sceneB.id)) return false;
+                
+                // Skip scenes without duration
+                if (!sceneA.duration || !sceneB.duration) return false;
+                
+                // Check if durations are within the threshold
+                const diff = Math.abs(sceneA.duration - sceneB.duration);
+                return diff <= durationDiff;
+              });
+            
+              // Only create a group if there are 2+ scenes with similar duration
+              if (similarDurationScenes.length >= 2) {
+                similarDurationScenes.forEach(s => processedScenes.add(s.id));
+                durationGroups.push(similarDurationScenes);
+              }
+            });
+          }
           
           return {
             performerIds,

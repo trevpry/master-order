@@ -77,7 +77,10 @@ export default function DuplicateScenesPage() {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'
-        }
+        },
+        body: JSON.stringify({
+          durationDiff: parseFloat(durationDiff)
+        })
       });
       
       const result = await response.json();

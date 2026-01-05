@@ -109,7 +109,7 @@ const ImageTagger = ({ onClose, connectionStatus }) => {
   
   const loadAllStudios = async () => {
     try {
-      const response = await fetch(`${config.apiBaseUrl}/api/stash/studios?perPage=10000`);
+      const response = await fetch(`${config.apiBaseUrl}/api/stash/studios?perPage=999999`);
       const result = await response.json();
       console.log('Studios API response:', result);
       if (result.success && result.data) {

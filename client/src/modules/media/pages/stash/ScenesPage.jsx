@@ -41,7 +41,7 @@ export default function ScenesPage() {
 
   const loadStudios = async () => {
     try {
-      const response = await fetch(`${config.apiBaseUrl}/api/stash/studios?perPage=1000`);
+      const response = await fetch(`${config.apiBaseUrl}/api/stash/studios?perPage=999999`);
       const result = await response.json();
       if (result.success) {
         setStudios(result.data || []);

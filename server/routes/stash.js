@@ -856,10 +856,11 @@ router.get('/scenes/next', asyncHandler(async (req, res) => {
 
 // POST /api/stash/scenes/duplicates/performers - Find duplicate scenes by matching performers
 router.post('/scenes/duplicates/performers', asyncHandler(async (req, res) => {
+  const { durationDiff = -1 } = req.body;
   const duplicateService = new DuplicateDetectionService();
   
   try {
-    let duplicateGroups = await duplicateService.findDuplicatesByPerformers();
+    let duplicateGroups = await duplicateService.findDuplicatesByPerformers(parseFloat(durationDiff));
     
     // Format for frontend - array of arrays (like phash duplicates)
     let formattedGroups = duplicateGroups.map(group => 
@@ -10670,8 +10671,9 @@ router.post('/performers/:id/scrape-native-result', asyncHandler(async (req, res
 router.get('/studios', asyncHandler(async (req, res) => {
   const { page = 1, perPage = 20, filter = '' } = req.query;
   
-  const skip = (parseInt(page) - 1) * parseInt(perPage);
-  const take = parseInt(perPage);
+  const requestedPerPage = parseInt(perPage);
+  const skip = (parseInt(page) - 1) * requestedPerPage;
+  const take = requestedPerPage;
   
   // If there's a filter, we need to do case-insensitive search in JavaScript
   // since mode: 'insensitive' is not supported on this table
@@ -10708,8 +10710,10 @@ router.get('/studios', asyncHandler(async (req, res) => {
     
     const total = filteredStudios.length;
     
-    // Apply pagination in JavaScript
-    const paginatedStudios = filteredStudios.slice(skip, skip + take);
+    // Apply pagination in JavaScript (unless requesting all with a very high perPage)
+    const paginatedStudios = requestedPerPage >= 999999 
+      ? filteredStudios 
+      : filteredStudios.slice(skip, skip + take);
     
     // Transform data to match expected format
     const transformedStudios = paginatedStudios.map(studio => ({
@@ -10726,7 +10730,7 @@ router.get('/studios', asyncHandler(async (req, res) => {
       data: transformedStudios,
       total: total,
       page: parseInt(page),
-      perPage: parseInt(perPage)
+      perPage: requestedPerPage
     });
   }
   
@@ -10734,7 +10738,8 @@ router.get('/studios', asyncHandler(async (req, res) => {
   const total = await prisma.stashStudio.count();
   
   // Get studios with scene counts using the relationship
-  const studios = await prisma.stashStudio.findMany({
+  // Skip pagination if requesting all studios (perPage >= 999999)
+  const queryOptions = {
     include: {
       scenes: {
         select: {
@@ -10748,10 +10753,16 @@ router.get('/studios', asyncHandler(async (req, res) => {
         }
       }
     },
-    orderBy: { name: 'asc' },
-    skip: skip,
-    take: take
-  });
+    orderBy: { name: 'asc' }
+  };
+  
+  // Only apply pagination if not requesting all studios
+  if (requestedPerPage < 999999) {
+    queryOptions.skip = skip;
+    queryOptions.take = take;
+  }
+  
+  const studios = await prisma.stashStudio.findMany(queryOptions);
   
   // Transform data to match expected format
   const transformedStudios = studios.map(studio => ({
@@ -10768,9 +10779,9 @@ router.get('/studios', asyncHandler(async (req, res) => {
     data: transformedStudios,
     pagination: {
       page: parseInt(page),
-      perPage: parseInt(perPage),
+      perPage: requestedPerPage,
       total: total,
-      totalPages: Math.ceil(total / parseInt(perPage))
+      totalPages: requestedPerPage >= 999999 ? 1 : Math.ceil(total / requestedPerPage)
     }
   });
 }));

@@ -244,30 +244,25 @@ const StashClipOverlay = ({ clipData, onClose }) => {
     }
   };
   
-  // Search for studios
-  const searchStudios = async (query) => {
-    if (!query || query.trim().length < 2) {
-      setStudios([]);
-      return;
-    }
-    
+  // Load all studios (called when opening the modal)
+  const loadAllStudios = async () => {
     try {
       setLoadingStudios(true);
       const response = await fetch(
-        `${config.apiBaseUrl}/api/stash/studios?filter=${encodeURIComponent(query)}&perPage=20`
+        `${config.apiBaseUrl}/api/stash/studios?perPage=999999`
       );
       
       if (response.ok) {
         const data = await response.json();
-        console.log('Studio search response:', data);
+        console.log('Studios loaded:', data.data?.length || 0);
         setStudios(data.data || []);
       } else {
-        console.error('Studio search failed:', response.status);
-        toast.error('Failed to search studios');
+        console.error('Failed to load studios:', response.status);
+        toast.error('Failed to load studios');
       }
     } catch (error) {
-      console.error('Error searching studios:', error);
-      toast.error('Failed to search studios');
+      console.error('Error loading studios:', error);
+      toast.error('Failed to load studios');
     } finally {
       setLoadingStudios(false);
     }
@@ -328,16 +323,12 @@ const StashClipOverlay = ({ clipData, onClose }) => {
     }
   };
   
-  // Handle studio search input change
+  // Load all studios when modal opens
   useEffect(() => {
-    const timer = setTimeout(() => {
-      if (showStudioSelector && studioSearchQuery) {
-        searchStudios(studioSearchQuery);
-      }
-    }, 300);
-    
-    return () => clearTimeout(timer);
-  }, [studioSearchQuery, showStudioSelector]);
+    if (showStudioSelector) {
+      loadAllStudios();
+    }
+  }, [showStudioSelector]);
   
   // Handle Escape key
   useEffect(() => {
@@ -661,10 +652,25 @@ const StashClipOverlay = ({ clipData, onClose }) => {
               {loadingStudios ? (
                 <div className="text-center text-gray-400 py-8">
                   <div className="animate-spin inline-block w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full"></div>
-                  <p className="mt-2">Searching studios...</p>
+                  <p className="mt-2">Loading studios...</p>
                 </div>
-              ) : studios.length > 0 ? (
-                studios.map((studio) => (
+              ) : (() => {
+                // Filter studios by search query
+                const filteredStudios = studioSearchQuery
+                  ? studios.filter(studio => 
+                      studio.name.toLowerCase().includes(studioSearchQuery.toLowerCase())
+                    )
+                  : studios;
+                
+                if (filteredStudios.length === 0) {
+                  return (
+                    <div className="text-center text-gray-400 py-8">
+                      {studioSearchQuery ? `No studios found matching "${studioSearchQuery}"` : 'No studios available'}
+                    </div>
+                  );
+                }
+                
+                return filteredStudios.map((studio) => (
                   <button
                     key={studio.id}
                     onClick={() => handleStudioSelect(studio)}
@@ -689,16 +695,8 @@ const StashClipOverlay = ({ clipData, onClose }) => {
                       )}
                     </div>
                   </button>
-                ))
-              ) : studioSearchQuery.length >= 2 ? (
-                <div className="text-center text-gray-400 py-8">
-                  No studios found matching "{studioSearchQuery}"
-                </div>
-              ) : (
-                <div className="text-center text-gray-400 py-8">
-                  Type at least 2 characters to search
-                </div>
-              )}
+                ));
+              })()}
             </div>
           </div>
         </div>
