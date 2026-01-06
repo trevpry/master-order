@@ -1186,12 +1186,6 @@ class StashSyncService {
       const syncedStudios = [];
       
       for (const studio of studios) {
-        // Skip studios with 0 scenes
-        if (studio.scene_count === 0) {
-          console.log(`Skipping studio ${studio.name} (0 scenes)`);
-          continue;
-        }
-
         const studioData = {
           id: studio.id,
           name: studio.name || '',

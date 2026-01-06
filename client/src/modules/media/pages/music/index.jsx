@@ -8,6 +8,7 @@ import MusicViewNavigation from './components/MusicViewNavigation';
 import MusicArtistsView from './components/MusicArtistsView';
 import MusicAlbumsView from './components/MusicAlbumsView';
 import MusicTracksView from './components/MusicTracksView';
+import AlbumDetail from './components/AlbumDetail';
 import MusicCollectionsView from './components/MusicCollectionsView';
 import MusicPlaylistsView from './components/MusicPlaylistsView';
 import LoadingState from '../../../../shared/components/LoadingState';
@@ -127,8 +128,8 @@ const Music = () => {
             const artistData = await artistRes.json();
             setSelectedArtist(artistData);
             
-            // Load albums for this artist if we're in albums or tracks view
-            if (activeView === 'albums' || (activeView === 'tracks' && albumRatingKey)) {
+            // Load albums for this artist if we're in albums, tracks, or album view
+            if (activeView === 'albums' || activeView === 'album' || (activeView === 'tracks' && albumRatingKey)) {
               const albumsRes = await fetch(`${config.apiBaseUrl}/api/music/albums/artist/${artistRatingKey}`);
               if (albumsRes.ok) {
                 const albumsData = await albumsRes.json();
@@ -145,8 +146,8 @@ const Music = () => {
             const albumData = await albumRes.json();
             setSelectedAlbum(albumData);
             
-            // Load tracks for this album if we're in tracks view
-            if (activeView === 'tracks') {
+            // Load tracks for this album if we're in tracks or album view
+            if (activeView === 'tracks' || activeView === 'album') {
               const tracksRes = await fetch(`${config.apiBaseUrl}/api/music/tracks/album/${albumRatingKey}`);
               if (tracksRes.ok) {
                 const tracksData = await tracksRes.json();
@@ -880,7 +881,7 @@ const Music = () => {
 
   const selectAlbum = async (album) => {
     setSelectedAlbum(album);
-    navigateToView('tracks', { 
+    navigateToView('album', { 
       artist: selectedArtist?.ratingKey || artistRatingKey,
       album: album.ratingKey 
     });
@@ -1499,6 +1500,22 @@ const Music = () => {
             onAddAlbumToCustomPlaylist={addAlbumToCustomPlaylist}
             onExtractAlbumMetadata={extractAlbumMetadata}
             onPlaylistFilterChange={handlePlaylistFilterChange}
+          />
+        )}
+
+        {activeView === 'album' && selectedAlbum && (
+          <AlbumDetail
+            album={selectedAlbum}
+            tracks={tracks}
+            currentTrack={currentTrack}
+            isPlaying={isPlaying}
+            playlists={playlists}
+            selectedSection={selectedSection}
+            onGoBack={goBackToAlbums}
+            onPlayTrack={playTrack}
+            onAddTrackToCustomPlaylist={addTrackToCustomPlaylist}
+            formatDuration={formatDuration}
+            formatFileSize={formatFileSize}
           />
         )}
 

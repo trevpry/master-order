@@ -1,10 +1,12 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import LoadingState from '../../../../../shared/components/LoadingState';
 import TracksPlaylistPlayer from './TracksPlaylistPlayer';
+import StarRating from '../../../../../components/StarRating';
+import config from '../../../../../config';
 import './TracksPlaylistPlayer.css';
 
 const MusicTracksView = ({ 
-  tracks, 
+  tracks: propTracks, 
   tracksLoading, 
   tracksHasMore,
   selectedAlbum,
@@ -21,6 +23,42 @@ const MusicTracksView = ({
   formatDuration,
   formatFileSize
 }) => {
+  const [tracks, setTracks] = useState(propTracks);
+  
+  useEffect(() => {
+    setTracks(propTracks);
+  }, [propTracks]);
+  
+  const handleRatingChange = async (trackRatingKey, newRating) => {
+    try {
+      console.log('📊 Setting rating:', { trackRatingKey, rating: newRating });
+      
+      const response = await fetch(`${config.apiBaseUrl}/api/music/tracks/${trackRatingKey}/rating`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ rating: newRating }),
+      });
+      
+      if (response.ok) {
+        const data = await response.json();
+        console.log('📊 Rating updated successfully:', data.track.userRating);
+        // Update local state
+        setTracks(prevTracks =>
+          prevTracks.map(t =>
+            t.ratingKey === trackRatingKey
+              ? { ...t, userRating: data.track.userRating }
+              : t
+          )
+        );
+      } else {
+        console.error('Failed to update rating:', await response.text());
+      }
+    } catch (error) {
+      console.error('Error updating rating:', error);
+    }
+  };
   return (
     <div className="tracks-section">
       <div className="section-header">
@@ -31,11 +69,49 @@ const MusicTracksView = ({
         >
           ← Back
         </button>
-        <h2>
-          {selectedAlbum ? `Tracks from ${selectedAlbum.title}` : 
-           selectedArtist ? `All tracks by ${selectedArtist.title}` : 
-           'All Tracks'}
-        </h2>
+        
+        {/* Album/Artist Header with Artwork */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '20px', marginTop: '10px' }}>
+          {selectedAlbum?.thumb && (
+            <img 
+              src={`${config.plexUrl}${selectedAlbum.thumb}?X-Plex-Token=${config.plexToken}`}
+              alt={selectedAlbum.title}
+              style={{
+                width: '150px',
+                height: '150px',
+                objectFit: 'cover',
+                borderRadius: '8px',
+                boxShadow: '0 4px 8px rgba(0,0,0,0.2)'
+              }}
+            />
+          )}
+          {selectedArtist?.thumb && !selectedAlbum && (
+            <img 
+              src={`${config.plexUrl}${selectedArtist.thumb}?X-Plex-Token=${config.plexToken}`}
+              alt={selectedArtist.title}
+              style={{
+                width: '150px',
+                height: '150px',
+                objectFit: 'cover',
+                borderRadius: '8px',
+                boxShadow: '0 4px 8px rgba(0,0,0,0.2)'
+              }}
+            />
+          )}
+          <div>
+            <h2 style={{ margin: '0 0 10px 0' }}>
+              {selectedAlbum ? selectedAlbum.title : 
+               selectedArtist ? `All tracks by ${selectedArtist.title}` : 
+               'All Tracks'}
+            </h2>
+            {selectedAlbum && (
+              <p style={{ margin: '0', color: '#888', fontSize: '14px' }}>
+                {selectedAlbum.parentTitle || selectedArtist?.title || 'Unknown Artist'}
+                {selectedAlbum.year && ` • ${selectedAlbum.year}`}
+              </p>
+            )}
+          </div>
+        </div>
       </div>
 
       {/* Playlist Player for all tracks */}
@@ -63,6 +139,7 @@ const MusicTracksView = ({
               <span className="track-controls">▶</span>
               <span className="track-number">#</span>
               <span className="track-title">Title</span>
+              <span className="track-rating">Rating</span>
               <span className="track-duration">Duration</span>
               <span className="track-size">Size</span>
               <span className="track-playlist">Playlist</span>
@@ -82,6 +159,13 @@ const MusicTracksView = ({
                   {track.originalTitle && track.originalTitle !== track.title && (
                     <span className="original-title">({track.originalTitle})</span>
                   )}
+                </div>
+                <div className="track-rating">
+                  <StarRating
+                    value={track.userRating || 0}
+                    onChange={(rating) => handleRatingChange(track.ratingKey, rating)}
+                    size="small"
+                  />
                 </div>
                 <span className="track-duration">
                   {formatDuration(track.duration)}

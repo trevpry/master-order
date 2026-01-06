@@ -212,6 +212,7 @@ router.get('/*', async (req, res) => {
     }
     
     const artworkUrl = `${settings.plexUrl}/${artworkPath}?X-Plex-Token=${settings.plexToken}`;
+    console.log('🎨 Proxying artwork from:', artworkUrl);
     
     const response = await axios.get(artworkUrl, {
       responseType: 'stream'
@@ -226,7 +227,9 @@ router.get('/*', async (req, res) => {
     // Pipe the image data
     response.data.pipe(res);
   } catch (error) {
-    console.error('Error proxying artwork:', error);
+    console.error('Error proxying artwork from:', error.config?.url);
+    console.error('Plex error:', error.response?.status, error.response?.statusText);
+    console.error('Full error:', error.message);
     res.status(500).send('Failed to proxy artwork');
   }
 });

@@ -675,4 +675,70 @@ router.get('/debug/:ratingKey', asyncHandler(async (req, res) => {
   });
 }));
 
+// Update track rating
+router.put('/tracks/:ratingKey/rating', asyncHandler(async (req, res) => {
+  const { ratingKey } = req.params;
+  const { rating } = req.body;
+  
+  console.log(`📊 Updating rating for track ${ratingKey} to ${rating}`);
+  
+  // Validate rating (0-10, where 0 removes the rating)
+  if (rating !== undefined && (rating < 0 || rating > 10)) {
+    return res.status(400).json({ error: 'Rating must be between 0 and 10' });
+  }
+  
+  const settings = await prisma.settings.findFirst();
+  
+  if (!settings || !settings.plexUrl || !settings.plexToken) {
+    return res.status(500).json({ error: 'Plex configuration not found' });
+  }
+  
+  try {
+    // Update rating in Plex server
+    // Plex uses a rating scale of 0-10 (0 = no rating)
+    const plexRatingUrl = `${settings.plexUrl}/:/rate?key=${ratingKey}&identifier=com.plexapp.plugins.library&rating=${rating}`;
+    console.log(`📊 Sending rating to Plex: ${plexRatingUrl}`);
+    
+    const plexResponse = await fetch(plexRatingUrl, {
+      method: 'PUT',
+      headers: {
+        'X-Plex-Token': settings.plexToken,
+        'Accept': 'application/json'
+      }
+    });
+    
+    if (!plexResponse.ok) {
+      console.error('Failed to update rating in Plex:', await plexResponse.text());
+      return res.status(500).json({ error: 'Failed to update rating in Plex' });
+    }
+    
+    console.log('📊 Plex rating updated successfully');
+    
+    // Update rating in local database
+    const updatedTrack = await prisma.plexTrack.update({
+      where: { ratingKey },
+      data: { 
+        userRating: rating === 0 ? null : rating
+      },
+      include: {
+        album: {
+          include: {
+            artist: true
+          }
+        }
+      }
+    });
+    
+    console.log(`📊 Database updated: userRating = ${updatedTrack.userRating}`);
+    
+    res.json({
+      success: true,
+      track: updatedTrack
+    });
+  } catch (error) {
+    console.error('Error updating track rating:', error);
+    res.status(500).json({ error: 'Failed to update track rating' });
+  }
+}));
+
 module.exports = router;

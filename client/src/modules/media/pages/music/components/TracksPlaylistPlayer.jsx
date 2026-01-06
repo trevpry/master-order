@@ -54,7 +54,8 @@ const TracksPlaylistPlayer = ({
 
   const getDisplayName = () => {
     if (selectedAlbum) {
-      return `${selectedAlbum.title} by ${selectedAlbum.parentTitle || selectedArtist?.title || 'Unknown Artist'}`;
+      const albumArtist = selectedAlbum.parentTitle || selectedAlbum.artist?.title || selectedArtist?.title || 'Unknown Artist';
+      return `${selectedAlbum.title} by ${albumArtist}`;
     } else if (selectedArtist) {
       return `All tracks by ${selectedArtist.title}`;
     }
@@ -68,7 +69,17 @@ const TracksPlaylistPlayer = ({
       setError(null);
 
       let url;
-      if (searchQuery && searchQuery.trim()) {
+      
+      // If on an album page, load only that album's tracks
+      if (selectedAlbum) {
+        url = `${config.apiBaseUrl}/api/music/tracks/album/${selectedAlbum.ratingKey}`;
+      }
+      // If on an artist page, load only that artist's tracks
+      else if (selectedArtist && !selectedAlbum) {
+        url = `${config.apiBaseUrl}/api/music/tracks/artist/${selectedArtist.ratingKey}`;
+      }
+      // Otherwise load based on search/section
+      else if (searchQuery && searchQuery.trim()) {
         // For search, respect the selected section
         if (selectedSection !== 'all') {
           url = `${config.apiBaseUrl}/api/music/tracks/section/${selectedSection}?search=${encodeURIComponent(searchQuery)}&limit=10000`;
@@ -140,15 +151,31 @@ const TracksPlaylistPlayer = ({
       const playlistData = {
         id: `tracks-playlist-${Date.now()}`,
         title: getDisplayName(),
-        tracks: trackList.map(track => ({
-          id: track.ratingKey,
-          ratingKey: track.ratingKey,
-          title: track.title,
-          artist: track.grandparentTitle || track.artist || 'Unknown Artist',
-          album: track.parentTitle || selectedAlbum?.title || 'Unknown Album',
-          duration: track.duration,
-          type: 'plex'
-        }))
+        tracks: trackList.map(track => {
+          // Use the album's thumb field directly from database (same as albums page uses)
+          // This is the most reliable source as it's what Plex has stored
+          const albumThumb = track.album?.thumb || track.parentThumb;
+          const artistThumb = track.album?.artist?.thumb || track.grandparentThumb;
+          
+          // Determine album artist - use selectedAlbum if available for consistency
+          const albumArtist = selectedAlbum?.artist?.title || selectedAlbum?.parentTitle || track.album?.artist?.title || track.grandparentTitle;
+          
+          return {
+            id: track.ratingKey,
+            ratingKey: track.ratingKey,
+            title: track.title,
+            artist: track.originalTitle || albumArtist || 'Unknown Artist',
+            album: track.album?.title || track.parentTitle || selectedAlbum?.title || 'Unknown Album',
+            duration: track.duration,
+            thumb: track.thumb,
+            art: track.art,
+            parentThumb: albumThumb,
+            grandparentThumb: artistThumb,
+            userRating: track.userRating,
+            rating: track.rating,
+            type: 'plex'
+          };
+        })
       };
 
       // Dispatch event to trigger GlobalMusicPlayer

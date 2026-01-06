@@ -1,5 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import config from '../../config';
+import CastButton from './CastButton';
+import StarRating from '../StarRating';
 import './GlobalMusicPlayer.css';
 
 const GlobalMusicPlayer = () => {
@@ -17,7 +19,10 @@ const GlobalMusicPlayer = () => {
   const [shuffledTracks, setShuffledTracks] = useState([]);
   const [isRepeat, setIsRepeat] = useState(false);
   const [isMinimized, setIsMinimized] = useState(false);
+  const [isExpanded, setIsExpanded] = useState(false); // Full-screen view
   const [isVisible, setIsVisible] = useState(false); // Hidden by default until music is played
+  const [isCasting, setIsCasting] = useState(false);
+  const [castDeviceName, setCastDeviceName] = useState('');
   
   const audioRef = useRef(null);
   const progressRef = useRef(null);
@@ -25,6 +30,15 @@ const GlobalMusicPlayer = () => {
   // Function to get artwork URL for a track/media item
   const getArtworkUrl = (track) => {
     if (!track) return null;
+
+    console.log('🎨 Getting artwork URL for track:', {
+      title: track.title,
+      type: track.type,
+      thumb: track.thumb,
+      art: track.art,
+      parentThumb: track.parentThumb,
+      grandparentThumb: track.grandparentThumb
+    });
 
     // Web videos don't have artwork
     if (track?.type === 'webvideo') {
@@ -69,9 +83,13 @@ const GlobalMusicPlayer = () => {
       return `${config.apiBaseUrl}/api/tvdb-artwork?url=${encodeURIComponent(track.tvdbArtwork.url)}`;
     }
 
-    // Fall back to Plex artwork
-    const thumb = track?.thumb || track?.art;
-    if (!thumb) return null;
+    // Fall back to Plex artwork for music tracks
+    // Priority: parentThumb (album art) > grandparentThumb (artist art) > thumb (track art) > art
+    const thumb = track?.parentThumb || track?.grandparentThumb || track?.thumb || track?.art;
+    if (!thumb) {
+      console.log('🎨 No artwork available for track');
+      return null;
+    }
 
     // Check if thumb is already a full URL (starts with http)
     if (thumb.startsWith('http')) {
@@ -79,9 +97,12 @@ const GlobalMusicPlayer = () => {
       return thumb;
     }
 
-    // Otherwise, it's a relative path, so add the base URL
-    console.log('🎨 Using Plex artwork:', thumb);
-    return `${config.apiBaseUrl}/api/artwork${thumb}`;
+    // Otherwise, it's a relative path, so proxy through our API
+    // Remove leading slash from thumb if present to avoid double slashes
+    const cleanThumb = thumb.startsWith('/') ? thumb.substring(1) : thumb;
+    const artworkUrl = `${config.apiBaseUrl}/api/artwork/${cleanThumb}`;
+    console.log('🎨 Using Plex artwork via proxy:', artworkUrl);
+    return artworkUrl;
   };
   
   // Load playlist tracks when playlist changes
@@ -100,8 +121,17 @@ const GlobalMusicPlayer = () => {
     console.log('🎵 [useEffect] Using track list:', isShuffled ? 'shuffled' : 'original', 'length:', trackList?.length);
     if (trackList && trackList.length > 0 && currentTrackIndex >= 0 && currentTrackIndex < trackList.length) {
       const newTrack = trackList[currentTrackIndex];
-      console.log('🎵 [useEffect] Updating current track display:', newTrack.title, 'by', newTrack.artist, 'from', newTrack.album);
-      setCurrentTrack(newTrack);
+      
+      // Only update if the track has actually changed (different ratingKey)
+      setCurrentTrack(prev => {
+        if (!prev || prev.ratingKey !== newTrack.ratingKey) {
+          console.log('🎵 [useEffect] Updating current track display:', newTrack.title, 'by', newTrack.artist, 'from', newTrack.album);
+          return newTrack;
+        }
+        // Track hasn't changed, keep previous to avoid re-render
+        console.log('🎵 [useEffect] Same track, not updating');
+        return prev;
+      });
     } else {
       console.log('🎵 [useEffect] Invalid conditions - trackList length:', trackList?.length, 'currentTrackIndex:', currentTrackIndex);
     }
@@ -403,6 +433,18 @@ const GlobalMusicPlayer = () => {
     playTrack(prevIndex);
   };
   
+  const handleCastStateChange = (connected, deviceName) => {
+    setIsCasting(connected);
+    setCastDeviceName(deviceName);
+    
+    if (connected) {
+      // Pause local audio when casting
+      if (audioRef.current && !audioRef.current.paused) {
+        audioRef.current.pause();
+      }
+    }
+  };
+  
   const handleSeek = (e) => {
     const audio = audioRef.current;
     if (!audio || !duration) return;
@@ -424,20 +466,74 @@ const GlobalMusicPlayer = () => {
   };
   
   const toggleShuffle = () => {
-    setIsShuffled(!isShuffled);
-    // Re-shuffle tracks if turning shuffle on
     if (!isShuffled) {
-      const shuffledTracks = [...tracks].sort(() => Math.random() - 0.5);
-      setTracks(shuffledTracks);
-      setCurrentTrackIndex(0);
+      // Turning shuffle ON - create shuffled version
+      const shuffled = [...tracks].sort(() => Math.random() - 0.5);
+      setShuffledTracks(shuffled);
+      setIsShuffled(true);
+      
+      // Find current track in shuffled array and update index
+      if (currentTrack) {
+        const newIndex = shuffled.findIndex(t => t.ratingKey === currentTrack.ratingKey);
+        if (newIndex >= 0) {
+          setCurrentTrackIndex(newIndex);
+        }
+      }
     } else {
-      // Reload tracks in original order
-      loadPlaylistTracks();
+      // Turning shuffle OFF - use original tracks order
+      setIsShuffled(false);
+      
+      // Find current track in original array and update index
+      if (currentTrack) {
+        const newIndex = tracks.findIndex(t => t.ratingKey === currentTrack.ratingKey);
+        if (newIndex >= 0) {
+          setCurrentTrackIndex(newIndex);
+        }
+      }
     }
   };
   
   const toggleRepeat = () => {
     setIsRepeat(!isRepeat);
+  };
+  
+  const toggleExpanded = () => {
+    setIsExpanded(!isExpanded);
+    if (isMinimized) {
+      setIsMinimized(false);
+    }
+  };
+  
+  const handleRatingChange = async (rating) => {
+    if (!currentTrack) return;
+    
+    try {
+      console.log('📊 Setting rating in player:', { trackRatingKey: currentTrack.ratingKey, rating });
+      
+      const response = await fetch(`${config.apiBaseUrl}/api/music/tracks/${currentTrack.ratingKey}/rating`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ rating }),
+      });
+      
+      if (response.ok) {
+        const data = await response.json();
+        console.log('📊 Rating updated in player:', data.track.userRating);
+        
+        // ONLY update currentTrack - don't touch tracks/shuffledTracks arrays
+        // to avoid triggering any effects that might restart playback
+        setCurrentTrack(prev => {
+          if (prev && prev.ratingKey === currentTrack.ratingKey) {
+            return { ...prev, userRating: data.track.userRating };
+          }
+          return prev;
+        });
+      }
+    } catch (error) {
+      console.error('Error updating rating:', error);
+    }
   };
   
   const formatTime = (time) => {
@@ -452,7 +548,7 @@ const GlobalMusicPlayer = () => {
   }
   
   return (
-    <div className={`global-music-player ${isMinimized ? 'minimized' : ''}`}>
+    <div className={`global-music-player ${isMinimized ? 'minimized' : ''} ${isExpanded ? 'expanded' : ''}`}>
       <audio ref={audioRef} preload="metadata" />
       
       <div className="player-header">
@@ -464,8 +560,18 @@ const GlobalMusicPlayer = () => {
         </div>
         <div className="player-controls-header">
           <button
+            className="expand-btn"
+            onClick={toggleExpanded}
+            title={isExpanded ? 'Exit full screen' : 'Full screen view'}
+          >
+            {isExpanded ? '🗗' : '⛶'}
+          </button>
+          <button
             className="minimize-btn"
-            onClick={() => setIsMinimized(!isMinimized)}
+            onClick={() => {
+              setIsMinimized(!isMinimized);
+              if (isExpanded) setIsExpanded(false);
+            }}
             title={isMinimized ? 'Expand player' : 'Minimize player'}
           >
             {isMinimized ? '▲' : '▼'}
@@ -513,11 +619,23 @@ const GlobalMusicPlayer = () => {
               <div className="track-info">
                 <div className="track-title">{currentTrack.title}</div>
                 <div className="track-meta">
-                  {currentTrack.artist || currentTrack.grandparentTitle}
+                  {currentTrack.originalTitle || currentTrack.album?.parentTitle || currentTrack.grandparentTitle || currentTrack.artist}
                   {(currentTrack.album || currentTrack.parentTitle) && 
                     ` • ${currentTrack.album || currentTrack.parentTitle}`
                   }
                 </div>
+                <div className="track-rating-display">
+                  <StarRating
+                    value={currentTrack.userRating || 0}
+                    onChange={handleRatingChange}
+                    size="small"
+                  />
+                </div>
+                {isCasting && castDeviceName && (
+                  <div className="casting-indicator">
+                    📡 Casting to {castDeviceName}
+                  </div>
+                )}
               </div>
             </div>
           )}
@@ -540,64 +658,74 @@ const GlobalMusicPlayer = () => {
             <span className="time-display">{formatTime(duration)}</span>
           </div>
           
-          {/* Control Buttons */}
-          <div className="player-controls">
-            <button
-              className={`control-btn ${isShuffled ? 'active' : ''}`}
-              onClick={toggleShuffle}
-              title="Toggle shuffle"
-            >
-              🔀
-            </button>
+          {/* Controls and Volume Section */}
+          <div className="controls-volume-wrapper">
+            {/* Control Buttons */}
+            <div className="player-controls">
+              <button
+                className={`control-btn ${isShuffled ? 'active' : ''}`}
+                onClick={toggleShuffle}
+                title="Toggle shuffle"
+              >
+                🔀
+              </button>
+              
+              <button
+                className="control-btn"
+                onClick={handlePreviousTrack}
+                disabled={!tracks.length}
+                title="Previous track"
+              >
+                ⏮
+              </button>
+              
+              <button
+                className="play-pause-btn"
+                onClick={togglePlayPause}
+                disabled={!tracks.length || isLoading}
+                title={isPlaying ? 'Pause' : 'Play'}
+              >
+                {isLoading ? '⏳' : (isPlaying ? '⏸' : '▶')}
+              </button>
+              
+              <button
+                className="control-btn"
+                onClick={handleNextTrack}
+                disabled={!tracks.length}
+                title="Next track"
+              >
+                ⏭
+              </button>
+              
+              <button
+                className={`control-btn ${isRepeat ? 'active' : ''}`}
+                onClick={toggleRepeat}
+                title="Toggle repeat"
+              >
+                🔁
+              </button>
+            </div>
             
-            <button
-              className="control-btn"
-              onClick={handlePreviousTrack}
-              disabled={!tracks.length}
-              title="Previous track"
-            >
-              ⏮
-            </button>
-            
-            <button
-              className="play-pause-btn"
-              onClick={togglePlayPause}
-              disabled={!tracks.length || isLoading}
-              title={isPlaying ? 'Pause' : 'Play'}
-            >
-              {isLoading ? '⏳' : (isPlaying ? '⏸' : '▶')}
-            </button>
-            
-            <button
-              className="control-btn"
-              onClick={handleNextTrack}
-              disabled={!tracks.length}
-              title="Next track"
-            >
-              ⏭
-            </button>
-            
-            <button
-              className={`control-btn ${isRepeat ? 'active' : ''}`}
-              onClick={toggleRepeat}
-              title="Toggle repeat"
-            >
-              🔁
-            </button>
-          </div>
-          
-          {/* Volume Control */}
-          <div className="volume-section">
-            <span className="volume-icon">🔊</span>
-            <input
-              type="range"
-              min="0"
-              max="1"
-              step="0.1"
-              value={volume}
-              onChange={handleVolumeChange}
-              className="volume-slider"
+            {/* Cast Button */}
+            <CastButton
+              currentTrack={currentTrack}
+              isPlaying={isPlaying}
+              onCastStateChange={handleCastStateChange}
             />
+            
+            {/* Volume Control */}
+            <div className="volume-section">
+              <span className="volume-icon">🔊</span>
+              <input
+                type="range"
+                min="0"
+                max="1"
+                step="0.1"
+                value={volume}
+                onChange={handleVolumeChange}
+                className="volume-slider"
+              />
+            </div>
           </div>
         </>
       )}
@@ -649,6 +777,176 @@ const GlobalMusicPlayer = () => {
               <span className="mini-track-artist">
                 {currentTrack?.artist || currentTrack?.grandparentTitle || 'Unknown artist'}
               </span>
+            </div>
+          </div>
+        </div>
+      )}
+      
+      {/* Expanded/Full Screen View */}
+      {isExpanded && currentTrack && (
+        <div className="expanded-view">
+          <div className="expanded-content">
+            {/* Large Artwork */}
+            <div className="expanded-artwork">
+              {getArtworkUrl(currentTrack) ? (
+                <img 
+                  src={getArtworkUrl(currentTrack)} 
+                  alt={`${currentTrack.album || currentTrack.parentTitle || 'Album'} artwork`}
+                  className="expanded-artwork-image"
+                  onError={(e) => {
+                    e.target.style.display = 'none';
+                  }}
+                />
+              ) : (
+                <div className="expanded-artwork-placeholder">
+                  🎵
+                </div>
+              )}
+            </div>
+            
+            {/* Track Info */}
+            <div className="expanded-track-info">
+              <h1 className="expanded-track-title">{currentTrack.title}</h1>
+              <h2 className="expanded-track-artist">
+                {currentTrack.originalTitle || currentTrack.album?.parentTitle || currentTrack.grandparentTitle || currentTrack.artist}
+              </h2>
+              <p className="expanded-track-album">
+                {currentTrack.album || currentTrack.parentTitle}
+              </p>
+              <div className="expanded-track-rating">
+                <StarRating
+                  value={currentTrack.userRating || 0}
+                  onChange={handleRatingChange}
+                  size="medium"
+                />
+              </div>
+              {isCasting && castDeviceName && (
+                <div className="expanded-casting-indicator">
+                  📡 Casting to {castDeviceName}
+                </div>
+              )}
+            </div>
+            
+            {/* Progress Bar */}
+            <div className="expanded-progress-section">
+              <span className="expanded-time-display">{formatTime(currentTime)}</span>
+              <div 
+                className="expanded-progress-bar" 
+                ref={progressRef}
+                onClick={handleSeek}
+              >
+                <div 
+                  className="expanded-progress-fill" 
+                  style={{ width: `${duration ? (currentTime / duration) * 100 : 0}%` }}
+                />
+              </div>
+              <span className="expanded-time-display">{formatTime(duration)}</span>
+            </div>
+            
+            {/* Control Buttons */}
+            <div className="expanded-controls">
+              <button
+                className={`expanded-control-btn ${isShuffled ? 'active' : ''}`}
+                onClick={toggleShuffle}
+                title="Toggle shuffle"
+              >
+                🔀
+              </button>
+              
+              <button
+                className="expanded-control-btn"
+                onClick={handlePreviousTrack}
+                disabled={!tracks.length}
+                title="Previous track"
+              >
+                ⏮
+              </button>
+              
+              <button
+                className="expanded-play-pause-btn"
+                onClick={togglePlayPause}
+                disabled={!tracks.length || isLoading}
+                title={isPlaying ? 'Pause' : 'Play'}
+              >
+                {isLoading ? '⏳' : (isPlaying ? '⏸' : '▶')}
+              </button>
+              
+              <button
+                className="expanded-control-btn"
+                onClick={handleNextTrack}
+                disabled={!tracks.length}
+                title="Next track"
+              >
+                ⏭
+              </button>
+              
+              <button
+                className={`expanded-control-btn ${isRepeat ? 'active' : ''}`}
+                onClick={toggleRepeat}
+                title="Toggle repeat"
+              >
+                🔁
+              </button>
+            </div>
+            
+            {/* Volume and Cast */}
+            <div className="expanded-bottom-controls">
+              <div className="expanded-volume-section">
+                <span className="volume-icon">🔊</span>
+                <input
+                  type="range"
+                  min="0"
+                  max="1"
+                  step="0.1"
+                  value={volume}
+                  onChange={handleVolumeChange}
+                  className="expanded-volume-slider"
+                />
+              </div>
+              
+              <CastButton
+                currentTrack={currentTrack}
+                isPlaying={isPlaying}
+                onCastStateChange={handleCastStateChange}
+              />
+            </div>
+          </div>
+          
+          {/* Up Next Queue */}
+          <div className="up-next-section">
+            <h3 className="up-next-title">Up Next</h3>
+            <div className="up-next-list">
+              {tracks.slice(currentTrackIndex + 1, currentTrackIndex + 11).map((track, index) => (
+                <div 
+                  key={track.ratingKey || index} 
+                  className="up-next-item"
+                  onClick={() => playTrack(currentTrackIndex + 1 + index)}
+                >
+                  <div className="up-next-artwork">
+                    {getArtworkUrl(track) ? (
+                      <img 
+                        src={getArtworkUrl(track)} 
+                        alt="Album artwork"
+                        className="up-next-artwork-image"
+                      />
+                    ) : (
+                      <div className="up-next-artwork-placeholder">🎵</div>
+                    )}
+                  </div>
+                  <div className="up-next-info">
+                    <div className="up-next-track-title">{track.title}</div>
+                    <div className="up-next-track-artist">
+                      {track.originalTitle || track.album?.parentTitle || track.grandparentTitle || 'Unknown Artist'}
+                    </div>
+                  </div>
+                  <div className="up-next-duration">{formatTime(track.duration / 1000)}</div>
+                </div>
+              ))}
+              {tracks.length <= currentTrackIndex + 1 && (
+                <div className="up-next-empty">
+                  <p>No more tracks in queue</p>
+                </div>
+              )}
             </div>
           </div>
         </div>
