@@ -9,6 +9,7 @@ import MusicArtistsView from './components/MusicArtistsView';
 import MusicAlbumsView from './components/MusicAlbumsView';
 import MusicTracksView from './components/MusicTracksView';
 import AlbumDetail from './components/AlbumDetail';
+import ArtistDetail from './components/ArtistDetail';
 import MusicCollectionsView from './components/MusicCollectionsView';
 import MusicPlaylistsView from './components/MusicPlaylistsView';
 import LoadingState from '../../../../shared/components/LoadingState';
@@ -128,12 +129,21 @@ const Music = () => {
             const artistData = await artistRes.json();
             setSelectedArtist(artistData);
             
-            // Load albums for this artist if we're in albums, tracks, or album view
-            if (activeView === 'albums' || activeView === 'album' || (activeView === 'tracks' && albumRatingKey)) {
+            // Load albums for this artist if we're in artist, albums, tracks, or album view
+            if (activeView === 'artist' || activeView === 'albums' || activeView === 'album' || (activeView === 'tracks' && albumRatingKey)) {
               const albumsRes = await fetch(`${config.apiBaseUrl}/api/music/albums/artist/${artistRatingKey}`);
               if (albumsRes.ok) {
                 const albumsData = await albumsRes.json();
                 setAlbums(albumsData);
+              }
+            }
+            
+            // Load tracks count for artist detail view
+            if (activeView === 'artist') {
+              const tracksRes = await fetch(`${config.apiBaseUrl}/api/music/tracks/artist/${artistRatingKey}`);
+              if (tracksRes.ok) {
+                const tracksData = await tracksRes.json();
+                setTracks(tracksData);
               }
             }
           }
@@ -851,7 +861,7 @@ const Music = () => {
   const selectArtist = async (artist) => {
     setSelectedArtist(artist);
     setPlaylistFilter(''); // Clear playlist filter when selecting an artist
-    navigateToView('albums', { artist: artist.ratingKey, playlistFilter: null });
+    navigateToView('artist', { artist: artist.ratingKey, playlistFilter: null });
     
     try {
       const [albumsRes, tracksRes] = await Promise.all([
@@ -1469,6 +1479,8 @@ const Music = () => {
         onPlayPause={() => isPlaying ? stopTrack() : playTrack(currentTrack)}
         onSeek={seekTo}
         onVolumeChange={setVolumeLevel}
+        onSelectArtist={selectArtist}
+        onSelectAlbum={selectAlbum}
         formatTime={formatTime}
       />
 
@@ -1495,11 +1507,38 @@ const Music = () => {
             metadataResults={metadataResults}
             playlistFilter={searchParams.get('playlistFilter') || ''}
             onSelectAlbum={selectAlbum}
+            onSelectArtist={selectArtist}
             onLoadMoreAlbums={loadMoreAlbums}
             onGoBackToArtists={goBackToArtists}
             onAddAlbumToCustomPlaylist={addAlbumToCustomPlaylist}
             onExtractAlbumMetadata={extractAlbumMetadata}
             onPlaylistFilterChange={handlePlaylistFilterChange}
+          />
+        )}
+
+        {activeView === 'artist' && selectedArtist && (
+          <ArtistDetail
+            artist={selectedArtist}
+            albums={albums}
+            stats={{
+              totalTracks: tracks?.length || 0
+            }}
+            onGoBack={() => {
+              setSelectedArtist(null);
+              navigateToView('artists');
+            }}
+            onSelectAlbum={selectAlbum}
+            onArtistUpdate={(updatedArtist) => {
+              // Update selectedArtist with new data
+              setSelectedArtist(updatedArtist);
+              
+              // Update the artist in the artists list
+              setArtists(prevArtists => 
+                prevArtists.map(a => 
+                  a.ratingKey === updatedArtist.ratingKey ? updatedArtist : a
+                )
+              );
+            }}
           />
         )}
 
@@ -1513,6 +1552,7 @@ const Music = () => {
             selectedSection={selectedSection}
             onGoBack={goBackToAlbums}
             onPlayTrack={playTrack}
+            onSelectArtist={selectArtist}
             onAddTrackToCustomPlaylist={addTrackToCustomPlaylist}
             formatDuration={formatDuration}
             formatFileSize={formatFileSize}
@@ -1533,6 +1573,7 @@ const Music = () => {
             playlists={playlists}
             onGoBackFromTracks={goBackFromTracks}
             onPlayTrack={playTrack}
+            onSelectArtist={selectArtist}
             onLoadMoreTracks={loadMoreTracks}
             onAddTrackToCustomPlaylist={addTrackToCustomPlaylist}
             formatDuration={formatDuration}

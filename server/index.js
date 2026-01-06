@@ -373,6 +373,10 @@ app.use('/api/books', booksRoutes);
 const musicRoutes = require('./routes/music');
 app.use('/api/music', musicRoutes);
 
+// SONOS API routes
+const sonosRoutes = require('./routes/sonos');
+app.use('/api/sonos', sonosRoutes);
+
 // ComicVine Integration API routes
 app.use('/api/comicvine', comicvineRoutes);
 

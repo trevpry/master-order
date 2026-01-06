@@ -140,6 +140,18 @@
   text-overflow: ellipsis;
 }
 
+.artist-link,
+.album-link {
+  display: inline;
+  transition: all 0.2s ease;
+  user-select: none;
+}
+
+.artist-link:hover,
+.album-link:hover {
+  opacity: 0.8;
+}
+
 .track-rating-display {
   margin-top: 0.5rem;
 }

@@ -1,10 +1,13 @@
 import React, { useState, useRef, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import config from '../../config';
 import CastButton from './CastButton';
+import SonosCastButton from './SonosCastButton';
 import StarRating from '../StarRating';
 import './GlobalMusicPlayer.css';
 
 const GlobalMusicPlayer = () => {
+  const navigate = useNavigate();
   const [playlist, setPlaylist] = useState(null);
   const [tracks, setTracks] = useState([]);
   const [currentTrackIndex, setCurrentTrackIndex] = useState(0);
@@ -23,6 +26,8 @@ const GlobalMusicPlayer = () => {
   const [isVisible, setIsVisible] = useState(false); // Hidden by default until music is played
   const [isCasting, setIsCasting] = useState(false);
   const [castDeviceName, setCastDeviceName] = useState('');
+  const [castDeviceType, setCastDeviceType] = useState(''); // 'chromecast' or 'sonos'
+  const [sonosDeviceRef, setSonosDeviceRef] = useState(null); // Reference to SONOS device for controls
   
   const audioRef = useRef(null);
   const progressRef = useRef(null);
@@ -126,6 +131,18 @@ const GlobalMusicPlayer = () => {
       setCurrentTrack(prev => {
         if (!prev || prev.ratingKey !== newTrack.ratingKey) {
           console.log('🎵 [useEffect] Updating current track display:', newTrack.title, 'by', newTrack.artist, 'from', newTrack.album);
+          console.log('🔍 [DEBUG] Full track object structure:', JSON.stringify(newTrack, null, 2));
+          console.log('🔍 [DEBUG] Track properties:', {
+            ratingKey: newTrack.ratingKey,
+            grandparentRatingKey: newTrack.grandparentRatingKey,
+            parentRatingKey: newTrack.parentRatingKey,
+            title: newTrack.title,
+            grandparentTitle: newTrack.grandparentTitle,
+            parentTitle: newTrack.parentTitle,
+            artist: newTrack.artist,
+            album: newTrack.album,
+            originalTitle: newTrack.originalTitle
+          });
           return newTrack;
         }
         // Track hasn't changed, keep previous to avoid re-render
@@ -433,9 +450,11 @@ const GlobalMusicPlayer = () => {
     playTrack(prevIndex);
   };
   
-  const handleCastStateChange = (connected, deviceName) => {
+  const handleCastStateChange = (connected, deviceName, deviceType = 'chromecast', deviceRef = null) => {
     setIsCasting(connected);
     setCastDeviceName(deviceName);
+    setCastDeviceType(deviceType);
+    setSonosDeviceRef(deviceRef);
     
     if (connected) {
       // Pause local audio when casting
@@ -457,11 +476,36 @@ const GlobalMusicPlayer = () => {
     setCurrentTime(newTime);
   };
   
-  const handleVolumeChange = (e) => {
+  const handleVolumeChange = async (e) => {
     const newVolume = parseFloat(e.target.value);
     setVolume(newVolume);
+    
+    // Update local audio volume
     if (audioRef.current) {
       audioRef.current.volume = newVolume;
+    }
+    
+    // Update SONOS volume if casting to SONOS
+    if (castDeviceType === 'sonos' && sonosDeviceRef) {
+      try {
+        const sonosVolume = Math.round(newVolume * 100); // Convert 0-1 to 0-100
+        const response = await fetch(`${config.apiBaseUrl}/api/sonos/volume`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            deviceId: sonosDeviceRef.uuid || sonosDeviceRef.host,
+            volume: sonosVolume
+          }),
+        });
+        
+        if (!response.ok) {
+          console.error('Failed to set SONOS volume');
+        }
+      } catch (error) {
+        console.error('Error setting SONOS volume:', error);
+      }
     }
   };
   
@@ -502,6 +546,20 @@ const GlobalMusicPlayer = () => {
     if (isMinimized) {
       setIsMinimized(false);
     }
+  };
+  
+  // Navigate to artist page
+  const goToArtist = (artistRatingKey, artistName) => {
+    if (!artistRatingKey) return;
+    console.log('🎵 Navigating to artist:', artistName);
+    navigate(`/media/music?view=albums&artist=${artistRatingKey}`);
+  };
+  
+  // Navigate to album page
+  const goToAlbum = (albumRatingKey, albumName) => {
+    if (!albumRatingKey) return;
+    console.log('🎵 Navigating to album:', albumName);
+    navigate(`/media/music?view=album&album=${albumRatingKey}`);
   };
   
   const handleRatingChange = async (rating) => {
@@ -619,10 +677,79 @@ const GlobalMusicPlayer = () => {
               <div className="track-info">
                 <div className="track-title">{currentTrack.title}</div>
                 <div className="track-meta">
-                  {currentTrack.originalTitle || currentTrack.album?.parentTitle || currentTrack.grandparentTitle || currentTrack.artist}
-                  {(currentTrack.album || currentTrack.parentTitle) && 
-                    ` • ${currentTrack.album || currentTrack.parentTitle}`
-                  }
+                  <span 
+                    className="artist-link"
+                    onClick={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      console.log('🎵 Artist clicked:', {
+                        grandparentRatingKey: currentTrack.grandparentRatingKey,
+                        grandparentTitle: currentTrack.grandparentTitle,
+                        originalTitle: currentTrack.originalTitle,
+                        artist: currentTrack.artist,
+                        album: currentTrack.album
+                      });
+                      const artistRatingKey = currentTrack.grandparentRatingKey || currentTrack.album?.parentRatingKey;
+                      const artistName = currentTrack.originalTitle || currentTrack.album?.parentTitle || currentTrack.grandparentTitle || currentTrack.artist;
+                      if (artistRatingKey) {
+                        goToArtist(artistRatingKey, artistName);
+                      } else {
+                        console.warn('No artist rating key found');
+                      }
+                    }}
+                    style={{
+                      cursor: (currentTrack.grandparentRatingKey || currentTrack.album?.parentRatingKey) ? 'pointer' : 'default',
+                      color: (currentTrack.grandparentRatingKey || currentTrack.album?.parentRatingKey) ? '#007bff' : '#666',
+                      textDecoration: 'none',
+                      display: 'inline-block'
+                    }}
+                    onMouseEnter={(e) => {
+                      if (currentTrack.grandparentRatingKey || currentTrack.album?.parentRatingKey) {
+                        e.target.style.textDecoration = 'underline';
+                      }
+                    }}
+                    onMouseLeave={(e) => e.target.style.textDecoration = 'none'}
+                  >
+                    {currentTrack.originalTitle || currentTrack.album?.parentTitle || currentTrack.grandparentTitle || currentTrack.artist}
+                  </span>
+                  {(currentTrack.album || currentTrack.parentTitle) && (
+                    <>
+                      {' • '}
+                      <span
+                        className="album-link"
+                        onClick={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          console.log('🎵 Album clicked:', {
+                            parentRatingKey: currentTrack.parentRatingKey,
+                            parentTitle: currentTrack.parentTitle,
+                            album: currentTrack.album
+                          });
+                          const albumRatingKey = currentTrack.parentRatingKey;
+                          const albumName = currentTrack.album || currentTrack.parentTitle;
+                          if (albumRatingKey) {
+                            goToAlbum(albumRatingKey, albumName);
+                          } else {
+                            console.warn('No album rating key found');
+                          }
+                        }}
+                        style={{
+                          cursor: currentTrack.parentRatingKey ? 'pointer' : 'default',
+                          color: currentTrack.parentRatingKey ? '#007bff' : '#666',
+                          textDecoration: 'none',
+                          display: 'inline-block'
+                        }}
+                        onMouseEnter={(e) => {
+                          if (currentTrack.parentRatingKey) {
+                            e.target.style.textDecoration = 'underline';
+                          }
+                        }}
+                        onMouseLeave={(e) => e.target.style.textDecoration = 'none'}
+                      >
+                        {currentTrack.album || currentTrack.parentTitle}
+                      </span>
+                    </>
+                  )}
                 </div>
                 <div className="track-rating-display">
                   <StarRating
@@ -706,8 +833,14 @@ const GlobalMusicPlayer = () => {
               </button>
             </div>
             
-            {/* Cast Button */}
+            {/* Cast Buttons */}
             <CastButton
+              currentTrack={currentTrack}
+              isPlaying={isPlaying}
+              onCastStateChange={handleCastStateChange}
+            />
+            
+            <SonosCastButton
               currentTrack={currentTrack}
               isPlaying={isPlaying}
               onCastStateChange={handleCastStateChange}
@@ -807,10 +940,56 @@ const GlobalMusicPlayer = () => {
             {/* Track Info */}
             <div className="expanded-track-info">
               <h1 className="expanded-track-title">{currentTrack.title}</h1>
-              <h2 className="expanded-track-artist">
+              <h2 
+                className="expanded-track-artist"
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  const artistRatingKey = currentTrack.grandparentRatingKey || currentTrack.album?.parentRatingKey;
+                  const artistName = currentTrack.originalTitle || currentTrack.album?.parentTitle || currentTrack.grandparentTitle || currentTrack.artist;
+                  console.log('🎵 Expanded artist clicked:', { artistRatingKey, artistName });
+                  if (artistRatingKey) {
+                    goToArtist(artistRatingKey, artistName);
+                  }
+                }}
+                style={{
+                  cursor: (currentTrack.grandparentRatingKey || currentTrack.album?.parentRatingKey) ? 'pointer' : 'default',
+                  color: (currentTrack.grandparentRatingKey || currentTrack.album?.parentRatingKey) ? '#007bff' : 'inherit',
+                  textDecoration: 'none'
+                }}
+                onMouseEnter={(e) => {
+                  if (currentTrack.grandparentRatingKey || currentTrack.album?.parentRatingKey) {
+                    e.target.style.textDecoration = 'underline';
+                  }
+                }}
+                onMouseLeave={(e) => e.target.style.textDecoration = 'none'}
+              >
                 {currentTrack.originalTitle || currentTrack.album?.parentTitle || currentTrack.grandparentTitle || currentTrack.artist}
               </h2>
-              <p className="expanded-track-album">
+              <p 
+                className="expanded-track-album"
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  const albumRatingKey = currentTrack.parentRatingKey;
+                  const albumName = currentTrack.album || currentTrack.parentTitle;
+                  console.log('🎵 Expanded album clicked:', { albumRatingKey, albumName });
+                  if (albumRatingKey) {
+                    goToAlbum(albumRatingKey, albumName);
+                  }
+                }}
+                style={{
+                  cursor: currentTrack.parentRatingKey ? 'pointer' : 'default',
+                  color: currentTrack.parentRatingKey ? '#007bff' : 'inherit',
+                  textDecoration: 'none'
+                }}
+                onMouseEnter={(e) => {
+                  if (currentTrack.parentRatingKey) {
+                    e.target.style.textDecoration = 'underline';
+                  }
+                }}
+                onMouseLeave={(e) => e.target.style.textDecoration = 'none'}
+              >
                 {currentTrack.album || currentTrack.parentTitle}
               </p>
               <div className="expanded-track-rating">
@@ -905,6 +1084,12 @@ const GlobalMusicPlayer = () => {
               </div>
               
               <CastButton
+                currentTrack={currentTrack}
+                isPlaying={isPlaying}
+                onCastStateChange={handleCastStateChange}
+              />
+              
+              <SonosCastButton
                 currentTrack={currentTrack}
                 isPlaying={isPlaying}
                 onCastStateChange={handleCastStateChange}

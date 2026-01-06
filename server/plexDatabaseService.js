@@ -258,8 +258,7 @@ class PlexDatabaseService {
       
       const whereCondition = {
         title: {
-          contains: searchTitle,
-          mode: 'insensitive'
+          contains: searchTitle
         }
       };
       
@@ -291,8 +290,7 @@ class PlexDatabaseService {
       return await this.prisma.plexMovie.findMany({
         where: {
           title: {
-            contains: query,
-            mode: 'insensitive'
+            contains: query
           }
         },
         include: {
@@ -323,14 +321,12 @@ class PlexDatabaseService {
         OR: [
           {
             title: {
-              contains: searchQuery,
-              mode: 'insensitive'
+              contains: searchQuery
             }
           },
           {
             showTitle: {
-              contains: searchQuery,
-              mode: 'insensitive'
+              contains: searchQuery
             }
           }
         ]
@@ -342,8 +338,7 @@ class PlexDatabaseService {
           AND: [
             {
               showTitle: {
-                contains: searchQuery,
-                mode: 'insensitive'
+                contains: searchQuery
               }
             },
             {
@@ -825,7 +820,10 @@ class PlexDatabaseService {
         include: {
           librarySection: true
         },
-        orderBy: { title: 'asc' }
+        orderBy: [
+          { titleSort: 'asc' },
+          { title: 'asc' }
+        ]
       };
 
       // Add pagination if limit is provided
@@ -867,7 +865,10 @@ class PlexDatabaseService {
         include: {
           librarySection: true
         },
-        orderBy: { title: 'asc' }
+        orderBy: [
+          { titleSort: 'asc' },
+          { title: 'asc' }
+        ]
       };
 
       // Add pagination if limit is provided
@@ -907,14 +908,16 @@ class PlexDatabaseService {
       return await this.prisma.plexArtist.findMany({
         where: {
           title: {
-            contains: searchQuery,
-            mode: 'insensitive'
+            contains: searchQuery
           }
         },
         include: {
           librarySection: true
         },
-        orderBy: { title: 'asc' }
+        orderBy: [
+          { titleSort: 'asc' },
+          { title: 'asc' }
+        ]
       });
     } catch (error) {
       console.error('Error searching artists:', error);
@@ -930,8 +933,7 @@ class PlexDatabaseService {
           AND: [
             {
               title: {
-                contains: searchQuery,
-                mode: 'insensitive'
+                contains: searchQuery
               }
             },
             {
@@ -944,7 +946,10 @@ class PlexDatabaseService {
         include: {
           librarySection: true
         },
-        orderBy: { title: 'asc' }
+        orderBy: [
+          { titleSort: 'asc' },
+          { title: 'asc' }
+        ]
       };
 
       // Add pagination if limit is provided
@@ -970,8 +975,7 @@ class PlexDatabaseService {
           AND: [
             {
               title: {
-                contains: searchQuery,
-                mode: 'insensitive'
+                contains: searchQuery
               }
             },
             {
@@ -1157,8 +1161,8 @@ class PlexDatabaseService {
       const query = {
         where: {
           OR: [
-            { title: { contains: searchTerm, mode: 'insensitive' } },
-            { artist: { title: { contains: searchTerm, mode: 'insensitive' } } }
+            { title: { contains: searchTerm } },
+            { artist: { title: { contains: searchTerm } } }
           ]
         },
         include: {
@@ -1191,8 +1195,8 @@ class PlexDatabaseService {
           AND: [
             {
               OR: [
-                { title: { contains: searchTerm, mode: 'insensitive' } },
-                { artist: { title: { contains: searchTerm, mode: 'insensitive' } } }
+                { title: { contains: searchTerm } },
+                { artist: { title: { contains: searchTerm } } }
               ]
             },
             {
@@ -1401,9 +1405,9 @@ class PlexDatabaseService {
       const query = {
         where: {
           OR: [
-            { title: { contains: searchTerm, mode: 'insensitive' } },
-            { album: { title: { contains: searchTerm, mode: 'insensitive' } } },
-            { album: { artist: { title: { contains: searchTerm, mode: 'insensitive' } } } }
+            { title: { contains: searchTerm } },
+            { album: { title: { contains: searchTerm } } },
+            { album: { artist: { title: { contains: searchTerm } } } }
           ]
         },
         include: {
@@ -1440,9 +1444,9 @@ class PlexDatabaseService {
           AND: [
             {
               OR: [
-                { title: { contains: searchTerm, mode: 'insensitive' } },
-                { album: { title: { contains: searchTerm, mode: 'insensitive' } } },
-                { album: { artist: { title: { contains: searchTerm, mode: 'insensitive' } } } }
+                { title: { contains: searchTerm } },
+                { album: { title: { contains: searchTerm } } },
+                { album: { artist: { title: { contains: searchTerm } } } }
               ]
             },
             {

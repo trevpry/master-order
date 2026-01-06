@@ -13,6 +13,7 @@ const AlbumDetail = ({
   selectedSection,
   onGoBack,
   onPlayTrack,
+  onSelectArtist,
   onAddTrackToCustomPlaylist,
   formatDuration,
   formatFileSize
@@ -83,7 +84,27 @@ const AlbumDetail = ({
         
         <div className="album-metadata">
           <h1 className="album-title">{album.title}</h1>
-          <p className="album-artist">{album.parentTitle || album.artist?.title || 'Various Artists'}</p>
+          <p 
+            className="album-artist"
+            onClick={() => {
+              if (album.parentRatingKey && onSelectArtist) {
+                onSelectArtist({ ratingKey: album.parentRatingKey, title: album.parentTitle });
+              }
+            }}
+            style={{
+              cursor: onSelectArtist && album.parentRatingKey ? 'pointer' : 'default',
+              color: onSelectArtist && album.parentRatingKey ? '#007bff' : '#666'
+            }}
+            title={onSelectArtist && album.parentRatingKey ? `View ${album.parentTitle || 'artist'}'s albums` : ''}
+            onMouseEnter={(e) => {
+              if (onSelectArtist && album.parentRatingKey) {
+                e.target.style.textDecoration = 'underline';
+              }
+            }}
+            onMouseLeave={(e) => e.target.style.textDecoration = 'none'}
+          >
+            {album.parentTitle || album.artist?.title || 'Various Artists'}
+          </p>
           
           <div className="album-details">
             {album.year && <span className="album-year">{album.year}</span>}

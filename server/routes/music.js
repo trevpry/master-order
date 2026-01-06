@@ -254,6 +254,47 @@ router.get('/artists/:ratingKey', asyncHandler(async (req, res) => {
   res.json(artist);
 }));
 
+// Update Artist - Name and Sort Name
+router.put('/artists/:ratingKey', asyncHandler(async (req, res) => {
+  const { ratingKey } = req.params;
+  const { title, titleSort } = req.body;
+
+  validateRequiredFields(req.body, ['title']);
+
+  // Get Plex server settings
+  const settings = await plexDb.getPlexSettings();
+  if (!settings || !settings.plexUrl || !settings.plexToken) {
+    return sendBadRequest(res, 'Plex settings not configured');
+  }
+
+  try {
+    // Update in Plex first
+    const plexUrl = `${settings.plexUrl}/library/metadata/${ratingKey}?type=8&title.value=${encodeURIComponent(title)}&titleSort.value=${encodeURIComponent(titleSort || title)}&X-Plex-Token=${settings.plexToken}`;
+    
+    const plexResponse = await fetch(plexUrl, {
+      method: 'PUT'
+    });
+
+    if (!plexResponse.ok) {
+      throw new Error(`Plex update failed: ${plexResponse.status} ${plexResponse.statusText}`);
+    }
+
+    // Update in local database
+    const updatedArtist = await plexDb.prisma.plexArtist.update({
+      where: { ratingKey },
+      data: {
+        title,
+        titleSort: titleSort || title
+      }
+    });
+
+    sendSuccess(res, { artist: updatedArtist, message: 'Artist updated successfully' });
+  } catch (error) {
+    console.error('Error updating artist:', error);
+    sendServerError(res, `Failed to update artist: ${error.message}`);
+  }
+}));
+
 // Music Albums - All
 router.get('/albums', asyncHandler(async (req, res) => {
   const { search, page = 1, limit = 20 } = req.query;

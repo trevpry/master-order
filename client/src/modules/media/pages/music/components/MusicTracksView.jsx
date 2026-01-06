@@ -18,6 +18,7 @@ const MusicTracksView = ({
   playlists,
   onGoBackFromTracks,
   onPlayTrack,
+  onSelectArtist,
   onLoadMoreTracks,
   onAddTrackToCustomPlaylist,
   formatDuration,
@@ -106,7 +107,29 @@ const MusicTracksView = ({
             </h2>
             {selectedAlbum && (
               <p style={{ margin: '0', color: '#888', fontSize: '14px' }}>
-                {selectedAlbum.parentTitle || selectedArtist?.title || 'Unknown Artist'}
+                <span 
+                  onClick={() => {
+                    if (onSelectArtist && (selectedAlbum.parentRatingKey || selectedArtist)) {
+                      const artist = selectedArtist || { 
+                        ratingKey: selectedAlbum.parentRatingKey, 
+                        title: selectedAlbum.parentTitle 
+                      };
+                      onSelectArtist(artist);
+                    }
+                  }}
+                  style={{
+                    cursor: onSelectArtist ? 'pointer' : 'default',
+                    color: onSelectArtist ? '#007bff' : '#888',
+                    textDecoration: 'none'
+                  }}
+                  title={onSelectArtist ? `View ${selectedAlbum.parentTitle || selectedArtist?.title || 'artist'}'s albums` : ''}
+                  onMouseEnter={(e) => {
+                    if (onSelectArtist) e.target.style.textDecoration = 'underline';
+                  }}
+                  onMouseLeave={(e) => e.target.style.textDecoration = 'none'}
+                >
+                  {selectedAlbum.parentTitle || selectedArtist?.title || 'Unknown Artist'}
+                </span>
                 {selectedAlbum.year && ` • ${selectedAlbum.year}`}
               </p>
             )}

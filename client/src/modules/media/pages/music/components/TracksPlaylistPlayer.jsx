@@ -173,7 +173,12 @@ const TracksPlaylistPlayer = ({
             grandparentThumb: artistThumb,
             userRating: track.userRating,
             rating: track.rating,
-            type: 'plex'
+            type: 'plex',
+            // Include rating keys for navigation
+            grandparentRatingKey: track.grandparentRatingKey || track.album?.artist?.ratingKey,
+            parentRatingKey: track.parentRatingKey || track.album?.ratingKey,
+            grandparentTitle: track.grandparentTitle || track.album?.artist?.title,
+            parentTitle: track.parentTitle || track.album?.title
           };
         })
       };

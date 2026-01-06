@@ -12,6 +12,7 @@ const MusicAlbumsView = ({
   metadataResults,
   playlistFilter,
   onSelectAlbum, 
+  onSelectArtist,
   onLoadMoreAlbums,
   onGoBackToArtists,
   onAddAlbumToCustomPlaylist,
@@ -137,15 +138,36 @@ const MusicAlbumsView = ({
                       </select>
                     </div>
                   </div>
+                  
+                  {/* Extract Metadata Button Overlay */}
+                  <div className="album-metadata-overlay">
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onExtractAlbumMetadata(album);
+                      }}
+                      className="metadata-icon-button"
+                      disabled={extractingMetadata.has(album.ratingKey)}
+                      title={extractingMetadata.has(album.ratingKey) ? 'Extracting metadata...' : 'Extract metadata'}
+                    >
+                      {extractingMetadata.has(album.ratingKey) ? (
+                        <LoadingState type="spinner" />
+                      ) : (
+                        '🏷️'
+                      )}
+                    </button>
+                  </div>
                 </div>
               )}
               <div className="album-info">
-                <h3 onClick={() => onSelectAlbum(album)} style={{ cursor: 'pointer' }}>
+                <h3 className="album-title-line" onClick={() => onSelectAlbum(album)} style={{ cursor: 'pointer' }}>
                   {album.title}
+                  {album.year && <span className="album-year"> ({album.year})</span>}
                 </h3>
-                {album.year && <span className="album-year">({album.year})</span>}
-                {album.summary && (
-                  <p className="album-summary">{album.summary}</p>
+                {(album.artist?.title || album.parentTitle) && (
+                  <p className="album-artist-name">
+                    {album.artist?.title || album.parentTitle}
+                  </p>
                 )}
                 <div className="album-meta">
                   {album.genres && album.genres.length > 0 && (
@@ -158,27 +180,6 @@ const MusicAlbumsView = ({
                       {album.childCount} track{album.childCount !== 1 ? 's' : ''}
                     </span>
                   )}
-                </div>
-                <div className="album-actions">
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onExtractAlbumMetadata(album);
-                    }}
-                    className="extract-metadata-button"
-                    disabled={extractingMetadata.has(album.ratingKey)}
-                  >
-                    {extractingMetadata.has(album.ratingKey) ? (
-                      <>
-                        <LoadingState type="spinner" />
-                        Extracting...
-                      </>
-                    ) : (
-                      <>
-                        🏷️ Extract Metadata
-                      </>
-                    )}
-                  </button>
                 </div>
                 {metadataResults[album.ratingKey] && (
                   <div className="metadata-results">
