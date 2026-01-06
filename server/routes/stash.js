@@ -616,6 +616,10 @@ router.get('/scenes', asyncHandler(async (req, res) => {
       orderBy = [
         { title: sortOrderLower }
       ];
+    } else if (sortBy === 'filename') {
+      orderBy = [
+        { path: sortOrderLower }
+      ];
     } else if (sortBy === 'rating') {
       orderBy = [
         { rating: sortOrderLower },

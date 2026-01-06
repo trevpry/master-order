@@ -343,6 +343,7 @@ export default function ScenesPage() {
             <option value="date">Date</option>
             <option value="created">Created Date</option>
             <option value="title">Title</option>
+            <option value="filename">File Name</option>
             <option value="rating">Rating</option>
             <option value="duration">Duration</option>
           </select>
@@ -545,6 +546,7 @@ export default function ScenesPage() {
             onSceneClick={setSelectedScene}
             selectedScenes={selectedScenes}
             onToggleSelect={toggleSceneSelection}
+            searchParams={searchParams}
           />
 
           {/* Pagination */}

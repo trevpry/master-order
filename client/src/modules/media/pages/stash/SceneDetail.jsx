@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { useParams, Link, useNavigate } from 'react-router-dom';
+import { useParams, Link, useNavigate, useSearchParams } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import { formatDuration } from '../../../../utils/timeUtils';
 import { getSceneDisplayTitle, getSceneImageUrl, formatDate } from '../../utils/stashUtils';
@@ -14,6 +14,8 @@ import config from '../../../../config';
 export default function SceneDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const returnTo = searchParams.get('returnTo');
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -2145,7 +2147,9 @@ export default function SceneDetail() {
           duration: 3000,
           position: 'bottom-right'
         });
-        navigate('/media/stash/scenes');
+        // Navigate back with preserved filters/sorting
+        const backPath = returnTo ? `/media/stash/scenes?${returnTo}` : '/media/stash/scenes';
+        navigate(backPath);
       } else {
         toast.error(result.error || 'Failed to delete scene', {
           duration: 5000,

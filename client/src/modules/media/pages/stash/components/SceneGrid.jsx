@@ -1,7 +1,7 @@
 import React from 'react';
 import SceneCard from './SceneCard';
 
-export default function SceneGrid({ scenes, onSceneClick, showSceneNumbers = false, onUnlinkClick = null, selectedScenes = [], onToggleSelect = null }) {
+export default function SceneGrid({ scenes, onSceneClick, showSceneNumbers = false, onUnlinkClick = null, selectedScenes = [], onToggleSelect = null, searchParams = null }) {
   if (!scenes || scenes.length === 0) {
     return (
       <div className="empty-state">
@@ -21,6 +21,7 @@ export default function SceneGrid({ scenes, onSceneClick, showSceneNumbers = fal
           sceneNumber={showSceneNumbers ? (scene.sceneIndex || index + 1) : null}
           isSelected={selectedScenes.includes(scene.id)}
           onToggleSelect={onToggleSelect}
+          searchParams={searchParams}
         />
       ))}
     </div>

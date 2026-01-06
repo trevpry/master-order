@@ -184,7 +184,7 @@ export default function SceneCard({ scene, onSceneClick, sceneNumber = null, onU
       onMouseEnter={handleMouseEnter}
       onMouseLeave={handleMouseLeave}
     >
-      <Link to={`/media/stash/scenes/${scene.id}`} style={{ textDecoration: 'none' }}>
+      <Link to={sceneLink} style={{ textDecoration: 'none' }}>
         <div style={styles.imageContainer}>
           <img
             src={getSceneImageUrl(scene)}
@@ -231,7 +231,7 @@ export default function SceneCard({ scene, onSceneClick, sceneNumber = null, onU
       </Link>
       
       <div style={styles.cardBody}>
-        <Link to={`/media/stash/scenes/${scene.id}`} style={styles.titleLink}>
+        <Link to={sceneLink} style={styles.titleLink}>
           <h3 style={styles.title}>{getSceneDisplayTitle(scene)}</h3>
         </Link>
         
