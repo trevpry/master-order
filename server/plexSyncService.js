@@ -1626,7 +1626,21 @@ class PlexSyncService {
         return;
       }
 
+      let addedCount = 0;
+      let skippedCount = 0;
+
       for (const track of tracks) {
+        // Check if track already exists
+        const existingTrack = await prisma.plexTrack.findUnique({
+          where: { ratingKey: track.ratingKey }
+        });
+
+        // Only add new tracks, skip updates to preserve manual edits
+        if (existingTrack) {
+          skippedCount++;
+          continue;
+        }
+
         const trackData = {
           ratingKey: track.ratingKey,
           key: track.key,
@@ -1649,18 +1663,16 @@ class PlexSyncService {
         };
 
         try {
-          await prisma.plexTrack.upsert({
-            where: { ratingKey: track.ratingKey },
-            update: trackData,
-            create: trackData
+          await prisma.plexTrack.create({
+            data: trackData
           });
+          addedCount++;
         } catch (error) {
           await this.handleDatabaseError(error, `track ${track.title}`, async () => {
-            await prisma.plexTrack.upsert({
-              where: { ratingKey: track.ratingKey },
-              update: trackData,
-              create: trackData
+            await prisma.plexTrack.create({
+              data: trackData
             });
+            addedCount++;
           });
         }
 
@@ -1670,7 +1682,7 @@ class PlexSyncService {
         }
       }
 
-      console.log(`✅ Synced ${tracks.length} tracks for album ${albumRatingKey}`);
+      console.log(`✅ Tracks for album ${albumRatingKey}: ${addedCount} added, ${skippedCount} skipped (already exist)`);
     } catch (error) {
       console.error('Error syncing tracks:', error);
       throw error;

@@ -6,37 +6,87 @@ const MusicArtistsView = ({
   artistsLoading,
   artistsHasMore,
   onSelectArtist,
-  onLoadMoreArtists
+  onLoadMoreArtists,
+  onCreateArtist,
+  selectionMode = false,
+  selectedArtists = new Set(),
+  onToggleSelection
 }) => {
+  
+  const handleArtistClick = (artist) => {
+    if (selectionMode && onToggleSelection) {
+      onToggleSelection(artist.ratingKey);
+    } else if (onSelectArtist) {
+      onSelectArtist(artist);
+    }
+  };
+  
   return (
-    <div className="artists-grid">
+    <div className="artists-view-container">
+      {onCreateArtist && (
+        <div className="artists-view-header">
+          <button 
+            className="btn-create-artist"
+            onClick={onCreateArtist}
+          >
+            ➕ Add New Artist
+          </button>
+        </div>
+      )}
+      
+      <div className="artists-grid">
       {artists.length === 0 ? (
         <div className="empty-state">
           <p>No artists found. Try adjusting your search or filters.</p>
         </div>
       ) : (
-        artists.map(artist => (
-          <div 
-            key={artist.ratingKey} 
-            className="artist-card"
-            onClick={() => onSelectArtist(artist)}
-          >
-            {artist.thumb && (
-              <div className="artist-image">
-                <img 
-                  src={`${config.plexUrl}${artist.thumb}?X-Plex-Token=${config.plexToken}`}
-                  alt={artist.title}
-                  onError={(e) => {
-                    e.target.style.display = 'none';
+        artists.map(artist => {
+          const isSelected = selectedArtists.has(artist.ratingKey);
+          
+          return (
+            <div 
+              key={artist.ratingKey} 
+              className={`artist-card ${selectionMode ? 'selection-mode' : ''} ${isSelected ? 'selected' : ''}`}
+              onClick={() => handleArtistClick(artist)}
+            >
+              {selectionMode && (
+                <div 
+                  className="selection-checkbox"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onToggleSelection(artist.ratingKey);
                   }}
-                />
+                >
+                  <input 
+                    type="checkbox" 
+                    checked={isSelected}
+                    onChange={() => {}}
+                    readOnly
+                  />
+                </div>
+              )}
+              {artist.thumb && (
+                <div className="artist-image">
+                  <img 
+                    src={`${config.plexUrl}${artist.thumb}?X-Plex-Token=${config.plexToken}`}
+                    alt={artist.title}
+                    onError={(e) => {
+                      e.target.style.display = 'none';
+                    }}
+                  />
+                </div>
+              )}
+              <div className="artist-info">
+                <h3>{artist.title}</h3>
+                {artist.totalPlayCount !== undefined && artist.totalPlayCount > 0 && (
+                  <p className="artist-play-count">
+                    {artist.totalPlayCount} {artist.totalPlayCount === 1 ? 'play' : 'plays'}
+                  </p>
+                )}
               </div>
-            )}
-            <div className="artist-info">
-              <h3>{artist.title}</h3>
             </div>
-          </div>
-        ))
+          );
+        })
       )}
       
       {/* Load More Button */}
@@ -59,6 +109,7 @@ const MusicArtistsView = ({
         </div>
       )}
     </div>
+  </div>
   );
 };
 

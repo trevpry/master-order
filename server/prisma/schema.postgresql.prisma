@@ -665,11 +665,11 @@ model WatchLog {
 }
 
 model PlexArtist {
-  id               Int                 @id @default(autoincrement())
-  ratingKey        String              @unique
+  id               Int                      @id @default(autoincrement())
+  ratingKey        String                   @unique
   key              String
   guid             String?
-  type             String              @default("artist")
+  type             String                   @default("artist")
   title            String
   titleSort        String?
   summary          String?
@@ -680,9 +680,12 @@ model PlexArtist {
   updatedAt        DateTime?
   librarySectionID Int?
   collections      String?
-  removed          Boolean             @default(false)
+  removed          Boolean                  @default(false)
   albums           PlexAlbum[]
-  librarySection   PlexLibrarySection? @relation(fields: [librarySectionID], references: [id])
+  works            Work[]
+  artistTypes      ArtistTypeAssignment[]
+  trackArtists     TrackArtist[]
+  librarySection   PlexLibrarySection?      @relation(fields: [librarySectionID], references: [id])
 
   @@map("PlexArtist")
 }
@@ -753,8 +756,103 @@ model PlexTrack {
   removed              Boolean             @default(false)
   album                PlexAlbum?          @relation(fields: [parentRatingKey], references: [ratingKey])
   librarySection       PlexLibrarySection? @relation(fields: [librarySectionID], references: [id])
+  workPartTracks       WorkPartTrack[]
+  trackArtists         TrackArtist[]
 
   @@map("PlexTrack")
+}
+
+model Work {
+  id               Int        @id @default(autoincrement())
+  title            String
+  composerKey      String
+  composer         PlexArtist @relation(fields: [composerKey], references: [ratingKey])
+  parts            WorkPart[]
+  createdAt        DateTime   @default(now())
+  updatedAt        DateTime   @updatedAt
+
+  @@map("Work")
+}
+
+model WorkPart {
+  id          Int                   @id @default(autoincrement())
+  workId      Int
+  title       String
+  order       Int
+  work        Work                  @relation(fields: [workId], references: [id], onDelete: Cascade)
+  tracks      WorkPartTrack[]
+  artistTypes WorkPartArtistType[]
+  createdAt   DateTime              @default(now())
+  updatedAt   DateTime              @updatedAt
+
+  @@map("WorkPart")
+}
+
+model WorkPartTrack {
+  id         Int       @id @default(autoincrement())
+  workPartId Int
+  trackKey   String
+  workPart   WorkPart  @relation(fields: [workPartId], references: [id], onDelete: Cascade)
+  track      PlexTrack @relation(fields: [trackKey], references: [ratingKey])
+  createdAt  DateTime  @default(now())
+
+  @@unique([workPartId, trackKey])
+  @@map("WorkPartTrack")
+}
+
+model ArtistType {
+  id          Int                      @id @default(autoincrement())
+  name        String                   @unique
+  description String?
+  color       String?
+  parentId    Int?
+  parent      ArtistType?              @relation("ArtistTypeHierarchy", fields: [parentId], references: [id], onDelete: SetNull)
+  children    ArtistType[]             @relation("ArtistTypeHierarchy")
+  createdAt   DateTime                 @default(now())
+  updatedAt   DateTime                 @updatedAt
+  artists     ArtistTypeAssignment[]
+  workParts   WorkPartArtistType[]
+  trackArtists TrackArtist[]
+
+  @@map("ArtistType")
+}
+
+model ArtistTypeAssignment {
+  id           Int        @id @default(autoincrement())
+  artistKey    String
+  artistTypeId Int
+  artist       PlexArtist @relation(fields: [artistKey], references: [ratingKey], onDelete: Cascade)
+  artistType   ArtistType @relation(fields: [artistTypeId], references: [id], onDelete: Cascade)
+  createdAt    DateTime   @default(now())
+
+  @@unique([artistKey, artistTypeId])
+  @@map("ArtistTypeAssignment")
+}
+
+model WorkPartArtistType {
+  id           Int        @id @default(autoincrement())
+  workPartId   Int
+  artistTypeId Int
+  workPart     WorkPart   @relation(fields: [workPartId], references: [id], onDelete: Cascade)
+  artistType   ArtistType @relation(fields: [artistTypeId], references: [id], onDelete: Cascade)
+  createdAt    DateTime   @default(now())
+
+  @@unique([workPartId, artistTypeId])
+  @@map("WorkPartArtistType")
+}
+
+model TrackArtist {
+  id           Int        @id @default(autoincrement())
+  trackKey     String
+  artistKey    String
+  artistTypeId Int
+  track        PlexTrack  @relation(fields: [trackKey], references: [ratingKey], onDelete: Cascade)
+  artist       PlexArtist @relation(fields: [artistKey], references: [ratingKey], onDelete: Cascade)
+  artistType   ArtistType @relation(fields: [artistTypeId], references: [id], onDelete: Cascade)
+  createdAt    DateTime   @default(now())
+
+  @@unique([trackKey, artistKey, artistTypeId])
+  @@map("TrackArtist")
 }
 
 model StashScene {

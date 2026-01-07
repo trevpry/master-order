@@ -176,6 +176,21 @@
   font-size: 0.95rem;
 }
 
+.track-title-link {
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  text-decoration: none;
+  transition: color 0.2s;
+}
+
+.track-title-link:hover {
+  color: #007bff;
+}
+
 .track-artist {
   color: #6c757d;
   font-size: 0.85rem;

@@ -14,6 +14,7 @@ const AlbumDetail = ({
   onGoBack,
   onPlayTrack,
   onSelectArtist,
+  onSelectTrack,
   onAddTrackToCustomPlaylist,
   formatDuration,
   formatFileSize
@@ -111,6 +112,9 @@ const AlbumDetail = ({
             {tracks && tracks.length > 0 && (
               <span className="album-track-count">{tracks.length} track{tracks.length !== 1 ? 's' : ''}</span>
             )}
+            {album.totalPlayCount !== undefined && album.totalPlayCount > 0 && (
+              <span className="album-play-count">• {album.totalPlayCount} {album.totalPlayCount === 1 ? 'play' : 'plays'}</span>
+            )}
           </div>
 
           {album.summary && (
@@ -147,6 +151,7 @@ const AlbumDetail = ({
               <span className="track-number">#</span>
               <span className="track-title">Title</span>
               <span className="track-rating">Rating</span>
+              <span className="track-plays">Plays</span>
               <span className="track-duration">Duration</span>
               <span className="track-size">Size</span>
               <span className="track-playlist">Playlist</span>
@@ -165,7 +170,12 @@ const AlbumDetail = ({
                 </button>
                 <span className="track-number">{track.index || index + 1}</span>
                 <div className="track-title">
-                  <div className="track-name">{track.title || 'Untitled'}</div>
+                  <div 
+                    className="track-name track-name-link"
+                    onClick={() => onSelectTrack && onSelectTrack(track)}
+                  >
+                    {track.title || 'Untitled'}
+                  </div>
                   {track.originalTitle && (
                     <div className="track-subtitle">{track.originalTitle}</div>
                   )}
@@ -177,6 +187,9 @@ const AlbumDetail = ({
                     size="small"
                   />
                 </div>
+                <span className="track-plays">
+                  {track.viewCount > 0 ? `${track.viewCount} ${track.viewCount === 1 ? 'play' : 'plays'}` : '—'}
+                </span>
                 <span className="track-duration">{formatDuration(track.duration)}</span>
                 <span className="track-size">{formatFileSize(track.size)}</span>
                 <div className="track-playlist">

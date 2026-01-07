@@ -10,8 +10,13 @@ import MusicAlbumsView from './components/MusicAlbumsView';
 import MusicTracksView from './components/MusicTracksView';
 import AlbumDetail from './components/AlbumDetail';
 import ArtistDetail from './components/ArtistDetail';
+import TrackDetail from './components/TrackDetail';
+import WorkDetail from './components/WorkDetail';
 import MusicCollectionsView from './components/MusicCollectionsView';
 import MusicPlaylistsView from './components/MusicPlaylistsView';
+import WorksView from './components/WorksView';
+import RadioView from './components/RadioView';
+import MergeArtistsModal from '../../../../components/music/MergeArtistsModal';
 import LoadingState from '../../../../shared/components/LoadingState';
 import './Music.css';
 
@@ -43,8 +48,11 @@ const Music = () => {
   const activeView = searchParams.get('view') || 'artists';
   const artistRatingKey = searchParams.get('artist');
   const albumRatingKey = searchParams.get('album');
+  const trackRatingKey = searchParams.get('track');
+  const workId = searchParams.get('work');
   const [selectedArtist, setSelectedArtist] = useState(null);
   const [selectedAlbum, setSelectedAlbum] = useState(null);
+  const [selectedTrack, setSelectedTrack] = useState(null);
   
   const [searchQuery, setSearchQuery] = useState(searchParams.get('search') || '');
   const [selectedSection, setSelectedSection] = useState(searchParams.get('section') || 'all');
@@ -65,6 +73,27 @@ const Music = () => {
   });
   const [creatingPlaylist, setCreatingPlaylist] = useState(false);
   
+  // Artist types management state
+  const [showArtistTypesModal, setShowArtistTypesModal] = useState(false);
+  const [artistTypes, setArtistTypes] = useState([]);
+  const [newTypeName, setNewTypeName] = useState('');
+  const [newTypeDescription, setNewTypeDescription] = useState('');
+  const [newTypeColor, setNewTypeColor] = useState('');
+  const [newTypeParentId, setNewTypeParentId] = useState('');
+  const [editingType, setEditingType] = useState(null);
+  const [artistTypesLoading, setArtistTypesLoading] = useState(false);
+  
+  // Create artist state
+  const [showCreateArtistModal, setShowCreateArtistModal] = useState(false);
+  const [newArtistName, setNewArtistName] = useState('');
+  const [newArtistSortName, setNewArtistSortName] = useState('');
+  const [creatingArtist, setCreatingArtist] = useState(false);
+  
+  // Artist merge state
+  const [artistSelectionMode, setArtistSelectionMode] = useState(false);
+  const [selectedArtists, setSelectedArtists] = useState(new Set());
+  const [showMergeArtistsModal, setShowMergeArtistsModal] = useState(false);
+  
   // Audio player state
   const [currentTrack, setCurrentTrack] = useState(null);
   const [isPlaying, setIsPlaying] = useState(false);
@@ -72,6 +101,8 @@ const Music = () => {
   const [duration, setDuration] = useState(0);
   const [volume, setVolume] = useState(1);
   const [isLoading, setIsLoading] = useState(false);
+  const [trackQueue, setTrackQueue] = useState([]);
+  const [queueIndex, setQueueIndex] = useState(0);
   const audioRef = useRef(null);
 
   // Helper functions for URL management
@@ -245,6 +276,37 @@ const Music = () => {
     loadData();
   }, []);
 
+  // Handle track end - auto-scrobble to Plex and play next in queue
+  const handleEnded = async () => {
+    setIsPlaying(false);
+    setCurrentTime(0);
+    
+    // Automatically mark track as played in Plex
+    if (currentTrack && currentTrack.ratingKey) {
+      try {
+        const response = await fetch(
+          `${config.apiBaseUrl}/api/music/track/${currentTrack.ratingKey}/scrobble`,
+          { method: 'POST' }
+        );
+        
+        if (response.ok) {
+          console.log('✓ Track marked as played:', currentTrack.title);
+        } else {
+          console.error('Failed to mark track as played');
+        }
+      } catch (err) {
+        console.error('Error marking track as played:', err);
+      }
+    }
+
+    // Play next track in queue if available
+    if (trackQueue.length > 0 && queueIndex < trackQueue.length - 1) {
+      const nextIndex = queueIndex + 1;
+      setQueueIndex(nextIndex);
+      await playTrack(trackQueue[nextIndex]);
+    }
+  };
+
   // Audio player event handlers
   useEffect(() => {
     const audio = audioRef.current;
@@ -256,11 +318,6 @@ const Music = () => {
 
     const handleTimeUpdate = () => {
       setCurrentTime(audio.currentTime);
-    };
-
-    const handleEnded = () => {
-      setIsPlaying(false);
-      setCurrentTime(0);
     };
 
     const handleError = (e) => {
@@ -437,6 +494,19 @@ const Music = () => {
       audioRef.current.volume = newVolume;
       setVolume(newVolume);
     }
+  };
+
+  // Play multiple tracks (for radio)
+  const playTracks = async (tracks) => {
+    if (!tracks || tracks.length === 0) {
+      console.error('No tracks provided');
+      return;
+    }
+
+    console.log('🎲 Radio: Starting playback with', tracks.length, 'tracks');
+    setTrackQueue(tracks);
+    setQueueIndex(0);
+    await playTrack(tracks[0]);
   };
 
   // Load static data that doesn't change often
@@ -910,6 +980,194 @@ const Music = () => {
       setError(err.message);
     }
   };
+
+  const selectTrack = (track) => {
+    setSelectedTrack(track);
+    navigateToView('track', {
+      artist: selectedArtist?.ratingKey || artistRatingKey,
+      album: selectedAlbum?.ratingKey || albumRatingKey,
+      track: track.ratingKey
+    });
+  };
+
+  const selectWork = (workIdOrWork) => {
+    const id = typeof workIdOrWork === 'object' ? workIdOrWork.id : workIdOrWork;
+    navigateToView('workDetail', { work: id });
+  };
+
+  // Artist Types Management Functions
+  const loadArtistTypes = async () => {
+    try {
+      setArtistTypesLoading(true);
+      const response = await fetch(`${config.apiBaseUrl}/api/artist-types`);
+      if (!response.ok) throw new Error('Failed to load artist types');
+      const result = await response.json();
+      setArtistTypes(result.data?.artistTypes || []);
+    } catch (err) {
+      console.error('Error loading artist types:', err);
+      alert(`Error loading artist types: ${err.message}`);
+    } finally {
+      setArtistTypesLoading(false);
+    }
+  };
+
+  const handleCreateArtistType = async () => {
+    if (!newTypeName.trim()) {
+      alert('Please enter a name for the artist type');
+      return;
+    }
+
+    try {
+      const response = await fetch(`${config.apiBaseUrl}/api/artist-types`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: newTypeName.trim(),
+          description: newTypeDescription.trim() || null,
+          color: newTypeColor.trim() || null,
+          parentId: newTypeParentId ? parseInt(newTypeParentId) : null
+        })
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Failed to create artist type');
+      }
+
+      await loadArtistTypes();
+      setNewTypeName('');
+      setNewTypeDescription('');
+      setNewTypeColor('');
+      setNewTypeParentId('');
+      setEditingType(null);
+    } catch (err) {
+      console.error('Error creating artist type:', err);
+      alert(`Error: ${err.message}`);
+    }
+  };
+
+  const handleUpdateArtistType = async () => {
+    if (!editingType || !newTypeName.trim()) {
+      alert('Please enter a name for the artist type');
+      return;
+    }
+
+    try {
+      const response = await fetch(`${config.apiBaseUrl}/api/artist-types/${editingType.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: newTypeName.trim(),
+          description: newTypeDescription.trim() || null,
+          color: newTypeColor.trim() || null,
+          parentId: newTypeParentId ? parseInt(newTypeParentId) : null
+        })
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Failed to update artist type');
+      }
+
+      await loadArtistTypes();
+      setNewTypeName('');
+      setNewTypeDescription('');
+      setNewTypeColor('');
+      setNewTypeParentId('');
+      setEditingType(null);
+    } catch (err) {
+      console.error('Error updating artist type:', err);
+      alert(`Error: ${err.message}`);
+    }
+  };
+
+  const handleDeleteArtistType = async (typeId) => {
+    if (!confirm('Delete this artist type? This will remove it from all artists.')) return;
+
+    try {
+      const response = await fetch(`${config.apiBaseUrl}/api/artist-types/${typeId}`, {
+        method: 'DELETE'
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Failed to delete artist type');
+      }
+
+      await loadArtistTypes();
+    } catch (err) {
+      console.error('Error deleting artist type:', err);
+      alert(`Error: ${err.message}`);
+    }
+  };
+
+  const openEditArtistType = (type) => {
+    setEditingType(type);
+    setNewTypeName(type.name);
+    setNewTypeDescription(type.description || '');
+    setNewTypeColor(type.color || '');
+    setNewTypeParentId(type.parentId ? String(type.parentId) : '');
+  };
+
+  const cancelEditArtistType = () => {
+    setEditingType(null);
+    setNewTypeName('');
+    setNewTypeDescription('');
+    setNewTypeColor('');
+    setNewTypeParentId('');
+  };
+
+  const openArtistTypesModal = () => {
+    setShowArtistTypesModal(true);
+    loadArtistTypes();
+  };
+
+  // Create Artist Functions
+  const handleCreateArtist = async () => {
+    if (!newArtistName.trim()) {
+      alert('Please enter an artist name');
+      return;
+    }
+
+    try {
+      setCreatingArtist(true);
+      const response = await fetch(`${config.apiBaseUrl}/api/music/artists`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title: newArtistName.trim(),
+          titleSort: newArtistSortName.trim() || newArtistName.trim()
+        })
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Failed to create artist');
+      }
+
+      const result = await response.json();
+      
+      // Add the new artist to the list
+      setArtists(prev => [result.data.artist, ...prev]);
+      
+      // Close modal and reset form
+      setShowCreateArtistModal(false);
+      setNewArtistName('');
+      setNewArtistSortName('');
+      
+      // Optionally navigate to the new artist
+      if (result.data.artist) {
+        selectArtist(result.data.artist);
+      }
+    } catch (err) {
+      console.error('Error creating artist:', err);
+      alert(`Error: ${err.message}`);
+    } finally {
+      setCreatingArtist(false);
+    }
+  };
+
+  // End Artist Types Management Functions
 
   const resetToArtists = () => {
     navigateToView('artists');
@@ -1409,6 +1667,7 @@ const Music = () => {
           onNavigateToView={navigateToView}
           onLoadAlbumsView={loadAlbumsView}
           onLoadTracksView={loadTracksView}
+          onOpenArtistTypesModal={openArtistTypesModal}
         />
       </div>
 
@@ -1421,10 +1680,7 @@ const Music = () => {
             setDuration(audioRef.current.duration || 0);
           }
         }}
-        onEnded={() => {
-          setIsPlaying(false);
-          setCurrentTime(0);
-        }}
+        onEnded={handleEnded}
         onLoadStart={() => {
           console.log('🔄 Audio loading started');
           setIsLoading(true);
@@ -1472,7 +1728,7 @@ const Music = () => {
       <MusicAudioPlayer
         currentTrack={currentTrack}
         isPlaying={isPlaying}
-        isLoading={loading}
+        isLoading={isLoading}
         currentTime={currentTime}
         duration={duration}
         volume={volume}
@@ -1486,15 +1742,90 @@ const Music = () => {
 
       <div className="music-content">
         {activeView === 'artists' && (
-          <MusicArtistsView
-            artists={artists}
-            artistsLoading={artistsLoading}
-            artistsHasMore={artistsHasMore}
-            onSelectArtist={selectArtist}
-            onLoadMoreArtists={loadMoreArtists}
-          />
+          <>
+            {/* Artist Selection Controls */}
+            <div className="artist-selection-controls" style={{ 
+              display: 'flex', 
+              gap: '0.75rem', 
+              alignItems: 'center',
+              marginBottom: '1rem',
+              padding: '0.75rem',
+              backgroundColor: artistSelectionMode ? '#eff6ff' : 'transparent',
+              borderRadius: '0.375rem',
+              border: artistSelectionMode ? '2px solid #3b82f6' : 'none'
+            }}>
+              <button
+                onClick={() => {
+                  setArtistSelectionMode(!artistSelectionMode);
+                  if (artistSelectionMode) {
+                    setSelectedArtists(new Set());
+                  }
+                }}
+                style={{
+                  padding: '0.5rem 1rem',
+                  borderRadius: '0.375rem',
+                  border: 'none',
+                  backgroundColor: artistSelectionMode ? '#3b82f6' : '#e5e7eb',
+                  color: artistSelectionMode ? 'white' : '#374151',
+                  cursor: 'pointer',
+                  fontSize: '0.875rem',
+                  fontWeight: '500'
+                }}
+              >
+                {artistSelectionMode ? '✓ Selection Mode' : '☑️ Select Artists'}
+              </button>
+              
+              {artistSelectionMode && selectedArtists.size > 0 && (
+                <>
+                  <span style={{ fontSize: '0.875rem', color: '#6b7280' }}>
+                    {selectedArtists.size} selected
+                  </span>
+                  
+                  {selectedArtists.size >= 2 && (
+                    <button
+                      onClick={() => setShowMergeArtistsModal(true)}
+                      style={{
+                        padding: '0.5rem 1rem',
+                        borderRadius: '0.375rem',
+                        border: 'none',
+                        backgroundColor: '#3b82f6',
+                        color: 'white',
+                        cursor: 'pointer',
+                        fontSize: '0.875rem',
+                        fontWeight: '500'
+                      }}
+                    >
+                      🔀 Merge {selectedArtists.size} Artists
+                    </button>
+                  )}
+                </>
+              )}
+            </div>
+            
+            <MusicArtistsView
+              artists={artists}
+              artistsLoading={artistsLoading}
+              artistsHasMore={artistsHasMore}
+              onSelectArtist={selectArtist}
+              onLoadMoreArtists={loadMoreArtists}
+              selectionMode={artistSelectionMode}
+              selectedArtists={selectedArtists}
+              onToggleSelection={(ratingKey) => {
+                setSelectedArtists(prev => {
+                  const newSelection = new Set(prev);
+                  if (newSelection.has(ratingKey)) {
+                    newSelection.delete(ratingKey);
+                  } else {
+                    newSelection.add(ratingKey);
+                  }
+                  return newSelection;
+                });
+              }}
+              onCreateArtist={() => setShowCreateArtistModal(true)}
+            />
+          </>
         )}
-
+        
         {activeView === 'albums' && (
           <MusicAlbumsView
             albums={albums}
@@ -1553,6 +1884,7 @@ const Music = () => {
             onGoBack={goBackToAlbums}
             onPlayTrack={playTrack}
             onSelectArtist={selectArtist}
+            onSelectTrack={selectTrack}
             onAddTrackToCustomPlaylist={addTrackToCustomPlaylist}
             formatDuration={formatDuration}
             formatFileSize={formatFileSize}
@@ -1574,10 +1906,46 @@ const Music = () => {
             onGoBackFromTracks={goBackFromTracks}
             onPlayTrack={playTrack}
             onSelectArtist={selectArtist}
+            onSelectTrack={selectTrack}
             onLoadMoreTracks={loadMoreTracks}
             onAddTrackToCustomPlaylist={addTrackToCustomPlaylist}
             formatDuration={formatDuration}
             formatFileSize={formatFileSize}
+          />
+        )}
+
+        {activeView === 'track' && trackRatingKey && (
+          <TrackDetail
+            trackRatingKey={trackRatingKey}
+            onGoBack={() => {
+              if (selectedAlbum || albumRatingKey) {
+                navigateToView('album', { 
+                  artist: selectedArtist?.ratingKey || artistRatingKey,
+                  album: selectedAlbum?.ratingKey || albumRatingKey 
+                });
+              } else {
+                navigateToView('tracks');
+              }
+            }}
+            onSelectAlbum={selectAlbum}
+            onSelectArtist={selectArtist}
+            onSelectWork={selectWork}
+            onPlayTrack={playTrack}
+          />
+        )}
+
+        {activeView === 'workDetail' && workId && (
+          <WorkDetail
+            workId={parseInt(workId)}
+            onGoBack={() => {
+              const params = {};
+              if (artistRatingKey) params.artist = artistRatingKey;
+              if (albumRatingKey) params.album = albumRatingKey;
+              if (trackRatingKey) params.track = trackRatingKey;
+              navigateToView('track', params);
+            }}
+            onSelectArtist={selectArtist}
+            onSelectTrack={selectTrack}
           />
         )}
 
@@ -1591,6 +1959,16 @@ const Music = () => {
             config={config}
             onSetShowCreatePlaylistModal={setShowCreatePlaylistModal}
             onDeleteCustomPlaylist={deleteCustomPlaylist}
+          />
+        )}
+
+        {activeView === 'works' && (
+          <WorksView />
+        )}
+
+        {activeView === 'radio' && (
+          <RadioView 
+            selectedSection={selectedSection}
           />
         )}
       </div>
@@ -1814,6 +2192,249 @@ const Music = () => {
             </div>
           </div>
         </div>
+      )}
+      
+      {/* Artist Types Management Modal */}
+      {showArtistTypesModal && (
+        <div className="modal-overlay" onClick={() => setShowArtistTypesModal(false)}>
+          <div className="modal-dialog" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h2>🎭 Manage Artist Types</h2>
+              <button 
+                className="modal-close"
+                onClick={() => setShowArtistTypesModal(false)}
+              >
+                ✕
+              </button>
+            </div>
+            
+            <div className="modal-content">
+              {/* Create/Edit Form */}
+              <div className="artist-type-form">
+                <h3>{editingType ? 'Edit Artist Type' : 'Create New Artist Type'}</h3>
+                <div className="form-group">
+                  <label htmlFor="type-name">Name *</label>
+                  <input
+                    id="type-name"
+                    type="text"
+                    value={newTypeName}
+                    onChange={(e) => setNewTypeName(e.target.value)}
+                    placeholder="e.g., Composer, Performer, Conductor"
+                    maxLength={50}
+                  />
+                </div>
+                
+                <div className="form-group">
+                  <label htmlFor="type-description">Description</label>
+                  <textarea
+                    id="type-description"
+                    value={newTypeDescription}
+                    onChange={(e) => setNewTypeDescription(e.target.value)}
+                    placeholder="Optional description"
+                    rows={2}
+                    maxLength={200}
+                  />
+                </div>
+                
+                <div className="form-group">
+                  <label htmlFor="type-color">Color (hex)</label>
+                  <input
+                    id="type-color"
+                    type="text"
+                    value={newTypeColor}
+                    onChange={(e) => setNewTypeColor(e.target.value)}
+                    placeholder="#007bff"
+                    maxLength={7}
+                  />
+                  {newTypeColor && (
+                    <div 
+                      className="color-preview"
+                      style={{ backgroundColor: newTypeColor }}
+                    />
+                  )}
+                </div>
+                
+                <div className="form-group">
+                  <label htmlFor="type-parent">Parent Type (optional)</label>
+                  <select
+                    id="type-parent"
+                    value={newTypeParentId}
+                    onChange={(e) => setNewTypeParentId(e.target.value)}
+                  >
+                    <option value="">None (top-level type)</option>
+                    {artistTypes
+                      .filter(t => !editingType || t.id !== editingType.id)
+                      .map(type => (
+                        <option key={type.id} value={type.id}>
+                          {type.name}
+                        </option>
+                      ))}
+                  </select>
+                  <small>Set a parent to create a hierarchy (e.g., "String Orchestra" → "Orchestra")</small>
+                </div>
+                
+                <div className="form-actions">
+                  {editingType && (
+                    <button 
+                      className="cancel-button"
+                      onClick={cancelEditArtistType}
+                    >
+                      Cancel Edit
+                    </button>
+                  )}
+                  <button 
+                    className="create-button"
+                    onClick={editingType ? handleUpdateArtistType : handleCreateArtistType}
+                    disabled={!newTypeName.trim()}
+                  >
+                    {editingType ? 'Update Type' : 'Create Type'}
+                  </button>
+                </div>
+              </div>
+              
+              {/* Existing Artist Types List */}
+              <div className="artist-types-list">
+                <h3>Existing Artist Types</h3>
+                {artistTypesLoading ? (
+                  <div className="loading-state">Loading artist types...</div>
+                ) : artistTypes.length === 0 ? (
+                  <p className="empty-state">No artist types created yet.</p>
+                ) : (
+                  <div className="types-grid">
+                    {artistTypes.map(type => (
+                      <div 
+                        key={type.id} 
+                        className="type-card"
+                        style={type.color ? { borderLeftColor: type.color } : {}}
+                      >
+                        <div className="type-info">
+                          <h4 style={type.color ? { color: type.color } : {}}>
+                            {type.name}
+                          </h4>
+                          {type.parent && (
+                            <p className="type-parent">
+                              Child of: <span className="parent-name">{type.parent.name}</span>
+                            </p>
+                          )}
+                          {type.children && type.children.length > 0 && (
+                            <p className="type-children">
+                              Parent of: {type.children.map(c => c.name).join(', ')}
+                            </p>
+                          )}
+                          {type.description && (
+                            <p className="type-description">{type.description}</p>
+                          )}
+                        </div>
+                        <div className="type-actions">
+                          <button
+                            className="btn-edit-type"
+                            onClick={() => openEditArtistType(type)}
+                            title="Edit"
+                          >
+                            ✏️
+                          </button>
+                          <button
+                            className="btn-delete-type"
+                            onClick={() => handleDeleteArtistType(type.id)}
+                            title="Delete"
+                          >
+                            🗑️
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+            
+            <div className="modal-footer">
+              <button 
+                className="close-button"
+                onClick={() => setShowArtistTypesModal(false)}
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      
+      {/* Create Artist Modal */}
+      {showCreateArtistModal && (
+        <div className="modal-overlay" onClick={() => setShowCreateArtistModal(false)}>
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h2>🎵 Add New Artist</h2>
+              <button 
+                className="modal-close"
+                onClick={() => setShowCreateArtistModal(false)}
+              >
+                ✕
+              </button>
+            </div>
+            
+            <div className="modal-content">
+              <div className="form-group">
+                <label htmlFor="artist-name">Artist Name *</label>
+                <input
+                  id="artist-name"
+                  type="text"
+                  value={newArtistName}
+                  onChange={(e) => setNewArtistName(e.target.value)}
+                  placeholder="Enter artist name"
+                  maxLength={200}
+                  autoFocus
+                />
+              </div>
+              
+              <div className="form-group">
+                <label htmlFor="artist-sort-name">Sort Name</label>
+                <input
+                  id="artist-sort-name"
+                  type="text"
+                  value={newArtistSortName}
+                  onChange={(e) => setNewArtistSortName(e.target.value)}
+                  placeholder="Optional - defaults to artist name"
+                  maxLength={200}
+                />
+                <small className="form-help">Used for alphabetical sorting (e.g., "Beatles, The")</small>
+              </div>
+            </div>
+            
+            <div className="modal-footer">
+              <button 
+                className="cancel-button"
+                onClick={() => setShowCreateArtistModal(false)}
+                disabled={creatingArtist}
+              >
+                Cancel
+              </button>
+              <button 
+                className="create-button"
+                onClick={handleCreateArtist}
+                disabled={creatingArtist || !newArtistName.trim()}
+              >
+                {creatingArtist ? 'Creating...' : 'Create Artist'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      
+      {/* Merge Artists Modal */}
+      {showMergeArtistsModal && selectedArtists.size >= 2 && (
+        <MergeArtistsModal
+          artists={artists.filter(a => selectedArtists.has(a.ratingKey))}
+          onClose={() => setShowMergeArtistsModal(false)}
+          onSuccess={() => {
+            setSelectedArtists(new Set());
+            setArtistSelectionMode(false);
+            loadArtists(); // Reload artists to reflect the merge
+          }}
+          plexUrl={config.plexUrl}
+          plexToken={config.plexToken}
+        />
       )}
     </div>
   );

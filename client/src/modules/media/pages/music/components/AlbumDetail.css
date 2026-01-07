@@ -71,7 +71,8 @@
 }
 
 .album-year,
-.album-track-count {
+.album-track-count,
+.album-play-count {
   font-size: 14px;
   color: #888;
 }
@@ -108,7 +109,7 @@
 
 .album-detail .tracks-header {
   display: grid;
-  grid-template-columns: 50px 50px 1fr 120px 100px 100px 200px;
+  grid-template-columns: 50px 50px 1fr 120px 80px 100px 100px 200px;
   gap: 10px;
   padding: 10px 15px;
   background: #2a2a2a;
@@ -121,7 +122,7 @@
 
 .album-detail .track-row {
   display: grid;
-  grid-template-columns: 50px 50px 1fr 120px 100px 100px 200px;
+  grid-template-columns: 50px 50px 1fr 120px 80px 100px 100px 200px;
   gap: 10px;
   padding: 10px 15px;
   background: #242424;
@@ -182,6 +183,17 @@
   text-overflow: ellipsis;
 }
 
+.album-detail .track-name-link {
+  cursor: pointer;
+  color: #4da6ff;
+  transition: color 0.2s;
+}
+
+.album-detail .track-name-link:hover {
+  color: #66b3ff;
+  text-decoration: underline;
+}
+
 .album-detail .track-subtitle {
   font-size: 12px;
   color: #888;
@@ -191,10 +203,15 @@
 }
 
 .album-detail .track-duration,
+.album-detail .track-plays,
 .album-detail .track-size {
   font-size: 14px;
   color: #aaa;
   text-align: right;
+}
+
+.album-detail .track-plays {
+  text-align: center;
 }
 
 .album-detail .track-playlist {
@@ -251,6 +268,11 @@
   .album-detail .tracks-header,
   .album-detail .track-row {
     grid-template-columns: 40px 40px 1fr 80px 150px;
+  }
+
+  .album-detail .track-plays,
+  .album-detail .track-size {
+    display: none;
   }
 
   .album-detail .track-size {

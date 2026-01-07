@@ -1,0 +1,447 @@
+.work-detail {
+  padding: 2rem;
+  max-width: 1200px;
+  margin: 0 auto;
+}
+
+.work-detail-header {
+  margin-bottom: 2rem;
+}
+
+.btn-back {
+  background: #6c757d;
+  color: white;
+  border: none;
+  padding: 0.5rem 1rem;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 1rem;
+  transition: background 0.2s;
+}
+
+.btn-back:hover {
+  background: #5a6268;
+}
+
+.work-detail-loading,
+.work-detail-error {
+  text-align: center;
+  padding: 3rem;
+  font-size: 1.2rem;
+  color: #6c757d;
+}
+
+.work-detail-error {
+  color: #dc3545;
+}
+
+.work-detail-content {
+  background: white;
+  border-radius: 12px;
+  padding: 2rem;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+.work-header-section {
+  display: flex;
+  gap: 2rem;
+  margin-bottom: 3rem;
+  padding-bottom: 2rem;
+  border-bottom: 2px solid #e9ecef;
+}
+
+.composer-artwork {
+  flex-shrink: 0;
+}
+
+.composer-artwork img {
+  width: 150px;
+  height: 150px;
+  border-radius: 50%;
+  object-fit: cover;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
+.work-main-info {
+  flex: 1;
+}
+
+.work-title {
+  font-size: 2.5rem;
+  margin: 0 0 1rem 0;
+  color: #212529;
+}
+
+.work-composer {
+  margin-bottom: 1rem;
+  font-size: 1.2rem;
+}
+
+.label {
+  font-weight: 500;
+  color: #6c757d;
+  margin-right: 0.5rem;
+}
+
+.link-button {
+  background: none;
+  border: none;
+  color: #007bff;
+  cursor: pointer;
+  padding: 0;
+  font-size: inherit;
+  text-decoration: underline;
+  transition: color 0.2s;
+}
+
+.link-button:hover {
+  color: #0056b3;
+}
+
+.work-stats {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  color: #6c757d;
+  font-size: 1rem;
+}
+
+.stat-item {
+  font-weight: 500;
+}
+
+.stat-separator {
+  color: #dee2e6;
+}
+
+.work-artist-types {
+  margin-top: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.artist-types-label {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: #495057;
+}
+
+.artist-types-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.artist-type-badge {
+  display: inline-block;
+  padding: 0.4rem 1rem;
+  background: #007bff;
+  color: white;
+  border-radius: 16px;
+  font-size: 0.9rem;
+  font-weight: 500;
+}
+
+.work-parts-section {
+  margin-bottom: 2rem;
+}
+
+.work-parts-section h2 {
+  font-size: 1.8rem;
+  margin: 0 0 1.5rem 0;
+  color: #495057;
+}
+
+.no-parts {
+  color: #6c757d;
+  font-style: italic;
+  padding: 2rem;
+  text-align: center;
+  background: #f8f9fa;
+  border-radius: 8px;
+}
+
+.parts-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+.part-card {
+  background: #f8f9fa;
+  border: 1px solid #dee2e6;
+  border-radius: 8px;
+  padding: 1.5rem;
+  transition: box-shadow 0.2s;
+}
+
+.part-card:hover {
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+}
+
+.part-header {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+
+.part-number {
+  background: #007bff;
+  color: white;
+  font-weight: bold;
+  font-size: 1.2rem;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.part-title {
+  margin: 0;
+  font-size: 1.3rem;
+  color: #212529;
+}
+
+.part-play-count {
+  color: #6c757d;
+  font-size: 0.9rem;
+  font-weight: normal;
+  margin-left: auto;
+}
+
+.part-artist-types-section {
+  margin-bottom: 1rem;
+  padding: 0.75rem;
+  background: #ffffff;
+  border-radius: 6px;
+  border: 1px solid #e9ecef;
+}
+
+.part-artist-types-header {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 0.5rem;
+}
+
+.artist-types-label {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: #495057;
+  margin: 0;
+}
+
+.artist-type-dropdown-small {
+  padding: 0.4rem 0.6rem;
+  border: 1px solid #ced4da;
+  border-radius: 6px;
+  font-size: 0.85rem;
+  cursor: pointer;
+  background: white;
+  min-width: 150px;
+}
+
+.artist-type-dropdown-small:focus {
+  outline: none;
+  border-color: #007bff;
+}
+
+.part-artist-types {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.artist-type-badge-small {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.25rem 0.75rem;
+  background: #007bff;
+  color: white;
+  border-radius: 12px;
+  font-size: 0.8rem;
+  font-weight: 500;
+}
+
+.remove-type-btn-small {
+  background: rgba(255, 255, 255, 0.3);
+  border: none;
+  color: white;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  cursor: pointer;
+  font-size: 0.65rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  line-height: 1;
+  transition: background 0.2s;
+}
+
+.remove-type-btn-small:hover {
+  background: rgba(255, 255, 255, 0.5);
+}
+
+.part-tracks {
+  margin-top: 1rem;
+}
+
+.part-tracks h4 {
+  margin: 0 0 0.75rem 0;
+  font-size: 1rem;
+  color: #495057;
+  font-weight: 500;
+}
+
+.no-tracks {
+  color: #6c757d;
+  font-style: italic;
+  padding: 1rem;
+  margin: 0;
+}
+
+.tracks-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.track-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.75rem;
+  background: white;
+  border: 1px solid #e9ecef;
+  border-radius: 6px;
+  transition: background 0.2s;
+}
+
+.track-item:hover {
+  background: #e9ecef;
+}
+
+.track-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.track-title {
+  font-weight: 500;
+  color: #212529;
+  margin-bottom: 0.25rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.track-title-link {
+  cursor: pointer;
+  color: #007bff;
+  transition: color 0.2s;
+}
+
+.track-title-link:hover {
+  color: #0056b3;
+  text-decoration: underline;
+}
+
+.track-album {
+  font-size: 0.9rem;
+  color: #6c757d;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.track-artist {
+  color: #868e96;
+}
+
+.track-meta {
+  font-size: 0.9rem;
+  color: #6c757d;
+  font-variant-numeric: tabular-nums;
+  flex-shrink: 0;
+  text-align: right;
+}
+
+.track-duration {
+  font-size: 0.9rem;
+  color: #6c757d;
+  font-variant-numeric: tabular-nums;
+  flex-shrink: 0;
+}
+
+.track-play-count {
+  color: #868e96;
+}
+
+.work-metadata {
+  display: flex;
+  gap: 2rem;
+  padding-top: 2rem;
+  border-top: 1px solid #e9ecef;
+  flex-wrap: wrap;
+}
+
+.metadata-item {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.metadata-label {
+  font-weight: 500;
+  color: #6c757d;
+  font-size: 0.9rem;
+}
+
+.metadata-value {
+  color: #212529;
+  font-size: 1rem;
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+  .work-detail {
+    padding: 1rem;
+  }
+
+  .work-detail-content {
+    padding: 1rem;
+  }
+
+  .work-header-section {
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+  }
+
+  .work-title {
+    font-size: 1.8rem;
+  }
+
+  .composer-artwork img {
+    width: 120px;
+    height: 120px;
+  }
+
+  .track-item {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .track-duration {
+    align-self: flex-end;
+  }
+}

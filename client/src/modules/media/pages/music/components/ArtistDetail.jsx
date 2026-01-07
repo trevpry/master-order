@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import config from '../../../../../config';
+import ArtistTypesManager from './ArtistTypesManager';
 import './ArtistDetail.css';
 
 const ArtistDetail = ({
@@ -157,6 +158,9 @@ const ArtistDetail = ({
                 {stats?.totalTracks > 0 && (
                   <span className="stat-item">{stats.totalTracks} track{stats.totalTracks !== 1 ? 's' : ''}</span>
                 )}
+                {artist.totalPlayCount !== undefined && artist.totalPlayCount > 0 && (
+                  <span className="stat-item">{artist.totalPlayCount} {artist.totalPlayCount === 1 ? 'play' : 'plays'}</span>
+                )}
               </div>
 
               {artist.summary && (
@@ -166,6 +170,11 @@ const ArtistDetail = ({
           )}
         </div>
       </div>
+
+      {/* Artist Types Manager */}
+      {!isEditing && (
+        <ArtistTypesManager artistKey={artist.ratingKey} />
+      )}
 
       {/* Albums Grid */}
       {albums && albums.length > 0 && (
@@ -192,6 +201,11 @@ const ArtistDetail = ({
                     {album.title}
                     {album.year && <span className="album-year"> ({album.year})</span>}
                   </h3>
+                  {album.totalPlayCount !== undefined && album.totalPlayCount > 0 && (
+                    <p className="album-play-count">
+                      {album.totalPlayCount} {album.totalPlayCount === 1 ? 'play' : 'plays'}
+                    </p>
+                  )}
                 </div>
               </div>
             ))}

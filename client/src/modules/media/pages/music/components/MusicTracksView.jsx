@@ -19,6 +19,7 @@ const MusicTracksView = ({
   onGoBackFromTracks,
   onPlayTrack,
   onSelectArtist,
+  onSelectTrack,
   onLoadMoreTracks,
   onAddTrackToCustomPlaylist,
   formatDuration,
@@ -163,6 +164,7 @@ const MusicTracksView = ({
               <span className="track-number">#</span>
               <span className="track-title">Title</span>
               <span className="track-rating">Rating</span>
+              <span className="track-plays">Plays</span>
               <span className="track-duration">Duration</span>
               <span className="track-size">Size</span>
               <span className="track-playlist">Playlist</span>
@@ -178,7 +180,12 @@ const MusicTracksView = ({
                 </button>
                 <span className="track-number">{track.index}</span>
                 <div className="track-title">
-                  <strong>{track.title}</strong>
+                  <button 
+                    className="track-title-link"
+                    onClick={() => onSelectTrack && onSelectTrack(track)}
+                  >
+                    <strong>{track.title}</strong>
+                  </button>
                   {track.originalTitle && track.originalTitle !== track.title && (
                     <span className="original-title">({track.originalTitle})</span>
                   )}
@@ -190,6 +197,9 @@ const MusicTracksView = ({
                     size="small"
                   />
                 </div>
+                <span className="track-plays">
+                  {track.viewCount > 0 ? `${track.viewCount} ${track.viewCount === 1 ? 'play' : 'plays'}` : '—'}
+                </span>
                 <span className="track-duration">
                   {formatDuration(track.duration)}
                 </span>

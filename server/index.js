@@ -373,6 +373,14 @@ app.use('/api/books', booksRoutes);
 const musicRoutes = require('./routes/music');
 app.use('/api/music', musicRoutes);
 
+// Works API routes
+const worksRoutes = require('./routes/works');
+app.use('/api/works', worksRoutes);
+
+// Artist Types API routes
+const artistTypesRoutes = require('./routes/artistTypes');
+app.use('/api/artist-types', artistTypesRoutes);
+
 // SONOS API routes
 const sonosRoutes = require('./routes/sonos');
 app.use('/api/sonos', sonosRoutes);

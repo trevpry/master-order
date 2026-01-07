@@ -192,9 +192,9 @@ const GlobalMusicPlayer = () => {
   
   // Auto-play when tracks are loaded from event
   useEffect(() => {
-    if (tracks && tracks.length > 0 && playlist && playlist.id && playlist.id.includes('tracks-playlist')) {
-      // This is a tracks page playlist that should auto-play
-      console.log('🎵 Auto-playing tracks playlist with', tracks.length, 'tracks', isShuffled ? '(shuffled)' : '');
+    if (tracks && tracks.length > 0 && playlist && playlist.id && (playlist.id.includes('tracks-playlist') || playlist.id.includes('radio-playlist'))) {
+      // This is a playlist that should auto-play
+      console.log('🎵 Auto-playing playlist with', tracks.length, 'tracks', isShuffled ? '(shuffled)' : '');
       setCurrentTrackIndex(0);
       
       // Immediately set the current track for display

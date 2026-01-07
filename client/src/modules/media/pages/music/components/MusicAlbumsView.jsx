@@ -180,6 +180,11 @@ const MusicAlbumsView = ({
                       {album.childCount} track{album.childCount !== 1 ? 's' : ''}
                     </span>
                   )}
+                  {album.totalPlayCount !== undefined && album.totalPlayCount > 0 && (
+                    <span className="play-count">
+                      • {album.totalPlayCount} {album.totalPlayCount === 1 ? 'play' : 'plays'}
+                    </span>
+                  )}
                 </div>
                 {metadataResults[album.ratingKey] && (
                   <div className="metadata-results">

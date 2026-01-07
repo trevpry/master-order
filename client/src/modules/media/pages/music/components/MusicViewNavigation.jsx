@@ -8,7 +8,8 @@ const MusicViewNavigation = ({
   albumRatingKey,
   onNavigateToView,
   onLoadAlbumsView,
-  onLoadTracksView
+  onLoadTracksView,
+  onOpenArtistTypesModal
 }) => {
   return (
     <div className="view-navigation">
@@ -31,6 +32,12 @@ const MusicViewNavigation = ({
         Playlists
       </button>
       <button 
+        onClick={() => onNavigateToView('works')}
+        className={`nav-button ${activeView === 'works' ? 'active' : ''}`}
+      >
+        Works
+      </button>
+      <button 
         onClick={async () => {
           await onLoadAlbumsView();
           onNavigateToView('albums');
@@ -48,6 +55,21 @@ const MusicViewNavigation = ({
       >
         Tracks
       </button>
+      <button 
+        onClick={() => onNavigateToView('radio')}
+        className={`nav-button ${activeView === 'radio' ? 'active' : ''}`}
+      >
+        Radio
+      </button>
+      {onOpenArtistTypesModal && (
+        <button 
+          onClick={onOpenArtistTypesModal}
+          className="nav-button nav-button-special"
+          title="Manage Artist Types"
+        >
+          🎭 Artist Types
+        </button>
+      )}
       {selectedArtist && (
         <button 
           onClick={() => onNavigateToView('albums', { artist: selectedArtist.ratingKey })}
