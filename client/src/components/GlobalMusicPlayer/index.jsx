@@ -652,7 +652,7 @@ const GlobalMusicPlayer = () => {
         </div>
       </div>
       
-      {!isMinimized && (
+      {!isMinimized && !isExpanded && (
         <>
           {/* Current Track Info */}
           {currentTrack && (
@@ -994,9 +994,10 @@ const GlobalMusicPlayer = () => {
               </p>
               <div className="expanded-track-rating">
                 <StarRating
+                  key={currentTrack.ratingKey}
                   value={currentTrack.userRating || 0}
                   onChange={handleRatingChange}
-                  size="medium"
+                  size="large"
                 />
               </div>
               {isCasting && castDeviceName && (
