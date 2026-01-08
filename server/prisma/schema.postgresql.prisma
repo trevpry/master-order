@@ -665,27 +665,34 @@ model WatchLog {
 }
 
 model PlexArtist {
-  id               Int                      @id @default(autoincrement())
-  ratingKey        String                   @unique
-  key              String
-  guid             String?
-  type             String                   @default("artist")
-  title            String
-  titleSort        String?
-  summary          String?
-  index            Int?
-  thumb            String?
-  art              String?
-  addedAt          DateTime?
-  updatedAt        DateTime?
-  librarySectionID Int?
-  collections      String?
-  removed          Boolean                  @default(false)
-  albums           PlexAlbum[]
-  works            Work[]
-  artistTypes      ArtistTypeAssignment[]
-  trackArtists     TrackArtist[]
-  librarySection   PlexLibrarySection?      @relation(fields: [librarySectionID], references: [id])
+  id                    Int                      @id @default(autoincrement())
+  ratingKey             String                   @unique
+  key                   String
+  guid                  String?
+  type                  String                   @default("artist")
+  title                 String
+  titleSort             String?
+  summary               String?
+  index                 Int?
+  thumb                 String?
+  art                   String?
+  addedAt               DateTime?
+  updatedAt             DateTime?
+  librarySectionID      Int?
+  collections           String?
+  removed               Boolean                  @default(false)
+  musicBrainzId         String?
+  musicBrainzCountry    String?
+  musicBrainzBeginDate  String?
+  musicBrainzEndDate    String?
+  musicBrainzEnded      Boolean?
+  musicBrainzAliases    String?
+  musicBrainzLinks      String?
+  albums                PlexAlbum[]
+  works                 Work[]
+  artistTypes           ArtistTypeAssignment[]
+  trackArtists          TrackArtist[]
+  librarySection        PlexLibrarySection?      @relation(fields: [librarySectionID], references: [id])
 
   @@map("PlexArtist")
 }
@@ -711,6 +718,14 @@ model PlexAlbum {
   librarySectionID      Int?
   collections           String?
   removed               Boolean             @default(false)
+  musicBrainzId         String?
+  musicBrainzReleaseDate String?
+  musicBrainzCountry    String?
+  musicBrainzStatus     String?
+  musicBrainzPackaging  String?
+  musicBrainzLabel      String?
+  musicBrainzBarcode    String?
+  musicBrainzAsin       String?
   artist                PlexArtist?         @relation(fields: [parentRatingKey], references: [ratingKey])
   librarySection        PlexLibrarySection? @relation(fields: [librarySectionID], references: [id])
   tracks                PlexTrack[]

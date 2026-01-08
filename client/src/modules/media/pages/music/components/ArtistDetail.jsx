@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import config from '../../../../../config';
 import ArtistTypesManager from './ArtistTypesManager';
+import MusicBrainzSearchModal from '../../../../../components/music/MusicBrainzSearchModal';
 import './ArtistDetail.css';
 
 const ArtistDetail = ({
@@ -16,6 +17,8 @@ const ArtistDetail = ({
   const [editedTitleSort, setEditedTitleSort] = useState(artist?.titleSort || '');
   const [isSaving, setIsSaving] = useState(false);
   const [saveError, setSaveError] = useState(null);
+  const [showMusicBrainzModal, setShowMusicBrainzModal] = useState(false);
+  const [showMusicBrainzData, setShowMusicBrainzData] = useState(false);
 
   if (!artist) return null;
 
@@ -69,6 +72,13 @@ const ArtistDetail = ({
       <div className="artist-detail-header">
         <button className="back-button" onClick={onGoBack}>
           ← Back to Artists
+        </button>
+        <button 
+          className="musicbrainz-button" 
+          onClick={() => setShowMusicBrainzModal(true)}
+          title="Search MusicBrainz for metadata"
+        >
+          🎵 MusicBrainz Search
         </button>
       </div>
 
@@ -166,6 +176,88 @@ const ArtistDetail = ({
               {artist.summary && (
                 <p className="artist-summary">{artist.summary}</p>
               )}
+
+              {/* MusicBrainz Metadata Section */}
+              {artist.musicBrainzId && (
+                <div className="musicbrainz-metadata">
+                  <div 
+                    className="metadata-header" 
+                    onClick={() => setShowMusicBrainzData(!showMusicBrainzData)}
+                  >
+                    <h3 className="metadata-heading">MusicBrainz Information</h3>
+                    <button className="metadata-toggle">
+                      {showMusicBrainzData ? '▼' : '▶'}
+                    </button>
+                  </div>
+                  
+                  {showMusicBrainzData && (
+                    <>
+                      <div className="metadata-grid">
+                        {artist.musicBrainzCountry && (
+                          <div className="metadata-item">
+                            <span className="metadata-label">Country:</span>
+                            <span className="metadata-value">{artist.musicBrainzCountry}</span>
+                          </div>
+                        )}
+                        
+                        {(artist.musicBrainzBeginDate || artist.musicBrainzEndDate) && (
+                          <div className="metadata-item">
+                            <span className="metadata-label">Active:</span>
+                            <span className="metadata-value">
+                              {artist.musicBrainzBeginDate || '?'} - {artist.musicBrainzEnded ? artist.musicBrainzEndDate || '?' : 'present'}
+                            </span>
+                          </div>
+                        )}
+                        
+                        <div className="metadata-item">
+                          <span className="metadata-label">MusicBrainz ID:</span>
+                          <a 
+                            href={`https://musicbrainz.org/artist/${artist.musicBrainzId}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="metadata-link"
+                          >
+                            {artist.musicBrainzId}
+                          </a>
+                        </div>
+                      </div>
+
+                      {artist.musicBrainzAliases && JSON.parse(artist.musicBrainzAliases).length > 0 && (
+                        <div className="metadata-section">
+                          <h4 className="metadata-subheading">Aliases</h4>
+                          <div className="aliases-list">
+                            {JSON.parse(artist.musicBrainzAliases).map((alias, idx) => (
+                              <span key={idx} className="alias-tag">
+                                {alias.name}
+                                {alias.locale && <span className="alias-locale"> ({alias.locale})</span>}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {artist.musicBrainzLinks && JSON.parse(artist.musicBrainzLinks).length > 0 && (
+                        <div className="metadata-section">
+                          <h4 className="metadata-subheading">External Links</h4>
+                          <div className="external-links">
+                            {JSON.parse(artist.musicBrainzLinks).map((link, idx) => (
+                              <a
+                                key={idx}
+                                href={link.url?.resource || link.url}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="external-link"
+                              >
+                                {link.type || 'Link'}
+                              </a>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </>
+                  )}
+                </div>
+              )}
             </>
           )}
         </div>
@@ -211,6 +303,16 @@ const ArtistDetail = ({
             ))}
           </div>
         </div>
+      )}
+      
+      {/* MusicBrainz Search Modal */}
+      {showMusicBrainzModal && (
+        <MusicBrainzSearchModal
+          artistName={artist.title}
+          artistRatingKey={artist.ratingKey}
+          onClose={() => setShowMusicBrainzModal(false)}
+          onArtistUpdated={onArtistUpdate}
+        />
       )}
     </div>
   );

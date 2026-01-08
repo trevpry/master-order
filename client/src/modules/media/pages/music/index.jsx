@@ -1259,6 +1259,20 @@ const Music = () => {
       
       console.log(`Metadata extraction completed for album "${album.title}":`, result);
       
+      // If we're currently viewing this album, refetch it to get updated MusicBrainz IDs
+      if (selectedAlbum && selectedAlbum.ratingKey === album.ratingKey) {
+        try {
+          const albumResponse = await fetch(`${config.apiBaseUrl}/api/music/albums/${album.ratingKey}`);
+          if (albumResponse.ok) {
+            const updatedAlbum = await albumResponse.json();
+            setSelectedAlbum(updatedAlbum);
+            console.log('Refreshed album data after metadata extraction:', updatedAlbum);
+          }
+        } catch (err) {
+          console.error('Error refreshing album after metadata extraction:', err);
+        }
+      }
+      
       // Show metadata modal with results
       setCurrentMetadataResult(result);
       setShowMetadataModal(true);
@@ -2104,6 +2118,13 @@ const Music = () => {
                         <small className="file-path">{track.filePath}</small>
                       )}
                     </div>
+                    
+                    {/* Note about auto-saved data */}
+                    {track.success && !track.error && (
+                      <div className="metadata-saved-notice">
+                        <small>✓ File path, audio format, and MusicBrainz IDs automatically saved to database</small>
+                      </div>
+                    )}
                     
                     {track.error ? (
                       <div className="metadata-error">

@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const PlexDatabaseService = require('../plexDatabaseService');
+const PlexSyncService = require('../plexSyncService');
 const fetch = require('node-fetch');
 const { validateRequiredFields } = require('../middleware/validation');
 const { sendBadRequest, sendSuccess, sendServerError, asyncHandler } = require('../utils/responses');
@@ -8,6 +9,7 @@ const ArtistMergeService = require('../services/artistMergeService');
 
 const prisma = require('../prismaClient'); // Use shared singleton instance
 const plexDb = new PlexDatabaseService();
+const plexSync = new PlexSyncService();
 
 // Helper function to get tracks filtered by unplayed albums/artists/works
 async function getUnplayedFilteredTracks(sectionId, unplayedAlbums, unplayedArtists, unplayedWorks) {
@@ -513,6 +515,90 @@ router.put('/artists/:ratingKey', asyncHandler(async (req, res) => {
   }
 }));
 
+// Update artist with MusicBrainz metadata
+router.put('/artists/:ratingKey/musicbrainz', asyncHandler(async (req, res) => {
+  const { ratingKey } = req.params;
+  const { 
+    name, 
+    sortName, 
+    disambiguation, 
+    country, 
+    lifeSpan, 
+    aliases, 
+    relations, 
+    musicBrainzId 
+  } = req.body;
+
+  validateRequiredFields(req.body, ['name', 'musicBrainzId']);
+
+  // Prepare the update data
+  const updateData = {
+    title: name,
+    titleSort: sortName || name,
+    summary: disambiguation || null,
+    musicBrainzId,
+    musicBrainzCountry: country || null,
+    musicBrainzBeginDate: lifeSpan?.begin || null,
+    musicBrainzEndDate: lifeSpan?.end || null,
+    musicBrainzEnded: lifeSpan?.ended || false,
+    musicBrainzAliases: aliases ? JSON.stringify(aliases) : null,
+    musicBrainzLinks: relations ? JSON.stringify(relations) : null
+  };
+
+  // Update in local database
+  const updatedArtist = await prisma.plexArtist.update({
+    where: { ratingKey },
+    data: updateData
+  });
+
+  sendSuccess(res, { 
+    artist: updatedArtist, 
+    message: 'Artist updated with MusicBrainz metadata' 
+  });
+}));
+
+// Update album with MusicBrainz metadata
+router.put('/albums/:ratingKey/musicbrainz', asyncHandler(async (req, res) => {
+  const { ratingKey } = req.params;
+  const {
+    title,
+    date,
+    country,
+    status,
+    packaging,
+    barcode,
+    asin,
+    label,
+    musicBrainzId
+  } = req.body;
+
+  validateRequiredFields(req.body, ['title', 'musicBrainzId']);
+
+  // Prepare the update data
+  const updateData = {
+    title,
+    musicBrainzId,
+    musicBrainzReleaseDate: date || null,
+    musicBrainzCountry: country || null,
+    musicBrainzStatus: status || null,
+    musicBrainzPackaging: packaging || null,
+    musicBrainzBarcode: barcode || null,
+    musicBrainzAsin: asin || null,
+    musicBrainzLabel: label || null
+  };
+
+  // Update in local database
+  const updatedAlbum = await prisma.plexAlbum.update({
+    where: { ratingKey },
+    data: updateData
+  });
+
+  sendSuccess(res, {
+    album: updatedAlbum,
+    message: 'Album updated with MusicBrainz metadata'
+  });
+}));
+
 // Create New Artist - Add to local database
 router.post('/artists', validateRequiredFields('title', 'Artist name is required'), asyncHandler(async (req, res) => {
   const { title, titleSort, thumb } = req.body;
@@ -823,8 +909,35 @@ router.get('/albums/not-in-playlist/:playlistId', asyncHandler(async (req, res) 
 }));
 
 // Extract File Metadata from Album
+// Helper function to map Plex path to local filesystem path
+function mapPlexPathToLocal(plexPath) {
+  if (!plexPath) return null;
+  
+  // Get path mappings from environment variables
+  const pathMappings = [
+    { plexPath: '/xmas', localPath: process.env.XMAS_PATH },
+    { plexPath: '/classical', localPath: process.env.CLASSICAL_PATH }
+  ].filter(m => m.localPath); // Only include mappings that are defined
+  
+  // Try each mapping
+  for (const mapping of pathMappings) {
+    if (plexPath.toLowerCase().startsWith(mapping.plexPath)) {
+      const relativePath = plexPath.substring(mapping.plexPath.length);
+      const localPath = mapping.localPath + relativePath.replace(/\//g, require('path').sep);
+      console.log(`Mapped Plex path: ${plexPath} -> ${localPath}`);
+      return localPath;
+    }
+  }
+  
+  // If no mapping found, return original path (useful for Docker where paths match)
+  console.log(`No path mapping found for: ${plexPath}, using as-is`);
+  return plexPath;
+}
+
 router.post('/albums/:ratingKey/extract-file-metadata', asyncHandler(async (req, res) => {
   const { ratingKey } = req.params;
+  const { parseFile } = await import('music-metadata');
+  const fs = require('fs').promises;
   
   // Get album and its tracks using PlexDatabaseService
   const album = await plexDb.getAlbumByRatingKey(ratingKey);
@@ -836,13 +949,224 @@ router.post('/albums/:ratingKey/extract-file-metadata', asyncHandler(async (req,
   // Get tracks for this album
   const tracks = await plexDb.getTracksByAlbum(ratingKey);
   
-  // TODO: Implement file metadata extraction logic
-  // This would typically involve reading audio file metadata
+  console.log(`Processing ${tracks.length} tracks for album "${album.title}"`);
+  
+  let successCount = 0;
+  let failedCount = 0;
+  const results = [];
+  let albumMusicBrainzUpdated = false; // Track if we've already updated album MB ID
+  
+  // Process each track
+  for (const track of tracks) {
+    const result = {
+      ratingKey: track.ratingKey,
+      title: track.title,
+      index: track.index,
+      filePath: track.file,
+      plexPath: null,
+      success: false,
+      common: null,
+      formatInfo: null,
+      error: null
+    };
+    
+    let plexPath = track.file;
+    
+    // If no file path in database, query Plex directly for the track's media info
+    if (!plexPath) {
+      try {
+        console.log(`Fetching track metadata from Plex: ${track.key}`);
+        
+        const trackData = await plexSync.makeRequest(track.key);
+        const metadata = trackData?.MediaContainer?.Metadata?.[0];
+        const mediaPart = metadata?.Media?.[0]?.Part?.[0];
+        const stream = metadata?.Media?.[0]?.Part?.[0]?.Stream?.[0];
+        
+        console.log(`Track ${track.title} media info:`, mediaPart);
+        
+        if (mediaPart?.file) {
+          plexPath = mediaPart.file;
+          result.plexPath = plexPath;
+          console.log(`Found Plex path: ${plexPath}`);
+          
+          // Save Plex metadata to database
+          const updateData = {
+            file: mediaPart.file,
+            duration: mediaPart.duration ? parseInt(mediaPart.duration) : track.duration,
+            size: mediaPart.size ? parseInt(mediaPart.size) : track.size,
+            container: mediaPart.container || track.container
+          };
+          
+          // Add stream info if available
+          if (stream) {
+            updateData.audioCodec = stream.codec || track.audioCodec;
+            updateData.audioChannels = stream.channels ? parseInt(stream.channels) : track.audioChannels;
+            updateData.bitrate = stream.bitrate ? parseInt(stream.bitrate) : track.bitrate;
+          }
+          
+          // Update track with Plex metadata
+          await prisma.plexTrack.update({
+            where: { ratingKey: track.ratingKey },
+            data: updateData
+          });
+          
+          console.log(`Updated track ${track.title} with Plex metadata`);
+        } else {
+          console.log(`No file path in Plex response for ${track.title}`);
+        }
+      } catch (error) {
+        console.error(`Error fetching file path from Plex for track ${track.title}:`, error.message);
+      }
+    } else {
+      result.plexPath = plexPath;
+    }
+    
+    // Map Plex path to local filesystem path
+    const localPath = mapPlexPathToLocal(plexPath);
+    result.filePath = localPath;
+    
+    if (!localPath) {
+      result.error = 'No file path available';
+      failedCount++;
+      results.push(result);
+      continue;
+    }
+    
+    try {
+      // Check if file exists
+      await fs.access(localPath);
+      
+      // Parse audio file metadata
+      const metadata = await parseFile(localPath);
+      
+      // Extract format info
+      result.formatInfo = {
+        container: metadata.format.container,
+        codec: metadata.format.codec,
+        lossless: metadata.format.lossless,
+        duration: metadata.format.duration,
+        bitrate: metadata.format.bitrate,
+        sampleRate: metadata.format.sampleRate,
+        numberOfChannels: metadata.format.numberOfChannels,
+        bitsPerSample: metadata.format.bitsPerSample,
+        size: track.size
+      };
+      
+      // Extract common metadata
+      result.common = {
+        title: metadata.common.title,
+        artist: metadata.common.artist,
+        artists: metadata.common.artists,
+        album: metadata.common.album,
+        albumartist: metadata.common.albumartist,
+        year: metadata.common.year,
+        date: metadata.common.date,
+        originaldate: metadata.common.originaldate,
+        originalyear: metadata.common.originalyear,
+        track: metadata.common.track,
+        disk: metadata.common.disk,
+        genre: metadata.common.genre,
+        comment: metadata.common.comment,
+        composer: metadata.common.composer,
+        label: metadata.common.label,
+        isrc: metadata.common.isrc,
+        barcode: metadata.common.barcode,
+        catalognumber: metadata.common.catalognumber,
+        language: metadata.common.language,
+        mood: metadata.common.mood,
+        bpm: metadata.common.bpm,
+        key: metadata.common.key,
+        rating: metadata.common.rating,
+        compilation: metadata.common.compilation,
+        gapless: metadata.common.gapless,
+        copyright: metadata.common.copyright,
+        license: metadata.common.license,
+        encodedby: metadata.common.encodedby,
+        encodersettings: metadata.common.encodersettings,
+        releasetype: metadata.common.releasetype,
+        releasestatus: metadata.common.releasestatus,
+        releasecountry: metadata.common.releasecountry,
+        musicbrainz_recordingid: metadata.common.musicbrainz_recordingid,
+        musicbrainz_trackid: metadata.common.musicbrainz_trackid,
+        musicbrainz_albumid: metadata.common.musicbrainz_albumid,
+        musicbrainz_artistid: metadata.common.musicbrainz_artistid,
+        musicbrainz_albumartistid: metadata.common.musicbrainz_albumartistid,
+        musicbrainz_releasegroupid: metadata.common.musicbrainz_releasegroupid,
+        musicbrainz_workid: metadata.common.musicbrainz_workid
+      };
+      
+      result.success = true;
+      successCount++;
+      
+      // Update track with file metadata (MusicBrainz Recording ID)
+      console.log(`MusicBrainz IDs for ${track.title}:`, {
+        recordingid: metadata.common.musicbrainz_recordingid,
+        trackid: metadata.common.musicbrainz_trackid,
+        albumid: metadata.common.musicbrainz_albumid
+      });
+      
+      const updates = {};
+      
+      // Save Recording ID to track (this is the actual recording identifier)
+      if (metadata.common.musicbrainz_recordingid) {
+        const recordingId = Array.isArray(metadata.common.musicbrainz_recordingid) 
+          ? metadata.common.musicbrainz_recordingid[0]
+          : metadata.common.musicbrainz_recordingid;
+        if (recordingId) {
+          updates.musicBrainzTrackId = recordingId;
+        }
+      }
+      
+      if (Object.keys(updates).length > 0) {
+        try {
+          await prisma.plexTrack.update({
+            where: { ratingKey: track.ratingKey },
+            data: updates
+          });
+          console.log(`✓ Updated track ${track.title} with MusicBrainz Recording ID: ${updates.musicBrainzTrackId}`);
+        } catch (dbError) {
+          console.error(`Error updating track ${track.title} with file metadata:`, dbError.message);
+        }
+      } else {
+        console.log(`No MusicBrainz Recording ID found in file for ${track.title}`);
+      }
+      
+      // Save Album ID to album (once, not per track)
+      if (metadata.common.musicbrainz_albumid && !albumMusicBrainzUpdated) {
+        const albumId = Array.isArray(metadata.common.musicbrainz_albumid)
+          ? metadata.common.musicbrainz_albumid[0]
+          : metadata.common.musicbrainz_albumid;
+        
+        if (albumId) {
+          try {
+            await prisma.plexAlbum.update({
+              where: { ratingKey: ratingKey },
+              data: { musicBrainzId: albumId }
+            });
+            console.log(`✓ Updated album ${album.title} with MusicBrainz Release ID: ${albumId}`);
+            albumMusicBrainzUpdated = true;
+          } catch (dbError) {
+            console.error(`Error updating album with MusicBrainz ID:`, dbError.message);
+          }
+        }
+      }
+      
+    } catch (error) {
+      console.error(`Error extracting metadata for track ${track.title}:`, error.message);
+      result.error = error.message;
+      failedCount++;
+    }
+    
+    results.push(result);
+  }
   
   res.json({ 
-    message: 'File metadata extraction initiated for album',
     albumTitle: album.title,
-    trackCount: tracks.length
+    albumRatingKey: ratingKey,
+    tracksProcessed: tracks.length,
+    successCount,
+    errorCount: failedCount,
+    extractedMetadata: results
   });
 }));
 

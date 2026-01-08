@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import config from '../../../../../config';
 import TracksPlaylistPlayer from './TracksPlaylistPlayer';
 import StarRating from '../../../../../components/StarRating';
+import AlbumMusicBrainzSearchModal from '../../../../../components/music/AlbumMusicBrainzSearchModal';
 import './AlbumDetail.css';
 
 const AlbumDetail = ({
@@ -22,11 +23,19 @@ const AlbumDetail = ({
   if (!album) return null;
   
   const [tracks, setTracks] = useState(initialTracks);
+  const [showMusicBrainzModal, setShowMusicBrainzModal] = useState(false);
+  const [showMusicBrainzData, setShowMusicBrainzData] = useState(false);
+  const [albumData, setAlbumData] = useState(album);
   
   // Sync local state when prop changes
   useEffect(() => {
     setTracks(initialTracks);
   }, [initialTracks]);
+  
+  // Sync album data when prop changes
+  useEffect(() => {
+    setAlbumData(album);
+  }, [album]);
   
   const handleRatingChange = async (trackRatingKey, newRating) => {
     try {
@@ -58,6 +67,11 @@ const AlbumDetail = ({
       console.error('Error updating rating:', error);
     }
   };
+  
+  const handleAlbumUpdate = (updatedAlbum) => {
+    setAlbumData(updatedAlbum);
+    console.log('Album updated with MusicBrainz metadata:', updatedAlbum);
+  };
 
   return (
     <div className="album-detail">
@@ -65,6 +79,13 @@ const AlbumDetail = ({
       <div className="album-detail-header">
         <button className="back-button" onClick={onGoBack}>
           ← Back to Albums
+        </button>
+        <button 
+          className="musicbrainz-search-btn"
+          onClick={() => setShowMusicBrainzModal(true)}
+          title="Search MusicBrainz for album metadata"
+        >
+          🔍 MusicBrainz Search
         </button>
       </div>
 
@@ -115,7 +136,22 @@ const AlbumDetail = ({
             {album.totalPlayCount !== undefined && album.totalPlayCount > 0 && (
               <span className="album-play-count">• {album.totalPlayCount} {album.totalPlayCount === 1 ? 'play' : 'plays'}</span>
             )}
+            {(albumData.musicBrainzId || album.musicBrainzId) && (
+              <span className="album-mbid">
+                • <a 
+                  href={`https://musicbrainz.org/release/${albumData.musicBrainzId || album.musicBrainzId}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="mbid-link"
+                  title="View release on MusicBrainz"
+                >
+                  🏷️ MusicBrainz
+                </a>
+              </span>
+            )}
           </div>
+
+          {console.log('Album MusicBrainz ID:', albumData.musicBrainzId, album.musicBrainzId)}
 
           {album.summary && (
             <p className="album-summary">{album.summary}</p>
@@ -179,6 +215,19 @@ const AlbumDetail = ({
                   {track.originalTitle && (
                     <div className="track-subtitle">{track.originalTitle}</div>
                   )}
+                  {track.musicBrainzTrackId && (
+                    <div className="track-mbid">
+                      <a 
+                        href={`https://musicbrainz.org/recording/${track.musicBrainzTrackId}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="mbid-link"
+                        title="View on MusicBrainz"
+                      >
+                        🏷️ MB
+                      </a>
+                    </div>
+                  )}
                 </div>
                 <div className="track-rating">
                   <StarRating
@@ -219,6 +268,101 @@ const AlbumDetail = ({
           </div>
         )}
       </div>
+      
+      {/* MusicBrainz Metadata Section */}
+      {albumData.musicBrainzId && (
+        <div className="musicbrainz-metadata">
+          <div 
+            className="metadata-header" 
+            onClick={() => setShowMusicBrainzData(!showMusicBrainzData)}
+          >
+            <h3 className="metadata-heading">MusicBrainz Information</h3>
+            <button className="metadata-toggle">
+              {showMusicBrainzData ? '▼' : '▶'}
+            </button>
+          </div>
+          
+          {showMusicBrainzData && (
+            <>
+              <div className="metadata-grid">
+                {albumData.musicBrainzCountry && (
+                  <div className="metadata-item">
+                    <span className="metadata-label">Country:</span>
+                    <span className="metadata-value">{albumData.musicBrainzCountry}</span>
+                  </div>
+                )}
+                
+                {albumData.musicBrainzReleaseDate && (
+                  <div className="metadata-item">
+                    <span className="metadata-label">Release Date:</span>
+                    <span className="metadata-value">{new Date(albumData.musicBrainzReleaseDate).toLocaleDateString()}</span>
+                  </div>
+                )}
+                
+                {albumData.musicBrainzStatus && (
+                  <div className="metadata-item">
+                    <span className="metadata-label">Status:</span>
+                    <span className="metadata-value">{albumData.musicBrainzStatus}</span>
+                  </div>
+                )}
+                
+                {albumData.musicBrainzPackaging && (
+                  <div className="metadata-item">
+                    <span className="metadata-label">Packaging:</span>
+                    <span className="metadata-value">{albumData.musicBrainzPackaging}</span>
+                  </div>
+                )}
+                
+                {albumData.musicBrainzLabel && (
+                  <div className="metadata-item">
+                    <span className="metadata-label">Label:</span>
+                    <span className="metadata-value">{albumData.musicBrainzLabel}</span>
+                  </div>
+                )}
+                
+                {albumData.musicBrainzBarcode && (
+                  <div className="metadata-item">
+                    <span className="metadata-label">Barcode:</span>
+                    <span className="metadata-value">{albumData.musicBrainzBarcode}</span>
+                  </div>
+                )}
+                
+                {albumData.musicBrainzAsin && (
+                  <div className="metadata-item">
+                    <span className="metadata-label">ASIN:</span>
+                    <span className="metadata-value">{albumData.musicBrainzAsin}</span>
+                  </div>
+                )}
+                
+                <div className="metadata-item">
+                  <span className="metadata-label">MusicBrainz ID:</span>
+                  <a 
+                    href={`https://musicbrainz.org/release/${albumData.musicBrainzId}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="metadata-link"
+                  >
+                    {albumData.musicBrainzId}
+                  </a>
+                </div>
+              </div>
+            </>
+          )}
+        </div>
+      )}
+      
+      {/* MusicBrainz Search Modal */}
+      {showMusicBrainzModal && (
+        <AlbumMusicBrainzSearchModal
+          albumTitle={albumData.title}
+          albumRatingKey={albumData.ratingKey}
+          albumThumb={albumData.thumb}
+          artistMusicBrainzId={albumData.artist?.musicBrainzId}
+          trackCount={tracks?.length}
+          onClose={() => setShowMusicBrainzModal(false)}
+          onAlbumUpdated={handleAlbumUpdate}
+        />
+      )}
     </div>
   );
 };

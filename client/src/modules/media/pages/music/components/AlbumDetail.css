@@ -279,3 +279,130 @@
     display: none;
   }
 }
+
+/* MusicBrainz Search Button */
+.album-detail-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1.5rem;
+  gap: 1rem;
+}
+
+.musicbrainz-search-btn {
+  padding: 0.5rem 1rem;
+  background: #ba478f;
+  color: white;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.9rem;
+  font-weight: 600;
+  transition: all 0.2s ease;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.musicbrainz-search-btn:hover {
+  background: #a03d7a;
+  transform: translateY(-1px);
+  box-shadow: 0 2px 8px rgba(186, 71, 143, 0.3);
+}
+
+/* MusicBrainz Metadata Display - reusing styles from ArtistDetail */
+.musicbrainz-metadata {
+  margin-top: 2rem;
+  padding: 1.5rem;
+  background: #f8f9fa;
+  border-radius: 8px;
+  border-left: 4px solid #ba478f;
+}
+
+.metadata-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  cursor: pointer;
+  user-select: none;
+  margin-bottom: 1rem;
+}
+
+.metadata-header:hover {
+  opacity: 0.8;
+}
+
+.metadata-header:hover .metadata-heading {
+  color: #ba478f;
+}
+
+.metadata-heading {
+  margin: 0;
+  font-size: 1.25rem;
+  font-weight: 600;
+  color: #333;
+  transition: color 0.2s ease;
+}
+
+.metadata-toggle {
+  background: none;
+  border: none;
+  font-size: 1.25rem;
+  color: #ba478f;
+  cursor: pointer;
+  padding: 0.25rem 0.5rem;
+  transition: transform 0.2s ease;
+}
+
+.metadata-toggle:hover {
+  transform: scale(1.2);
+}
+
+.metadata-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+  gap: 1rem;
+}
+
+.metadata-item {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.metadata-label {
+  font-weight: 600;
+  color: #666;
+  font-size: 0.875rem;
+}
+
+.metadata-value {
+  color: #333;
+}
+
+.metadata-link {
+  color: #ba478f;
+  text-decoration: none;
+  word-break: break-all;
+}
+
+.metadata-link:hover {
+  text-decoration: underline;
+}
+
+.track-mbid {
+  font-size: 0.75rem;
+  margin-top: 0.25rem;
+}
+
+.mbid-link {
+  color: #ba478f;
+  text-decoration: none;
+  font-weight: 500;
+  transition: opacity 0.2s;
+}
+
+.mbid-link:hover {
+  opacity: 0.7;
+  text-decoration: underline;
+}
