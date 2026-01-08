@@ -152,6 +152,8 @@ const styles = {
 };
 
 export default function SceneCard({ scene, onSceneClick, sceneNumber = null, onUnlinkClick = null, isSelected = false, onToggleSelect = null }) {
+  const sceneLink = `/media/stash/scenes/${scene.id}`;
+  
   const handleMouseEnter = (e) => {
     e.currentTarget.style.boxShadow = '0 4px 6px -1px rgba(0, 0, 0, 0.1)';
     e.currentTarget.style.transform = 'translateY(-2px)';

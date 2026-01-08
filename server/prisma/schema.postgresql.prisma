@@ -726,8 +726,10 @@ model PlexAlbum {
   musicBrainzLabel      String?
   musicBrainzBarcode    String?
   musicBrainzAsin       String?
+  workId                Int?
   artist                PlexArtist?         @relation(fields: [parentRatingKey], references: [ratingKey])
   librarySection        PlexLibrarySection? @relation(fields: [librarySectionID], references: [id])
+  work                  Work?               @relation(fields: [workId], references: [id], onDelete: SetNull)
   tracks                PlexTrack[]
 
   @@map("PlexAlbum")
@@ -769,8 +771,10 @@ model PlexTrack {
   userRating           Float?
   viewCount            Int?
   removed              Boolean             @default(false)
+  workId               Int?
   album                PlexAlbum?          @relation(fields: [parentRatingKey], references: [ratingKey])
   librarySection       PlexLibrarySection? @relation(fields: [librarySectionID], references: [id])
+  work                 Work?               @relation(fields: [workId], references: [id], onDelete: SetNull)
   workPartTracks       WorkPartTrack[]
   trackArtists         TrackArtist[]
 
@@ -778,13 +782,15 @@ model PlexTrack {
 }
 
 model Work {
-  id               Int        @id @default(autoincrement())
+  id               Int         @id @default(autoincrement())
   title            String
   composerKey      String
-  composer         PlexArtist @relation(fields: [composerKey], references: [ratingKey])
+  composer         PlexArtist  @relation(fields: [composerKey], references: [ratingKey])
   parts            WorkPart[]
-  createdAt        DateTime   @default(now())
-  updatedAt        DateTime   @updatedAt
+  albums           PlexAlbum[]
+  tracks           PlexTrack[]
+  createdAt        DateTime    @default(now())
+  updatedAt        DateTime    @updatedAt
 
   @@map("Work")
 }
