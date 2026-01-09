@@ -48,6 +48,11 @@ export default function StudioDetail() {
   const [selectedScraper, setSelectedScraper] = useState('');
   const [showScraperModal, setShowScraperModal] = useState(false);
   const [isSavingScraper, setIsSavingScraper] = useState(false);
+  
+  // Bulk identification state
+  const [showBulkIdentificationModal, setShowBulkIdentificationModal] = useState(false);
+  const [bulkIdentificationValue, setBulkIdentificationValue] = useState('Not Identified');
+  const [isUpdatingBulkIdentification, setIsUpdatingBulkIdentification] = useState(false);
 
   useEffect(() => {
     const fetchStudio = async () => {
@@ -145,6 +150,42 @@ export default function StudioDetail() {
       }
       return newSet;
     });
+  };
+  
+  // Handle bulk identification update
+  const handleBulkIdentificationUpdate = async () => {
+    if (selectedScenes.size === 0) {
+      alert('Please select at least one scene');
+      return;
+    }
+    
+    setIsUpdatingBulkIdentification(true);
+    try {
+      const response = await fetch(`${config.apiBaseUrl}/api/stash/scenes/bulk-identification`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          sceneIds: Array.from(selectedScenes),
+          identification: bulkIdentificationValue
+        })
+      });
+      
+      const result = await response.json();
+      
+      if (result.success) {
+        alert(`Successfully updated ${result.data.updated} scene(s) to "${bulkIdentificationValue}"`);
+        setShowBulkIdentificationModal(false);
+        setSelectedScenes(new Set());
+        loadScenes(); // Refresh the scenes list
+      } else {
+        throw new Error(result.error || 'Failed to update scenes');
+      }
+    } catch (error) {
+      console.error('Error updating bulk identification:', error);
+      alert(`Failed to update identification: ${error.message}`);
+    } finally {
+      setIsUpdatingBulkIdentification(false);
+    }
   };
 
   // Handle opening scene merge modal
@@ -681,33 +722,61 @@ export default function StudioDetail() {
           </div>
         ) : (
           <>
-            {/* Merge Button */}
-            {selectedScenes.size >= 2 && (
-              <div style={{ marginBottom: '20px' }}>
+            {/* Action Buttons */}
+            {selectedScenes.size > 0 && (
+              <div style={{ marginBottom: '20px', display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
+                {selectedScenes.size >= 2 && (
+                  <button
+                    onClick={handleOpenSceneMergeModal}
+                    style={{
+                      background: 'linear-gradient(135deg, #8b5cf6 0%, #7c3aed 100%)',
+                      color: 'white',
+                      border: '2px solid #8b5cf6',
+                      padding: '10px 20px',
+                      borderRadius: '8px',
+                      cursor: 'pointer',
+                      fontSize: '15px',
+                      fontWeight: '600',
+                      boxShadow: '0 2px 4px rgba(139, 92, 246, 0.2)',
+                      transition: 'all 0.2s ease'
+                    }}
+                    onMouseEnter={(e) => {
+                      e.target.style.transform = 'translateY(-1px)';
+                      e.target.style.boxShadow = '0 4px 8px rgba(139, 92, 246, 0.3)';
+                    }}
+                    onMouseLeave={(e) => {
+                      e.target.style.transform = 'translateY(0)';
+                      e.target.style.boxShadow = '0 2px 4px rgba(139, 92, 246, 0.2)';
+                    }}
+                  >
+                    🔀 Merge {selectedScenes.size} Selected Scenes
+                  </button>
+                )}
+                
                 <button
-                  onClick={handleOpenSceneMergeModal}
+                  onClick={() => setShowBulkIdentificationModal(true)}
                   style={{
-                    background: 'linear-gradient(135deg, #8b5cf6 0%, #7c3aed 100%)',
+                    background: 'linear-gradient(135deg, #3b82f6 0%, #2563eb 100%)',
                     color: 'white',
-                    border: '2px solid #8b5cf6',
+                    border: '2px solid #3b82f6',
                     padding: '10px 20px',
                     borderRadius: '8px',
                     cursor: 'pointer',
                     fontSize: '15px',
                     fontWeight: '600',
-                    boxShadow: '0 2px 4px rgba(139, 92, 246, 0.2)',
+                    boxShadow: '0 2px 4px rgba(59, 130, 246, 0.2)',
                     transition: 'all 0.2s ease'
                   }}
                   onMouseEnter={(e) => {
                     e.target.style.transform = 'translateY(-1px)';
-                    e.target.style.boxShadow = '0 4px 8px rgba(139, 92, 246, 0.3)';
+                    e.target.style.boxShadow = '0 4px 8px rgba(59, 130, 246, 0.3)';
                   }}
                   onMouseLeave={(e) => {
                     e.target.style.transform = 'translateY(0)';
-                    e.target.style.boxShadow = '0 2px 4px rgba(139, 92, 246, 0.2)';
+                    e.target.style.boxShadow = '0 2px 4px rgba(59, 130, 246, 0.2)';
                   }}
                 >
-                  🔀 Merge {selectedScenes.size} Selected Scenes
+                  🏷️ Update Identification ({selectedScenes.size} scene{selectedScenes.size !== 1 ? 's' : ''})
                 </button>
               </div>
             )}
@@ -1405,6 +1474,73 @@ export default function StudioDetail() {
                 className="btn-cancel" 
                 onClick={() => setShowSceneMergeModal(false)}
                 disabled={isMergingScenes}
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      
+      {/* Bulk Identification Modal */}
+      {showBulkIdentificationModal && (
+        <div className="modal-overlay" onClick={() => setShowBulkIdentificationModal(false)}>
+          <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '500px' }}>
+            <div className="modal-header">
+              <h2>🏷️ Update Identification</h2>
+              <button className="modal-close" onClick={() => setShowBulkIdentificationModal(false)}>×</button>
+            </div>
+
+            <div className="modal-body">
+              <p style={{ marginBottom: '20px', color: '#6b7280' }}>
+                Update identification status for {selectedScenes.size} selected scene{selectedScenes.size !== 1 ? 's' : ''}.
+              </p>
+
+              <div style={{ marginBottom: '20px' }}>
+                <label style={{ display: 'block', fontWeight: '600', marginBottom: '8px' }}>
+                  Identification Status:
+                </label>
+                <select
+                  value={bulkIdentificationValue}
+                  onChange={(e) => setBulkIdentificationValue(e.target.value)}
+                  style={{
+                    width: '100%',
+                    padding: '10px',
+                    borderRadius: '6px',
+                    border: '1px solid #cbd5e0',
+                    fontSize: '15px',
+                    backgroundColor: 'white'
+                  }}
+                >
+                  <option value="Not Identified">Not Identified</option>
+                  <option value="Identified">Identified</option>
+                  <option value="Identified and Scraped">Identified and Scraped</option>
+                </select>
+              </div>
+
+              <div style={{
+                padding: '12px',
+                backgroundColor: '#fef3c7',
+                borderRadius: '6px',
+                fontSize: '14px',
+                color: '#92400e'
+              }}>
+                ℹ️ This will update all selected scenes to "{bulkIdentificationValue}".
+              </div>
+            </div>
+
+            <div className="modal-actions">
+              <button 
+                className="btn-accept" 
+                onClick={handleBulkIdentificationUpdate}
+                disabled={isUpdatingBulkIdentification}
+              >
+                {isUpdatingBulkIdentification ? '⏳ Updating...' : '✓ Update'}
+              </button>
+              <button 
+                className="btn-cancel" 
+                onClick={() => setShowBulkIdentificationModal(false)}
+                disabled={isUpdatingBulkIdentification}
               >
                 Cancel
               </button>

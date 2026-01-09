@@ -688,6 +688,14 @@ model PlexArtist {
   musicBrainzEnded      Boolean?
   musicBrainzAliases    String?
   musicBrainzLinks      String?
+  userTitle             String?
+  userSortName          String?
+  userBiography         String?
+  userCountry           String?
+  metadataPreferences   String?
+  identificationStatus  String?  @default("unidentified")
+  identificationConfidence Float?
+  lastIdentificationAttempt DateTime?
   albums                PlexAlbum[]
   works                 Work[]
   artistTypes           ArtistTypeAssignment[]
@@ -726,7 +734,15 @@ model PlexAlbum {
   musicBrainzLabel      String?
   musicBrainzBarcode    String?
   musicBrainzAsin       String?
+  albumArtist           String?
   workId                Int?
+  userTitle             String?
+  userReleaseDate       DateTime?
+  userLabel             String?
+  metadataPreferences   String?
+  identificationStatus  String?  @default("unidentified")
+  identificationConfidence Float?
+  lastIdentificationAttempt DateTime?
   artist                PlexArtist?         @relation(fields: [parentRatingKey], references: [ratingKey])
   librarySection        PlexLibrarySection? @relation(fields: [librarySectionID], references: [id])
   work                  Work?               @relation(fields: [workId], references: [id], onDelete: SetNull)
@@ -772,6 +788,12 @@ model PlexTrack {
   viewCount            Int?
   removed              Boolean             @default(false)
   workId               Int?
+  userTitle            String?
+  userComposer         String?
+  metadataPreferences  String?
+  identificationStatus String?  @default("unidentified")
+  identificationConfidence Float?
+  lastIdentificationAttempt DateTime?
   album                PlexAlbum?          @relation(fields: [parentRatingKey], references: [ratingKey])
   librarySection       PlexLibrarySection? @relation(fields: [librarySectionID], references: [id])
   work                 Work?               @relation(fields: [workId], references: [id], onDelete: SetNull)
@@ -782,15 +804,23 @@ model PlexTrack {
 }
 
 model Work {
-  id               Int         @id @default(autoincrement())
-  title            String
-  composerKey      String
-  composer         PlexArtist  @relation(fields: [composerKey], references: [ratingKey])
-  parts            WorkPart[]
-  albums           PlexAlbum[]
-  tracks           PlexTrack[]
-  createdAt        DateTime    @default(now())
-  updatedAt        DateTime    @updatedAt
+  id                    Int         @id @default(autoincrement())
+  title                 String
+  composerKey           String
+  userTitle             String?
+  userCatalogNumber     String?
+  userOpusNumber        String?
+  userNickname          String?
+  musicBrainzWorkId     String?
+  metadataPreferences   String?
+  identificationStatus  String?     @default("unidentified")
+  identificationConfidence Float?
+  composer              PlexArtist  @relation(fields: [composerKey], references: [ratingKey])
+  parts                 WorkPart[]
+  albums                PlexAlbum[]
+  tracks                PlexTrack[]
+  createdAt             DateTime    @default(now())
+  updatedAt             DateTime    @updatedAt
 
   @@map("Work")
 }
@@ -874,6 +904,63 @@ model TrackArtist {
 
   @@unique([trackKey, artistKey, artistTypeId])
   @@map("TrackArtist")
+}
+
+model IdentificationCandidate {
+  id              Int      @id @default(autoincrement())
+  entityType      String
+  entityKey       String
+  musicBrainzId   String
+  title           String
+  artist          String?
+  releaseDate     DateTime?
+  confidence      Float
+  metadata        String
+  status          String   @default("pending")
+  createdAt       DateTime @default(now())
+  reviewedAt      DateTime?
+
+  @@index([entityType, entityKey, status])
+  @@map("IdentificationCandidate")
+}
+
+model MusicBrainzMetadataCache {
+  id            Int      @id @default(autoincrement())
+  musicBrainzId String   @unique
+  entityType    String
+  metadata      String
+  lastFetched   DateTime @default(now())
+  expiresAt     DateTime
+
+  @@index([musicBrainzId])
+  @@index([expiresAt])
+  @@map("MusicBrainzMetadataCache")
+}
+
+model UserMetadataOverride {
+  id         Int      @id @default(autoincrement())
+  entityType String
+  entityKey  String
+  field      String
+  value      String
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@unique([entityType, entityKey, field])
+  @@map("UserMetadataOverride")
+}
+
+model MetadataPreference {
+  id         Int      @id @default(autoincrement())
+  entityType String
+  entityKey  String
+  field      String
+  source     String
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@unique([entityType, entityKey, field])
+  @@map("MetadataPreference")
 }
 
 model StashScene {

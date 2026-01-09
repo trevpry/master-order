@@ -2,7 +2,8 @@ import React, { useState, useEffect } from 'react';
 import config from '../../../../../config';
 import TracksPlaylistPlayer from './TracksPlaylistPlayer';
 import StarRating from '../../../../../components/StarRating';
-import AlbumMusicBrainzSearchModal from '../../../../../components/music/AlbumMusicBrainzSearchModal';
+import IdentifyModal from '../../../../../components/IdentifyModal';
+import MetadataEditor from '../../../../../components/MetadataEditor';
 import './AlbumDetail.css';
 
 const AlbumDetail = ({
@@ -23,7 +24,8 @@ const AlbumDetail = ({
   if (!album) return null;
   
   const [tracks, setTracks] = useState(initialTracks);
-  const [showMusicBrainzModal, setShowMusicBrainzModal] = useState(false);
+  const [showIdentifyModal, setShowIdentifyModal] = useState(false);
+  const [isEditMode, setIsEditMode] = useState(false);
   const [showMusicBrainzData, setShowMusicBrainzData] = useState(false);
   const [albumData, setAlbumData] = useState(album);
   
@@ -80,13 +82,24 @@ const AlbumDetail = ({
         <button className="back-button" onClick={onGoBack}>
           ← Back to Albums
         </button>
-        <button 
-          className="musicbrainz-search-btn"
-          onClick={() => setShowMusicBrainzModal(true)}
-          title="Search MusicBrainz for album metadata"
-        >
-          🔍 MusicBrainz Search
-        </button>
+        <div style={{ display: 'flex', gap: '0.5rem' }}>
+          <button 
+            className="musicbrainz-search-btn"
+            onClick={() => setShowIdentifyModal(true)}
+            title="Identify album with MusicBrainz"
+            style={{ backgroundColor: '#3b82f6' }}
+          >
+            🔍 Identify Album
+          </button>
+          <button 
+            className="musicbrainz-search-btn"
+            onClick={() => setIsEditMode(!isEditMode)}
+            title="Edit album metadata"
+            style={{ backgroundColor: isEditMode ? '#10b981' : '#8b5cf6' }}
+          >
+            {isEditMode ? '✓ Done' : '✏️ Edit Metadata'}
+          </button>
+        </div>
       </div>
 
       {/* Album Info Section */}
@@ -105,28 +118,90 @@ const AlbumDetail = ({
         )}
         
         <div className="album-metadata">
-          <h1 className="album-title">{album.title}</h1>
-          <p 
-            className="album-artist"
-            onClick={() => {
-              if (album.parentRatingKey && onSelectArtist) {
-                onSelectArtist({ ratingKey: album.parentRatingKey, title: album.parentTitle });
-              }
-            }}
-            style={{
-              cursor: onSelectArtist && album.parentRatingKey ? 'pointer' : 'default',
-              color: onSelectArtist && album.parentRatingKey ? '#007bff' : '#666'
-            }}
-            title={onSelectArtist && album.parentRatingKey ? `View ${album.parentTitle || 'artist'}'s albums` : ''}
-            onMouseEnter={(e) => {
-              if (onSelectArtist && album.parentRatingKey) {
-                e.target.style.textDecoration = 'underline';
-              }
-            }}
-            onMouseLeave={(e) => e.target.style.textDecoration = 'none'}
-          >
-            {album.parentTitle || album.artist?.title || 'Various Artists'}
-          </p>
+          {/* Identification Status Badge */}
+          {albumData.identificationStatus && (
+            <div style={{ marginBottom: '1rem' }}>
+              <span style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                padding: '0.25rem 0.75rem',
+                borderRadius: '0.25rem',
+                fontSize: '0.875rem',
+                backgroundColor: albumData.identificationStatus === 'identified' ? '#065f46' : 
+                                albumData.identificationStatus === 'pending_review' ? '#78350f' :
+                                albumData.identificationStatus === 'manual' ? '#581c87' : '#374151',
+                color: albumData.identificationStatus === 'identified' ? '#d1fae5' :
+                      albumData.identificationStatus === 'pending_review' ? '#fde68a' :
+                      albumData.identificationStatus === 'manual' ? '#e9d5ff' : '#d1d5db'
+              }}>
+                {albumData.identificationStatus === 'identified' && '✓ Identified'}
+                {albumData.identificationStatus === 'pending_review' && '⏳ Pending Review'}
+                {albumData.identificationStatus === 'unidentified' && 'Not Identified'}
+                {albumData.identificationStatus === 'manual' && '✏️ Manual Entry'}
+                {albumData.identificationConfidence && ` (${Math.round(albumData.identificationConfidence * 100)}% match)`}
+              </span>
+            </div>
+          )}
+
+          {/* Metadata Editing Mode */}
+          {isEditMode ? (
+            <div style={{ 
+              backgroundColor: '#1f2937', 
+              padding: '1.5rem', 
+              borderRadius: '0.5rem',
+              marginBottom: '1.5rem'
+            }}>
+              <MetadataEditor
+                entityType="album"
+                entityKey={album.ratingKey}
+                field="title"
+                label="Album Title"
+                currentValue={albumData.title}
+                onUpdate={(val) => setAlbumData({ ...albumData, title: val })}
+              />
+              <MetadataEditor
+                entityType="album"
+                entityKey={album.ratingKey}
+                field="releaseDate"
+                label="Release Date"
+                currentValue={albumData.originallyAvailableAt || albumData.year?.toString()}
+                onUpdate={(val) => setAlbumData({ ...albumData, originallyAvailableAt: val })}
+              />
+              <MetadataEditor
+                entityType="album"
+                entityKey={album.ratingKey}
+                field="label"
+                label="Record Label"
+                currentValue={albumData.studio}
+                onUpdate={(val) => setAlbumData({ ...albumData, studio: val })}
+              />
+            </div>
+          ) : (
+            <>
+              <h1 className="album-title">{albumData.title}</h1>
+              <p 
+                className="album-artist"
+                onClick={() => {
+                  if (album.parentRatingKey && onSelectArtist) {
+                    onSelectArtist({ ratingKey: album.parentRatingKey, title: album.parentTitle });
+                  }
+                }}
+                style={{
+                  cursor: onSelectArtist && album.parentRatingKey ? 'pointer' : 'default',
+                  color: onSelectArtist && album.parentRatingKey ? '#007bff' : '#666'
+                }}
+                title={onSelectArtist && album.parentRatingKey ? `View ${album.parentTitle || 'artist'}'s albums` : ''}
+                onMouseEnter={(e) => {
+                  if (onSelectArtist && album.parentRatingKey) {
+                    e.target.style.textDecoration = 'underline';
+                  }
+                }}
+                onMouseLeave={(e) => e.target.style.textDecoration = 'none'}
+              >
+                {album.parentTitle || album.artist?.title || 'Various Artists'}
+              </p>
+            </>
+          )}
           
           <div className="album-details">
             {album.year && <span className="album-year">{album.year}</span>}
@@ -351,18 +426,18 @@ const AlbumDetail = ({
         </div>
       )}
       
-      {/* MusicBrainz Search Modal */}
-      {showMusicBrainzModal && (
-        <AlbumMusicBrainzSearchModal
-          albumTitle={albumData.title}
-          albumRatingKey={albumData.ratingKey}
-          albumThumb={albumData.thumb}
-          artistMusicBrainzId={albumData.artist?.musicBrainzId}
-          trackCount={tracks?.length}
-          onClose={() => setShowMusicBrainzModal(false)}
-          onAlbumUpdated={handleAlbumUpdate}
-        />
-      )}
+      {/* Identify Modal */}
+      <IdentifyModal
+        isOpen={showIdentifyModal}
+        onClose={() => setShowIdentifyModal(false)}
+        entityType="album"
+        entityKey={album.ratingKey}
+        entityTitle={albumData.title}
+        onIdentified={(updatedAlbum) => {
+          setAlbumData(updatedAlbum);
+          setShowIdentifyModal(false);
+        }}
+      />
     </div>
   );
 };

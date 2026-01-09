@@ -61,6 +61,13 @@ const MusicViewNavigation = ({
       >
         Radio
       </button>
+      <button 
+        onClick={() => onNavigateToView('settings')}
+        className={`nav-button ${activeView === 'settings' ? 'active' : ''}`}
+        title="Music Library Settings"
+      >
+        ⚙️ Settings
+      </button>
       {onOpenArtistTypesModal && (
         <button 
           onClick={onOpenArtistTypesModal}

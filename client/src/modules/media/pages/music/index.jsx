@@ -16,6 +16,7 @@ import MusicCollectionsView from './components/MusicCollectionsView';
 import MusicPlaylistsView from './components/MusicPlaylistsView';
 import WorksView from './components/WorksView';
 import RadioView from './components/RadioView';
+import MusicSettings from './MusicSettings';
 import MergeArtistsModal from '../../../../components/music/MergeArtistsModal';
 import LoadingState from '../../../../shared/components/LoadingState';
 import './Music.css';
@@ -1983,6 +1984,12 @@ const Music = () => {
         {activeView === 'radio' && (
           <RadioView 
             selectedSection={selectedSection}
+          />
+        )}
+
+        {activeView === 'settings' && (
+          <MusicSettings 
+            onBack={() => navigateToView('artists')}
           />
         )}
       </div>

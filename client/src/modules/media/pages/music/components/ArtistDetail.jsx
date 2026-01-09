@@ -2,6 +2,8 @@ import React, { useState } from 'react';
 import config from '../../../../../config';
 import ArtistTypesManager from './ArtistTypesManager';
 import MusicBrainzSearchModal from '../../../../../components/music/MusicBrainzSearchModal';
+import IdentifyModal from '../../../../../components/IdentifyModal';
+import MetadataEditor from '../../../../../components/MetadataEditor';
 import './ArtistDetail.css';
 
 const ArtistDetail = ({
@@ -18,7 +20,10 @@ const ArtistDetail = ({
   const [isSaving, setIsSaving] = useState(false);
   const [saveError, setSaveError] = useState(null);
   const [showMusicBrainzModal, setShowMusicBrainzModal] = useState(false);
+  const [showIdentifyModal, setShowIdentifyModal] = useState(false);
+  const [isMetadataEditMode, setIsMetadataEditMode] = useState(false);
   const [showMusicBrainzData, setShowMusicBrainzData] = useState(false);
+  const [artistData, setArtistData] = useState(artist);
 
   if (!artist) return null;
 
@@ -73,13 +78,31 @@ const ArtistDetail = ({
         <button className="back-button" onClick={onGoBack}>
           ← Back to Artists
         </button>
-        <button 
-          className="musicbrainz-button" 
-          onClick={() => setShowMusicBrainzModal(true)}
-          title="Search MusicBrainz for metadata"
-        >
-          🎵 MusicBrainz Search
-        </button>
+        <div style={{ display: 'flex', gap: '0.5rem' }}>
+          <button 
+            className="musicbrainz-button"
+            onClick={() => setShowIdentifyModal(true)}
+            title="Identify artist with MusicBrainz"
+            style={{ backgroundColor: '#3b82f6' }}
+          >
+            🔍 Identify Artist
+          </button>
+          <button 
+            className="musicbrainz-button"
+            onClick={() => setIsMetadataEditMode(!isMetadataEditMode)}
+            title="Edit artist metadata"
+            style={{ backgroundColor: isMetadataEditMode ? '#10b981' : '#8b5cf6' }}
+          >
+            {isMetadataEditMode ? '✓ Done' : '✏️ Edit Metadata'}
+          </button>
+          <button 
+            className="musicbrainz-button" 
+            onClick={() => setShowMusicBrainzModal(true)}
+            title="Search MusicBrainz for metadata"
+          >
+            🎵 MusicBrainz Search
+          </button>
+        </div>
       </div>
 
       {/* Artist Info Section */}
@@ -98,6 +121,66 @@ const ArtistDetail = ({
         )}
         
         <div className="artist-metadata">
+          {/* Identification Status Badge */}
+          {artistData.identificationStatus && (
+            <div style={{ marginBottom: '1rem' }}>
+              <span style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                padding: '0.25rem 0.75rem',
+                borderRadius: '0.25rem',
+                fontSize: '0.875rem',
+                backgroundColor: artistData.identificationStatus === 'identified' ? '#065f46' : 
+                                artistData.identificationStatus === 'pending_review' ? '#78350f' :
+                                artistData.identificationStatus === 'manual' ? '#581c87' : '#374151',
+                color: artistData.identificationStatus === 'identified' ? '#d1fae5' :
+                      artistData.identificationStatus === 'pending_review' ? '#fde68a' :
+                      artistData.identificationStatus === 'manual' ? '#e9d5ff' : '#d1d5db'
+              }}>
+                {artistData.identificationStatus === 'identified' && '✓ Identified'}
+                {artistData.identificationStatus === 'pending_review' && '⏳ Pending Review'}
+                {artistData.identificationStatus === 'unidentified' && 'Not Identified'}
+                {artistData.identificationStatus === 'manual' && '✏️ Manual Entry'}
+                {artistData.identificationConfidence && ` (${Math.round(artistData.identificationConfidence * 100)}% match)`}
+              </span>
+            </div>
+          )}
+
+          {/* Metadata Edit Mode */}
+          {isMetadataEditMode ? (
+            <div style={{ 
+              backgroundColor: '#1f2937', 
+              padding: '1.5rem', 
+              borderRadius: '0.5rem',
+              marginBottom: '1.5rem'
+            }}>
+              <MetadataEditor
+                entityType="artist"
+                entityKey={artist.ratingKey}
+                field="title"
+                label="Artist Name"
+                currentValue={artistData.title}
+                onUpdate={(val) => setArtistData({ ...artistData, title: val })}
+              />
+              <MetadataEditor
+                entityType="artist"
+                entityKey={artist.ratingKey}
+                field="sortName"
+                label="Sort Name"
+                currentValue={artistData.titleSort}
+                onUpdate={(val) => setArtistData({ ...artistData, titleSort: val })}
+              />
+              <MetadataEditor
+                entityType="artist"
+                entityKey={artist.ratingKey}
+                field="country"
+                label="Country"
+                currentValue={artistData.country}
+                onUpdate={(val) => setArtistData({ ...artistData, country: val })}
+              />
+            </div>
+          ) : null}
+
           {isEditing ? (
             <div className="artist-edit-form">
               <div className="form-group">
@@ -314,6 +397,22 @@ const ArtistDetail = ({
           onArtistUpdated={onArtistUpdate}
         />
       )}
+
+      {/* Identify Modal */}
+      <IdentifyModal
+        isOpen={showIdentifyModal}
+        onClose={() => setShowIdentifyModal(false)}
+        entityType="artist"
+        entityKey={artist.ratingKey}
+        entityTitle={artistData.title}
+        onIdentified={(updatedArtist) => {
+          setArtistData(updatedArtist);
+          if (onArtistUpdate) {
+            onArtistUpdate(updatedArtist);
+          }
+          setShowIdentifyModal(false);
+        }}
+      />
     </div>
   );
 };

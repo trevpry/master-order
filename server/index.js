@@ -377,6 +377,14 @@ app.use('/api/music', musicRoutes);
 const musicbrainzRoutes = require('./routes/musicbrainz');
 app.use('/api/musicbrainz', musicbrainzRoutes);
 
+// Metadata API routes
+const metadataRoutes = require('./routes/metadata');
+app.use('/api/metadata', metadataRoutes);
+
+// Identification API routes
+const identificationRoutes = require('./routes/identification');
+app.use('/api/identification', identificationRoutes);
+
 // Works API routes
 const worksRoutes = require('./routes/works');
 app.use('/api/works', worksRoutes);
