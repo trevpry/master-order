@@ -566,8 +566,21 @@ class GeviScraperService {
             aliases.push(aliasText);
           }
         });
+        
+        // If performer has a disambiguation, add "Name (Disambiguation)" as an alias
+        if (metadata.name && metadata.disambiguation) {
+          const combinedAlias = `${metadata.name} (${metadata.disambiguation})`;
+          aliases.push(combinedAlias);
+          console.log(`   - Added combined name+disambiguation alias: "${combinedAlias}"`);
+        }
+        
         // Deduplicate and join
         metadata.aliases = [...new Set(aliases)].join(', ');
+      } else if (metadata.name && metadata.disambiguation) {
+        // No h2 aliases found, but we have name + disambiguation
+        const combinedAlias = `${metadata.name} (${metadata.disambiguation})`;
+        metadata.aliases = combinedAlias;
+        console.log(`   - Added combined name+disambiguation alias: "${combinedAlias}"`);
       }
 
       console.log('   - Metadata extracted:', JSON.stringify(metadata, null, 2));

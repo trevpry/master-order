@@ -402,10 +402,37 @@ const GlobalMusicPlayer = () => {
     }
   };
   
-  const togglePlayPause = () => {
+  const togglePlayPause = async () => {
     const audio = audioRef.current;
     if (!audio || !tracks[currentTrackIndex]) return;
     
+    // Handle Sonos casting
+    if (isCasting && castDeviceType === 'sonos' && sonosDeviceRef) {
+      try {
+        const action = isPlaying ? 'pause' : 'play';
+        const response = await fetch(`${config.apiBaseUrl}/api/sonos/${action}`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            deviceId: sonosDeviceRef.uuid || sonosDeviceRef.host
+          }),
+        });
+        
+        if (response.ok) {
+          setIsPlaying(!isPlaying);
+          console.log(`🔊 Sonos ${action} successful`);
+        } else {
+          console.error(`Failed to ${action} on Sonos`);
+        }
+      } catch (error) {
+        console.error(`Error controlling Sonos playback:`, error);
+      }
+      return;
+    }
+    
+    // Handle local playback
     if (isPlaying) {
       audio.pause();
       setIsPlaying(false);
@@ -414,10 +441,46 @@ const GlobalMusicPlayer = () => {
     }
   };
   
-  const handleNextTrack = () => {
+  const handleNextTrack = async () => {
     const trackList = isShuffled ? shuffledTracks : tracks;
     if (!trackList.length) return;
     
+    // Handle Sonos casting
+    if (isCasting && castDeviceType === 'sonos' && sonosDeviceRef) {
+      try {
+        const response = await fetch(`${config.apiBaseUrl}/api/sonos/next`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            deviceId: sonosDeviceRef.uuid || sonosDeviceRef.host
+          }),
+        });
+        
+        if (response.ok) {
+          // Update local state to match
+          let nextIndex;
+          if (isRepeat) {
+            nextIndex = currentTrackIndex;
+          } else if (currentTrackIndex < trackList.length - 1) {
+            nextIndex = currentTrackIndex + 1;
+          } else {
+            nextIndex = 0;
+          }
+          setCurrentTrackIndex(nextIndex);
+          setCurrentTrack(trackList[nextIndex]);
+          console.log('🔊 Sonos next track successful');
+        } else {
+          console.error('Failed to skip to next track on Sonos');
+        }
+      } catch (error) {
+        console.error('Error skipping Sonos track:', error);
+      }
+      return;
+    }
+    
+    // Handle local playback
     let nextIndex;
     if (isRepeat) {
       nextIndex = currentTrackIndex;
@@ -433,10 +496,44 @@ const GlobalMusicPlayer = () => {
     playTrack(nextIndex);
   };
   
-  const handlePreviousTrack = () => {
+  const handlePreviousTrack = async () => {
     const trackList = isShuffled ? shuffledTracks : tracks;
     if (!trackList.length) return;
     
+    // Handle Sonos casting
+    if (isCasting && castDeviceType === 'sonos' && sonosDeviceRef) {
+      try {
+        const response = await fetch(`${config.apiBaseUrl}/api/sonos/previous`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            deviceId: sonosDeviceRef.uuid || sonosDeviceRef.host
+          }),
+        });
+        
+        if (response.ok) {
+          // Update local state to match
+          let prevIndex;
+          if (currentTrackIndex > 0) {
+            prevIndex = currentTrackIndex - 1;
+          } else {
+            prevIndex = trackList.length - 1;
+          }
+          setCurrentTrackIndex(prevIndex);
+          setCurrentTrack(trackList[prevIndex]);
+          console.log('🔊 Sonos previous track successful');
+        } else {
+          console.error('Failed to skip to previous track on Sonos');
+        }
+      } catch (error) {
+        console.error('Error going to previous Sonos track:', error);
+      }
+      return;
+    }
+    
+    // Handle local playback
     let prevIndex;
     if (currentTrackIndex > 0) {
       prevIndex = currentTrackIndex - 1;
@@ -453,7 +550,7 @@ const GlobalMusicPlayer = () => {
   const handleCastStateChange = (connected, deviceName, deviceType = 'chromecast', deviceRef = null) => {
     setIsCasting(connected);
     setCastDeviceName(deviceName);
-    setCastDeviceType(deviceType);
+    setCastDeviceType(connected ? deviceType : '');
     setSonosDeviceRef(deviceRef);
     
     if (connected) {
@@ -461,6 +558,9 @@ const GlobalMusicPlayer = () => {
       if (audioRef.current && !audioRef.current.paused) {
         audioRef.current.pause();
       }
+    } else {
+      // When disconnecting, resume local playback if there was something playing
+      console.log('🔊 Disconnected from cast device, resuming local playback');
     }
   };
   

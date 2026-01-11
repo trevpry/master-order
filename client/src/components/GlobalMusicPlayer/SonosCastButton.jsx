@@ -152,10 +152,10 @@ const SonosCastButton = ({ currentTrack, isPlaying, onCastStateChange }) => {
   const handleDisconnect = () => {
     setIsConnected(false);
     setSelectedDevice(null);
-    localStorage.removeItem('sonos_selected_device');
+    localStorage.removeItem('sonos_selected_device_id');
     
     if (onCastStateChange) {
-      onCastStateChange(false, '');
+      onCastStateChange(false, '', 'sonos', null);
     }
     
     console.log('🔊 Disconnected from SONOS');

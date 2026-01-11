@@ -362,7 +362,7 @@ const StashClipOverlay = ({ clipData, onClose }) => {
   const sceneImageUrl = `${config.apiBaseUrl}/api/stash/image-proxy/scene/${scene.id}/screenshot`;
 
   return (
-    <div className="fixed inset-0 bg-gradient-to-br from-gray-900 via-gray-800 to-black z-[2000] overflow-hidden">
+    <div className="fixed inset-0 bg-black z-[2000] overflow-hidden">
       {/* Close Button - Top Right */}
       <button
         onClick={onClose}
@@ -444,65 +444,6 @@ const StashClipOverlay = ({ clipData, onClose }) => {
 
               </div>
 
-              {/* Description */}
-              {scene.details && (
-                <div className="bg-gray-800 bg-opacity-50 rounded-xl p-5 border border-gray-700">
-                  <p className="text-base text-gray-300 leading-relaxed">{scene.details}</p>
-                </div>
-              )}
-
-              {/* File Path */}
-              {scene.path && (
-                <div className="bg-gray-800 bg-opacity-50 rounded-xl p-5 border border-gray-700">
-                  <div className="flex items-start gap-3">
-                    <span className="text-gray-400 text-lg flex-shrink-0 mt-1">📁</span>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-xs text-gray-400 uppercase font-semibold mb-2">File Location</p>
-                      <p className="text-sm text-gray-300 font-mono break-all">{scene.path}</p>
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {/* Technical Details */}
-              {(scene.resolution || scene.codec || scene.fileSize) && (
-                <div className="bg-gray-800 bg-opacity-50 rounded-xl p-5 border border-gray-700">
-                  <h4 className="text-sm font-semibold text-gray-300 uppercase mb-3">Technical Details</h4>
-                  <div className="grid grid-cols-2 gap-4 text-sm">
-                    {scene.resolution && (
-                      <div>
-                        <span className="text-gray-500">Resolution:</span>
-                        <span className="text-white ml-2">{scene.resolution}</span>
-                      </div>
-                    )}
-                    {scene.codec && (
-                      <div>
-                        <span className="text-gray-500">Codec:</span>
-                        <span className="text-white ml-2">{scene.codec}</span>
-                      </div>
-                    )}
-                    {scene.fileSize && (
-                      <div>
-                        <span className="text-gray-500">Size:</span>
-                        <span className="text-white ml-2">{(scene.fileSize / 1024 / 1024 / 1024).toFixed(2)} GB</span>
-                      </div>
-                    )}
-                    {scene.frameRate && (
-                      <div>
-                        <span className="text-gray-500">FPS:</span>
-                        <span className="text-white ml-2">{scene.frameRate.toFixed(2)}</span>
-                      </div>
-                    )}
-                    {scene.width && scene.height && (
-                      <div>
-                        <span className="text-gray-500">Dimensions:</span>
-                        <span className="text-white ml-2">{scene.width}x{scene.height}</span>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              )}
-
               {/* Action Buttons */}
               <div className="flex gap-4 pt-4">
                 <button
@@ -521,7 +462,7 @@ const StashClipOverlay = ({ clipData, onClose }) => {
           {scene.performers && scene.performers.length > 0 && (
             <div className="mt-8 bg-gray-800 bg-opacity-50 rounded-xl p-6 border border-gray-700">
               <h4 className="text-lg font-semibold text-gray-300 uppercase mb-4">Performers</h4>
-              <div className="flex flex-wrap gap-3">
+              <div className="flex flex-wrap gap-6">
                 {scene.performers.map((p) => (
                   <button
                     key={p.id}
@@ -529,17 +470,17 @@ const StashClipOverlay = ({ clipData, onClose }) => {
                       setSelectedPerformerId(p.id);
                       setSceneDate(scene.date);
                     }}
-                    className="flex items-center gap-3 px-4 py-3 bg-gray-700 bg-opacity-50 rounded-lg hover:bg-gray-600 transition-colors cursor-pointer border border-gray-600"
+                    className="flex flex-col items-center gap-3 px-4 py-4 bg-gray-700 bg-opacity-50 rounded-lg hover:bg-gray-600 transition-colors cursor-pointer border border-gray-600"
                   >
                     {p.image && (
                       <img
                         src={p.image}
                         alt={p.name}
-                        className="w-12 h-12 rounded-full object-cover"
+                        className="w-24 h-24 rounded-full object-cover"
                         onError={(e) => e.target.style.display = 'none'}
                       />
                     )}
-                    <span className="text-white text-base font-medium">{p.name}</span>
+                    <span className="text-white text-base font-medium text-center">{p.name}</span>
                   </button>
                 ))}
               </div>
