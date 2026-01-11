@@ -362,103 +362,166 @@ const StashClipOverlay = ({ clipData, onClose }) => {
   const sceneImageUrl = `${config.apiBaseUrl}/api/stash/image-proxy/scene/${scene.id}/screenshot`;
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50 p-4">
-      <div className="bg-gray-900 rounded-lg shadow-2xl max-w-4xl w-full max-h-[90vh] overflow-y-auto border border-gray-700">
-        {/* Header */}
-        <div className="flex items-center justify-between p-4 border-b border-gray-700">
-          <h2 className="text-xl font-bold text-white flex items-center gap-2">
-            <span>📱</span>
-            <span>Android Playing Clip</span>
-          </h2>
-          <button
-            onClick={onClose}
-            className="text-gray-400 hover:text-white transition-colors p-1"
-            aria-label="Close overlay"
-          >
-            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-            </svg>
-          </button>
-        </div>
+    <div className="fixed inset-0 bg-gradient-to-br from-gray-900 via-gray-800 to-black z-[2000] overflow-hidden">
+      {/* Close Button - Top Right */}
+      <button
+        onClick={onClose}
+        className="absolute top-6 right-6 z-10 text-gray-400 hover:text-white transition-colors p-2 bg-black bg-opacity-50 rounded-full hover:bg-opacity-75"
+        aria-label="Close overlay"
+      >
+        <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+        </svg>
+      </button>
 
-        {/* Content */}
-        <div className="p-6 space-y-4">
-          {/* Scene Artwork */}
-          <div className="relative w-full aspect-video bg-gray-800 rounded-lg overflow-hidden">
-            <img
-              src={sceneImageUrl}
-              alt={scene.title}
-              className="w-full h-full object-cover"
-              onError={(e) => {
-                e.target.src = 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iODAwIiBoZWlnaHQ9IjYwMCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48cmVjdCB3aWR0aD0iODAwIiBoZWlnaHQ9IjYwMCIgZmlsbD0iIzJhMmEyYSIvPjx0ZXh0IHg9IjUwJSIgeT0iNTAlIiBmb250LWZhbWlseT0ic2Fucy1zZXJpZiIgZm9udC1zaXplPSIyNCIgZmlsbD0iIzY2NiIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZG9taW5hbnQtYmFzZWxpbmU9Im1pZGRsZSI+Tm8gSW1hZ2UgQXZhaWxhYmxlPC90ZXh0Pjwvc3ZnPg==';
-              }}
-            />
-          </div>
+      {/* Header - Top Left */}
+      <div className="absolute top-6 left-6 z-10">
+        <h2 className="text-2xl font-bold text-white flex items-center gap-3 bg-black bg-opacity-50 px-4 py-2 rounded-lg">
+          <span>📱</span>
+          <span>Android Playing Clip</span>
+        </h2>
+      </div>
 
-          {/* Title & Basic Info */}
-          <div>
-            <h3 className="text-2xl font-semibold text-white mb-2">{scene.title}</h3>
-            <div className="flex flex-wrap gap-3 text-sm">
-              {currentStudio ? (
-                <span className="flex items-center gap-1 text-gray-300">
-                  <span>🎬</span>
-                  <span>{currentStudio.name}</span>
-                </span>
-              ) : (
-                <button
-                  onClick={() => setShowStudioSelector(true)}
-                  className="flex items-center gap-1 px-3 py-1 bg-yellow-900 bg-opacity-30 border border-yellow-600 text-yellow-300 rounded hover:bg-opacity-50 transition-colors"
-                >
-                  <span>🎬</span>
-                  <span>Add Studio</span>
-                </button>
-              )}
-              {scene.date && (
-                <span className="flex items-center gap-1 text-gray-300">
-                  <span>📅</span>
-                  <span>{scene.date}</span>
-                </span>
-              )}
-              {scene.duration && (
-                <span className="flex items-center gap-1 text-gray-300">
-                  <span>⏱️</span>
-                  <span>{Math.round(scene.duration / 60)} min</span>
-                </span>
-              )}
-              {scene.rating && (
-                <span className="flex items-center gap-1 text-gray-300">
-                  <span>⭐</span>
-                  <span>{scene.rating}/5</span>
-                </span>
-              )}
-            </div>
-          </div>
-
-          {/* File Path */}
-          {scene.path && (
-            <div className="bg-gray-800 rounded-lg p-3">
-              <div className="flex items-start gap-2">
-                <span className="text-gray-400 text-sm flex-shrink-0 mt-0.5">📁</span>
-                <div className="flex-1 min-w-0">
-                  <p className="text-xs text-gray-400 uppercase font-semibold mb-1">File Location</p>
-                  <p className="text-sm text-gray-300 font-mono break-all">{scene.path}</p>
-                </div>
+      {/* Main Content - Scrollable */}
+      <div className="h-full overflow-y-auto pt-24 pb-8 px-8">
+        <div className="max-w-7xl mx-auto">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 items-start">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 items-start">
+            {/* Left Column - Large Artwork */}
+            <div className="relative w-full">
+              <div className="aspect-video bg-gray-900 rounded-2xl overflow-hidden shadow-2xl border border-gray-700">
+                <img
+                  src={sceneImageUrl}
+                  alt={scene.title}
+                  className="w-full h-full object-cover"
+                  onError={(e) => {
+                    e.target.src = 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iODAwIiBoZWlnaHQ9IjYwMCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48cmVjdCB3aWR0aD0iODAwIiBoZWlnaHQ9IjYwMCIgZmlsbD0iIzJhMmEyYSIvPjx0ZXh0IHg9IjUwJSIgeT0iNTAlIiBmb250LWZhbWlseT0ic2Fucy1zZXJpZiIgZm9udC1zaXplPSIyNCIgZmlsbD0iIzY2NiIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZG9taW5hbnQtYmFzZWxpbmU9Im1pZGRsZSI+Tm8gSW1hZ2UgQXZhaWxhYmxlPC90ZXh0Pjwvc3ZnPg==';
+                  }}
+                />
               </div>
             </div>
-          )}
 
-          {/* Description */}
-          {scene.details && (
-            <div className="bg-gray-800 rounded-lg p-4">
-              <p className="text-sm text-gray-300 leading-relaxed">{scene.details}</p>
+            {/* Right Column - Scene Info */}
+            <div className="space-y-6">
+              {/* Title & Basic Info */}
+              <div>
+                <h3 className="text-4xl font-bold text-white mb-4">{scene.title}</h3>
+                <div className="flex flex-wrap gap-3 text-base">
+                  {currentStudio ? (
+                    <span className="flex items-center gap-2 text-gray-300 bg-gray-800 bg-opacity-50 px-3 py-2 rounded-lg">
+                      <span>🎬</span>
+                      <span>{currentStudio.name}</span>
+                    </span>
+                  ) : (
+                    <button
+                      onClick={() => setShowStudioSelector(true)}
+                      className="flex items-center gap-2 px-4 py-2 bg-yellow-900 bg-opacity-30 border border-yellow-600 text-yellow-300 rounded-lg hover:bg-opacity-50 transition-colors"
+                    >
+                      <span>🎬</span>
+                      <span>Add Studio</span>
+                    </button>
+                  )}
+                  {scene.date && (
+                    <span className="flex items-center gap-2 text-gray-300 bg-gray-800 bg-opacity-50 px-3 py-2 rounded-lg">
+                      <span>📅</span>
+                      <span>{scene.date}</span>
+                    </span>
+                  )}
+                  {scene.duration && (
+                    <span className="flex items-center gap-2 text-gray-300 bg-gray-800 bg-opacity-50 px-3 py-2 rounded-lg">
+                      <span>⏱️</span>
+                      <span>{Math.round(scene.duration / 60)} min</span>
+                    </span>
+                  )}
+                  {scene.rating && (
+                    <span className="flex items-center gap-2 text-gray-300 bg-gray-800 bg-opacity-50 px-3 py-2 rounded-lg">
+                      <span>⭐</span>
+                      <span>{scene.rating}/5</span>
+                    </span>
+                  )}
+                </div>
+              </div>
+
+              </div>
+
+              {/* Description */}
+              {scene.details && (
+                <div className="bg-gray-800 bg-opacity-50 rounded-xl p-5 border border-gray-700">
+                  <p className="text-base text-gray-300 leading-relaxed">{scene.details}</p>
+                </div>
+              )}
+
+              {/* File Path */}
+              {scene.path && (
+                <div className="bg-gray-800 bg-opacity-50 rounded-xl p-5 border border-gray-700">
+                  <div className="flex items-start gap-3">
+                    <span className="text-gray-400 text-lg flex-shrink-0 mt-1">📁</span>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-xs text-gray-400 uppercase font-semibold mb-2">File Location</p>
+                      <p className="text-sm text-gray-300 font-mono break-all">{scene.path}</p>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Technical Details */}
+              {(scene.resolution || scene.codec || scene.fileSize) && (
+                <div className="bg-gray-800 bg-opacity-50 rounded-xl p-5 border border-gray-700">
+                  <h4 className="text-sm font-semibold text-gray-300 uppercase mb-3">Technical Details</h4>
+                  <div className="grid grid-cols-2 gap-4 text-sm">
+                    {scene.resolution && (
+                      <div>
+                        <span className="text-gray-500">Resolution:</span>
+                        <span className="text-white ml-2">{scene.resolution}</span>
+                      </div>
+                    )}
+                    {scene.codec && (
+                      <div>
+                        <span className="text-gray-500">Codec:</span>
+                        <span className="text-white ml-2">{scene.codec}</span>
+                      </div>
+                    )}
+                    {scene.fileSize && (
+                      <div>
+                        <span className="text-gray-500">Size:</span>
+                        <span className="text-white ml-2">{(scene.fileSize / 1024 / 1024 / 1024).toFixed(2)} GB</span>
+                      </div>
+                    )}
+                    {scene.frameRate && (
+                      <div>
+                        <span className="text-gray-500">FPS:</span>
+                        <span className="text-white ml-2">{scene.frameRate.toFixed(2)}</span>
+                      </div>
+                    )}
+                    {scene.width && scene.height && (
+                      <div>
+                        <span className="text-gray-500">Dimensions:</span>
+                        <span className="text-white ml-2">{scene.width}x{scene.height}</span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* Action Buttons */}
+              <div className="flex gap-4 pt-4">
+                <button
+                  onClick={handleDeleteScene}
+                  disabled={isDeleting}
+                  className="flex-1 px-6 py-3 bg-red-600 hover:bg-red-700 disabled:bg-red-800 disabled:cursor-not-allowed text-white rounded-xl transition-colors flex items-center justify-center gap-2 text-lg font-semibold"
+                >
+                  <span>{isDeleting ? '⏳' : '🗑️'}</span>
+                  <span>{isDeleting ? 'Deleting...' : 'Delete Scene'}</span>
+                </button>
+              </div>
             </div>
-          )}
+          </div>
 
-          {/* Performers */}
+          {/* Performers Section - Full Width Below */}
           {scene.performers && scene.performers.length > 0 && (
-            <div className="bg-gray-800 rounded-lg p-4">
-              <h4 className="text-sm font-semibold text-gray-300 uppercase mb-3">Performers</h4>
-              <div className="flex flex-wrap gap-2">
+            <div className="mt-8 bg-gray-800 bg-opacity-50 rounded-xl p-6 border border-gray-700">
+              <h4 className="text-lg font-semibold text-gray-300 uppercase mb-4">Performers</h4>
+              <div className="flex flex-wrap gap-3">
                 {scene.performers.map((p) => (
                   <button
                     key={p.id}
@@ -466,41 +529,41 @@ const StashClipOverlay = ({ clipData, onClose }) => {
                       setSelectedPerformerId(p.id);
                       setSceneDate(scene.date);
                     }}
-                    className="flex items-center gap-2 px-3 py-2 bg-gray-700 rounded-lg hover:bg-gray-600 transition-colors cursor-pointer"
+                    className="flex items-center gap-3 px-4 py-3 bg-gray-700 bg-opacity-50 rounded-lg hover:bg-gray-600 transition-colors cursor-pointer border border-gray-600"
                   >
                     {p.image && (
                       <img
                         src={p.image}
                         alt={p.name}
-                        className="w-8 h-8 rounded-full object-cover"
+                        className="w-12 h-12 rounded-full object-cover"
                         onError={(e) => e.target.style.display = 'none'}
                       />
                     )}
-                    <span className="text-white text-sm">{p.name}</span>
+                    <span className="text-white text-base font-medium">{p.name}</span>
                   </button>
                 ))}
               </div>
             </div>
           )}
 
-          {/* Tags */}
-          <div className="bg-gray-800 rounded-lg p-4">
-            <div className="flex items-center justify-between mb-3">
-              <h4 className="text-sm font-semibold text-gray-300 uppercase">
-                Tags {!loadingTags && scene.tags && scene.tags.length > 0 && <span className="text-xs text-gray-500">(click to add to clip)</span>}
+          {/* Tags Section - Full Width Below */}
+          <div className="mt-8 bg-gray-800 bg-opacity-50 rounded-xl p-6 border border-gray-700">
+            <div className="flex items-center justify-between mb-4">
+              <h4 className="text-lg font-semibold text-gray-300 uppercase">
+                Tags {!loadingTags && scene.tags && scene.tags.length > 0 && <span className="text-sm text-gray-500 ml-2">(click to add to clip)</span>}
               </h4>
               <button
                 onClick={() => setShowTagSelector(true)}
-                className="px-3 py-1 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-500 transition-colors flex items-center gap-1"
+                className="px-4 py-2 bg-blue-600 text-white text-base rounded-lg hover:bg-blue-500 transition-colors flex items-center gap-2"
               >
                 <span>➕</span>
                 <span>Add Tags</span>
               </button>
             </div>
             {loadingTags ? (
-              <div className="text-gray-400 text-sm">Loading clip tags...</div>
+              <div className="text-gray-400 text-base py-4">Loading clip tags...</div>
             ) : scene.tags && scene.tags.length > 0 ? (
-              <div className="flex flex-wrap gap-2">
+              <div className="flex flex-wrap gap-3">
                 {scene.tags
                   .filter(tag => !tag.hasChildren) // Only show leaf tags (no children)
                   .map((tag) => {
@@ -512,7 +575,7 @@ const StashClipOverlay = ({ clipData, onClose }) => {
                         key={tag.id}
                         onClick={() => handleTagClick(tag.id)}
                         disabled={isOnClip || isAdding}
-                        className={`px-3 py-1 text-sm rounded-full transition-all ${
+                        className={`px-4 py-2 text-base rounded-lg transition-all ${
                           isOnClip
                             ? 'bg-green-900 text-green-200 cursor-default'
                             : isAdding
@@ -529,66 +592,9 @@ const StashClipOverlay = ({ clipData, onClose }) => {
                   })}
               </div>
             ) : (
-              <div className="text-gray-400 text-sm">No tags on scene yet. Click "Add Tags" to add some!</div>
+              <div className="text-gray-400 text-base py-4">No tags on scene yet. Click "Add Tags" to add some!</div>
             )}
           </div>
-
-          {/* Technical Details */}
-          {(scene.resolution || scene.codec || scene.fileSize) && (
-            <div className="bg-gray-800 rounded-lg p-4">
-              <h4 className="text-sm font-semibold text-gray-300 uppercase mb-2">Technical Details</h4>
-              <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 text-sm">
-                {scene.resolution && (
-                  <div>
-                    <span className="text-gray-500">Resolution:</span>
-                    <span className="text-white ml-2">{scene.resolution}</span>
-                  </div>
-                )}
-                {scene.codec && (
-                  <div>
-                    <span className="text-gray-500">Codec:</span>
-                    <span className="text-white ml-2">{scene.codec}</span>
-                  </div>
-                )}
-                {scene.fileSize && (
-                  <div>
-                    <span className="text-gray-500">Size:</span>
-                    <span className="text-white ml-2">{(scene.fileSize / 1024 / 1024 / 1024).toFixed(2)} GB</span>
-                  </div>
-                )}
-                {scene.frameRate && (
-                  <div>
-                    <span className="text-gray-500">FPS:</span>
-                    <span className="text-white ml-2">{scene.frameRate.toFixed(2)}</span>
-                  </div>
-                )}
-                {scene.width && scene.height && (
-                  <div>
-                    <span className="text-gray-500">Dimensions:</span>
-                    <span className="text-white ml-2">{scene.width}x{scene.height}</span>
-                  </div>
-                )}
-              </div>
-            </div>
-          )}
-        </div>
-
-        {/* Footer */}
-        <div className="p-4 border-t border-gray-700 flex justify-between items-center">
-          <button
-            onClick={handleDeleteScene}
-            disabled={isDeleting}
-            className="px-6 py-2 bg-red-600 hover:bg-red-700 disabled:bg-red-800 disabled:cursor-not-allowed text-white rounded-lg transition-colors flex items-center gap-2"
-          >
-            <span>{isDeleting ? '⏳' : '🗑️'}</span>
-            <span>{isDeleting ? 'Deleting...' : 'Delete Scene & Clips'}</span>
-          </button>
-          <button
-            onClick={onClose}
-            className="px-6 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors"
-          >
-            Dismiss
-          </button>
         </div>
       </div>
 
