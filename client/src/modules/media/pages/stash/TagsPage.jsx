@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
+import toast from 'react-hot-toast';
 import Button from '../../../../shared/components/Button';
 import config from '../../../../config';
 
@@ -17,12 +18,18 @@ export default function TagsPage() {
     perPage: 24
   });
   const [expandedTags, setExpandedTags] = useState(new Set());
+  const [draggedTag, setDraggedTag] = useState(null);
+  const [dropTarget, setDropTarget] = useState(null);
+  const [dropAction, setDropAction] = useState(null); // 'child' or 'merge'
+  const [showConfirmMerge, setShowConfirmMerge] = useState(false);
+  const [mergeData, setMergeData] = useState(null);
+  const [showHidden, setShowHidden] = useState(false);
 
   const currentPage = parseInt(searchParams.get('page') || '1', 10);
 
   useEffect(() => {
     loadTags();
-  }, [currentPage, searchQuery]);
+  }, [currentPage, searchQuery, showHidden]);
   
   // Auto-expand all tags when searching to show matching sub-tags
   useEffect(() => {
@@ -49,6 +56,9 @@ export default function TagsPage() {
       params.set('perPage', pagination.perPage);
       if (searchQuery) {
         params.set('filter', searchQuery);
+      }
+      if (showHidden) {
+        params.set('showHidden', 'true');
       }
 
       const response = await fetch(`${config.apiBaseUrl}/api/stash/tags?${params}`);
@@ -97,17 +107,189 @@ export default function TagsPage() {
     });
   };
 
+  // Drag and drop handlers
+  const handleDragStart = (e, tag) => {
+    e.stopPropagation();
+    setDraggedTag(tag);
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/plain', tag.id);
+    
+    // Add visual feedback
+    e.currentTarget.style.opacity = '0.5';
+  };
+
+  const handleDragEnd = (e) => {
+    e.currentTarget.style.opacity = '1';
+    setDraggedTag(null);
+    setDropTarget(null);
+    setDropAction(null);
+  };
+
+  const handleDragOver = (e, tag) => {
+    e.preventDefault();
+    e.stopPropagation();
+    
+    if (!draggedTag || draggedTag.id === tag.id) return;
+    
+    // Determine drop action based on mouse position
+    const rect = e.currentTarget.getBoundingClientRect();
+    const mouseY = e.clientY - rect.top;
+    const cardHeight = rect.height;
+    
+    // If hovering over top 30% - make child, otherwise merge
+    const action = mouseY < cardHeight * 0.3 ? 'child' : 'merge';
+    
+    setDropTarget(tag);
+    setDropAction(action);
+    e.dataTransfer.dropEffect = action === 'child' ? 'copy' : 'move';
+  };
+
+  const handleDragLeave = (e) => {
+    e.stopPropagation();
+    setDropTarget(null);
+    setDropAction(null);
+  };
+
+  const handleDrop = async (e, targetTag) => {
+    e.preventDefault();
+    e.stopPropagation();
+    
+    if (!draggedTag || draggedTag.id === targetTag.id) {
+      setDraggedTag(null);
+      setDropTarget(null);
+      setDropAction(null);
+      return;
+    }
+
+    // Check if trying to make a parent a child of its own child (circular reference)
+    const isCircular = checkCircularReference(targetTag, draggedTag.id);
+    if (isCircular && dropAction === 'child') {
+      toast.error('Cannot make a parent a child of its own descendant');
+      setDraggedTag(null);
+      setDropTarget(null);
+      setDropAction(null);
+      return;
+    }
+
+    if (dropAction === 'merge') {
+      // Show confirmation dialog for merge
+      setMergeData({ source: draggedTag, target: targetTag });
+      setShowConfirmMerge(true);
+    } else if (dropAction === 'child') {
+      // Move tag as child
+      await moveTagAsChild(draggedTag, targetTag);
+    }
+
+    setDraggedTag(null);
+    setDropTarget(null);
+    setDropAction(null);
+  };
+
+  const checkCircularReference = (tag, ancestorId) => {
+    if (tag.id === ancestorId) return true;
+    if (tag.children && tag.children.length > 0) {
+      return tag.children.some(child => checkCircularReference(child, ancestorId));
+    }
+    return false;
+  };
+
+  const moveTagAsChild = async (sourceTag, targetTag) => {
+    try {
+      const response = await fetch(`${config.apiBaseUrl}/api/stash/tags/${sourceTag.id}/parent`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ parentId: targetTag.id })
+      });
+
+      const result = await response.json();
+
+      if (result.success) {
+        toast.success(`"${sourceTag.name}" moved under "${targetTag.name}"`);
+        loadTags(); // Reload to see the changes
+      } else {
+        toast.error(result.error || 'Failed to move tag');
+      }
+    } catch (err) {
+      console.error('Error moving tag:', err);
+      toast.error('Failed to move tag');
+    }
+  };
+
+  const mergeTags = async () => {
+    if (!mergeData) return;
+
+    try {
+      const response = await fetch(`${config.apiBaseUrl}/api/stash/tags/merge`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          sourceIds: [mergeData.source.id],
+          targetId: mergeData.target.id
+        })
+      });
+
+      const result = await response.json();
+
+      if (result.success) {
+        toast.success(`"${mergeData.source.name}" merged into "${mergeData.target.name}"`);
+        setShowConfirmMerge(false);
+        setMergeData(null);
+        loadTags(); // Reload to see the changes
+      } else {
+        toast.error(result.error || 'Failed to merge tags');
+      }
+    } catch (err) {
+      console.error('Error merging tags:', err);
+      toast.error('Failed to merge tags');
+    }
+  };
+
+  const toggleTagHidden = async (tag, e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    
+    const newHiddenStatus = !tag.hidden;
+    
+    try {
+      const response = await fetch(`${config.apiBaseUrl}/api/stash/tags/${tag.id}/hidden`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ hidden: newHiddenStatus })
+      });
+
+      const result = await response.json();
+
+      if (result.success) {
+        toast.success(`"${tag.name}" ${newHiddenStatus ? 'hidden' : 'shown'}`);
+        loadTags(); // Reload to see the changes
+      } else {
+        toast.error(result.error || 'Failed to update tag visibility');
+      }
+    } catch (err) {
+      console.error('Error updating tag visibility:', err);
+      toast.error('Failed to update tag visibility');
+    }
+  };
+
   const renderTagCard = (tag, level = 0, parentExpanded = true) => {
     if (!parentExpanded && level > 0) return null;
     
     const isExpanded = expandedTags.has(tag.id);
     const hasChildren = tag.children && tag.children.length > 0;
+    const isDropTarget = dropTarget?.id === tag.id;
+    const isDragging = draggedTag?.id === tag.id;
     
     return (
       <div key={tag.id} className="tag-card-wrapper">
         <div 
-          className={`content-card tag-card-enhanced ${tag.favorite ? 'favorite-tag' : ''}`}
+          className={`content-card tag-card-enhanced ${tag.favorite ? 'favorite-tag' : ''} ${tag.hidden ? 'hidden-tag' : ''} ${isDropTarget ? (dropAction === 'child' ? 'drop-target-child' : 'drop-target-merge') : ''} ${isDragging ? 'dragging' : ''}`}
           style={{ marginLeft: level > 0 ? `${level * 1.5}rem` : '0' }}
+          draggable="true"
+          onDragStart={(e) => handleDragStart(e, tag)}
+          onDragEnd={handleDragEnd}
+          onDragOver={(e) => handleDragOver(e, tag)}
+          onDragLeave={handleDragLeave}
+          onDrop={(e) => handleDrop(e, tag)}
         >
           {/* Tag Image/Icon */}
           <div className="tag-visual">
@@ -135,6 +317,13 @@ export default function TagsPage() {
                 ⭐
               </div>
             )}
+            
+            {/* Hidden Badge */}
+            {tag.hidden && (
+              <div className="tag-hidden-badge" title="Hidden Tag">
+                👁️‍🗨️
+              </div>
+            )}
           </div>
 
           {/* Tag Content */}
@@ -145,15 +334,33 @@ export default function TagsPage() {
                 <Link to={`/media/stash/tags/${tag.id}`} className="tag-name-link">
                   <h3 className="tag-name" title={tag.name}>{tag.name}</h3>
                 </Link>
-                {hasChildren && (
+                <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
                   <button 
-                    className="tag-expand-button"
-                    onClick={() => toggleTag(tag.id)}
-                    title={isExpanded ? 'Collapse children' : 'Expand children'}
+                    className="tag-hide-button"
+                    onClick={(e) => toggleTagHidden(tag, e)}
+                    title={tag.hidden ? 'Show tag' : 'Hide tag'}
+                    style={{
+                      padding: '0.25rem 0.5rem',
+                      fontSize: '0.75rem',
+                      backgroundColor: tag.hidden ? '#10b981' : '#6b7280',
+                      color: 'white',
+                      border: 'none',
+                      borderRadius: '4px',
+                      cursor: 'pointer'
+                    }}
                   >
-                    {isExpanded ? '▼' : '▶'}
+                    {tag.hidden ? '👁️ Show' : '🚫 Hide'}
                   </button>
-                )}
+                  {hasChildren && (
+                    <button 
+                      className="tag-expand-button"
+                      onClick={() => toggleTag(tag.id)}
+                      title={isExpanded ? 'Collapse children' : 'Expand children'}
+                    >
+                      {isExpanded ? '▼' : '▶'}
+                    </button>
+                  )}
+                </div>
               </div>
               <div className="tag-stats">
                 {tag.scene_count > 0 && (
@@ -253,6 +460,19 @@ export default function TagsPage() {
         )}
       </form>
 
+      {/* Show Hidden Tags Toggle */}
+      <div style={{ marginBottom: '1rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+        <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer' }}>
+          <input
+            type="checkbox"
+            checked={showHidden}
+            onChange={(e) => setShowHidden(e.target.checked)}
+            style={{ cursor: 'pointer' }}
+          />
+          <span>Show hidden tags</span>
+        </label>
+      </div>
+
       {/* Error State */}
       {error && (
         <div className="error-message">
@@ -303,6 +523,52 @@ export default function TagsPage() {
           )}
         </>
       )}
+
+      {/* Merge Confirmation Modal */}
+      {showConfirmMerge && mergeData && (
+        <div className="modal-overlay" onClick={() => setShowConfirmMerge(false)}>
+          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+            <h2>🔀 Merge Tags</h2>
+            <p>
+              Are you sure you want to merge <strong>"{mergeData.source.name}"</strong> into <strong>"{mergeData.target.name}"</strong>?
+            </p>
+            <p className="muted" style={{ fontSize: '0.875rem', marginTop: '0.5rem' }}>
+              This will:
+            </p>
+            <ul style={{ marginTop: '0.5rem', fontSize: '0.875rem' }}>
+              <li>Move all scenes and performers from "{mergeData.source.name}" to "{mergeData.target.name}"</li>
+              <li>Delete "{mergeData.source.name}" tag</li>
+              <li>This action cannot be undone</li>
+            </ul>
+            <div className="modal-actions" style={{ marginTop: '1rem', display: 'flex', gap: '0.5rem', justifyContent: 'flex-end' }}>
+              <Button onClick={() => setShowConfirmMerge(false)}>
+                Cancel
+              </Button>
+              <Button onClick={mergeTags} className="btn-danger">
+                Merge Tags
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Drag and Drop Instructions */}
+      <div style={{ 
+        position: 'fixed', 
+        bottom: '1rem', 
+        right: '1rem', 
+        backgroundColor: 'rgba(0, 0, 0, 0.8)', 
+        color: 'white', 
+        padding: '1rem', 
+        borderRadius: '8px',
+        fontSize: '0.875rem',
+        maxWidth: '300px',
+        display: draggedTag ? 'block' : 'none'
+      }}>
+        <div style={{ fontWeight: 'bold', marginBottom: '0.5rem' }}>Drag & Drop</div>
+        <div>📁 <strong>Top third:</strong> Make child tag</div>
+        <div>🔀 <strong>Lower area:</strong> Merge tags</div>
+      </div>
     </div>
   );
 }

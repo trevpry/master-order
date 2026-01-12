@@ -96,6 +96,10 @@ export default function PerformerDetail() {
 
   // URLs collapse state
   const [isUrlsCollapsed, setIsUrlsCollapsed] = useState(true);
+  
+  // Clip aggregate rating state
+  const [clipAggregateRating, setClipAggregateRating] = useState(null);
+  const [clipCount, setClipCount] = useState(0);
 
   // Fetch Stash URL from settings
   useEffect(() => {
@@ -174,12 +178,41 @@ export default function PerformerDetail() {
       console.log('Scenes with tags:', json.data.scenes?.filter(s => s.performerTags?.length > 0));
       setMergedTags(merged);
       
+      // Fetch clips for this performer to calculate aggregate rating
+      fetchClipsAggregateRating(id);
+      
     } catch (e) {
       setError(e.message);
     } finally {
       setLoading(false);
     }
   }, [id]);
+  
+  // Fetch clips and calculate aggregate rating
+  const fetchClipsAggregateRating = async (performerId) => {
+    try {
+      const res = await fetch(`${config.apiBaseUrl}/api/stash/clips?performerId=${performerId}&perPage=999`);
+      const json = await res.json();
+      
+      if (json.success && json.data) {
+        const clips = json.data;
+        setClipCount(clips.length);
+        
+        // Calculate average rating from clips that have ratings
+        const ratedClips = clips.filter(clip => clip.rating !== null && clip.rating !== undefined && clip.rating > 0);
+        
+        if (ratedClips.length > 0) {
+          const totalRating = ratedClips.reduce((sum, clip) => sum + clip.rating, 0);
+          const avgRating = totalRating / ratedClips.length;
+          setClipAggregateRating(avgRating);
+        } else {
+          setClipAggregateRating(null);
+        }
+      }
+    } catch (error) {
+      console.error('Error fetching clips for aggregate rating:', error);
+    }
+  };
 
   useEffect(() => {
     fetchPerformer();
@@ -1724,6 +1757,12 @@ export default function PerformerDetail() {
               <div className="meta-badge rating">
                 <span className="badge-icon">⭐</span>
                 <span>{data.rating}/100</span>
+              </div>
+            )}
+            {clipAggregateRating !== null && clipCount > 0 && (
+              <div className="meta-badge rating" title={`Average rating from ${clipCount} clip${clipCount !== 1 ? 's' : ''}`}>
+                <span className="badge-icon">🎬</span>
+                <span>Clips: {clipAggregateRating.toFixed(1)}/5 ({clipCount})</span>
               </div>
             )}
           </div>

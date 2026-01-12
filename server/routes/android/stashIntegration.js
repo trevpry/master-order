@@ -311,6 +311,7 @@ function createStashIntegrationRoutes(prisma, io) {
           clipId: clip.id,
           sceneId: scene?.id || '',
           clipIndex: clip.clipIndex || 0,
+          rating: clip.rating || null,
           // Full scene metadata enrichment
           scene: fullScene ? {
             id: fullScene.id,

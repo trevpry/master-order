@@ -439,6 +439,8 @@ router.get('/scenes', asyncHandler(async (req, res) => {
       tag,
       minRating,
       maxRating,
+      minClipRating,
+      maxClipRating,
       watched,
       noPerformers,
       time,
@@ -676,14 +678,68 @@ router.get('/scenes', asyncHandler(async (req, res) => {
       take: take
     });
     
+    // Filter by clip rating if requested (requires post-query filtering)
+    let filteredScenes = scenes;
+    if (minClipRating || maxClipRating) {
+      const sceneIds = scenes.map(s => s.id);
+      const clipRatings = await prisma.stashClip.groupBy({
+        by: ['sceneId'],
+        where: {
+          sceneId: { in: sceneIds },
+          rating: { not: null }
+        },
+        _avg: {
+          rating: true
+        }
+      });
+      
+      const clipRatingMap = new Map();
+      clipRatings.forEach(cr => {
+        if (cr._avg.rating) {
+          clipRatingMap.set(cr.sceneId, cr._avg.rating);
+        }
+      });
+      
+      filteredScenes = scenes.filter(scene => {
+        const clipRating = clipRatingMap.get(scene.id);
+        if (!clipRating) return false; // No rated clips
+        
+        if (minClipRating && clipRating < parseFloat(minClipRating)) return false;
+        if (maxClipRating && clipRating > parseFloat(maxClipRating)) return false;
+        return true;
+      });
+    }
+
+    // Calculate aggregate clip ratings for all filtered scenes
+    const sceneIds = filteredScenes.map(s => s.id);
+    const clipRatings = await prisma.stashClip.groupBy({
+      by: ['sceneId'],
+      where: {
+        sceneId: { in: sceneIds },
+        rating: { not: null }
+      },
+      _avg: {
+        rating: true
+      }
+    });
+    
+    // Create a map of sceneId to average rating
+    const clipRatingMap = new Map();
+    clipRatings.forEach(cr => {
+      if (cr._avg.rating) {
+        clipRatingMap.set(cr.sceneId, Math.round(cr._avg.rating * 10) / 10); // Round to 1 decimal
+      }
+    });
+
     // Transform data to match expected format
-    const transformedScenes = scenes.map(scene => ({
+    const transformedScenes = filteredScenes.map(scene => ({
       id: scene.id,
       title: scene.title,
       details: scene.details,
       url: scene.url,
       date: scene.date,
       rating: scene.rating,
+      clipRating: clipRatingMap.get(scene.id) || null,
       organized: scene.organized,
       path: scene.path,
       duration: scene.duration,
@@ -6357,6 +6413,220 @@ router.post('/scenes/:id/performers', asyncHandler(async (req, res) => {
   sendSuccess(res, updatedScene);
 }));
 
+// POST /api/stash/scenes/:id/tags - Add tags to a scene
+router.post('/scenes/:id/tags', asyncHandler(async (req, res) => {
+  const { id: sceneId } = req.params;
+  const { tagIds } = req.body;
+
+  console.log(`🏷️ POST /scenes/:id/tags - Adding tags to scene ${sceneId}:`, tagIds);
+
+  if (!Array.isArray(tagIds) || tagIds.length === 0) {
+    return sendBadRequest(res, 'tagIds must be a non-empty array');
+  }
+
+  // Check if scene exists
+  const scene = await prisma.stashScene.findUnique({
+    where: { id: sceneId }
+  });
+
+  if (!scene) {
+    return sendNotFound(res, 'Scene not found');
+  }
+
+  // Verify all tags exist
+  const tags = await prisma.stashTag.findMany({
+    where: { id: { in: tagIds } }
+  });
+
+  console.log(`🔍 Tags verification for scene:`, {
+    requestedTags: tagIds,
+    foundTags: tags.map(t => ({ id: t.id, name: t.name })),
+    requestedCount: tagIds.length,
+    foundCount: tags.length
+  });
+
+  if (tags.length !== tagIds.length) {
+    return sendBadRequest(res, 'One or more tag IDs are invalid', {
+      requestedTags: tagIds,
+      foundTags: tags.map(t => t.id),
+      missingTags: tagIds.filter(id => !tags.find(t => t.id === id))
+    });
+  }
+
+  // Add tags to scene in local database (skip duplicates)
+  const createdTags = [];
+  for (const tagId of tagIds) {
+    const existing = await prisma.stashSceneTag.findUnique({
+      where: {
+        sceneId_tagId: {
+          sceneId: sceneId,
+          tagId: tagId
+        }
+      }
+    });
+
+    if (!existing) {
+      const created = await prisma.stashSceneTag.create({
+        data: {
+          sceneId: sceneId,
+          tagId: tagId
+        },
+        include: {
+          tag: true
+        }
+      });
+      console.log(`✅ Added tag "${created.tag.name}" to scene ${sceneId}`);
+      createdTags.push(created);
+    } else {
+      console.log(`⏭️ Tag ${tagId} already on scene ${sceneId}`);
+    }
+  }
+
+  // Update in Stash via GraphQL
+  if (scene.id) {
+    try {
+      const syncService = getActiveSyncService();
+      
+      // Get all current tags for the scene
+      const allSceneTags = await prisma.stashSceneTag.findMany({
+        where: { sceneId: sceneId }
+      });
+      
+      const allTagIds = allSceneTags.map(st => st.tagId);
+      
+      const mutation = `
+        mutation SceneUpdate($input: SceneUpdateInput!) {
+          sceneUpdate(input: $input) {
+            id
+            tags {
+              id
+              name
+            }
+          }
+        }
+      `;
+
+      const variables = {
+        input: {
+          id: scene.id,
+          tag_ids: allTagIds
+        }
+      };
+
+      console.log(`🔄 Updating scene tags in Stash:`, variables);
+
+      const data = await syncService.makeGraphQLRequest(mutation, variables);
+      
+      if (data?.sceneUpdate) {
+        console.log(`✅ Successfully updated scene tags in Stash - now has ${data.sceneUpdate.tags?.length || 0} tags`);
+      }
+    } catch (stashError) {
+      console.error('⚠️ Failed to update tags in Stash:', stashError.message);
+      // Continue anyway - local database is updated
+    }
+  }
+
+  console.log(`✅ Added ${createdTags.length} tags to scene ${sceneId}`);
+
+  sendSuccess(res, {
+    message: `Added ${createdTags.length} tag(s) to scene`,
+    sceneId: sceneId,
+    addedTags: createdTags
+  });
+}));
+
+// POST /api/stash/scenes/:sceneId/performers/:performerId/tags - Add tags to performer-scene relationship
+router.post('/scenes/:sceneId/performers/:performerId/tags', asyncHandler(async (req, res) => {
+  const { sceneId, performerId } = req.params;
+  const { tagIds } = req.body;
+
+  console.log(`🏷️ POST /scenes/:sceneId/performers/:performerId/tags - Adding tags to performer ${performerId} in scene ${sceneId}:`, tagIds);
+
+  if (!Array.isArray(tagIds) || tagIds.length === 0) {
+    return sendBadRequest(res, 'tagIds must be a non-empty array');
+  }
+
+  // Check if scene and performer exist
+  const scene = await prisma.stashScene.findUnique({
+    where: { id: sceneId }
+  });
+
+  if (!scene) {
+    return sendNotFound(res, 'Scene not found');
+  }
+
+  const performer = await prisma.stashPerformer.findUnique({
+    where: { id: performerId }
+  });
+
+  if (!performer) {
+    return sendNotFound(res, 'Performer not found');
+  }
+
+  // Check if performer is in the scene
+  const scenePerformer = await prisma.stashScenePerformer.findUnique({
+    where: {
+      sceneId_performerId: {
+        sceneId: sceneId,
+        performerId: performerId
+      }
+    }
+  });
+
+  if (!scenePerformer) {
+    return sendBadRequest(res, 'Performer is not in this scene');
+  }
+
+  // Verify all tags exist
+  const tags = await prisma.stashTag.findMany({
+    where: { id: { in: tagIds } }
+  });
+
+  if (tags.length !== tagIds.length) {
+    return sendBadRequest(res, 'One or more tag IDs are invalid');
+  }
+
+  // Add tags to performer-scene relationship (skip duplicates)
+  const createdTags = [];
+  for (const tagId of tagIds) {
+    const existing = await prisma.stashScenePerformerTag.findUnique({
+      where: {
+        sceneId_performerId_tagId: {
+          sceneId: sceneId,
+          performerId: performerId,
+          tagId: tagId
+        }
+      }
+    });
+
+    if (!existing) {
+      const created = await prisma.stashScenePerformerTag.create({
+        data: {
+          sceneId: sceneId,
+          performerId: performerId,
+          tagId: tagId
+        },
+        include: {
+          tag: true
+        }
+      });
+      console.log(`✅ Added tag "${created.tag.name}" to performer ${performerId} in scene ${sceneId}`);
+      createdTags.push(created);
+    } else {
+      console.log(`⏭️ Tag ${tagId} already on performer ${performerId} in scene ${sceneId}`);
+    }
+  }
+
+  console.log(`✅ Added ${createdTags.length} tags to performer ${performerId} in scene ${sceneId}`);
+
+  sendSuccess(res, {
+    message: `Added ${createdTags.length} tag(s) to performer in scene`,
+    sceneId: sceneId,
+    performerId: performerId,
+    addedTags: createdTags
+  });
+}));
+
 // POST /api/stash/scenes/:sceneId/performers/:performerId/swap - Swap performer with another
 router.post('/scenes/:sceneId/performers/:performerId/swap', asyncHandler(async (req, res) => {
   const { sceneId, performerId: oldPerformerId } = req.params;
@@ -9329,6 +9599,39 @@ router.get('/clips/:id', asyncHandler(async (req, res) => {
   sendSuccess(res, transformedClip);
 }));
 
+// PUT /api/stash/clips/:id/rating - Update clip rating
+router.put('/clips/:id/rating', asyncHandler(async (req, res) => {
+  const clipId = parseInt(req.params.id);
+  const { rating } = req.body;
+  
+  console.log(`⭐ Updating clip ${clipId} rating to ${rating}...`);
+  
+  // Validate rating (1-5 or null to remove rating)
+  if (rating !== null && (rating < 1 || rating > 5 || !Number.isInteger(rating))) {
+    return sendBadRequest(res, 'Rating must be an integer between 1 and 5, or null to remove rating');
+  }
+  
+  const updatedClip = await prisma.stashClip.update({
+    where: { id: clipId },
+    data: { rating },
+    include: {
+      scene: {
+        select: {
+          id: true,
+          title: true
+        }
+      }
+    }
+  });
+  
+  console.log(`⭐ Clip ${clipId} rating updated to ${rating}`);
+  
+  sendSuccess(res, {
+    message: 'Clip rating updated',
+    clip: updatedClip
+  });
+}));
+
 // POST /api/stash/clips/:id/watched - Mark clip as watched
 router.post('/clips/:id/watched', asyncHandler(async (req, res) => {
   const clipId = parseInt(req.params.id);
@@ -9837,7 +10140,7 @@ router.get('/stats/tags', asyncHandler(async (req, res) => {
 
 // GET /performers - Stash performers endpoint
 router.get('/performers', asyncHandler(async (req, res) => {
-  const { page = 1, perPage = 20, filter = '', search = '', startsWith = 'false' } = req.query;
+  const { page = 1, perPage = 20, filter = '', search = '', startsWith = 'false', minClipRating, maxClipRating } = req.query;
   
   const skip = (parseInt(page) - 1) * parseInt(perPage);
   const take = parseInt(perPage);
@@ -9914,8 +10217,87 @@ router.get('/performers', asyncHandler(async (req, res) => {
   
   console.log(`✅ [PERFORMERS] Returning ${performers.length} performers for page ${page}`);
   
+  // Filter by clip rating if requested (requires post-query filtering)
+  let filteredPerformers = performers;
+  if (minClipRating || maxClipRating) {
+    // Get all scene IDs for all performers
+    const allSceneIds = new Set();
+    performers.forEach(p => {
+      p.scenes.forEach(s => allSceneIds.add(s.sceneId));
+    });
+    
+    // Get clip ratings for all those scenes
+    const clipRatings = await prisma.stashClip.groupBy({
+      by: ['sceneId'],
+      where: {
+        sceneId: { in: Array.from(allSceneIds) },
+        rating: { not: null }
+      },
+      _avg: {
+        rating: true
+      }
+    });
+    
+    const sceneClipRatingMap = new Map();
+    clipRatings.forEach(cr => {
+      if (cr._avg.rating) {
+        sceneClipRatingMap.set(cr.sceneId, cr._avg.rating);
+      }
+    });
+    
+    // Calculate average clip rating for each performer
+    filteredPerformers = performers.filter(performer => {
+      const performerClipRatings = performer.scenes
+        .map(s => sceneClipRatingMap.get(s.sceneId))
+        .filter(r => r != null);
+      
+      if (performerClipRatings.length === 0) return false; // No rated clips
+      
+      const avgRating = performerClipRatings.reduce((sum, r) => sum + r, 0) / performerClipRatings.length;
+      
+      if (minClipRating && avgRating < parseFloat(minClipRating)) return false;
+      if (maxClipRating && avgRating > parseFloat(maxClipRating)) return false;
+      return true;
+    });
+  }
+  
+  // Calculate aggregate clip ratings for all filtered performers
+  const allSceneIds = new Set();
+  filteredPerformers.forEach(p => {
+    p.scenes.forEach(s => allSceneIds.add(s.sceneId));
+  });
+  
+  let sceneClipRatingMap = new Map();
+  if (allSceneIds.size > 0) {
+    const clipRatings = await prisma.stashClip.groupBy({
+      by: ['sceneId'],
+      where: {
+        sceneId: { in: Array.from(allSceneIds) },
+        rating: { not: null }
+      },
+      _avg: {
+        rating: true
+      }
+    });
+    
+    clipRatings.forEach(cr => {
+      if (cr._avg.rating) {
+        sceneClipRatingMap.set(cr.sceneId, cr._avg.rating);
+      }
+    });
+  }
+  
   // Transform data to match expected format
-  const transformedPerformers = performers.map(performer => ({
+  const transformedPerformers = filteredPerformers.map(performer => {
+    const performerClipRatings = performer.scenes
+      .map(s => sceneClipRatingMap.get(s.sceneId))
+      .filter(r => r != null);
+    
+    const avgClipRating = performerClipRatings.length > 0
+      ? Math.round((performerClipRatings.reduce((sum, r) => sum + r, 0) / performerClipRatings.length) * 10) / 10
+      : null;
+    
+    return {
     id: performer.id,
     name: performer.name,
     disambiguation: performer.disambiguation,
@@ -9940,8 +10322,10 @@ router.get('/performers', asyncHandler(async (req, res) => {
       id: pt.tag.id,
       name: pt.tag.name
     })),
-    scene_count: performer.scenes.length
-  }));
+    scene_count: performer.scenes.length,
+    clipRating: avgClipRating
+  };
+  });
   
   res.json({
     success: true,
@@ -11676,6 +12060,44 @@ router.put('/tags/:id', asyncHandler(async (req, res) => {
   });
 }));
 
+// PUT /api/stash/tags/:id/hidden - Toggle tag hidden status
+router.put('/tags/:id/hidden', asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  const { hidden } = req.body;
+  
+  console.log('👁️  [Toggle Tag Hidden] Request received');
+  console.log('   - Tag ID:', id);
+  console.log('   - Hidden:', hidden);
+  
+  // Validate inputs
+  if (typeof hidden !== 'boolean') {
+    return sendBadRequest(res, 'Hidden status must be a boolean');
+  }
+  
+  // Validate tag exists
+  const tag = await prisma.stashTag.findUnique({
+    where: { id }
+  });
+  
+  if (!tag) {
+    return sendNotFound(res, 'Tag not found');
+  }
+  
+  // Update tag hidden status in local database
+  const updatedTag = await prisma.stashTag.update({
+    where: { id },
+    data: { hidden }
+  });
+  
+  console.log(`   - Updated tag hidden status: "${tag.name}" → ${hidden ? 'hidden' : 'visible'}`);
+  
+  return sendSuccess(res, {
+    id: updatedTag.id,
+    name: updatedTag.name,
+    hidden: updatedTag.hidden
+  });
+}));
+
 // POST /api/stash/tags/merge - Merge multiple tags into one
 router.post('/tags/merge', asyncHandler(async (req, res) => {
   const { mainTagId, mergeTagIds } = req.body;
@@ -11725,7 +12147,7 @@ router.post('/tags/merge', asyncHandler(async (req, res) => {
 
 // GET /tags - Stash tags endpoint
 router.get('/tags', asyncHandler(async (req, res) => {
-  const { page = 1, perPage = 20, filter = '', rootOnly = 'true' } = req.query;
+  const { page = 1, perPage = 20, filter = '', rootOnly = 'true', showHidden = 'false' } = req.query;
   
   const skip = (parseInt(page) - 1) * parseInt(perPage);
   const take = parseInt(perPage);
@@ -11733,13 +12155,25 @@ router.get('/tags', asyncHandler(async (req, res) => {
   // Build search filter
   let whereClause = {};
   
+  // Filter out hidden tags unless showHidden is true
+  if (showHidden !== 'true') {
+    whereClause.hidden = false;
+  }
+  
   if (filter) {
     // When searching, find ALL tags that match (parent or child)
     const allMatchingTags = await prisma.stashTag.findMany({
       where: {
-        OR: [
-          { name: { contains: filter } },
-          { description: { contains: filter } }
+        AND: [
+          // Apply hidden filter
+          showHidden === 'true' ? {} : { hidden: false },
+          // Search criteria
+          {
+            OR: [
+              { name: { contains: filter } },
+              { description: { contains: filter } }
+            ]
+          }
         ]
       },
       select: {
@@ -11839,6 +12273,7 @@ router.get('/tags', asyncHandler(async (req, res) => {
               description: true,
               image: true,
               favorite: true,
+              hidden: true,
               scenes: {
                 select: {
                   sceneId: true
@@ -11884,12 +12319,17 @@ router.get('/tags', asyncHandler(async (req, res) => {
   };
   
   // Recursive function to filter and transform child tags
-  const transformChildTag = (childTag, filterText) => {
+  const transformChildTag = (childTag, filterText, showHiddenParam) => {
+    // Filter out hidden children unless showHidden is true
+    if (showHiddenParam !== 'true' && childTag.hidden) {
+      return null;
+    }
+    
     const matches = tagMatchesFilter(childTag, filterText);
     
     // Recursively process grandchildren (safely handle undefined)
     const filteredGrandchildren = (childTag.childTags || [])
-      .map(gct => transformChildTag(gct.childTag, filterText))
+      .map(gct => transformChildTag(gct.childTag, filterText, showHiddenParam))
       .filter(child => child !== null);
     
     // Include this tag if it matches OR if any of its descendants match
@@ -11903,6 +12343,7 @@ router.get('/tags', asyncHandler(async (req, res) => {
       description: childTag.description,
       image: childTag.image,
       favorite: childTag.favorite,
+      hidden: childTag.hidden,
       scene_count: (childTag.scenes || []).length,
       performer_count: (childTag.performers || []).length,
       child_count: filteredGrandchildren.length,
@@ -11914,7 +12355,7 @@ router.get('/tags', asyncHandler(async (req, res) => {
   const transformedTags = tags.map(tag => {
     // Filter children recursively based on search (safely handle undefined)
     const filteredChildren = (tag.childTags || [])
-      .map(ct => transformChildTag(ct.childTag, filter))
+      .map(ct => transformChildTag(ct.childTag, filter, showHidden))
       .filter(child => child !== null);
     
     return {
@@ -11924,6 +12365,7 @@ router.get('/tags', asyncHandler(async (req, res) => {
       image: tag.image,
       favorite: tag.favorite,
       ignoreAutoTag: tag.ignoreAutoTag,
+      hidden: tag.hidden,
       scene_count: (tag.scenes || []).length,
       performer_count: (tag.performers || []).length,
       parent_count: (tag.parentTags || []).length,
@@ -13589,12 +14031,20 @@ router.get('/clips/:id/tags', asyncHandler(async (req, res) => {
   console.log('🔍 Clip lookup result:', {
     clipId: clipId,
     found: !!clip,
-    clipDbId: clip?.id
+    clipDbId: clip?.id,
+    tagsCount: clip?.tags?.length || 0,
+    tags: clip?.tags?.map(ct => ({ 
+      clipTagId: ct.id,
+      tagId: ct.tagId, 
+      tagName: ct.tag?.name 
+    })) || []
   });
   
   if (!clip) {
     return sendNotFound(res, 'Clip not found');
   }
+  
+  console.log(`🏷️ Returning ${clip.tags.length} tags for clip ${clipId}`);
   
   res.json({
     clipId: clip.id,
@@ -13606,6 +14056,14 @@ router.get('/clips/:id/tags', asyncHandler(async (req, res) => {
 router.post('/clips/:id/tags', asyncHandler(async (req, res) => {
   const clipId = parseInt(req.params.id);
   const { tagIds } = req.body;
+  
+  console.log(`🏷️ POST /clips/:id/tags - Request details:`, {
+    clipId,
+    tagIds,
+    tagIdsType: typeof tagIds,
+    tagIdsIsArray: Array.isArray(tagIds),
+    bodyKeys: Object.keys(req.body)
+  });
   
   if (isNaN(clipId)) {
     return sendBadRequest(res, 'Invalid clip ID');
@@ -13630,13 +14088,26 @@ router.post('/clips/:id/tags', asyncHandler(async (req, res) => {
     return sendNotFound(res, 'Clip not found. Please ensure the clip has been generated and synced.');
   }
   
+  console.log(`🔍 Clip found: ${clipId}, verifying tags exist:`, tagIds);
+  
   // Verify all tags exist
   const tags = await prisma.stashTag.findMany({
     where: { id: { in: tagIds } }
   });
   
+  console.log(`🔍 Tags verification:`, {
+    requestedTags: tagIds,
+    foundTags: tags.map(t => ({ id: t.id, name: t.name })),
+    requestedCount: tagIds.length,
+    foundCount: tags.length
+  });
+  
   if (tags.length !== tagIds.length) {
-    return sendBadRequest(res, 'One or more tag IDs are invalid');
+    return sendBadRequest(res, 'One or more tag IDs are invalid', {
+      requestedTags: tagIds,
+      foundTags: tags.map(t => t.id),
+      missingTags: tagIds.filter(id => !tags.find(t => t.id === id))
+    });
   }
   
   // Create clip-tag associations (skip duplicates)
@@ -13651,6 +14122,12 @@ router.post('/clips/:id/tags', asyncHandler(async (req, res) => {
       }
     });
     
+    console.log(`🔍 Checking if tag ${tagId} already exists on clip:`, {
+      clipId,
+      tagId,
+      exists: !!existing
+    });
+    
     if (!existing) {
       const created = await prisma.stashClipTag.create({
         data: {
@@ -13661,16 +14138,40 @@ router.post('/clips/:id/tags', asyncHandler(async (req, res) => {
           tag: true
         }
       });
+      console.log(`✅ Created clip-tag relationship:`, {
+        clipId: created.clipId,
+        tagId: created.tagId,
+        tagName: created.tag?.name
+      });
       createdTags.push(created);
+    } else {
+      console.log(`⏭️ Skipping duplicate tag ${tagId} on clip ${clipId}`);
     }
   }
   
   console.log(`✅ Added ${createdTags.length} tags to clip ${clipId}`);
   
+  // Verify the tags were actually added by fetching them back
+  const verifyClip = await prisma.stashClip.findUnique({
+    where: { id: clipId },
+    include: {
+      tags: {
+        include: {
+          tag: true
+        }
+      }
+    }
+  });
+  
+  console.log(`🔍 Post-save verification - Clip ${clipId} now has ${verifyClip.tags.length} tags:`, 
+    verifyClip.tags.map(ct => ({ tagId: ct.tagId, tagName: ct.tag?.name }))
+  );
+  
   res.json({
     message: `Added ${createdTags.length} tag(s) to clip`,
     clipId: clipId,
-    addedTags: createdTags
+    addedTags: createdTags,
+    totalTags: verifyClip.tags.length
   });
 }));
 
