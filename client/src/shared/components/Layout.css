@@ -4,6 +4,8 @@
   flex-direction: column;
   min-height: 100vh;
   background-color: #f8f9fa;
+  position: relative;
+  overflow-x: hidden;
 }
 
 /* Global header height variable for consistency */
@@ -15,6 +17,7 @@
 .layout-content {
   display: flex;
   flex: 1;
+  position: relative;
 }
 
 .side-menu-container {
@@ -90,11 +93,30 @@
 
 /* Mobile Responsive */
 @media (max-width: 768px) {
+  /* Fix mobile scrolling - allow body to scroll normally */
+  .layout {
+    min-height: 100vh;
+    height: auto;
+    overflow-x: hidden;
+    overflow-y: visible;
+  }
+  
+  .layout-content {
+    flex-direction: column;
+    min-height: calc(100vh - var(--global-header-height) - var(--mobile-header-height));
+    overflow: visible;
+  }
+  
   .main-content {
     margin-left: 0;
     padding: 20px;
     padding-top: calc(var(--global-header-height) + var(--mobile-header-height) + 10px); /* Both headers + spacing */
     min-height: calc(100vh - var(--global-header-height) - var(--mobile-header-height));
+    overflow-y: visible;
+    overflow-x: hidden;
+    /* Remove any height constraints that prevent scrolling */
+    height: auto;
+    max-height: none;
   }
   
   .mobile-header {
@@ -102,8 +124,10 @@
     top: var(--global-header-height); /* Position below global header */
   }
   
+  /* Show side menu only when mobile-open class is present */
   .side-menu-container.mobile-open .side-menu {
     transform: translateX(0);
+    visibility: visible;
   }
 }
 

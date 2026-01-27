@@ -1,6 +1,13 @@
 @import "tailwindcss";
 
 /* Basic styles */
+html {
+  /* Ensure html can scroll on mobile */
+  overflow-y: auto;
+  overflow-x: hidden;
+  -webkit-overflow-scrolling: touch;
+}
+
 body {
   margin: 0;
   padding: 0;
@@ -8,6 +15,10 @@ body {
     Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
   background-color: #f5f5f5;
   min-height: 100vh;
+  /* Ensure body can scroll on mobile */
+  overflow-y: auto;
+  overflow-x: hidden;
+  -webkit-overflow-scrolling: touch;
 }
 
 .container {

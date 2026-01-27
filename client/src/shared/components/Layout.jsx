@@ -9,7 +9,13 @@ const Layout = ({ children }) => {
 
   useEffect(() => {
     const checkMobile = () => {
-      setIsMobile(window.innerWidth <= 768);
+      const mobile = window.innerWidth <= 768;
+      setIsMobile(mobile);
+      
+      // Always close menu when switching to mobile or when resizing
+      if (mobile) {
+        setIsSideMenuOpen(false);
+      }
     };
 
     checkMobile();

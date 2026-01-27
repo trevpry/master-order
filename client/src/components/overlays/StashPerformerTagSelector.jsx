@@ -71,10 +71,18 @@ const StashPerformerTagSelector = ({ performerId, clipId, sceneId, onClose, onTa
         const fetchedTags = tagsData.data || tagsData.tags || [];
         console.log(`Fetched ${fetchedTags.length} tags from database`);
         
-        setAllTags(fetchedTags);
+        // Filter out tags that are excluded from clip tagging (if context is clip)
+        const availableTags = clipId 
+          ? fetchedTags.filter(tag => tag.includeInClipTagging !== false)
+          : fetchedTags;
+        if (clipId) {
+          console.log(`${availableTags.length} tags available for clip tagging`);
+        }
+        
+        setAllTags(availableTags);
         
         // Build hierarchical structure
-        const { rootTags } = buildTagHierarchy(fetchedTags);
+        const { rootTags } = buildTagHierarchy(availableTags);
         console.log(`Built hierarchy with ${rootTags.length} root tags`);
         setTagHierarchy(rootTags);
         

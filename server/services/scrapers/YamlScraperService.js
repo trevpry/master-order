@@ -249,6 +249,13 @@ class YamlScraperService extends BaseScraperService {
       selector = selector.replace(/\/text\(\)$/, '');
     }
     
+    // Handle parent:: axis - mark it for special processing
+    // Example: //h3[@class="h90"]/parent::a -> h3[class="h90"]::PARENT::a
+    const hasParent = selector.includes('/parent::');
+    if (hasParent) {
+      selector = selector.replace(/\/parent::/g, '::PARENT::');
+    }
+    
     // Convert // to nothing (descendant)
     selector = selector.replace(/^\/\//, '');
     
@@ -284,6 +291,17 @@ class YamlScraperService extends BaseScraperService {
     
     // Handle simple attribute conditions
     // Example: [@class="test"]
+    // Special handling for class attributes with multiple values
+    selector = selector.replace(/\[@class="([^"]+)"\]/g, (match, classes) => {
+      // If class has multiple space-separated values, convert to multiple class selectors
+      if (classes.includes(' ')) {
+        const classNames = classes.split(/\s+/).filter(c => c);
+        return classNames.map(c => `[class*="${c}"]`).join('');
+      }
+      return `[class="${classes}"]`;
+    });
+    
+    // Handle other attribute conditions
     selector = selector.replace(/\[@(\w+)="([^"]+)"\]/g, '[$1="$2"]');
     
     // Handle text() = "value" - convert to :contains() selector
@@ -604,26 +622,60 @@ class YamlScraperService extends BaseScraperService {
       
       const selector = this.xpathToJquery(config.selector);
       
+      // Check if this uses parent:: axis
+      const parentMatch = selector.match(/^(.+?)::PARENT::(.*)$/);
+      
       try {
-        $(selector).each((i, el) => {
-          let value;
+        if (parentMatch) {
+          // Handle parent:: axis - find child elements, then get their parents
+          const childSelector = parentMatch[1];
+          const afterParent = parentMatch[2].trim();
           
-          // Extract attribute or text
-          if (attributeName) {
-            value = $(el).attr(attributeName);
-          } else {
-            value = $(el).text().trim();
-          }
-          
-          // Apply post-processing if defined
-          if (value && config.postProcess) {
-            value = this.applyPostProcess(value, config.postProcess);
-          }
-          
-          if (value && value.trim() !== '') {
-            results.push(value.trim());
-          }
-        });
+          $(childSelector).each((i, el) => {
+            let parentEl = $(el).parent();
+            
+            // If there's a selector after parent::, filter by it
+            if (afterParent && !parentEl.is(afterParent)) {
+              return; // Skip this element
+            }
+            
+            let value;
+            if (attributeName) {
+              value = parentEl.attr(attributeName);
+            } else {
+              value = parentEl.text().trim();
+            }
+            
+            // Apply post-processing if defined
+            if (value && config.postProcess) {
+              value = this.applyPostProcess(value, config.postProcess);
+            }
+            
+            if (value && value.trim() !== '') {
+              results.push(value.trim());
+            }
+          });
+        } else {
+          $(selector).each((i, el) => {
+            let value;
+            
+            // Extract attribute or text
+            if (attributeName) {
+              value = $(el).attr(attributeName);
+            } else {
+              value = $(el).text().trim();
+            }
+            
+            // Apply post-processing if defined
+            if (value && config.postProcess) {
+              value = this.applyPostProcess(value, config.postProcess);
+            }
+            
+            if (value && value.trim() !== '') {
+              results.push(value.trim());
+            }
+          });
+        }
       } catch (error) {
         console.warn(`   ⚠️ Array selector error for "${selector}":`, error.message);
         console.warn(`   ⚠️ Original XPath: "${originalXpath}"`);
@@ -641,21 +693,50 @@ class YamlScraperService extends BaseScraperService {
     
     const selector = this.xpathToJquery(config);
     
+    // Check if this uses parent:: axis
+    const parentMatch = selector.match(/^(.+?)::PARENT::(.*)$/);
+    
     try {
-      $(selector).each((i, el) => {
-        let value;
+      if (parentMatch) {
+        // Handle parent:: axis - find child elements, then get their parents
+        const childSelector = parentMatch[1];
+        const afterParent = parentMatch[2].trim();
         
-        // Extract attribute or text
-        if (attributeName) {
-          value = $(el).attr(attributeName);
-        } else {
-          value = $(el).text().trim();
-        }
-        
-        if (value && value.trim() !== '') {
-          results.push(value.trim());
-        }
-      });
+        $(childSelector).each((i, el) => {
+          let parentEl = $(el).parent();
+          
+          // If there's a selector after parent::, filter by it
+          if (afterParent && !parentEl.is(afterParent)) {
+            return; // Skip this element
+          }
+          
+          let value;
+          if (attributeName) {
+            value = parentEl.attr(attributeName);
+          } else {
+            value = parentEl.text().trim();
+          }
+          
+          if (value && value.trim() !== '') {
+            results.push(value.trim());
+          }
+        });
+      } else {
+        $(selector).each((i, el) => {
+          let value;
+          
+          // Extract attribute or text
+          if (attributeName) {
+            value = $(el).attr(attributeName);
+          } else {
+            value = $(el).text().trim();
+          }
+          
+          if (value && value.trim() !== '') {
+            results.push(value.trim());
+          }
+        });
+      }
     } catch (error) {
       console.warn(`   ⚠️ Array selector error for "${selector}":`, error.message);
       console.warn(`   ⚠️ Original XPath: "${originalXpath}"`);
@@ -896,7 +977,7 @@ class YamlScraperService extends BaseScraperService {
       // Extract Movies/Groups
       const moviesConfig = sceneConfig.Movies || sceneConfig.Groups;
       if (moviesConfig && moviesConfig.Name) {
-        console.log(`   �️ Extracting movie/group with selector: ${moviesConfig.Name}`);
+        console.log(`   🎬 Extracting movies/groups with selector: ${JSON.stringify(moviesConfig.Name)}`);
         
         // Resolve variable references if needed
         let nameSelector = moviesConfig.Name;
@@ -924,14 +1005,19 @@ class YamlScraperService extends BaseScraperService {
           }
         }
         
-        const movieName = this.extractValue($, nameSelector);
+        // Extract arrays of names and URLs
+        const movieNames = this.extractArray($, nameSelector);
+        console.log(`   🎬 Found ${movieNames.length} movie/group name(s)`);
         
-        if (movieName) {
-          const movie = { name: movieName, url: null };
+        const movieUrls = urlSelector ? this.extractArray($, urlSelector) : [];
+        console.log(`   🎬 Found ${movieUrls.length} movie/group URL(s)`);
+        
+        // Match names to URLs by index
+        movieNames.forEach((name, index) => {
+          const movie = { name, url: null };
           
-          // Extract movie URL if configured
-          if (urlSelector) {
-            movie.url = this.extractValue($, urlSelector);
+          if (index < movieUrls.length && movieUrls[index]) {
+            movie.url = movieUrls[index];
             // Convert relative URL to absolute
             if (movie.url && !movie.url.startsWith('http')) {
               movie.url = this.absUrl(movie.url, url);
@@ -939,8 +1025,10 @@ class YamlScraperService extends BaseScraperService {
           }
           
           metadata.movies.push(movie);
-          console.log(`   - Found movie: ${movieName}`, movie.url ? `(${movie.url})` : '');
-        } else {
+          console.log(`   - Found movie: ${name}`, movie.url ? `(${movie.url})` : '(no URL)');
+        });
+        
+        if (movieNames.length === 0) {
           console.log(`   ⚠️ Movie selector didn't match anything`);
         }
       }

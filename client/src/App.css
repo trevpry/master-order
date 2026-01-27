@@ -3,6 +3,9 @@
   min-height: 100vh;
   margin: 0;
   padding: 0;
+  /* Ensure root doesn't block scrolling on mobile */
+  overflow-x: hidden;
+  overflow-y: visible;
 }
 
 .app-container {

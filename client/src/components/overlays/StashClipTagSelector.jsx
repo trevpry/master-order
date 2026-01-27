@@ -97,10 +97,14 @@ const StashClipTagSelector = ({ clipId, onClose, onTagsAdded }) => {
         const fetchedTags = tagsData.data || tagsData.tags || [];
         console.log(`Fetched ${fetchedTags.length} tags from database`);
         
+        // Filter out tags that are excluded from clip tagging
+        const clipTaggingTags = fetchedTags.filter(tag => tag.includeInClipTagging !== false);
+        console.log(`${clipTaggingTags.length} tags available for clip tagging`);
+        
         // Debug: Check tag structure
-        if (fetchedTags.length > 0) {
-          const sampleTag = fetchedTags.find(t => (t.parents && t.parents.length > 0) || (t.parentTags && t.parentTags.length > 0));
-          const rootTag = fetchedTags.find(t => (!t.parents || t.parents.length === 0) && (!t.parentTags || t.parentTags.length === 0));
+        if (clipTaggingTags.length > 0) {
+          const sampleTag = clipTaggingTags.find(t => (t.parents && t.parents.length > 0) || (t.parentTags && t.parentTags.length > 0));
+          const rootTag = clipTaggingTags.find(t => (!t.parents || t.parents.length === 0) && (!t.parentTags || t.parentTags.length === 0));
           console.log('Sample tag with parents:', sampleTag);
           console.log('  - Has parents field?', sampleTag?.parents);
           console.log('  - Has parentTags field?', sampleTag?.parentTags);
@@ -108,16 +112,16 @@ const StashClipTagSelector = ({ clipId, onClose, onTagsAdded }) => {
           console.log('  - Tag name:', rootTag?.name);
           
           // Count how many tags have parents
-          const tagsWithParents = fetchedTags.filter(t => 
+          const tagsWithParents = clipTaggingTags.filter(t => 
             (t.parents && t.parents.length > 0) || (t.parentTags && t.parentTags.length > 0)
           ).length;
-          console.log(`Tags with parents: ${tagsWithParents} / ${fetchedTags.length}`);
+          console.log(`Tags with parents: ${tagsWithParents} / ${clipTaggingTags.length}`);
         }
         
-        setAllTags(fetchedTags);
+        setAllTags(clipTaggingTags);
         
         // Build hierarchical structure
-        const { rootTags, tagMap } = buildTagHierarchy(fetchedTags);
+        const { rootTags, tagMap } = buildTagHierarchy(clipTaggingTags);
         console.log(`Built hierarchy with ${rootTags.length} root tags`);
         setTagHierarchy(rootTags);
         

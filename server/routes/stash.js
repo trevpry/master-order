@@ -12098,6 +12098,44 @@ router.put('/tags/:id/hidden', asyncHandler(async (req, res) => {
   });
 }));
 
+// PUT /api/stash/tags/:id/clip-tagging - Toggle tag includeInClipTagging status
+router.put('/tags/:id/clip-tagging', asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  const { includeInClipTagging } = req.body;
+  
+  console.log('🏷️  [Toggle Tag Clip Tagging] Request received');
+  console.log('   - Tag ID:', id);
+  console.log('   - Include in Clip Tagging:', includeInClipTagging);
+  
+  // Validate inputs
+  if (typeof includeInClipTagging !== 'boolean') {
+    return sendBadRequest(res, 'includeInClipTagging must be a boolean');
+  }
+  
+  // Validate tag exists
+  const tag = await prisma.stashTag.findUnique({
+    where: { id }
+  });
+  
+  if (!tag) {
+    return sendNotFound(res, 'Tag not found');
+  }
+  
+  // Update tag includeInClipTagging status in local database
+  const updatedTag = await prisma.stashTag.update({
+    where: { id },
+    data: { includeInClipTagging }
+  });
+  
+  console.log(`   - Updated tag clip tagging status: "${tag.name}" → ${includeInClipTagging ? 'included' : 'excluded'}`);
+  
+  return sendSuccess(res, {
+    id: updatedTag.id,
+    name: updatedTag.name,
+    includeInClipTagging: updatedTag.includeInClipTagging
+  });
+}));
+
 // POST /api/stash/tags/merge - Merge multiple tags into one
 router.post('/tags/merge', asyncHandler(async (req, res) => {
   const { mainTagId, mergeTagIds } = req.body;

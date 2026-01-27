@@ -1,4 +1,4 @@
-name: GayNetwork
+name: BerryBoys
 performerByURL:
   - action: scrapeXPath
     scraper: sceneScraper
@@ -12,19 +12,17 @@ sceneByFragment:
     titleSearchScraper: sceneSearchScraper
     # Search for scenes by performers
     # {performer} will be replaced with performer name (spaces converted to underscores, lowercased)
-    performerSearchUrl: https://www.hotcast.fr/en/modeles/text-search?page=0&name={performer}
+    performerSearchUrl: https://www.berryboys.fr/en/modeles/text-search?page=0&name={performer}
     # Search for scenes by title - direct scene URL
     # {title} will be replaced with scene title (spaces converted to plus signs, lowercased)
-    studioSearchUrl: https://www.hotcast.fr/en/videos/text-search?page=0&name={title}
+    studioSearchUrl: https://www.berryboys.fr/en/videos/text-search?page=0&name={title}
     spacesConvertTo: +
 sceneByURL:
   - action: scrapeXPath
     scraper: sceneScraper
     url:
       # Taken from https://www.gaynetwork.com/en/sites on 2025-05-17
-      - rawhole.com/scenes/
-      - sdboy.com/scenes/
-      - berryboys.fr/en/videos/
+      - berryboys.fr/en/videos
 movieByURL:
   - action: scrapeXPath
     scraper: movieScraper
@@ -74,8 +72,8 @@ movieByURL:
 xPathScrapers:
   sceneScraper:
     scene:
-      Title: //div[@class="product-page vid-block"]//h1/text()
-      Details: //div[@class="description"]/text()
+      Title: //h1[@class="mt-3 mb-1 h5"]/text()
+      Details: //span[@class="lh15 opacity-70"]/text()
       URL: &url //link[@rel="alternate" and hreflang="en"]/@href
       # Date: &date
       #   selector: //script[@type="application/ld+json"]/text()
@@ -83,20 +81,30 @@ xPathScrapers:
       #     - replace:
       #         - regex: .*"datePublished"\s*:\s*"([^"]+)".*
       #           with: $1
+      Groups:
+        Name: 
+          selector: //h3[@class="h90"]/text()
+          postProcess:
+          - replace:
+              - regex: "DVD: "
+                with: ""
+        URL: 
+          selector: //h3[@class="h90"]/parent::a/@href
+          postProcess:
+          - replace:
+              - regex: ^
+                with: https://www.berryboys.fr
       Image:
-        selector: //video/@poster
+        selector: //div[@class="pb-2 pl-1 row"]/div[1]//img/@src
       Studio:
-        Name: //a[@class="site-logo"]/img/@alt
+        Name: 
+          fixed: "BerryBoys"
       Performers:
         Name: //div[contains(@class, "text-terciary") and contains(@class, "text-truncate")]
         URL: //div[@class="mt-4"]//a[contains(@class, "h100")]/@href
       Tags:
         Name: 
-          selector: //li[@class="clearfix list-group-item cat"]/a/text()
-          postProcess:
-          - replace:
-              - regex: "#"
-                with: ""
+          selector: //h3[@class="h120"]/text()
   movieScraper:
     movie:
       Title: 
@@ -123,6 +131,10 @@ xPathScrapers:
       Title: //a[@class="px-3 pt-3 pb-0 text-center d-block h110 text-truncate text-primary font-weight-bold"]/text()
       URL:
         selector: //a[@class="px-3 pt-3 pb-0 text-center d-block h110 text-truncate text-primary font-weight-bold"]/@href
+        postProcess:
+          - replace:
+              - regex: ^
+                with: https://www.berryboys.fr
       Image:
         selector: //div[@class="rounded embed-responsive embed-responsive-16by9"]/img/@src
   performerSearchScraper:
@@ -130,11 +142,11 @@ xPathScrapers:
     performer:
       Name: //div[@class="pb-1 m-2 text-center b-0 l-0 r-0 h6 text-truncate text-dark"]/text()
       URL:
-        selector: //a[@class="mb-3 col-xxl-2 col-xl-3 col-md-3 col-sm-4 col-6 "]/@href
+        selector: //a[@class="mb-3 col-xxl-2 col-xl-3 col-md-3 col-sm-4 col-6 "]/@href 
         postProcess:
           - replace:
               - regex: ^
-                with: https://www.hotcast.fr
+                with: https://www.berryboys.fr
       Image:
         selector: //div[@class="rounded embed-responsive embed-responsive-16by9"]/img/@src    
       performerSceneScraper: performerSceneScraper
@@ -147,7 +159,7 @@ xPathScrapers:
         postProcess:
           - replace:
               - regex: ^
-                with: https://www.hotcast.fr
+                with: https://www.berryboys.fr
       Performers:
         Name: //div[contains(@class, "text-terciary") and contains(@class, "text-truncate")]
         URL: //div[@class="mt-4"]//a[contains(@class, "h100")]/@href    

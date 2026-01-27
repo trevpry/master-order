@@ -317,16 +317,20 @@
     width: 100vw;
     transform: translateX(-100%);
     transition: transform 0.3s ease;
+    /* Ensure menu is hidden by default on mobile */
+    visibility: hidden;
   }
   
-  /* Remove this conflicting rule - handled by Layout.css */
-  /* .side-menu.mobile-open {
+  /* Only show menu when parent has mobile-open class */
+  .side-menu-container.mobile-open .side-menu {
     transform: translateX(0);
-  } */
+    visibility: visible;
+  }
   
   .side-menu.collapsed {
     width: 100vw;
     transform: translateX(-100%);
+    visibility: hidden;
   }
 }
 

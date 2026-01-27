@@ -31,7 +31,9 @@ const ClipTagManager = ({ clip, onTagsUpdated, isVisible, onClose }) => {
       if (response.ok) {
         const data = await response.json();
         console.log('ClipTagManager: Fetched tags:', data.data?.length || 0, 'tags');
-        setAvailableTags(data.data || []);
+        // Filter out tags that are excluded from clip tagging
+        const filteredTags = (data.data || []).filter(tag => tag.includeInClipTagging !== false);
+        setAvailableTags(filteredTags);
       }
     } catch (error) {
       console.error('Error fetching tags:', error);
@@ -62,7 +64,9 @@ const ClipTagManager = ({ clip, onTagsUpdated, isVisible, onClose }) => {
       const response = await fetch(`/api/stash/tags?filter=${encodeURIComponent(searchTerm)}&rootOnly=false&perPage=50`);
       if (response.ok) {
         const data = await response.json();
-        setSearchResults(data.data || []);
+        // Filter out tags that are excluded from clip tagging
+        const filteredTags = (data.data || []).filter(tag => tag.includeInClipTagging !== false);
+        setSearchResults(filteredTags);
       }
     } catch (error) {
       console.error('Error searching tags:', error);

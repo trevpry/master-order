@@ -271,6 +271,33 @@ export default function TagsPage() {
     }
   };
 
+  const toggleTagClipTagging = async (tag, e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    
+    const newClipTaggingStatus = !tag.includeInClipTagging;
+    
+    try {
+      const response = await fetch(`${config.apiBaseUrl}/api/stash/tags/${tag.id}/clip-tagging`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ includeInClipTagging: newClipTaggingStatus })
+      });
+
+      const result = await response.json();
+
+      if (result.success) {
+        toast.success(`"${tag.name}" ${newClipTaggingStatus ? 'included in' : 'excluded from'} clip tagging`);
+        loadTags(); // Reload to see the changes
+      } else {
+        toast.error(result.error || 'Failed to update clip tagging setting');
+      }
+    } catch (err) {
+      console.error('Error updating clip tagging setting:', err);
+      toast.error('Failed to update clip tagging setting');
+    }
+  };
+
   const renderTagCard = (tag, level = 0, parentExpanded = true) => {
     if (!parentExpanded && level > 0) return null;
     
@@ -324,6 +351,25 @@ export default function TagsPage() {
                 👁️‍🗨️
               </div>
             )}
+            
+            {/* Clip Tagging Badge */}
+            {tag.includeInClipTagging === false && (
+              <div className="tag-clip-tagging-badge" title="Excluded from Clip Tagging" style={{
+                position: 'absolute',
+                top: '10px',
+                right: tag.hidden ? '50px' : '10px',
+                backgroundColor: '#f59e0b',
+                color: 'white',
+                padding: '6px 10px',
+                borderRadius: '6px',
+                fontSize: '0.75rem',
+                fontWeight: 'bold',
+                boxShadow: '0 2px 4px rgba(0,0,0,0.2)',
+                zIndex: 2
+              }}>
+                🚫 Clip Tagging
+              </div>
+            )}
           </div>
 
           {/* Tag Content */}
@@ -350,6 +396,22 @@ export default function TagsPage() {
                     }}
                   >
                     {tag.hidden ? '👁️ Show' : '🚫 Hide'}
+                  </button>
+                  <button 
+                    className="tag-clip-tagging-button"
+                    onClick={(e) => toggleTagClipTagging(tag, e)}
+                    title={tag.includeInClipTagging === false ? 'Include in clip tagging' : 'Exclude from clip tagging'}
+                    style={{
+                      padding: '0.25rem 0.5rem',
+                      fontSize: '0.75rem',
+                      backgroundColor: tag.includeInClipTagging === false ? '#f59e0b' : '#3b82f6',
+                      color: 'white',
+                      border: 'none',
+                      borderRadius: '4px',
+                      cursor: 'pointer'
+                    }}
+                  >
+                    {tag.includeInClipTagging === false ? '🏷️ Include Clips' : '🏷️ Clip Tagging'}
                   </button>
                   {hasChildren && (
                     <button 
