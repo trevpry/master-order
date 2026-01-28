@@ -1,0 +1,70 @@
+name: BlakeMason
+renderJavaScript: true
+performerByURL:
+  - action: scrapeXPath
+    scraper: sceneScraper
+    url:
+      # Taken from https://www.gaynetwork.com/en/sites on 2025-05-17
+      - berryboys.fr/en/modeles/detail/
+sceneByURL:
+  - action: scrapeXPath
+    scraper: sceneScraper
+    url:
+      - blakemason.com/videos/
+movieByURL:
+  - action: scrapeXPath
+    scraper: movieScraper
+    url:
+      - adamjacques.fr/en/dvd/detail/
+xPathScrapers:
+  sceneScraper:
+    scene:
+      Title: 
+        selector: //h2//span[contains(@class,'fw-bolder')]
+      Details: 
+        selector: //div[contains(@class,'content-description')]//p
+      URL: 
+        selector: //link[@rel='alternate']/@href
+      Date:
+        selector: //span[contains(@class,'date')]
+      Image:
+        selector: //div[contains(@class,'vjs-poster')]/@style
+        postProcess:
+          - replace:
+              - regex: '.*url\(\"([^&]+)\"\).*'
+                with: '$1'
+          - replace:
+              - regex: '^//'
+                with: 'https://'
+      Studio:
+        Name: 
+          fixed: "Blake Mason"
+      Performers:
+        Name: 
+          selector: //div[contains(@class,'models-thumb')]//h5
+        URL: 
+          selector: //div[contains(@class,'model-thumb')]//a/@href
+      Tags:
+        Name: 
+          selector: //a[contains(@class,'tag-name')]
+  movieScraper:
+    movie:
+      Title: 
+        selector: //h1[@class="h4 text-dark"]/text()     
+      Image: 
+        selector: //div[@class="mb-2 embed-responsive embed-responsive-2by3"]/img/@src
+  performerScraper:
+    performer:
+      Name: 
+        selector: //div[@class="p-1 pt-2 text-center h90 text-terciary -bg-black-50 text-truncate"]/text()
+        postProcess:
+          - replace:
+              - regex: "\""
+                with: "" 
+      Gender:
+        fixed: Male       
+      URL:
+        selector: //link[@rel="canonical"]/@content
+      Image: 
+        selector: //img[@class="border embed-responsive-item bg-light border-dark obj-cover"]/@src
+  

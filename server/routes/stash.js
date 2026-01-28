@@ -7278,10 +7278,11 @@ router.post('/scenes/:id/scrape-generic', asyncHandler(async (req, res) => {
   console.log(`   - Matched groups: ${matchedGroups.matched.length}`);
   console.log(`   - Unmatched groups:`, matchedGroups.unmatched);
   
-  // Note: Image URL is used directly from scraper (no proxying)
-  // Each scraper can proxy in their YAML config if needed
+  // Proxy external image URLs to avoid CORS issues
   if (metadata.image) {
-    console.log(`   - Image URL: ${metadata.image}`);
+    const originalImage = metadata.image;
+    metadata.image = `/api/stash/external-image-proxy?url=${encodeURIComponent(originalImage)}`;
+    console.log(`   - Proxied image URL: ${originalImage} → ${metadata.image}`);
   }
   
   // Return scraped data with matches (same format as GEVI scraper)
@@ -12136,6 +12137,142 @@ router.put('/tags/:id/clip-tagging', asyncHandler(async (req, res) => {
   });
 }));
 
+// GET /api/stash/clip-tagging-workflow - Get clip tagging workflow configuration
+router.get('/clip-tagging-workflow', asyncHandler(async (req, res) => {
+  console.log('🎯 [Get Clip Tagging Workflow] Request received');
+  
+  try {
+    // Try to load from a configuration file
+    const fs = require('fs');
+    const path = require('path');
+    const configPath = path.join(__dirname, '../data/clip-tagging-workflow.json');
+    
+    if (fs.existsSync(configPath)) {
+      const configData = fs.readFileSync(configPath, 'utf8');
+      const config = JSON.parse(configData);
+      console.log('   - Loaded workflow configuration from file');
+      return sendSuccess(res, config);
+    } else {
+      // No config exists - create default workflow based on hard-coded flow
+      console.log('   - No workflow configuration found, creating default');
+      
+      // Load tags to build initial workflow
+      const workflowTagNames = [
+        'Performer Count',  // Step 1
+        'Performer Race',   // Step 2
+        'Sex Acts',         // Step 3
+        'Masturbation',     // Conditional after Sex Acts
+        'Oral Sex',         // Conditional after Sex Acts
+        'Anal Sex',         // Conditional after Sex Acts
+        'Performer Positions', // After Oral/Anal
+        'Cum Shot'          // Final step
+      ];
+      
+      // Find these tags in database (look for parent tags that match these names)
+      const tags = await prisma.stashTag.findMany({
+        where: {
+          name: { in: workflowTagNames },
+          includeInClipTagging: true
+        },
+        orderBy: { name: 'asc' }
+      });
+      
+      // Build default connections based on hard-coded flow logic
+      const connections = {};
+      
+      // Find tag IDs for connections
+      const sexActsTag = tags.find(t => t.name === 'Sex Acts');
+      const masturbationTag = tags.find(t => t.name === 'Masturbation');
+      const oralSexTag = tags.find(t => t.name === 'Oral Sex');
+      const analSexTag = tags.find(t => t.name === 'Anal Sex');
+      const performerPositionsTag = tags.find(t => t.name === 'Performer Positions');
+      const cumShotTag = tags.find(t => t.name === 'Cum Shot');
+      
+      // Sex Acts → Masturbation, Oral Sex, Anal Sex
+      if (sexActsTag && (masturbationTag || oralSexTag || analSexTag)) {
+        connections[sexActsTag.id] = [
+          masturbationTag?.id,
+          oralSexTag?.id,
+          analSexTag?.id
+        ].filter(Boolean);
+      }
+      
+      // Oral Sex → Performer Positions
+      if (oralSexTag && performerPositionsTag) {
+        connections[oralSexTag.id] = [performerPositionsTag.id];
+      }
+      
+      // Anal Sex → Performer Positions
+      if (analSexTag && performerPositionsTag) {
+        connections[analSexTag.id] = [performerPositionsTag.id];
+      }
+      
+      // Performer Positions → Cum Shot
+      if (performerPositionsTag && cumShotTag) {
+        connections[performerPositionsTag.id] = [cumShotTag.id];
+      }
+      
+      const defaultConfig = {
+        tags: tags,
+        connections: connections
+      };
+      
+      console.log(`   - Created default workflow with ${tags.length} tags and ${Object.keys(connections).length} connections`);
+      return sendSuccess(res, defaultConfig);
+    }
+  } catch (err) {
+    console.error('   - Error loading workflow configuration:', err);
+    return sendSuccess(res, {
+      tags: [],
+      connections: {}
+    });
+  }
+}));
+
+// POST /api/stash/clip-tagging-workflow - Save clip tagging workflow configuration
+router.post('/clip-tagging-workflow', asyncHandler(async (req, res) => {
+  const { tags, connections } = req.body;
+  
+  console.log('🎯 [Save Clip Tagging Workflow] Request received');
+  console.log(`   - Tags: ${tags?.length || 0}`);
+  console.log(`   - Connections: ${Object.keys(connections || {}).length}`);
+  
+  // Validate inputs
+  if (!Array.isArray(tags)) {
+    return sendBadRequest(res, 'tags must be an array');
+  }
+  
+  if (typeof connections !== 'object' || connections === null) {
+    return sendBadRequest(res, 'connections must be an object');
+  }
+  
+  try {
+    const fs = require('fs');
+    const path = require('path');
+    
+    // Ensure data directory exists
+    const dataDir = path.join(__dirname, '../data');
+    if (!fs.existsSync(dataDir)) {
+      fs.mkdirSync(dataDir, { recursive: true });
+    }
+    
+    const configPath = path.join(dataDir, 'clip-tagging-workflow.json');
+    const configData = JSON.stringify({ tags, connections }, null, 2);
+    
+    fs.writeFileSync(configPath, configData, 'utf8');
+    console.log('   - Saved workflow configuration to file');
+    
+    return sendSuccess(res, {
+      tags,
+      connections,
+      message: 'Workflow configuration saved successfully'
+    });
+  } catch (err) {
+    console.error('   - Error saving workflow configuration:', err);
+    return sendError(res, 'Failed to save workflow configuration');
+  }
+}));
+
 // POST /api/stash/tags/merge - Merge multiple tags into one
 router.post('/tags/merge', asyncHandler(async (req, res) => {
   const { mainTagId, mergeTagIds } = req.body;
@@ -14292,6 +14429,45 @@ router.get('/gevi-image-proxy', asyncHandler(async (req, res) => {
     response.data.pipe(res);
   } catch (error) {
     console.error('❌ Error proxying GEVI image:', error.message);
+    return sendServerError(res, 'Failed to proxy image');
+  }
+}));
+
+// GET /api/stash/external-image-proxy - Proxy external scraper images to avoid CORS issues
+router.get('/external-image-proxy', asyncHandler(async (req, res) => {
+  const { url } = req.query;
+
+  if (!url) {
+    return sendBadRequest(res, 'Image URL is required');
+  }
+
+  // Validate it's an HTTP(S) URL
+  if (!url.startsWith('http://') && !url.startsWith('https://')) {
+    return sendBadRequest(res, 'Invalid image URL');
+  }
+
+  try {
+    const axios = require('axios');
+    const parsedUrl = new URL(url);
+    
+    const response = await axios.get(url, {
+      responseType: 'stream',
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        'Referer': `${parsedUrl.protocol}//${parsedUrl.hostname}/`
+      }
+    });
+
+    // Set appropriate headers
+    res.set({
+      'Content-Type': response.headers['content-type'] || 'image/jpeg',
+      'Cache-Control': 'public, max-age=86400' // Cache for 24 hours
+    });
+
+    // Pipe the image data
+    response.data.pipe(res);
+  } catch (error) {
+    console.error('❌ Error proxying external image:', error.message);
     return sendServerError(res, 'Failed to proxy image');
   }
 }));

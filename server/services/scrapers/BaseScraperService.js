@@ -6,6 +6,7 @@
  */
 
 const cheerio = require('cheerio');
+const puppeteer = require('puppeteer');
 const { applyUrlReplacements } = require('../../utils/urlReplacements');
 
 class BaseScraperService {
@@ -45,15 +46,66 @@ class BaseScraperService {
   /**
    * Helper method to fetch HTML from a URL
    * @param {string} url - The URL to fetch
+   * @param {boolean} useJavaScript - Whether to use Puppeteer for JavaScript rendering
    * @returns {Promise<CheerioStatic>} - Cheerio instance with loaded HTML
    */
-  async fetchHtml(url) {
+  async fetchHtml(url, useJavaScript = false) {
+    if (useJavaScript) {
+      return await this.fetchHtmlWithPuppeteer(url);
+    }
+    
     const response = await fetch(url);
     if (!response.ok) {
       throw new Error(`Failed to fetch ${url}: ${response.status} ${response.statusText}`);
     }
     const html = await response.text();
     return cheerio.load(html);
+  }
+
+  /**
+   * Helper method to fetch JavaScript-rendered HTML using Puppeteer
+   * @param {string} url - The URL to fetch
+   * @returns {Promise<CheerioStatic>} - Cheerio instance with loaded HTML
+   */
+  async fetchHtmlWithPuppeteer(url) {
+    console.log(`   🎭 Using Puppeteer for JavaScript rendering`);
+    let browser = null;
+    
+    try {
+      browser = await puppeteer.launch({
+        headless: true,
+        args: [
+          '--no-sandbox',
+          '--disable-setuid-sandbox',
+          '--disable-dev-shm-usage',
+          '--disable-gpu'
+        ]
+      });
+
+      const page = await browser.newPage();
+      await page.setViewport({ width: 1920, height: 1080 });
+      await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
+      
+      await page.goto(url, { 
+        waitUntil: 'networkidle2',
+        timeout: 30000 
+      });
+
+      // Wait for content to fully render
+      await new Promise(resolve => setTimeout(resolve, 2000));
+
+      const html = await page.content();
+      await browser.close();
+
+      console.log(`   ✅ JavaScript content rendered`);
+      return cheerio.load(html);
+      
+    } catch (error) {
+      if (browser) {
+        await browser.close();
+      }
+      throw error;
+    }
   }
 
   /**

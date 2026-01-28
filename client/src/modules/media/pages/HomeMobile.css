@@ -1,10 +1,12 @@
 /* Mobile-specific styles for the Home page */
 
 /* Prevent overscroll and improve mobile performance */
-body {
-  overscroll-behavior: none;
-  -webkit-overflow-scrolling: touch;
-  touch-action: manipulation;
+@media (max-width: 768px) {
+  body {
+    overscroll-behavior: none;
+    -webkit-overflow-scrolling: touch;
+    touch-action: manipulation;
+  }
 }
 
 /* Remove global transforms that might cause blur */

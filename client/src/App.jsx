@@ -21,6 +21,7 @@ import Stash from './modules/media/pages/Stash';
 import PerformerDetail from './modules/media/pages/stash/PerformerDetail';
 import TagsPage from './modules/media/pages/stash/TagsPage';
 import TagDetail from './modules/media/pages/stash/TagDetail';
+import ClipTaggingFlowPage from './modules/media/pages/stash/ClipTaggingFlowPage';
 import ScenesPage from './modules/media/pages/stash/ScenesPage';
 import SceneDetail from './modules/media/pages/stash/SceneDetail';
 import GroupsPage from './modules/media/pages/stash/GroupsPage';
@@ -69,6 +70,7 @@ function App() {
           <Route path="/media/stash" element={<Stash />} />
           <Route path="/media/stash/tags" element={<TagsPage />} />
           <Route path="/media/stash/tags/:id" element={<TagDetail />} />
+          <Route path="/media/stash/clip-tagging-flow" element={<ClipTaggingFlowPage />} />
           <Route path="/media/stash/scenes" element={<ScenesPage />} />
           <Route path="/media/stash/scenes/:id" element={<SceneDetail />} />
           <Route path="/media/stash/groups" element={<GroupsPage />} />

@@ -23,6 +23,9 @@ class YamlScraperService extends BaseScraperService {
     this.yamlPath = yamlFilePath;
     this.yamlDir = path.dirname(yamlFilePath);
     
+    // Check if this scraper needs JavaScript rendering
+    this.renderJavaScript = this.config.renderJavaScript || false;
+    
     // Check if this is a script-based scraper
     this.isScriptBased = this._detectScriptBased();
     
@@ -771,7 +774,7 @@ class YamlScraperService extends BaseScraperService {
       }
 
       // XPath-based scraping (existing code)
-      const $ = await this.fetchHtml(transformedUrl);
+      const $ = await this.fetchHtml(transformedUrl, this.renderJavaScript);
 
       // Debug: Check what images exist in the HTML
       console.log(`   🔍 DEBUG - Checking all img tags in HTML:`);
@@ -1191,7 +1194,7 @@ class YamlScraperService extends BaseScraperService {
               
               console.log(`      📄 Scraping page ${pageCount}: ${currentUrl}`);
 
-              const $ = await this.fetchHtml(currentUrl);
+              const $ = await this.fetchHtml(currentUrl, this.renderJavaScript);
               
               // Check for "no results" error message
               if (scraperConfig.pagination?.noResultsSelector) {
@@ -1373,7 +1376,7 @@ class YamlScraperService extends BaseScraperService {
           console.log(`      - Searching: ${searchUrl}`);
 
           try {
-            const $ = await this.fetchHtml(searchUrl);
+            const $ = await this.fetchHtml(searchUrl, this.renderJavaScript);
             const performerConfig = performerSearchConfig.performer;
 
             // Extract performer search results - first get element count
@@ -1433,7 +1436,7 @@ class YamlScraperService extends BaseScraperService {
         const performerScenes = new Map(); // Map of URL -> scene object
 
         try {
-          const $ = await this.fetchHtml(performerUrlFound);
+          const $ = await this.fetchHtml(performerUrlFound, this.renderJavaScript);
           const sceneConfig = sceneScraperConfig.scene;
 
           // Extract all scenes from the performer page
@@ -1675,7 +1678,7 @@ class YamlScraperService extends BaseScraperService {
         
         console.log(`   📄 Scraping page ${pageCount}: ${currentUrl}`);
 
-        const $ = await this.fetchHtml(currentUrl);
+        const $ = await this.fetchHtml(currentUrl, this.renderJavaScript);
         
         // Check for "no results" error message
         if (scraperConfig.pagination?.noResultsSelector) {
@@ -1833,7 +1836,7 @@ class YamlScraperService extends BaseScraperService {
         throw new Error(`No movie scraper configuration found for URL: ${url}`);
       }
 
-      const $ = await this.fetchHtml(url);
+      const $ = await this.fetchHtml(url, this.renderJavaScript);
 
       const scraperName = movieScraper.scraper;
       const scraperConfig = this.config.xPathScrapers[scraperName];

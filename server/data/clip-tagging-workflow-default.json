@@ -1,0 +1,18 @@
+{
+  "tags": [
+    { "id": "performerCount", "name": "Performer Count" },
+    { "id": "performerRace", "name": "Performer Race" },
+    { "id": "sexActs", "name": "Sex Acts" },
+    { "id": "masturbation", "name": "Masturbation" },
+    { "id": "oralSex", "name": "Oral Sex" },
+    { "id": "analSex", "name": "Anal Sex" },
+    { "id": "performerPositions", "name": "Performer Positions" },
+    { "id": "cumShot", "name": "Cum Shot" }
+  ],
+  "connections": {
+    "sexActs": ["masturbation", "oralSex", "analSex"],
+    "oralSex": ["performerPositions"],
+    "analSex": ["performerPositions"],
+    "performerPositions": ["cumShot"]
+  }
+}

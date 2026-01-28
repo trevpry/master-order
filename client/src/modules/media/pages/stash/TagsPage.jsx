@@ -499,8 +499,11 @@ export default function TagsPage() {
 
       <div className="header">
         <h1>🏷️ Tags</h1>
-        <p className="muted">Browse and explore your tag library</p>
-      </div>
+        <p className="muted">Browse and explore your tag library</p>        <div style={{ marginTop: '1rem' }}>
+          <Link to="/media/stash/clip-tagging-flow">
+            <Button>🎯 Configure Clip Tagging Flow</Button>
+          </Link>
+        </div>      </div>
 
       {/* Search */}
       <form onSubmit={handleSearch} className="search-section">
