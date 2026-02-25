@@ -12,10 +12,11 @@ const plexDb = new PlexDatabaseService();
 const plexSync = new PlexSyncService();
 
 // Helper function to get tracks filtered by unplayed albums/artists/works
-async function getUnplayedFilteredTracks(sectionId, unplayedAlbums, unplayedArtists, unplayedWorks) {
+// sectionKey: the Plex sectionKey string (e.g. "6"), or null for all sections
+async function getUnplayedFilteredTracks(sectionKey, unplayedAlbums, unplayedArtists, unplayedWorks) {
   const allTracks = await prisma.plexTrack.findMany({
-    where: sectionId ? { 
-      librarySectionID: sectionId, 
+    where: sectionKey ? { 
+      librarySection: { sectionKey: sectionKey },
       removed: false,
       OR: [
         { userRating: null },
@@ -1456,7 +1457,7 @@ router.get('/tracks/random/section/:sectionKey', asyncHandler(async (req, res) =
     // Fetch rated tracks (excluding tracks rated below 5 stars)
     const ratedTracks = await prisma.plexTrack.findMany({
       where: {
-        librarySectionID: parseInt(sectionKey),
+        librarySection: { sectionKey: sectionKey },
         removed: false,
         AND: [
           {
@@ -1492,7 +1493,7 @@ router.get('/tracks/random/section/:sectionKey', asyncHandler(async (req, res) =
 
     // Build where clause for other tracks (applying unplayed filters if set, exclude tracks below 5 stars)
     const otherWhereClause = {
-      librarySectionID: parseInt(sectionKey),
+      librarySection: { sectionKey: sectionKey },
       removed: false,
       OR: [
         { userRating: null },
@@ -1521,7 +1522,7 @@ router.get('/tracks/random/section/:sectionKey', asyncHandler(async (req, res) =
     // Handle unplayed albums/artists/works filters for the "other" tracks
     let otherTracks;
     if (unplayedAlbums === 'true' || unplayedArtists === 'true' || unplayedWorks === 'true') {
-      otherTracks = await getUnplayedFilteredTracks(parseInt(sectionKey), unplayedAlbums === 'true', unplayedArtists === 'true', unplayedWorks === 'true');
+      otherTracks = await getUnplayedFilteredTracks(sectionKey, unplayedAlbums === 'true', unplayedArtists === 'true', unplayedWorks === 'true');
     } else {
       // Fetch other tracks (exclude tracks below 5 stars)
       otherTracks = await prisma.plexTrack.findMany({
@@ -1565,7 +1566,7 @@ router.get('/tracks/random/section/:sectionKey', asyncHandler(async (req, res) =
 
   // Handle unplayed albums/artists/works filters
   if (unplayedAlbums === 'true' || unplayedArtists === 'true' || unplayedWorks === 'true') {
-    const filteredTracks = await getUnplayedFilteredTracks(parseInt(sectionKey), unplayedAlbums === 'true', unplayedArtists === 'true', unplayedWorks === 'true');
+    const filteredTracks = await getUnplayedFilteredTracks(sectionKey, unplayedAlbums === 'true', unplayedArtists === 'true', unplayedWorks === 'true');
     const shuffled = filteredTracks.sort(() => Math.random() - 0.5);
     let selectedTracks = shuffled.slice(0, limitNum);
     
@@ -1583,7 +1584,7 @@ router.get('/tracks/random/section/:sectionKey', asyncHandler(async (req, res) =
   // Original logic when no special filters
   // Build where clause (exclude tracks rated below 5 stars)
   const whereClause = {
-    librarySectionID: parseInt(sectionKey),
+    librarySection: { sectionKey: sectionKey },
     removed: false,
     OR: [
       { userRating: null },
