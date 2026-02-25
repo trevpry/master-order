@@ -3609,8 +3609,13 @@ router.post('/groups/:id/search-gevi', asyncHandler(async (req, res) => {
   console.log('   - Group title:', group.name);
 
   try {
+    // Strip text within parentheses from title for better matching
+    // This ignores extra info like year, studio, etc. that's often in parentheses
+    const searchTitle = group.name.replace(/\([^)]*\)/g, '').trim();
+    console.log('   - Search title (parentheses stripped):', searchTitle);
+    
     // Search GEVI for movies matching the group title
-    let movies = await geviScraper.searchMovie(group.name);
+    let movies = await geviScraper.searchMovie(searchTitle);
 
     // If no results and group has aliases, try searching with each alias
     if ((!movies || movies.length === 0) && group.aliases) {

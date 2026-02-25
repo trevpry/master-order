@@ -1,0 +1,80 @@
+name: BoyLocker
+performerByURL:
+  - action: scrapeXPath
+    scraper: sceneScraper
+    url:
+      # Taken from https://www.gaynetwork.com/en/sites on 2025-05-17
+      - berryboys.fr/en/modeles/detail/
+sceneByURL:
+  - action: scrapeXPath
+    scraper: sceneScraper
+    url:
+      - boylocker.com/video
+xPathScrapers:
+  sceneScraper:
+    scene:
+      Title: //h1[@class="page-header-title clr"]/text()
+      Details: //div[@class="elementor-widget-container"]/p/text()
+      Studio:
+        Name: 
+          fixed: "Boy Locker"
+      Performers:
+        Name: //div[@class="elementor-element elementor-element-821cd6f elementor-widget elementor-widget-jet-listing-grid"]//h4[@class="elementor-heading-title elementor-size-default"]/text()
+        URL: //div[@class="elementor-element elementor-element-821cd6f elementor-widget elementor-widget-jet-listing-grid"]//div[@class="elementor elementor-138"]/@href
+      Tags:
+        Name: 
+          selector: //div[@class="elementor-element elementor-element-85eb6f5 elementor-widget elementor-widget-jet-listing-dynamic-terms"]//span[@class="jet-listing-dynamic-terms__link"]/text()
+  performerScraper:
+    performer:
+      Name: 
+        selector: //div[@class="p-1 pt-2 text-center h90 text-terciary -bg-black-50 text-truncate"]/text()
+        postProcess:
+          - replace:
+              - regex: "\""
+                with: "" 
+      Gender:
+        fixed: Male       
+      URL:
+        selector: //link[@rel="canonical"]/@content
+      Image: 
+        selector: //img[@class="border embed-responsive-item bg-light border-dark obj-cover"]/@src
+  sceneSearchScraper:
+    # Search for scenes on a performer's page
+    scene:
+      Title: //a[@class="px-3 pt-3 pb-0 text-center d-block h110 text-truncate text-primary font-weight-bold"]/text()
+      URL:
+        selector: //a[@class="px-3 pt-3 pb-0 text-center d-block h110 text-truncate text-primary font-weight-bold"]/@href
+        postProcess:
+          - replace:
+              - regex: ^
+                with: https://www.berryboys.fr
+      Image:
+        selector: //div[@class="rounded embed-responsive embed-responsive-16by9"]/img/@src
+  performerSearchScraper:
+    # Search for performers - returns list of matching performers with URLs
+    performer:
+      Name: //div[@class="pb-1 m-2 text-center b-0 l-0 r-0 h6 text-truncate text-dark"]/text()
+      URL:
+        selector: //a[@class="mb-3 col-xxl-2 col-xl-3 col-md-3 col-sm-4 col-6 "]/@href 
+        postProcess:
+          - replace:
+              - regex: ^
+                with: https://www.berryboys.fr
+      Image:
+        selector: //div[@class="rounded embed-responsive embed-responsive-16by9"]/img/@src    
+      performerSceneScraper: performerSceneScraper
+  performerSceneScraper:
+    # Extract scenes from a performer's detail page
+    scene:
+      Title: //a[@class="px-3 pt-3 pb-0 text-center d-block h110 text-truncate text-primary font-weight-bold"]/text()
+      URL:
+        selector: //a[@class="px-3 pt-3 pb-0 text-center d-block h110 text-truncate text-primary font-weight-bold"]/@href
+        postProcess:
+          - replace:
+              - regex: ^
+                with: https://www.berryboys.fr
+      Performers:
+        Name: //div[contains(@class, "text-terciary") and contains(@class, "text-truncate")]
+        URL: //div[@class="mt-4"]//a[contains(@class, "h100")]/@href    
+
+

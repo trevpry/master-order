@@ -2705,16 +2705,10 @@ export default function SceneDetail() {
                 </a>
               </div>
             )}
-            {data.rating && (
-              <div className="meta-badge rating">
-                <span className="badge-icon">⭐</span>
-                <span>{data.rating}/100</span>
-              </div>
-            )}
             {clipAggregateRating !== null && clipCount > 0 && (
               <div className="meta-badge rating" title={`Average rating from ${clipCount} clip${clipCount !== 1 ? 's' : ''}`}>
-                <span className="badge-icon">🎬</span>
-                <span>Clips: {clipAggregateRating.toFixed(1)}/5 ({clipCount})</span>
+                <span className="badge-icon">⭐</span>
+                <span>{clipAggregateRating.toFixed(1)}/5</span>
               </div>
             )}
             {data.code && (

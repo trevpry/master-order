@@ -31,9 +31,13 @@ router.get('/', asyncHandler(async (req, res) => {
   const where = {};
   
   if (search) {
+    // Strip text within parentheses from search query for matching
+    // This ignores extra info like year, studio, etc. that's often in parentheses
+    const searchWithoutParens = search.replace(/\([^)]*\)/g, '').trim();
+    
     // Note: SQLite doesn't support mode: 'insensitive', but contains is case-insensitive by default in SQLite
     // PostgreSQL needs mode: 'insensitive' for case-insensitive search
-    const searchFilter = { contains: search };
+    const searchFilter = { contains: searchWithoutParens };
     
     // Only search in name field (not synopsis or director)
     where.name = searchFilter;

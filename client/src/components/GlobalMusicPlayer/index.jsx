@@ -32,6 +32,11 @@ const GlobalMusicPlayer = () => {
   const audioRef = useRef(null);
   const progressRef = useRef(null);
 
+  // Refs to always hold the latest handlers (avoids stale closures in event listeners)
+  const handleNextTrackRef = useRef(null);
+  const handlePreviousTrackRef = useRef(null);
+  const togglePlayPauseRef = useRef(null);
+
   // Function to get artwork URL for a track/media item
   const getArtworkUrl = (track) => {
     if (!track) return null;
@@ -221,6 +226,13 @@ const GlobalMusicPlayer = () => {
     }
   }, [tracks, playlist, isShuffled, shuffledTracks]);
 
+  // Keep handler refs current so the event listener below never captures stale closures
+  useEffect(() => {
+    handleNextTrackRef.current = handleNextTrack;
+    handlePreviousTrackRef.current = handlePreviousTrack;
+    togglePlayPauseRef.current = togglePlayPause;
+  });
+
   // Event listener for starting music from reading sessions
   useEffect(() => {
     const handleStartMusicPlayback = (event) => {
@@ -254,19 +266,20 @@ const GlobalMusicPlayer = () => {
     window.addEventListener('startMusicPlayback', handleStartMusicPlayback);
     
     // Event listener for external player controls
+    // Uses refs so this never captures stale closures even with the empty dep array.
     const handlePlayerControl = (event) => {
       console.log('🎵 GlobalMusicPlayer received control event:', event.detail);
       const { action } = event.detail;
       
       switch (action) {
         case 'next':
-          handleNextTrack();
+          handleNextTrackRef.current?.();
           break;
         case 'previous':
-          handlePreviousTrack();
+          handlePreviousTrackRef.current?.();
           break;
         case 'toggle':
-          togglePlayPause();
+          togglePlayPauseRef.current?.();
           break;
         default:
           console.log('Unknown control action:', action);
@@ -365,34 +378,25 @@ const GlobalMusicPlayer = () => {
         throw new Error('Invalid track data');
       }
       
-      // Set audio source and play
+      // Set audio source and play directly — don't wait for canplay which can
+      // fail to fire reliably (e.g. with preload="metadata") causing tracks to
+      // silently stop advancing.
       audio.src = streamUrl;
       audio.volume = volume;
-      
-      const playAudio = async () => {
-        try {
-          await audio.play();
-          setIsPlaying(true);
-          
-          // Track change is handled by the useEffect that watches currentTrackIndex
-          console.log('🎵 Successfully started playing:', track.title);
-        } catch (playError) {
-          if (playError.name === 'NotAllowedError') {
-            setError('Audio playback blocked. Please interact with the page first.');
-          } else {
-            setError(`Playback failed: ${playError.message}`);
-          }
+
+      try {
+        await audio.play();
+        setIsPlaying(true);
+        console.log('🎵 Successfully started playing:', track.title);
+      } catch (playError) {
+        if (playError.name === 'AbortError') {
+          // AbortError is expected when a newer play() call supersedes this one.
+          console.log('🎵 Playback aborted (superseded by newer request)');
+        } else if (playError.name === 'NotAllowedError') {
+          setError('Audio playback blocked. Please interact with the page first.');
+        } else {
+          setError(`Playback failed: ${playError.message}`);
         }
-      };
-      
-      if (audio.readyState >= HTMLMediaElement.HAVE_ENOUGH_DATA) {
-        await playAudio();
-      } else {
-        const onCanPlay = () => {
-          audio.removeEventListener('canplay', onCanPlay);
-          playAudio();
-        };
-        audio.addEventListener('canplay', onCanPlay, { once: true });
       }
     } catch (error) {
       console.error('Error playing track:', error);
