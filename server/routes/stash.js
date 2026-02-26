@@ -15119,7 +15119,7 @@ router.get('/scenes/duplicates/dismissed', asyncHandler(async (req, res) => {
       return sendBadRequest(res, 'Filename is required');
     }
     const fetch = require('node-fetch');
-    const upstream = `http://localhost:5001/api/scrape/gheaven/lookup-filename?filename=${encodeURIComponent(filename)}`;
+    const upstream = `http://192.168.1.252:5001/api/scrape/gheaven/lookup-filename?filename=${encodeURIComponent(filename)}`;
     const response = await fetch(upstream);
     const data = await response.json();
     res.status(response.status).json(data);
