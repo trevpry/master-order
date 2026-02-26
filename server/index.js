@@ -18,6 +18,7 @@ const settingsRoutes = require('./routes/settings');
 const artworkRoutes = require('./routes/artwork');
 const healthRoutes = require('./routes/health');
 const databaseHealthRoutes = require('./routes/databaseHealth');
+const monitoringRoutes = require('./routes/monitoring');
 const plexRoutes = require('./routes/plex');
 const createStashRouter = require('./routes/stash');
 const groupsRoutes = require('./routes/groups');
@@ -251,6 +252,9 @@ app.use('/api/artwork', artworkRoutes);
 
 // Health & Monitoring API routes
 app.use('/api/health', healthRoutes);
+
+// Monitoring dashboard API
+app.use('/api/monitoring', monitoringRoutes);
 
 // Database Health & Diagnostics API routes (SAFE - READ-ONLY)
 app.use('/api/database-health', databaseHealthRoutes);

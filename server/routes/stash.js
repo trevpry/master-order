@@ -15112,6 +15112,19 @@ router.get('/scenes/duplicates/dismissed', asyncHandler(async (req, res) => {
   const scenePerformerRoutes = require('./stash/scenePerformers');
   router.use(scenePerformerRoutes);
 
+  // Proxy: GHeaven scraper filename lookup
+  router.get('/scraper/gheaven/lookup-filename', asyncHandler(async (req, res) => {
+    const { filename } = req.query;
+    if (!filename) {
+      return sendBadRequest(res, 'Filename is required');
+    }
+    const fetch = require('node-fetch');
+    const upstream = `http://localhost:5001/api/scrape/gheaven/lookup-filename?filename=${encodeURIComponent(filename)}`;
+    const response = await fetch(upstream);
+    const data = await response.json();
+    res.status(response.status).json(data);
+  }));
+
   return router;
 }
 

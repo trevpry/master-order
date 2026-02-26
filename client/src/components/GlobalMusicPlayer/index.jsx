@@ -226,6 +226,26 @@ const GlobalMusicPlayer = () => {
     }
   }, [tracks, playlist, isShuffled, shuffledTracks]);
 
+  // Broadcast current playback state to other components (e.g. Dashboard monitoring)
+  useEffect(() => {
+    // Cache in window so any component can read the current state on mount
+    window.__musicPlayerState = { track: currentTrack, isPlaying };
+    window.dispatchEvent(new CustomEvent('musicPlayerStateChanged', {
+      detail: { track: currentTrack, isPlaying }
+    }));
+  }, [currentTrack, isPlaying]);
+
+  // Respond to on-demand state requests (e.g. Dashboard mounting after playback started)
+  useEffect(() => {
+    const handleRequest = () => {
+      window.dispatchEvent(new CustomEvent('musicPlayerStateChanged', {
+        detail: { track: currentTrack, isPlaying }
+      }));
+    };
+    window.addEventListener('requestMusicPlayerState', handleRequest);
+    return () => window.removeEventListener('requestMusicPlayerState', handleRequest);
+  }, [currentTrack, isPlaying]);
+
   // Keep handler refs current so the event listener below never captures stale closures
   useEffect(() => {
     handleNextTrackRef.current = handleNextTrack;
@@ -441,7 +461,19 @@ const GlobalMusicPlayer = () => {
       audio.pause();
       setIsPlaying(false);
     } else {
-      playTrack(currentTrackIndex);
+      // If the audio already has a src loaded, just resume from current position.
+      // Calling playTrack() would reset src and restart from 0.
+      if (audio.src && !audio.ended) {
+        try {
+          await audio.play();
+          setIsPlaying(true);
+        } catch (e) {
+          if (e.name !== 'AbortError') console.error('Resume failed:', e);
+        }
+      } else {
+        // No src yet (e.g. first play), load the track normally
+        playTrack(currentTrackIndex);
+      }
     }
   };
   

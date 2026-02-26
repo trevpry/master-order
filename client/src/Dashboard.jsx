@@ -1,339 +1,436 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef, useCallback } from "react";
 import { Link } from "react-router-dom";
 import config from './config';
 
+const POLL_INTERVAL_MS = 15_000;
+
+// ── helpers ───────────────────────────────────────────────────────────────────
+
+function formatDuration(ms) {
+  if (!ms) return null;
+  const totalSec = Math.floor(ms / 1000);
+  const h = Math.floor(totalSec / 3600);
+  const m = Math.floor((totalSec % 3600) / 60);
+  const s = totalSec % 60;
+  if (h > 0) return `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+  return `${m}:${String(s).padStart(2, '0')}`;
+}
+
+function formatDurationSec(sec) {
+  if (!sec) return null;
+  return formatDuration(sec * 1000);
+}
+
+function timeAgo(dateStr) {
+  if (!dateStr) return '—';
+  const diff = Date.now() - new Date(dateStr).getTime();
+  const m = Math.floor(diff / 60000);
+  if (m < 1) return 'just now';
+  if (m < 60) return `${m}m ago`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}h ago`;
+  return `${Math.floor(h / 24)}d ago`;
+}
+
+function plexArtworkUrl(thumb) {
+  if (!thumb) return null;
+  if (thumb.startsWith('http')) return thumb;
+  const clean = thumb.startsWith('/') ? thumb.substring(1) : thumb;
+  return `${config.apiBaseUrl}/api/artwork/${clean}`;
+}
+
+function progressPercent(offset, duration) {
+  if (!offset || !duration) return 0;
+  return Math.min(100, Math.round((offset / duration) * 100));
+}
+
+function stateColor(state) {
+  if (state === 'playing') return '#22c55e';
+  if (state === 'paused') return '#f59e0b';
+  return '#6b7280';
+}
+
+function stateIcon(state) {
+  if (state === 'playing') return '▶';
+  if (state === 'paused') return '⏸';
+  return '■';
+}
+
+// ── sub-components ────────────────────────────────────────────────────────────
+
+function SectionHeader({ icon, title, count }) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '1rem' }}>
+      <span style={{ fontSize: '1.4rem' }}>{icon}</span>
+      <h2 style={{ margin: 0, fontSize: '1.1rem', fontWeight: 700, color: '#1e293b' }}>{title}</h2>
+      {count != null && (
+        <span style={{
+          background: count > 0 ? '#3b82f6' : '#94a3b8',
+          color: 'white',
+          fontSize: '0.75rem',
+          fontWeight: 700,
+          borderRadius: '9999px',
+          padding: '0.1rem 0.5rem',
+        }}>{count}</span>
+      )}
+    </div>
+  );
+}
+
+function Card({ children, style }) {
+  return (
+    <div style={{
+      background: 'white',
+      borderRadius: '12px',
+      boxShadow: '0 1px 4px rgba(0,0,0,0.08)',
+      padding: '1.25rem',
+      ...style,
+    }}>
+      {children}
+    </div>
+  );
+}
+
+function EmptyState({ label }) {
+  return (
+    <div style={{ color: '#94a3b8', fontSize: '0.9rem', padding: '0.5rem 0' }}>
+      {label}
+    </div>
+  );
+}
+
+// Active Plex session card
+function PlexSessionCard({ session }) {
+  const thumb = plexArtworkUrl(session.thumb);
+  const pct = progressPercent(session.viewOffset, session.duration);
+  const elapsed = formatDuration(session.viewOffset);
+  const total = formatDuration(session.duration);
+  const color = stateColor(session.state);
+
+  let title = session.title;
+  let subtitle = null;
+  if (session.type === 'episode') {
+    subtitle = session.grandparentTitle;
+    if (session.parentIndex != null && session.index != null) {
+      subtitle += ` · S${String(session.parentIndex).padStart(2, '0')}E${String(session.index).padStart(2, '0')}`;
+    }
+  } else if (session.type === 'movie') {
+    subtitle = session.year ? String(session.year) : 'Movie';
+  } else if (session.type === 'track') {
+    subtitle = [session.grandparentTitle, session.parentTitle].filter(Boolean).join(' · ');
+  }
+
+  return (
+    <div style={{
+      display: 'flex', gap: '1rem', padding: '0.9rem', borderRadius: '10px',
+      background: '#f8fafc', border: '1px solid #e2e8f0', alignItems: 'flex-start',
+    }}>
+      <div style={{
+        width: 64, height: 64, flexShrink: 0, borderRadius: 8, overflow: 'hidden',
+        background: '#e2e8f0', display: 'flex', alignItems: 'center', justifyContent: 'center',
+      }}>
+        {thumb ? (
+          <img src={thumb} alt={title} style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+            onError={e => { e.target.style.display = 'none'; }} />
+        ) : (
+          <span style={{ fontSize: '1.5rem' }}>
+            {session.type === 'episode' ? '📺' : session.type === 'movie' ? '🎬' : '🎵'}
+          </span>
+        )}
+      </div>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', marginBottom: '0.2rem' }}>
+          <span style={{ fontSize: '1rem', color, fontWeight: 700 }}>{stateIcon(session.state)}</span>
+          <span style={{ fontWeight: 600, fontSize: '0.95rem', color: '#1e293b', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+            {title}
+          </span>
+        </div>
+        {subtitle && (
+          <div style={{ fontSize: '0.82rem', color: '#64748b', marginBottom: '0.4rem', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+            {subtitle}
+          </div>
+        )}
+        {session.duration > 0 && (
+          <div style={{ marginBottom: '0.3rem' }}>
+            <div style={{ background: '#e2e8f0', borderRadius: 9999, height: 4, overflow: 'hidden' }}>
+              <div style={{ width: `${pct}%`, background: color, height: '100%', borderRadius: 9999, transition: 'width 0.5s' }} />
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.75rem', color: '#94a3b8', marginTop: '0.2rem' }}>
+              <span>{elapsed}</span><span>{pct}%</span><span>{total}</span>
+            </div>
+          </div>
+        )}
+        <div style={{ fontSize: '0.78rem', color: '#94a3b8' }}>
+          {session.playerTitle && <span>📺 {session.playerTitle}</span>}
+          {session.user && <span style={{ marginLeft: '0.5rem' }}>👤 {session.user}</span>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── main component ────────────────────────────────────────────────────────────
+
 function Dashboard() {
-  const [stats, setStats] = useState({
-    media: {},
-    reading: {},
-    system: {},
-    recent: {}
-  });
+  const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [upNext, setUpNext] = useState(null);
+  const [refreshing, setRefreshing] = useState(false);
+  const [error, setError] = useState(null);
+  const [lastRefreshed, setLastRefreshed] = useState(null);
+  const [appMusic, setAppMusic] = useState(null);
+  const timerRef = useRef(null);
 
-  useEffect(() => {
-    fetchDashboardData();
-  }, []);
-
-  const fetchDashboardData = async () => {
+  const fetchData = useCallback(async (isManual = false) => {
+    if (isManual) setRefreshing(true);
     try {
-      setLoading(true);
-      
-      // Fetch multiple API endpoints for dashboard data
-      const [
-        customOrdersRes,
-        watchStatsRes,
-        upNextRes,
-        settingsRes
-      ] = await Promise.allSettled([
-        fetch(`${config.apiBaseUrl}/api/custom-orders`),
-        fetch(`${config.apiBaseUrl}/api/watch-tracking/stats`),
-        fetch(`${config.apiBaseUrl}/api/up-next`),
-        fetch(`${config.apiBaseUrl}/api/settings`)
-      ]);
-
-      // Process custom orders data
-      if (customOrdersRes.status === 'fulfilled' && customOrdersRes.value.ok) {
-        const customOrders = await customOrdersRes.value.json();
-        setStats(prev => ({
-          ...prev,
-          media: {
-            ...prev.media,
-            totalCustomOrders: customOrders.length,
-            activeOrders: customOrders.filter(order => !order.isCompleted).length
-          }
-        }));
-      }
-
-      // Process watch stats data
-      if (watchStatsRes.status === 'fulfilled' && watchStatsRes.value.ok) {
-        const watchStats = await watchStatsRes.value.json();
-        setStats(prev => ({
-          ...prev,
-          media: {
-            ...prev.media,
-            totalWatchTime: watchStats.totalWatchTime || 0,
-            recentSessions: watchStats.recentSessions || 0
-          }
-        }));
-      }
-
-      // Process up next data
-      if (upNextRes.status === 'fulfilled' && upNextRes.value.ok) {
-        const upNextData = await upNextRes.value.json();
-        setUpNext(upNextData);
-      }
-
-    } catch (error) {
-      console.error('Error fetching dashboard data:', error);
+      const res = await fetch(`${config.apiBaseUrl}/api/monitoring`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      setData(await res.json());
+      setError(null);
+      setLastRefreshed(new Date());
+    } catch (e) {
+      setError(e.message);
     } finally {
       setLoading(false);
+      setRefreshing(false);
     }
-  };
+  }, []);
 
-  const formatTime = (minutes) => {
-    if (!minutes) return '0 min';
-    const hours = Math.floor(minutes / 60);
-    const mins = minutes % 60;
-    if (hours > 0) {
-      return `${hours}h ${mins}m`;
+  useEffect(() => {
+    fetchData();
+    timerRef.current = setInterval(() => fetchData(), POLL_INTERVAL_MS);
+    return () => clearInterval(timerRef.current);
+  }, [fetchData]);
+
+  useEffect(() => {
+    const applyState = ({ track, isPlaying: playing }) => {
+      if (track) {
+        setAppMusic({ title: track.title, artist: track.artist || track.grandparentTitle, album: track.album || track.parentTitle, isPlaying: playing });
+      } else {
+        setAppMusic(null);
+      }
+    };
+
+    // Read cached state immediately (covers the case where music was already playing on mount)
+    if (window.__musicPlayerState) {
+      applyState(window.__musicPlayerState);
     }
-    return `${mins}m`;
-  };
 
-  const formatDate = (date) => {
-    return new Date(date).toLocaleDateString('en-US', {
-      weekday: 'long',
-      year: 'numeric',
-      month: 'long',
-      day: 'numeric'
-    });
-  };
+    const onStateChanged = (e) => applyState(e.detail || {});
+    // Fallback: catch the initial startMusicPlayback before player has processed it
+    const onStart = (e) => {
+      const first = e.detail?.playlist?.tracks?.[0];
+      if (first) setAppMusic({ title: first.title, artist: first.artist, album: first.album, isPlaying: true });
+    };
+    window.addEventListener('musicPlayerStateChanged', onStateChanged);
+    window.addEventListener('startMusicPlayback', onStart);
+    // Ask the player to re-broadcast in case __musicPlayerState wasn't set yet
+    window.dispatchEvent(new CustomEvent('requestMusicPlayerState'));
+    return () => {
+      window.removeEventListener('musicPlayerStateChanged', onStateChanged);
+      window.removeEventListener('startMusicPlayback', onStart);
+    };
+  }, []);
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-gray-50 via-white to-blue-50">
-        <div className="flex items-center justify-center h-96">
-          <div className="text-center">
-            <div className="w-16 h-16 mx-auto mb-4 border-4 border-blue-500 rounded-full animate-spin border-t-transparent"></div>
-            <p className="text-xl text-gray-600">Loading your dashboard...</p>
-          </div>
-        </div>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '60vh', flexDirection: 'column', gap: '1rem' }}>
+        <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+        <div style={{ width: 40, height: 40, border: '4px solid #3b82f6', borderTopColor: 'transparent', borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} />
+        <p style={{ color: '#64748b' }}>Loading monitoring data…</p>
       </div>
     );
   }
 
+  const sessions = data?.plexSessions || [];
+  const playingSessions = sessions.filter(s => s.state === 'playing');
+  const pausedSessions = sessions.filter(s => s.state !== 'playing');
+
   return (
-    <div className="min-h-screen bg-gradient-to-br from-gray-50 via-white to-blue-50">
-      <div className="p-6 mx-auto max-w-7xl">
-        
-        {/* Welcome Section */}
-        <div className="mb-8">
-          <div className="p-6 bg-white shadow-xl rounded-2xl">
-            <h1 className="mb-2 text-4xl font-bold text-transparent bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text">
-              Welcome Back to Eddie
-            </h1>
-            <p className="text-lg text-gray-600">Your comprehensive life management dashboard</p>
-            <div className="mt-4 text-sm text-gray-500">
-              {formatDate(new Date())}
-            </div>
-          </div>
+    <div style={{ padding: '1.5rem', maxWidth: '1200px', margin: '0 auto', background: '#f1f5f9', minHeight: '100vh' }}>
+      <style>{`@keyframes spin{to{transform:rotate(360deg)}} @keyframes pulse{0%,100%{opacity:1}50%{opacity:0.4}}`}</style>
+
+      {/* Header */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1.5rem', flexWrap: 'wrap', gap: '0.75rem' }}>
+        <div>
+          <h1 style={{ margin: 0, fontSize: '1.6rem', fontWeight: 800, color: '#0f172a' }}>📡 Monitoring</h1>
+          <p style={{ margin: '0.25rem 0 0', color: '#64748b', fontSize: '0.9rem' }}>Live playback activity across all sources</p>
         </div>
-
-        {/* Stats Grid */}
-        <div className="grid grid-cols-1 gap-6 mb-8 md:grid-cols-2 lg:grid-cols-4">
-          
-          {/* Media Stats */}
-          <div className="p-6 bg-white shadow-lg rounded-xl">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-lg font-semibold text-gray-800">Media Library</h3>
-              <div className="p-2 text-blue-600 bg-blue-100 rounded-lg">
-                🎬
-              </div>
-            </div>
-            <div className="space-y-2">
-              <div className="flex justify-between">
-                <span className="text-gray-600">Custom Orders</span>
-                <span className="font-bold text-blue-600">{stats.media.totalCustomOrders || 0}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-gray-600">Active Orders</span>
-                <span className="font-bold text-green-600">{stats.media.activeOrders || 0}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-gray-600">Watch Time</span>
-                <span className="font-bold text-purple-600">{formatTime(stats.media.totalWatchTime)}</span>
-              </div>
-            </div>
-          </div>
-
-          {/* Reading Stats */}
-          <div className="p-6 bg-white shadow-lg rounded-xl">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-lg font-semibold text-gray-800">Reading</h3>
-              <div className="p-2 text-green-600 bg-green-100 rounded-lg">
-                📚
-              </div>
-            </div>
-            <div className="space-y-2">
-              <div className="flex justify-between">
-                <span className="text-gray-600">Books</span>
-                <span className="font-bold text-green-600">{stats.reading.totalBooks || 0}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-gray-600">Comics</span>
-                <span className="font-bold text-blue-600">{stats.reading.totalComics || 0}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-gray-600">In Progress</span>
-                <span className="font-bold text-orange-600">{stats.reading.inProgress || 0}</span>
-              </div>
-            </div>
-          </div>
-
-          {/* System Stats */}
-          <div className="p-6 bg-white shadow-lg rounded-xl">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-lg font-semibold text-gray-800">System</h3>
-              <div className="p-2 text-purple-600 bg-purple-100 rounded-lg">
-                ⚙️
-              </div>
-            </div>
-            <div className="space-y-2">
-              <div className="flex justify-between">
-                <span className="text-gray-600">Uptime</span>
-                <span className="font-bold text-green-600">Online</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-gray-600">Background Tasks</span>
-                <span className="font-bold text-blue-600">Active</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-gray-600">Last Sync</span>
-                <span className="font-bold text-gray-600">Recent</span>
-              </div>
-            </div>
-          </div>
-
-          {/* Quick Actions */}
-          <div className="p-6 bg-white shadow-lg rounded-xl">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-lg font-semibold text-gray-800">Quick Actions</h3>
-              <div className="p-2 text-orange-600 bg-orange-100 rounded-lg">
-                ⚡
-              </div>
-            </div>
-            <div className="space-y-2">
-              <Link to="/media/up-next" className="block p-2 text-sm text-center text-white transition-colors bg-blue-500 rounded hover:bg-blue-600">
-                Get Up Next
-              </Link>
-              <Link to="/media/custom-orders" className="block p-2 text-sm text-center text-white transition-colors bg-green-500 rounded hover:bg-green-600">
-                Custom Orders
-              </Link>
-              <Link to="/media/settings" className="block p-2 text-sm text-center text-white transition-colors bg-purple-500 rounded hover:bg-purple-600">
-                Settings
-              </Link>
-            </div>
-          </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+          {lastRefreshed && (
+            <span style={{ fontSize: '0.8rem', color: '#94a3b8' }}>Updated {timeAgo(lastRefreshed)}</span>
+          )}
+          <button
+            onClick={() => fetchData(true)}
+            disabled={refreshing}
+            style={{
+              padding: '0.5rem 1rem', borderRadius: 8, border: 'none',
+              background: refreshing ? '#93c5fd' : '#3b82f6', color: 'white',
+              fontWeight: 600, cursor: refreshing ? 'default' : 'pointer',
+              fontSize: '0.875rem', display: 'flex', alignItems: 'center', gap: '0.4rem',
+            }}
+          >
+            {refreshing
+              ? <span style={{ display: 'inline-block', width: 14, height: 14, border: '2px solid white', borderTopColor: 'transparent', borderRadius: '50%', animation: 'spin 0.7s linear infinite' }} />
+              : '↺'}
+            Refresh
+          </button>
         </div>
+      </div>
 
-        {/* Up Next Section */}
-        {upNext && (
-          <div className="mb-8">
-            <div className="p-6 text-white bg-gradient-to-r from-blue-600 to-purple-600 shadow-xl rounded-2xl">
-              <h2 className="mb-4 text-2xl font-bold">🎯 Up Next</h2>
-              <div className="p-4 bg-white bg-opacity-20 backdrop-blur-sm rounded-xl">
-                <h3 className="mb-2 text-xl font-semibold">{upNext.title}</h3>
-                {upNext.type === 'episode' && (
-                  <p className="mb-2 opacity-90">
-                    Season {upNext.seasonNumber}, Episode {upNext.episodeNumber}
-                  </p>
-                )}
-                <p className="opacity-80">{upNext.summary}</p>
-                <div className="mt-4">
-                  <Link 
-                    to="/media/up-next" 
-                    className="inline-block px-6 py-2 font-semibold text-blue-600 transition-colors bg-white rounded-lg hover:bg-gray-100"
-                  >
-                    Start Watching
-                  </Link>
-                </div>
-              </div>
+      {error && (
+        <div style={{ background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 10, padding: '0.75rem 1rem', marginBottom: '1.5rem', color: '#dc2626', fontSize: '0.875rem' }}>
+          ⚠️ {error}
+        </div>
+      )}
+
+      {/* Now Playing on Plex */}
+      <Card style={{ marginBottom: '1.5rem' }}>
+        <SectionHeader icon="📺" title="Now Playing on Plex" count={sessions.length} />
+        {data?.plexSessionsError && (
+          <div style={{ fontSize: '0.82rem', color: '#94a3b8', marginBottom: '0.75rem' }}>
+            Could not reach Plex: {data.plexSessionsError}
+          </div>
+        )}
+        {sessions.length === 0 && !data?.plexSessionsError && (
+          <EmptyState label="Nothing playing on Plex right now" />
+        )}
+        {playingSessions.length > 0 && (
+          <div style={{ marginBottom: pausedSessions.length ? '1rem' : 0 }}>
+            <div style={{ fontSize: '0.78rem', fontWeight: 700, color: '#22c55e', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: '0.5rem' }}>▶ Playing</div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+              {playingSessions.map(s => <PlexSessionCard key={s.sessionKey || s.ratingKey} session={s} />)}
             </div>
           </div>
         )}
-
-        {/* Module Quick Access */}
-        <div className="mb-8">
-          <h2 className="mb-6 text-2xl font-bold text-gray-800">🏠 Eddie Modules</h2>
-          <div className="grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-6">
-            
-            <Link to="/media" className="transition-all duration-300 transform group hover:scale-105">
-              <div className="p-6 text-center transition-all duration-300 bg-white border border-gray-200 shadow-lg hover:shadow-xl rounded-2xl hover:border-blue-300">
-                <div className="mb-3 text-4xl transition-transform duration-300 group-hover:scale-110">🎬</div>
-                <div className="mb-1 text-lg font-bold text-gray-800">Media</div>
-                <div className="text-sm text-gray-500">Movies & TV</div>
-              </div>
-            </Link>
-
-            <Link to="/tasks" className="transition-all duration-300 transform group hover:scale-105">
-              <div className="p-6 text-center transition-all duration-300 bg-white border border-gray-200 shadow-lg hover:shadow-xl rounded-2xl hover:border-green-300">
-                <div className="mb-3 text-4xl transition-transform duration-300 group-hover:scale-110">✅</div>
-                <div className="mb-1 text-lg font-bold text-gray-800">Tasks</div>
-                <div className="text-sm text-gray-500">Todo & Projects</div>
-              </div>
-            </Link>
-
-            <Link to="/notes" className="transition-all duration-300 transform group hover:scale-105">
-              <div className="p-6 text-center transition-all duration-300 bg-white border border-gray-200 shadow-lg hover:shadow-xl rounded-2xl hover:border-yellow-300">
-                <div className="mb-3 text-4xl transition-transform duration-300 group-hover:scale-110">�</div>
-                <div className="mb-1 text-lg font-bold text-gray-800">Notes</div>
-                <div className="text-sm text-gray-500">Ideas & Thoughts</div>
-              </div>
-            </Link>
-
-            <Link to="/locations" className="transition-all duration-300 transform group hover:scale-105">
-              <div className="p-6 text-center transition-all duration-300 bg-white border border-gray-200 shadow-lg hover:shadow-xl rounded-2xl hover:border-red-300">
-                <div className="mb-3 text-4xl transition-transform duration-300 group-hover:scale-110">📍</div>
-                <div className="mb-1 text-lg font-bold text-gray-800">Locations</div>
-                <div className="text-sm text-gray-500">Places & Maps</div>
-              </div>
-            </Link>
-
-            <Link to="/dating" className="transition-all duration-300 transform group hover:scale-105">
-              <div className="p-6 text-center transition-all duration-300 bg-white border border-gray-200 shadow-lg hover:shadow-xl rounded-2xl hover:border-pink-300">
-                <div className="mb-3 text-4xl transition-transform duration-300 group-hover:scale-110">💕</div>
-                <div className="mb-1 text-lg font-bold text-gray-800">Dating</div>
-                <div className="text-sm text-gray-500">Connections</div>
-              </div>
-            </Link>
-
-            <Link to="/eddie/settings" className="transition-all duration-300 transform group hover:scale-105">
-              <div className="p-6 text-center transition-all duration-300 bg-white border border-gray-200 shadow-lg hover:shadow-xl rounded-2xl hover:border-purple-300">
-                <div className="mb-3 text-4xl transition-transform duration-300 group-hover:scale-110">⚙️</div>
-                <div className="mb-1 text-lg font-bold text-gray-800">Settings</div>
-                <div className="text-sm text-gray-500">Configuration</div>
-              </div>
-            </Link>
-          </div>
-        </div>
-
-        {/* Recent Activity */}
-        <div className="mb-8">
-          <h2 className="mb-6 text-2xl font-bold text-gray-800">📊 Recent Activity</h2>
-          <div className="p-6 bg-white shadow-lg rounded-2xl">
-            <div className="space-y-4">
-              <div className="flex items-center justify-between p-4 bg-gray-50 rounded-lg">
-                <div className="flex items-center">
-                  <div className="w-3 h-3 mr-3 bg-green-500 rounded-full"></div>
-                  <span className="text-gray-700">System startup completed</span>
-                </div>
-                <span className="text-sm text-gray-500">Just now</span>
-              </div>
-              
-              <div className="flex items-center justify-between p-4 bg-gray-50 rounded-lg">
-                <div className="flex items-center">
-                  <div className="w-3 h-3 mr-3 bg-blue-500 rounded-full"></div>
-                  <span className="text-gray-700">Dashboard loaded successfully</span>
-                </div>
-                <span className="text-sm text-gray-500">Just now</span>
-              </div>
-              
-              <div className="flex items-center justify-between p-4 bg-gray-50 rounded-lg">
-                <div className="flex items-center">
-                  <div className="w-3 h-3 mr-3 bg-purple-500 rounded-full"></div>
-                  <span className="text-gray-700">Welcome to Eddie Life Management</span>
-                </div>
-                <span className="text-sm text-gray-500">Just now</span>
-              </div>
+        {pausedSessions.length > 0 && (
+          <div>
+            <div style={{ fontSize: '0.78rem', fontWeight: 700, color: '#f59e0b', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: '0.5rem' }}>⏸ Paused</div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+              {pausedSessions.map(s => <PlexSessionCard key={s.sessionKey || s.ratingKey} session={s} />)}
             </div>
           </div>
-        </div>
+        )}
+      </Card>
+
+      {/* Music in App */}
+      <Card style={{ marginBottom: '1.5rem' }}>
+        <SectionHeader icon="🎵" title="Music in App" />
+        {appMusic ? (
+          <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+            <div style={{ width: 48, height: 48, borderRadius: 8, background: '#e0e7ff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '1.5rem', flexShrink: 0 }}>🎵</div>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                <span style={{ display: 'inline-block', width: 8, height: 8, borderRadius: '50%', background: appMusic.isPlaying ? '#22c55e' : '#f59e0b', animation: appMusic.isPlaying ? 'pulse 1.5s ease-in-out infinite' : 'none' }} />
+                <span style={{ fontWeight: 600, fontSize: '0.95rem', color: '#1e293b', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{appMusic.title}</span>
+              </div>
+              {(appMusic.artist || appMusic.album) && (
+                <div style={{ fontSize: '0.82rem', color: '#64748b', marginTop: '0.2rem' }}>{[appMusic.artist, appMusic.album].filter(Boolean).join(' · ')}</div>
+              )}
+              <div style={{ fontSize: '0.78rem', color: '#94a3b8', marginTop: '0.15rem' }}>{appMusic.isPlaying ? '▶ Playing' : '⏸ Paused'} in Music Player</div>
+            </div>
+          </div>
+        ) : (
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <EmptyState label="Music player is not active" />
+            {data?.lastMusicTrack && (
+              <div style={{ fontSize: '0.8rem', color: '#94a3b8' }}>
+                Last: <em>{data.lastMusicTrack.title}</em> · {timeAgo(data.lastMusicTrack.lastViewedAt)}
+              </div>
+            )}
+          </div>
+        )}
+      </Card>
+
+      {/* Last Played grid */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(270px, 1fr))', gap: '1.25rem' }}>
+
+        {/* Last Plex item */}
+        <Card>
+          <SectionHeader icon="📺" title="Last Plex Item" />
+          {data?.lastPlexItem ? (
+            <div>
+              <div style={{ fontWeight: 600, fontSize: '0.95rem', color: '#1e293b', marginBottom: '0.2rem' }}>{data.lastPlexItem.title}</div>
+              {data.lastPlexItem.seriesTitle && (
+                <div style={{ fontSize: '0.82rem', color: '#64748b', marginBottom: '0.15rem' }}>
+                  {data.lastPlexItem.seriesTitle}
+                  {data.lastPlexItem.seasonNumber != null && data.lastPlexItem.episodeNumber != null &&
+                    ` · S${String(data.lastPlexItem.seasonNumber).padStart(2,'0')}E${String(data.lastPlexItem.episodeNumber).padStart(2,'0')}`}
+                </div>
+              )}
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginTop: '0.5rem', flexWrap: 'wrap' }}>
+                <span style={{ background: data.lastPlexItem.mediaType === 'movie' ? '#f0fdf4' : '#eff6ff', color: data.lastPlexItem.mediaType === 'movie' ? '#16a34a' : '#2563eb', fontSize: '0.75rem', fontWeight: 600, borderRadius: 6, padding: '0.15rem 0.5rem' }}>
+                  {data.lastPlexItem.mediaType === 'movie' ? '🎬 Movie' : '📺 Episode'}
+                </span>
+                <span style={{ color: '#94a3b8', fontSize: '0.78rem' }}>{timeAgo(data.lastPlexItem.watchedAt)}</span>
+              </div>
+              <Link to="/media/up-next" style={{ display: 'inline-block', marginTop: '0.75rem', fontSize: '0.8rem', color: '#3b82f6', textDecoration: 'none' }}>Open Media →</Link>
+            </div>
+          ) : <EmptyState label="No Plex items watched yet" />}
+        </Card>
+
+        {/* Last music track */}
+        <Card>
+          <SectionHeader icon="🎵" title="Last Music Track" />
+          {data?.lastMusicTrack ? (
+            <div>
+              <div style={{ fontWeight: 600, fontSize: '0.95rem', color: '#1e293b', marginBottom: '0.2rem' }}>{data.lastMusicTrack.title}</div>
+              {data.lastMusicTrack.artist && <div style={{ fontSize: '0.82rem', color: '#64748b' }}>{data.lastMusicTrack.artist}</div>}
+              {data.lastMusicTrack.album && <div style={{ fontSize: '0.82rem', color: '#94a3b8' }}>{data.lastMusicTrack.album}</div>}
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginTop: '0.5rem', flexWrap: 'wrap' }}>
+                {data.lastMusicTrack.duration && <span style={{ fontSize: '0.78rem', color: '#94a3b8' }}>⏱ {formatDuration(data.lastMusicTrack.duration)}</span>}
+                <span style={{ fontSize: '0.78rem', color: '#94a3b8' }}>{timeAgo(data.lastMusicTrack.lastViewedAt)}</span>
+              </div>
+              <Link to="/media/music" style={{ display: 'inline-block', marginTop: '0.75rem', fontSize: '0.8rem', color: '#3b82f6', textDecoration: 'none' }}>Open Music →</Link>
+            </div>
+          ) : <EmptyState label="No music played yet" />}
+        </Card>
+
+        {/* Last Stash scene */}
+        <Card>
+          <SectionHeader icon="🎬" title="Last Stash Scene" />
+          {data?.lastStashScene ? (
+            <div>
+              <div style={{ fontWeight: 600, fontSize: '0.95rem', color: '#1e293b', marginBottom: '0.2rem' }}>{data.lastStashScene.title || `Scene ${data.lastStashScene.id}`}</div>
+              {data.lastStashScene.studio && <div style={{ fontSize: '0.82rem', color: '#64748b', marginBottom: '0.15rem' }}>🏢 {data.lastStashScene.studio}</div>}
+              {data.lastStashScene.performers?.length > 0 && (
+                <div style={{ fontSize: '0.82rem', color: '#64748b', marginBottom: '0.15rem' }}>
+                  👤 {data.lastStashScene.performers.slice(0, 3).join(', ')}{data.lastStashScene.performers.length > 3 ? ` +${data.lastStashScene.performers.length - 3}` : ''}
+                </div>
+              )}
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginTop: '0.5rem', flexWrap: 'wrap' }}>
+                {data.lastStashScene.duration && <span style={{ fontSize: '0.78rem', color: '#94a3b8' }}>⏱ {formatDurationSec(data.lastStashScene.duration)}</span>}
+                {data.lastStashScene.playCount > 0 && <span style={{ fontSize: '0.78rem', color: '#94a3b8' }}>▶ {data.lastStashScene.playCount}×</span>}
+                {data.lastStashScene.userRating && <span style={{ fontSize: '0.78rem', color: '#f59e0b' }}>★ {data.lastStashScene.userRating}</span>}
+                <span style={{ fontSize: '0.78rem', color: '#94a3b8' }}>{timeAgo(data.lastStashScene.lastPlayedAt)}</span>
+              </div>
+              <Link to={`/media/stash/scenes/${data.lastStashScene.id}`} style={{ display: 'inline-block', marginTop: '0.75rem', fontSize: '0.8rem', color: '#3b82f6', textDecoration: 'none' }}>Open Scene →</Link>
+            </div>
+          ) : <EmptyState label="No Stash scenes played yet" />}
+        </Card>
+
+        {/* Last Stash clip */}
+        <Card>
+          <SectionHeader icon="✂️" title="Last Stash Clip" />
+          {data?.lastStashClip ? (
+            <div>
+              <div style={{ fontWeight: 600, fontSize: '0.95rem', color: '#1e293b', marginBottom: '0.2rem' }}>
+                {data.lastStashClip.title || `Clip #${data.lastStashClip.clipIndex}`}
+              </div>
+              {data.lastStashClip.sceneTitle && <div style={{ fontSize: '0.82rem', color: '#64748b', marginBottom: '0.15rem' }}>From: {data.lastStashClip.sceneTitle}</div>}
+              {data.lastStashClip.studio && <div style={{ fontSize: '0.82rem', color: '#94a3b8', marginBottom: '0.15rem' }}>🏢 {data.lastStashClip.studio}</div>}
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginTop: '0.5rem' }}>
+                {data.lastStashClip.duration && <span style={{ fontSize: '0.78rem', color: '#94a3b8' }}>⏱ {formatDurationSec(data.lastStashClip.duration)}</span>}
+                <span style={{ fontSize: '0.78rem', color: '#94a3b8' }}>{timeAgo(data.lastStashClip.watchedAt)}</span>
+              </div>
+              <Link to={`/media/stash/scenes/${data.lastStashClip.sceneId}`} style={{ display: 'inline-block', marginTop: '0.75rem', fontSize: '0.8rem', color: '#3b82f6', textDecoration: 'none' }}>Open Scene →</Link>
+            </div>
+          ) : <EmptyState label="No Stash clips watched yet" />}
+        </Card>
 
       </div>
     </div>
   );
-};
+}
 
 export default Dashboard;

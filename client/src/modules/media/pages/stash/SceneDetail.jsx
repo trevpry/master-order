@@ -101,6 +101,12 @@ export default function SceneDetail() {
   const [clipAggregateRating, setClipAggregateRating] = useState(null);
   const [clipCount, setClipCount] = useState(0);
 
+  // Scraper search states
+  const [showScraperSearchModal, setShowScraperSearchModal] = useState(false);
+  const [scraperSearchResults, setScraperSearchResults] = useState(null);
+  const [isSearchingScraper, setIsSearchingScraper] = useState(false);
+  const [scraperHasResults, setScraperHasResults] = useState(false);
+
   // Fetch Stash URL from settings
   useEffect(() => {
     const fetchStashUrl = async () => {
@@ -183,6 +189,21 @@ export default function SceneDetail() {
         
         // Fetch clips for this scene to calculate aggregate rating
         fetchClipsAggregateRating(id);
+
+        // Background-check scraper for this file
+        if (json.data.path) {
+          const pathParts = json.data.path.split(/[\\/]/);
+          const filenameWithoutExt = pathParts[pathParts.length - 1].replace(/\.[^/.]+$/, '');
+          fetch(`${config.apiBaseUrl}/api/stash/scraper/gheaven/lookup-filename?filename=${encodeURIComponent(filenameWithoutExt)}`)
+            .then(r => r.json())
+            .then(result => {
+              if (result.success && result.count > 0) {
+                setScraperHasResults(true);
+                setScraperSearchResults(result);
+              }
+            })
+            .catch(() => {}); // silently ignore scraper errors
+        }
         
       } catch (e) {
         setError(e.message);
@@ -251,6 +272,51 @@ export default function SceneDetail() {
     setShowPerformerChoice(false);
   };
 
+  const handleApplyScraperTitle = (rawTitle) => {
+    const cleanTitle = rawTitle.replace(/:+$/, '').trim();
+    setShowScraperSearchModal(false);
+    handleParseFilename(cleanTitle);
+  };
+
+  const handleSearchScraper = async () => {
+    // If results were already pre-fetched on load, just open the modal
+    if (scraperSearchResults) {
+      setShowScraperSearchModal(true);
+      return;
+    }
+
+    if (!data?.path) {
+      toast.error('No file path available to search');
+      return;
+    }
+    const pathParts = data.path.split(/[\\/]/);
+    const fullFilename = pathParts[pathParts.length - 1];
+    const filenameWithoutExt = fullFilename.replace(/\.[^/.]+$/, '');
+
+    setIsSearchingScraper(true);
+    setScraperSearchResults(null);
+    setShowScraperSearchModal(true);
+
+    try {
+      const response = await fetch(
+        `${config.apiBaseUrl}/api/stash/scraper/gheaven/lookup-filename?filename=${encodeURIComponent(filenameWithoutExt)}`
+      );
+      const result = await response.json();
+      if (result.success) {
+        setScraperSearchResults(result);
+      } else {
+        toast.error(result.error || 'Search failed');
+        setScraperSearchResults({ success: false, data: [], count: 0 });
+      }
+    } catch (error) {
+      console.error('Error searching scraper:', error);
+      toast.error('Failed to connect to scraper service');
+      setScraperSearchResults({ success: false, data: [], count: 0 });
+    } finally {
+      setIsSearchingScraper(false);
+    }
+  };
+
   const handleParseFilename = async (customFilename = null) => {
     if (!data || !data.path) {
       alert('No file path available to parse');
@@ -271,6 +337,8 @@ export default function SceneDetail() {
         const fullFilename = pathParts[pathParts.length - 1];
         const filenameWithoutExt = fullFilename.replace(/\.[^/.]+$/, '');
         setEditedFilename(filenameWithoutExt);
+      } else {
+        setEditedFilename(customFilename);
       }
 
       const response = await fetch(`${config.apiBaseUrl}/api/stash/scenes/${id}/parse-filename`, {
@@ -2496,6 +2564,16 @@ export default function SceneDetail() {
               >
                 🌐 Scrape GEVI
               </button>
+
+              {scraperHasResults && (
+                <button
+                  onClick={handleSearchScraper}
+                  className="search-scraper-button"
+                  title="Show GHeaven scraper results for this filename"
+                >
+                  🔎 Search Scraper
+                </button>
+              )}
             </>
           )}
 
@@ -3288,6 +3366,100 @@ export default function SceneDetail() {
           sceneId={id}
           onClose={closePerformerOverlay}
         />
+      )}
+
+      {/* Scraper Search Modal */}
+      {showScraperSearchModal && (
+        <div className="modal-overlay" onClick={() => setShowScraperSearchModal(false)}>
+          <div className="modal-content scraper-search-modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '700px', width: '90%' }}>
+            <h3>🔎 Scraper Search Results</h3>
+            {isSearchingScraper ? (
+              <p style={{ textAlign: 'center', padding: '20px' }}>⏳ Searching...</p>
+            ) : scraperSearchResults ? (
+              scraperSearchResults.count === 0 ? (
+                <p style={{ textAlign: 'center', padding: '20px', color: '#9ca3af' }}>No matches found.</p>
+              ) : (
+                <div style={{ maxHeight: '60vh', overflowY: 'auto' }}>
+                  <p style={{ marginBottom: '12px', color: '#9ca3af', fontSize: '0.875rem' }}>
+                    {scraperSearchResults.count} result{scraperSearchResults.count !== 1 ? 's' : ''} found
+                  </p>
+                  {scraperSearchResults.data.map((item) => (
+                    <div
+                      key={item.id}
+                      style={{
+                        background: '#f3f4f6',
+                        border: '1px solid #d1d5db',
+                        borderRadius: '8px',
+                        padding: '14px',
+                        marginBottom: '12px',
+                      }}
+                    >
+                      {item.imageLink && (
+                        <img
+                          src={item.imageLink}
+                          alt={item.name || item.fileName}
+                          style={{ width: '100%', maxHeight: '180px', objectFit: 'cover', borderRadius: '4px', marginBottom: '10px' }}
+                          onError={(e) => { e.target.style.display = 'none'; }}
+                        />
+                      )}
+                      <div style={{ display: 'grid', gap: '6px', fontSize: '0.875rem', color: '#111827' }}>
+                        {item.name && (
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                            <span style={{ color: '#6b7280' }}>Title: </span>
+                            <strong>{item.name}</strong>
+                            <button
+                              onClick={() => handleApplyScraperTitle(item.name)}
+                              style={{
+                                marginLeft: 'auto',
+                                padding: '2px 10px',
+                                fontSize: '0.75rem',
+                                background: '#3b82f6',
+                                color: '#fff',
+                                border: 'none',
+                                borderRadius: '4px',
+                                cursor: 'pointer',
+                                whiteSpace: 'nowrap',
+                              }}
+                            >
+                              🔍 Parse as Filename
+                            </button>
+                          </div>
+                        )}
+                        {item.fileName && (
+                          <div><span style={{ color: '#6b7280' }}>File: </span><span style={{ fontFamily: 'monospace' }}>{item.fileName}{item.fileExt ? `.${item.fileExt}` : ''}</span></div>
+                        )}
+                        {item.cast && (
+                          <div><span style={{ color: '#6b7280' }}>Cast: </span>{item.cast}</div>
+                        )}
+                        {item.keywords && (
+                          <div><span style={{ color: '#6b7280' }}>Keywords: </span>{item.keywords}</div>
+                        )}
+                        {item.threadUrl && (
+                          <div>
+                            <a
+                              href={item.threadUrl}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              style={{ color: '#60a5fa' }}
+                            >
+                              View Thread ↗
+                            </a>
+                          </div>
+                        )}
+                        <div style={{ color: '#9ca3af', fontSize: '0.75rem' }}>
+                          Action: {item.action} &bull; {new Date(item.createdAt).toLocaleDateString()}
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )
+            ) : null}
+            <div style={{ textAlign: 'right', marginTop: '16px' }}>
+              <button className="modal-close" onClick={() => setShowScraperSearchModal(false)}>Close</button>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* Parse Filename Modal */}
