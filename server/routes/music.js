@@ -67,20 +67,25 @@ async function getUnplayedFilteredTracks(sectionKey, unplayedAlbums, unplayedArt
   }
 
   if (unplayedArtists) {
-    // Group by artist and check if ALL tracks by artist are unplayed
-    const artistTracks = {};
-    for (const track of allTracks) {
-      const artistKey = track.grandparentRatingKey || 'unknown';
-      if (!artistTracks[artistKey]) {
-        artistTracks[artistKey] = [];
+    // Fetch ALL tracks for the section (no rating filter) to correctly determine play history.
+    // The pre-filtered allTracks excludes low-rated played tracks, which would make a
+    // played artist appear unplayed if those tracks were their only played ones.
+    const allTracksForArtistCheck = await prisma.plexTrack.findMany({
+      where: sectionKey
+        ? { librarySection: { sectionKey: sectionKey }, removed: false }
+        : { removed: false },
+      select: { grandparentRatingKey: true, viewCount: true }
+    });
+
+    // Build a set of artist keys that have ANY played track in their entire catalog
+    const playedArtistKeys = new Set();
+    for (const track of allTracksForArtistCheck) {
+      if (track.viewCount && track.viewCount > 0) {
+        playedArtistKeys.add(track.grandparentRatingKey || 'unknown');
       }
-      artistTracks[artistKey].push(track);
     }
-    // An artist is unplayed only if ALL their tracks have viewCount null or 0
-    const unplayedArtistKeys = Object.keys(artistTracks).filter(key => 
-      artistTracks[key].every(t => !t.viewCount || t.viewCount === 0)
-    );
-    filteredTracks = filteredTracks.filter(t => unplayedArtistKeys.includes(t.grandparentRatingKey || 'unknown'));
+
+    filteredTracks = filteredTracks.filter(t => !playedArtistKeys.has(t.grandparentRatingKey || 'unknown'));
   }
 
   if (unplayedWorks) {

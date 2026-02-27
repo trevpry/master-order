@@ -37,6 +37,14 @@ const GlobalMusicPlayer = () => {
   const handlePreviousTrackRef = useRef(null);
   const togglePlayPauseRef = useRef(null);
 
+  // Refs mirroring casting state so playTrack (even inside setTimeout) always sees current values
+  const isCastingRef = useRef(false);
+  const castDeviceTypeRef = useRef('');
+  // Sonos polling refs
+  const sonosDeviceIdRef = useRef(null);
+  const sonosWasPlayingRef = useRef(false);
+  const sonosTrackStartTimeRef = useRef(0);
+
   // Function to get artwork URL for a track/media item
   const getArtworkUrl = (track) => {
     if (!track) return null;
@@ -398,24 +406,31 @@ const GlobalMusicPlayer = () => {
         throw new Error('Invalid track data');
       }
       
-      // Set audio source and play directly — don't wait for canplay which can
-      // fail to fire reliably (e.g. with preload="metadata") causing tracks to
-      // silently stop advancing.
+      // Set audio source — always update so seeking/duration work even on Sonos
       audio.src = streamUrl;
       audio.volume = volume;
 
-      try {
-        await audio.play();
-        setIsPlaying(true);
-        console.log('🎵 Successfully started playing:', track.title);
-      } catch (playError) {
-        if (playError.name === 'AbortError') {
-          // AbortError is expected when a newer play() call supersedes this one.
-          console.log('🎵 Playback aborted (superseded by newer request)');
-        } else if (playError.name === 'NotAllowedError') {
-          setError('Audio playback blocked. Please interact with the page first.');
-        } else {
-          setError(`Playback failed: ${playError.message}`);
+      // Only play locally when NOT casting to Sonos
+      if (isCastingRef.current && castDeviceTypeRef.current === 'sonos') {
+        console.log('🔊 Sonos active — skipping local audio.play() for:', track.title);
+        // Explicitly pause to prevent any accidental browser auto-play
+        audio.pause();
+        // Keep audio paused; SonosCastButton's useEffect will send the track to Sonos
+        setIsPlaying(true); // keep UI play-state in sync
+      } else {
+        try {
+          await audio.play();
+          setIsPlaying(true);
+          console.log('🎵 Successfully started playing:', track.title);
+        } catch (playError) {
+          if (playError.name === 'AbortError') {
+            // AbortError is expected when a newer play() call supersedes this one.
+            console.log('🎵 Playback aborted (superseded by newer request)');
+          } else if (playError.name === 'NotAllowedError') {
+            setError('Audio playback blocked. Please interact with the page first.');
+          } else {
+            setError(`Playback failed: ${playError.message}`);
+          }
         }
       }
     } catch (error) {
@@ -480,114 +495,92 @@ const GlobalMusicPlayer = () => {
   const handleNextTrack = async () => {
     const trackList = isShuffled ? shuffledTracks : tracks;
     if (!trackList.length) return;
-    
-    // Handle Sonos casting
-    if (isCasting && castDeviceType === 'sonos' && sonosDeviceRef) {
-      try {
-        const response = await fetch(`${config.apiBaseUrl}/api/sonos/next`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            deviceId: sonosDeviceRef.uuid || sonosDeviceRef.host
-          }),
-        });
-        
-        if (response.ok) {
-          // Update local state to match
-          let nextIndex;
-          if (isRepeat) {
-            nextIndex = currentTrackIndex;
-          } else if (currentTrackIndex < trackList.length - 1) {
-            nextIndex = currentTrackIndex + 1;
-          } else {
-            nextIndex = 0;
-          }
-          setCurrentTrackIndex(nextIndex);
-          setCurrentTrack(trackList[nextIndex]);
-          console.log('🔊 Sonos next track successful');
-        } else {
-          console.error('Failed to skip to next track on Sonos');
-        }
-      } catch (error) {
-        console.error('Error skipping Sonos track:', error);
-      }
-      return;
-    }
-    
-    // Handle local playback
+
+    // Compute next index (same logic for Sonos and local)
     let nextIndex;
     if (isRepeat) {
       nextIndex = currentTrackIndex;
     } else if (currentTrackIndex < trackList.length - 1) {
       nextIndex = currentTrackIndex + 1;
     } else {
-      nextIndex = 0; // Loop back to first track
+      nextIndex = 0;
     }
-    
+
     console.log('🎵 Moving to next track. Current index:', currentTrackIndex, 'Next index:', nextIndex);
     console.log('🎵 Next track will be:', trackList[nextIndex]?.title, 'by', trackList[nextIndex]?.artist);
-    
+
+    // playTrack handles both local and Sonos (skips audio.play() when Sonos is active;
+    // SonosCastButton's useEffect on currentTrack sends the new track to Sonos)
     playTrack(nextIndex);
   };
   
   const handlePreviousTrack = async () => {
     const trackList = isShuffled ? shuffledTracks : tracks;
     if (!trackList.length) return;
-    
-    // Handle Sonos casting
-    if (isCasting && castDeviceType === 'sonos' && sonosDeviceRef) {
-      try {
-        const response = await fetch(`${config.apiBaseUrl}/api/sonos/previous`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            deviceId: sonosDeviceRef.uuid || sonosDeviceRef.host
-          }),
-        });
-        
-        if (response.ok) {
-          // Update local state to match
-          let prevIndex;
-          if (currentTrackIndex > 0) {
-            prevIndex = currentTrackIndex - 1;
-          } else {
-            prevIndex = trackList.length - 1;
-          }
-          setCurrentTrackIndex(prevIndex);
-          setCurrentTrack(trackList[prevIndex]);
-          console.log('🔊 Sonos previous track successful');
-        } else {
-          console.error('Failed to skip to previous track on Sonos');
-        }
-      } catch (error) {
-        console.error('Error going to previous Sonos track:', error);
-      }
-      return;
-    }
-    
-    // Handle local playback
-    let prevIndex;
-    if (currentTrackIndex > 0) {
-      prevIndex = currentTrackIndex - 1;
-    } else {
-      prevIndex = trackList.length - 1; // Loop to last track
-    }
-    
+
+    // Compute previous index (same logic for Sonos and local)
+    const prevIndex = currentTrackIndex > 0 ? currentTrackIndex - 1 : trackList.length - 1;
+
     console.log('🎵 Moving to previous track. Current index:', currentTrackIndex, 'Previous index:', prevIndex);
     console.log('🎵 Previous track will be:', trackList[prevIndex]?.title, 'by', trackList[prevIndex]?.artist);
-    
+
     playTrack(prevIndex);
   };
   
+  // Record when we send a new track to Sonos so polling ignores the initial STOPPED state
+  // before Sonos has started playing.
+  useEffect(() => {
+    if (isCasting && castDeviceType === 'sonos' && currentTrack) {
+      sonosTrackStartTimeRef.current = Date.now();
+      sonosWasPlayingRef.current = false; // reset; Sonos hasn't started yet
+    }
+  }, [currentTrack?.ratingKey]);
+
+  // Poll Sonos transport state to detect end-of-track and auto-advance
+  useEffect(() => {
+    if (!isCasting || castDeviceType !== 'sonos') return;
+
+    const interval = setInterval(async () => {
+      const deviceId = sonosDeviceIdRef.current;
+      if (!deviceId) return;
+      try {
+        const res = await fetch(`${config.apiBaseUrl}/api/sonos/state/${encodeURIComponent(deviceId)}`);
+        if (!res.ok) return;
+        const data = await res.json();
+        const state = data.state; // e.g. 'PLAYING', 'STOPPED', 'PAUSED_PLAYBACK'
+
+        if (state === 'PLAYING') {
+          sonosWasPlayingRef.current = true;
+        } else if (
+          sonosWasPlayingRef.current &&
+          (state === 'STOPPED' || state === 'NO_MEDIA_PRESENT') &&
+          // Ignore STOPPED from before the track started (grace period: 4 s)
+          Date.now() - sonosTrackStartTimeRef.current > 4000
+        ) {
+          console.log('🔊 Sonos track ended — auto-advancing');
+          sonosWasPlayingRef.current = false;
+          handleNextTrackRef.current?.();
+        }
+      } catch (e) {
+        // Silently ignore polling errors (device may be temporarily unreachable)
+      }
+    }, 3000);
+
+    return () => clearInterval(interval);
+  }, [isCasting, castDeviceType]);
+
   const handleCastStateChange = (connected, deviceName, deviceType = 'chromecast', deviceRef = null) => {
     setIsCasting(connected);
     setCastDeviceName(deviceName);
     setCastDeviceType(connected ? deviceType : '');
     setSonosDeviceRef(deviceRef);
+    // Keep refs in sync so playTrack closures always see latest values
+    isCastingRef.current = connected;
+    castDeviceTypeRef.current = connected ? deviceType : '';
+    sonosDeviceIdRef.current = connected ? (deviceRef?.uuid || deviceRef?.host || null) : null;
+    if (!connected) {
+      sonosWasPlayingRef.current = false;
+    }
     
     if (connected) {
       // Pause local audio when casting
