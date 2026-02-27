@@ -108,6 +108,8 @@ export default function SceneDetail() {
   const [scraperHasResults, setScraperHasResults] = useState(false);
   // Keyword → tag matching state per result item { [itemId]: { matched, unmatched, loading, applying, expanded } }
   const [keywordTagResults, setKeywordTagResults] = useState({});
+  // Cast → performer matching state per result item
+  const [castPerformerResults, setCastPerformerResults] = useState({});
 
   // Fetch Stash URL from settings
   useEffect(() => {
@@ -306,13 +308,76 @@ export default function SceneDetail() {
     }
   };
 
+  const handleToggleKeywordTag = (itemId, tagId) => {
+    setKeywordTagResults(prev => {
+      const state = prev[itemId] || {};
+      const deselected = new Set(state.deselected || []);
+      if (deselected.has(tagId)) {
+        deselected.delete(tagId);
+      } else {
+        deselected.add(tagId);
+      }
+      return { ...prev, [itemId]: { ...state, deselected } };
+    });
+  };
+
+  const handleCreateTagFromKeyword = async (item, keyword) => {
+    const itemId = item.id;
+    const keywordName = typeof keyword === 'string' ? keyword : keyword.name;
+    setKeywordTagResults(prev => ({
+      ...prev,
+      [itemId]: { ...prev[itemId], creating: { ...(prev[itemId]?.creating || {}), [keywordName]: true } },
+    }));
+    try {
+      const response = await fetch(`${config.apiBaseUrl}/api/stash/tags/create`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: keywordName }),
+      });
+      const result = await response.json();
+      if (result.success && result.data) {
+        const tagData = result.data.tag || result.data;
+        const newTag = { id: tagData.id, name: tagData.name, isNew: true };
+        toast.success(`Created tag "${keywordName}"`);
+        setKeywordTagResults(prev => {
+          const state = prev[itemId] || {};
+          const matched = [...(state.matched || []), newTag];
+          const unmatched = (state.unmatched || []).filter(u => (typeof u === 'string' ? u : u.name) !== keywordName);
+          const creating = { ...(state.creating || {}), [keywordName]: false };
+          return { ...prev, [itemId]: { ...state, matched, unmatched, creating } };
+        });
+      } else {
+        toast.error(result.error || `Failed to create tag "${keywordName}"`);
+        setKeywordTagResults(prev => ({
+          ...prev,
+          [itemId]: { ...prev[itemId], creating: { ...(prev[itemId]?.creating || {}), [keywordName]: false } },
+        }));
+      }
+    } catch (err) {
+      console.error('Error creating tag:', err);
+      toast.error('Failed to create tag');
+      setKeywordTagResults(prev => ({
+        ...prev,
+        [itemId]: { ...prev[itemId], creating: { ...(prev[itemId]?.creating || {}), [keywordName]: false } },
+      }));
+    }
+  };
+
   const handleApplyKeywordTags = async (item) => {
     const itemId = item.id;
     const state = keywordTagResults[itemId];
     if (!state || !state.matched || state.matched.length === 0) return;
     setKeywordTagResults(prev => ({ ...prev, [itemId]: { ...prev[itemId], applying: true } }));
     try {
-      const tagIds = state.matched.map(t => t.id);
+      const deselected = state.deselected || new Set();
+      const toApply = state.matched.filter(t => !deselected.has(t.id));
+      if (toApply.length === 0) {
+        toast.error('No tags selected to apply');
+        setKeywordTagResults(prev => ({ ...prev, [itemId]: { ...prev[itemId], applying: false } }));
+        return;
+      }
+      // Deduplicate: multiple keywords can match the same tag
+      const tagIds = [...new Set(toApply.map(t => t.id))];
       const response = await fetch(`${config.apiBaseUrl}/api/stash/scenes/${id}/tags`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -334,6 +399,131 @@ export default function SceneDetail() {
       console.error('Error applying keyword tags:', err);
       toast.error('Failed to apply tags');
       setKeywordTagResults(prev => ({ ...prev, [itemId]: { ...prev[itemId], applying: false } }));
+    }
+  };
+
+  const handleMatchCast = async (item) => {
+    const itemId = item.id;
+    setCastPerformerResults(prev => ({ ...prev, [itemId]: { ...(prev[itemId] || {}), loading: true, expanded: true } }));
+    try {
+      const response = await fetch(`${config.apiBaseUrl}/api/stash/scraper/match-cast`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ cast: item.cast }),
+      });
+      const result = await response.json();
+      if (result.success) {
+        setCastPerformerResults(prev => ({
+          ...prev,
+          [itemId]: { matched: result.matched, unmatched: result.unmatched, loading: false, applying: false, expanded: true }
+        }));
+      } else {
+        toast.error(result.error || 'Failed to match cast');
+        setCastPerformerResults(prev => ({ ...prev, [itemId]: { ...(prev[itemId] || {}), loading: false } }));
+      }
+    } catch (err) {
+      console.error('Error matching cast:', err);
+      toast.error('Failed to match cast');
+      setCastPerformerResults(prev => ({ ...prev, [itemId]: { ...(prev[itemId] || {}), loading: false } }));
+    }
+  };
+
+  const handleToggleCastPerformer = (itemId, performerId) => {
+    setCastPerformerResults(prev => {
+      const state = prev[itemId] || {};
+      const deselected = new Set(state.deselected || []);
+      if (deselected.has(performerId)) {
+        deselected.delete(performerId);
+      } else {
+        deselected.add(performerId);
+      }
+      return { ...prev, [itemId]: { ...state, deselected } };
+    });
+  };
+
+  const handleCreatePerformerFromCast = async (item, performerName) => {
+    const itemId = item.id;
+    setCastPerformerResults(prev => ({
+      ...prev,
+      [itemId]: { ...prev[itemId], creating: { ...(prev[itemId]?.creating || {}), [performerName]: true } },
+    }));
+    try {
+      const response = await fetch(`${config.apiBaseUrl}/api/stash/performers/create`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: performerName }),
+      });
+      const result = await response.json();
+      if (result.success && result.data?.performer) {
+        const newPerformer = { id: result.data.performer.id, name: result.data.performer.name, isNew: true };
+        toast.success(`Created performer "${performerName}"`);
+        setCastPerformerResults(prev => {
+          const state = prev[itemId] || {};
+          const matched = [...(state.matched || []), newPerformer];
+          const unmatched = (state.unmatched || []).filter(u => (typeof u === 'string' ? u : u.name) !== performerName);
+          const creating = { ...(state.creating || {}), [performerName]: false };
+          return { ...prev, [itemId]: { ...state, matched, unmatched, creating } };
+        });
+      } else {
+        toast.error(result.error || `Failed to create performer "${performerName}"`);
+        setCastPerformerResults(prev => ({
+          ...prev,
+          [itemId]: { ...prev[itemId], creating: { ...(prev[itemId]?.creating || {}), [performerName]: false } },
+        }));
+      }
+    } catch (err) {
+      console.error('Error creating performer:', err);
+      toast.error('Failed to create performer');
+      setCastPerformerResults(prev => ({
+        ...prev,
+        [itemId]: { ...prev[itemId], creating: { ...(prev[itemId]?.creating || {}), [performerName]: false } },
+      }));
+    }
+  };
+
+  const handleApplyCastPerformers = async (item) => {
+    const itemId = item.id;
+    const state = castPerformerResults[itemId];
+    if (!state || !state.matched || state.matched.length === 0) return;
+    setCastPerformerResults(prev => ({ ...prev, [itemId]: { ...prev[itemId], applying: true } }));
+    try {
+      const deselected = state.deselected || new Set();
+      const toApply = state.matched.filter(p => !deselected.has(p.id));
+      if (toApply.length === 0) {
+        toast.error('No performers selected to apply');
+        setCastPerformerResults(prev => ({ ...prev, [itemId]: { ...prev[itemId], applying: false } }));
+        return;
+      }
+      let applied = 0;
+      let skipped = 0;
+      for (const performer of toApply) {
+        const res = await fetch(`${config.apiBaseUrl}/api/stash/scenes/${id}/performers`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ performerId: performer.id }),
+        });
+        const result = await res.json();
+        if (result.success) {
+          applied++;
+        } else if (result.error?.includes('already in this scene') || result.error?.includes('already')) {
+          skipped++;
+        } else {
+          toast.error(`Failed to add ${performer.name}: ${result.error}`);
+        }
+      }
+      if (applied > 0) {
+        toast.success(`Added ${applied} performer${applied !== 1 ? 's' : ''} to scene${skipped > 0 ? ` (${skipped} already present)` : ''}`);
+        const refreshed = await fetch(`${config.apiBaseUrl}/api/stash/scenes/${id}`);
+        const refreshedResult = await refreshed.json();
+        if (refreshedResult.success) setData(refreshedResult.data);
+      } else if (skipped > 0) {
+        toast.success('All selected performers already on scene');
+      }
+      setCastPerformerResults(prev => ({ ...prev, [itemId]: { ...prev[itemId], applying: false } }));
+    } catch (err) {
+      console.error('Error applying cast performers:', err);
+      toast.error('Failed to apply performers');
+      setCastPerformerResults(prev => ({ ...prev, [itemId]: { ...prev[itemId], applying: false } }));
     }
   };
 
@@ -3487,9 +3677,130 @@ export default function SceneDetail() {
                         {item.fileName && (
                           <div><span style={{ color: '#6b7280' }}>File: </span><span style={{ fontFamily: 'monospace' }}>{item.fileName}{item.fileExt ? `.${item.fileExt}` : ''}</span></div>
                         )}
-                        {item.cast && (
-                          <div><span style={{ color: '#6b7280' }}>Cast: </span>{item.cast}</div>
-                        )}
+                        {item.cast && (() => {
+                          const cpr = castPerformerResults[item.id];
+                          return (
+                            <div>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                                <span style={{ color: '#6b7280' }}>Cast: </span>
+                                <span>{item.cast}</span>
+                                <button
+                                  onClick={() => handleMatchCast(item)}
+                                  disabled={cpr?.loading}
+                                  style={{
+                                    marginLeft: 'auto',
+                                    padding: '2px 10px',
+                                    fontSize: '0.75rem',
+                                    background: '#ec4899',
+                                    color: '#fff',
+                                    border: 'none',
+                                    borderRadius: '4px',
+                                    cursor: cpr?.loading ? 'not-allowed' : 'pointer',
+                                    whiteSpace: 'nowrap',
+                                    opacity: cpr?.loading ? 0.6 : 1,
+                                  }}
+                                >
+                                  {cpr?.loading ? '⏳ Matching...' : '👤 Match Cast'}
+                                </button>
+                              </div>
+
+                              {/* Matched / unmatched cast results */}
+                              {cpr?.expanded && !cpr?.loading && (cpr?.matched?.length > 0 || cpr?.unmatched?.length > 0) && (
+                                <div style={{ marginTop: '8px', padding: '10px', background: '#fff', border: '1px solid #e5e7eb', borderRadius: '6px' }}>
+                                  {cpr.matched?.length > 0 && (() => {
+                                    const deselected = cpr.deselected || new Set();
+                                    const selectedCount = cpr.matched.filter(p => !deselected.has(p.id)).length;
+                                    return (
+                                      <div>
+                                        <div style={{ fontSize: '0.75rem', fontWeight: 600, color: '#065f46', marginBottom: '4px' }}>
+                                          ✓ Matched ({cpr.matched.length}) — click to deselect
+                                        </div>
+                                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px', marginBottom: '6px' }}>
+                                          {cpr.matched.map(p => {
+                                            const isDeselected = deselected.has(p.id);
+                                            return (
+                                              <span
+                                                key={p.id}
+                                                onClick={() => handleToggleCastPerformer(item.id, p.id)}
+                                                title={isDeselected ? 'Click to re-select' : 'Click to exclude from apply'}
+                                                style={{
+                                                  padding: '2px 8px',
+                                                  background: isDeselected ? '#f3f4f6' : (p.isNew ? '#dbeafe' : '#fce7f3'),
+                                                  color: isDeselected ? '#9ca3af' : (p.isNew ? '#1d4ed8' : '#9d174d'),
+                                                  borderRadius: '10px',
+                                                  fontSize: '0.75rem',
+                                                  cursor: 'pointer',
+                                                  border: isDeselected ? '1px dashed #d1d5db' : '1px solid transparent',
+                                                  textDecoration: isDeselected ? 'line-through' : 'none',
+                                                  userSelect: 'none',
+                                                  transition: 'all 0.15s',
+                                                }}
+                                              >
+                                                {isDeselected ? '✗ ' : '✓ '}{p.name}
+                                                {p.isNew && <span style={{ opacity: 0.7 }}> (new)</span>}
+                                                {!p.isNew && p.matchedVia === 'alias' && <span style={{ opacity: 0.7 }}> (via {p.matchedAlias})</span>}
+                                              </span>
+                                            );
+                                          })}
+                                        </div>
+                                        <button
+                                          onClick={() => handleApplyCastPerformers(item)}
+                                          disabled={cpr.applying || selectedCount === 0}
+                                          style={{
+                                            padding: '4px 14px',
+                                            fontSize: '0.8rem',
+                                            background: selectedCount === 0 ? '#9ca3af' : '#ec4899',
+                                            color: '#fff',
+                                            border: 'none',
+                                            borderRadius: '4px',
+                                            cursor: (cpr.applying || selectedCount === 0) ? 'not-allowed' : 'pointer',
+                                            opacity: cpr.applying ? 0.6 : 1,
+                                            marginTop: '2px',
+                                          }}
+                                        >
+                                          {cpr.applying ? '⏳ Applying...' : `✓ Add ${selectedCount} Performer${selectedCount !== 1 ? 's' : ''} to Scene`}
+                                        </button>
+                                      </div>
+                                    );
+                                  })()}
+                                  {cpr.unmatched?.length > 0 && (
+                                    <div style={{ marginTop: cpr.matched?.length > 0 ? '10px' : 0 }}>
+                                      <div style={{ fontSize: '0.75rem', fontWeight: 600, color: '#92400e', marginBottom: '4px' }}>✗ No match ({cpr.unmatched.length})</div>
+                                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
+                                        {cpr.unmatched.map((p, i) => {
+                                          const pname = typeof p === 'string' ? p : p.name;
+                                          const isCreating = cpr.creating?.[pname];
+                                          return (
+                                            <span key={i} style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', padding: '2px 8px', background: '#fef3c7', color: '#92400e', borderRadius: '10px', fontSize: '0.75rem', border: '1px dashed #f59e0b' }}>
+                                              {pname}
+                                              <button
+                                                onClick={() => handleCreatePerformerFromCast(item, pname)}
+                                                disabled={isCreating}
+                                                title={`Create performer "${pname}" in Stash`}
+                                                style={{
+                                                  padding: '0 4px',
+                                                  fontSize: '0.7rem',
+                                                  background: isCreating ? '#d1d5db' : '#6366f1',
+                                                  color: '#fff',
+                                                  border: 'none',
+                                                  borderRadius: '4px',
+                                                  cursor: isCreating ? 'not-allowed' : 'pointer',
+                                                  lineHeight: 1.4,
+                                                }}
+                                              >
+                                                {isCreating ? '⏳' : '+ Add'}
+                                              </button>
+                                            </span>
+                                          );
+                                        })}
+                                      </div>
+                                    </div>
+                                  )}
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })()}
                         {item.keywords && (() => {
                           const ktr = keywordTagResults[item.id];
                           return (
@@ -3520,49 +3831,96 @@ export default function SceneDetail() {
                               {/* Matched / unmatched tag results */}
                               {ktr?.expanded && !ktr?.loading && (ktr?.matched?.length > 0 || ktr?.unmatched?.length > 0) && (
                                 <div style={{ marginTop: '8px', padding: '10px', background: '#fff', border: '1px solid #e5e7eb', borderRadius: '6px' }}>
-                                  {ktr.matched?.length > 0 && (
-                                    <div>
-                                      <div style={{ fontSize: '0.75rem', fontWeight: 600, color: '#065f46', marginBottom: '4px' }}>✓ Matched ({ktr.matched.length})</div>
-                                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px', marginBottom: '6px' }}>
-                                        {ktr.matched.map(t => (
-                                          <span key={t.id} style={{ padding: '2px 8px', background: '#d1fae5', color: '#065f46', borderRadius: '10px', fontSize: '0.75rem' }}>
-                                            {t.name}
-                                            {t.matchedVia === 'alias' && <span style={{ opacity: 0.7 }}> (via {t.matchedAlias})</span>}
-                                          </span>
-                                        ))}
+                                  {ktr.matched?.length > 0 && (() => {
+                                    const deselected = ktr.deselected || new Set();
+                                    // Deduplicate by ID (multiple keywords can match the same tag)
+                                    const uniqueMatched = ktr.matched.filter((t, idx, arr) => arr.findIndex(x => x.id === t.id) === idx);
+                                    const selectedCount = uniqueMatched.filter(t => !deselected.has(t.id)).length;
+                                    return (
+                                      <div>
+                                        <div style={{ fontSize: '0.75rem', fontWeight: 600, color: '#065f46', marginBottom: '4px' }}>
+                                          ✓ Matched ({uniqueMatched.length}) — click to deselect
+                                        </div>
+                                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px', marginBottom: '6px' }}>
+                                          {uniqueMatched.map(t => {
+                                            const isDeselected = deselected.has(t.id);
+                                            return (
+                                              <span
+                                                key={t.id}
+                                                onClick={() => handleToggleKeywordTag(item.id, t.id)}
+                                                title={isDeselected ? 'Click to re-select' : 'Click to exclude from apply'}
+                                                style={{
+                                                  padding: '2px 8px',
+                                                  background: isDeselected ? '#f3f4f6' : (t.isNew ? '#dbeafe' : '#d1fae5'),
+                                                  color: isDeselected ? '#9ca3af' : (t.isNew ? '#1d4ed8' : '#065f46'),
+                                                  borderRadius: '10px',
+                                                  fontSize: '0.75rem',
+                                                  cursor: 'pointer',
+                                                  border: isDeselected ? '1px dashed #d1d5db' : '1px solid transparent',
+                                                  textDecoration: isDeselected ? 'line-through' : 'none',
+                                                  userSelect: 'none',
+                                                  transition: 'all 0.15s',
+                                                }}
+                                              >
+                                                {isDeselected ? '✗ ' : '✓ '}{t.name}
+                                                {t.isNew && <span style={{ opacity: 0.7 }}> (new)</span>}
+                                                {!t.isNew && t.matchedVia === 'alias' && <span style={{ opacity: 0.7 }}> (via {t.matchedAlias})</span>}
+                                              </span>
+                                            );
+                                          })}
+                                        </div>
+                                        <button
+                                          onClick={() => handleApplyKeywordTags(item)}
+                                          disabled={ktr.applying || selectedCount === 0}
+                                          style={{
+                                            padding: '4px 14px',
+                                            fontSize: '0.8rem',
+                                            background: selectedCount === 0 ? '#9ca3af' : '#10b981',
+                                            color: '#fff',
+                                            border: 'none',
+                                            borderRadius: '4px',
+                                            cursor: (ktr.applying || selectedCount === 0) ? 'not-allowed' : 'pointer',
+                                            opacity: ktr.applying ? 0.6 : 1,
+                                            marginTop: '2px',
+                                          }}
+                                        >
+                                          {ktr.applying ? '⏳ Applying...' : `✓ Apply ${selectedCount} Tag${selectedCount !== 1 ? 's' : ''} to Scene`}
+                                        </button>
                                       </div>
-                                    </div>
-                                  )}
+                                    );
+                                  })()}
                                   {ktr.unmatched?.length > 0 && (
-                                    <div>
+                                    <div style={{ marginTop: ktr.matched?.length > 0 ? '10px' : 0 }}>
                                       <div style={{ fontSize: '0.75rem', fontWeight: 600, color: '#92400e', marginBottom: '4px' }}>✗ No match ({ktr.unmatched.length})</div>
                                       <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px', marginBottom: '6px' }}>
-                                        {ktr.unmatched.map((t, i) => (
-                                          <span key={i} style={{ padding: '2px 8px', background: '#fef3c7', color: '#92400e', borderRadius: '10px', fontSize: '0.75rem', border: '1px dashed #f59e0b' }}>
-                                            {typeof t === 'string' ? t : t.name}
-                                          </span>
-                                        ))}
+                                        {ktr.unmatched.map((t, i) => {
+                                          const kname = typeof t === 'string' ? t : t.name;
+                                          const isCreating = ktr.creating?.[kname];
+                                          return (
+                                            <span key={i} style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', padding: '2px 8px', background: '#fef3c7', color: '#92400e', borderRadius: '10px', fontSize: '0.75rem', border: '1px dashed #f59e0b' }}>
+                                              {kname}
+                                              <button
+                                                onClick={() => handleCreateTagFromKeyword(item, kname)}
+                                                disabled={isCreating}
+                                                title={`Create tag "${kname}" in Stash`}
+                                                style={{
+                                                  padding: '0 4px',
+                                                  fontSize: '0.7rem',
+                                                  background: isCreating ? '#d1d5db' : '#6366f1',
+                                                  color: '#fff',
+                                                  border: 'none',
+                                                  borderRadius: '4px',
+                                                  cursor: isCreating ? 'not-allowed' : 'pointer',
+                                                  lineHeight: 1.4,
+                                                }}
+                                              >
+                                                {isCreating ? '⏳' : '+ Add'}
+                                              </button>
+                                            </span>
+                                          );
+                                        })}
                                       </div>
                                     </div>
-                                  )}
-                                  {ktr.matched?.length > 0 && (
-                                    <button
-                                      onClick={() => handleApplyKeywordTags(item)}
-                                      disabled={ktr.applying}
-                                      style={{
-                                        padding: '4px 14px',
-                                        fontSize: '0.8rem',
-                                        background: '#10b981',
-                                        color: '#fff',
-                                        border: 'none',
-                                        borderRadius: '4px',
-                                        cursor: ktr.applying ? 'not-allowed' : 'pointer',
-                                        opacity: ktr.applying ? 0.6 : 1,
-                                        marginTop: '2px',
-                                      }}
-                                    >
-                                      {ktr.applying ? '⏳ Applying...' : `✓ Apply ${ktr.matched.length} Tag${ktr.matched.length !== 1 ? 's' : ''} to Scene`}
-                                    </button>
                                   )}
                                 </div>
                               )}

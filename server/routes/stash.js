@@ -15112,6 +15112,69 @@ router.get('/scenes/duplicates/dismissed', asyncHandler(async (req, res) => {
   const scenePerformerRoutes = require('./stash/scenePerformers');
   router.use(scenePerformerRoutes);
 
+  // Match cast names from scraper results against local stash performers
+  router.post('/scraper/match-cast', asyncHandler(async (req, res) => {
+    const { cast } = req.body;
+    if (!cast) {
+      return sendBadRequest(res, 'cast is required');
+    }
+
+    const castList = Array.isArray(cast)
+      ? cast
+      : String(cast).split(',').map(n => n.trim()).filter(Boolean);
+
+    if (castList.length === 0) {
+      return res.json({ success: true, matched: [], unmatched: [] });
+    }
+
+    const allPerformers = await prisma.stashPerformer.findMany();
+
+    const matched = [];
+    const unmatched = [];
+
+    for (const castName of castList) {
+      const nameLower = castName.toLowerCase();
+      const nameNorm = nameLower.replace(/\s+/g, '');
+      let found = null;
+      let matchedVia = 'name';
+      let matchedAlias = null;
+
+      for (const p of allPerformers) {
+        // Check primary name
+        const pLower = p.name.toLowerCase();
+        if (pLower === nameLower || pLower.replace(/\s+/g, '') === nameNorm) {
+          found = p; matchedVia = 'name'; break;
+        }
+        // Check aliases
+        if (p.alias) {
+          const aliases = p.alias.split(',').map(a => a.trim());
+          for (const a of aliases) {
+            const aLower = a.toLowerCase();
+            if (aLower === nameLower || aLower.replace(/\s+/g, '') === nameNorm) {
+              found = p; matchedVia = 'alias'; matchedAlias = a; break;
+            }
+          }
+          if (found) break;
+        }
+        // Check name + disambiguation
+        if (p.disambiguation) {
+          const combined = `${p.name} ${p.disambiguation}`.toLowerCase();
+          if (combined === nameLower || combined.replace(/\s+/g, '') === nameNorm) {
+            found = p; matchedVia = 'name+disambiguation'; break;
+          }
+        }
+      }
+
+      if (found) {
+        matched.push({ id: found.id, name: found.name, matchedVia, matchedAlias });
+      } else {
+        unmatched.push(castName);
+      }
+    }
+
+    return res.json({ success: true, matched, unmatched });
+  }));
+
   // Match keywords from scraper results against local stash tags
   router.post('/scraper/match-keywords', asyncHandler(async (req, res) => {
     const { keywords } = req.body;
