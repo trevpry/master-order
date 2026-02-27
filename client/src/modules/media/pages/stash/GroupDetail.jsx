@@ -983,7 +983,7 @@ export default function GroupDetail() {
 
       {/* Scrape GEVI Modal */}
       {showScrapeModal && (
-        <div className="modal-overlay" onClick={() => setShowScrapeModal(false)}>
+        <div className="modal-overlay">
           <div className="modal-content" onClick={(e) => e.stopPropagation()}>
             <h2>🌐 Scrape Movie Metadata</h2>
             
@@ -1110,7 +1110,7 @@ export default function GroupDetail() {
 
       {/* Scrape Review Modal */}
       {showScrapeReviewModal && scrapeData && (
-        <div className="modal-overlay" onClick={() => setShowScrapeReviewModal(false)}>
+        <div className="modal-overlay">
           <div className="modal-content scrape-review-modal" onClick={(e) => e.stopPropagation()}>
             <h3>📋 Review Scraped Metadata</h3>
             {/* DEBUG: Log scrapeData on render */}

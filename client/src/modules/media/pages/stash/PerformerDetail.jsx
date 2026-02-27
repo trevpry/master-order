@@ -1935,7 +1935,7 @@ export default function PerformerDetail() {
 
       {/* Merge Performers Modal */}
       {showMergeModal && (
-        <div className="modal-overlay" onClick={() => !isMerging && setShowMergeModal(false)}>
+        <div className="modal-overlay">
           <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '700px', maxHeight: '80vh', overflow: 'auto' }}>
             <h3>
               {mergeDirection === 'into' 
@@ -2122,7 +2122,7 @@ export default function PerformerDetail() {
 
       {/* Merge Scenes Modal */}
       {showSceneMergeModal && (
-        <div className="modal-overlay" onClick={() => !isMergingScenes && setShowSceneMergeModal(false)}>
+        <div className="modal-overlay">
           <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '900px', maxHeight: '90vh', overflow: 'auto' }}>
             <h3>🔀 Merge {scenesToMerge.length} Scenes</h3>
             
@@ -2601,7 +2601,7 @@ export default function PerformerDetail() {
 
       {/* Stash-Box Search Modal */}
       {showStashBoxSearchModal && (
-        <div className="modal-overlay" onClick={() => setShowStashBoxSearchModal(false)}>
+        <div className="modal-overlay">
           <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '600px' }}>
             <h3>📦 {selectedStashBoxScraper?.name} Search</h3>
             
@@ -2687,7 +2687,7 @@ export default function PerformerDetail() {
 
       {/* Search Results Modal */}
       {showScrapeModal && searchResults && (
-        <div className="modal-overlay" onClick={() => setShowScrapeModal(false)}>
+        <div className="modal-overlay">
           <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '900px', maxHeight: '90vh', overflow: 'auto' }}>
             <h3>
               {searchResults.isStashBox ? '📦' : searchResults.isGevi ? '🎬' : '🔍'} {searchResults.source} Search Results
@@ -2812,7 +2812,7 @@ export default function PerformerDetail() {
 
       {/* Scrape Review Modal */}
       {showScrapeReviewModal && scrapeData && (
-        <div className="modal-overlay" onClick={() => !isApplyingScrape && setShowScrapeReviewModal(false)}>
+        <div className="modal-overlay">
           <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '800px', maxHeight: '90vh', overflow: 'auto' }}>
             <h3>📦 Review Scraped Data</h3>
             
@@ -3424,7 +3424,7 @@ export default function PerformerDetail() {
 
       {/* Name Conflict Resolution Modal */}
       {showConflictModal && conflictData && (
-        <div className="modal-overlay" onClick={() => setShowConflictModal(false)}>
+        <div className="modal-overlay">
           <div className="modal-content conflict-modal" onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
               <h2>⚠️ Performer Name Conflict</h2>

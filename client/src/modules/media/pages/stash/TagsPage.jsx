@@ -591,7 +591,7 @@ export default function TagsPage() {
 
       {/* Merge Confirmation Modal */}
       {showConfirmMerge && mergeData && (
-        <div className="modal-overlay" onClick={() => setShowConfirmMerge(false)}>
+        <div className="modal-overlay">
           <div className="modal-content" onClick={(e) => e.stopPropagation()}>
             <h2>🔀 Merge Tags</h2>
             <p>

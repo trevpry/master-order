@@ -15112,6 +15112,26 @@ router.get('/scenes/duplicates/dismissed', asyncHandler(async (req, res) => {
   const scenePerformerRoutes = require('./stash/scenePerformers');
   router.use(scenePerformerRoutes);
 
+  // Match keywords from scraper results against local stash tags
+  router.post('/scraper/match-keywords', asyncHandler(async (req, res) => {
+    const { keywords } = req.body;
+    if (!keywords) {
+      return sendBadRequest(res, 'keywords is required');
+    }
+
+    // Support comma-separated string or array
+    const keywordList = Array.isArray(keywords)
+      ? keywords
+      : String(keywords).split(',').map(k => k.trim()).filter(Boolean);
+
+    if (keywordList.length === 0) {
+      return res.json({ success: true, matched: [], unmatched: [] });
+    }
+
+    const { matched, unmatched } = await geviScraper.matchTags(keywordList, prisma);
+    return res.json({ success: true, matched, unmatched });
+  }));
+
   // Proxy: GHeaven scraper filename lookup
   router.get('/scraper/gheaven/lookup-filename', asyncHandler(async (req, res) => {
     const { filename } = req.query;

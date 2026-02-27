@@ -106,6 +106,8 @@ export default function SceneDetail() {
   const [scraperSearchResults, setScraperSearchResults] = useState(null);
   const [isSearchingScraper, setIsSearchingScraper] = useState(false);
   const [scraperHasResults, setScraperHasResults] = useState(false);
+  // Keyword → tag matching state per result item { [itemId]: { matched, unmatched, loading, applying, expanded } }
+  const [keywordTagResults, setKeywordTagResults] = useState({});
 
   // Fetch Stash URL from settings
   useEffect(() => {
@@ -276,6 +278,63 @@ export default function SceneDetail() {
     const cleanTitle = rawTitle.replace(/:+$/, '').trim();
     setShowScraperSearchModal(false);
     handleParseFilename(cleanTitle);
+  };
+
+  const handleMatchKeywords = async (item) => {
+    const itemId = item.id;
+    setKeywordTagResults(prev => ({ ...prev, [itemId]: { ...(prev[itemId] || {}), loading: true, expanded: true } }));
+    try {
+      const response = await fetch(`${config.apiBaseUrl}/api/stash/scraper/match-keywords`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ keywords: item.keywords }),
+      });
+      const result = await response.json();
+      if (result.success) {
+        setKeywordTagResults(prev => ({
+          ...prev,
+          [itemId]: { matched: result.matched, unmatched: result.unmatched, loading: false, applying: false, expanded: true }
+        }));
+      } else {
+        toast.error(result.error || 'Failed to match keywords');
+        setKeywordTagResults(prev => ({ ...prev, [itemId]: { ...(prev[itemId] || {}), loading: false } }));
+      }
+    } catch (err) {
+      console.error('Error matching keywords:', err);
+      toast.error('Failed to match keywords');
+      setKeywordTagResults(prev => ({ ...prev, [itemId]: { ...(prev[itemId] || {}), loading: false } }));
+    }
+  };
+
+  const handleApplyKeywordTags = async (item) => {
+    const itemId = item.id;
+    const state = keywordTagResults[itemId];
+    if (!state || !state.matched || state.matched.length === 0) return;
+    setKeywordTagResults(prev => ({ ...prev, [itemId]: { ...prev[itemId], applying: true } }));
+    try {
+      const tagIds = state.matched.map(t => t.id);
+      const response = await fetch(`${config.apiBaseUrl}/api/stash/scenes/${id}/tags`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tagIds }),
+      });
+      const result = await response.json();
+      if (result.success) {
+        toast.success(`Applied ${tagIds.length} tag${tagIds.length !== 1 ? 's' : ''} to scene`);
+        // Refresh scene data to show the new tags
+        const refreshed = await fetch(`${config.apiBaseUrl}/api/stash/scenes/${id}`);
+        const refreshedResult = await refreshed.json();
+        if (refreshedResult.success) setData(refreshedResult.data);
+        setKeywordTagResults(prev => ({ ...prev, [itemId]: { ...prev[itemId], applying: false } }));
+      } else {
+        toast.error(result.error || 'Failed to apply tags');
+        setKeywordTagResults(prev => ({ ...prev, [itemId]: { ...prev[itemId], applying: false } }));
+      }
+    } catch (err) {
+      console.error('Error applying keyword tags:', err);
+      toast.error('Failed to apply tags');
+      setKeywordTagResults(prev => ({ ...prev, [itemId]: { ...prev[itemId], applying: false } }));
+    }
   };
 
   const handleSearchScraper = async () => {
@@ -3330,7 +3389,7 @@ export default function SceneDetail() {
 
       {/* Performer Choice Modal */}
       {showPerformerChoice && clickedPerformer && (
-        <div className="modal-overlay" onClick={closePerformerChoice}>
+        <div className="modal-overlay">
           <div className="modal-content performer-choice-modal" onClick={(e) => e.stopPropagation()}>
             <h3>View Performer: {clickedPerformer.name}</h3>
             <div className="performer-choice-buttons">
@@ -3370,7 +3429,7 @@ export default function SceneDetail() {
 
       {/* Scraper Search Modal */}
       {showScraperSearchModal && (
-        <div className="modal-overlay" onClick={() => setShowScraperSearchModal(false)}>
+        <div className="modal-overlay">
           <div className="modal-content scraper-search-modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '700px', width: '90%' }}>
             <h3>🔎 Scraper Search Results</h3>
             {isSearchingScraper ? (
@@ -3431,9 +3490,85 @@ export default function SceneDetail() {
                         {item.cast && (
                           <div><span style={{ color: '#6b7280' }}>Cast: </span>{item.cast}</div>
                         )}
-                        {item.keywords && (
-                          <div><span style={{ color: '#6b7280' }}>Keywords: </span>{item.keywords}</div>
-                        )}
+                        {item.keywords && (() => {
+                          const ktr = keywordTagResults[item.id];
+                          return (
+                            <div>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                                <span style={{ color: '#6b7280' }}>Keywords: </span>
+                                <span>{item.keywords}</span>
+                                <button
+                                  onClick={() => handleMatchKeywords(item)}
+                                  disabled={ktr?.loading}
+                                  style={{
+                                    marginLeft: 'auto',
+                                    padding: '2px 10px',
+                                    fontSize: '0.75rem',
+                                    background: '#8b5cf6',
+                                    color: '#fff',
+                                    border: 'none',
+                                    borderRadius: '4px',
+                                    cursor: ktr?.loading ? 'not-allowed' : 'pointer',
+                                    whiteSpace: 'nowrap',
+                                    opacity: ktr?.loading ? 0.6 : 1,
+                                  }}
+                                >
+                                  {ktr?.loading ? '⏳ Matching...' : '🏷️ Match Tags'}
+                                </button>
+                              </div>
+
+                              {/* Matched / unmatched tag results */}
+                              {ktr?.expanded && !ktr?.loading && (ktr?.matched?.length > 0 || ktr?.unmatched?.length > 0) && (
+                                <div style={{ marginTop: '8px', padding: '10px', background: '#fff', border: '1px solid #e5e7eb', borderRadius: '6px' }}>
+                                  {ktr.matched?.length > 0 && (
+                                    <div>
+                                      <div style={{ fontSize: '0.75rem', fontWeight: 600, color: '#065f46', marginBottom: '4px' }}>✓ Matched ({ktr.matched.length})</div>
+                                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px', marginBottom: '6px' }}>
+                                        {ktr.matched.map(t => (
+                                          <span key={t.id} style={{ padding: '2px 8px', background: '#d1fae5', color: '#065f46', borderRadius: '10px', fontSize: '0.75rem' }}>
+                                            {t.name}
+                                            {t.matchedVia === 'alias' && <span style={{ opacity: 0.7 }}> (via {t.matchedAlias})</span>}
+                                          </span>
+                                        ))}
+                                      </div>
+                                    </div>
+                                  )}
+                                  {ktr.unmatched?.length > 0 && (
+                                    <div>
+                                      <div style={{ fontSize: '0.75rem', fontWeight: 600, color: '#92400e', marginBottom: '4px' }}>✗ No match ({ktr.unmatched.length})</div>
+                                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px', marginBottom: '6px' }}>
+                                        {ktr.unmatched.map((t, i) => (
+                                          <span key={i} style={{ padding: '2px 8px', background: '#fef3c7', color: '#92400e', borderRadius: '10px', fontSize: '0.75rem', border: '1px dashed #f59e0b' }}>
+                                            {typeof t === 'string' ? t : t.name}
+                                          </span>
+                                        ))}
+                                      </div>
+                                    </div>
+                                  )}
+                                  {ktr.matched?.length > 0 && (
+                                    <button
+                                      onClick={() => handleApplyKeywordTags(item)}
+                                      disabled={ktr.applying}
+                                      style={{
+                                        padding: '4px 14px',
+                                        fontSize: '0.8rem',
+                                        background: '#10b981',
+                                        color: '#fff',
+                                        border: 'none',
+                                        borderRadius: '4px',
+                                        cursor: ktr.applying ? 'not-allowed' : 'pointer',
+                                        opacity: ktr.applying ? 0.6 : 1,
+                                        marginTop: '2px',
+                                      }}
+                                    >
+                                      {ktr.applying ? '⏳ Applying...' : `✓ Apply ${ktr.matched.length} Tag${ktr.matched.length !== 1 ? 's' : ''} to Scene`}
+                                    </button>
+                                  )}
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })()}
                         {item.threadUrl && (
                           <div>
                             <a
@@ -3464,7 +3599,7 @@ export default function SceneDetail() {
 
       {/* Parse Filename Modal */}
       {showParseModal && parseData && (
-        <div className="modal-overlay" onClick={() => setShowParseModal(false)}>
+        <div className="modal-overlay">
           <div className="modal-content parse-filename-modal" onClick={(e) => e.stopPropagation()}>
             <h3>📋 Review Parsed Filename</h3>
             
@@ -3711,7 +3846,7 @@ export default function SceneDetail() {
 
       {/* Scrape URL Input Modal (Generic for all scrapers) */}
       {showScrapeModal && (
-        <div className="modal-overlay" onClick={() => setShowScrapeModal(false)}>
+        <div className="modal-overlay">
           <div className="modal-content scrape-url-modal" onClick={(e) => e.stopPropagation()}>
             <h3>🌐 Scrape {selectedScraper ? selectedScraper.siteName : 'GEVI'} Metadata</h3>
             
@@ -4108,7 +4243,7 @@ export default function SceneDetail() {
 
       {/* Stash-Box Search Options Modal */}
       {showStashBoxSearchModal && selectedStashBoxScraper && (
-        <div className="modal-overlay" onClick={() => setShowStashBoxSearchModal(false)}>
+        <div className="modal-overlay">
           <div className="modal-content scrape-url-modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '600px' }}>
             <h3>📦 {selectedStashBoxScraper.name} Search Options</h3>
             
@@ -4302,7 +4437,7 @@ export default function SceneDetail() {
 
       {/* Scrape Review Modal */}
       {showScrapeReviewModal && scrapeData && (
-        <div className="modal-overlay" onClick={() => setShowScrapeReviewModal(false)}>
+        <div className="modal-overlay">
           <div className="modal-content scrape-review-modal" onClick={(e) => e.stopPropagation()}>
             <h3>📋 Review Scraped Metadata</h3>
             
@@ -5163,7 +5298,7 @@ export default function SceneDetail() {
 
       {/* Set/Update GEVI URL Modal */}
       {showGeviUrlModal && (
-        <div className="modal-overlay" onClick={() => setShowGeviUrlModal(false)}>
+        <div className="modal-overlay">
           <div className="modal-content" onClick={(e) => e.stopPropagation()}>
             <h3>🔗 {data?.geviUrl ? 'Update' : 'Set'} GEVI URL</h3>
             
@@ -5205,7 +5340,7 @@ export default function SceneDetail() {
 
       {/* URL Editor Modal */}
       {showUrlEditorModal && (
-        <div className="modal-overlay" onClick={() => !isSavingUrls && setShowUrlEditorModal(false)}>
+        <div className="modal-overlay">
           <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '700px', maxHeight: '80vh', overflow: 'auto' }}>
             <h3>✏️ Edit Scene URLs</h3>
             
@@ -5317,7 +5452,7 @@ export default function SceneDetail() {
 
       {/* Studio Editor Modal */}
       {showStudioEditorModal && (
-        <div className="modal-overlay" onClick={() => !isUpdatingStudio && setShowStudioEditorModal(false)}>
+        <div className="modal-overlay">
           <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '600px', maxHeight: '80vh', overflow: 'auto' }}>
             <h3>🏢 Edit Studio</h3>
             
@@ -5426,7 +5561,7 @@ export default function SceneDetail() {
 
       {/* Group/Movie Search Modal */}
       {showGroupSearchModal && (
-        <div className="modal-overlay" onClick={() => !isAddingGroup && setShowGroupSearchModal(false)}>
+        <div className="modal-overlay">
           <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '800px', maxHeight: '80vh', overflow: 'auto' }}>
             <h3>🎬 Add Group/Movie</h3>
             
@@ -5554,7 +5689,7 @@ export default function SceneDetail() {
 
       {/* Delete Scene Confirmation Modal */}
       {showDeleteModal && (
-        <div className="modal-overlay" onClick={() => !isDeleting && setShowDeleteModal(false)}>
+        <div className="modal-overlay">
           <div className="modal-content" onClick={(e) => e.stopPropagation()}>
             <h3 style={{ color: '#ef4444' }}>🗑️ Delete Scene</h3>
             

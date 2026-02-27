@@ -651,7 +651,7 @@ export default function ScenesPage() {
 
       {/* Scene Modal Placeholder - Would need full modal implementation */}
       {selectedScene && (
-        <div className="modal-overlay" onClick={() => setSelectedScene(null)}>
+        <div className="modal-overlay">
           <div className="modal-content" onClick={(e) => e.stopPropagation()}>
             <h2>{selectedScene.title || 'Scene'}</h2>
             <p>Scene playback modal would go here</p>

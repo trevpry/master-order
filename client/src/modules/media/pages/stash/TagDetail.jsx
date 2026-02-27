@@ -811,7 +811,7 @@ export default function TagDetail() {
 
       {/* Merge Modal */}
       {showMergeModal && (
-        <div className="modal-overlay" onClick={handleMergeCancel}>
+        <div className="modal-overlay">
           <div className="modal-content" onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
               <h2>Merge "{data.name}" Into Another Tag</h2>

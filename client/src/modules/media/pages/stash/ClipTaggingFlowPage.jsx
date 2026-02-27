@@ -201,6 +201,19 @@ export default function ClipTaggingFlowPage() {
       .filter(Boolean);
   };
 
+  const getIncomingConnections = (tagId) => {
+    const incoming = [];
+    Object.keys(tagConnections).forEach(sourceId => {
+      if ((tagConnections[sourceId] || []).includes(tagId)) {
+        const sourceTag = workflowTags.find(t => t.id === parseInt(sourceId) || t.id === sourceId);
+        if (sourceTag) {
+          incoming.push(sourceTag);
+        }
+      }
+    });
+    return incoming;
+  };
+
   // Calculate mind map layout positions
   const getMindMapLayout = () => {
     if (workflowTags.length === 0) return [];
@@ -427,7 +440,7 @@ export default function ClipTaggingFlowPage() {
 
           <div className="workflow-visual-area">
             {/* SVG for connection lines */}
-            <svg className="connection-lines-svg">
+            <svg className="connection-lines-svg" style={{ width: '2000px', height: '1000px' }}>
               {Object.keys(tagConnections).map(sourceId => {
                 const sourcePos = tagPositions[sourceId];
                 if (!sourcePos) return null;
@@ -505,11 +518,10 @@ export default function ClipTaggingFlowPage() {
               <div className="mindmap-container">
                 {getMindMapLayout().map((tag, index) => {
                   const connectedTags = getConnectedTags(tag.id);
+                  const incomingTags = getIncomingConnections(tag.id);
                   const isDragging = draggedTag?.id === tag.id;
-                  const hasConnections = connectedTags.length > 0;
-                  const isConnectedTo = Object.keys(tagConnections).some(
-                    sourceId => tagConnections[sourceId]?.includes(tag.id)
-                  );
+                  const hasConnections = connectedTags.length > 0 || incomingTags.length > 0;
+                  const isConnectedTo = incomingTags.length > 0;
                   
                   // Generate color based on level
                   const colors = [
@@ -542,9 +554,11 @@ export default function ClipTaggingFlowPage() {
                           <div className="mindmap-node-number">{index + 1}</div>
                           <div className="mindmap-node-content">
                             <div className="mindmap-node-name">{tag.name}</div>
-                            {connectedTags.length > 0 && (
+                            {(connectedTags.length > 0 || incomingTags.length > 0) && (
                               <div className="mindmap-node-meta">
-                                {connectedTags.length} connection{connectedTags.length !== 1 ? 's' : ''}
+                                {connectedTags.length > 0 && `${connectedTags.length} out`}
+                                {connectedTags.length > 0 && incomingTags.length > 0 && ' · '}
+                                {incomingTags.length > 0 && `${incomingTags.length} in`}
                               </div>
                             )}
                           </div>
@@ -569,23 +583,46 @@ export default function ClipTaggingFlowPage() {
                       </div>
 
                       {/* Hover tooltip with connections */}
-                      {connectedTags.length > 0 && (
+                      {(connectedTags.length > 0 || incomingTags.length > 0) && (
                         <div className="mindmap-node-tooltip">
-                          <div className="tooltip-title">Leads to:</div>
-                          {connectedTags.map(connectedTag => (
-                            <div key={connectedTag.id} className="tooltip-connection">
-                              → {connectedTag.name}
-                              <button
-                                className="tooltip-remove"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  removeConnection(tag.id, connectedTag.id);
-                                }}
-                              >
-                                ✕
-                              </button>
-                            </div>
-                          ))}
+                          {connectedTags.length > 0 && (
+                            <>
+                              <div className="tooltip-title">Leads to:</div>
+                              {connectedTags.map(connectedTag => (
+                                <div key={`out-${connectedTag.id}`} className="tooltip-connection">
+                                  → {connectedTag.name}
+                                  <button
+                                    className="tooltip-remove"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      removeConnection(tag.id, connectedTag.id);
+                                    }}
+                                  >
+                                    ✕
+                                  </button>
+                                </div>
+                              ))}
+                            </>
+                          )}
+                          {incomingTags.length > 0 && (
+                            <>
+                              <div className="tooltip-title" style={{ marginTop: connectedTags.length > 0 ? '0.5rem' : 0 }}>Comes from:</div>
+                              {incomingTags.map(incomingTag => (
+                                <div key={`in-${incomingTag.id}`} className="tooltip-connection tooltip-incoming">
+                                  ← {incomingTag.name}
+                                  <button
+                                    className="tooltip-remove"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      removeConnection(incomingTag.id, tag.id);
+                                    }}
+                                  >
+                                    ✕
+                                  </button>
+                                </div>
+                              ))}
+                            </>
+                          )}
                         </div>
                       )}
                     </div>

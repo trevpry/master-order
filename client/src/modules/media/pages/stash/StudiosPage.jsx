@@ -400,7 +400,7 @@ export default function StudiosPage() {
 
       {/* Merge Modal */}
       {showMergeModal && (
-        <div className="modal-overlay" onClick={() => !isMerging && setShowMergeModal(false)}>
+        <div className="modal-overlay">
           <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '600px' }}>
             <h3>🔀 Merge {studiosToMerge.length} Studios</h3>
             
@@ -488,7 +488,7 @@ export default function StudiosPage() {
 
       {/* Create Studio Modal */}
       {showCreateModal && (
-        <div className="modal-overlay" onClick={() => !isCreating && setShowCreateModal(false)}>
+        <div className="modal-overlay">
           <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '500px' }}>
             <h3>➕ Add New Studio</h3>
             
