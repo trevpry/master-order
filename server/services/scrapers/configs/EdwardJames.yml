@@ -1,0 +1,67 @@
+name: Edward James
+sceneByURL:
+  - action: scrapeXPath
+    url:
+      - edwardjames.com/videos
+    scraper: video
+performerByURL:
+  - action: scrapeXPath
+    url:
+      - men.treasureislandmedia.com/men/
+    scraper: tim
+xPathScrapers:
+  video:
+    scene:
+      Title: &title //div[@class="text-center text-uppercase"]/div/h1/text()
+      Details:
+        selector: //p[@class="description"]/text()
+      URL: //link[@rel="canonical"]/@href
+      Date: &date
+        selector: //ul[@class="info-wrapper"]/li[2]/span/text()
+        postProcess:
+          - parseDate: January 2, 2006
+      Performers:
+        Name:
+          selector: //a[@class="model-name-link"]/h5
+        URL:
+          selector: //a[@class="model-name-link"]/@href  
+          postProcess:
+          - replace:
+              - regex: ^
+                with: "https://edwardjames.com"
+      Image:
+        selector: //meta[@property="og:image"]/@content
+      Studio: &studio
+        Name:
+          fixed: "Edward James"
+      Tags:
+        Name: //a[@class="tag-name"]/text()
+    performer:
+      Name: //div[contains(@class,'model-profile-top')]//h3/text()
+      URLs: //link[contains(@rel,'canonical')]/@href
+      Country: //span[contains(@style,"777777")]/text()
+      Gender:
+        fixed: Male
+      Circumcised: //div[contains(@class,'bio-content')]//li[contains(.,'Cock type')]/span
+      HairColor: //div[contains(@class,'bio-content')]//li[contains(.,'Hair color')]/span
+      EyeColor: //div[contains(@class,'bio-content')]//li[contains(.,'Eye color')]/span
+      Ethnicity: //div[contains(@class,'bio-content')]//li[contains(.,'Ethnicity')]/span
+      Details: //div[contains(@class,'summary')]//p/text()
+      Height:
+        selector: //div[contains(@class,'bio-content')]//li[contains(.,'Height')]/span
+        postProcess:
+          - feetToCm: true
+      Weight:
+        selector: //div[contains(@class,'bio-content')]//li[contains(.,'Weight')]/span
+        postProcess:
+          - lbToKg: true
+      Measurements:
+        selector: //div[contains(@class,'bio-content')]//li[contains(.,'Length')]/span
+        postProcess:
+          - replace:
+              - regex: (^.*$)
+                with: 0'$1
+          - feetToCm: true
+      Image:
+        selector: //*[@id="top-content-outer-wrap"]/div/div[1]/div[2]/div/div/a/@href
+# Last Updated September 17, 2025

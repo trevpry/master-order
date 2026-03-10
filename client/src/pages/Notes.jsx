@@ -25,8 +25,9 @@ import NoteEditor from '../components/notes/NoteEditor';
 import NoteFolders from '../components/notes/NoteFolders';
 import NotesList from '../components/notes/NotesList';
 import NotePreview from '../components/notes/NotePreview';
+import config from '../config';
 
-const API_BASE = 'http://localhost:3001/api/notes';
+const API_BASE = `${config.apiBaseUrl}/api/notes`;
 
 const Notes = () => {
   const [activeView, setActiveView] = useState('all'); // all, recent, favorites, journal

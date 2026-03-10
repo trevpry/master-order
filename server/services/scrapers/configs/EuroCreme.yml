@@ -1,10 +1,4 @@
-name: GayNetwork
-performerByURL:
-  - action: scrapeXPath
-    scraper: sceneScraper
-    url:
-      # Taken from https://www.gaynetwork.com/en/sites on 2025-05-17
-      - berryboys.fr/en/modeles/detail/
+name: EuroCreme
 sceneByFragment:
   - action: scrapeXPath
     scraper: sceneScraper
@@ -21,62 +15,12 @@ sceneByURL:
   - action: scrapeXPath
     scraper: sceneScraper
     url:
-      # Taken from https://www.gaynetwork.com/en/sites on 2025-05-17
-      - rawhole.com/scenes/
-      - sdboy.com/scenes/
-      - berryboys.fr/en/videos/
       - eurocreme.com/en/videos/
-movieByURL:
-  - action: scrapeXPath
-    scraper: movieScraper
-    url:
-      - adamjacques.fr/en/dvd/detail/
-      - alphamales.com/en/dvd/detail/
-      - andolinixxl.com/en/dvd/detail/
-      - attackboys.com/en/dvd/detail/
-      - berryboys.fr/en/dvd/detail/
-      - bolatino.com/en/dvd/detail/
-      - bravofucker.com/en/dvd/detail/
-      - brett-tyler.com/en/dvd/detail/
-      - bulldogxxx.com/en/dvd/detail/
-      - cadinot.fr/en/dvd/detail/
-      - cazzofilm.com/en/dvd/detail/
-      - citebeur.com/en/dvd/detail/
-      - clairprod.com/en/dvd/detail/
-      - cocksuckerprod.com/en/dvd/detail/
-      - crunchboy.com/en/dvd/detail/
-      - darkcruising.com/en/dvd/detail/
-      - enzorimenez.com/en/dvd/detail/
-      - eurocreme.com/en/dvd/detail/
-      - frenchporn.fr/en/dvd/detail/
-      - gayarabclub.com/en/dvd/detail/
-      - gayfrenchkiss.fr/en/dvd/detail/
-      - gaynetwork.com/en/dvd/detail/
-      - hardkinks.com/en/dvd/detail/
-      - harlemsex.com/en/dvd/detail/
-      - hotcast.fr/en/dvd/detail/
-      - jessroyan.com/en/dvd/detail/
-      - jnrc.fr/en/dvd/detail/
-      - kinkytwink.com/en/dvd/detail/
-      - mackstudio.com/en/dvd/detail/
-      - maxence-angel.com/en/dvd/detail/
-      - menoboy.com/en/dvd/detail/
-      - mika-ayden.com/en/dvd/detail/
-      - militarygayxxx.com/en/dvd/detail/
-      - mistermale.com/en/dvd/detail/
-      - philippwants.com/en/dvd/detail/
-      - rawfuck.com/en/dvd/detail/
-      - ridleydovarez.com/en/dvd/detail/
-      - sketboy.com/en/dvd/detail/
-      - universblack.com/en/dvd/detail/
-      - viktor-rom.com/en/dvd/detail/
-      - vintagegaymovies.com/en/dvd/detail/
-      - wurstfilm.com/en/dvd/detail/
 xPathScrapers:
   sceneScraper:
     scene:
-      Title: //div[@class="product-page vid-block"]//h1/text()
-      Details: //div[@class="description"]/text()
+      Title: //h1[@class="mt-3 mb-1 h5"]/text()
+      Details: //span[@class="lh15 opacity-70"]/text()
       URL: &url //link[@rel="alternate" and hreflang="en"]/@href
       # Date: &date
       #   selector: //script[@type="application/ld+json"]/text()
@@ -85,19 +29,29 @@ xPathScrapers:
       #         - regex: .*"datePublished"\s*:\s*"([^"]+)".*
       #           with: $1
       Image:
-        selector: //video/@poster
+        selector: //img[@class="rounded embed-responsive-item bg-dark border-border-dark obj-adapt"]/@src
       Studio:
-        Name: //a[@class="site-logo"]/img/@alt
+        Name:
+          fixed: "EuroCreme"
       Performers:
         Name: //div[contains(@class, "text-terciary") and contains(@class, "text-truncate")]
         URL: //div[@class="mt-4"]//a[contains(@class, "h100")]/@href
       Tags:
         Name: 
-          selector: //li[@class="clearfix list-group-item cat"]/a/text()
+          selector: //h3[@class="h120"]/text()
+      Groups:
+        Name: 
+          selector: //h3[@class="h90"]/text()
           postProcess:
-          - replace:
-              - regex: "#"
+            - replace:
+              - regex: "DVD: "
                 with: ""
+        URL:
+          selector: //a[@class="p-0 mr-1 btn btn-sm btn-link"]/@href   
+          postProcess:
+            - replace:
+              - regex: ^
+                with: "https://www.eurocreme.com" 
   movieScraper:
     movie:
       Title: 

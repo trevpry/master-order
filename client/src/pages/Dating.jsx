@@ -39,8 +39,9 @@ import EncounterForm from '../components/EncounterForm';
 import ConnectionsMap from '../components/ConnectionsMap';
 import EnhancedConnectionManager from '../components/EnhancedConnectionManager';
 import ScreenshotImporter from '../components/ScreenshotImporter';
+import config from '../config';
 
-const API_BASE = 'http://localhost:3001/api/dating';
+const API_BASE = `${config.apiBaseUrl}/api/dating`;
 
 const Dating = () => {
   const [activeTab, setActiveTab] = useState('connections');
