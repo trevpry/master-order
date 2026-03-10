@@ -12,8 +12,9 @@ services:
     ports:
       - "3001:3001"
     volumes:
-      # Only mount the database for persistence
+      # Database and uploads persistence
       - ./master_order.db:/app/master_order.db
+      - ./data:/app/data
     environment:
       - NODE_ENV=production
       - PORT=3001

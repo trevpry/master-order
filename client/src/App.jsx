@@ -43,6 +43,9 @@ import CalendarHome from './modules/calendar/pages/CalendarHome';
 import Locations from './modules/locations/pages/Locations';
 import EddieSettings from './modules/eddie/pages/EddieSettings';
 import Dating from './pages/Dating';
+import ConnectionDetail from './pages/ConnectionDetail';
+import DateDetail from './pages/DateDetail';
+import EncounterDetail from './pages/EncounterDetail';
 import HistoryPlusHome from './modules/history-plus/pages/HistoryPlusHome';
 import Timeline from './modules/history-plus/pages/Timeline';
 import Videos from './modules/history-plus/pages/Videos';
@@ -116,6 +119,9 @@ function App() {
           <Route path="/calendar" element={<CalendarHome />} />
           <Route path="/locations" element={<Locations />} />
           <Route path="/dating" element={<Dating />} />
+          <Route path="/dating/connections/:id" element={<ConnectionDetail />} />
+          <Route path="/dating/dates/:id" element={<DateDetail />} />
+          <Route path="/dating/encounters/:id" element={<EncounterDetail />} />
           <Route path="/history-plus" element={<HistoryPlusHome />} />
           <Route path="/history-plus/timeline" element={<Timeline />} />
           <Route path="/history-plus/videos" element={<Videos />} />

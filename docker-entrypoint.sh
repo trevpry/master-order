@@ -31,6 +31,7 @@ echo "[INFO] Ensuring required directories exist with correct permissions..."
 mkdir -p /app/server/artwork-cache
 mkdir -p /app/logs
 mkdir -p /app/data
+mkdir -p /app/data/uploads/connection-photos
 
 # Set ownership if running as root (will be changed by USER directive)
 if [ "$(id -u)" = "0" ]; then

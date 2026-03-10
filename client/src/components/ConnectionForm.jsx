@@ -9,6 +9,7 @@ const ConnectionForm = ({ isOpen, onClose, onSave, connection = null, userId = 1
     guyName: '',
     appId: '',
     age: '',
+    phoneNumber: '',
     location: '',
     profileUrl: '',
     bio: '',
@@ -55,6 +56,7 @@ const ConnectionForm = ({ isOpen, onClose, onSave, connection = null, userId = 1
           guyName: connection.guyName || '',
           appId: connection.appId || '',
           age: connection.age || '',
+          phoneNumber: connection.phoneNumber || '',
           location: connection.location || '',
           profileUrl: connection.profileUrl || '',
           bio: connection.bio || '',
@@ -135,6 +137,7 @@ const ConnectionForm = ({ isOpen, onClose, onSave, connection = null, userId = 1
             guyName: '',
             appId: '',
             age: '',
+            phoneNumber: '',
             location: '',
             profileUrl: '',
             bio: '',
@@ -318,6 +321,20 @@ const ConnectionForm = ({ isOpen, onClose, onSave, connection = null, userId = 1
                 max="100"
                 className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-pink-500"
                 placeholder="Age"
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Phone Number
+              </label>
+              <input
+                type="tel"
+                name="phoneNumber"
+                value={formData.phoneNumber}
+                onChange={handleInputChange}
+                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-pink-500"
+                placeholder="Phone number"
               />
             </div>
 

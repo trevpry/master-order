@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { Link } from 'react-router-dom';
 import { 
   Heart, 
   MessageCircle, 
@@ -30,7 +31,8 @@ import {
   ChevronDown,
   Calendar as CalendarIcon,
   Sparkles,
-  Camera
+  Camera,
+  X
 } from 'lucide-react';
 import Button from '../components/Button';
 import ConnectionForm from '../components/ConnectionForm';
@@ -72,8 +74,14 @@ const Dating = () => {
   
   // Filter states
   const [connectionFilter, setConnectionFilter] = useState('all');
+  const [appFilter, setAppFilter] = useState('all');
   const [dateFilter, setDateFilter] = useState('all');
   const [searchQuery, setSearchQuery] = useState('');
+
+  // App management states
+  const [showAppForm, setShowAppForm] = useState(false);
+  const [editingApp, setEditingApp] = useState(null);
+  const [appFormData, setAppFormData] = useState({ name: '', description: '' });
   
   // User state
   const [userId, setUserId] = useState(1);
@@ -156,11 +164,70 @@ const Dating = () => {
     }
   };
 
+  const loadApps = async () => {
+    try {
+      const response = await fetch(`${API_BASE}/apps`);
+      if (response.ok) {
+        const data = await response.json();
+        setDatingApps(data);
+      }
+    } catch (error) {
+      console.error('Error loading apps:', error);
+    }
+  };
+
   // Form handlers
   const openAddForm = (type) => {
     if (type === 'connection') setShowConnectionForm(true);
     else if (type === 'date') setShowDateForm(true);
     else if (type === 'encounter') setShowEncounterForm(true);
+  };
+
+  const openAddAppForm = () => {
+    setEditingApp(null);
+    setAppFormData({ name: '', description: '' });
+    setShowAppForm(true);
+  };
+
+  const handleSaveApp = async (e) => {
+    e.preventDefault();
+    try {
+      const url = editingApp ? `${API_BASE}/apps/${editingApp.id}` : `${API_BASE}/apps`;
+      const method = editingApp ? 'PUT' : 'POST';
+      const response = await fetch(url, {
+        method,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(appFormData)
+      });
+      if (response.ok) {
+        await loadApps();
+        setShowAppForm(false);
+        setEditingApp(null);
+        setAppFormData({ name: '', description: '' });
+      } else {
+        const error = await response.json();
+        alert(error.error || 'Failed to save app');
+      }
+    } catch (error) {
+      console.error('Error saving app:', error);
+      alert('Failed to save app');
+    }
+  };
+
+  const handleDeleteApp = async (id) => {
+    if (!window.confirm('Are you sure you want to delete this app?')) return;
+    try {
+      const response = await fetch(`${API_BASE}/apps/${id}`, { method: 'DELETE' });
+      if (response.ok) {
+        await loadApps();
+      } else {
+        const error = await response.json();
+        alert(error.error || 'Failed to delete app');
+      }
+    } catch (error) {
+      console.error('Error deleting app:', error);
+      alert('Failed to delete app');
+    }
   };
 
   const handleConnectionSaved = (savedConnection) => {
@@ -266,14 +333,17 @@ const Dating = () => {
   // Filter functions
   const filteredConnections = connections.filter(connection => {
     const matchesSearch = !searchQuery || 
+      connection.guyName?.toLowerCase().includes(searchQuery.toLowerCase()) ||
       connection.name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      connection.app?.toLowerCase().includes(searchQuery.toLowerCase());
+      connection.app?.name?.toLowerCase().includes(searchQuery.toLowerCase());
     
     const matchesFilter = connectionFilter === 'all' || 
       (connectionFilter === 'active' && connection.status === 'ACTIVE') ||
       (connectionFilter === 'inactive' && connection.status !== 'ACTIVE');
+
+    const matchesApp = appFilter === 'all' || String(connection.appId) === appFilter;
     
-    return matchesSearch && matchesFilter;
+    return matchesSearch && matchesFilter && matchesApp;
   });
 
   const filteredDates = dates.filter(date => {
@@ -298,18 +368,31 @@ const Dating = () => {
   });
 
   // Card components
-  const ConnectionCard = ({ connection }) => (
+  const ConnectionCard = ({ connection }) => {
+    const profilePhoto = connection.connectionPhotos?.[0];
+    const photoUrl = profilePhoto ? `${config.apiBaseUrl}/uploads/connection-photos/${profilePhoto.filename}` : null;
+    const initials = connection.guyName?.charAt(0).toUpperCase() || '?';
+    return (
     <div className="bg-white rounded-lg shadow p-6">
       <div className="flex justify-between items-start mb-4">
-        <div className="flex items-center space-x-3">
-          <div className="w-12 h-12 bg-gradient-to-br from-pink-400 to-purple-500 rounded-full flex items-center justify-center text-white font-semibold text-lg">
-            {connection.name?.charAt(0).toUpperCase() || '?'}
+        <Link
+          to={`/dating/connections/${connection.id}`}
+          className="flex items-center space-x-3 group"
+        >
+          <div className="w-12 h-12 rounded-full overflow-hidden flex-shrink-0 group-hover:opacity-80 transition-opacity">
+            {photoUrl ? (
+              <img src={photoUrl} alt={connection.guyName} className="w-full h-full object-cover" />
+            ) : (
+              <div className="w-full h-full bg-gradient-to-br from-pink-400 to-purple-500 flex items-center justify-center text-white font-semibold text-lg">
+                {initials}
+              </div>
+            )}
           </div>
           <div>
-            <h3 className="text-lg font-semibold text-gray-900">{connection.name}</h3>
-            <p className="text-sm text-gray-600">{connection.app}</p>
+            <h3 className="text-lg font-semibold text-gray-900 group-hover:text-pink-600 transition-colors">{connection.guyName}</h3>
+            <p className="text-sm text-gray-600">{connection.app?.name}</p>
           </div>
-        </div>
+        </Link>
         <div className="flex space-x-2">
           <button 
             onClick={() => {
@@ -358,62 +441,80 @@ const Dating = () => {
         </div>
       )}
     </div>
-  );
+    );
+  };
 
-  const DateCard = ({ date }) => (
-    <div className="bg-white rounded-lg shadow p-6">
-      <div className="flex justify-between items-start mb-4">
-        <div>
-          <h3 className="text-lg font-semibold text-gray-900">{date.guyName}</h3>
-          <p className="text-sm text-gray-600">{date.location}</p>
-        </div>
-        <div className="flex space-x-2">
-          <button 
-            onClick={() => {
-              setEditingDate(date);
-              setShowDateForm(true);
-            }}
-            className="text-gray-400 hover:text-blue-500 transition-colors"
-          >
-            <Edit className="w-4 h-4" />
-          </button>
-          <button 
-            onClick={() => handleDeleteDate(date.id)}
-            className="text-gray-400 hover:text-red-500 transition-colors"
-          >
-            <Trash2 className="w-4 h-4" />
-          </button>
-        </div>
-      </div>
-      
-      <div className="space-y-2">
-        <div className="flex items-center text-sm text-gray-600">
-          <Calendar className="w-4 h-4 mr-2" />
-          {new Date(date.dateTime).toLocaleDateString()}
+  const DateCard = ({ date }) => {
+    const profilePhoto = date.connection?.connectionPhotos?.[0];
+    const photoUrl = profilePhoto ? `${config.apiBaseUrl}/uploads/connection-photos/${profilePhoto.filename}` : null;
+    const initials = (date.connection?.guyName || date.guyName || '?').slice(0, 2).toUpperCase();
+
+    return (
+      <div className="bg-white rounded-lg shadow p-6">
+        <div className="flex justify-between items-start mb-4">
+          <Link to={`/dating/dates/${date.id}`} className="flex items-center gap-3 min-w-0 hover:opacity-80 transition-opacity">
+            <div className="w-10 h-10 rounded-xl flex-shrink-0 overflow-hidden">
+              {photoUrl ? (
+                <img src={photoUrl} alt={date.guyName} className="w-full h-full object-cover" />
+              ) : (
+                <div className="w-full h-full bg-gradient-to-br from-blue-400 to-indigo-500 flex items-center justify-center text-white font-bold text-sm">
+                  {initials}
+                </div>
+              )}
+            </div>
+            <div className="min-w-0">
+              <h3 className="text-lg font-semibold text-gray-900 truncate">{date.guyName}</h3>
+              <p className="text-sm text-gray-600 truncate">{date.location}</p>
+            </div>
+          </Link>
+          <div className="flex space-x-2 flex-shrink-0 ml-2">
+            <button 
+              onClick={() => {
+                setEditingDate(date);
+                setShowDateForm(true);
+              }}
+              className="text-gray-400 hover:text-blue-500 transition-colors"
+            >
+              <Edit className="w-4 h-4" />
+            </button>
+            <button 
+              onClick={() => handleDeleteDate(date.id)}
+              className="text-gray-400 hover:text-red-500 transition-colors"
+            >
+              <Trash2 className="w-4 h-4" />
+            </button>
+          </div>
         </div>
         
-        {date.rating && (
+        <div className="space-y-2">
           <div className="flex items-center text-sm text-gray-600">
-            <Star className="w-4 h-4 mr-2" />
-            {date.rating}/5 stars
+            <Calendar className="w-4 h-4 mr-2" />
+            {new Date(date.dateTime).toLocaleDateString()}
           </div>
-        )}
+          
+          {date.rating && (
+            <div className="flex items-center text-sm text-gray-600">
+              <Star className="w-4 h-4 mr-2" />
+              {date.rating}/5 stars
+            </div>
+          )}
+          
+          {date.cost && (
+            <div className="flex items-center text-sm text-gray-600">
+              <span className="w-4 h-4 mr-2">$</span>
+              ${date.cost}
+            </div>
+          )}
+        </div>
         
-        {date.cost && (
-          <div className="flex items-center text-sm text-gray-600">
-            <span className="w-4 h-4 mr-2">$</span>
-            ${date.cost}
+        {date.notes && (
+          <div className="mt-4 p-3 bg-gray-50 rounded-lg">
+            <p className="text-sm text-gray-700">{date.notes}</p>
           </div>
         )}
       </div>
-      
-      {date.notes && (
-        <div className="mt-4 p-3 bg-gray-50 rounded-lg">
-          <p className="text-sm text-gray-700">{date.notes}</p>
-        </div>
-      )}
-    </div>
-  );
+    );
+  };
 
   const EncounterCard = ({ encounter }) => (
     <div className="bg-white rounded-lg shadow p-6">
@@ -515,15 +616,17 @@ const Dating = () => {
               </Button>
 
               {/* Add Button */}
-              <Button onClick={() => {
-                if (activeTab === 'connections') openAddForm('connection');
-                else if (activeTab === 'dates') openAddForm('date');
-                else if (activeTab === 'encounters') openAddForm('encounter');
-                else if (activeTab === 'map') openAddForm('connection');
-              }}>
-                <Plus className="w-4 h-4 mr-2" />
-                Add New
-              </Button>
+              {activeTab !== 'stats' && activeTab !== 'map' && (
+                <Button onClick={() => {
+                  if (activeTab === 'connections') openAddForm('connection');
+                  else if (activeTab === 'dates') openAddForm('date');
+                  else if (activeTab === 'encounters') openAddForm('encounter');
+                  else if (activeTab === 'apps') openAddAppForm();
+                }}>
+                  <Plus className="w-4 h-4 mr-2" />
+                  {activeTab === 'apps' ? 'Add App' : 'Add New'}
+                </Button>
+              )}
             </div>
           </div>
         </div>
@@ -537,6 +640,7 @@ const Dating = () => {
               { id: 'connections', label: 'Connections', icon: MessageCircle },
               { id: 'dates', label: 'Dates', icon: Calendar },
               { id: 'encounters', label: 'Encounters', icon: Heart },
+              { id: 'apps', label: 'Apps', icon: Smartphone },
               { id: 'map', label: 'Map', icon: Map },
               { id: 'stats', label: 'Statistics', icon: BarChart3 }
             ].map(({ id, label, icon: Icon }) => (
@@ -576,6 +680,7 @@ const Dating = () => {
               <h2 className="text-2xl font-bold text-gray-900">Dating Statistics</h2>
             </div>
 
+            {/* Overall stats */}
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
               <div className="bg-white rounded-lg shadow p-6">
                 <div className="flex items-center">
@@ -609,13 +714,130 @@ const Dating = () => {
 
               <div className="bg-white rounded-lg shadow p-6">
                 <div className="flex items-center">
-                  <Star className="h-8 w-8 text-yellow-500" />
+                  <Smartphone className="h-8 w-8 text-purple-500" />
                   <div className="ml-4">
-                    <p className="text-2xl font-semibold text-gray-900">{stats.averageRating || 0}</p>
-                    <p className="text-gray-600">Average Rating</p>
+                    <p className="text-2xl font-semibold text-gray-900">{datingApps.length}</p>
+                    <p className="text-gray-600">Dating Apps</p>
                   </div>
                 </div>
               </div>
+            </div>
+
+            {/* Per-app breakdown */}
+            {datingApps.length > 0 && (
+              <div>
+                <h3 className="text-lg font-semibold text-gray-800 mb-4">Connections by App</h3>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {datingApps
+                    .filter(app => (app._count?.connections || 0) > 0)
+                    .sort((a, b) => (b._count?.connections || 0) - (a._count?.connections || 0))
+                    .map(app => {
+                      const total = stats.totalConnections || 1;
+                      const pct = Math.round(((app._count?.connections || 0) / total) * 100);
+                      return (
+                        <div key={app.id} className="bg-white rounded-lg shadow p-5">
+                          <div className="flex items-center justify-between mb-3">
+                            <div className="flex items-center gap-2">
+                              <div className="w-8 h-8 bg-gradient-to-br from-pink-400 to-purple-500 rounded-md flex items-center justify-center text-white">
+                                <Smartphone className="w-4 h-4" />
+                              </div>
+                              <span className="font-semibold text-gray-900">{app.name}</span>
+                            </div>
+                            <span className="text-sm font-medium text-gray-500">{pct}%</span>
+                          </div>
+                          <div className="w-full bg-gray-100 rounded-full h-2 mb-3">
+                            <div
+                              className="bg-gradient-to-r from-pink-400 to-purple-500 h-2 rounded-full transition-all"
+                              style={{ width: `${pct}%` }}
+                            />
+                          </div>
+                          <div className="flex gap-4 text-sm text-gray-500">
+                            <span className="flex items-center gap-1">
+                              <Users className="w-3.5 h-3.5" />
+                              {app._count?.connections || 0} connections
+                            </span>
+                            <span className="flex items-center gap-1">
+                              <Calendar className="w-3.5 h-3.5" />
+                              {app.totalDates || 0} dates
+                            </span>
+                            <span className="flex items-center gap-1">
+                              <Heart className="w-3.5 h-3.5" />
+                              {app.totalEncounters || 0} encounters
+                            </span>
+                          </div>
+                        </div>
+                      );
+                    })}
+                </div>
+                {datingApps.every(app => (app._count?.connections || 0) === 0) && (
+                  <p className="text-gray-500 text-sm">No connections recorded yet.</p>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Apps Tab */}
+        {activeTab === 'apps' && (
+          <div className="space-y-6">
+            <div className="flex items-center justify-between">
+              <h2 className="text-2xl font-bold text-gray-900">Dating Apps</h2>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+              {datingApps.map(app => (
+                <div key={app.id} className="bg-white rounded-lg shadow p-6">
+                  <div className="flex justify-between items-start mb-3">
+                    <div className="flex items-center space-x-3">
+                      <div className="w-10 h-10 bg-gradient-to-br from-pink-400 to-purple-500 rounded-lg flex items-center justify-center text-white">
+                        <Smartphone className="w-5 h-5" />
+                      </div>
+                      <div>
+                        <h3 className="text-lg font-semibold text-gray-900">{app.name}</h3>
+                        <p className="text-sm text-gray-500">{app._count?.connections || 0} connection{(app._count?.connections || 0) !== 1 ? 's' : ''}</p>
+                      </div>
+                    </div>
+                    <div className="flex space-x-2">
+                      <button
+                        onClick={() => {
+                          setEditingApp(app);
+                          setAppFormData({ name: app.name, description: app.description || '' });
+                          setShowAppForm(true);
+                        }}
+                        className="text-gray-400 hover:text-blue-500 transition-colors"
+                      >
+                        <Edit className="w-4 h-4" />
+                      </button>
+                      <button
+                        onClick={() => handleDeleteApp(app.id)}
+                        className="text-gray-400 hover:text-red-500 transition-colors"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
+                  </div>
+
+                  {app.description && (
+                    <p className="text-sm text-gray-600 mb-3">{app.description}</p>
+                  )}
+
+                  <div className="flex gap-4 text-sm text-gray-500 border-t pt-3">
+                    <span className="flex items-center gap-1">
+                      <Calendar className="w-3.5 h-3.5" />
+                      {app.totalDates || 0} dates
+                    </span>
+                    <span className="flex items-center gap-1">
+                      <Heart className="w-3.5 h-3.5" />
+                      {app.totalEncounters || 0} encounters
+                    </span>
+                  </div>
+                </div>
+              ))}
+              {datingApps.length === 0 && (
+                <div className="col-span-full text-center py-8 text-gray-500">
+                  No apps yet. Add your first dating app!
+                </div>
+              )}
             </div>
           </div>
         )}
@@ -626,6 +848,16 @@ const Dating = () => {
             <div className="flex items-center justify-between">
               <h2 className="text-2xl font-bold text-gray-900">Connections</h2>
               <div className="flex items-center space-x-4">
+                <select
+                  value={appFilter}
+                  onChange={(e) => setAppFilter(e.target.value)}
+                  className="border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-pink-500"
+                >
+                  <option value="all">All Apps</option>
+                  {datingApps.map(app => (
+                    <option key={app.id} value={String(app.id)}>{app.name}</option>
+                  ))}
+                </select>
                 <select
                   value={connectionFilter}
                   onChange={(e) => setConnectionFilter(e.target.value)}
@@ -750,6 +982,61 @@ const Dating = () => {
           onConnectionCreated={handleConnectionSaved}
           onClose={() => setShowScreenshotImporter(false)}
         />
+      )}
+
+      {/* App Form Modal */}
+      {showAppForm && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-md mx-4 p-6">
+            <div className="flex justify-between items-center mb-5">
+              <h2 className="text-xl font-semibold text-gray-900">
+                {editingApp ? 'Edit App' : 'Add Dating App'}
+              </h2>
+              <button
+                onClick={() => { setShowAppForm(false); setEditingApp(null); }}
+                className="text-gray-400 hover:text-gray-600 transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveApp} className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">App Name *</label>
+                <input
+                  type="text"
+                  value={appFormData.name}
+                  onChange={(e) => setAppFormData(prev => ({ ...prev, name: e.target.value }))}
+                  placeholder="e.g. Grindr, Tinder, Hinge"
+                  required
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-pink-500 focus:border-transparent"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Description</label>
+                <textarea
+                  value={appFormData.description}
+                  onChange={(e) => setAppFormData(prev => ({ ...prev, description: e.target.value }))}
+                  placeholder="Optional notes about this app"
+                  rows={3}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-pink-500 focus:border-transparent resize-none"
+                />
+              </div>
+              <div className="flex justify-end gap-3 pt-2">
+                <Button
+                  variant="outline"
+                  type="button"
+                  onClick={() => { setShowAppForm(false); setEditingApp(null); }}
+                >
+                  Cancel
+                </Button>
+                <Button type="submit">
+                  {editingApp ? 'Save Changes' : 'Add App'}
+                </Button>
+              </div>
+            </form>
+          </div>
+        </div>
       )}
     </div>
   );
