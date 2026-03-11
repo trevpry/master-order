@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { X, Save, Camera, MapPin, Heart, Star } from 'lucide-react';
 import { Button } from './ui/button';
+import config from '../config';
 
-const API_BASE = 'http://localhost:3001/api/dating';
+const API_BASE = `${config.apiBaseUrl}/api/dating`;
 
 const ConnectionForm = ({ isOpen, onClose, onSave, connection = null, userId = 1 }) => {
   const [formData, setFormData] = useState({

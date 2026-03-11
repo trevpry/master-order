@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { X, Save, Calendar, MapPin, Star, DollarSign, Clock } from 'lucide-react';
 import { Button } from './ui/button';
+import config from '../config';
 
-const API_BASE = 'http://localhost:3001/api/dating';
+const API_BASE = `${config.apiBaseUrl}/api/dating`;
 
 const DateForm = ({ isOpen, onClose, onSave, date = null, userId = 1 }) => {
   const [formData, setFormData] = useState({

@@ -1,6 +1,7 @@
 import React, { useState, useRef } from 'react';
 import { Camera, Upload, X, User, AlertCircle, Check } from 'lucide-react';
 import { Button } from './ui/button';
+import config from '../config';
 
 const ScreenshotImporter = ({ onConnectionCreated, onClose }) => {
   const [selectedFiles, setSelectedFiles] = useState([]);
@@ -86,7 +87,7 @@ const ScreenshotImporter = ({ onConnectionCreated, onClose }) => {
         userId: 1 // Default user ID
       };
 
-      const response = await fetch('http://localhost:3001/api/dating/connections', {
+      const response = await fetch(`${config.apiBaseUrl}/api/dating/connections`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
