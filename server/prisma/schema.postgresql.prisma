@@ -35,6 +35,7 @@ model Settings {
   stashApiKey                       String?
   rawgApiKey                        String?
   geminiApiKey                      String?
+  listScrapeInterval                Int       @default(6)
   createdAt                         DateTime  @default(now())
   updatedAt                         DateTime  @updatedAt
 }
@@ -78,6 +79,7 @@ model CustomOrder {
   subOrders           CustomOrder[]      @relation("OrderHierarchy")
   items               CustomOrderItem[]
   referencingItems    CustomOrderItem[]  @relation("SubOrderReference")
+  listScrapeConfig    ListScrapeConfig?
 }
 
 model CustomOrderItem {
@@ -157,6 +159,7 @@ model CustomOrderItem {
   book                    Book?             @relation(fields: [bookId], references: [id])
   game                    VideoGame?        @relation(fields: [gameId], references: [id])
   watchLogs               WatchLog[]
+  listScrapedItems        ListScrapedItem[]
 }
 
 model PlexLibrarySection {
@@ -2410,4 +2413,54 @@ model GameCompletion {
   
   @@unique([gameId, userId])
   @@index([gameId])
+}
+
+// List scraping configuration - one per custom order
+model ListScrapeConfig {
+  id                 Int               @id @default(autoincrement())
+  name               String
+  customOrderId      Int?              @unique
+  url                String
+  parserType         String            @default("css-selectors")
+  parserConfig       String?
+  itemSelector       String?
+  titleSelector      String?
+  mediaTypeSelector  String?
+  urlSelector        String?
+  imageSelector      String?
+  yearSelector       String?
+  defaultMediaType   String            @default("movie")
+  useJavaScript      Boolean           @default(false)
+  isActive           Boolean           @default(true)
+  importedAll        Boolean           @default(false)
+  tailImportCount    Int?              
+  lastCheckedAt      DateTime?
+  lastItemCount      Int               @default(0)
+  lastError          String?
+  createdAt          DateTime          @default(now())
+  updatedAt          DateTime          @updatedAt
+  customOrder        CustomOrder?      @relation(fields: [customOrderId], references: [id], onDelete: SetNull)
+  scrapedItems       ListScrapedItem[]
+}
+
+// Tracks every item ever seen on a scraped list
+model ListScrapedItem {
+  id                  Int              @id @default(autoincrement())
+  listScrapeConfigId  Int
+  title               String
+  position            Int
+  itemUrl             String?
+  itemYear            String?
+  mediaType           String?
+  fingerprint         String
+  customOrderItemId   Int?
+  wasSkipped          Boolean          @default(false)
+  notInPlex           Boolean          @default(false)
+  createdAt           DateTime         @default(now())
+  config              ListScrapeConfig @relation(fields: [listScrapeConfigId], references: [id], onDelete: Cascade)
+  customOrderItem     CustomOrderItem? @relation(fields: [customOrderItemId], references: [id], onDelete: SetNull)
+
+  @@unique([listScrapeConfigId, fingerprint])
+  @@index([listScrapeConfigId])
+  @@index([customOrderItemId])
 }

@@ -14,7 +14,8 @@ const OrderCard = ({
   onViewOrder,
   onToggleActive,
   onEditOrder,
-  onDeleteOrder
+  onDeleteOrder,
+  onLinkListSync
 }) => {
   return (
     <div className={`order-card ${order.isActive ? 'active' : 'inactive'}`}>
@@ -45,6 +46,11 @@ const OrderCard = ({
         <DateDisplay date={order.createdAt} label="Created" />
         {(order.plexPlaylist || order.customPlaylist) && (
           <PlaylistDisplay order={order} />
+        )}
+        {order.listScrapeConfig && (
+          <span className="list-linked-badge" title={`Linked to: ${order.listScrapeConfig.name || order.listScrapeConfig.url}`}>
+            🔗 {order.listScrapeConfig.name || 'List Linked'} {order.listScrapeConfig.isActive ? '' : '(paused)'}
+          </span>
         )}
       </div>
 
@@ -77,6 +83,15 @@ const OrderCard = ({
         >
           Delete
         </Button>
+        {onLinkListSync && (
+          <Button
+            onClick={() => onLinkListSync(order.id, order.name)}
+            className="secondary"
+            size="small"
+          >
+            {order.listScrapeConfig ? '🔗 Edit Link' : '🔗 Link List'}
+          </Button>
+        )}
       </div>
     </div>
   );

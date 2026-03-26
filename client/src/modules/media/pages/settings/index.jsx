@@ -30,6 +30,7 @@ function Settings() {
   const [partiallyWatchedCollectionPercent, setPartiallyWatchedCollectionPercent] = useState(75);
   const [plexSyncInterval, setPlexSyncInterval] = useState(12);
   const [stashSyncInterval, setStashSyncInterval] = useState(24);
+  const [listScrapeInterval, setListScrapeInterval] = useState(6);
   
   // Christmas filter state
   const [christmasFilterEnabled, setChristmasFilterEnabled] = useState(false);
@@ -46,6 +47,11 @@ function Settings() {
   // Stash sync states
   const [stashSyncLoading, setStashSyncLoading] = useState(false);
   const [stashSyncMessage, setStashSyncMessage] = useState('');
+
+  // List scrape states
+  const [listScrapeLoading, setListScrapeLoading] = useState(false);
+  const [listScrapeMessage, setListScrapeMessage] = useState('');
+  const [listScrapeStatus, setListScrapeStatus] = useState(null);
   
   // Collection states
   const [customOrdersCount, setCustomOrdersCount] = useState(0);
@@ -146,6 +152,7 @@ function Settings() {
           setPartiallyWatchedCollectionPercent(settings.partiallyWatchedCollectionPercent ?? 75);
           setPlexSyncInterval(settings.plexSyncInterval ?? 12);
           setStashSyncInterval(settings.stashSyncInterval ?? 24);
+          setListScrapeInterval(settings.listScrapeInterval ?? 6);
           setIgnoredMovieCollections(settings.ignoredMovieCollections || []);
           setIgnoredTVCollections(settings.ignoredTVCollections || []);
           setChristmasFilterEnabled(settings.christmasFilterEnabled ?? false);
@@ -464,6 +471,13 @@ function Settings() {
       setStashSyncInterval(value);
     }
   };
+
+  const handleListScrapeIntervalChange = (e) => {
+    const value = parseInt(e.target.value);
+    if (value >= 1 && value <= 168) {
+      setListScrapeInterval(value);
+    }
+  };
   const handleSubmit = async () => {
     if (!validatePercentages()) {
       const effectiveCustomOrderPercent = customOrdersCount > 0 ? customOrderPercent : 0;
@@ -508,6 +522,7 @@ function Settings() {
           partiallyWatchedCollectionPercent,
           plexSyncInterval,
           stashSyncInterval,
+          listScrapeInterval,
           ignoredMovieCollections,
           ignoredTVCollections,
           christmasFilterEnabled
@@ -656,6 +671,28 @@ function Settings() {
       fetchBackgroundSyncStatus();
     } catch (error) {
       setBackgroundSyncMessage(`Failed to force background sync: ${error.message}`);
+    }
+  };
+
+  const handleRunListScrape = async () => {
+    try {
+      setListScrapeLoading(true);
+      setListScrapeMessage('Triggering list scrape check...');
+      const result = await fetchWithErrorHandling(`${config.apiBaseUrl}/api/list-scraping/check-all`, {
+        method: 'POST'
+      });
+      setListScrapeMessage(result?.message || 'List scrape check triggered');
+      // Refresh status after a short delay to pick up results
+      setTimeout(async () => {
+        try {
+          const status = await fetchWithErrorHandling(`${config.apiBaseUrl}/api/list-scraping/status`);
+          setListScrapeStatus(status);
+        } catch {}
+      }, 2000);
+    } catch (error) {
+      setListScrapeMessage(`Failed to trigger list scrape: ${error.message}`);
+    } finally {
+      setListScrapeLoading(false);
     }
   };
 
@@ -1426,6 +1463,45 @@ function Settings() {
                     className="interval-slider"
                   />
                 </div>
+
+                <div className="sync-interval-control compact">
+                  <label htmlFor="list_scrape_interval">List Scrape Interval: {listScrapeInterval}h</label>
+                  <input 
+                    type="range" 
+                    id="list_scrape_interval"
+                    name="list_scrape_interval"
+                    min="1"
+                    max="168"
+                    value={listScrapeInterval}
+                    onChange={handleListScrapeIntervalChange}
+                    className="interval-slider"
+                  />
+                  <Button
+                    onClick={handleRunListScrape}
+                    disabled={listScrapeLoading}
+                    className="sync-button force compact"
+                  >
+                    {listScrapeLoading ? '⏳ Running...' : '⚡ Run Now'}
+                  </Button>
+                </div>
+                {listScrapeMessage && (
+                  <div className="sync-status-card compact" style={{ marginTop: '4px' }}>
+                    <div className="status-row">
+                      <span className="status-value">{listScrapeMessage}</span>
+                    </div>
+                    {listScrapeStatus?.lastSyncStatus && (
+                      <div className="status-row">
+                        <span className="status-label">Last run:</span>
+                        <span className="status-value">
+                          {listScrapeStatus.lastSyncStatus.configsChecked} list(s) checked
+                          {listScrapeStatus.lastSyncStatus.results && (
+                            <> · {listScrapeStatus.lastSyncStatus.results.reduce((sum, r) => sum + (r.added || 0), 0)} new item(s) added</>
+                          )}
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                )}
                 
                 <div className="background-sync-controls compact">
                   <Button

@@ -40,6 +40,7 @@ const unifiedBooksRoutes = require('./routes/unifiedBooks');
 const rawgRoutes = require('./routes/rawg');
 const importDataRoutes = require('./routes/importData');
 const scrapingRoutes = require('./routes/scraping');
+const listScrapingRoutes = require('./routes/listScraping');
 
 // Import utility functions
 const { generateOptimizedClips, simpleHash, getUploadDirectory } = require('./utils/utilities');
@@ -75,6 +76,11 @@ const watchLogService = new WatchLogService(prisma); // Initialize watch log ser
 const statisticsService = new StatisticsService(prisma, watchLogService);
 const watchStatsRoutes = new WatchStatsRoutes(watchLogService, statisticsService);
 const weatherScheduler = new WeatherSchedulerService(); // Initialize weather scheduler service
+const ListScrapeBackgroundService = require('./services/ListScrapeBackgroundService');
+const tvdbServiceInstance = require('./tvdbService');
+const listScrapeBackground = new ListScrapeBackgroundService(tvdbServiceInstance);
+listScrapingRoutes.setTvdbService(tvdbServiceInstance);
+listScrapingRoutes.setBackgroundService(listScrapeBackground);
 const PlexPlayerService = require('./plexPlayerService');
 const plexPlayer = new PlexPlayerService(); // Initialize Plex player service
 const StashService = require('./stashService');
@@ -445,6 +451,9 @@ app.use('/api/courses', coursesRoutes);
 // Scraping API routes
 app.use('/api/scraping', scrapingRoutes);
 
+// List Scraping API routes
+app.use('/api/list-scraping', listScrapingRoutes);
+
 // Unified Books API routes
 app.use('/api/unified-books', unifiedBooksRoutes);
 
@@ -745,6 +754,13 @@ server.listen(PORT, '0.0.0.0', async () => {
     await weatherScheduler.start();
   } catch (error) {
     console.error('Failed to start weather scheduler service:', error);
+  }
+  
+  // Start list scrape background service
+  try {
+    await listScrapeBackground.start();
+  } catch (error) {
+    console.error('Failed to start list scrape background service:', error);
   }
   
   // Initialize Stash service

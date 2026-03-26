@@ -43,6 +43,8 @@ import EpisodeFormModal from './components/modals/EpisodeFormModal';
 import BulkImportFormModal from './components/modals/BulkImportFormModal';
 import DetailedBookFormModal from './components/modals/DetailedBookFormModal';
 import GameFormModal from './components/modals/GameFormModal';
+import ListSyncsPanel from './components/modals/ListSyncsPanel';
+import LinkListSyncModal from './components/modals/LinkListSyncModal';
 
 // Utility imports
 import {
@@ -126,6 +128,12 @@ function CustomOrders() {
   const [gameSearchQuery, setGameSearchQuery] = useState('');
   const [gameSearchResults, setGameSearchResults] = useState([]);
   const [gameSearchLoading, setGameSearchLoading] = useState(false);
+  
+  // List syncs state
+  const [showListSyncsPanel, setShowListSyncsPanel] = useState(false);
+  const [showLinkListModal, setShowLinkListModal] = useState(false);
+  const [linkListOrderId, setLinkListOrderId] = useState(null);
+  const [linkListOrderName, setLinkListOrderName] = useState('');
   
   // Drag and Drop state
   const [draggedItem, setDraggedItem] = useState(null);
@@ -540,6 +548,13 @@ function CustomOrders() {
       console.error('Error updating custom order:', error);
       setMessage('Error updating custom order');
     }
+  };
+
+  // List sync handlers
+  const handleOpenLinkList = (orderId, orderName) => {
+    setLinkListOrderId(orderId);
+    setLinkListOrderName(orderName);
+    setShowLinkListModal(true);
   };
 
   const handleEditItem = (item) => {
@@ -3855,6 +3870,8 @@ const handleSearchComics = async (e) => {
           onToggleActive={handleToggleActive}
           onEditOrder={handleEditOrder}
           onDeleteOrder={handleDeleteOrder}
+          onLinkListSync={handleOpenLinkList}
+          onOpenListSyncs={() => setShowListSyncsPanel(true)}
         />
       )}
 
@@ -4009,6 +4026,22 @@ const handleSearchComics = async (e) => {
         title={errorDetails.title}
         message={errorDetails.message}
         error={errorDetails.error}
+      />
+
+      {/* List Syncs Panel */}
+      <ListSyncsPanel
+        isOpen={showListSyncsPanel}
+        onClose={() => setShowListSyncsPanel(false)}
+        onRefreshOrders={fetchCustomOrders}
+      />
+
+      {/* Link List Sync Modal */}
+      <LinkListSyncModal
+        isOpen={showLinkListModal}
+        onClose={() => { setShowLinkListModal(false); setLinkListOrderId(null); setLinkListOrderName(''); }}
+        orderId={linkListOrderId}
+        orderName={linkListOrderName}
+        onLinked={fetchCustomOrders}
       />
 
       <MessageDisplay message={message} />

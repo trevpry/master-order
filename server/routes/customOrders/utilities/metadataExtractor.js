@@ -72,6 +72,11 @@ function extractComicVineMetadata(comicVineDetailsJson) {
         extracted.comicTeams = data.issue.team_credits.map(team => team.name).join(', ');
       }
       
+      // Extract story arc credits
+      if (data.issue.story_arc_credits && Array.isArray(data.issue.story_arc_credits)) {
+        extracted.comicStoryArcs = data.issue.story_arc_credits.map(arc => arc.name).join(', ');
+      }
+      
       // Extract location credits
       if (data.issue.location_credits && Array.isArray(data.issue.location_credits)) {
         extracted.comicLocations = data.issue.location_credits.map(loc => loc.name).join(', ');

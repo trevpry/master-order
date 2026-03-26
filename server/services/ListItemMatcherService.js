@@ -1,0 +1,584 @@
+const { PrismaClient } = require('@prisma/client');
+
+const prisma = new PrismaClient();
+
+class ListItemMatcherService {
+  constructor(tvdbService = null) {
+    this.tvdbService = tvdbService;
+  }
+
+  /**
+   * Match a scraped item against existing integrations and enrich it
+   * @param {Object} scrapedItem - { title, position, mediaType, itemUrl, itemYear, seriesTitle?, seasonNumber?, episodeNumber? }
+   * @returns {Object} - Enriched item data ready for CustomOrderItem creation
+   */
+  async matchItem(scrapedItem) {
+    const { title, mediaType, itemUrl, itemYear } = scrapedItem;
+
+    let result;
+    switch (mediaType) {
+      case 'movie':
+        result = await this.matchMovie(title, itemYear, itemUrl);
+        break;
+      case 'episode':
+        result = await this.matchEpisode(title, itemYear, itemUrl, scrapedItem);
+        break;
+      case 'comic':
+        result = await this.matchComic(scrapedItem);
+        break;
+      case 'book':
+        result = await this.matchBook(title, itemYear, itemUrl);
+        break;
+      case 'webvideo':
+        result = this.formatWebVideo(title, itemUrl);
+        break;
+      case 'game':
+        result = await this.matchGame(title, itemYear);
+        break;
+      default:
+        result = await this.matchMovie(title, itemYear, itemUrl);
+    }
+
+    // Preserve episode metadata from custom parsers if not set by matcher
+    if (scrapedItem.seriesTitle && !result.seriesTitle) {
+      result.seriesTitle = scrapedItem.seriesTitle;
+    }
+    if (scrapedItem.seasonNumber != null && result.seasonNumber == null) {
+      result.seasonNumber = scrapedItem.seasonNumber;
+    }
+    if (scrapedItem.episodeNumber != null && result.episodeNumber == null) {
+      result.episodeNumber = scrapedItem.episodeNumber;
+    }
+
+    // Preserve comic issue from custom parsers; parser-set value overrides default
+    if (mediaType === 'comic' && scrapedItem.comicIssue != null) {
+      result.comicIssue = scrapedItem.comicIssue;
+    }
+
+    return result;
+  }
+
+  /**
+   * Match against Plex movies, then fall back to TVDB
+   */
+  async matchMovie(title, year, itemUrl) {
+    // Try Plex first
+    const plexMovie = await this.searchPlexMovie(title, year);
+    if (plexMovie) {
+      return {
+        mediaType: 'movie',
+        title: plexMovie.title,
+        plexKey: plexMovie.ratingKey,
+        originalArtworkUrl: plexMovie.thumb || null,
+        tvdbYear: plexMovie.year || null
+      };
+    }
+
+    // Fall back to TVDB
+    if (this.tvdbService) {
+      try {
+        const tvdbResults = await this.tvdbService.searchMovies(title);
+        if (tvdbResults && tvdbResults.length > 0) {
+          const best = this.pickBestTvdbMatch(tvdbResults, title, year);
+          if (best) {
+            return {
+              mediaType: 'movie',
+              title: best.name || title,
+              plexKey: null,
+              tvdbId: best.tvdb_id || best.id?.toString() || null,
+              tvdbYear: best.year ? parseInt(best.year) : null,
+              tvdbOverview: best.overview || null,
+              tvdbArtworkUrl: best.image_url || best.thumbnail || null,
+              originalArtworkUrl: best.image_url || best.thumbnail || null,
+              isFromTvdbOnly: true
+            };
+          }
+        }
+      } catch (error) {
+        console.error(`TVDB movie search failed for "${title}":`, error.message);
+      }
+    }
+
+    // Return unmatched with original title
+    return {
+      mediaType: 'movie',
+      title,
+      plexKey: null,
+      tvdbYear: year ? parseInt(year) : null,
+      isFromTvdbOnly: true
+    };
+  }
+
+  /**
+   * Match against Plex TV shows/episodes, then fall back to TVDB
+   */
+  async matchEpisode(title, year, itemUrl, scrapedItem = {}) {
+    const seriesTitle = scrapedItem.seriesTitle || title;
+    const seasonNumber = scrapedItem.seasonNumber;
+    const episodeNumber = scrapedItem.episodeNumber;
+
+    console.log(`[ListSync] matchEpisode: seriesTitle="${seriesTitle}" S${seasonNumber}E${episodeNumber} year=${year}`);
+
+    // If we have season/episode numbers, try to find the specific episode in Plex
+    if (seasonNumber != null && episodeNumber != null) {
+      const plexEpisode = await this.searchPlexEpisode(seriesTitle, seasonNumber, episodeNumber);
+      if (plexEpisode) {
+        console.log(`[ListSync] matchEpisode: found in Plex by episode key=${plexEpisode.ratingKey}`);
+        return {
+          mediaType: 'episode',
+          title: plexEpisode.title,
+          seriesTitle: plexEpisode.grandparentTitle || plexEpisode.season?.show?.title || seriesTitle,
+          seasonNumber: plexEpisode.seasonIndex ?? seasonNumber,
+          episodeNumber: plexEpisode.index ?? episodeNumber,
+          plexKey: plexEpisode.ratingKey,
+          originalArtworkUrl: plexEpisode.thumb || plexEpisode.season?.show?.thumb || null
+        };
+      }
+    }
+
+    // No specific episode found — check if the show exists in Plex at all
+    const plexShow = await this.searchPlexTVShow(seriesTitle, year);
+    console.log(`[ListSync] matchEpisode: searchPlexTVShow("${seriesTitle}") =>`, plexShow ? `found: "${plexShow.title}"` : 'NOT FOUND');
+    if (plexShow) {
+      // Show is in Plex but we couldn't pinpoint the exact episode.
+      // Return with plexShowFound:true so the import is not blocked.
+      return {
+        mediaType: 'episode',
+        title: scrapedItem.title || plexShow.title,
+        seriesTitle: plexShow.title,
+        seasonNumber: seasonNumber ?? null,
+        episodeNumber: episodeNumber ?? null,
+        plexKey: null,
+        plexShowFound: true,
+        originalArtworkUrl: plexShow.thumb || null
+      };
+    }
+
+    // Fall back to TVDB
+    if (this.tvdbService) {
+      try {
+        const tvdbResults = await this.tvdbService.searchSeries(seriesTitle);
+        if (tvdbResults && tvdbResults.length > 0) {
+          const best = this.pickBestTvdbMatch(tvdbResults, seriesTitle, year);
+          if (best) {
+            return {
+              mediaType: 'episode',
+              title: scrapedItem.title || title,
+              seriesTitle: best.name || seriesTitle,
+              seasonNumber: seasonNumber ?? null,
+              episodeNumber: episodeNumber ?? null,
+              plexKey: null,
+              tvdbId: best.tvdb_id || best.id?.toString() || null,
+              tvdbYear: best.year ? parseInt(best.year) : null,
+              tvdbOverview: best.overview || null,
+              tvdbArtworkUrl: best.image_url || best.thumbnail || null,
+              originalArtworkUrl: best.image_url || best.thumbnail || null,
+              isFromTvdbOnly: true
+            };
+          }
+        }
+      } catch (error) {
+        console.error(`TVDB series search failed for "${seriesTitle}":`, error.message);
+      }
+    }
+
+    return {
+      mediaType: 'episode',
+      title: scrapedItem.title || title,
+      seriesTitle,
+      seasonNumber: seasonNumber ?? null,
+      episodeNumber: episodeNumber ?? null,
+      plexKey: null,
+      isFromTvdbOnly: true
+    };
+  }
+
+  /**
+   * Match against local Plex movie library
+   */
+  async searchPlexMovie(title, year) {
+    const normalizedTitle = title.toLowerCase().trim();
+
+    // Exact match first
+    let movie = await prisma.plexMovie.findFirst({
+      where: {
+        title: { equals: title },
+        removed: false,
+        ...(year ? { year: parseInt(year) } : {})
+      }
+    });
+    if (movie) return movie;
+
+    // Case-insensitive search
+    const movies = await prisma.plexMovie.findMany({
+      where: { removed: false },
+      select: { id: true, ratingKey: true, title: true, year: true, thumb: true }
+    });
+
+    // Score matches
+    let bestMatch = null;
+    let bestScore = 0;
+
+    for (const m of movies) {
+      const mTitle = m.title.toLowerCase().trim();
+      let score = 0;
+
+      if (mTitle === normalizedTitle) {
+        score = 1.0;
+      } else if (mTitle.includes(normalizedTitle) || normalizedTitle.includes(mTitle)) {
+        score = 0.7;
+      }
+
+      // Year boost
+      if (score > 0 && year && m.year === parseInt(year)) {
+        score += 0.2;
+      }
+
+      if (score > bestScore) {
+        bestScore = score;
+        bestMatch = m;
+      }
+    }
+
+    return bestScore >= 0.7 ? bestMatch : null;
+  }
+
+  /**
+   * Match against local Plex TV show library
+   */
+  async searchPlexTVShow(title, year) {
+    const normalizedTitle = title.toLowerCase().trim();
+
+    const totalShows = await prisma.plexTVShow.count({ where: { removed: false } });
+    console.log(`[ListSync] searchPlexTVShow: searching "${title}" among ${totalShows} active shows`);
+
+    let show = await prisma.plexTVShow.findFirst({
+      where: {
+        title: { equals: title },
+        removed: false,
+        ...(year ? { year: parseInt(year) } : {})
+      }
+    });
+    if (show) return show;
+
+    const shows = await prisma.plexTVShow.findMany({
+      where: { removed: false },
+      select: { id: true, ratingKey: true, title: true, year: true, thumb: true }
+    });
+
+    let bestMatch = null;
+    let bestScore = 0;
+
+    for (const s of shows) {
+      const sTitle = s.title.toLowerCase().trim();
+      let score = 0;
+
+      if (sTitle === normalizedTitle) {
+        score = 1.0;
+      } else if (sTitle.includes(normalizedTitle) || normalizedTitle.includes(sTitle)) {
+        score = 0.7;
+      }
+
+      if (score > 0 && year && s.year === parseInt(year)) {
+        score += 0.2;
+      }
+
+      if (score > bestScore) {
+        bestScore = score;
+        bestMatch = s;
+      }
+    }
+
+    return bestScore >= 0.7 ? bestMatch : null;
+  }
+
+  /**
+   * Search for a specific Plex episode by series title, season, and episode number
+   */
+  async searchPlexEpisode(seriesTitle, seasonNumber, episodeNumber) {
+    try {
+      const normalizedTitle = seriesTitle.toLowerCase().trim();
+
+      // Try exact title match first
+      let episode = await prisma.plexEpisode.findFirst({
+        where: {
+          seasonIndex: parseInt(seasonNumber),
+          index: parseInt(episodeNumber),
+          removed: false,
+          season: {
+            show: {
+              title: { equals: seriesTitle },
+              removed: false
+            }
+          }
+        },
+        include: {
+          season: {
+            include: { show: true }
+          }
+        }
+      });
+      if (episode) return episode;
+
+      // Fuzzy: search all episodes with matching season/episode numbers and score by show title
+      const candidates = await prisma.plexEpisode.findMany({
+        where: {
+          seasonIndex: parseInt(seasonNumber),
+          index: parseInt(episodeNumber),
+          removed: false,
+          season: {
+            show: { removed: false }
+          }
+        },
+        include: {
+          season: {
+            include: { show: true }
+          }
+        }
+      });
+
+      for (const ep of candidates) {
+        const showTitle = (ep.season?.show?.title || '').toLowerCase().trim();
+        if (showTitle === normalizedTitle || showTitle.includes(normalizedTitle) || normalizedTitle.includes(showTitle)) {
+          return ep;
+        }
+      }
+
+      return null;
+    } catch (error) {
+      console.error(`Error searching Plex episode "${seriesTitle}" S${seasonNumber}E${episodeNumber}:`, error.message);
+      return null;
+    }
+  }
+
+  /**
+   * Match a comic against the ComicVine API and return a fully-enriched item
+   * identical to what the manual "Add Comic" flow produces.
+   * Uses structured fields from the parser when available, otherwise parses
+   * series name and issue number out of the title string.
+   * @param {Object} scrapedItem
+   */
+  async matchComic(scrapedItem) {
+    const { title, itemYear } = scrapedItem;
+    const { extractComicVineMetadata } = require('../routes/customOrders/utilities/metadataExtractor');
+
+    // Use structured fields from parser if available
+    let comicSeries = scrapedItem.comicSeries || null;
+    let comicIssue  = scrapedItem.comicIssue  || null;
+    let comicYear   = scrapedItem.comicYear
+      ? parseInt(scrapedItem.comicYear)
+      : (itemYear ? parseInt(itemYear) : null);
+
+    // Parse series + issue from the title string when not already structured
+    if (!comicSeries || !comicIssue) {
+      // "Series Name (Year) #Issue" or "Series Name (Year) #Issue.5"
+      const matchWithYear = title.match(/^(.+?)\s*\((\d{4})\)\s*#(\d+(?:\.\d+)?)/);
+      if (matchWithYear) {
+        comicSeries = comicSeries || matchWithYear[1].trim();
+        comicYear   = comicYear   || parseInt(matchWithYear[2]);
+        comicIssue  = comicIssue  || matchWithYear[3];
+      } else {
+        // "Series Name #Issue" or "Series Name #Issue.5"
+        const matchWithoutYear = title.match(/^(.+?)\s*#(\d+(?:\.\d+)?)/);
+        if (matchWithoutYear) {
+          comicSeries = comicSeries || matchWithoutYear[1].trim();
+          comicIssue  = comicIssue  || matchWithoutYear[2];
+        } else {
+          comicSeries = comicSeries || title;
+        }
+      }
+    }
+
+    // Default to issue 1 when no issue number can be parsed
+    if (!comicIssue) comicIssue = '1';
+
+    const basicResult = {
+      mediaType: 'comic',
+      title,
+      comicSeries: comicSeries || title,
+      comicYear,
+      comicIssue,
+      comicPublisher: null,
+      comicVineId: null,
+      comicVineDetailsJson: null
+    };
+
+    if (!comicSeries) return basicResult;
+
+    try {
+      const comicVineService = require('../comicVineService');
+
+      if (!(await comicVineService.isApiKeyAvailable())) {
+        console.log('[ListSync] ComicVine API key not available, skipping comic match');
+        return basicResult;
+      }
+
+      console.log(`[ListSync] Searching ComicVine for "${comicSeries}"${comicIssue ? ` #${comicIssue}` : ''}`);
+      const seriesResults = await comicVineService.searchSeries(comicSeries);
+
+      if (!seriesResults || seriesResults.length === 0) {
+        console.log(`[ListSync] No ComicVine series found for "${comicSeries}"`);
+        return basicResult;
+      }
+
+      // Helper: build a fully-enriched result from series + issue data, identical to
+      // what the manual "Add Comic" route produces via extractComicVineMetadata.
+      const buildEnrichedResult = (series, issue) => {
+        const coverUrl =
+          issue?.image?.original_url ||
+          issue?.image?.medium_url ||
+          issue?.image?.small_url ||
+          series.image?.original_url ||
+          series.image?.medium_url ||
+          null;
+
+        // Build the same comicVineDetailsJson structure the frontend sends
+        const detailsPayload = { series, issue: issue || null, coverUrl };
+        const detailsJson = JSON.stringify(detailsPayload);
+
+        // Extract all metadata fields the same way the manual Add Comic route does
+        const extracted = extractComicVineMetadata(detailsJson);
+        console.log(`[ListSync] Extracted fields: ${Object.keys(extracted).join(', ')}`);
+
+        return {
+          mediaType: 'comic',
+          title,
+          comicSeries: series.name,
+          comicYear: comicYear || (series.start_year ? parseInt(series.start_year) : null),
+          comicIssue: comicIssue || null,
+          comicPublisher: series.publisher?.name || extracted.comicPublisher || null,
+          comicVineId: series.api_detail_url || null,
+          comicVineDetailsJson: detailsJson,
+          originalArtworkUrl: extracted.originalArtworkUrl || coverUrl,
+          // Spread all remaining extracted metadata (credits, descriptions, IDs, etc.)
+          ...extracted
+        };
+      };
+
+      // If we have an issue number, find the first series that actually has that issue.
+      // Limit to top 5 series and add a short delay between lookups to avoid hitting
+      // ComicVine rate limits during bulk list sync imports.
+      if (comicIssue) {
+        const seriesSlice = seriesResults.slice(0, 5);
+        for (const series of seriesSlice) {
+          try {
+            // Small delay to respect ComicVine rate limits during bulk imports
+            await new Promise(r => setTimeout(r, 250));
+            const issue = await comicVineService.getIssueByNumber(series.id, comicIssue);
+            if (issue) {
+              console.log(`[ListSync] ✓ ComicVine match: "${series.name}" #${comicIssue} (issueId: ${issue.id})`);
+              return buildEnrichedResult(series, issue);
+            } else {
+              console.log(`[ListSync] ✗ No issue #${comicIssue} in series "${series.name}" (id:${series.id})`);
+            }
+          } catch (issueErr) {
+            console.warn(
+              `[ListSync] ComicVine issue fetch error for "${series.name}" #${comicIssue}:`,
+              issueErr.message
+            );
+          }
+        }
+        console.log(
+          `[ListSync] No ComicVine series found with issue #${comicIssue} for "${comicSeries}", falling back to series-only match`
+        );
+      }
+
+      // Fallback: use the best-matching series without issue verification
+      console.log(`[ListSync] Using best series match for "${comicSeries}": "${seriesResults[0].name}"`);
+      return buildEnrichedResult(seriesResults[0], null);
+
+    } catch (error) {
+      console.error(`[ListSync] ComicVine lookup failed for "${comicSeries}":`, error.message);
+      return basicResult;
+    }
+  }
+
+  /**
+   * Match against OpenLibrary (basic title match)
+   */
+  async matchBook(title, year, itemUrl) {
+    return {
+      mediaType: 'book',
+      title,
+      bookId: null,
+      tvdbYear: year ? parseInt(year) : null
+    };
+  }
+
+  /**
+   * Format a web video item
+   */
+  formatWebVideo(title, itemUrl) {
+    return {
+      mediaType: 'webvideo',
+      title,
+      webTitle: title,
+      webUrl: itemUrl || null,
+      webDescription: null
+    };
+  }
+
+  /**
+   * Match against video games library
+   */
+  async matchGame(title, year) {
+    const game = await prisma.videoGame.findFirst({
+      where: {
+        title: { equals: title }
+      }
+    });
+
+    if (game) {
+      return {
+        mediaType: 'game',
+        title: game.title,
+        gameId: game.id
+      };
+    }
+
+    return {
+      mediaType: 'game',
+      title,
+      gameId: null
+    };
+  }
+
+  /**
+   * Pick the best TVDB match from search results
+   */
+  pickBestTvdbMatch(results, searchTitle, searchYear) {
+    if (!results || results.length === 0) return null;
+
+    const normalized = searchTitle.toLowerCase().trim();
+
+    let best = null;
+    let bestScore = 0;
+
+    for (const r of results) {
+      const name = (r.name || '').toLowerCase().trim();
+      let score = 0;
+
+      if (name === normalized) {
+        score = 1.0;
+      } else if (name.includes(normalized) || normalized.includes(name)) {
+        score = 0.6;
+      } else {
+        continue;
+      }
+
+      if (searchYear && r.year === searchYear) {
+        score += 0.3;
+      }
+
+      if (score > bestScore) {
+        bestScore = score;
+        best = r;
+      }
+    }
+
+    // If no strong match, return the first result
+    return best || results[0];
+  }
+}
+
+module.exports = ListItemMatcherService;

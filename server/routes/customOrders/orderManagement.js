@@ -53,6 +53,9 @@ function createOrderManagementRoutes(prisma, services) {
             }
           },
           backgroundGallery: true,
+          listScrapeConfig: {
+            select: { id: true, name: true, isActive: true, url: true, parserType: true }
+          },
           subOrders: {
             include: {
               items: {

@@ -31,7 +31,9 @@ const OrderListView = ({
   onViewOrder,
   onToggleActive,
   onEditOrder,
-  onDeleteOrder
+  onDeleteOrder,
+  onLinkListSync,
+  onOpenListSyncs
 }) => {
   const handleCreateFormToggle = () => {
     setShowCreateForm(!showCreateForm);
@@ -272,6 +274,9 @@ const OrderListView = ({
         <Button onClick={handleCreateFormToggle}>
           {showCreateForm ? 'Cancel' : 'Create New Custom Order'}
         </Button>
+        <Button onClick={onOpenListSyncs} className="secondary">
+          🔗 List Syncs
+        </Button>
       </div>
 
       {/* Create Form */}
@@ -294,6 +299,7 @@ const OrderListView = ({
                 onToggleActive={onToggleActive}
                 onEditOrder={onEditOrder}
                 onDeleteOrder={onDeleteOrder}
+                onLinkListSync={onLinkListSync}
               />
             ))}
           </div>
