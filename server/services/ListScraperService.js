@@ -1,9 +1,9 @@
 const cheerio = require('cheerio');
 const crypto = require('crypto');
-const { PrismaClient } = require('@prisma/client');
+// Use shared Prisma client to avoid SQLite connection contention
 const { getParser } = require('./parsers/ParserRegistry');
 
-const prisma = new PrismaClient();
+const prisma = require('../prismaClient');
 
 class ListScraperService {
   constructor() {
@@ -354,6 +354,19 @@ class ListScraperService {
       const scrapedItems = await this.scrapeList(config);
       const newItems = await this.detectNewItems(configId, scrapedItems);
 
+      // Build eligible fingerprint set based on head/tail limits
+      const headCount = config.headImportCount;
+      const tailCount = config.tailImportCount;
+      let eligibleFingerprints = null;
+      if (config.customOrderId) {
+        if (headCount && headCount > 0) {
+          eligibleFingerprints = new Set(scrapedItems.slice(0, headCount).map(i => i.fingerprint));
+        } else if (tailCount && tailCount > 0) {
+          eligibleFingerprints = new Set(scrapedItems.slice(-tailCount).map(i => i.fingerprint));
+        }
+        // null means no limit — all items eligible
+      }
+
       // Also find orphaned tracked items: fingerprint exists but customOrderItemId was set to null
       // by onDelete:SetNull (i.e. the linked CustomOrderItem was deleted after import)
       const orphanedTracked = await prisma.listScrapedItem.findMany({
@@ -384,17 +397,6 @@ class ListScraperService {
       // or are now eligible because the limit was removed entirely.
       let newlyEligibleItems = [];
       if (config.customOrderId) {
-        const headCount = config.headImportCount;
-        const tailCount = config.tailImportCount;
-        let eligibleFingerprints = null;
-        if (headCount && headCount > 0) {
-          eligibleFingerprints = new Set(scrapedItems.slice(0, headCount).map(i => i.fingerprint));
-        } else if (tailCount && tailCount > 0) {
-          eligibleFingerprints = new Set(scrapedItems.slice(-tailCount).map(i => i.fingerprint));
-        } else {
-          // No limit — all items are eligible
-          eligibleFingerprints = new Set(scrapedItems.map(i => i.fingerprint));
-        }
         const previouslySkipped = await prisma.listScrapedItem.findMany({
           where: {
             listScrapeConfigId: configId,
@@ -405,18 +407,37 @@ class ListScraperService {
           select: { fingerprint: true }
         });
         const skippedFingerprints = new Set(previouslySkipped.map(i => i.fingerprint));
+        const eligible = eligibleFingerprints || new Set(scrapedItems.map(i => i.fingerprint));
         newlyEligibleItems = scrapedItems.filter(i =>
-          eligibleFingerprints.has(i.fingerprint) && skippedFingerprints.has(i.fingerprint)
+          eligible.has(i.fingerprint) && skippedFingerprints.has(i.fingerprint)
         );
       }
 
+      // Apply head/tail limit to new items, orphaned items, and retry items
+      const isEligible = (item) => !eligibleFingerprints || eligibleFingerprints.has(item.fingerprint);
+      const eligibleNewItems = newItems.filter(isEligible);
+      const eligibleOrphanedItems = orphanedItems.filter(isEligible);
+      const eligibleRetryItems = retryItems.filter(isEligible);
+
+      // Track new items that fall outside the head/tail limit as skipped
+      if (config.customOrderId) {
+        const skippedNewItems = newItems.filter(i => !isEligible(i));
+        for (const item of skippedNewItems) {
+          await prisma.listScrapedItem.upsert({
+            where: { listScrapeConfigId_fingerprint: { listScrapeConfigId: configId, fingerprint: item.fingerprint } },
+            update: { title: item.title, position: item.position, itemUrl: item.itemUrl, itemYear: item.itemYear, mediaType: item.mediaType, wasSkipped: true },
+            create: { listScrapeConfigId: configId, title: item.title, position: item.position, itemUrl: item.itemUrl, itemYear: item.itemYear, mediaType: item.mediaType, fingerprint: item.fingerprint, wasSkipped: true }
+          });
+        }
+      }
+
       // Deduplicate: don't double-process items already in newItems or orphanedItems
-      const processedFingerprints = new Set([...newItems, ...orphanedItems].map(i => i.fingerprint));
-      const uniqueRetryItems = retryItems.filter(i => !processedFingerprints.has(i.fingerprint));
+      const processedFingerprints = new Set([...eligibleNewItems, ...eligibleOrphanedItems].map(i => i.fingerprint));
+      const uniqueRetryItems = eligibleRetryItems.filter(i => !processedFingerprints.has(i.fingerprint));
       const allProcessed = new Set([...processedFingerprints, ...uniqueRetryItems.map(i => i.fingerprint)]);
       const uniqueEligibleItems = newlyEligibleItems.filter(i => !allProcessed.has(i.fingerprint));
 
-      const itemsToProcess = [...newItems, ...orphanedItems, ...uniqueRetryItems, ...uniqueEligibleItems];
+      const itemsToProcess = [...eligibleNewItems, ...eligibleOrphanedItems, ...uniqueRetryItems, ...uniqueEligibleItems];
       // Sort by list position so we process items in order — if we hit a not-in-Plex item,
       // we stop BEFORE processing any items that come after it
       itemsToProcess.sort((a, b) => (a.position ?? 0) - (b.position ?? 0));
@@ -520,13 +541,18 @@ class ListScraperService {
 
       return results;
     } catch (error) {
-      await prisma.listScrapeConfig.update({
-        where: { id: configId },
-        data: {
-          lastCheckedAt: new Date(),
-          lastError: error.message
-        }
-      });
+      console.error(`[ListSync] checkForUpdates error for config ${configId}:`, error.message);
+      try {
+        await prisma.listScrapeConfig.updateMany({
+          where: { id: configId },
+          data: {
+            lastCheckedAt: new Date(),
+            lastError: error.message?.substring(0, 500) || 'Unknown error'
+          }
+        });
+      } catch (updateError) {
+        console.error(`[ListSync] Failed to update config ${configId} after error:`, updateError.message);
+      }
       throw error;
     }
   }

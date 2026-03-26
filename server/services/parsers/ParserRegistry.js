@@ -1,6 +1,7 @@
 const CssSelectorParser = require('./CssSelectorParser');
 const DcuTimelineParser = require('./DcuTimelineParser');
 const McuTimelineParser = require('./McuTimelineParser');
+const StarWarsTimelineParser = require('./StarWarsTimelineParser');
 
 /**
  * Registry mapping parserType strings to parser instances.
@@ -9,7 +10,8 @@ const McuTimelineParser = require('./McuTimelineParser');
 const parsers = {
   'css-selectors': new CssSelectorParser(),
   'dcu-timeline': new DcuTimelineParser(),
-  'mcu-timeline': new McuTimelineParser()
+  'mcu-timeline': new McuTimelineParser(),
+  'starwars-timeline': new StarWarsTimelineParser()
 };
 
 /**

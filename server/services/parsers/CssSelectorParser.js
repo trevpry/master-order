@@ -109,6 +109,7 @@ class CssSelectorParser extends BaseListParser {
     if (lower.includes('movie') || lower.includes('film')) return 'movie';
     if (lower.includes('tv') || lower.includes('series') || lower.includes('show') || lower.includes('episode')) return 'episode';
     if (lower.includes('comic')) return 'comic';
+    if (lower.includes('short stor')) return 'shortstory';
     if (lower.includes('book')) return 'book';
     if (lower.includes('game') || lower.includes('video game')) return 'game';
     if (lower.includes('web') || lower.includes('youtube') || lower.includes('video')) return 'webvideo';

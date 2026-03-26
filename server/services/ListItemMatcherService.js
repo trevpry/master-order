@@ -1,10 +1,13 @@
-const { PrismaClient } = require('@prisma/client');
-
-const prisma = new PrismaClient();
+const prisma = require('../prismaClient');
+const cheerio = require('cheerio');
+const openLibraryService = require('../openLibraryService');
+const BookService = require('./BookService');
 
 class ListItemMatcherService {
   constructor(tvdbService = null) {
     this.tvdbService = tvdbService;
+    this.openLibraryService = openLibraryService;
+    this.bookService = new BookService(prisma);
   }
 
   /**
@@ -27,7 +30,10 @@ class ListItemMatcherService {
         result = await this.matchComic(scrapedItem);
         break;
       case 'book':
-        result = await this.matchBook(title, itemYear, itemUrl);
+        result = await this.matchBook(title, itemYear, itemUrl, scrapedItem.isbn, scrapedItem.author, scrapedItem.pageCount);
+        break;
+      case 'shortstory':
+        result = this.matchShortStory(title, itemYear, itemUrl);
         break;
       case 'webvideo':
         result = this.formatWebVideo(title, itemUrl);
@@ -413,12 +419,28 @@ class ListItemMatcherService {
         return basicResult;
       }
 
-      console.log(`[ListSync] Searching ComicVine for "${comicSeries}"${comicIssue ? ` #${comicIssue}` : ''}`);
+      console.log(`[ListSync] Searching ComicVine for "${comicSeries}"${comicIssue ? ` #${comicIssue}` : ''}${comicYear ? ` (year: ${comicYear})` : ''}`);
       const seriesResults = await comicVineService.searchSeries(comicSeries);
 
       if (!seriesResults || seriesResults.length === 0) {
         console.log(`[ListSync] No ComicVine series found for "${comicSeries}"`);
         return basicResult;
+      }
+
+      // If we have a year, sort series so those matching the year come first.
+      // This avoids picking the wrong "Darth Vader" (2015 vs 2017 vs 2020) etc.
+      // Use ±1 year tolerance since an issue's release year may differ from the series start year.
+      if (comicYear) {
+        seriesResults.sort((a, b) => {
+          const aYear = a.start_year ? parseInt(a.start_year) : null;
+          const bYear = b.start_year ? parseInt(b.start_year) : null;
+          const aDiff = aYear != null ? Math.abs(aYear - comicYear) : 999;
+          const bDiff = bYear != null ? Math.abs(bYear - comicYear) : 999;
+          const aScore = aDiff <= 1 ? 0 : 1;
+          const bScore = bDiff <= 1 ? 0 : 1;
+          if (aScore !== bScore) return aScore - bScore;
+          return aDiff - bDiff;
+        });
       }
 
       // Helper: build a fully-enriched result from series + issue data, identical to
@@ -494,14 +516,121 @@ class ListItemMatcherService {
   }
 
   /**
-   * Match against OpenLibrary (basic title match)
+   * Match against OpenLibrary and create/find a Book record
    */
-  async matchBook(title, year, itemUrl) {
+  async matchBook(title, year, itemUrl, isbn, author, pageCount) {
+    try {
+      // If no ISBN provided, try to fetch it from the wiki page (e.g. Wookieepedia)
+      if (!isbn && itemUrl && itemUrl.includes('fandom.com/wiki/')) {
+        try {
+          const wikiDetails = await this.fetchBookDetailsFromWiki(itemUrl);
+          if (wikiDetails.isbn) isbn = wikiDetails.isbn;
+          if (wikiDetails.author && !author) author = wikiDetails.author;
+          if (wikiDetails.pageCount && !pageCount) pageCount = wikiDetails.pageCount;
+        } catch (err) {
+          console.warn(`[BookMatch] Could not fetch wiki details for "${title}": ${err.message}`);
+        }
+      }
+
+      // If we have an ISBN, search by ISBN first for a precise match
+      let results = [];
+      if (isbn) {
+        results = await this.openLibraryService.searchBooks(`isbn:${isbn}`, 5);
+      }
+
+      // Fall back to title search if ISBN search found nothing
+      if (results.length === 0) {
+        let searchQuery = title.trim();
+        if (year) {
+          searchQuery += ` first_publish_year:${year}`;
+        }
+        results = await this.openLibraryService.searchBooks(searchQuery, 5);
+      }
+
+      if (results.length > 0) {
+        const bestMatch = results[0];
+
+        // Prefer the original scraped title if the OpenLibrary title is a truncated/series-level name
+        const olTitle = bestMatch.title || '';
+        const useTitle = (title && title.length > olTitle.length && title.toLowerCase().startsWith(olTitle.toLowerCase()))
+          ? title
+          : (olTitle || title);
+
+        // Create or find the book in the unified Book table
+        const book = await this.bookService.createBook({
+          title: useTitle,
+          author: bestMatch.authors?.[0] || author || null,
+          isbn: bestMatch.isbn || isbn || null,
+          publisher: bestMatch.publishers?.[0] || null,
+          publishYear: bestMatch.firstPublishYear || (year ? parseInt(year) : null),
+          coverUrl: bestMatch.coverUrl || null,
+          openLibraryId: bestMatch.id || null,
+          pageCount: bestMatch.pageCount || pageCount || null
+        });
+
+        console.log(`📚 List sync matched book: "${title}" → "${book.title}" (Book ID: ${book.id})`);
+
+        return {
+          mediaType: 'book',
+          title: book.title,
+          bookId: book.id,
+          originalArtworkUrl: book.coverUrl || null,
+          tvdbYear: book.publishYear || null
+        };
+      }
+
+      // No OpenLibrary match — create a manual book entry with wiki metadata
+      console.log(`📚 No OpenLibrary match for "${title}", creating manual entry`);
+      const book = await this.bookService.createBook({
+        title: title,
+        author: author || null,
+        isbn: isbn || null,
+        publishYear: year ? parseInt(year) : null,
+        pageCount: pageCount || null
+      });
+
+      return {
+        mediaType: 'book',
+        title: book.title,
+        bookId: book.id,
+        tvdbYear: book.publishYear || null
+      };
+    } catch (error) {
+      console.error(`Error matching book "${title}":`, error.message);
+      // Fallback: still create a basic book entry
+      try {
+        const book = await this.bookService.createBook({
+          title: title,
+          publishYear: year ? parseInt(year) : null
+        });
+        return {
+          mediaType: 'book',
+          title: book.title,
+          bookId: book.id,
+          tvdbYear: book.publishYear || null
+        };
+      } catch (innerError) {
+        // Final fallback if even book creation fails
+        return {
+          mediaType: 'book',
+          title,
+          bookId: null,
+          tvdbYear: year ? parseInt(year) : null
+        };
+      }
+    }
+  }
+
+  /**
+   * Format a short story item
+   */
+  matchShortStory(title, year, itemUrl) {
     return {
-      mediaType: 'book',
+      mediaType: 'shortstory',
       title,
-      bookId: null,
-      tvdbYear: year ? parseInt(year) : null
+      storyTitle: title,
+      storyUrl: itemUrl || null,
+      storyYear: year ? parseInt(year) : null
     };
   }
 
@@ -578,6 +707,49 @@ class ListItemMatcherService {
 
     // If no strong match, return the first result
     return best || results[0];
+  }
+
+  /**
+   * Fetch book details (ISBN, author, page count) from a Fandom wiki page infobox
+   */
+  async fetchBookDetailsFromWiki(itemUrl) {
+    const parsed = new URL(itemUrl);
+    const pathMatch = parsed.pathname.match(/\/wiki\/(.+)$/);
+    if (!pathMatch) return {};
+
+    const wikiBase = `${parsed.protocol}//${parsed.host}`;
+    const pageName = decodeURIComponent(pathMatch[1]);
+    const apiUrl = `${wikiBase}/api.php?action=parse&page=${encodeURIComponent(pageName)}&prop=text&format=json`;
+
+    const response = await fetch(apiUrl, {
+      headers: { 'User-Agent': 'Mozilla/5.0 (compatible; EddieLifeManagement/1.0)' },
+      signal: AbortSignal.timeout(10000)
+    });
+
+    if (!response.ok) return {};
+
+    const data = await response.json();
+    if (data.error) return {};
+
+    const $ = cheerio.load(data.parse.text['*']);
+    const details = {};
+
+    const isbnText = $('[data-source="isbn"] .pi-data-value').first().text().trim();
+    if (isbnText) {
+      const isbnMatch = isbnText.match(/(\d{13}|\d{10})/);
+      if (isbnMatch) details.isbn = isbnMatch[1];
+    }
+
+    const authorText = $('[data-source="author"] .pi-data-value').first().text().trim().replace(/\[\d+\]/g, '').trim();
+    if (authorText) details.author = authorText;
+
+    const pagesText = $('[data-source="pages"] .pi-data-value').first().text().trim().replace(/\[\d+\]/g, '').trim();
+    if (pagesText) {
+      const num = parseInt(pagesText);
+      if (!isNaN(num)) details.pageCount = num;
+    }
+
+    return details;
   }
 }
 
