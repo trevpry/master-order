@@ -51,7 +51,7 @@ router.get('/configs', asyncHandler(async (req, res) => {
 router.post('/configs', asyncHandler(async (req, res) => {
   const { name, url, parserType, parserConfig, itemSelector, titleSelector,
           mediaTypeSelector, urlSelector, imageSelector, yearSelector,
-          defaultMediaType, useJavaScript, isActive, tailImportCount } = req.body;
+          defaultMediaType, useJavaScript, isActive, headImportCount, tailImportCount } = req.body;
 
   if (!name || !url) {
     return sendBadRequest(res, 'name and url are required');
@@ -77,6 +77,7 @@ router.post('/configs', asyncHandler(async (req, res) => {
       defaultMediaType: defaultMediaType || 'movie',
       useJavaScript: useJavaScript || false,
       isActive: isActive !== undefined ? isActive : true,
+      headImportCount: headImportCount ? parseInt(headImportCount) : null,
       tailImportCount: tailImportCount ? parseInt(tailImportCount) : null
     }
   });
@@ -102,7 +103,7 @@ router.get('/configs/:id', asyncHandler(async (req, res) => {
 router.put('/configs/:id', asyncHandler(async (req, res) => {
   const { name, url, parserType, parserConfig, itemSelector, titleSelector,
           mediaTypeSelector, urlSelector, imageSelector, yearSelector,
-          defaultMediaType, useJavaScript, isActive, tailImportCount } = req.body;
+          defaultMediaType, useJavaScript, isActive, headImportCount, tailImportCount } = req.body;
 
   const existing = await prisma.listScrapeConfig.findUnique({ where: { id: parseInt(req.params.id) } });
   if (!existing) return sendNotFound(res, 'List sync config not found');
@@ -123,6 +124,7 @@ router.put('/configs/:id', asyncHandler(async (req, res) => {
       ...(defaultMediaType !== undefined && { defaultMediaType }),
       ...(useJavaScript !== undefined && { useJavaScript }),
       ...(isActive !== undefined && { isActive }),
+      ...(headImportCount !== undefined && { headImportCount: headImportCount ? parseInt(headImportCount) : null }),
       ...(tailImportCount !== undefined && { tailImportCount: tailImportCount ? parseInt(tailImportCount) : null })
     }
   });

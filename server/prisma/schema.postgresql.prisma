@@ -2433,6 +2433,7 @@ model ListScrapeConfig {
   useJavaScript      Boolean           @default(false)
   isActive           Boolean           @default(true)
   importedAll        Boolean           @default(false)
+  headImportCount    Int?
   tailImportCount    Int?              
   lastCheckedAt      DateTime?
   lastItemCount      Int               @default(0)

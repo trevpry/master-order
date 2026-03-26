@@ -36,6 +36,7 @@ const ListSyncsPanel = ({ isOpen, onClose, onRefreshOrders }) => {
     defaultMediaType: 'movie',
     useJavaScript: false,
     isActive: true,
+    headImportCount: '',
     tailImportCount: ''
   });
 
@@ -72,7 +73,7 @@ const ListSyncsPanel = ({ isOpen, onClose, onRefreshOrders }) => {
       name: '', url: '', parserType: 'css-selectors', parserConfig: '',
       itemSelector: '', titleSelector: '', mediaTypeSelector: '',
       urlSelector: '', yearSelector: '', defaultMediaType: 'movie',
-      useJavaScript: false, isActive: true, tailImportCount: ''
+      useJavaScript: false, isActive: true, headImportCount: '', tailImportCount: ''
     });
     setEditingConfig(null);
     setPreviewItems([]);
@@ -98,6 +99,7 @@ const ListSyncsPanel = ({ isOpen, onClose, onRefreshOrders }) => {
       defaultMediaType: cfg.defaultMediaType || 'movie',
       useJavaScript: cfg.useJavaScript || false,
       isActive: cfg.isActive !== false,
+      headImportCount: cfg.headImportCount != null ? String(cfg.headImportCount) : '',
       tailImportCount: cfg.tailImportCount != null ? String(cfg.tailImportCount) : ''
     });
     setEditingConfig(cfg);
@@ -381,11 +383,19 @@ const ListSyncsPanel = ({ isOpen, onClose, onRefreshOrders }) => {
                 </select>
               </div>
               <div style={{minWidth: '130px'}}>
+                <label className="block text-sm font-medium mb-1">Import First N Items</label>
+                <input type="number" className="w-full border rounded px-3 py-2 text-sm"
+                       min="1"
+                       value={formData.headImportCount}
+                       onChange={(e) => setFormData({...formData, headImportCount: e.target.value, tailImportCount: e.target.value ? '' : formData.tailImportCount})}
+                       placeholder="All" />
+              </div>
+              <div style={{minWidth: '130px'}}>
                 <label className="block text-sm font-medium mb-1">Import Last N Items</label>
                 <input type="number" className="w-full border rounded px-3 py-2 text-sm"
                        min="1"
                        value={formData.tailImportCount}
-                       onChange={(e) => setFormData({...formData, tailImportCount: e.target.value})}
+                       onChange={(e) => setFormData({...formData, tailImportCount: e.target.value, headImportCount: e.target.value ? '' : formData.headImportCount})}
                        placeholder="All" />
               </div>
               <label className="flex items-end gap-2 text-sm">
