@@ -19,6 +19,7 @@ model Settings {
   tvdbBearerToken                   String?
   selectedPlayer                    String?
   selectedPlexUser                  String?
+  timezone                          String    @default("UTC")
   tvGeneralPercent                  Int       @default(50)
   moviesGeneralPercent              Int       @default(50)
   customOrderPercent                Int       @default(0)
@@ -36,6 +37,9 @@ model Settings {
   rawgApiKey                        String?
   geminiApiKey                      String?
   listScrapeInterval                Int       @default(6)
+  mediaTypeLimiters                 String?
+  preferNewRelease                  Int       @default(0)
+  preferLongUnwatched               Int       @default(0)
   createdAt                         DateTime  @default(now())
   updatedAt                         DateTime  @updatedAt
 }

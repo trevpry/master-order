@@ -521,7 +521,7 @@ async function enhanceWithTVDBArtwork(selectedSeries) {
 }
 
 // Main function to get next custom order item
-async function getNextCustomOrder(req = null) {
+async function getNextCustomOrder(req = null, mediaTypeLimiters = null) {
   try {
     console.log('Starting custom order selection...');
 
@@ -540,6 +540,22 @@ async function getNextCustomOrder(req = null) {
       };
     }
 
+    // Determine allowed media types for custom order items
+    const allEnabled = !mediaTypeLimiters || Object.values(mediaTypeLimiters).every(v => v);
+    let allowedMediaTypes = null;
+    if (!allEnabled) {
+      allowedMediaTypes = [];
+      if (mediaTypeLimiters.episode) allowedMediaTypes.push('episode');
+      if (mediaTypeLimiters.movie) allowedMediaTypes.push('movie');
+      if (mediaTypeLimiters.book) allowedMediaTypes.push('book', 'shortstory');
+      if (mediaTypeLimiters.webvideo) allowedMediaTypes.push('webvideo');
+      if (mediaTypeLimiters.videogame) allowedMediaTypes.push('game');
+      if (mediaTypeLimiters.comic) allowedMediaTypes.push('comic');
+      // Always allow suborder since we need to dive into them to find the actual item type
+      allowedMediaTypes.push('suborder');
+      console.log(`🎯 Custom order media type filter: ${allowedMediaTypes.join(', ')}`);
+    }
+
     // Select a random custom order
     const selectedOrder = await selectRandomCustomOrder(customOrders);
     console.log(`Selected custom order: "${selectedOrder.name}"`);
@@ -551,10 +567,12 @@ async function getNextCustomOrder(req = null) {
     let isFromSubOrder = false;
     let parentOrder = null;
     let attempts = 0;
-    const maxAttempts = Math.min(customOrders.length, 5); // Limit attempts to avoid infinite loops
+    const triedOrderIds = new Set();
+    const maxAttempts = allowedMediaTypes ? customOrders.length : Math.min(customOrders.length, 5); // Try all orders when filtering by media type
 
     while (!nextItem && attempts < maxAttempts) {
       attempts++;
+      triedOrderIds.add(selectedOrderToUse.id);
       
       // Get the next item from the current custom order
       const candidateResult = await getNextItemFromCustomOrder(selectedOrderToUse);
@@ -564,7 +582,7 @@ async function getNextCustomOrder(req = null) {
         
         // Try a different custom order
         if (attempts < maxAttempts) {
-          const remainingOrders = customOrders.filter(o => o.id !== selectedOrderToUse.id);
+          const remainingOrders = customOrders.filter(o => !triedOrderIds.has(o.id));
           if (remainingOrders.length > 0) {
             selectedOrderToUse = await selectRandomCustomOrder(remainingOrders);
             console.log(`🔄 Trying different custom order: "${selectedOrderToUse.name}"`);
@@ -581,7 +599,7 @@ async function getNextCustomOrder(req = null) {
         
         // Try a different custom order
         if (attempts < maxAttempts) {
-          const remainingOrders = customOrders.filter(o => o.id !== selectedOrderToUse.id);
+          const remainingOrders = customOrders.filter(o => !triedOrderIds.has(o.id));
           if (remainingOrders.length > 0) {
             selectedOrderToUse = await selectRandomCustomOrder(remainingOrders);
             console.log(`🔄 Trying different custom order: "${selectedOrderToUse.name}"`);
@@ -596,6 +614,22 @@ async function getNextCustomOrder(req = null) {
       isFromSubOrder = candidateResult.isFromSubOrder;
       parentOrder = candidateResult.parentOrder;
 
+      // Check if the candidate item's media type matches allowed types
+      if (allowedMediaTypes && !allowedMediaTypes.includes(candidateItem.mediaType)) {
+        console.log(`🎯 Skipping "${candidateItem.title}" (${candidateItem.mediaType}) - not in allowed media types`);
+        
+        // Try a different custom order
+        if (attempts < maxAttempts) {
+          const remainingOrders = customOrders.filter(o => !triedOrderIds.has(o.id));
+          if (remainingOrders.length > 0) {
+            selectedOrderToUse = await selectRandomCustomOrder(remainingOrders);
+            console.log(`🔄 Trying different custom order: "${selectedOrderToUse.name}"`);
+            continue;
+          }
+        }
+        break;
+      }
+
       // Check if this is a TVDB-only item that still doesn't exist in Plex
       if (candidateItem.isFromTvdbOnly) {
         console.log(`🔍 Checking TVDB-only item "${candidateItem.title}" availability...`);
@@ -606,7 +640,7 @@ async function getNextCustomOrder(req = null) {
           
           // Try a different custom order
           if (attempts < maxAttempts) {
-            const remainingOrders = customOrders.filter(o => o.id !== selectedOrderToUse.id);
+            const remainingOrders = customOrders.filter(o => !triedOrderIds.has(o.id));
             if (remainingOrders.length > 0) {
               selectedOrderToUse = await selectRandomCustomOrder(remainingOrders);
               console.log(`🔄 Trying different custom order: "${selectedOrderToUse.name}"`);

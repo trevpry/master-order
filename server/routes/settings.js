@@ -56,7 +56,10 @@ router.get('/', asyncHandler(async (req, res) => {
         JSON.parse(settings.ignoredMovieCollections) : settings.ignoredMovieCollections) : [],
     ignoredTVCollections: settings.ignoredTVCollections ? 
       (typeof settings.ignoredTVCollections === 'string' ? 
-        JSON.parse(settings.ignoredTVCollections) : settings.ignoredTVCollections) : []
+        JSON.parse(settings.ignoredTVCollections) : settings.ignoredTVCollections) : [],
+    mediaTypeLimiters: settings.mediaTypeLimiters ?
+      (typeof settings.mediaTypeLimiters === 'string' ?
+        JSON.parse(settings.mediaTypeLimiters) : settings.mediaTypeLimiters) : null
   };
 
   res.json(parsedSettings);

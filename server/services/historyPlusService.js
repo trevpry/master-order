@@ -1638,9 +1638,9 @@ class HistoryPlusService {
    * Randomly select a piece of content from an event
    * Returns an object with type and content data suitable for Up Next display
    */
-  async getRandomContentFromEvent(event) {
+  async getRandomContentFromEvent(event, allowedTypes = null) {
     try {
-      const availableContent = [];
+      let availableContent = [];
 
       // Collect only UNREVIEWED content
       event.videos?.forEach(video => {
@@ -1752,6 +1752,12 @@ class HistoryPlusService {
       });
 
       console.log(`🎲 Found ${availableContent.length} unreviewed items in event "${event.title}"`);
+      
+      // Filter by allowed types if specified
+      if (allowedTypes && allowedTypes.length > 0) {
+        availableContent = availableContent.filter(item => allowedTypes.includes(item.type));
+        console.log(`🎯 After media type filtering: ${availableContent.length} items (allowed: ${allowedTypes.join(', ')})`);
+      }
       
       if (availableContent.length === 0) {
         console.log('⚠️ No unreviewed content found in event');

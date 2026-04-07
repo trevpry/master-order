@@ -7,6 +7,8 @@ const { sendBadRequest, sendNotFound, sendSuccess, sendServerError, asyncHandler
 const getNextEpisode = require('../getNextEpisode');
 const getNextMovie = require('../getNextMovie');
 const { getNextCustomOrder } = require('../getNextCustomOrder');
+const HistoryPlusService = require('../services/historyPlusService');
+const historyPlusService = new HistoryPlusService();
 
 // Import Plex-specific services
 const prisma = require('../prismaClient');
@@ -419,6 +421,58 @@ router.get('/device-status/:machineIdentifier', asyncHandler(async (req, res) =>
 
 // ===== CONTENT MANAGEMENT =====
 
+// Helper: format History Plus response (transform video to webvideo format)
+function formatHistoryPlusResponse(req, data) {
+  if (data.type === 'video' && data.content) {
+    const video = data.content;
+    return {
+      ratingKey: `history-plus-video-${video.id}`,
+      title: data.title,
+      type: 'webvideo',
+      year: null,
+      summary: data.description || '',
+      thumb: data.thumbnail,
+      art: null,
+      webTitle: data.title,
+      webUrl: video.url,
+      webDescription: data.description || '',
+      localArtworkPath: null,
+      orderType: 'HISTORY_PLUS',
+      customOrderMediaType: 'webvideo',
+      eventId: data.eventId,
+      eventTitle: data.eventTitle,
+      eventTitleWithDates: data.eventTitleWithDates,
+      eventDate: data.eventDate,
+      channel: data.channel
+    };
+  }
+  // Non-video content (books, chapters, sections) or error messages
+  return data;
+}
+
+// Helper: try to fetch History Plus content directly (for fallback)
+async function tryGetHistoryPlusContent(mediaTypeLimiters) {
+  try {
+    const nextEvent = await historyPlusService.getNextUnreviewedEvent();
+    if (!nextEvent) return null;
+
+    let allowedTypes = null;
+    if (mediaTypeLimiters && !Object.values(mediaTypeLimiters).every(v => v)) {
+      allowedTypes = [];
+      if (mediaTypeLimiters.webvideo) allowedTypes.push('video');
+      if (mediaTypeLimiters.book) allowedTypes.push('book', 'chapter', 'section');
+    }
+
+    const randomContent = await historyPlusService.getRandomContentFromEvent(nextEvent, allowedTypes);
+    if (!randomContent) return null;
+
+    return { orderType: 'HISTORY_PLUS', ...randomContent };
+  } catch (error) {
+    console.error('Error in History Plus fallback:', error.message);
+    return null;
+  }
+}
+
 // Up Next endpoint - main entry point for getting next item to watch
 router.get('/up-next', asyncHandler(async (req, res) => {
   const data = await getNextEpisode(); // This handles order type selection internally
@@ -430,43 +484,31 @@ router.get('/up-next', asyncHandler(async (req, res) => {
     res.json(movieData);
   } else if (data.orderType === 'CUSTOM_ORDER') {
     console.log('Custom order type selected, using getNextCustomOrder function');
-    const customOrderData = await getNextCustomOrder(req);
+    const customOrderData = await getNextCustomOrder(req, data.mediaTypeLimiters);
+    
+    // Fallback: if no matching items in custom orders and limiters are active, try History Plus
+    if (customOrderData.message && data.mediaTypeLimiters) {
+      console.log('⚡ Custom Orders had no matching items, falling back to History Plus');
+      const fallbackData = await tryGetHistoryPlusContent(data.mediaTypeLimiters);
+      if (fallbackData) {
+        return res.json(formatHistoryPlusResponse(req, fallbackData));
+      }
+    }
+    
     res.json(customOrderData);
   } else if (data.orderType === 'HISTORY_PLUS') {
     console.log('History Plus order type selected, treating video as webvideo');
     
-    // Transform History Plus video to webvideo format (same as custom order webvideos)
-    if (data.type === 'video' && data.content) {
-      const video = data.content;
-      const baseUrl = `${req.protocol}://${req.get('host')}`;
-      
-      const webvideoData = {
-        ratingKey: `history-plus-video-${video.id}`,
-        title: data.title, // Keep the actual video title
-        type: 'webvideo',
-        year: null,
-        summary: data.description || '',
-        thumb: data.thumbnail,
-        art: null,
-        webTitle: data.title, // Keep the actual video title
-        webUrl: video.url,
-        webDescription: data.description || '',
-        localArtworkPath: null,
-        orderType: 'HISTORY_PLUS',
-        customOrderMediaType: 'webvideo',
-        // Include History Plus context
-        eventId: data.eventId,
-        eventTitle: data.eventTitle,
-        eventTitleWithDates: data.eventTitleWithDates,
-        eventDate: data.eventDate,
-        channel: data.channel
-      };
-      
-      res.json(webvideoData);
-    } else {
-      // Non-video History Plus content (books, chapters, sections)
-      res.json(data);
+    // Fallback: if History Plus had no matching content and limiters are active, try Custom Orders
+    if (data.message && data.mediaTypeLimiters) {
+      console.log('⚡ History Plus had no matching items, falling back to Custom Orders');
+      const customOrderData = await getNextCustomOrder(req, data.mediaTypeLimiters);
+      if (!customOrderData.message) {
+        return res.json(customOrderData);
+      }
     }
+    
+    res.json(formatHistoryPlusResponse(req, data));
   } else {
     // TV General selection
     res.json(data);

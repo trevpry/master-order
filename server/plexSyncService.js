@@ -54,18 +54,38 @@ class PlexSyncService {
     const url = `${this.plexUrl}${endpoint}${separator}X-Plex-Token=${this.plexToken}`;
     console.log(`Making Plex request to: ${url}`);
     
-    const response = await fetch(url, {
-      headers: {
-        'Accept': 'application/json'
+    const maxRetries = 3;
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 120000); // 2 minute timeout
+      
+      let response;
+      try {
+        response = await fetch(url, {
+          headers: {
+            'Accept': 'application/json'
+          },
+          signal: controller.signal
+        });
+      } catch (fetchError) {
+        clearTimeout(timeout);
+        if (attempt < maxRetries && (fetchError.code === 'ECONNRESET' || fetchError.type === 'system')) {
+          console.warn(`Plex request failed (attempt ${attempt}/${maxRetries}): ${fetchError.message}. Retrying in ${attempt * 2}s...`);
+          await new Promise(resolve => setTimeout(resolve, attempt * 2000));
+          continue;
+        }
+        throw fetchError;
+      } finally {
+        clearTimeout(timeout);
       }
-    });
-    
-    if (!response.ok) {
-      throw new Error(`Plex API request failed: ${response.status} ${response.statusText}`);
+      
+      if (!response.ok) {
+        throw new Error(`Plex API request failed: ${response.status} ${response.statusText}`);
+      }
+      
+      const jsonData = await response.json();
+      return jsonData;
     }
-    
-    const jsonData = await response.json();
-    return jsonData;
   }  async syncLibrarySections() {
     console.log('Syncing Plex library sections...');
     

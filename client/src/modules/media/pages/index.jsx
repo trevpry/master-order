@@ -6,6 +6,7 @@ import config from '../../../config'
 import '../../../App.css'
 import './HomeMobile.css'
 import '../../../shared/components/MobileImageFix.css'
+import './settings/Settings.css'
 import toast, { Toaster } from 'react-hot-toast';
 import readingSessionService from '../../../services/readingSessionService.js';
 
@@ -36,6 +37,29 @@ function MediaHome() {
 
   // Settings modal
   const [showSettingsModal, setShowSettingsModal] = useState(false);
+
+  // Up Next Settings state
+  const [tvGeneralPercent, setTvGeneralPercent] = useState(50);
+  const [moviesGeneralPercent, setMoviesGeneralPercent] = useState(50);
+  const [customOrderPercent, setCustomOrderPercent] = useState(0);
+  const [historyPlusPercent, setHistoryPlusPercent] = useState(0);
+  const [customOrdersCount, setCustomOrdersCount] = useState(0);
+  const [settingsLoading, setSettingsLoading] = useState(false);
+  const [settingsSaving, setSettingsSaving] = useState(false);
+
+  // Media Type Limiter state
+  const [mediaTypeLimiters, setMediaTypeLimiters] = useState({
+    episode: true,
+    movie: true,
+    book: true,
+    webvideo: true,
+    videogame: true,
+    comic: true
+  });
+
+  // Balance state
+  const [preferNewRelease, setPreferNewRelease] = useState(0);
+  const [preferLongUnwatched, setPreferLongUnwatched] = useState(0);
 
   // Auto-load data when component mounts (prevent manual button clicking)
   useEffect(() => {
@@ -185,6 +209,176 @@ function MediaHome() {
       console.error('Error saving viewing session:', error);
     }
   }, [viewingSession]);
+
+  // Load Up Next settings on settings modal open
+  const loadUpNextSettings = async () => {
+    try {
+      setSettingsLoading(true);
+      const [settingsRes, countRes] = await Promise.all([
+        fetch(`${config.apiBaseUrl}/api/settings`),
+        fetch(`${config.apiBaseUrl}/api/custom-orders/count`)
+      ]);
+      const settings = await settingsRes.json();
+      const countData = await countRes.json();
+      
+      setTvGeneralPercent(settings.tvGeneralPercent ?? 50);
+      setMoviesGeneralPercent(settings.moviesGeneralPercent ?? 50);
+      setCustomOrderPercent(settings.customOrderPercent ?? 0);
+      setHistoryPlusPercent(settings.historyPlusPercent ?? 0);
+      setCustomOrdersCount(countData.count || 0);
+      
+      // Load balance settings
+      setPreferNewRelease(settings.preferNewRelease ?? 0);
+      setPreferLongUnwatched(settings.preferLongUnwatched ?? 0);
+      
+      if (settings.mediaTypeLimiters) {
+        try {
+          const parsed = typeof settings.mediaTypeLimiters === 'string' 
+            ? JSON.parse(settings.mediaTypeLimiters) 
+            : settings.mediaTypeLimiters;
+          setMediaTypeLimiters({
+            episode: parsed.episode ?? true,
+            movie: parsed.movie ?? true,
+            book: parsed.book ?? true,
+            webvideo: parsed.webvideo ?? true,
+            videogame: parsed.videogame ?? true,
+            comic: parsed.comic ?? true
+          });
+        } catch (e) {
+          console.error('Error parsing mediaTypeLimiters:', e);
+        }
+      } else {
+        setMediaTypeLimiters({ episode: true, movie: true, book: true, webvideo: true, videogame: true, comic: true });
+      }
+    } catch (error) {
+      console.error('Error loading Up Next settings:', error);
+    } finally {
+      setSettingsLoading(false);
+    }
+  };
+
+  const saveUpNextSettings = async () => {
+    const effectiveCustomOrderPercent = customOrdersCount > 0 ? customOrderPercent : 0;
+    const total = tvGeneralPercent + moviesGeneralPercent + effectiveCustomOrderPercent + historyPlusPercent;
+    if (total !== 100) {
+      toast.error(`Order type percentages must add up to 100%. Current total: ${total}%`);
+      return;
+    }
+    try {
+      setSettingsSaving(true);
+      await fetch(`${config.apiBaseUrl}/api/settings`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          tvGeneralPercent,
+          moviesGeneralPercent,
+          customOrderPercent,
+          historyPlusPercent,
+          mediaTypeLimiters: JSON.stringify(mediaTypeLimiters),
+          preferNewRelease,
+          preferLongUnwatched
+        })
+      });
+      toast.success('Up Next settings saved!');
+      setShowSettingsModal(false);
+    } catch (error) {
+      console.error('Error saving Up Next settings:', error);
+      toast.error('Failed to save settings');
+    } finally {
+      setSettingsSaving(false);
+    }
+  };
+
+  const handleTvGeneralPercentChange = (e) => {
+    const value = parseInt(e.target.value);
+    setTvGeneralPercent(value);
+    const remainingPercent = 100 - value;
+    if (customOrdersCount === 0) {
+      const currentOtherTotal = moviesGeneralPercent + historyPlusPercent;
+      if (currentOtherTotal === 0) {
+        setMoviesGeneralPercent(remainingPercent);
+        setHistoryPlusPercent(0);
+      } else {
+        setMoviesGeneralPercent(Math.round(remainingPercent * (moviesGeneralPercent / currentOtherTotal)));
+        setHistoryPlusPercent(Math.round(remainingPercent * (historyPlusPercent / currentOtherTotal)));
+      }
+      setCustomOrderPercent(0);
+    } else {
+      const currentOtherTotal = moviesGeneralPercent + customOrderPercent + historyPlusPercent;
+      if (currentOtherTotal === 0) {
+        setMoviesGeneralPercent(remainingPercent);
+        setCustomOrderPercent(0);
+        setHistoryPlusPercent(0);
+      } else {
+        setMoviesGeneralPercent(Math.round(remainingPercent * (moviesGeneralPercent / currentOtherTotal)));
+        setCustomOrderPercent(Math.round(remainingPercent * (customOrderPercent / currentOtherTotal)));
+        setHistoryPlusPercent(Math.round(remainingPercent * (historyPlusPercent / currentOtherTotal)));
+      }
+    }
+  };
+
+  const handleMoviesGeneralPercentChange = (e) => {
+    const value = parseInt(e.target.value);
+    setMoviesGeneralPercent(value);
+    const remainingPercent = 100 - value;
+    if (customOrdersCount === 0) {
+      const currentOtherTotal = tvGeneralPercent + historyPlusPercent;
+      if (currentOtherTotal === 0) {
+        setTvGeneralPercent(remainingPercent);
+        setHistoryPlusPercent(0);
+      } else {
+        setTvGeneralPercent(Math.round(remainingPercent * (tvGeneralPercent / currentOtherTotal)));
+        setHistoryPlusPercent(Math.round(remainingPercent * (historyPlusPercent / currentOtherTotal)));
+      }
+      setCustomOrderPercent(0);
+    } else {
+      const currentOtherTotal = tvGeneralPercent + customOrderPercent + historyPlusPercent;
+      if (currentOtherTotal === 0) {
+        setTvGeneralPercent(remainingPercent);
+        setCustomOrderPercent(0);
+        setHistoryPlusPercent(0);
+      } else {
+        setTvGeneralPercent(Math.round(remainingPercent * (tvGeneralPercent / currentOtherTotal)));
+        setCustomOrderPercent(Math.round(remainingPercent * (customOrderPercent / currentOtherTotal)));
+        setHistoryPlusPercent(Math.round(remainingPercent * (historyPlusPercent / currentOtherTotal)));
+      }
+    }
+  };
+
+  const handleCustomOrderPercentChange = (e) => {
+    const value = parseInt(e.target.value);
+    setCustomOrderPercent(value);
+    const remainingPercent = 100 - value;
+    const currentOtherTotal = tvGeneralPercent + moviesGeneralPercent + historyPlusPercent;
+    if (currentOtherTotal === 0) {
+      setTvGeneralPercent(remainingPercent);
+      setMoviesGeneralPercent(0);
+      setHistoryPlusPercent(0);
+    } else {
+      setTvGeneralPercent(Math.round(remainingPercent * (tvGeneralPercent / currentOtherTotal)));
+      setMoviesGeneralPercent(Math.round(remainingPercent * (moviesGeneralPercent / currentOtherTotal)));
+      setHistoryPlusPercent(Math.round(remainingPercent * (historyPlusPercent / currentOtherTotal)));
+    }
+  };
+
+  const handleHistoryPlusPercentChange = (e) => {
+    const value = parseInt(e.target.value);
+    setHistoryPlusPercent(value);
+    const remainingPercent = 100 - value;
+    const effectiveCustomOrderPercent = customOrdersCount > 0 ? customOrderPercent : 0;
+    const currentOtherTotal = tvGeneralPercent + moviesGeneralPercent + effectiveCustomOrderPercent;
+    if (currentOtherTotal === 0) {
+      setTvGeneralPercent(remainingPercent);
+      setMoviesGeneralPercent(0);
+      setCustomOrderPercent(0);
+    } else {
+      setTvGeneralPercent(Math.round(remainingPercent * (tvGeneralPercent / currentOtherTotal)));
+      setMoviesGeneralPercent(Math.round(remainingPercent * (moviesGeneralPercent / currentOtherTotal)));
+      if (customOrdersCount > 0) {
+        setCustomOrderPercent(Math.round(remainingPercent * (effectiveCustomOrderPercent / currentOtherTotal)));
+      }
+    }
+  };
 
   // Check for active reading session - used by focus listeners
   const checkActiveReadingSession = async () => {
@@ -954,8 +1148,8 @@ function MediaHome() {
       <div className="settings-icon-container">
         <button
           className="settings-cog-button"
-          onClick={() => setShowSettingsModal(true)}
-          title="Temporary Settings"
+          onClick={() => { setShowSettingsModal(true); loadUpNextSettings(); }}
+          title="Up Next Settings"
         >
           ⚙️
         </button>
@@ -981,6 +1175,14 @@ function MediaHome() {
                 title="Find the earliest episode from a completed series in your collection that you haven't started watching yet"
               >
                 {findingNewSeries ? 'Finding New Series...' : 'Start New Series'}
+              </Button>
+
+              <Button
+                onClick={() => { setShowSettingsModal(true); loadUpNextSettings(); }}
+                style={{ backgroundColor: '#6b7280', color: '#fff', minWidth: '40px', padding: '8px 12px' }}
+                title="Up Next Settings"
+              >
+                ⚙️
               </Button>
             </div>
 
@@ -1530,12 +1732,12 @@ function MediaHome() {
         </div>
       )}
 
-      {/* Settings Modal */}
+      {/* Up Next Settings Modal */}
       {showSettingsModal && (
-        <div className="settings-modal-overlay" onClick={() => setShowSettingsModal(false)}>
-          <div className="settings-modal-content" onClick={(e) => e.stopPropagation()}>
+        <div className="settings-modal-overlay" onClick={() => setShowSettingsModal(false)} style={{ padding: 0 }}>
+          <div className="settings-modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '100%', width: '100%', height: '100vh', maxHeight: '100vh', borderRadius: 0, display: 'flex', flexDirection: 'column' }}>
             <div className="settings-modal-header">
-              <h3>Temporary Settings</h3>
+              <h3>Up Next Settings</h3>
               <button
                 className="settings-modal-close"
                 onClick={() => setShowSettingsModal(false)}
@@ -1544,16 +1746,200 @@ function MediaHome() {
               </button>
             </div>
 
-            <div className="settings-modal-body">
-              {/* Settings content can be added here in the future */}
+            <div className="settings-modal-body" style={{ flex: 1, maxHeight: 'none', display: 'flex', justifyContent: 'center' }}>
+              {settingsLoading ? (
+                <p style={{ textAlign: 'center', color: '#6b7280' }}>Loading settings...</p>
+              ) : (
+                <div className="order-types-container compact" style={{ maxWidth: '600px', width: '100%' }}>
+                  <div className="section-header compact" style={{ marginBottom: '1rem' }}>
+                    <h3 style={{ margin: 0 }}>⚖️ Order Types</h3>
+                    <p style={{ margin: '0.25rem 0 0', fontSize: '0.9rem', color: '#6b7280' }}>Configure content selection percentages</p>
+                  </div>
+
+                  <div className="order-type-control compact">
+                    <label htmlFor="upnext_tv_general_percent">📺 TV: {tvGeneralPercent}%</label>
+                    <input 
+                      type="range" 
+                      id="upnext_tv_general_percent"
+                      min="0"
+                      max="100"
+                      value={tvGeneralPercent}
+                      onChange={handleTvGeneralPercentChange}
+                      className="percentage-slider tv-slider"
+                    />
+                  </div>
+
+                  <div className="order-type-control compact">
+                    <label htmlFor="upnext_movies_general_percent">🎬 Movies: {moviesGeneralPercent}%</label>
+                    <input 
+                      type="range" 
+                      id="upnext_movies_general_percent"
+                      min="0"
+                      max="100"
+                      value={moviesGeneralPercent}
+                      onChange={handleMoviesGeneralPercentChange}
+                      className="percentage-slider movie-slider"
+                    />
+                  </div>
+
+                  {customOrdersCount > 0 && (
+                    <div className="order-type-control compact">
+                      <label htmlFor="upnext_custom_order_percent">⭐ Custom: {customOrderPercent}%</label>
+                      <input 
+                        type="range" 
+                        id="upnext_custom_order_percent"
+                        min="0"
+                        max="100"
+                        value={customOrderPercent}
+                        onChange={handleCustomOrderPercentChange}
+                        className="percentage-slider custom-slider"
+                      />
+                    </div>
+                  )}
+
+                  <div className="order-type-control compact">
+                    <label htmlFor="upnext_history_plus_percent">🏛️ History Plus: {historyPlusPercent}%</label>
+                    <input 
+                      type="range" 
+                      id="upnext_history_plus_percent"
+                      min="0"
+                      max="100"
+                      value={historyPlusPercent}
+                      onChange={handleHistoryPlusPercentChange}
+                      className="percentage-slider history-plus-slider"
+                    />
+                  </div>
+
+                  <div className="percentage-display compact">
+                    {(() => {
+                      const effectiveCustomOrderPercent = customOrdersCount > 0 ? customOrderPercent : 0;
+                      const total = tvGeneralPercent + moviesGeneralPercent + effectiveCustomOrderPercent + historyPlusPercent;
+                      const isValid = total === 100;
+                      return (
+                        <div className={`total-display ${isValid ? 'valid' : 'invalid'}`}>
+                          <span className="total-text">Total: {total}%</span>
+                          <span className="total-icon">{isValid ? '✅' : '⚠️'}</span>
+                        </div>
+                      );
+                    })()}
+                  </div>
+
+                  {/* Media Type Limiter */}
+                  <div style={{ marginTop: '2rem', borderTop: '1px solid #e1e5e9', paddingTop: '1.5rem' }}>
+                    <div className="section-header compact" style={{ marginBottom: '1rem' }}>
+                      <h3 style={{ margin: 0 }}>🎯 Media Type Limiter</h3>
+                      <p style={{ margin: '0.25rem 0 0', fontSize: '0.9rem', color: '#6b7280' }}>Select which media types can be chosen by Up Next</p>
+                    </div>
+
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))', gap: '0.75rem' }}>
+                      {[
+                        { key: 'episode', label: 'Episode', icon: '📺', desc: 'TV, Custom Orders' },
+                        { key: 'movie', label: 'Movie', icon: '🎬', desc: 'Movies, Custom Orders' },
+                        { key: 'book', label: 'Book / Short Story', icon: '📖', desc: 'Custom Orders, History+' },
+                        { key: 'webvideo', label: 'Web Video', icon: '🌐', desc: 'Custom Orders, History+' },
+                        { key: 'videogame', label: 'Video Game', icon: '🎮', desc: 'Custom Orders' },
+                        { key: 'comic', label: 'Comics', icon: '📚', desc: 'Custom Orders' }
+                      ].map(({ key, label, icon, desc }) => (
+                        <label
+                          key={key}
+                          style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '0.5rem',
+                            padding: '0.75rem',
+                            borderRadius: '8px',
+                            border: `2px solid ${mediaTypeLimiters[key] ? '#667eea' : '#e1e5e9'}`,
+                            background: mediaTypeLimiters[key] 
+                              ? 'linear-gradient(135deg, #eef2ff 0%, #e0e7ff 100%)' 
+                              : 'linear-gradient(135deg, #f9fafb 0%, #f3f4f6 100%)',
+                            cursor: 'pointer',
+                            transition: 'all 0.2s ease',
+                            userSelect: 'none'
+                          }}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={mediaTypeLimiters[key]}
+                            onChange={(e) => setMediaTypeLimiters(prev => ({ ...prev, [key]: e.target.checked }))}
+                            style={{ width: '16px', height: '16px', cursor: 'pointer' }}
+                          />
+                          <div>
+                            <div style={{ fontWeight: 600, fontSize: '0.9rem' }}>{icon} {label}</div>
+                            <div style={{ fontSize: '0.75rem', color: '#6b7280' }}>{desc}</div>
+                          </div>
+                        </label>
+                      ))}
+                    </div>
+
+                    {Object.values(mediaTypeLimiters).every(v => !v) && (
+                      <p style={{ color: '#dc3545', fontSize: '0.9rem', marginTop: '0.75rem', textAlign: 'center' }}>
+                        ⚠️ At least one media type must be selected
+                      </p>
+                    )}
+
+                    {!Object.values(mediaTypeLimiters).every(v => v) && Object.values(mediaTypeLimiters).some(v => v) && (
+                      <p style={{ fontSize: '0.85rem', color: '#6b7280', marginTop: '0.75rem', textAlign: 'center' }}>
+                        Only selected media types will appear when clicking "Get Up Next"
+                      </p>
+                    )}
+                  </div>
+
+                  {/* Balance */}
+                  <div style={{ marginTop: '2rem', borderTop: '1px solid #e1e5e9', paddingTop: '1.5rem' }}>
+                    <div className="section-header compact" style={{ marginBottom: '1rem' }}>
+                      <h3 style={{ margin: 0 }}>⚖️ Balance</h3>
+                      <p style={{ margin: '0.25rem 0 0', fontSize: '0.9rem', color: '#6b7280' }}>Adjust preference weighting for content selection</p>
+                    </div>
+
+                    <div className="order-type-control compact">
+                      <label htmlFor="upnext_prefer_new_release">🆕 Prefer New Release: {preferNewRelease}%</label>
+                      <input
+                        type="range"
+                        id="upnext_prefer_new_release"
+                        min="0"
+                        max="100"
+                        value={preferNewRelease}
+                        onChange={(e) => setPreferNewRelease(parseInt(e.target.value))}
+                        className="percentage-slider tv-slider"
+                      />
+                      <p style={{ margin: '0.25rem 0 0', fontSize: '0.8rem', color: '#6b7280' }}>
+                        Chance to prioritize items released within the past year
+                      </p>
+                    </div>
+
+                    <div className="order-type-control compact" style={{ marginTop: '1rem' }}>
+                      <label htmlFor="upnext_prefer_long_unwatched">⏳ Prefer Long Unwatched: {preferLongUnwatched}%</label>
+                      <input
+                        type="range"
+                        id="upnext_prefer_long_unwatched"
+                        min="0"
+                        max="100"
+                        value={preferLongUnwatched}
+                        onChange={(e) => setPreferLongUnwatched(parseInt(e.target.value))}
+                        className="percentage-slider movies-slider"
+                      />
+                      <p style={{ margin: '0.25rem 0 0', fontSize: '0.8rem', color: '#6b7280' }}>
+                        Chance to prioritize items from series or orders not viewed recently
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
 
             <div className="settings-modal-footer">
               <Button
                 onClick={() => setShowSettingsModal(false)}
+                style={{ marginRight: '0.5rem' }}
+              >
+                Cancel
+              </Button>
+              <Button
+                onClick={saveUpNextSettings}
+                disabled={settingsSaving || settingsLoading}
                 className="primary"
               >
-                Close
+                {settingsSaving ? 'Saving...' : 'Save'}
               </Button>
             </div>
           </div>

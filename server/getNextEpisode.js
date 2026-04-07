@@ -34,11 +34,26 @@ async function getOrderTypeSettings() {
       where: { id: 1 }
     });
       if (settings) {
+      // Parse media type limiters
+      let mediaTypeLimiters = null;
+      if (settings.mediaTypeLimiters) {
+        try {
+          mediaTypeLimiters = typeof settings.mediaTypeLimiters === 'string' 
+            ? JSON.parse(settings.mediaTypeLimiters) 
+            : settings.mediaTypeLimiters;
+        } catch (e) {
+          console.warn('Failed to parse mediaTypeLimiters:', e);
+        }
+      }
+
       return {
         tvGeneralPercent: settings.tvGeneralPercent ?? 50,
         moviesGeneralPercent: settings.moviesGeneralPercent ?? 50,
         customOrderPercent: settings.customOrderPercent ?? 0,
-        historyPlusPercent: settings.historyPlusPercent ?? 0
+        historyPlusPercent: settings.historyPlusPercent ?? 0,
+        mediaTypeLimiters,
+        preferNewRelease: settings.preferNewRelease ?? 0,
+        preferLongUnwatched: settings.preferLongUnwatched ?? 0
       };
     } else {
       console.log('No order type settings found, using defaults');
@@ -46,7 +61,10 @@ async function getOrderTypeSettings() {
         tvGeneralPercent: 50,
         moviesGeneralPercent: 50,
         customOrderPercent: 0,
-        historyPlusPercent: 0
+        historyPlusPercent: 0,
+        mediaTypeLimiters: null,
+        preferNewRelease: 0,
+        preferLongUnwatched: 0
       };
     }
   } catch (error) {
@@ -55,7 +73,10 @@ async function getOrderTypeSettings() {
       tvGeneralPercent: 50,
       moviesGeneralPercent: 50,
       customOrderPercent: 0,
-      historyPlusPercent: 0
+      historyPlusPercent: 0,
+      mediaTypeLimiters: null,
+      preferNewRelease: 0,
+      preferLongUnwatched: 0
     };
   }
 }
@@ -64,23 +85,76 @@ async function selectOrderType() {
   const settings = await getOrderTypeSettings();
   console.log(`Order type percentages - TV General: ${settings.tvGeneralPercent}%, Movies General: ${settings.moviesGeneralPercent}%, Custom Order: ${settings.customOrderPercent}%, History Plus: ${settings.historyPlusPercent}%`);
   
-  // Generate random number between 0-100
+  const limiters = settings.mediaTypeLimiters;
+  const allEnabled = !limiters || Object.values(limiters).every(v => v);
+  
+  // Determine eligible order types based on media type limiters
+  let tvPercent = settings.tvGeneralPercent;
+  let moviesPercent = settings.moviesGeneralPercent;
+  let customPercent = settings.customOrderPercent;
+  let historyPercent = settings.historyPlusPercent;
+  
+  if (!allEnabled && limiters) {
+    console.log(`🎯 Media type limiters active:`, limiters);
+    
+    // TV_GENERAL only produces episodes
+    if (!limiters.episode) {
+      tvPercent = 0;
+    }
+    
+    // MOVIES_GENERAL only produces movies
+    if (!limiters.movie) {
+      moviesPercent = 0;
+    }
+    
+    // CUSTOM_ORDER can produce any type - eligible if any limiter is enabled
+    const customEligible = limiters.episode || limiters.movie || limiters.book || 
+                           limiters.webvideo || limiters.videogame || limiters.comic;
+    if (!customEligible) {
+      customPercent = 0;
+    }
+    
+    // HISTORY_PLUS produces video, book, chapter, section
+    const historyEligible = limiters.webvideo || limiters.book;
+    if (!historyEligible) {
+      historyPercent = 0;
+    }
+    
+    // Re-normalize percentages if any were zeroed out
+    const total = tvPercent + moviesPercent + customPercent + historyPercent;
+    if (total === 0) {
+      console.log('⚠️ All order types excluded by media type limiters, falling back to no filtering');
+      tvPercent = settings.tvGeneralPercent;
+      moviesPercent = settings.moviesGeneralPercent;
+      customPercent = settings.customOrderPercent;
+      historyPercent = settings.historyPlusPercent;
+    } else if (total !== 100) {
+      const scale = 100 / total;
+      tvPercent = Math.round(tvPercent * scale);
+      moviesPercent = Math.round(moviesPercent * scale);
+      customPercent = Math.round(customPercent * scale);
+      historyPercent = 100 - tvPercent - moviesPercent - customPercent; // Absorb rounding error
+      console.log(`🎯 Re-normalized percentages - TV: ${tvPercent}%, Movies: ${moviesPercent}%, Custom: ${customPercent}%, History+: ${historyPercent}%`);
+    }
+  }
+  
+  // Generate random number between 1-100
   const randomPercent = Math.floor(Math.random() * 100) + 1;
   console.log(`Random selection: ${randomPercent}%`);
   
   // Determine order type based on cumulative percentages
-  if (randomPercent <= settings.tvGeneralPercent) {
+  if (randomPercent <= tvPercent) {
     console.log('Selected order type: TV General');
-    return 'TV_GENERAL';
-  } else if (randomPercent <= settings.tvGeneralPercent + settings.moviesGeneralPercent) {
+    return { orderType: 'TV_GENERAL', mediaTypeLimiters: limiters };
+  } else if (randomPercent <= tvPercent + moviesPercent) {
     console.log('Selected order type: Movies General');
-    return 'MOVIES_GENERAL';
-  } else if (randomPercent <= settings.tvGeneralPercent + settings.moviesGeneralPercent + settings.customOrderPercent) {
+    return { orderType: 'MOVIES_GENERAL', mediaTypeLimiters: limiters };
+  } else if (randomPercent <= tvPercent + moviesPercent + customPercent) {
     console.log('Selected order type: Custom Order');
-    return 'CUSTOM_ORDER';
+    return { orderType: 'CUSTOM_ORDER', mediaTypeLimiters: limiters };
   } else {
     console.log('Selected order type: History Plus');
-    return 'HISTORY_PLUS';
+    return { orderType: 'HISTORY_PLUS', mediaTypeLimiters: limiters };
   }
 }
 
@@ -739,16 +813,245 @@ async function enhanceWithTVDBArtwork(selectedSeries) {
   }
 }
 
+// Find a new release (released within past year) across eligible types
+async function findNewRelease(settings) {
+  const oneYearAgo = new Date();
+  oneYearAgo.setFullYear(oneYearAgo.getFullYear() - 1);
+  const oneYearAgoStr = oneYearAgo.toISOString().split('T')[0];
+  const currentYear = new Date().getFullYear();
+  const lastYear = currentYear - 1;
+
+  const candidates = [];
+  const limiters = settings.mediaTypeLimiters || { episode: true, movie: true, book: true, webvideo: true, videogame: true, comic: true };
+
+  // Respect order type percentages — only search types with non-zero percent
+  const tvEnabled = limiters.episode && settings.tvGeneralPercent > 0;
+  const moviesEnabled = limiters.movie && settings.moviesGeneralPercent > 0;
+
+  try {
+    // Check for new release movies (respecting collection + ignored collections)
+    if (moviesEnabled) {
+      const collection = await getCollectionName();
+      let movies;
+      if (collection) {
+        movies = await plexDb.getMoviesByCollection(collection);
+        if (!movies || movies.length === 0) {
+          movies = await plexDb.getAllMovies();
+        }
+      } else {
+        movies = await plexDb.getAllMovies();
+      }
+
+      // Filter to unwatched + new release + not in ignored collections
+      let ignoredMovieCollections = [];
+      const dbSettings = await prisma.settings.findUnique({ where: { id: 1 } });
+      if (dbSettings?.ignoredMovieCollections) {
+        try { ignoredMovieCollections = JSON.parse(dbSettings.ignoredMovieCollections); } catch (e) {}
+      }
+
+      for (const movie of movies) {
+        if (movie.removed) continue;
+        if (movie.viewCount && movie.viewCount > 0) continue;
+        if (!movie.year || movie.year < lastYear) continue;
+        if (ignoredMovieCollections.length > 0) {
+          const movieCollections = plexDb.parseCollections(movie.collections || '');
+          if (movieCollections.some(c => ignoredMovieCollections.includes(c))) continue;
+        }
+        candidates.push({ type: 'movie', source: 'MOVIES_GENERAL', data: movie });
+      }
+    }
+
+    // Check for new release TV episodes (respecting collection + ignored collections)
+    if (tvEnabled) {
+      const collection = await getCollectionName();
+      const seriesList = await getSeriesFromCollection(collection);
+      if (Array.isArray(seriesList)) {
+        for (const show of seriesList) {
+          if (show.removed) continue;
+          // Get next unwatched episode for this show and check if it's a new release
+          const nextEp = await plexDb.getNextUnwatchedEpisode(show.ratingKey);
+          if (nextEp && nextEp.originallyAvailableAt && nextEp.originallyAvailableAt >= oneYearAgoStr) {
+            candidates.push({ type: 'episode', source: 'TV_GENERAL', data: nextEp, show });
+          }
+        }
+      }
+    }
+
+    if (candidates.length === 0) return null;
+
+    const chosen = candidates[Math.floor(Math.random() * candidates.length)];
+    console.log(`🆕 New release selected: "${chosen.data.title}" (${chosen.type})`);
+
+    if (chosen.type === 'movie') {
+      return {
+        ...chosen.data,
+        type: 'movie',
+        orderType: 'MOVIES_GENERAL',
+        balanceReason: 'new_release'
+      };
+    } else {
+      const ep = chosen.data;
+      const show = chosen.show;
+      return {
+        ...show,
+        type: 'episode',
+        episodeRatingKey: ep.ratingKey,
+        episodeTitle: ep.title,
+        seasonNumber: ep.seasonNumber,
+        episodeNumber: ep.episodeNumber,
+        originallyAvailableAt: ep.originallyAvailableAt,
+        orderType: 'TV_GENERAL',
+        balanceReason: 'new_release'
+      };
+    }
+  } catch (error) {
+    console.error('Error finding new release:', error.message);
+  }
+  return null;
+}
+
+// Find content from a series/order that hasn't been viewed recently
+async function findLongUnwatched(settings) {
+  const limiters = settings.mediaTypeLimiters || { episode: true, movie: true, book: true, webvideo: true, videogame: true, comic: true };
+  const candidates = [];
+
+  // Respect order type percentages
+  const tvEnabled = limiters.episode && settings.tvGeneralPercent > 0;
+  const moviesEnabled = limiters.movie && settings.moviesGeneralPercent > 0;
+
+  try {
+    // Find TV shows with unwatched content, sorted by oldest lastViewedAt (respecting collection + ignored)
+    if (tvEnabled) {
+      const collection = await getCollectionName();
+      const seriesList = await getSeriesFromCollection(collection);
+      if (Array.isArray(seriesList)) {
+        // Filter to shows that have been viewed before but still have unwatched episodes
+        const staleShows = seriesList
+          .filter(show => !show.removed && show.lastViewedAt && show.lastViewedAt > 0 &&
+            (show.viewedLeafCount || 0) < (show.leafCount || 0))
+          .sort((a, b) => (a.lastViewedAt || 0) - (b.lastViewedAt || 0));
+
+        for (const show of staleShows.slice(0, 20)) {
+          candidates.push({ type: 'episode', source: 'TV_GENERAL', data: show, lastViewed: show.lastViewedAt });
+        }
+      }
+    }
+
+    // Find unwatched movies from collection, preferring oldest added (respecting collection + ignored)
+    if (moviesEnabled) {
+      const collection = await getCollectionName();
+      let movies;
+      if (collection) {
+        movies = await plexDb.getMoviesByCollection(collection);
+        if (!movies || movies.length === 0) {
+          movies = await plexDb.getAllMovies();
+        }
+      } else {
+        movies = await plexDb.getAllMovies();
+      }
+
+      let ignoredMovieCollections = [];
+      const dbSettings = await prisma.settings.findUnique({ where: { id: 1 } });
+      if (dbSettings?.ignoredMovieCollections) {
+        try { ignoredMovieCollections = JSON.parse(dbSettings.ignoredMovieCollections); } catch (e) {}
+      }
+
+      const unwatchedMovies = movies
+        .filter(movie => {
+          if (movie.removed) return false;
+          if (movie.viewCount && movie.viewCount > 0) return false;
+          if (ignoredMovieCollections.length > 0) {
+            const movieCollections = plexDb.parseCollections(movie.collections || '');
+            if (movieCollections.some(c => ignoredMovieCollections.includes(c))) return false;
+          }
+          return true;
+        })
+        .sort((a, b) => (a.addedAt || 0) - (b.addedAt || 0));
+
+      for (const movie of unwatchedMovies.slice(0, 20)) {
+        candidates.push({ type: 'movie', source: 'MOVIES_GENERAL', data: movie, lastViewed: movie.addedAt || 0 });
+      }
+    }
+
+    if (candidates.length === 0) return null;
+
+    // Sort by oldest lastViewed and pick from the top quartile
+    candidates.sort((a, b) => (a.lastViewed || 0) - (b.lastViewed || 0));
+    const topQuartile = candidates.slice(0, Math.max(1, Math.ceil(candidates.length / 4)));
+    const chosen = topQuartile[Math.floor(Math.random() * topQuartile.length)];
+    console.log(`⏳ Long unwatched selected: "${chosen.data.title}" (${chosen.type})`);
+
+    if (chosen.type === 'movie') {
+      return {
+        ...chosen.data,
+        type: 'movie',
+        orderType: 'MOVIES_GENERAL',
+        balanceReason: 'long_unwatched'
+      };
+    } else {
+      const nextEpisode = await plexDb.getNextUnwatchedEpisode(chosen.data.ratingKey);
+      if (nextEpisode) {
+        return {
+          ...chosen.data,
+          type: 'episode',
+          episodeRatingKey: nextEpisode.ratingKey,
+          episodeTitle: nextEpisode.title,
+          seasonNumber: nextEpisode.seasonNumber,
+          episodeNumber: nextEpisode.episodeNumber,
+          originallyAvailableAt: nextEpisode.originallyAvailableAt,
+          orderType: 'TV_GENERAL',
+          balanceReason: 'long_unwatched'
+        };
+      }
+    }
+  } catch (error) {
+    console.error('Error finding long unwatched:', error.message);
+  }
+  return null;
+}
+
 async function getNextEpisode() {
   try {
-    // First, determine which order type to use
-    const orderType = await selectOrderType();
+    // Check balance preferences before normal order type selection
+    const settings = await getOrderTypeSettings();
+    const { preferNewRelease, preferLongUnwatched } = settings;
+    console.log(`⚖️ Balance settings - Prefer New Release: ${preferNewRelease}%, Prefer Long Unwatched: ${preferLongUnwatched}%`);
+
+    // Roll for Prefer New Release
+    if (preferNewRelease > 0) {
+      const roll = Math.floor(Math.random() * 100) + 1;
+      if (roll <= preferNewRelease) {
+        console.log(`🆕 New Release roll: ${roll}% <= ${preferNewRelease}% — searching for new releases`);
+        const newRelease = await findNewRelease(settings);
+        if (newRelease) {
+          return newRelease;
+        }
+        console.log('🆕 No new releases found, falling through to normal selection');
+      }
+    }
+
+    // Roll for Prefer Long Unwatched
+    if (preferLongUnwatched > 0) {
+      const roll = Math.floor(Math.random() * 100) + 1;
+      if (roll <= preferLongUnwatched) {
+        console.log(`⏳ Long Unwatched roll: ${roll}% <= ${preferLongUnwatched}% — searching for long unwatched`);
+        const longUnwatched = await findLongUnwatched(settings);
+        if (longUnwatched) {
+          return longUnwatched;
+        }
+        console.log('⏳ No long unwatched content found, falling through to normal selection');
+      }
+    }
+
+    // Normal order type selection
+    const { orderType, mediaTypeLimiters } = await selectOrderType();
     
     if (orderType === 'MOVIES_GENERAL') {
       // Return indication that movie should be selected
       // The actual movie selection will be handled by the main router
       return {
-        orderType: 'MOVIES_GENERAL'
+        orderType: 'MOVIES_GENERAL',
+        mediaTypeLimiters
       };
     }
     
@@ -756,7 +1059,8 @@ async function getNextEpisode() {
       // Return indication that custom order should be selected
       // The actual custom order selection will be handled by the main router
       return {
-        orderType: 'CUSTOM_ORDER'
+        orderType: 'CUSTOM_ORDER',
+        mediaTypeLimiters
       };
     }
     
@@ -771,20 +1075,31 @@ async function getNextEpisode() {
           console.log('No unreviewed events found');
           return {
             message: 'No History Plus content available',
-            orderType: 'HISTORY_PLUS'
+            orderType: 'HISTORY_PLUS',
+            mediaTypeLimiters
           };
         }
         
         console.log(`📚 Found unreviewed event: ${nextEvent.title}`);
         
-        // Get random content from the event
-        const randomContent = await historyPlusService.getRandomContentFromEvent(nextEvent);
+        // Determine allowed History Plus content types based on limiters
+        let allowedTypes = null;
+        if (mediaTypeLimiters && !Object.values(mediaTypeLimiters).every(v => v)) {
+          allowedTypes = [];
+          if (mediaTypeLimiters.webvideo) allowedTypes.push('video');
+          if (mediaTypeLimiters.book) allowedTypes.push('book', 'chapter', 'section');
+          console.log(`🎯 History Plus filtered to types: ${allowedTypes.join(', ')}`);
+        }
+        
+        // Get random content from the event, filtered by allowed types
+        const randomContent = await historyPlusService.getRandomContentFromEvent(nextEvent, allowedTypes);
         
         if (!randomContent) {
           console.log('No content found in event');
           return {
             message: 'No content available in selected event',
-            orderType: 'HISTORY_PLUS'
+            orderType: 'HISTORY_PLUS',
+            mediaTypeLimiters
           };
         }
         
@@ -799,7 +1114,8 @@ async function getNextEpisode() {
         console.error('Error in History Plus selection:', error);
         return {
           message: `Error in History Plus selection: ${error.message}`,
-          orderType: 'HISTORY_PLUS'
+          orderType: 'HISTORY_PLUS',
+          mediaTypeLimiters
         };
       }
     }
