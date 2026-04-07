@@ -402,6 +402,107 @@ class BookIntegrationService {
       throw new Error(`Failed to get legacy book data: ${error.message}`);
     }
   }
+
+  /**
+   * Link an existing book to a historical event via HistoryBookLink
+   */
+  async linkBookToEvent(bookId, eventId) {
+    try {
+      const link = await this.prisma.historyBookLink.create({
+        data: { bookId, eventId },
+        include: { book: true, event: true }
+      });
+      console.log(`✅ Linked book ${bookId} to event ${eventId}`);
+      return link;
+    } catch (error) {
+      if (error.code === 'P2002') {
+        throw new Error('Book is already linked to this event');
+      }
+      throw new Error(`Failed to link book to event: ${error.message}`);
+    }
+  }
+
+  /**
+   * Unlink a book from a historical event
+   */
+  async unlinkBookFromEvent(bookId, eventId) {
+    try {
+      await this.prisma.historyBookLink.delete({
+        where: { bookId_eventId: { bookId, eventId } }
+      });
+      console.log(`✅ Unlinked book ${bookId} from event ${eventId}`);
+    } catch (error) {
+      throw new Error(`Failed to unlink book from event: ${error.message}`);
+    }
+  }
+
+  /**
+   * Link an existing chapter to a historical event (sets eventId)
+   */
+  async linkChapterToEvent(chapterId, eventId) {
+    try {
+      const chapter = await this.prisma.bookChapter.update({
+        where: { id: chapterId },
+        data: { eventId },
+        include: { book: true }
+      });
+      console.log(`✅ Linked chapter ${chapterId} to event ${eventId}`);
+      return chapter;
+    } catch (error) {
+      throw new Error(`Failed to link chapter to event: ${error.message}`);
+    }
+  }
+
+  /**
+   * Unlink a chapter from a historical event (clears eventId)
+   */
+  async unlinkChapterFromEvent(chapterId) {
+    try {
+      const chapter = await this.prisma.bookChapter.update({
+        where: { id: chapterId },
+        data: { eventId: null },
+        include: { book: true }
+      });
+      console.log(`✅ Unlinked chapter ${chapterId} from event`);
+      return chapter;
+    } catch (error) {
+      throw new Error(`Failed to unlink chapter from event: ${error.message}`);
+    }
+  }
+
+  /**
+   * Link an existing section to a historical event (sets eventId)
+   */
+  async linkSectionToEvent(sectionId, eventId) {
+    try {
+      const section = await this.prisma.bookSection.update({
+        where: { id: sectionId },
+        data: { eventId },
+        include: { chapter: { include: { book: true } } }
+      });
+      console.log(`✅ Linked section ${sectionId} to event ${eventId}`);
+      return section;
+    } catch (error) {
+      throw new Error(`Failed to link section to event: ${error.message}`);
+    }
+  }
+
+  /**
+   * Unlink a section from a historical event (clears eventId)
+   */
+  async unlinkSectionFromEvent(sectionId) {
+    try {
+      const section = await this.prisma.bookSection.update({
+        where: { id: sectionId },
+        data: { eventId: null },
+        include: { chapter: { include: { book: true } } }
+      });
+      console.log(`✅ Unlinked section ${sectionId} from event`);
+      return section;
+    } catch (error) {
+      throw new Error(`Failed to unlink section from event: ${error.message}`);
+    }
+  }
 }
 
 module.exports = BookIntegrationService;

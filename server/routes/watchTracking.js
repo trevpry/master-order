@@ -635,11 +635,7 @@ router.get('/reading/active', asyncHandler(async (req, res) => {
   const activeSession = await watchLogService.getActiveReadingSession();
   console.log('Active session:', activeSession);
   
-  if (!activeSession) {
-    return sendNotFound(res, 'No active reading session found');
-  }
-  
-  sendSuccess(res, activeSession);
+  sendSuccess(res, activeSession || null);
 }));
 
 // Manual reading log endpoint (for testing)

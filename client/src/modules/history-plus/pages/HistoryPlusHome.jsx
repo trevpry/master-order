@@ -81,9 +81,18 @@ const HistoryPlusHome = () => {
     }
   };
 
-  const handleEventUpdate = () => {
-    // Reload events when an event is updated
+  const handleEventUpdate = async () => {
+    // Reload events list
     loadInitialData();
+    // Also reload selected event details if viewing one
+    if (selectedEvent) {
+      try {
+        const eventDetails = await historyPlusApi.getEventById(selectedEvent.id);
+        setSelectedEvent(eventDetails.data || eventDetails);
+      } catch (err) {
+        console.error('Error reloading event details:', err);
+      }
+    }
   };
 
   if (loading) {

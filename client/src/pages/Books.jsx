@@ -37,7 +37,9 @@ import {
   SortAsc,
   Eye,
   Download,
-  Trash2
+  Trash2,
+  Clipboard,
+  Upload
 } from 'lucide-react';
 import readingSessionService from '../services/readingSessionService';
 
@@ -63,6 +65,14 @@ const Books = () => {
   const [showCreateBook, setShowCreateBook] = useState(false);
   const [showCreateChapter, setShowCreateChapter] = useState(false);
   const [showCreateSection, setShowCreateSection] = useState(false);
+  const [showAIPrompt, setShowAIPrompt] = useState(false);
+  const [aiImportJson, setAiImportJson] = useState('');
+  const [aiImportError, setAiImportError] = useState('');
+  const [aiImporting, setAiImporting] = useState(false);
+  const [promptCopied, setPromptCopied] = useState(false);
+  const [aiPromptEvents, setAiPromptEvents] = useState([]);
+  const [aiPromptCategories, setAiPromptCategories] = useState([]);
+  const [aiPromptLoading, setAiPromptLoading] = useState(false);
   const [activeReadingSession, setActiveReadingSession] = useState(null);
   
   // Editing states
@@ -79,6 +89,13 @@ const Books = () => {
   // Delete confirmation state
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [bookToDelete, setBookToDelete] = useState(null);
+  
+  // Event linking state
+  const [showEventLinker, setShowEventLinker] = useState(false);
+  const [eventLinkTarget, setEventLinkTarget] = useState(null); // { type: 'book'|'chapter'|'section', id, label }
+  const [eventsList, setEventsList] = useState([]);
+  const [eventsLoading, setEventsLoading] = useState(false);
+  const [eventSearchQuery, setEventSearchQuery] = useState('');
   
   const [bookFormData, setBookFormData] = useState({
     title: '',
@@ -436,6 +453,81 @@ const Books = () => {
     }
   };
 
+  // EVENT LINKING FUNCTIONS
+  const openEventLinker = async (type, id, label) => {
+    setEventLinkTarget({ type, id, label });
+    setShowEventLinker(true);
+    setEventSearchQuery('');
+    setEventsLoading(true);
+    try {
+      const response = await fetch('/api/history-plus/events');
+      const data = await response.json();
+      const events = data.data?.events || data.data || data.events || [];
+      setEventsList(Array.isArray(events) ? events : []);
+    } catch (err) {
+      console.error('Error fetching events:', err);
+      setEventsList([]);
+    } finally {
+      setEventsLoading(false);
+    }
+  };
+
+  const linkToEvent = async (eventId) => {
+    if (!eventLinkTarget) return;
+    try {
+      const { type, id } = eventLinkTarget;
+      let url;
+      let body;
+      if (type === 'book') {
+        url = `/api/books/history-events/${eventId}/link-book`;
+        body = { bookId: id };
+      } else if (type === 'chapter') {
+        url = `/api/books/history-events/${eventId}/link-chapter`;
+        body = { chapterId: id };
+      } else if (type === 'section') {
+        url = `/api/books/history-events/${eventId}/link-section`;
+        body = { sectionId: id };
+      }
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+      });
+      const data = await response.json();
+      if (data.success) {
+        setShowEventLinker(false);
+        setEventLinkTarget(null);
+        if (selectedBook) fetchBookDetails(selectedBook.id);
+      } else {
+        setError(data.error || 'Failed to link to event');
+      }
+    } catch (err) {
+      setError(`Failed to link to event: ${err.message}`);
+    }
+  };
+
+  const unlinkFromEvent = async (type, id, eventId) => {
+    try {
+      let url;
+      if (type === 'book') {
+        url = `/api/books/history-events/${eventId}/unlink-book/${id}`;
+      } else if (type === 'chapter') {
+        url = `/api/books/history-events/${eventId}/unlink-chapter/${id}`;
+      } else if (type === 'section') {
+        url = `/api/books/history-events/${eventId}/unlink-section/${id}`;
+      }
+      const response = await fetch(url, { method: 'DELETE' });
+      const data = await response.json();
+      if (data.success) {
+        if (selectedBook) fetchBookDetails(selectedBook.id);
+      } else {
+        setError(data.error || 'Failed to unlink from event');
+      }
+    } catch (err) {
+      setError(`Failed to unlink from event: ${err.message}`);
+    }
+  };
+
   // BOOK RE-SELECTION FUNCTIONS
   const handleReselectBook = (book) => {
     setReselectingBook(book);
@@ -735,19 +827,37 @@ const Books = () => {
               </div>
 
               {/* History Plus Links */}
-              {selectedBook.historyBookLinks && selectedBook.historyBookLinks.length > 0 && (
-                <div className="mb-4">
-                  <h4 className="font-medium text-gray-900 mb-2">Historical Context</h4>
+              <div className="mb-4">
+                <div className="flex items-center justify-between mb-2">
+                  <h4 className="font-medium text-gray-900">Historical Context</h4>
+                  <button
+                    onClick={() => openEventLinker('book', selectedBook.id, selectedBook.title)}
+                    className="flex items-center text-xs px-2 py-1 text-amber-700 hover:bg-amber-50 rounded border border-dashed border-amber-300"
+                  >
+                    <Plus className="w-3 h-3 mr-1" />
+                    Link to Event
+                  </button>
+                </div>
+                {selectedBook.historyBookLinks && selectedBook.historyBookLinks.length > 0 ? (
                   <div className="flex flex-wrap gap-2">
                     {selectedBook.historyBookLinks.map(link => (
-                      <span key={link.id} className="inline-flex items-center text-xs bg-amber-100 text-amber-800 px-2 py-1 rounded">
+                      <span key={link.id} className="inline-flex items-center text-xs bg-amber-100 text-amber-800 px-2 py-1 rounded group">
                         <Calendar className="w-3 h-3 mr-1" />
                         🏛️ {link.event.title} ({link.event.startDate})
+                        <button
+                          onClick={() => unlinkFromEvent('book', selectedBook.id, link.event.id)}
+                          className="ml-1 text-amber-500 hover:text-red-600 opacity-0 group-hover:opacity-100 transition-opacity"
+                          title="Unlink from event"
+                        >
+                          ×
+                        </button>
                       </span>
                     ))}
                   </div>
-                </div>
-              )}
+                ) : (
+                  <p className="text-sm text-gray-500">No events linked. Click "Link to Event" to associate with a historical event.</p>
+                )}
+              </div>
 
               {selectedBook.progress && (
                 <div className="mb-4">
@@ -837,11 +947,48 @@ const Books = () => {
         </div>
 
         {/* Chapters Section */}
-        {selectedBook.chapters && selectedBook.chapters.length > 0 && (
+        {selectedBook && (
           <div className="border-t pt-6">
-            <h3 className="text-xl font-bold text-gray-900 mb-4">Chapters</h3>
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-xl font-bold text-gray-900">Chapters</h3>
+              <div className="flex items-center space-x-2">
+                <button
+                  onClick={async () => {
+                    setShowAIPrompt(true); setAiImportJson(''); setAiImportError(''); setPromptCopied(false);
+                    setAiPromptLoading(true);
+                    try {
+                      const [eventsRes, catsRes] = await Promise.all([
+                        fetch('/api/history-plus/events'),
+                        fetch('/api/history-plus/categories')
+                      ]);
+                      const eventsData = await eventsRes.json();
+                      const catsData = await catsRes.json();
+                      const events = eventsData.data?.events || eventsData.data || eventsData.events || [];
+                      setAiPromptEvents(Array.isArray(events) ? events : []);
+                      const cats = catsData.data || catsData.categories || [];
+                      setAiPromptCategories(Array.isArray(cats) ? cats : []);
+                    } catch (err) {
+                      console.error('Error fetching events/categories for AI prompt:', err);
+                    } finally {
+                      setAiPromptLoading(false);
+                    }
+                  }}
+                  className="flex items-center px-3 py-1.5 text-sm bg-purple-600 text-white rounded-lg hover:bg-purple-700"
+                >
+                  <Clipboard className="w-3 h-3 mr-1" />
+                  AI Import
+                </button>
+                <button
+                  onClick={() => setShowCreateChapter(true)}
+                  className="flex items-center px-3 py-1.5 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+                >
+                  <Plus className="w-3 h-3 mr-1" />
+                  Add Chapter
+                </button>
+              </div>
+            </div>
             <div className="space-y-3">
-              {selectedBook.chapters.map(chapter => {
+              {selectedBook.chapters && selectedBook.chapters.length > 0 ? selectedBook.chapters.map(chapter => {
                 // Check if the chapter is completed for the current user ("default")
                 const userCompletion = chapter.chapterCompletions && chapter.chapterCompletions.find(completion => 
                   completion.userId === "default"
@@ -880,6 +1027,14 @@ const Books = () => {
                     
                     <div className="flex items-center space-x-2">
                       <button
+                        onClick={() => openEventLinker('chapter', chapter.id, `Chapter ${chapter.chapterNumber}: ${chapter.title}`)}
+                        className="p-2 text-amber-600 hover:bg-amber-100 rounded"
+                        title="Link chapter to event"
+                      >
+                        <Calendar className="w-4 h-4" />
+                      </button>
+                      
+                      <button
                         onClick={() => startReadingSession(selectedBook.id, chapter.id)}
                         className="p-2 text-green-600 hover:bg-green-100 rounded"
                         title="Start reading this chapter"
@@ -898,11 +1053,12 @@ const Books = () => {
                   </div>
 
                   {/* Sections for this chapter */}
-                  {chapter.sections && chapter.sections.length > 0 && (
-                    <div className="mt-3 ml-4 space-y-2">
+                  <div className="mt-3 ml-4">
+                    {chapter.sections && chapter.sections.length > 0 && (
+                    <div className="space-y-2">
                       {chapter.sections.map(section => {
                         // Check if the section is completed (user-specific completion)
-                        const isSectionCompleted = section.completion && section.completion.some(c => c.userId === 'default');
+                        const isSectionCompleted = section.sectionCompletions && section.sectionCompletions.some(c => c.userId === 'default' && c.isCompleted);
                         
                         return (
                         <div key={section.id} className={`flex items-center justify-between p-2 rounded ${isSectionCompleted ? 'bg-green-100 border border-green-200' : 'bg-gray-50'}`}>
@@ -932,6 +1088,14 @@ const Books = () => {
                           
                           <div className="flex items-center space-x-1">
                             <button
+                              onClick={() => openEventLinker('section', section.id, `Section: ${section.title}`)}
+                              className="p-1 text-amber-600 hover:bg-amber-100 rounded"
+                              title="Link section to event"
+                            >
+                              <Calendar className="w-3 h-3" />
+                            </button>
+                            
+                            <button
                               onClick={() => startReadingSession(selectedBook.id, chapter.id, section.id)}
                               className="p-1 text-green-600 hover:bg-green-100 rounded"
                               title="Start reading this section"
@@ -951,10 +1115,20 @@ const Books = () => {
                         );
                       })}
                     </div>
-                  )}
+                    )}
+                    <button
+                      onClick={() => { setSelectedChapter(chapter); setShowCreateSection(true); }}
+                      className="flex items-center mt-2 px-2 py-1 text-xs text-blue-600 hover:bg-blue-50 rounded border border-dashed border-blue-300"
+                    >
+                      <Plus className="w-3 h-3 mr-1" />
+                      Add Section
+                    </button>
+                  </div>
                 </div>
                 );
-              })}
+              }) : (
+                <p className="text-gray-500 text-sm">No chapters yet. Click "Add Chapter" to get started.</p>
+              )}
             </div>
           </div>
         )}
@@ -1280,6 +1454,521 @@ const Books = () => {
                 Cancel
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Event Linker Modal */}
+      {showEventLinker && eventLinkTarget && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-lg shadow-xl max-w-lg w-full p-6 max-h-[80vh] flex flex-col">
+            <h3 className="text-lg font-semibold mb-2">Link to Historical Event</h3>
+            <p className="text-sm text-gray-600 mb-4">
+              Select an event for: <strong>{eventLinkTarget.label}</strong>
+            </p>
+            <input
+              type="text"
+              placeholder="Search events..."
+              value={eventSearchQuery}
+              onChange={(e) => setEventSearchQuery(e.target.value)}
+              className="w-full border rounded-lg px-3 py-2 mb-3"
+            />
+            <div className="flex-1 overflow-y-auto min-h-0 space-y-1">
+              {eventsLoading ? (
+                <p className="text-center text-gray-500 py-4">Loading events...</p>
+              ) : (
+                eventsList
+                  .filter(evt => !eventSearchQuery || evt.title.toLowerCase().includes(eventSearchQuery.toLowerCase()) || (evt.category && evt.category.toLowerCase().includes(eventSearchQuery.toLowerCase())))
+                  .map(evt => (
+                    <button
+                      key={evt.id}
+                      onClick={() => linkToEvent(evt.id)}
+                      className="w-full text-left px-3 py-2 rounded hover:bg-amber-50 border border-transparent hover:border-amber-200 transition-colors"
+                    >
+                      <div className="font-medium text-sm">{evt.title}</div>
+                      <div className="text-xs text-gray-500">
+                        {evt.category && <span className="mr-2">{evt.category}</span>}
+                        {evt.startDate}{evt.endDate && evt.endDate !== evt.startDate ? ` – ${evt.endDate}` : ''}
+                      </div>
+                    </button>
+                  ))
+              )}
+              {!eventsLoading && eventsList.filter(evt => !eventSearchQuery || evt.title.toLowerCase().includes(eventSearchQuery.toLowerCase())).length === 0 && (
+                <p className="text-center text-gray-500 py-4">No events found</p>
+              )}
+            </div>
+            <div className="flex justify-end pt-4 border-t mt-3">
+              <button
+                onClick={() => { setShowEventLinker(false); setEventLinkTarget(null); }}
+                className="px-4 py-2 text-gray-700 bg-gray-200 rounded-lg hover:bg-gray-300"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Create Chapter Modal */}
+      {showCreateChapter && selectedBook && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-lg shadow-xl max-w-md w-full p-6">
+            <h3 className="text-lg font-semibold mb-4">Add Chapter to "{selectedBook.title}"</h3>
+            <form onSubmit={async (e) => {
+              e.preventDefault();
+              const formData = new FormData(e.target);
+              try {
+                const response = await fetch(`/api/books/${selectedBook.id}/chapters`, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    title: formData.get('title'),
+                    chapterNumber: parseInt(formData.get('chapterNumber')),
+                    description: formData.get('description') || null,
+                    pageStart: formData.get('pageStart') ? parseInt(formData.get('pageStart')) : null,
+                    pageEnd: formData.get('pageEnd') ? parseInt(formData.get('pageEnd')) : null
+                  })
+                });
+                const data = await response.json();
+                if (data.success) {
+                  setShowCreateChapter(false);
+                  fetchBookDetails(selectedBook.id);
+                } else {
+                  setError(data.error || 'Failed to create chapter');
+                }
+              } catch (err) {
+                setError(`Failed to create chapter: ${err.message}`);
+              }
+            }} className="space-y-4">
+              <div className="grid grid-cols-3 gap-4">
+                <div>
+                  <label className="block text-sm font-medium mb-1">Chapter # *</label>
+                  <input type="number" name="chapterNumber" className="w-full border rounded-lg px-3 py-2" required min="1" defaultValue={(selectedBook.chapters?.length || 0) + 1} />
+                </div>
+                <div className="col-span-2">
+                  <label className="block text-sm font-medium mb-1">Title *</label>
+                  <input type="text" name="title" className="w-full border rounded-lg px-3 py-2" required />
+                </div>
+              </div>
+              <div>
+                <label className="block text-sm font-medium mb-1">Description</label>
+                <textarea name="description" className="w-full border rounded-lg px-3 py-2" rows="2" />
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium mb-1">Page Start</label>
+                  <input type="number" name="pageStart" className="w-full border rounded-lg px-3 py-2" min="1" />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium mb-1">Page End</label>
+                  <input type="number" name="pageEnd" className="w-full border rounded-lg px-3 py-2" min="1" />
+                </div>
+              </div>
+              <div className="flex justify-end space-x-3 pt-4">
+                <button type="button" onClick={() => setShowCreateChapter(false)} className="px-4 py-2 text-gray-700 bg-gray-200 rounded-lg hover:bg-gray-300">
+                  Cancel
+                </button>
+                <button type="submit" className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">
+                  Create Chapter
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* AI Prompt / Import Modal */}
+      {showAIPrompt && selectedBook && (() => {
+        const eventsListText = aiPromptEvents.length > 0
+          ? aiPromptEvents.map(e => `- "${e.title}" (${e.startDate}${e.endDate ? ' - ' + e.endDate : ''}) - Category: ${e.category}`).join('\n')
+          : '(No existing events yet)';
+
+        const categoriesListText = aiPromptCategories.length > 0
+          ? aiPromptCategories.map(c => typeof c === 'string' ? `- "${c}"` : `- "${c.name}"${c.description ? ': ' + c.description : ''}`).join('\n')
+          : '(No categories yet)';
+
+        const aiPrompt = `I need a structured breakdown of the book "${selectedBook.title}"${selectedBook.author ? ` by ${selectedBook.author}` : ''}${selectedBook.isbn ? ` (ISBN: ${selectedBook.isbn})` : ''}.
+
+Please provide all chapters and their sections/subsections in the following JSON format. Each chapter and section should include an "event" field that either links to an existing historical event or creates a new one.
+
+Existing Historical Events:
+${eventsListText}
+
+Available Categories:
+${categoriesListText}
+
+JSON Format:
+{
+  "chapters": [
+    {
+      "chapterNumber": 1,
+      "title": "Chapter Title",
+      "pageStart": null,
+      "pageEnd": null,
+      "event": {
+        "action": "CREATE_NEW",
+        "title": "Historical Event Title",
+        "startDate": "YYYY-MM-DD or YYYY",
+        "endDate": "YYYY-MM-DD or YYYY or null",
+        "category": "Category Name",
+        "details": "Brief description of the event"
+      },
+      "sections": [
+        {
+          "sectionNumber": 1,
+          "title": "Section Title",
+          "pageStart": null,
+          "pageEnd": null,
+          "event": {
+            "action": "LINK_EXISTING",
+            "title": "Exact Title of Existing Event"
+          }
+        }
+      ]
+    }
+  ]
+}
+
+Event action options:
+- "CREATE_NEW": Create a new historical event. Required fields: title, startDate, category. Optional: endDate, details
+- "LINK_EXISTING": Link to an existing event. Required field: title (must EXACTLY match one of the existing event titles listed above, case-sensitive)
+- "NONE": No event association for this chapter/section
+- Or omit the "event" field entirely to skip event linking
+
+Category rules:
+- For CREATE_NEW events, the category MUST exactly match one of the available categories listed above
+- Only suggest a new category if none of the existing categories fit
+- PREFER LINK_EXISTING over CREATE_NEW when the chapter/section clearly matches an existing event
+
+Rules:
+- Include ALL chapters and sections from the table of contents
+- Use the exact titles from the book
+- chapterNumber and sectionNumber should be sequential integers starting at 1
+- pageStart and pageEnd are optional - include them if you know the page numbers, otherwise use null
+- sections array can be empty [] if a chapter has no subsections
+- For event linking, be specific with historical events - prefer narrow time periods over broad eras
+- If a chapter covers the same event as a section, you can link both to the same event
+- Return ONLY the JSON, no additional text`;
+
+        const handleImport = async () => {
+          setAiImportError('');
+          setAiImporting(true);
+          try {
+            const parsed = JSON.parse(aiImportJson.trim());
+            if (!parsed.chapters || !Array.isArray(parsed.chapters)) {
+              throw new Error('JSON must contain a "chapters" array');
+            }
+
+            // Fetch existing events for matching
+            const eventsRes = await fetch('/api/history-plus/events');
+            const eventsData = await eventsRes.json();
+            const existingEvents = eventsData.data?.events || eventsData.data || eventsData.events || [];
+            const eventsByTitle = {};
+            if (Array.isArray(existingEvents)) {
+              existingEvents.forEach(evt => { eventsByTitle[evt.title.toLowerCase()] = evt; });
+            }
+
+            const resolveEvent = async (eventSpec) => {
+              if (!eventSpec || eventSpec.action === 'NONE') return null;
+
+              if (eventSpec.action === 'LINK_EXISTING') {
+                const match = eventsByTitle[eventSpec.title?.toLowerCase()];
+                if (!match) {
+                  console.warn(`Event not found: "${eventSpec.title}" - skipping link`);
+                  return null;
+                }
+                return match.id;
+              }
+
+              if (eventSpec.action === 'CREATE_NEW') {
+                // Check if we already created an event with this title in this import
+                const existing = eventsByTitle[eventSpec.title?.toLowerCase()];
+                if (existing) return existing.id;
+
+                const createRes = await fetch('/api/history-plus/events', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    title: eventSpec.title,
+                    startDate: eventSpec.startDate,
+                    endDate: eventSpec.endDate || null,
+                    category: eventSpec.category,
+                    details: eventSpec.details || null
+                  })
+                });
+                const createData = await createRes.json();
+                if (!createData.success) {
+                  console.warn(`Failed to create event "${eventSpec.title}": ${createData.error} - skipping link`);
+                  return null;
+                }
+                // Cache so duplicate titles reuse the same event
+                eventsByTitle[eventSpec.title.toLowerCase()] = createData.data;
+                return createData.data.id;
+              }
+              return null;
+            };
+
+            for (const chapter of parsed.chapters) {
+              const chapterRes = await fetch(`/api/books/${selectedBook.id}/chapters`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  title: chapter.title,
+                  chapterNumber: chapter.chapterNumber,
+                  description: chapter.description || null,
+                  pageStart: chapter.pageStart || null,
+                  pageEnd: chapter.pageEnd || null
+                })
+              });
+              const chapterData = await chapterRes.json();
+              if (!chapterData.success) {
+                throw new Error(`Failed to create chapter ${chapter.chapterNumber}: ${chapterData.error}`);
+              }
+
+              // Link chapter to event
+              const chapterEventId = await resolveEvent(chapter.event);
+              if (chapterEventId) {
+                await fetch(`/api/books/history-events/${chapterEventId}/link-chapter`, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ chapterId: chapterData.data.id })
+                });
+              }
+
+              if (chapter.sections && chapter.sections.length > 0) {
+                for (const section of chapter.sections) {
+                  const sectionRes = await fetch(`/api/books/${selectedBook.id}/chapters/${chapterData.data.id}/sections`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                      title: section.title,
+                      sectionNumber: section.sectionNumber,
+                      description: section.description || null,
+                      pageStart: section.pageStart || null,
+                      pageEnd: section.pageEnd || null
+                    })
+                  });
+                  const sectionData = await sectionRes.json();
+                  if (!sectionData.success) {
+                    throw new Error(`Failed to create section ${section.sectionNumber} in chapter ${chapter.chapterNumber}: ${sectionData.error}`);
+                  }
+
+                  // Link section to event
+                  const sectionEventId = await resolveEvent(section.event);
+                  if (sectionEventId) {
+                    await fetch(`/api/books/history-events/${sectionEventId}/link-section`, {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ sectionId: sectionData.data.id })
+                    });
+                  }
+                }
+              }
+            }
+            setShowAIPrompt(false);
+            setAiImportJson('');
+            fetchBookDetails(selectedBook.id);
+          } catch (err) {
+            setAiImportError(err.message);
+          } finally {
+            setAiImporting(false);
+          }
+        };
+
+        return (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+            <div className="bg-white rounded-lg shadow-xl max-w-2xl w-full p-6 max-h-[90vh] overflow-y-auto">
+              <h3 className="text-lg font-semibold mb-4">AI Chapter Import for "{selectedBook.title}"</h3>
+              
+              {/* Step 1: Copy Prompt */}
+              <div className="mb-6">
+                <label className="block text-sm font-medium mb-2">Step 1: Copy this prompt and paste it into an AI assistant</label>
+                {aiPromptLoading ? (
+                  <div className="bg-gray-50 border rounded-lg p-6 text-center text-gray-500">
+                    Loading events and categories...
+                  </div>
+                ) : (
+                <div className="relative">
+                  <pre className="bg-gray-50 border rounded-lg p-3 text-xs whitespace-pre-wrap max-h-48 overflow-y-auto">{aiPrompt}</pre>
+                  <button
+                    onClick={() => {
+                      navigator.clipboard.writeText(aiPrompt);
+                      setPromptCopied(true);
+                      setTimeout(() => setPromptCopied(false), 2000);
+                    }}
+                    className={`absolute top-2 right-2 px-3 py-1 text-xs rounded ${
+                      promptCopied ? 'bg-green-600 text-white' : 'bg-blue-600 text-white hover:bg-blue-700'
+                    }`}
+                  >
+                    {promptCopied ? 'Copied!' : 'Copy Prompt'}
+                  </button>
+                </div>
+                )}
+              </div>
+
+              {/* Step 2: Paste JSON */}
+              <div className="mb-4">
+                <label className="block text-sm font-medium mb-2">Step 2: Paste the AI's JSON response here</label>
+                <textarea
+                  value={aiImportJson}
+                  onChange={(e) => setAiImportJson(e.target.value)}
+                  className="w-full border rounded-lg px-3 py-2 text-sm font-mono h-48"
+                  placeholder='{\n  "chapters": [\n    ...\n  ]\n}'
+                />
+                {aiImportError && (
+                  <p className="text-red-600 text-sm mt-1">{aiImportError}</p>
+                )}
+              </div>
+
+              <div className="flex justify-end space-x-3">
+                <button
+                  onClick={() => { setShowAIPrompt(false); setAiImportJson(''); setAiImportError(''); }}
+                  className="px-4 py-2 text-gray-700 bg-gray-200 rounded-lg hover:bg-gray-300"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleImport}
+                  disabled={!aiImportJson.trim() || aiImporting}
+                  className="flex items-center px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  <Upload className="w-4 h-4 mr-1" />
+                  {aiImporting ? 'Importing...' : 'Import Chapters'}
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* Create Section Modal */}
+      {showCreateSection && selectedChapter && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-lg shadow-xl max-w-md w-full p-6">
+            <h3 className="text-lg font-semibold mb-4">Add Section to Chapter {selectedChapter.chapterNumber}: "{selectedChapter.title}"</h3>
+            <form onSubmit={async (e) => {
+              e.preventDefault();
+              const formData = new FormData(e.target);
+              try {
+                const response = await fetch(`/api/books/${selectedBook.id}/chapters/${selectedChapter.id}/sections`, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    title: formData.get('title'),
+                    sectionNumber: parseInt(formData.get('sectionNumber')),
+                    description: formData.get('description') || null,
+                    pageStart: formData.get('pageStart') ? parseInt(formData.get('pageStart')) : null,
+                    pageEnd: formData.get('pageEnd') ? parseInt(formData.get('pageEnd')) : null
+                  })
+                });
+                const data = await response.json();
+                if (data.success) {
+                  setShowCreateSection(false);
+                  setSelectedChapter(null);
+                  fetchBookDetails(selectedBook.id);
+                } else {
+                  setError(data.error || 'Failed to create section');
+                }
+              } catch (err) {
+                setError(`Failed to create section: ${err.message}`);
+              }
+            }} className="space-y-4">
+              <div className="grid grid-cols-3 gap-4">
+                <div>
+                  <label className="block text-sm font-medium mb-1">Section # *</label>
+                  <input type="number" name="sectionNumber" className="w-full border rounded-lg px-3 py-2" required min="1" defaultValue={(selectedChapter.sections?.length || 0) + 1} />
+                </div>
+                <div className="col-span-2">
+                  <label className="block text-sm font-medium mb-1">Title *</label>
+                  <input type="text" name="title" className="w-full border rounded-lg px-3 py-2" required />
+                </div>
+              </div>
+              <div>
+                <label className="block text-sm font-medium mb-1">Description</label>
+                <textarea name="description" className="w-full border rounded-lg px-3 py-2" rows="2" />
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium mb-1">Page Start</label>
+                  <input type="number" name="pageStart" className="w-full border rounded-lg px-3 py-2" min="1" />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium mb-1">Page End</label>
+                  <input type="number" name="pageEnd" className="w-full border rounded-lg px-3 py-2" min="1" />
+                </div>
+              </div>
+              <div className="flex justify-end space-x-3 pt-4">
+                <button type="button" onClick={() => { setShowCreateSection(false); setSelectedChapter(null); }} className="px-4 py-2 text-gray-700 bg-gray-200 rounded-lg hover:bg-gray-300">
+                  Cancel
+                </button>
+                <button type="submit" className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">
+                  Create Section
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Create Book Modal */}
+      {showCreateBook && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-lg shadow-xl max-w-md w-full p-6">
+            <h3 className="text-lg font-semibold mb-4">Add New Book</h3>
+            <form onSubmit={(e) => {
+              e.preventDefault();
+              const formData = new FormData(e.target);
+              createBook({
+                title: formData.get('title'),
+                author: formData.get('author'),
+                description: formData.get('description'),
+                isbn: formData.get('isbn'),
+                publisher: formData.get('publisher'),
+                publishYear: formData.get('publishYear') || null,
+                pageCount: formData.get('pageCount') ? parseInt(formData.get('pageCount')) : null
+              });
+            }} className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium mb-1">Title *</label>
+                <input type="text" name="title" className="w-full border rounded-lg px-3 py-2" required />
+              </div>
+              <div>
+                <label className="block text-sm font-medium mb-1">Author *</label>
+                <input type="text" name="author" className="w-full border rounded-lg px-3 py-2" required />
+              </div>
+              <div>
+                <label className="block text-sm font-medium mb-1">Description</label>
+                <textarea name="description" className="w-full border rounded-lg px-3 py-2" rows="3" />
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium mb-1">ISBN</label>
+                  <input type="text" name="isbn" className="w-full border rounded-lg px-3 py-2" />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium mb-1">Publisher</label>
+                  <input type="text" name="publisher" className="w-full border rounded-lg px-3 py-2" />
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium mb-1">Publish Year</label>
+                  <input type="number" name="publishYear" className="w-full border rounded-lg px-3 py-2" />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium mb-1">Page Count</label>
+                  <input type="number" name="pageCount" className="w-full border rounded-lg px-3 py-2" />
+                </div>
+              </div>
+              <div className="flex justify-end space-x-3 pt-4">
+                <button type="button" onClick={() => setShowCreateBook(false)} className="px-4 py-2 text-gray-700 bg-gray-200 rounded-lg hover:bg-gray-300">
+                  Cancel
+                </button>
+                <button type="submit" className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">
+                  Create Book
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

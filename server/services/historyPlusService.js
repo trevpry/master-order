@@ -1412,7 +1412,11 @@ class HistoryPlusService {
           bookChapters: {
             include: {
               chapterCompletions: true,
-              book: true  // Include parent book for cover art and author
+              book: {
+                include: {
+                  bookCompletions: true  // Check if parent book is already read
+                }
+              }
             }
           },
           bookSections: {
@@ -1420,7 +1424,12 @@ class HistoryPlusService {
               sectionCompletions: true,
               chapter: {
                 include: {
-                  book: true  // Include parent book for cover art and author
+                  chapterCompletions: true,  // Check if parent chapter is already read
+                  book: {
+                    include: {
+                      bookCompletions: true  // Check if parent book is already read
+                    }
+                  }
                 }
               }
             }
@@ -1495,14 +1504,17 @@ class HistoryPlusService {
         !bookLink.book.bookCompletions?.[0]?.isCompleted
       );
       
-      // Check for any unread unified chapters
+      // Check for any unread unified chapters (also skip if parent book is read)
       const unreadUnifiedChapters = (event.bookChapters || []).filter(chapter =>
-        !chapter.chapterCompletions?.[0]?.isCompleted
+        !chapter.chapterCompletions?.[0]?.isCompleted &&
+        !chapter.book?.bookCompletions?.[0]?.isCompleted
       );
       
-      // Check for any unread unified sections
+      // Check for any unread unified sections (also skip if parent chapter or book is read)
       const unreadUnifiedSections = (event.bookSections || []).filter(section =>
-        !section.sectionCompletions?.[0]?.isCompleted
+        !section.sectionCompletions?.[0]?.isCompleted &&
+        !section.chapter?.chapterCompletions?.[0]?.isCompleted &&
+        !section.chapter?.book?.bookCompletions?.[0]?.isCompleted
       );
       
       // Calculate total unwatched content
@@ -1612,20 +1624,23 @@ class HistoryPlusService {
       }
     }
 
-    // Check chapters
+    // Check chapters (skip if parent book is already read)
     for (const chapter of event.bookChapters || []) {
       const isCompleted = chapter.chapterCompletions && chapter.chapterCompletions.length > 0 && chapter.chapterCompletions[0].isCompleted;
-      console.log(`    📖 Chapter "${chapter.title}": ${!isCompleted ? 'UNREVIEWED' : 'reviewed'}`);
-      if (!isCompleted) {
+      const parentBookRead = chapter.book?.bookCompletions?.[0]?.isCompleted;
+      console.log(`    📖 Chapter "${chapter.title}": ${!isCompleted && !parentBookRead ? 'UNREVIEWED' : 'reviewed'}`);
+      if (!isCompleted && !parentBookRead) {
         return true;
       }
     }
 
-    // Check sections
+    // Check sections (skip if parent chapter or book is already read)
     for (const section of event.bookSections || []) {
       const isCompleted = section.sectionCompletions && section.sectionCompletions.length > 0 && section.sectionCompletions[0].isCompleted;
-      console.log(`    📄 Section "${section.title}": ${!isCompleted ? 'UNREVIEWED' : 'reviewed'}`);
-      if (!isCompleted) {
+      const parentChapterRead = section.chapter?.chapterCompletions?.[0]?.isCompleted;
+      const parentBookRead = section.chapter?.book?.bookCompletions?.[0]?.isCompleted;
+      console.log(`    📄 Section "${section.title}": ${!isCompleted && !parentChapterRead && !parentBookRead ? 'UNREVIEWED' : 'reviewed'}`);
+      if (!isCompleted && !parentChapterRead && !parentBookRead) {
         return true;
       }
     }
@@ -1685,7 +1700,8 @@ class HistoryPlusService {
       // Unified book system - check bookChapters directly linked to events
       event.bookChapters?.forEach(chapter => {
         const isRead = chapter.chapterCompletions?.[0]?.isCompleted;
-        if (!isRead) {
+        const parentBookRead = chapter.book?.bookCompletions?.[0]?.isCompleted;
+        if (!isRead && !parentBookRead) {
           // Get parent book information if available
           const parentBook = chapter.book;
           
@@ -1716,7 +1732,9 @@ class HistoryPlusService {
       // Unified book system - check bookSections directly linked to events
       event.bookSections?.forEach(section => {
         const isRead = section.sectionCompletions?.[0]?.isCompleted;
-        if (!isRead) {
+        const parentChapterRead = section.chapter?.chapterCompletions?.[0]?.isCompleted;
+        const parentBookRead = section.chapter?.book?.bookCompletions?.[0]?.isCompleted;
+        if (!isRead && !parentChapterRead && !parentBookRead) {
           // Get parent chapter and book information if available
           const parentChapter = section.chapter;
           const parentBook = parentChapter?.book;

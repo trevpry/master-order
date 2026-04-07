@@ -280,6 +280,75 @@ router.post('/history-events/:eventId', asyncHandler(async (req, res) => {
 }));
 
 /**
+ * POST /api/books/history-events/:eventId/link-book
+ * Link an existing book to a historical event
+ */
+router.post('/history-events/:eventId/link-book', asyncHandler(async (req, res) => {
+  const { eventId } = req.params;
+  validateRequiredFields(req.body, ['bookId']);
+
+  const { bookId } = req.body;
+  const link = await integrationService.linkBookToEvent(parseInt(bookId), parseInt(eventId));
+  sendSuccess(res, link);
+}));
+
+/**
+ * DELETE /api/books/history-events/:eventId/unlink-book/:bookId
+ * Remove a book from a historical event
+ */
+router.delete('/history-events/:eventId/unlink-book/:bookId', asyncHandler(async (req, res) => {
+  const { eventId, bookId } = req.params;
+  await integrationService.unlinkBookFromEvent(parseInt(bookId), parseInt(eventId));
+  sendSuccess(res, { message: 'Book unlinked from event' });
+}));
+
+/**
+ * POST /api/books/history-events/:eventId/link-chapter
+ * Link an existing chapter to a historical event
+ */
+router.post('/history-events/:eventId/link-chapter', asyncHandler(async (req, res) => {
+  const { eventId } = req.params;
+  validateRequiredFields(req.body, ['chapterId']);
+
+  const { chapterId } = req.body;
+  const chapter = await integrationService.linkChapterToEvent(parseInt(chapterId), parseInt(eventId));
+  sendSuccess(res, chapter);
+}));
+
+/**
+ * DELETE /api/books/history-events/:eventId/unlink-chapter/:chapterId
+ * Remove a chapter from a historical event
+ */
+router.delete('/history-events/:eventId/unlink-chapter/:chapterId', asyncHandler(async (req, res) => {
+  const { eventId, chapterId } = req.params;
+  const chapter = await integrationService.unlinkChapterFromEvent(parseInt(chapterId));
+  sendSuccess(res, chapter);
+}));
+
+/**
+ * POST /api/books/history-events/:eventId/link-section
+ * Link an existing section to a historical event
+ */
+router.post('/history-events/:eventId/link-section', asyncHandler(async (req, res) => {
+  const { eventId } = req.params;
+  validateRequiredFields(req.body, ['sectionId']);
+
+  const { sectionId } = req.body;
+  const section = await integrationService.linkSectionToEvent(parseInt(sectionId), parseInt(eventId));
+  sendSuccess(res, section);
+}));
+
+/**
+ * DELETE /api/books/history-events/:eventId/unlink-section/:sectionId
+ * Remove a section from a historical event
+ */
+router.delete('/history-events/:eventId/unlink-section/:sectionId', asyncHandler(async (req, res) => {
+  const { eventId, sectionId } = req.params;
+  const section = await integrationService.unlinkSectionFromEvent(parseInt(sectionId));
+  sendSuccess(res, section);
+}));
+
+/**
  * POST /api/books/history-plus/mark-read
  * Mark History Plus content as read
  */

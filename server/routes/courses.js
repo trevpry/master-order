@@ -718,7 +718,10 @@ router.post('/:id/ai-assign-lectures', asyncHandler(async (req, res) => {
   // Track newly created events during this import so ASSIGN_TO_EXISTING can reference them
   const newlyCreatedEvents = new Map(); // eventTitle -> eventId
   
-  // Process each suggestion
+  // Track eventId assignment per lecture number for the two-pass approach
+  const lectureEventMap = new Map(); // lectureNumber -> eventId
+  
+  // PASS 1: Process CREATE_NEW_EVENT and ASSIGN_TO_EXISTING lectures first to establish event mappings
   for (const suggestion of validatedResponse.suggestions) {
     try {
       const lecture = course.videos.find(v => v.order === suggestion.lectureNumber);
@@ -727,70 +730,17 @@ router.post('/:id/ai-assign-lectures', asyncHandler(async (req, res) => {
         continue;
       }
       
-      if (suggestion.action === 'SKIP') {
-        results.skipped++;
+      if (suggestion.action === 'SKIP' || suggestion.action === 'PAIR_WITH_NEXT') {
+        // Skip these in pass 1; they'll be resolved in pass 2
         continue;
       }
       
       let eventId;
       
-      if (suggestion.action === 'PAIR_WITH_NEXT') {
-        // PAIR_WITH_NEXT: This lecture should be assigned to the same event as the next lecture
-        const nextLecture = validatedResponse.suggestions.find(s => s.lectureNumber === suggestion.pairedWithLecture);
-        
-        if (!nextLecture) {
-          results.errors.push(`Lecture ${suggestion.lectureNumber}: Cannot find paired lecture ${suggestion.pairedWithLecture}`);
-          continue;
-        }
-        
-        // Check if the next lecture has already been processed and created/assigned to an event
-        if (nextLecture.newEventSuggestion && newlyCreatedEvents.has(nextLecture.newEventSuggestion.title)) {
-          // Next lecture already created its event
-          eventId = newlyCreatedEvents.get(nextLecture.newEventSuggestion.title);
-          console.log(`📌 PAIR_WITH_NEXT: Lecture ${suggestion.lectureNumber} assigned to event ${eventId} (already created)`);
-        } else if (nextLecture.action === 'ASSIGN_TO_EXISTING' && nextLecture.existingEvent) {
-          // Next lecture will be assigned to existing event
-          eventId = nextLecture.existingEvent.id;
-          console.log(`📌 PAIR_WITH_NEXT: Lecture ${suggestion.lectureNumber} assigned to existing event ${eventId}`);
-        } else if (nextLecture.action === 'ASSIGN_TO_EXISTING' && nextLecture.willBeCreated && nextLecture.existingEventTitle) {
-          // Next lecture references an event that should be created by an earlier lecture
-          // Check if it's already been created in this batch
-          if (newlyCreatedEvents.has(nextLecture.existingEventTitle)) {
-            eventId = newlyCreatedEvents.get(nextLecture.existingEventTitle);
-            console.log(`📌 PAIR_WITH_NEXT: Lecture ${suggestion.lectureNumber} using event "${nextLecture.existingEventTitle}" (created earlier in batch)`);
-          } else {
-            results.errors.push(`Lecture ${suggestion.lectureNumber}: Next lecture references event "${nextLecture.existingEventTitle}" which hasn't been created yet`);
-            continue;
-          }
-        } else if (nextLecture.action === 'CREATE_NEW_EVENT' && nextLecture.newEventSuggestion) {
-          // Next lecture will create a new event - create it now for both lectures
-          const newEventData = nextLecture.newEventSuggestion;
-          const newEvent = await prisma.historicalEvent.create({
-            data: {
-              title: newEventData.title,
-              startDate: newEventData.startDate,
-              endDate: newEventData.endDate,
-              category: newEventData.category,
-              details: newEventData.details
-            }
-          });
-          eventId = newEvent.id;
-          newlyCreatedEvents.set(newEventData.title, eventId);
-          results.createdEvents++;
-          console.log(`📌 PAIR_WITH_NEXT: Created new event "${newEventData.title}" (${eventId}) for lectures ${suggestion.lectureNumber} and ${nextLecture.lectureNumber}`);
-        } else {
-          results.errors.push(`Lecture ${suggestion.lectureNumber}: Next lecture ${nextLecture.lectureNumber} has unsupported action ${nextLecture.action}`);
-          continue;
-        }
-        
-        results.pairedLectures++;
-      } else if (suggestion.action === 'ASSIGN_TO_EXISTING') {
-        // Assign to existing event
+      if (suggestion.action === 'ASSIGN_TO_EXISTING') {
         if (suggestion.existingEvent) {
-          // Event existed before this import
           eventId = suggestion.existingEvent.id;
         } else if (suggestion.willBeCreated && suggestion.existingEventTitle) {
-          // Event should have been created by an earlier suggestion in this batch
           if (newlyCreatedEvents.has(suggestion.existingEventTitle)) {
             eventId = newlyCreatedEvents.get(suggestion.existingEventTitle);
             console.log(`✅ Lecture ${suggestion.lectureNumber} assigned to event "${suggestion.existingEventTitle}" (created earlier in batch)`);
@@ -804,13 +754,11 @@ router.post('/:id/ai-assign-lectures', asyncHandler(async (req, res) => {
         }
         results.assignedToExisting++;
       } else if (suggestion.action === 'CREATE_NEW_EVENT' && suggestion.newEventSuggestion) {
-        // Check if this event was already created by a PAIR_WITH_NEXT action
         const newEventData = suggestion.newEventSuggestion;
         if (newlyCreatedEvents.has(newEventData.title)) {
           eventId = newlyCreatedEvents.get(newEventData.title);
-          console.log(`✅ Lecture ${suggestion.lectureNumber} using event "${newEventData.title}" (${eventId}) - already created by PAIR_WITH_NEXT`);
+          console.log(`✅ Lecture ${suggestion.lectureNumber} using event "${newEventData.title}" (${eventId}) - already created`);
         } else {
-          // Create new event
           const newEvent = await prisma.historicalEvent.create({
             data: {
               title: newEventData.title,
@@ -820,7 +768,6 @@ router.post('/:id/ai-assign-lectures', asyncHandler(async (req, res) => {
               details: newEventData.details
             }
           });
-          
           eventId = newEvent.id;
           newlyCreatedEvents.set(newEventData.title, eventId);
           results.createdEvents++;
@@ -828,47 +775,75 @@ router.post('/:id/ai-assign-lectures', asyncHandler(async (req, res) => {
       }
       
       if (eventId) {
-        // Create a corresponding HistoryVideo entry for the course video so it appears in the Videos page
-        // This is how the existing system links videos to events
-        try {
-          await prisma.historyVideo.create({
-            data: {
-              title: lecture.title,
-              url: lecture.url,
-              type: 'great-courses-plus',
-              eventId: eventId,
-              courseTitle: course.title,
-              lectureNumber: lecture.order,
-              description: lecture.description || `Lecture ${lecture.order} from ${course.title}`,
-              assignedByAI: true
-            }
-          });
-          console.log(`✅ Created HistoryVideo link for lecture ${suggestion.lectureNumber}: ${lecture.title} -> Event ${eventId}`);
-        } catch (error) {
-          // If URL already exists, update the existing record
-          if (error.code === 'P2002') {
-            await prisma.historyVideo.update({
-              where: { url: lecture.url },
-              data: {
-                eventId: eventId,
-                assignedByAI: true,
-                courseTitle: course.title,
-                lectureNumber: lecture.order
-              }
-            });
-            console.log(`✅ Updated existing HistoryVideo link for lecture ${suggestion.lectureNumber}: ${lecture.title} -> Event ${eventId}`);
-          } else {
-            throw error;
-          }
-        }
-        
-        results.processedLectures++;
+        lectureEventMap.set(suggestion.lectureNumber, eventId);
       }
-      
     } catch (error) {
       console.error(`Error processing lecture ${suggestion.lectureNumber}:`, error);
       results.errors.push(`Lecture ${suggestion.lectureNumber}: ${error.message}`);
     }
+  }
+  
+  // PASS 2: Sweep backwards to assign unlinked lectures (PAIR_WITH_NEXT, SKIP, errors) to the next lecture's event
+  const sortedSuggestions = [...validatedResponse.suggestions].sort((a, b) => a.lectureNumber - b.lectureNumber);
+  let nextEventId = null;
+  
+  // Walk backward: any lecture without an event inherits the next lecture's event
+  for (let i = sortedSuggestions.length - 1; i >= 0; i--) {
+    const suggestion = sortedSuggestions[i];
+    if (lectureEventMap.has(suggestion.lectureNumber)) {
+      nextEventId = lectureEventMap.get(suggestion.lectureNumber);
+    } else if (nextEventId) {
+      lectureEventMap.set(suggestion.lectureNumber, nextEventId);
+      results.pairedLectures++;
+      console.log(`📌 Lecture ${suggestion.lectureNumber} ("${suggestion.lectureTitle}") assigned to next event ${nextEventId}`);
+    } else if (suggestion.action === 'SKIP') {
+      results.skipped++;
+    }
+  }
+  
+  // PASS 3: Create HistoryVideo entries for all lectures that now have events
+  for (const suggestion of sortedSuggestions) {
+    const eventId = lectureEventMap.get(suggestion.lectureNumber);
+    if (!eventId) continue;
+    
+    const lecture = course.videos.find(v => v.order === suggestion.lectureNumber);
+    if (!lecture) continue;
+    
+    try {
+      await prisma.historyVideo.create({
+        data: {
+          title: lecture.title,
+          url: lecture.url,
+          type: 'great-courses-plus',
+          eventId: eventId,
+          courseTitle: course.title,
+          lectureNumber: lecture.order,
+          description: lecture.description || `Lecture ${lecture.order} from ${course.title}`,
+          assignedByAI: true
+        }
+      });
+      console.log(`✅ Created HistoryVideo link for lecture ${suggestion.lectureNumber}: ${lecture.title} -> Event ${eventId}`);
+    } catch (error) {
+      // If URL already exists, update the existing record
+      if (error.code === 'P2002') {
+        await prisma.historyVideo.update({
+          where: { url: lecture.url },
+          data: {
+            eventId: eventId,
+            assignedByAI: true,
+            courseTitle: course.title,
+            lectureNumber: lecture.order
+          }
+        });
+        console.log(`✅ Updated existing HistoryVideo link for lecture ${suggestion.lectureNumber}: ${lecture.title} -> Event ${eventId}`);
+      } else {
+        console.error(`Error processing lecture ${suggestion.lectureNumber}:`, error);
+        results.errors.push(`Lecture ${suggestion.lectureNumber}: ${error.message}`);
+        continue;
+      }
+    }
+    
+    results.processedLectures++;
   }
   
   sendSuccess(res, {

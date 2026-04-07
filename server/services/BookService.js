@@ -48,10 +48,10 @@ class BookService {
         data: {
           title: bookData.title,
           author: bookData.author,
-          isbn: bookData.isbn,
-          publisher: bookData.publisher,
+          isbn: bookData.isbn || null,
+          publisher: bookData.publisher || null,
           publishYear: bookData.publishYear,
-          description: bookData.description,
+          description: bookData.description || null,
           coverUrl: bookData.coverUrl,
           pageCount: bookData.pageCount,
           openLibraryId: bookData.openLibraryId,
@@ -107,8 +107,10 @@ class BookService {
               event: true,
               sections: {
                 include: {
-                  event: true
-                }
+                  event: true,
+                  sectionCompletions: true
+                },
+                orderBy: { sectionNumber: 'asc' }
               },
               chapterCompletions: true
             },
