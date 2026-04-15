@@ -6,7 +6,7 @@
 
 const express = require('express');
 const { asyncHandler, sendSuccess, sendBadRequest, sendServerError } = require('../../utils/responses');
-const { validateRequiredFields } = require('../../middleware/validation');
+const { validateRequiredFieldsDirect } = require('../../middleware/validation');
 const WatchLogService = require('../../watchLogService');
 const HistoryPlusService = require('../../services/historyPlusService');
 const { createAndroidResponse, createAndroidErrorResponse } = require('./utilities/androidHelpers');
@@ -42,7 +42,7 @@ function createHistoryPlusReadingSessionRoutes(prisma) {
     } = req.body;
 
     // Validate required fields
-    validateRequiredFields(req.body, ['contentType', 'contentId', 'bookId', 'bookTitle', 'eventId', 'eventTitle']);
+    validateRequiredFieldsDirect(req.body, ['contentType', 'contentId', 'bookId', 'bookTitle', 'eventId', 'eventTitle']);
 
     // Validate content type
     if (!['book', 'chapter', 'section'].includes(contentType)) {
@@ -306,7 +306,7 @@ function createHistoryPlusReadingSessionRoutes(prisma) {
     const { contentType, contentId, bookId, chapterId, eventId } = req.body;
 
     // Validate required fields
-    validateRequiredFields(req.body, ['contentType', 'contentId', 'bookId', 'eventId']);
+    validateRequiredFieldsDirect(req.body, ['contentType', 'contentId', 'bookId', 'eventId']);
 
     if (!['book', 'chapter', 'section'].includes(contentType)) {
       return res.status(400).json(createAndroidErrorResponse(
@@ -329,22 +329,23 @@ function createHistoryPlusReadingSessionRoutes(prisma) {
       let affectedContent = {};
 
       // Mark the specific content as read based on type
+      const parsedContentId = parseInt(contentId);
       if (contentType === 'book') {
-        await historyPlusService.markBookAsRead(contentId);
+        await historyPlusService.markBookRead(parsedContentId);
         const book = await prisma.book.findUnique({
-          where: { id: contentId },
+          where: { id: parsedContentId },
           include: { chapters: true }
         });
         markedContent = book;
         affectedContent = {
           bookTitle: book.title,
           chaptersInBook: book.chapters.length,
-          chaptersMarkedRead: book.chapters.length // Assuming all chapters are marked when book is marked
+          chaptersMarkedRead: book.chapters.length
         };
       } else if (contentType === 'chapter') {
-        await historyPlusService.markChapterAsRead(contentId);
-        const chapter = await prisma.chapter.findUnique({
-          where: { id: contentId },
+        await historyPlusService.markChapterRead(parsedContentId);
+        const chapter = await prisma.bookChapter.findUnique({
+          where: { id: parsedContentId },
           include: { 
             book: true,
             sections: true
@@ -355,12 +356,12 @@ function createHistoryPlusReadingSessionRoutes(prisma) {
           chapterTitle: chapter.title,
           bookTitle: chapter.book.title,
           sectionsInChapter: chapter.sections.length,
-          sectionsMarkedRead: chapter.sections.length // Assuming all sections are marked when chapter is marked
+          sectionsMarkedRead: chapter.sections.length
         };
       } else if (contentType === 'section') {
-        await historyPlusService.markSectionAsRead(contentId);
-        const section = await prisma.section.findUnique({
-          where: { id: contentId },
+        await historyPlusService.markSectionRead(parsedContentId);
+        const section = await prisma.bookSection.findUnique({
+          where: { id: parsedContentId },
           include: { 
             chapter: {
               include: { book: true }
@@ -376,25 +377,25 @@ function createHistoryPlusReadingSessionRoutes(prisma) {
       }
 
       // Calculate event progress
-      const eventProgress = await historyPlusService.getEventProgress(eventId);
+      const eventProgress = await historyPlusService.getEventProgress(parseInt(eventId));
       
       const responseData = {
         success: true,
         contentType,
-        contentId,
-        bookId,
-        ...(chapterId && { chapterId }),
+        contentId: parsedContentId,
+        bookId: parseInt(bookId),
+        ...(chapterId && { chapterId: parseInt(chapterId) }),
         markedAsRead: true,
         affectedContent,
         eventProgress: {
-          eventId,
-          eventTitle: eventProgress.eventTitle,
-          totalContent: eventProgress.totalItems,
-          readContent: eventProgress.readItems,
-          completionPercentage: Math.round((eventProgress.readItems / eventProgress.totalItems) * 100 * 10) / 10,
-          eventCompleted: eventProgress.isCompleted
+          eventId: parseInt(eventId),
+          eventTitle: eventProgress?.title || '',
+          totalContent: eventProgress?.totalItems || 0,
+          readContent: eventProgress?.completedItems || 0,
+          completionPercentage: eventProgress?.completionPercentage || 0,
+          eventCompleted: eventProgress?.isReviewed || false
         },
-        message: `Marked ${contentType} "${markedContent.title}" as read${eventProgress.isCompleted ? ' - Event completed!' : ''}`,
+        message: `Marked ${contentType} "${markedContent.title}" as read${eventProgress?.isReviewed ? ' - Event completed!' : ''}`,
         timestamp: new Date().toISOString()
       };
 

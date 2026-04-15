@@ -34,20 +34,59 @@ function createReadingSessionRoutes(prisma) {
     const actualCustomOrderItemId = customOrderItemId || id;
 
     // Check if this is a History Plus reading session
-    const isHistoryPlusSession = historyPlus && historyPlus.orderType === 'HISTORY_PLUS';
+    // Either explicitly via historyPlus object, or implicitly via hp- prefixed IDs
+    const isHistoryPlusSession = (historyPlus && historyPlus.orderType === 'HISTORY_PLUS') ||
+      (typeof actualCustomOrderItemId === 'string' && actualCustomOrderItemId.startsWith('hp-'));
     
     console.log(`📱 Session type: ${isHistoryPlusSession ? 'History Plus' : 'Regular'}`);
     
     if (isHistoryPlusSession) {
-      console.log('📚 History Plus session detected:', historyPlus);
+      console.log('📚 History Plus session detected:', historyPlus || { id: actualCustomOrderItemId });
+      
+      // Build History Plus context from explicit object or parse from id
+      let hpContext = historyPlus;
+      if (!hpContext && typeof actualCustomOrderItemId === 'string' && actualCustomOrderItemId.startsWith('hp-')) {
+        // Parse hp-{contentType}-{contentId} format
+        const parts = actualCustomOrderItemId.split('-');
+        if (parts.length >= 3) {
+          hpContext = {
+            orderType: 'HISTORY_PLUS',
+            contentType: parts[1],
+            contentId: parts.slice(2).join('-')
+          };
+        }
+      }
+      
+      if (!hpContext || (!hpContext.eventId && !hpContext.contentId)) {
+        // Minimal context available - start session without full History Plus encoding
+        console.log('📚 Starting History Plus session with minimal context');
+        const readingSession = await watchLogService.startReading({
+          mediaType: mediaType || 'book',
+          title: title,
+          seriesTitle: `HISTORY_PLUS:unknown:${hpContext?.contentType || 'book'}:${hpContext?.contentId || 'unknown'}:${title}`,
+          customOrderItemId: null
+        });
+        
+        return sendSuccess(res, {
+          success: true,
+          sessionId: readingSession.id,
+          title: title,
+          mediaType: mediaType || 'book',
+          customOrderItemId: null,
+          startedAt: readingSession.startedAt,
+          isPaused: readingSession.isPaused || false,
+          message: `Started History Plus reading session for "${title}"`,
+          timestamp: new Date().toISOString()
+        });
+      }
       
       // For History Plus sessions, we need different validation and handling
-      if (!historyPlus.eventId || !historyPlus.contentType || !historyPlus.contentId) {
+      if (!hpContext.eventId || !hpContext.contentType || !hpContext.contentId) {
         return sendBadRequest(res, 'History Plus sessions require eventId, contentType, and contentId');
       }
       
       // Create a special History Plus reading session
-      const historyPlusSeriesTitle = `HISTORY_PLUS:${historyPlus.eventId}:${historyPlus.contentType}:${historyPlus.contentId}:${historyPlus.eventTitle || title}`;
+      const historyPlusSeriesTitle = `HISTORY_PLUS:${hpContext.eventId}:${hpContext.contentType}:${hpContext.contentId}:${hpContext.eventTitle || title}`;
       
       console.log(`📚 Starting History Plus reading session: ${historyPlusSeriesTitle}`);
       
@@ -66,7 +105,7 @@ function createReadingSessionRoutes(prisma) {
           title: title,
           mediaType: mediaType,
           customOrderItemId: null, // History Plus doesn't use custom order items
-          historyPlus: historyPlus, // Return the History Plus context
+          historyPlus: hpContext, // Return the History Plus context
           startedAt: readingSession.startedAt,
           isPaused: readingSession.isPaused || false,
           message: `Started History Plus reading session for "${title}"`,
