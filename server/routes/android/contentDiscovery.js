@@ -5,81 +5,34 @@
 
 const express = require('express');
 const { getAndroidApiBaseUrl, getAndroidArtworkUrl, createAndroidResponse, createAndroidErrorResponse } = require('./utilities/androidHelpers');
+const { resolveUpNext } = require('../../services/upNextService');
 
 /**
  * Create content discovery routes for Android app
- * @param {object} services - Service dependencies
  * @returns {express.Router} Configured router
  */
-function createContentDiscoveryRoutes(services) {
+function createContentDiscoveryRoutes() {
   const router = express.Router();
-  const { getNextEpisode, getNextMovie, getNextCustomOrder } = services;
 
   // Android companion app endpoint - Get Up Next
+  // Uses the shared resolveUpNext service to guarantee identical content selection
+  // as the web app endpoint (/api/plex/up-next). Only the response formatting differs.
   router.get('/up-next', async (req, res) => {
     console.log('📱 Android app requesting up next content...');
     
     try {
-      // Call the internal getNextEpisode function directly to ensure consistent data
-      console.log('📱 Calling getNextEpisode() directly...');
-      const data = await getNextEpisode(); // This handles order type selection internally
+      // Use shared Up Next resolution - identical logic to web endpoint
+      const upNextData = await resolveUpNext(req);
       
-      console.log('📱 getNextEpisode() returned:', {
-        orderType: data?.orderType,
-        title: data?.title,
-        ratingKey: data?.ratingKey,
-        episodeRatingKey: data?.episodeRatingKey
+      console.log('📱 resolveUpNext() returned:', {
+        orderType: upNextData?.orderType,
+        type: upNextData?.type,
+        title: upNextData?.title,
+        ratingKey: upNextData?.ratingKey
       });
-      
-      let upNextData;
-      // If movies were selected, use the new getNextMovie function
-      if (data.orderType === 'MOVIES_GENERAL') {
-        console.log('📱 Movie order type selected, using getNextMovie function');
-        upNextData = await getNextMovie();
-      } else if (data.orderType === 'CUSTOM_ORDER') {
-        console.log('📱 Custom order type selected, using getNextCustomOrder function');
-        upNextData = await getNextCustomOrder(req);
-      } else if (data.orderType === 'HISTORY_PLUS') {
-        console.log('📱 History Plus order type selected, treating video as webvideo');
-        
-        // Transform History Plus video to webvideo format (same as custom order webvideos)
-        if (data.type === 'video' && data.content) {
-          const video = data.content;
-          
-          upNextData = {
-            ratingKey: `history-plus-video-${video.id}`,
-            title: data.title, // Keep actual video title
-            type: 'webvideo',
-            year: null,
-            summary: data.description || '',
-            thumb: data.thumbnail,
-            art: null,
-            webTitle: data.title, // Keep actual video title
-            webUrl: video.url,
-            webDescription: data.description || '',
-            localArtworkPath: null,
-            orderType: 'HISTORY_PLUS',
-            customOrderMediaType: 'webvideo',
-            // Include History Plus context
-            eventId: data.eventId,
-            eventTitle: data.eventTitle,
-            eventTitleWithDates: data.eventTitleWithDates,
-            eventDate: data.eventDate,
-            channel: data.channel
-          };
-        } else {
-          // Non-video History Plus content (books, chapters, sections)
-          upNextData = data;
-        }
-      } else {
-        // TV General selection
-        upNextData = data;
-      }
       
       // Get base URL for Android API (needed for artwork URLs)
       const baseUrl = getAndroidApiBaseUrl();
-      console.log('📱 Using base URL for Android API:', baseUrl);
-      console.log('📱 Up next data received:', JSON.stringify(upNextData, null, 2));
       
       if (!upNextData || upNextData.error) {
         return res.status(404).json(createAndroidErrorResponse(
@@ -89,273 +42,8 @@ function createContentDiscoveryRoutes(services) {
         ));
       }
       
-      // Determine content type and build appropriate response according to documentation
-      let androidResponse;
-      
-      if (upNextData.orderType === 'MOVIES_GENERAL') {
-        // Movie response - use PLAY_MOVIE type
-        const artworkUrl = getAndroidArtworkUrl(upNextData, baseUrl);
-        androidResponse = {
-          type: 'PLAY_MOVIE',
-          data: {
-            ratingKey: upNextData.ratingKey,
-            plexId: upNextData.ratingKey,
-            title: upNextData.title,
-            year: upNextData.year,
-            duration: upNextData.duration || 0,
-            summary: upNextData.summary || '',
-            studio: upNextData.studio || 'Unknown Studio',
-            rating: upNextData.rating || 0,
-            thumb: upNextData.thumb || '',
-            art: upNextData.art || '',
-            artworkUrl: artworkUrl || '',
-            streamUrl: upNextData.streamUrl || '',
-            otherCollections: upNextData.otherCollections || []
-          }
-        };
-      } else if (upNextData.orderType === 'CUSTOM_ORDER') {
-        // Custom order response - use PLAY_CUSTOM_ORDER_ITEM type
-        const artworkUrl = getAndroidArtworkUrl(upNextData, baseUrl);
-        
-        // For episodes in custom orders, make sure we use the episode rating key
-        let episodeRatingKey = upNextData.ratingKey;
-        if (upNextData.type === 'episode' && upNextData.episodeRatingKey) {
-          episodeRatingKey = upNextData.episodeRatingKey;
-          console.log('📱 Using episode-specific rating key for Android:', episodeRatingKey);
-        }
-
-        // Base data structure for all Custom Order items
-        const baseData = {
-          id: upNextData.customOrderItemId || upNextData.id,
-          title: upNextData.title,
-          type: upNextData.type,
-          orderName: upNextData.customOrderName || 'Custom Order',
-          summary: upNextData.summary || '',
-          duration: upNextData.duration || 0,
-          localArtworkPath: upNextData.localArtworkPath || '',
-          artworkUrl: artworkUrl || '',
-          streamUrl: upNextData.streamUrl || '',
-          ratingKey: episodeRatingKey || null,
-          plexId: episodeRatingKey || null,
-          webUrl: upNextData.webUrl || null,
-          customOrderId: upNextData.customOrderId || null,
-          customOrderItemId: upNextData.customOrderItemId || null,
-          // Playlist information
-          ...(upNextData.playlistName && {
-            playlistName: upNextData.playlistName,
-            playlistType: upNextData.playlistType
-          }),
-          // Background gallery information
-          ...(upNextData.backgroundGalleryName && {
-            backgroundGalleryName: upNextData.backgroundGalleryName,
-            backgroundGalleryId: upNextData.backgroundGalleryId
-          }),
-          // Episode-specific fields for custom orders
-          ...(upNextData.type === 'episode' && {
-            seasonNumber: upNextData.seasonNumber || upNextData.currentSeason || null,
-            episodeNumber: upNextData.episodeNumber || upNextData.currentEpisode || null,
-            episodeTitle: upNextData.episodeTitle || upNextData.nextEpisodeTitle || null,
-            seriesTitle: upNextData.seriesTitle || upNextData.grandparentTitle || null
-          }),
-          // Book-specific fields for custom order books (same structure as History Plus books)
-          ...(upNextData.type === 'book' && {
-            bookTitle: upNextData.bookTitle,
-            bookAuthor: upNextData.bookAuthor,
-            bookYear: upNextData.bookYear,
-            bookIsbn: upNextData.bookIsbn,
-            bookPublisher: upNextData.bookPublisher,
-            bookPageCount: upNextData.bookPageCount,
-            bookCoverUrl: upNextData.bookCoverUrl || upNextData.thumb || upNextData.art,
-            bookDescription: upNextData.bookDetails?.description || upNextData.summary || '',
-            bookOpenLibraryId: upNextData.bookOpenLibraryId,
-            // Chapter information (if available - for future chapter/section support)
-            ...(upNextData.chapterNumber && {
-              chapterNumber: upNextData.chapterNumber,
-              chapterTitle: upNextData.chapterTitle,
-              chapterDescription: upNextData.chapterDescription
-            }),
-            // Section information (if available - for future chapter/section support)
-            ...(upNextData.sectionNumber && {
-              sectionNumber: upNextData.sectionNumber,
-              sectionTitle: upNextData.sectionTitle,
-              sectionDescription: upNextData.sectionDescription
-            }),
-            // Page information (if available)
-            ...(upNextData.pageStart && {
-              pageStart: upNextData.pageStart,
-              pageEnd: upNextData.pageEnd
-            })
-          })
-        };
-
-        androidResponse = {
-          type: 'PLAY_CUSTOM_ORDER_ITEM',
-          data: baseData
-        };
-      } else if (upNextData.orderType === 'HISTORY_PLUS') {
-        // History Plus response - treat webvideos like custom order webvideos
-        const artworkUrl = getAndroidArtworkUrl(upNextData, baseUrl);
-        
-        if (upNextData.type === 'webvideo') {
-          // Handle History Plus webvideos exactly like custom order webvideos
-          androidResponse = {
-            type: 'PLAY_CUSTOM_ORDER_ITEM',
-            data: {
-              id: upNextData.ratingKey,
-              title: upNextData.title, // Use actual video title
-              type: upNextData.type,
-              orderName: `History Plus: ${upNextData.eventTitleWithDates || upNextData.eventTitle}`, // Use formatted title with dates for order name
-              summary: upNextData.summary || '',
-              duration: 0, // Webvideos don't have duration
-              localArtworkPath: upNextData.localArtworkPath || '',
-              artworkUrl: artworkUrl || '',
-              streamUrl: '',
-              ratingKey: null, // Webvideos don't have Plex rating keys
-              plexId: null, // Webvideos don't have Plex IDs
-              webUrl: upNextData.webUrl || null,
-              webTitle: upNextData.webTitle, // Use actual video title
-              webDescription: upNextData.webDescription,
-              customOrderId: null,
-              customOrderItemId: null,
-              // History Plus specific context
-              eventId: upNextData.eventId,
-              eventTitle: upNextData.eventTitle,
-              eventTitleWithDates: upNextData.eventTitleWithDates,
-              eventDate: upNextData.eventDate,
-              channel: upNextData.channel
-            }
-          };
-        } else {
-          // Non-webvideo History Plus content (books, chapters, sections)
-          // Format as custom order book item for compatibility with regular reading endpoints
-          const artworkUrl = upNextData.bookCoverUrl || '';
-          
-          androidResponse = {
-            type: 'PLAY_CUSTOM_ORDER_ITEM',
-            data: {
-              id: `history-plus-${upNextData.type}-${upNextData.content?.id || 'unknown'}`,
-              title: upNextData.title,
-              type: 'book', // Always treat as book for reading interface
-              orderName: 'History Plus Reading',
-              summary: upNextData.description || '',
-              duration: 0,
-              localArtworkPath: artworkUrl,
-              artworkUrl: artworkUrl,
-              streamUrl: null, // Books don't stream
-              ratingKey: null,
-              plexId: null,
-              webUrl: null,
-              customOrderId: 'history-plus',
-              customOrderItemId: `hp-${upNextData.type}-${upNextData.content?.id || 'unknown'}`,
-              // Book-specific fields for reading
-              bookTitle: upNextData.bookTitle,
-              bookAuthor: upNextData.bookAuthor,
-              bookYear: upNextData.bookYear,
-              bookIsbn: upNextData.bookIsbn,
-              bookPublisher: upNextData.bookPublisher,
-              bookPageCount: upNextData.bookPageCount,
-              bookCoverUrl: upNextData.bookCoverUrl,
-              bookDescription: upNextData.bookDescription,
-              // Chapter information (for chapters and sections)
-              ...(upNextData.chapterNumber && {
-                chapterNumber: upNextData.chapterNumber,
-                chapterTitle: upNextData.chapterTitle,
-                chapterDescription: upNextData.chapterDescription
-              }),
-              // Section information (for sections only)
-              ...(upNextData.sectionNumber && {
-                sectionNumber: upNextData.sectionNumber,
-                sectionTitle: upNextData.sectionTitle,
-                sectionDescription: upNextData.sectionDescription
-              }),
-              // Page information
-              ...(upNextData.pageStart && {
-                pageStart: upNextData.pageStart,
-                pageEnd: upNextData.pageEnd
-              }),
-              // History Plus specific context - preserved for reading session creation
-              historyPlus: {
-                orderType: upNextData.orderType,
-                contentType: upNextData.type,
-                eventId: upNextData.eventId,
-                eventTitle: upNextData.eventTitle,
-                eventTitleWithDates: upNextData.eventTitleWithDates,
-                eventDate: upNextData.eventDate,
-                contentId: upNextData.content?.id,
-                chapterId: upNextData.content?.chapterId || upNextData.content?.chapter?.id,
-                sectionId: upNextData.type === 'section' ? upNextData.content?.id : null,
-                bookId: upNextData.content?.bookId || upNextData.content?.book?.id || upNextData.content?.chapter?.book?.id
-              }
-            }
-          };
-        }
-      } else {
-        // TV Show response (default) - use PLAY_TV_EPISODE type
-        const artworkUrl = getAndroidArtworkUrl(upNextData, baseUrl);
-        
-        // For TV episodes from Plex, make sure we use the episode rating key
-        let episodeRatingKey = upNextData.ratingKey; // Default to series rating key
-        let seriesRatingKey = upNextData.ratingKey; // Keep series rating key for reference
-        
-        // Priority order for finding episode-specific rating key
-        if (upNextData.episodeRatingKey) {
-          episodeRatingKey = upNextData.episodeRatingKey;
-          console.log('📱 Using episodeRatingKey for Android:', episodeRatingKey);
-        } else if (upNextData.currentEpisodeRatingKey) {
-          episodeRatingKey = upNextData.currentEpisodeRatingKey;
-          console.log('📱 Using currentEpisodeRatingKey for Android:', episodeRatingKey);
-        } else if (upNextData.nextEpisodeRatingKey) {
-          episodeRatingKey = upNextData.nextEpisodeRatingKey;
-          console.log('📱 Using nextEpisodeRatingKey for Android:', episodeRatingKey);
-        } else {
-          console.log('📱 No episode-specific rating key found, using series rating key:', episodeRatingKey);
-        }
-        
-        // For TV episodes, construct episode-specific artwork paths
-        let episodeThumb = upNextData.thumb || '';
-        let episodeArt = upNextData.art || '';
-        
-        // If we have an episode rating key, construct episode-specific artwork paths
-        if (episodeRatingKey && episodeRatingKey !== seriesRatingKey) {
-          // Extract timestamp from existing thumb/art if available
-          const thumbMatch = upNextData.thumb?.match(/\/(\d+)$/);
-          const artMatch = upNextData.art?.match(/\/(\d+)$/);
-          const thumbTimestamp = thumbMatch ? thumbMatch[1] : Date.now();
-          const artTimestamp = artMatch ? artMatch[1] : Date.now();
-          
-          episodeThumb = `/library/metadata/${episodeRatingKey}/thumb/${thumbTimestamp}`;
-          episodeArt = `/library/metadata/${episodeRatingKey}/art/${artTimestamp}`;
-          console.log('📱 Using episode-specific artwork paths:', { episodeThumb, episodeArt });
-        } else {
-          console.log('📱 Using series artwork paths for episode');
-        }
-        
-        androidResponse = {
-          type: 'PLAY_TV_EPISODE',
-          data: {
-            ratingKey: episodeRatingKey,
-            episodeRatingKey: episodeRatingKey,
-            seriesRatingKey: seriesRatingKey,
-            plexId: episodeRatingKey,
-            title: upNextData.title,
-            episodeTitle: upNextData.episodeTitle || upNextData.nextEpisodeTitle || null,
-            summary: upNextData.summary || '',
-            episodeSummary: upNextData.episodeSummary || null,
-            leafCount: upNextData.leafCount || 0,
-            viewedLeafCount: upNextData.viewedLeafCount || 0,
-            // Season and episode information for TV shows
-            seasonNumber: upNextData.currentSeason || upNextData.seasonNumber || null,
-            episodeNumber: upNextData.currentEpisode || upNextData.episodeNumber || null,
-            isFinalSeason: upNextData.isCurrentSeasonFinal || false,
-            // Episode-specific artwork URLs
-            thumb: episodeThumb,
-            art: episodeArt,
-            artworkUrl: artworkUrl || '',
-            streamUrl: upNextData.streamUrl || '',
-            otherCollections: upNextData.otherCollections || []
-          }
-        };
-      }
+      // Format the resolved data into Android response structure
+      const androidResponse = formatAndroidResponse(upNextData, baseUrl);
       
       console.log('📱 Sending Android companion up next response:', JSON.stringify(androidResponse, null, 2));
       res.json(androidResponse);
@@ -371,6 +59,265 @@ function createContentDiscoveryRoutes(services) {
   });
 
   return router;
+}
+
+/**
+ * Format resolved Up Next data into Android-specific response structure.
+ * This only handles presentation formatting - all content selection and
+ * filtering logic is handled by the shared resolveUpNext service.
+ */
+function formatAndroidResponse(upNextData, baseUrl) {
+  if (upNextData.orderType === 'MOVIES_GENERAL') {
+    const artworkUrl = getAndroidArtworkUrl(upNextData, baseUrl);
+    return {
+      type: 'PLAY_MOVIE',
+      data: {
+        ratingKey: upNextData.ratingKey,
+        plexId: upNextData.ratingKey,
+        title: upNextData.title,
+        year: upNextData.year,
+        duration: upNextData.duration || 0,
+        summary: upNextData.summary || '',
+        studio: upNextData.studio || 'Unknown Studio',
+        rating: upNextData.rating || 0,
+        thumb: upNextData.thumb || '',
+        art: upNextData.art || '',
+        artworkUrl: artworkUrl || '',
+        streamUrl: upNextData.streamUrl || '',
+        otherCollections: upNextData.otherCollections || []
+      }
+    };
+  }
+
+  if (upNextData.orderType === 'CUSTOM_ORDER') {
+    return formatAndroidCustomOrderResponse(upNextData, baseUrl);
+  }
+
+  if (upNextData.orderType === 'HISTORY_PLUS') {
+    return formatAndroidHistoryPlusResponse(upNextData, baseUrl);
+  }
+
+  // TV Show response (default) - use PLAY_TV_EPISODE type
+  return formatAndroidTVResponse(upNextData, baseUrl);
+}
+
+function formatAndroidCustomOrderResponse(upNextData, baseUrl) {
+  const artworkUrl = getAndroidArtworkUrl(upNextData, baseUrl);
+
+  // For episodes in custom orders, make sure we use the episode rating key
+  let episodeRatingKey = upNextData.ratingKey;
+  if (upNextData.type === 'episode' && upNextData.episodeRatingKey) {
+    episodeRatingKey = upNextData.episodeRatingKey;
+    console.log('📱 Using episode-specific rating key for Android:', episodeRatingKey);
+  }
+
+  const baseData = {
+    id: upNextData.customOrderItemId || upNextData.id,
+    title: upNextData.title,
+    type: upNextData.type,
+    orderName: upNextData.customOrderName || 'Custom Order',
+    summary: upNextData.summary || '',
+    duration: upNextData.duration || 0,
+    localArtworkPath: upNextData.localArtworkPath || '',
+    artworkUrl: artworkUrl || '',
+    streamUrl: upNextData.streamUrl || '',
+    ratingKey: episodeRatingKey || null,
+    plexId: episodeRatingKey || null,
+    webUrl: upNextData.webUrl || null,
+    customOrderId: upNextData.customOrderId || null,
+    customOrderItemId: upNextData.customOrderItemId || null,
+    // Playlist information
+    ...(upNextData.playlistName && {
+      playlistName: upNextData.playlistName,
+      playlistType: upNextData.playlistType
+    }),
+    // Background gallery information
+    ...(upNextData.backgroundGalleryName && {
+      backgroundGalleryName: upNextData.backgroundGalleryName,
+      backgroundGalleryId: upNextData.backgroundGalleryId
+    }),
+    // Episode-specific fields for custom orders
+    ...(upNextData.type === 'episode' && {
+      seasonNumber: upNextData.seasonNumber || upNextData.currentSeason || null,
+      episodeNumber: upNextData.episodeNumber || upNextData.currentEpisode || null,
+      episodeTitle: upNextData.episodeTitle || upNextData.nextEpisodeTitle || null,
+      seriesTitle: upNextData.seriesTitle || upNextData.grandparentTitle || null
+    }),
+    // Book-specific fields for custom order books
+    ...(upNextData.type === 'book' && {
+      bookTitle: upNextData.bookTitle,
+      bookAuthor: upNextData.bookAuthor,
+      bookYear: upNextData.bookYear,
+      bookIsbn: upNextData.bookIsbn,
+      bookPublisher: upNextData.bookPublisher,
+      bookPageCount: upNextData.bookPageCount,
+      bookCoverUrl: upNextData.bookCoverUrl || upNextData.thumb || upNextData.art,
+      bookDescription: upNextData.bookDetails?.description || upNextData.summary || '',
+      bookOpenLibraryId: upNextData.bookOpenLibraryId,
+      ...(upNextData.chapterNumber && {
+        chapterNumber: upNextData.chapterNumber,
+        chapterTitle: upNextData.chapterTitle,
+        chapterDescription: upNextData.chapterDescription
+      }),
+      ...(upNextData.sectionNumber && {
+        sectionNumber: upNextData.sectionNumber,
+        sectionTitle: upNextData.sectionTitle,
+        sectionDescription: upNextData.sectionDescription
+      }),
+      ...(upNextData.pageStart && {
+        pageStart: upNextData.pageStart,
+        pageEnd: upNextData.pageEnd
+      })
+    })
+  };
+
+  return { type: 'PLAY_CUSTOM_ORDER_ITEM', data: baseData };
+}
+
+function formatAndroidHistoryPlusResponse(upNextData, baseUrl) {
+  const artworkUrl = getAndroidArtworkUrl(upNextData, baseUrl);
+
+  if (upNextData.type === 'webvideo') {
+    return {
+      type: 'PLAY_CUSTOM_ORDER_ITEM',
+      data: {
+        id: upNextData.ratingKey,
+        title: upNextData.title,
+        type: upNextData.type,
+        orderName: `History Plus: ${upNextData.eventTitleWithDates || upNextData.eventTitle}`,
+        summary: upNextData.summary || '',
+        duration: 0,
+        localArtworkPath: upNextData.localArtworkPath || '',
+        artworkUrl: artworkUrl || '',
+        streamUrl: '',
+        ratingKey: null,
+        plexId: null,
+        webUrl: upNextData.webUrl || null,
+        webTitle: upNextData.webTitle,
+        webDescription: upNextData.webDescription,
+        customOrderId: null,
+        customOrderItemId: null,
+        eventId: upNextData.eventId,
+        eventTitle: upNextData.eventTitle,
+        eventTitleWithDates: upNextData.eventTitleWithDates,
+        eventDate: upNextData.eventDate,
+        channel: upNextData.channel
+      }
+    };
+  }
+
+  // Non-webvideo History Plus content (books, chapters, sections)
+  const bookArtworkUrl = upNextData.bookCoverUrl || '';
+
+  return {
+    type: 'PLAY_CUSTOM_ORDER_ITEM',
+    data: {
+      id: `history-plus-${upNextData.type}-${upNextData.content?.id || 'unknown'}`,
+      title: upNextData.title,
+      type: 'book',
+      orderName: 'History Plus Reading',
+      summary: upNextData.description || '',
+      duration: 0,
+      localArtworkPath: bookArtworkUrl,
+      artworkUrl: bookArtworkUrl,
+      streamUrl: null,
+      ratingKey: null,
+      plexId: null,
+      webUrl: null,
+      customOrderId: 'history-plus',
+      customOrderItemId: `hp-${upNextData.type}-${upNextData.content?.id || 'unknown'}`,
+      bookTitle: upNextData.bookTitle,
+      bookAuthor: upNextData.bookAuthor,
+      bookYear: upNextData.bookYear,
+      bookIsbn: upNextData.bookIsbn,
+      bookPublisher: upNextData.bookPublisher,
+      bookPageCount: upNextData.bookPageCount,
+      bookCoverUrl: upNextData.bookCoverUrl,
+      bookDescription: upNextData.bookDescription,
+      ...(upNextData.chapterNumber && {
+        chapterNumber: upNextData.chapterNumber,
+        chapterTitle: upNextData.chapterTitle,
+        chapterDescription: upNextData.chapterDescription
+      }),
+      ...(upNextData.sectionNumber && {
+        sectionNumber: upNextData.sectionNumber,
+        sectionTitle: upNextData.sectionTitle,
+        sectionDescription: upNextData.sectionDescription
+      }),
+      ...(upNextData.pageStart && {
+        pageStart: upNextData.pageStart,
+        pageEnd: upNextData.pageEnd
+      }),
+      historyPlus: {
+        orderType: upNextData.orderType,
+        contentType: upNextData.type,
+        eventId: upNextData.eventId,
+        eventTitle: upNextData.eventTitle,
+        eventTitleWithDates: upNextData.eventTitleWithDates,
+        eventDate: upNextData.eventDate,
+        contentId: upNextData.content?.id,
+        chapterId: upNextData.type === 'chapter'
+          ? upNextData.content?.id
+          : (upNextData.content?.chapterId || upNextData.content?.chapter?.id),
+        sectionId: upNextData.type === 'section' ? upNextData.content?.id : null,
+        bookId: upNextData.type === 'book'
+          ? upNextData.content?.id
+          : (upNextData.content?.bookId || upNextData.content?.book?.id || upNextData.content?.chapter?.book?.id)
+      }
+    }
+  };
+}
+
+function formatAndroidTVResponse(upNextData, baseUrl) {
+  const artworkUrl = getAndroidArtworkUrl(upNextData, baseUrl);
+
+  let episodeRatingKey = upNextData.ratingKey;
+  let seriesRatingKey = upNextData.ratingKey;
+
+  if (upNextData.episodeRatingKey) {
+    episodeRatingKey = upNextData.episodeRatingKey;
+  } else if (upNextData.currentEpisodeRatingKey) {
+    episodeRatingKey = upNextData.currentEpisodeRatingKey;
+  } else if (upNextData.nextEpisodeRatingKey) {
+    episodeRatingKey = upNextData.nextEpisodeRatingKey;
+  }
+
+  let episodeThumb = upNextData.thumb || '';
+  let episodeArt = upNextData.art || '';
+
+  if (episodeRatingKey && episodeRatingKey !== seriesRatingKey) {
+    const thumbMatch = upNextData.thumb?.match(/\/(\d+)$/);
+    const artMatch = upNextData.art?.match(/\/(\d+)$/);
+    const thumbTimestamp = thumbMatch ? thumbMatch[1] : Date.now();
+    const artTimestamp = artMatch ? artMatch[1] : Date.now();
+
+    episodeThumb = `/library/metadata/${episodeRatingKey}/thumb/${thumbTimestamp}`;
+    episodeArt = `/library/metadata/${episodeRatingKey}/art/${artTimestamp}`;
+  }
+
+  return {
+    type: 'PLAY_TV_EPISODE',
+    data: {
+      ratingKey: episodeRatingKey,
+      episodeRatingKey: episodeRatingKey,
+      seriesRatingKey: seriesRatingKey,
+      plexId: episodeRatingKey,
+      title: upNextData.title,
+      episodeTitle: upNextData.episodeTitle || upNextData.nextEpisodeTitle || null,
+      summary: upNextData.summary || '',
+      episodeSummary: upNextData.episodeSummary || null,
+      leafCount: upNextData.leafCount || 0,
+      viewedLeafCount: upNextData.viewedLeafCount || 0,
+      seasonNumber: upNextData.currentSeason || upNextData.seasonNumber || null,
+      episodeNumber: upNextData.currentEpisode || upNextData.episodeNumber || null,
+      isFinalSeason: upNextData.isCurrentSeasonFinal || false,
+      thumb: episodeThumb,
+      art: episodeArt,
+      artworkUrl: artworkUrl || '',
+      streamUrl: upNextData.streamUrl || '',
+      otherCollections: upNextData.otherCollections || []
+    }
+  };
 }
 
 module.exports = createContentDiscoveryRoutes;

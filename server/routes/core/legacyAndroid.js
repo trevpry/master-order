@@ -14,6 +14,7 @@ const path = require('path');
  */
 function createLegacyAndroidRoutes(prisma) {
   const router = express.Router();
+  const { resolveUpNext } = require('../../services/upNextService');
 
   // Helper function to get base URL for Android API
   const getAndroidApiBaseUrl = () => {
@@ -22,36 +23,13 @@ function createLegacyAndroidRoutes(prisma) {
     return externalIp ? `http://${externalIp}:${PORT}` : `http://localhost:${PORT}`;
   };
 
-  // Android companion app endpoint - Get Up Next
+  // Legacy Android companion app endpoint - Get Up Next
+  // Uses the shared resolveUpNext service for identical behavior to web and modern Android endpoints
   router.get('/up-next', async (req, res) => {
-    console.log('📱 Android app requesting up next content...');
+    console.log('📱 [LEGACY] Android app requesting up next content...');
     
     try {
-      // Call the internal getNextEpisode function directly to ensure consistent data
-      const { getNextEpisode, getNextMovie, getNextCustomOrder } = require('../../getNextEpisode');
-      console.log('📱 Calling getNextEpisode() directly...');
-      const data = await getNextEpisode(); // This handles order type selection internally
-      
-      console.log('📱 getNextEpisode() returned:', {
-        orderType: data?.orderType,
-        title: data?.title,
-        ratingKey: data?.ratingKey,
-        episodeRatingKey: data?.episodeRatingKey
-      });
-      
-      let upNextData;
-      // If movies were selected, use the new getNextMovie function
-      if (data.orderType === 'MOVIES_GENERAL') {
-        console.log('📱 Movie order type selected, using getNextMovie function');
-        upNextData = await getNextMovie();
-      } else if (data.orderType === 'CUSTOM_ORDER') {
-        console.log('📱 Custom order type selected, using getNextCustomOrder function');
-        upNextData = await getNextCustomOrder(req);
-      } else {
-        // TV General selection
-        upNextData = data;
-      }
-      
+      const upNextData = await resolveUpNext(req);
       // Get base URL for Android API (needed for artwork URLs)
       const baseUrl = getAndroidApiBaseUrl();
       console.log('📱 Using base URL for Android API:', baseUrl);

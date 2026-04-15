@@ -8,6 +8,7 @@ const getNextEpisode = require('../getNextEpisode');
 const getNextMovie = require('../getNextMovie');
 const { getNextCustomOrder } = require('../getNextCustomOrder');
 const HistoryPlusService = require('../services/historyPlusService');
+const { resolveUpNext } = require('../services/upNextService');
 const historyPlusService = new HistoryPlusService();
 
 // Import Plex-specific services
@@ -475,44 +476,8 @@ async function tryGetHistoryPlusContent(mediaTypeLimiters) {
 
 // Up Next endpoint - main entry point for getting next item to watch
 router.get('/up-next', asyncHandler(async (req, res) => {
-  const data = await getNextEpisode(); // This handles order type selection internally
-  
-  // If movies were selected, use the new getNextMovie function
-  if (data.orderType === 'MOVIES_GENERAL') {
-    console.log('Movie order type selected, using getNextMovie function');
-    const movieData = await getNextMovie();
-    res.json(movieData);
-  } else if (data.orderType === 'CUSTOM_ORDER') {
-    console.log('Custom order type selected, using getNextCustomOrder function');
-    const customOrderData = await getNextCustomOrder(req, data.mediaTypeLimiters);
-    
-    // Fallback: if no matching items in custom orders and limiters are active, try History Plus
-    if (customOrderData.message && data.mediaTypeLimiters) {
-      console.log('⚡ Custom Orders had no matching items, falling back to History Plus');
-      const fallbackData = await tryGetHistoryPlusContent(data.mediaTypeLimiters);
-      if (fallbackData) {
-        return res.json(formatHistoryPlusResponse(req, fallbackData));
-      }
-    }
-    
-    res.json(customOrderData);
-  } else if (data.orderType === 'HISTORY_PLUS') {
-    console.log('History Plus order type selected, treating video as webvideo');
-    
-    // Fallback: if History Plus had no matching content and limiters are active, try Custom Orders
-    if (data.message && data.mediaTypeLimiters) {
-      console.log('⚡ History Plus had no matching items, falling back to Custom Orders');
-      const customOrderData = await getNextCustomOrder(req, data.mediaTypeLimiters);
-      if (!customOrderData.message) {
-        return res.json(customOrderData);
-      }
-    }
-    
-    res.json(formatHistoryPlusResponse(req, data));
-  } else {
-    // TV General selection
-    res.json(data);
-  }
+  const data = await resolveUpNext(req);
+  res.json(data);
 }));
 
 // Find the earliest episode from a completed series in the selected collection

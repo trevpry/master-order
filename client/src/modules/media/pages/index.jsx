@@ -1835,7 +1835,7 @@ function MediaHome() {
                       {[
                         { key: 'episode', label: 'Episode', icon: '📺', desc: 'TV, Custom Orders' },
                         { key: 'movie', label: 'Movie', icon: '🎬', desc: 'Movies, Custom Orders' },
-                        { key: 'book', label: 'Book / Short Story', icon: '📖', desc: 'Custom Orders, History+' },
+                        { key: 'book', label: 'Book / Short Story', icon: '📖', desc: 'Incl. chapters & sections' },
                         { key: 'webvideo', label: 'Web Video', icon: '🌐', desc: 'Custom Orders, History+' },
                         { key: 'videogame', label: 'Video Game', icon: '🎮', desc: 'Custom Orders' },
                         { key: 'comic', label: 'Comics', icon: '📚', desc: 'Custom Orders' }

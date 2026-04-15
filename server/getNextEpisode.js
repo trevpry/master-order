@@ -123,11 +123,35 @@ async function selectOrderType() {
     // Re-normalize percentages if any were zeroed out
     const total = tvPercent + moviesPercent + customPercent + historyPercent;
     if (total === 0) {
-      console.log('⚠️ All order types excluded by media type limiters, falling back to no filtering');
-      tvPercent = settings.tvGeneralPercent;
-      moviesPercent = settings.moviesGeneralPercent;
-      customPercent = settings.customOrderPercent;
-      historyPercent = settings.historyPlusPercent;
+      // All configured order types were excluded by limiters, but some order types
+      // COULD serve the requested media types (they just had 0% configured).
+      // Promote eligible-but-unconfigured order types instead of ignoring limiters.
+      const eligibleTypes = [];
+      if (limiters.episode) eligibleTypes.push('tv');
+      if (limiters.movie) eligibleTypes.push('movies');
+      if (limiters.episode || limiters.movie || limiters.book || limiters.webvideo || limiters.videogame || limiters.comic) eligibleTypes.push('custom');
+      if (limiters.webvideo || limiters.book) eligibleTypes.push('history');
+
+      if (eligibleTypes.length > 0) {
+        const share = Math.floor(100 / eligibleTypes.length);
+        tvPercent = eligibleTypes.includes('tv') ? share : 0;
+        moviesPercent = eligibleTypes.includes('movies') ? share : 0;
+        customPercent = eligibleTypes.includes('custom') ? share : 0;
+        historyPercent = eligibleTypes.includes('history') ? share : 0;
+        // Absorb rounding remainder into the last eligible type
+        const remainder = 100 - (tvPercent + moviesPercent + customPercent + historyPercent);
+        if (eligibleTypes.includes('history')) historyPercent += remainder;
+        else if (eligibleTypes.includes('custom')) customPercent += remainder;
+        else if (eligibleTypes.includes('movies')) moviesPercent += remainder;
+        else tvPercent += remainder;
+        console.log(`🎯 Promoted eligible order types - TV: ${tvPercent}%, Movies: ${moviesPercent}%, Custom: ${customPercent}%, History+: ${historyPercent}%`);
+      } else {
+        console.log('⚠️ No order types can serve the selected media types, falling back to no filtering');
+        tvPercent = settings.tvGeneralPercent;
+        moviesPercent = settings.moviesGeneralPercent;
+        customPercent = settings.customOrderPercent;
+        historyPercent = settings.historyPlusPercent;
+      }
     } else if (total !== 100) {
       const scale = 100 / total;
       tvPercent = Math.round(tvPercent * scale);

@@ -42,24 +42,12 @@ function createAndroidRouter(options = {}) {
   // Initialize database client
   const prisma = require('../../prismaClient');
   
-  // Initialize core services
-  const getNextEpisode = require('../../getNextEpisode');
-  const getNextMovie = require('../../getNextMovie');
-  const { getNextCustomOrder } = require('../../getNextCustomOrder');
-  
-  // Prepare service dependencies
-  const services = {
-    getNextEpisode,
-    getNextMovie,
-    getNextCustomOrder
-  };
-  
   console.log('Android router: Mounting modular routes...');
   
   // Mount modular routes
   
-  // Content discovery
-  router.use('/', createContentDiscoveryRoutes(services));
+  // Content discovery (uses shared upNextService internally)
+  router.use('/', createContentDiscoveryRoutes());
   
   // Activity tracking
   router.use('/', createActivityTrackingRoutes(prisma));
