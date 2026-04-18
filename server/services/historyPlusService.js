@@ -1030,7 +1030,7 @@ class HistoryPlusService {
           videos: {
             include: { user_video_watches: true }
           },
-          // NEW: Unified book system relationships only
+          // Unified book system relationships
           bookLinks: {
             include: {
               book: {
@@ -1047,7 +1047,13 @@ class HistoryPlusService {
               chapterCompletions: {
                 where: { userId: "default" }
               },
-              book: true  // Include parent book for cover art and author
+              book: {
+                include: {
+                  bookCompletions: {
+                    where: { userId: "default" }
+                  }
+                }
+              }
             }
           },
           bookSections: {
@@ -1057,10 +1063,29 @@ class HistoryPlusService {
               },
               chapter: {
                 include: {
-                  book: true  // Include parent book for cover art and author
+                  chapterCompletions: {
+                    where: { userId: "default" }
+                  },
+                  book: {
+                    include: {
+                      bookCompletions: {
+                        where: { userId: "default" }
+                      }
+                    }
+                  }
                 }
               }
             }
+          },
+          // Legacy book system relationships
+          books: {
+            include: { user_book_reads: true }
+          },
+          chapters: {
+            include: { user_chapter_reads: true }
+          },
+          sections: {
+            include: { user_section_reads: true }
           },
           user_event_reviews: true
         }
@@ -1072,34 +1097,57 @@ class HistoryPlusService {
       }
       
       // Check for any unwatched videos
-      const unwatchedVideos = event.videos.filter(video => {
+      const unwatchedVideos = (event.videos || []).filter(video => {
         const watchRecord = video.user_video_watches;
-        return !watchRecord || watchRecord.length === 0 || !watchRecord[0]?.watched;
+        return !watchRecord || !watchRecord.watched;
       });
       
       // Check for any unread unified books (via bookLinks)
-      const unreadUnifiedBooks = event.bookLinks.filter(bookLink =>
+      const unreadUnifiedBooks = (event.bookLinks || []).filter(bookLink =>
         !bookLink.book.bookCompletions?.length || !bookLink.book.bookCompletions[0]?.isCompleted
       );
       
-      // Check for any unread unified chapters
-      const unreadUnifiedChapters = event.bookChapters.filter(chapter =>
-        !chapter.chapterCompletions?.length || !chapter.chapterCompletions[0]?.isCompleted
+      // Check for any unread unified chapters (also skip if parent book is read)
+      const unreadUnifiedChapters = (event.bookChapters || []).filter(chapter =>
+        (!chapter.chapterCompletions?.length || !chapter.chapterCompletions[0]?.isCompleted) &&
+        !chapter.book?.bookCompletions?.[0]?.isCompleted
       );
       
-      // Check for any unread unified sections
-      const unreadUnifiedSections = event.bookSections.filter(section =>
-        !section.sectionCompletions?.length || !section.sectionCompletions[0]?.isCompleted
+      // Check for any unread unified sections (also skip if parent chapter or book is read)
+      const unreadUnifiedSections = (event.bookSections || []).filter(section =>
+        (!section.sectionCompletions?.length || !section.sectionCompletions[0]?.isCompleted) &&
+        !section.chapter?.chapterCompletions?.[0]?.isCompleted &&
+        !section.chapter?.book?.bookCompletions?.[0]?.isCompleted
       );
       
-      // Calculate totals
-      const totalUnconsumed = unwatchedVideos.length + unreadUnifiedBooks.length + unreadUnifiedChapters.length + unreadUnifiedSections.length;
+      // Check for any unread legacy books
+      const unreadLegacyBooks = (event.books || []).filter(book =>
+        !book.user_book_reads?.read
+      );
+      
+      // Check for any unread legacy chapters
+      const unreadLegacyChapters = (event.chapters || []).filter(chapter =>
+        !chapter.user_chapter_reads?.read
+      );
+      
+      // Check for any unread legacy sections
+      const unreadLegacySections = (event.sections || []).filter(section =>
+        !section.user_section_reads?.read
+      );
+      
+      // Calculate totals across both systems
+      const totalUnconsumed = unwatchedVideos.length + 
+        unreadUnifiedBooks.length + unreadUnifiedChapters.length + unreadUnifiedSections.length +
+        unreadLegacyBooks.length + unreadLegacyChapters.length + unreadLegacySections.length;
       
       console.log(`📊 Event "${event.title}" status:`, {
         unwatchedVideos: unwatchedVideos.length,
-        unreadBooks: unreadUnifiedBooks.length,
-        unreadChapters: unreadUnifiedChapters.length,
-        unreadSections: unreadUnifiedSections.length,
+        unreadUnifiedBooks: unreadUnifiedBooks.length,
+        unreadUnifiedChapters: unreadUnifiedChapters.length,
+        unreadUnifiedSections: unreadUnifiedSections.length,
+        unreadLegacyBooks: unreadLegacyBooks.length,
+        unreadLegacyChapters: unreadLegacyChapters.length,
+        unreadLegacySections: unreadLegacySections.length,
         totalUnconsumed
       });
       
@@ -1399,7 +1447,7 @@ class HistoryPlusService {
       const events = await this.prisma.historicalEvent.findMany({
         where: { hidden: false },
         include: {
-          // Unified book system relationships only
+          // Unified book system relationships
           bookLinks: {
             include: {
               book: {
@@ -1433,6 +1481,16 @@ class HistoryPlusService {
                 }
               }
             }
+          },
+          // Legacy book system relationships
+          books: {
+            include: { user_book_reads: true }
+          },
+          chapters: {
+            include: { user_chapter_reads: true }
+          },
+          sections: {
+            include: { user_section_reads: true }
           },
           videos: {
             include: {
@@ -1493,7 +1551,7 @@ class HistoryPlusService {
   async checkEventHasUnwatchedContent(event) {
     try {
       // Check for any unwatched videos
-      const unwatchedVideos = event.videos.filter(video => {
+      const unwatchedVideos = (event.videos || []).filter(video => {
         // user_video_watches is a single optional object, not an array
         const watchRecord = video.user_video_watches;
         return !watchRecord || !watchRecord.watched;
@@ -1517,15 +1575,34 @@ class HistoryPlusService {
         !section.chapter?.book?.bookCompletions?.[0]?.isCompleted
       );
       
-      // Calculate total unwatched content
-      const totalUnwatched = unwatchedVideos.length + unreadUnifiedBooks.length + 
-                           unreadUnifiedChapters.length + unreadUnifiedSections.length;
+      // Check for any unread legacy books
+      const unreadLegacyBooks = (event.books || []).filter(book =>
+        !book.user_book_reads?.read
+      );
       
-      console.log(`📊 Event "${event.title}" unwatched content:`, {
+      // Check for any unread legacy chapters
+      const unreadLegacyChapters = (event.chapters || []).filter(chapter =>
+        !chapter.user_chapter_reads?.read
+      );
+      
+      // Check for any unread legacy sections
+      const unreadLegacySections = (event.sections || []).filter(section =>
+        !section.user_section_reads?.read
+      );
+      
+      // Calculate total unwatched/unread content across both systems
+      const totalUnwatched = unwatchedVideos.length + 
+                           unreadUnifiedBooks.length + unreadUnifiedChapters.length + unreadUnifiedSections.length +
+                           unreadLegacyBooks.length + unreadLegacyChapters.length + unreadLegacySections.length;
+      
+      console.log(`📊 Event "${event.title}" unwatched/unread content:`, {
         videos: unwatchedVideos.length,
-        books: unreadUnifiedBooks.length,
-        chapters: unreadUnifiedChapters.length,
-        sections: unreadUnifiedSections.length,
+        unifiedBooks: unreadUnifiedBooks.length,
+        unifiedChapters: unreadUnifiedChapters.length,
+        unifiedSections: unreadUnifiedSections.length,
+        legacyBooks: unreadLegacyBooks.length,
+        legacyChapters: unreadLegacyChapters.length,
+        legacySections: unreadLegacySections.length,
         total: totalUnwatched
       });
       

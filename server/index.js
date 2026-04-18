@@ -250,6 +250,10 @@ app.use('/api/tasks', tasksRoutes);
 // Locations API routes
 app.use('/api/locations', locationsRoutes);
 
+// Chat (Ollama AI) API routes
+const chatRoutes = require('./routes/chat');
+app.use('/api/chat', chatRoutes);
+
 // Settings API routes
 app.use('/api/settings', settingsRoutes);
 

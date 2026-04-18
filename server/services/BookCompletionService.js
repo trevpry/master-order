@@ -193,17 +193,6 @@ class BookCompletionService {
         }
       });
 
-      // Auto-mark all sections in this chapter as completed (only if not already in section update)
-      if (!skipSectionUpdate) {
-        const sections = await this.prisma.bookSection.findMany({
-          where: { chapterId }
-        });
-
-        for (const section of sections) {
-          await this.markSectionCompleted(section.id, userId, true); // Pass skipChapterUpdate = true
-        }
-      }
-
       // Update book progress
       await this.updateBookProgressFromChapters(chapterId, userId);
 

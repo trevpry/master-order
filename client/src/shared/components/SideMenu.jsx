@@ -134,6 +134,12 @@ const SideMenu = ({ isMobile, closeMobileMenu }) => {
       isSubmenu: true
     },
     {
+      path: '/chat',
+      icon: '💬',
+      label: 'AI Chat',
+      description: 'Chat with local AI'
+    },
+    {
       path: '/eddie-settings',
       icon: '⚙️',
       label: 'Settings',
