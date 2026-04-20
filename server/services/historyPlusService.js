@@ -1037,6 +1037,14 @@ class HistoryPlusService {
                 include: { 
                   bookCompletions: {
                     where: { userId: "default" }
+                  },
+                  chapters: {
+                    include: {
+                      chapterCompletions: { where: { userId: "default" } },
+                      sections: {
+                        include: { sectionCompletions: { where: { userId: "default" } } }
+                      }
+                    }
                   }
                 }
               }
@@ -1046,6 +1054,9 @@ class HistoryPlusService {
             include: { 
               chapterCompletions: {
                 where: { userId: "default" }
+              },
+              sections: {
+                include: { sectionCompletions: { where: { userId: "default" } } }
               },
               book: {
                 include: {
@@ -1079,10 +1090,25 @@ class HistoryPlusService {
           },
           // Legacy book system relationships
           books: {
-            include: { user_book_reads: true }
+            include: {
+              user_book_reads: true,
+              chapters: {
+                include: {
+                  user_chapter_reads: true,
+                  sections: {
+                    include: { user_section_reads: true }
+                  }
+                }
+              }
+            }
           },
           chapters: {
-            include: { user_chapter_reads: true }
+            include: {
+              user_chapter_reads: true,
+              sections: {
+                include: { user_section_reads: true }
+              }
+            }
           },
           sections: {
             include: { user_section_reads: true }
@@ -1102,52 +1128,117 @@ class HistoryPlusService {
         return !watchRecord || !watchRecord.watched;
       });
       
+      // --- UNIFIED BOOK SYSTEM ---
+      
       // Check for any unread unified books (via bookLinks)
       const unreadUnifiedBooks = (event.bookLinks || []).filter(bookLink =>
         !bookLink.book.bookCompletions?.length || !bookLink.book.bookCompletions[0]?.isCompleted
       );
       
-      // Check for any unread unified chapters (also skip if parent book is read)
+      // Check for any unread unified chapters (directly linked, skip if parent book is read)
       const unreadUnifiedChapters = (event.bookChapters || []).filter(chapter =>
         (!chapter.chapterCompletions?.length || !chapter.chapterCompletions[0]?.isCompleted) &&
         !chapter.book?.bookCompletions?.[0]?.isCompleted
       );
       
-      // Check for any unread unified sections (also skip if parent chapter or book is read)
+      // Check for any unread unified sections (directly linked)
       const unreadUnifiedSections = (event.bookSections || []).filter(section =>
         (!section.sectionCompletions?.length || !section.sectionCompletions[0]?.isCompleted) &&
         !section.chapter?.chapterCompletions?.[0]?.isCompleted &&
         !section.chapter?.book?.bookCompletions?.[0]?.isCompleted
       );
       
+      // Check sections nested under event-linked chapters
+      let unreadNestedUnifiedSections = 0;
+      for (const chapter of (event.bookChapters || [])) {
+        if (chapter.book?.bookCompletions?.[0]?.isCompleted) continue;
+        if (chapter.chapterCompletions?.[0]?.isCompleted) continue;
+        for (const section of (chapter.sections || [])) {
+          if (!section.sectionCompletions?.length || !section.sectionCompletions[0]?.isCompleted) {
+            unreadNestedUnifiedSections++;
+          }
+        }
+      }
+      
+      // Check chapters/sections nested under event-linked books
+      let unreadNestedUnifiedBookContent = 0;
+      for (const bookLink of (event.bookLinks || [])) {
+        if (bookLink.book.bookCompletions?.[0]?.isCompleted) continue;
+        for (const chapter of (bookLink.book.chapters || [])) {
+          if (!chapter.chapterCompletions?.length || !chapter.chapterCompletions[0]?.isCompleted) {
+            unreadNestedUnifiedBookContent++;
+          }
+          for (const section of (chapter.sections || [])) {
+            if ((!section.sectionCompletions?.length || !section.sectionCompletions[0]?.isCompleted) &&
+                (!chapter.chapterCompletions?.length || !chapter.chapterCompletions[0]?.isCompleted)) {
+              unreadNestedUnifiedBookContent++;
+            }
+          }
+        }
+      }
+      
+      // --- LEGACY BOOK SYSTEM ---
+      
       // Check for any unread legacy books
       const unreadLegacyBooks = (event.books || []).filter(book =>
         !book.user_book_reads?.read
       );
       
-      // Check for any unread legacy chapters
+      // Check for any unread legacy chapters (directly linked)
       const unreadLegacyChapters = (event.chapters || []).filter(chapter =>
         !chapter.user_chapter_reads?.read
       );
       
-      // Check for any unread legacy sections
+      // Check for any unread legacy sections (directly linked)
       const unreadLegacySections = (event.sections || []).filter(section =>
         !section.user_section_reads?.read
       );
       
+      // Check sections nested under event-linked legacy chapters
+      let unreadNestedLegacySections = 0;
+      for (const chapter of (event.chapters || [])) {
+        for (const section of (chapter.sections || [])) {
+          if (!section.user_section_reads?.read) {
+            unreadNestedLegacySections++;
+          }
+        }
+      }
+      
+      // Check chapters/sections nested under event-linked legacy books
+      let unreadNestedLegacyBookContent = 0;
+      for (const book of (event.books || [])) {
+        if (book.user_book_reads?.read) continue;
+        for (const chapter of (book.chapters || [])) {
+          if (!chapter.user_chapter_reads?.read) {
+            unreadNestedLegacyBookContent++;
+          }
+          for (const section of (chapter.sections || [])) {
+            if (!section.user_section_reads?.read) {
+              unreadNestedLegacyBookContent++;
+            }
+          }
+        }
+      }
+      
       // Calculate totals across both systems
       const totalUnconsumed = unwatchedVideos.length + 
         unreadUnifiedBooks.length + unreadUnifiedChapters.length + unreadUnifiedSections.length +
-        unreadLegacyBooks.length + unreadLegacyChapters.length + unreadLegacySections.length;
+        unreadNestedUnifiedSections + unreadNestedUnifiedBookContent +
+        unreadLegacyBooks.length + unreadLegacyChapters.length + unreadLegacySections.length +
+        unreadNestedLegacySections + unreadNestedLegacyBookContent;
       
       console.log(`📊 Event "${event.title}" status:`, {
         unwatchedVideos: unwatchedVideos.length,
         unreadUnifiedBooks: unreadUnifiedBooks.length,
         unreadUnifiedChapters: unreadUnifiedChapters.length,
         unreadUnifiedSections: unreadUnifiedSections.length,
+        nestedUnifiedSections: unreadNestedUnifiedSections,
+        nestedUnifiedBookContent: unreadNestedUnifiedBookContent,
         unreadLegacyBooks: unreadLegacyBooks.length,
         unreadLegacyChapters: unreadLegacyChapters.length,
         unreadLegacySections: unreadLegacySections.length,
+        nestedLegacySections: unreadNestedLegacySections,
+        nestedLegacyBookContent: unreadNestedLegacyBookContent,
         totalUnconsumed
       });
       
@@ -1452,7 +1543,15 @@ class HistoryPlusService {
             include: {
               book: {
                 include: {
-                  bookCompletions: true
+                  bookCompletions: true,
+                  chapters: {
+                    include: {
+                      chapterCompletions: true,
+                      sections: {
+                        include: { sectionCompletions: true }
+                      }
+                    }
+                  }
                 }
               }
             }
@@ -1460,9 +1559,12 @@ class HistoryPlusService {
           bookChapters: {
             include: {
               chapterCompletions: true,
+              sections: {
+                include: { sectionCompletions: true }
+              },
               book: {
                 include: {
-                  bookCompletions: true  // Check if parent book is already read
+                  bookCompletions: true
                 }
               }
             }
@@ -1472,10 +1574,10 @@ class HistoryPlusService {
               sectionCompletions: true,
               chapter: {
                 include: {
-                  chapterCompletions: true,  // Check if parent chapter is already read
+                  chapterCompletions: true,
                   book: {
                     include: {
-                      bookCompletions: true  // Check if parent book is already read
+                      bookCompletions: true
                     }
                   }
                 }
@@ -1484,10 +1586,25 @@ class HistoryPlusService {
           },
           // Legacy book system relationships
           books: {
-            include: { user_book_reads: true }
+            include: {
+              user_book_reads: true,
+              chapters: {
+                include: {
+                  user_chapter_reads: true,
+                  sections: {
+                    include: { user_section_reads: true }
+                  }
+                }
+              }
+            }
           },
           chapters: {
-            include: { user_chapter_reads: true }
+            include: {
+              user_chapter_reads: true,
+              sections: {
+                include: { user_section_reads: true }
+              }
+            }
           },
           sections: {
             include: { user_section_reads: true }
@@ -1547,62 +1664,126 @@ class HistoryPlusService {
   /**
    * Check if an event has any unwatched/unread content
    * Returns true if there is content to consume, false if all content is consumed
+   * Checks content linked directly to the event AND content nested under event-linked parents
    */
   async checkEventHasUnwatchedContent(event) {
     try {
       // Check for any unwatched videos
       const unwatchedVideos = (event.videos || []).filter(video => {
-        // user_video_watches is a single optional object, not an array
         const watchRecord = video.user_video_watches;
         return !watchRecord || !watchRecord.watched;
       });
+      
+      // --- UNIFIED BOOK SYSTEM ---
       
       // Check for any unread unified books (via bookLinks)
       const unreadUnifiedBooks = (event.bookLinks || []).filter(bookLink =>
         !bookLink.book.bookCompletions?.[0]?.isCompleted
       );
       
-      // Check for any unread unified chapters (also skip if parent book is read)
+      // Check for any unread unified chapters (directly linked to event)
       const unreadUnifiedChapters = (event.bookChapters || []).filter(chapter =>
         !chapter.chapterCompletions?.[0]?.isCompleted &&
         !chapter.book?.bookCompletions?.[0]?.isCompleted
       );
       
-      // Check for any unread unified sections (also skip if parent chapter or book is read)
+      // Check for any unread unified sections (directly linked to event)
       const unreadUnifiedSections = (event.bookSections || []).filter(section =>
         !section.sectionCompletions?.[0]?.isCompleted &&
         !section.chapter?.chapterCompletions?.[0]?.isCompleted &&
         !section.chapter?.book?.bookCompletions?.[0]?.isCompleted
       );
       
+      // Check sections nested under event-linked chapters (sections without their own eventId)
+      let unreadNestedUnifiedSections = 0;
+      for (const chapter of (event.bookChapters || [])) {
+        if (chapter.book?.bookCompletions?.[0]?.isCompleted) continue;
+        if (chapter.chapterCompletions?.[0]?.isCompleted) continue;
+        for (const section of (chapter.sections || [])) {
+          if (!section.sectionCompletions?.[0]?.isCompleted) {
+            unreadNestedUnifiedSections++;
+          }
+        }
+      }
+      
+      // Check chapters/sections nested under event-linked books (via bookLinks)
+      let unreadNestedUnifiedBookContent = 0;
+      for (const bookLink of (event.bookLinks || [])) {
+        if (bookLink.book.bookCompletions?.[0]?.isCompleted) continue;
+        for (const chapter of (bookLink.book.chapters || [])) {
+          if (!chapter.chapterCompletions?.[0]?.isCompleted) {
+            unreadNestedUnifiedBookContent++;
+          }
+          for (const section of (chapter.sections || [])) {
+            if (!section.sectionCompletions?.[0]?.isCompleted && !chapter.chapterCompletions?.[0]?.isCompleted) {
+              unreadNestedUnifiedBookContent++;
+            }
+          }
+        }
+      }
+      
+      // --- LEGACY BOOK SYSTEM ---
+      
       // Check for any unread legacy books
       const unreadLegacyBooks = (event.books || []).filter(book =>
         !book.user_book_reads?.read
       );
       
-      // Check for any unread legacy chapters
+      // Check for any unread legacy chapters (directly linked to event)
       const unreadLegacyChapters = (event.chapters || []).filter(chapter =>
         !chapter.user_chapter_reads?.read
       );
       
-      // Check for any unread legacy sections
+      // Check for any unread legacy sections (directly linked to event)
       const unreadLegacySections = (event.sections || []).filter(section =>
         !section.user_section_reads?.read
       );
       
+      // Check sections nested under event-linked legacy chapters
+      let unreadNestedLegacySections = 0;
+      for (const chapter of (event.chapters || [])) {
+        for (const section of (chapter.sections || [])) {
+          if (!section.user_section_reads?.read) {
+            unreadNestedLegacySections++;
+          }
+        }
+      }
+      
+      // Check chapters/sections nested under event-linked legacy books
+      let unreadNestedLegacyBookContent = 0;
+      for (const book of (event.books || [])) {
+        if (book.user_book_reads?.read) continue;
+        for (const chapter of (book.chapters || [])) {
+          if (!chapter.user_chapter_reads?.read) {
+            unreadNestedLegacyBookContent++;
+          }
+          for (const section of (chapter.sections || [])) {
+            if (!section.user_section_reads?.read) {
+              unreadNestedLegacyBookContent++;
+            }
+          }
+        }
+      }
+      
       // Calculate total unwatched/unread content across both systems
       const totalUnwatched = unwatchedVideos.length + 
                            unreadUnifiedBooks.length + unreadUnifiedChapters.length + unreadUnifiedSections.length +
-                           unreadLegacyBooks.length + unreadLegacyChapters.length + unreadLegacySections.length;
+                           unreadNestedUnifiedSections + unreadNestedUnifiedBookContent +
+                           unreadLegacyBooks.length + unreadLegacyChapters.length + unreadLegacySections.length +
+                           unreadNestedLegacySections + unreadNestedLegacyBookContent;
       
       console.log(`📊 Event "${event.title}" unwatched/unread content:`, {
         videos: unwatchedVideos.length,
         unifiedBooks: unreadUnifiedBooks.length,
         unifiedChapters: unreadUnifiedChapters.length,
         unifiedSections: unreadUnifiedSections.length,
+        nestedUnifiedSections: unreadNestedUnifiedSections,
+        nestedUnifiedBookContent: unreadNestedUnifiedBookContent,
         legacyBooks: unreadLegacyBooks.length,
         legacyChapters: unreadLegacyChapters.length,
         legacySections: unreadLegacySections.length,
+        nestedLegacySections: unreadNestedLegacySections,
+        nestedLegacyBookContent: unreadNestedLegacyBookContent,
         total: totalUnwatched
       });
       
@@ -1736,7 +1917,6 @@ class HistoryPlusService {
 
       // Collect only UNREVIEWED content
       event.videos?.forEach(video => {
-        // user_video_watches is a single optional object, not an array
         const isWatched = video.user_video_watches?.watched;
         if (!isWatched) {
           availableContent.push({
@@ -1751,7 +1931,15 @@ class HistoryPlusService {
         }
       });
 
-      // Unified book system - check bookLinks
+      // ==========================================
+      // UNIFIED BOOK SYSTEM
+      // ==========================================
+      
+      // Track IDs already added to avoid duplicates from nested traversal
+      const addedChapterIds = new Set();
+      const addedSectionIds = new Set();
+
+      // Books (via bookLinks)
       event.bookLinks?.forEach(bookLink => {
         const book = bookLink.book;
         const isRead = book.bookCompletions?.[0]?.isCompleted;
@@ -1761,7 +1949,6 @@ class HistoryPlusService {
             content: book,
             title: book.title,
             description: book.description || '',
-            // Book-specific fields to match custom order format
             bookTitle: book.title,
             bookAuthor: book.author || 'Unknown Author',
             bookYear: book.publishYear,
@@ -1771,15 +1958,72 @@ class HistoryPlusService {
             bookCoverUrl: book.coverUrl,
             bookDescription: book.description
           });
+          
+          // Also add unread chapters/sections nested under this book
+          for (const chapter of (book.chapters || [])) {
+            if (!chapter.chapterCompletions?.[0]?.isCompleted && !addedChapterIds.has(chapter.id)) {
+              addedChapterIds.add(chapter.id);
+              availableContent.push({
+                type: 'chapter',
+                content: chapter,
+                title: `${book.title} - Chapter ${chapter.chapterNumber || ''}: ${chapter.title}`,
+                description: chapter.description || '',
+                chapterNumber: chapter.chapterNumber || 0,
+                chapterTitle: chapter.title,
+                chapterDescription: chapter.description,
+                pageStart: chapter.pageStart,
+                pageEnd: chapter.pageEnd,
+                bookTitle: book.title,
+                bookAuthor: book.author || 'Unknown Author',
+                bookYear: book.publishYear,
+                bookIsbn: book.isbn,
+                bookPublisher: book.publisher,
+                bookPageCount: book.pageCount,
+                bookCoverUrl: book.coverUrl,
+                bookDescription: book.description
+              });
+            }
+            for (const section of (chapter.sections || [])) {
+              if (!section.sectionCompletions?.[0]?.isCompleted && 
+                  !chapter.chapterCompletions?.[0]?.isCompleted &&
+                  !addedSectionIds.has(section.id)) {
+                addedSectionIds.add(section.id);
+                availableContent.push({
+                  type: 'section',
+                  content: section,
+                  title: `${book.title} - Chapter ${chapter.chapterNumber || ''}: ${chapter.title} - Section ${section.sectionNumber || ''}: ${section.title}`,
+                  description: section.description || '',
+                  sectionNumber: section.sectionNumber || 0,
+                  sectionTitle: section.title,
+                  sectionDescription: section.description,
+                  sectionPageStart: section.pageStart,
+                  sectionPageEnd: section.pageEnd,
+                  chapterNumber: chapter.chapterNumber || 0,
+                  chapterTitle: chapter.title,
+                  chapterDescription: chapter.description,
+                  pageStart: chapter.pageStart,
+                  pageEnd: chapter.pageEnd,
+                  bookTitle: book.title,
+                  bookAuthor: book.author || 'Unknown Author',
+                  bookYear: book.publishYear,
+                  bookIsbn: book.isbn,
+                  bookPublisher: book.publisher,
+                  bookPageCount: book.pageCount,
+                  bookCoverUrl: book.coverUrl,
+                  bookDescription: book.description
+                });
+              }
+            }
+          }
         }
       });
 
-      // Unified book system - check bookChapters directly linked to events
+      // Chapters directly linked to events
       event.bookChapters?.forEach(chapter => {
         const isRead = chapter.chapterCompletions?.[0]?.isCompleted;
         const parentBookRead = chapter.book?.bookCompletions?.[0]?.isCompleted;
-        if (!isRead && !parentBookRead) {
-          // Get parent book information if available
+        if (!isRead && !parentBookRead && !addedChapterIds.has(chapter.id)) {
+          addedChapterIds.add(chapter.id);
           const parentBook = chapter.book;
           
           availableContent.push({
@@ -1787,13 +2031,79 @@ class HistoryPlusService {
             content: chapter,
             title: `${parentBook?.title || 'Unknown Book'} - Chapter ${chapter.chapterNumber || ''}: ${chapter.title}`,
             description: chapter.description || '',
-            // Chapter-specific details
             chapterNumber: chapter.chapterNumber || 0,
             chapterTitle: chapter.title,
             chapterDescription: chapter.description,
             pageStart: chapter.pageStart,
             pageEnd: chapter.pageEnd,
-            // Parent book information for cover art and author
+            bookTitle: parentBook?.title || 'Unknown Book',
+            bookAuthor: parentBook?.author || 'Unknown Author',
+            bookYear: parentBook?.publishYear,
+            bookIsbn: parentBook?.isbn,
+            bookPublisher: parentBook?.publisher,
+            bookPageCount: parentBook?.pageCount,
+            bookCoverUrl: parentBook?.coverUrl,
+            bookDescription: parentBook?.description
+          });
+          
+          // Also add unread sections nested under this chapter
+          for (const section of (chapter.sections || [])) {
+            if (!section.sectionCompletions?.[0]?.isCompleted && !addedSectionIds.has(section.id)) {
+              addedSectionIds.add(section.id);
+              availableContent.push({
+                type: 'section',
+                content: section,
+                title: `${parentBook?.title || 'Unknown Book'} - Chapter ${chapter.chapterNumber || ''}: ${chapter.title} - Section ${section.sectionNumber || ''}: ${section.title}`,
+                description: section.description || '',
+                sectionNumber: section.sectionNumber || 0,
+                sectionTitle: section.title,
+                sectionDescription: section.description,
+                sectionPageStart: section.pageStart,
+                sectionPageEnd: section.pageEnd,
+                chapterNumber: chapter.chapterNumber || 0,
+                chapterTitle: chapter.title,
+                chapterDescription: chapter.description,
+                pageStart: chapter.pageStart,
+                pageEnd: chapter.pageEnd,
+                bookTitle: parentBook?.title || 'Unknown Book',
+                bookAuthor: parentBook?.author || 'Unknown Author',
+                bookYear: parentBook?.publishYear,
+                bookIsbn: parentBook?.isbn,
+                bookPublisher: parentBook?.publisher,
+                bookPageCount: parentBook?.pageCount,
+                bookCoverUrl: parentBook?.coverUrl,
+                bookDescription: parentBook?.description
+              });
+            }
+          }
+        }
+      });
+
+      // Sections directly linked to events
+      event.bookSections?.forEach(section => {
+        const isRead = section.sectionCompletions?.[0]?.isCompleted;
+        const parentChapterRead = section.chapter?.chapterCompletions?.[0]?.isCompleted;
+        const parentBookRead = section.chapter?.book?.bookCompletions?.[0]?.isCompleted;
+        if (!isRead && !parentChapterRead && !parentBookRead && !addedSectionIds.has(section.id)) {
+          addedSectionIds.add(section.id);
+          const parentChapter = section.chapter;
+          const parentBook = parentChapter?.book;
+          
+          availableContent.push({
+            type: 'section',
+            content: section,
+            title: `${parentBook?.title || 'Unknown Book'} - Chapter ${parentChapter?.chapterNumber || ''}: ${parentChapter?.title || 'Unknown Chapter'} - Section ${section.sectionNumber || ''}: ${section.title}`,
+            description: section.description || '',
+            sectionNumber: section.sectionNumber || 0,
+            sectionTitle: section.title,
+            sectionDescription: section.description,
+            sectionPageStart: section.pageStart,
+            sectionPageEnd: section.pageEnd,
+            chapterNumber: parentChapter?.chapterNumber || 0,
+            chapterTitle: parentChapter?.title || 'Unknown Chapter',
+            chapterDescription: parentChapter?.description,
+            pageStart: parentChapter?.pageStart,
+            pageEnd: parentChapter?.pageEnd,
             bookTitle: parentBook?.title || 'Unknown Book',
             bookAuthor: parentBook?.author || 'Unknown Author',
             bookYear: parentBook?.publishYear,
@@ -1806,42 +2116,147 @@ class HistoryPlusService {
         }
       });
 
-      // Unified book system - check bookSections directly linked to events
-      event.bookSections?.forEach(section => {
-        const isRead = section.sectionCompletions?.[0]?.isCompleted;
-        const parentChapterRead = section.chapter?.chapterCompletions?.[0]?.isCompleted;
-        const parentBookRead = section.chapter?.book?.bookCompletions?.[0]?.isCompleted;
-        if (!isRead && !parentChapterRead && !parentBookRead) {
-          // Get parent chapter and book information if available
-          const parentChapter = section.chapter;
-          const parentBook = parentChapter?.book;
+      // ==========================================
+      // LEGACY BOOK SYSTEM
+      // ==========================================
+      
+      const addedLegacyChapterIds = new Set();
+      const addedLegacySectionIds = new Set();
+
+      // Legacy books (directly linked to event)
+      event.books?.forEach(book => {
+        if (!book.user_book_reads?.read) {
+          availableContent.push({
+            type: 'book',
+            content: book,
+            title: book.title,
+            description: book.description || '',
+            bookTitle: book.title,
+            bookAuthor: book.author || 'Unknown Author',
+            bookYear: book.publishYear,
+            bookIsbn: book.isbn,
+            bookPublisher: book.publisher,
+            bookPageCount: book.pageCount,
+            bookCoverUrl: book.coverUrl,
+            bookDescription: book.description
+          });
           
+          // Also add unread chapters/sections nested under this book
+          for (const chapter of (book.chapters || [])) {
+            if (!chapter.user_chapter_reads?.read && !addedLegacyChapterIds.has(chapter.id)) {
+              addedLegacyChapterIds.add(chapter.id);
+              availableContent.push({
+                type: 'chapter',
+                content: chapter,
+                title: `${book.title} - Chapter ${chapter.chapterNumber || ''}: ${chapter.title}`,
+                description: chapter.description || '',
+                chapterNumber: chapter.chapterNumber || 0,
+                chapterTitle: chapter.title,
+                chapterDescription: chapter.description,
+                pageStart: chapter.pageStart,
+                pageEnd: chapter.pageEnd,
+                bookTitle: book.title,
+                bookAuthor: book.author || 'Unknown Author',
+                bookYear: book.publishYear,
+                bookIsbn: book.isbn,
+                bookPublisher: book.publisher,
+                bookPageCount: book.pageCount,
+                bookCoverUrl: book.coverUrl,
+                bookDescription: book.description
+              });
+            }
+            for (const section of (chapter.sections || [])) {
+              if (!section.user_section_reads?.read && !addedLegacySectionIds.has(section.id)) {
+                addedLegacySectionIds.add(section.id);
+                availableContent.push({
+                  type: 'section',
+                  content: section,
+                  title: `${book.title} - Chapter ${chapter.chapterNumber || ''}: ${chapter.title} - Section ${section.sectionNumber || ''}: ${section.title}`,
+                  description: section.description || '',
+                  sectionNumber: section.sectionNumber || 0,
+                  sectionTitle: section.title,
+                  sectionDescription: section.description,
+                  sectionPageStart: section.pageStart,
+                  sectionPageEnd: section.pageEnd,
+                  chapterNumber: chapter.chapterNumber || 0,
+                  chapterTitle: chapter.title,
+                  chapterDescription: chapter.description,
+                  pageStart: chapter.pageStart,
+                  pageEnd: chapter.pageEnd,
+                  bookTitle: book.title,
+                  bookAuthor: book.author || 'Unknown Author',
+                  bookYear: book.publishYear,
+                  bookIsbn: book.isbn,
+                  bookPublisher: book.publisher,
+                  bookPageCount: book.pageCount,
+                  bookCoverUrl: book.coverUrl,
+                  bookDescription: book.description
+                });
+              }
+            }
+          }
+        }
+      });
+
+      // Legacy chapters (directly linked to event)
+      event.chapters?.forEach(chapter => {
+        if (!chapter.user_chapter_reads?.read && !addedLegacyChapterIds.has(chapter.id)) {
+          addedLegacyChapterIds.add(chapter.id);
+          availableContent.push({
+            type: 'chapter',
+            content: chapter,
+            title: `Chapter ${chapter.chapterNumber || ''}: ${chapter.title}`,
+            description: chapter.description || '',
+            chapterNumber: chapter.chapterNumber || 0,
+            chapterTitle: chapter.title,
+            chapterDescription: chapter.description,
+            pageStart: chapter.pageStart,
+            pageEnd: chapter.pageEnd,
+            bookTitle: 'Unknown Book',
+            bookAuthor: 'Unknown Author'
+          });
+          
+          // Also add unread sections nested under this chapter
+          for (const section of (chapter.sections || [])) {
+            if (!section.user_section_reads?.read && !addedLegacySectionIds.has(section.id)) {
+              addedLegacySectionIds.add(section.id);
+              availableContent.push({
+                type: 'section',
+                content: section,
+                title: `Chapter ${chapter.chapterNumber || ''}: ${chapter.title} - Section ${section.sectionNumber || ''}: ${section.title}`,
+                description: section.description || '',
+                sectionNumber: section.sectionNumber || 0,
+                sectionTitle: section.title,
+                sectionDescription: section.description,
+                sectionPageStart: section.pageStart,
+                sectionPageEnd: section.pageEnd,
+                chapterNumber: chapter.chapterNumber || 0,
+                chapterTitle: chapter.title,
+                chapterDescription: chapter.description,
+                pageStart: chapter.pageStart,
+                pageEnd: chapter.pageEnd,
+                bookTitle: 'Unknown Book',
+                bookAuthor: 'Unknown Author'
+              });
+            }
+          }
+        }
+      });
+
+      // Legacy sections (directly linked to event)
+      event.sections?.forEach(section => {
+        if (!section.user_section_reads?.read && !addedLegacySectionIds.has(section.id)) {
+          addedLegacySectionIds.add(section.id);
           availableContent.push({
             type: 'section',
             content: section,
-            title: `${parentBook?.title || 'Unknown Book'} - Chapter ${parentChapter?.chapterNumber || ''}: ${parentChapter?.title || 'Unknown Chapter'} - Section ${section.sectionNumber || ''}: ${section.title}`,
+            title: `Section ${section.sectionNumber || ''}: ${section.title}`,
             description: section.description || '',
-            // Section details
             sectionNumber: section.sectionNumber || 0,
             sectionTitle: section.title,
             sectionDescription: section.description,
             sectionPageStart: section.pageStart,
-            sectionPageEnd: section.pageEnd,
-            // Parent chapter information
-            chapterNumber: parentChapter?.chapterNumber || 0,
-            chapterTitle: parentChapter?.title || 'Unknown Chapter',
-            chapterDescription: parentChapter?.description,
-            pageStart: parentChapter?.pageStart,
-            pageEnd: parentChapter?.pageEnd,
-            // Parent book information for cover art and author
-            bookTitle: parentBook?.title || 'Unknown Book',
-            bookAuthor: parentBook?.author || 'Unknown Author',
-            bookYear: parentBook?.publishYear,
-            bookIsbn: parentBook?.isbn,
-            bookPublisher: parentBook?.publisher,
-            bookPageCount: parentBook?.pageCount,
-            bookCoverUrl: parentBook?.coverUrl,
-            bookDescription: parentBook?.description
+            sectionPageEnd: section.pageEnd
           });
         }
       });
@@ -1871,11 +2286,8 @@ class HistoryPlusService {
       selectedContent.eventDate = event.startDate;
       
       // Format the event title with date range for Android display
-      // Convert dates from ISO format to BCE/CE format
       const formatHistoricalDate = (dateStr) => {
         if (!dateStr) return '';
-        
-        // Handle negative years (BCE) and positive years (CE)
         const match = dateStr.match(/^(-?\d{1,4})/);
         if (match) {
           const year = parseInt(match[1]);
@@ -1885,17 +2297,15 @@ class HistoryPlusService {
             return `${year} CE`;
           }
         }
-        return dateStr; // Fallback to original string
+        return dateStr;
       };
       
       let formattedEventTitle = event.title;
       if (event.startDate && event.endDate && event.startDate !== event.endDate) {
-        // Both start and end dates exist and are different
         const startFormatted = formatHistoricalDate(event.startDate);
         const endFormatted = formatHistoricalDate(event.endDate);
         formattedEventTitle = `${event.title} (${startFormatted} - ${endFormatted})`;
       } else if (event.startDate) {
-        // Only start date exists or start and end are the same
         const startFormatted = formatHistoricalDate(event.startDate);
         formattedEventTitle = `${event.title} (${startFormatted})`;
       }

@@ -14,19 +14,24 @@ export default function TagDetail() {
   // Edit parent state
   const [isEditingParent, setIsEditingParent] = useState(false);
   const [allTags, setAllTags] = useState([]);
-  const [selectedParentId, setSelectedParentId] = useState('');
+  const [selectedParentIds, setSelectedParentIds] = useState([]);
   const [savingParent, setSavingParent] = useState(false);
   
   // Edit name state
   const [isEditingName, setIsEditingName] = useState(false);
   const [editedName, setEditedName] = useState('');
   const [savingName, setSavingName] = useState(false);
+  const [isEditingUrls, setIsEditingUrls] = useState(false);
+  const [editedUrlsText, setEditedUrlsText] = useState('');
+  const [savingUrls, setSavingUrls] = useState(false);
   
   // Merge state
   const [showMergeModal, setShowMergeModal] = useState(false);
   const [selectedTargetTagId, setSelectedTargetTagId] = useState('');
   const [merging, setMerging] = useState(false);
   const [mergeSearchQuery, setMergeSearchQuery] = useState('');
+  const [updatingWiki, setUpdatingWiki] = useState(false);
+  const [wikiPage, setWikiPage] = useState(null);
   
   // Scenes tab state
   const [scenes, setScenes] = useState([]);
@@ -49,6 +54,18 @@ export default function TagDetail() {
         console.log('Tag data received:', json.data);
         console.log('Aliases:', json.data.aliases);
         setData(json.data);
+
+        try {
+          const wikiRes = await fetch(`${config.apiBaseUrl}/api/stash-wiki/tags/${id}/page`);
+          const wikiJson = await wikiRes.json();
+          if (wikiJson.success) {
+            setWikiPage(wikiJson.data);
+          } else {
+            setWikiPage(null);
+          }
+        } catch {
+          setWikiPage(null);
+        }
       } catch (e) {
         setError(e.message);
       } finally {
@@ -116,14 +133,25 @@ export default function TagDetail() {
   const handleEditParent = () => {
     setIsEditingParent(true);
     loadAllTags();
-    // Set current parent as selected
-    const currentParentId = data.parents?.[0]?.id || data.parent?.id || '';
-    setSelectedParentId(currentParentId);
+    // Set current parents as selected
+    const currentParentIds = (data.parents && data.parents.length > 0)
+      ? data.parents.map(parent => parent.id)
+      : (data.parent ? [data.parent.id] : []);
+    setSelectedParentIds(currentParentIds);
   };
 
   const handleCancelEdit = () => {
     setIsEditingParent(false);
-    setSelectedParentId('');
+    setSelectedParentIds([]);
+  };
+
+  const handleToggleParent = (parentTagId) => {
+    setSelectedParentIds(prev => {
+      if (prev.includes(parentTagId)) {
+        return prev.filter(idValue => idValue !== parentTagId);
+      }
+      return [...prev, parentTagId];
+    });
   };
 
   const handleSaveParent = async () => {
@@ -135,7 +163,7 @@ export default function TagDetail() {
           'Content-Type': 'application/json'
         },
         body: JSON.stringify({
-          parentId: selectedParentId || null
+          parentIds: selectedParentIds
         })
       });
 
@@ -151,7 +179,7 @@ export default function TagDetail() {
         setIsEditingParent(false);
         
         // Show success message
-        alert(`Parent tag updated successfully`);
+        alert('Parent tags updated successfully');
       } else {
         throw new Error(result.error || 'Failed to update parent');
       }
@@ -282,6 +310,79 @@ export default function TagDetail() {
     }
   };
 
+  const handleEditUrls = () => {
+    const currentUrls = Array.isArray(data?.urls) ? data.urls : [];
+    setEditedUrlsText(currentUrls.join('\n'));
+    setIsEditingUrls(true);
+  };
+
+  const handleCancelEditUrls = () => {
+    setIsEditingUrls(false);
+    setEditedUrlsText('');
+  };
+
+  const handleSaveUrls = async () => {
+    const parsedUrls = [...new Set(
+      editedUrlsText
+        .split('\n')
+        .map(line => line.trim())
+        .filter(Boolean)
+    )];
+
+    setSavingUrls(true);
+    try {
+      const response = await fetch(`${config.apiBaseUrl}/api/stash/tags/${id}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          urls: parsedUrls
+        })
+      });
+
+      const result = await response.json();
+      if (!result.success) {
+        throw new Error(result.error || 'Failed to update tag URLs');
+      }
+
+      setData(prev => ({
+        ...prev,
+        urls: result.data.urls || []
+      }));
+      setIsEditingUrls(false);
+      alert('Tag URLs updated successfully');
+    } catch (err) {
+      console.error('Error updating tag URLs:', err);
+      alert(`Error updating tag URLs: ${err.message}`);
+    } finally {
+      setSavingUrls(false);
+    }
+  };
+
+  const handleUpdateTagWiki = async () => {
+    setUpdatingWiki(true);
+    try {
+      const response = await fetch(`${config.apiBaseUrl}/api/stash-wiki/tags/${id}/update`, {
+        method: 'POST'
+      });
+      const result = await response.json();
+
+      if (!result.success) {
+        throw new Error(result.error || 'Failed to update tag wiki page');
+      }
+
+      const actionText = result.data?.action === 'created' ? 'created' : 'updated';
+      const pageSlug = result.data?.page?.slug || 'unknown';
+      alert(`Tag wiki page ${actionText}: ${pageSlug}`);
+    } catch (err) {
+      console.error('Error updating tag wiki page:', err);
+      alert(`Error updating tag wiki page: ${err.message}`);
+    } finally {
+      setUpdatingWiki(false);
+    }
+  };
+
   const filteredMergeTags = allTags.filter(tag => 
     tag.name.toLowerCase().includes(mergeSearchQuery.toLowerCase())
   );
@@ -358,6 +459,9 @@ export default function TagDetail() {
                   <h1>🏷️ {data.name}</h1>
                   <Button onClick={handleEditName} variant="secondary" size="small">
                     ✏️ Edit Name
+                  </Button>
+                  <Button onClick={handleUpdateTagWiki} variant="primary" size="small" disabled={updatingWiki}>
+                    {updatingWiki ? '📚 Updating Wiki...' : '📚 Update Wiki'}
                   </Button>
                 </>
               )}
@@ -543,10 +647,10 @@ export default function TagDetail() {
             {/* Parent Tags Section with Edit */}
             <div className="section">
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
-                <h3>Parent Tag</h3>
+                <h3>Parent Tags</h3>
                 {!isEditingParent && (
                   <Button onClick={handleEditParent} variant="secondary" size="small">
-                    ✏️ Edit Parent
+                    ✏️ Edit Parents
                   </Button>
                 )}
               </div>
@@ -554,31 +658,45 @@ export default function TagDetail() {
               {isEditingParent ? (
                 <div className="edit-parent-section">
                   <div style={{ marginBottom: '1rem' }}>
-                    <label htmlFor="parent-select" style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 'bold' }}>
-                      Select Parent Tag:
+                    <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 'bold' }}>
+                      Select Parent Tags:
                     </label>
-                    <select
-                      id="parent-select"
-                      value={selectedParentId}
-                      onChange={(e) => setSelectedParentId(e.target.value)}
-                      style={{
-                        width: '100%',
-                        padding: '0.5rem',
-                        fontSize: '1rem',
-                        borderRadius: '4px',
-                        border: '1px solid var(--border-color)',
-                        backgroundColor: 'var(--bg-secondary)',
-                        color: 'var(--text-primary)'
-                      }}
-                      disabled={savingParent}
-                    >
-                      <option value="">-- No Parent (Root Tag) --</option>
-                      {allTags.map(tag => (
-                        <option key={tag.id} value={tag.id}>
-                          {tag.name}
-                        </option>
-                      ))}
-                    </select>
+                    <div style={{
+                      maxHeight: '280px',
+                      overflowY: 'auto',
+                      border: '1px solid var(--border-color)',
+                      borderRadius: '4px',
+                      padding: '0.5rem',
+                      backgroundColor: 'var(--bg-secondary)'
+                    }}>
+                      {allTags.length === 0 ? (
+                        <p className="muted" style={{ margin: 0 }}>No parent tag options available</p>
+                      ) : (
+                        allTags.map(tag => (
+                          <label
+                            key={tag.id}
+                            style={{
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: '0.5rem',
+                              padding: '0.25rem 0',
+                              cursor: savingParent ? 'default' : 'pointer'
+                            }}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={selectedParentIds.includes(tag.id)}
+                              onChange={() => handleToggleParent(tag.id)}
+                              disabled={savingParent}
+                            />
+                            <span>{tag.name}</span>
+                          </label>
+                        ))
+                      )}
+                    </div>
+                    <p className="muted" style={{ marginTop: '0.5rem', marginBottom: 0 }}>
+                      Leave all unchecked to make this a root tag.
+                    </p>
                   </div>
                   
                   <div style={{ display: 'flex', gap: '0.5rem' }}>
@@ -621,7 +739,7 @@ export default function TagDetail() {
                       )}
                     </div>
                   ) : (
-                    <p className="muted">No parent tag (this is a root tag)</p>
+                    <p className="muted">No parent tags (this is a root tag)</p>
                   )}
                 </>
               )}
@@ -682,8 +800,79 @@ export default function TagDetail() {
             )}
 
             <div className="section">
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+                <h3>Reference URLs</h3>
+                {!isEditingUrls && (
+                  <Button onClick={handleEditUrls} variant="secondary" size="small">
+                    🔗 Edit URLs
+                  </Button>
+                )}
+              </div>
+
+              {isEditingUrls ? (
+                <div>
+                  <p className="muted" style={{ marginBottom: '0.5rem' }}>
+                    One URL per line. These URLs are used by AI when generating and updating this tag's wiki page.
+                  </p>
+                  <textarea
+                    value={editedUrlsText}
+                    onChange={(e) => setEditedUrlsText(e.target.value)}
+                    rows={6}
+                    style={{
+                      width: '100%',
+                      padding: '0.75rem',
+                      borderRadius: '6px',
+                      border: '1px solid var(--border-color)',
+                      backgroundColor: 'var(--bg-secondary)',
+                      color: 'var(--text-primary)',
+                      fontFamily: 'monospace'
+                    }}
+                    disabled={savingUrls}
+                    placeholder="https://example.com/source-1\nhttps://example.com/source-2"
+                  />
+                  <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.75rem' }}>
+                    <Button onClick={handleSaveUrls} variant="primary" disabled={savingUrls}>
+                      {savingUrls ? '💾 Saving...' : '💾 Save URLs'}
+                    </Button>
+                    <Button onClick={handleCancelEditUrls} variant="secondary" disabled={savingUrls}>
+                      Cancel
+                    </Button>
+                  </div>
+                </div>
+              ) : (
+                Array.isArray(data.urls) && data.urls.length > 0 ? (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                    {data.urls.map((url, idx) => (
+                      <a
+                        key={`${url}-${idx}`}
+                        href={url}
+                        target="_blank"
+                        rel="noreferrer"
+                        style={{ wordBreak: 'break-all' }}
+                      >
+                        {url}
+                      </a>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="muted">No reference URLs added yet.</p>
+                )
+              )}
+            </div>
+
+            <div className="section">
               <h3>Details</h3>
               <div className="detail-grid">
+                <div className="detail-item">
+                  <strong>Wiki:</strong>{' '}
+                  {wikiPage?.slug ? (
+                    <Link to={`/media/stash?mainTab=wiki&wikiSlug=${encodeURIComponent(wikiPage.slug)}`} className="tag-link">
+                      Open wiki entry ({wikiPage.slug})
+                    </Link>
+                  ) : (
+                    <span className="muted">No wiki entry yet</span>
+                  )}
+                </div>
                 <div className="detail-item">
                   <strong>ID:</strong> {data.id}
                 </div>

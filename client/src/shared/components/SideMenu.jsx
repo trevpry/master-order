@@ -140,6 +140,12 @@ const SideMenu = ({ isMobile, closeMobileMenu }) => {
       description: 'Chat with local AI'
     },
     {
+      path: '/wiki',
+      icon: '📚',
+      label: 'Wiki',
+      description: 'Personal knowledge wiki'
+    },
+    {
       path: '/eddie-settings',
       icon: '⚙️',
       label: 'Settings',

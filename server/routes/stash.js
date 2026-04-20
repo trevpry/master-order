@@ -1982,7 +1982,7 @@ router.post('/tags/create', asyncHandler(async (req, res) => {
   console.log('🏷️ [Create Tag] Request received');
   console.log('   - Body:', JSON.stringify(req.body, null, 2));
   
-  const { name, aliases } = req.body;
+  const { name, aliases, urls } = req.body;
 
   // Validate required fields
   validateRequiredFieldsDirect(req.body, ['name']);
@@ -2031,7 +2031,10 @@ router.post('/tags/create', asyncHandler(async (req, res) => {
         include: { aliases: true }
       });
       return sendSuccess(res, {
-        tag: fullTag,
+        tag: {
+          ...fullTag,
+          urls: JSON.parse(fullTag.urls || '[]')
+        },
         message: `Tag "${name}" already exists.`,
         wasExisting: true
       });
@@ -2051,7 +2054,10 @@ router.post('/tags/create', asyncHandler(async (req, res) => {
     if (existingTagWithAlias) {
       console.log(`   - Tag name "${name}" already exists as alias for "${existingTagWithAlias.name}"`);
       return sendSuccess(res, {
-        tag: existingTagWithAlias,
+        tag: {
+          ...existingTagWithAlias,
+          urls: JSON.parse(existingTagWithAlias.urls || '[]')
+        },
         message: `Tag "${name}" already exists as an alias for "${existingTagWithAlias.name}". Using existing tag instead.`,
         wasExisting: true
       });
@@ -2098,6 +2104,13 @@ router.post('/tags/create', asyncHandler(async (req, res) => {
       lastSyncedAt: new Date()
     };
 
+    const cleanedUrls = Array.isArray(urls)
+      ? [...new Set(urls.map(u => String(u || '').trim()).filter(Boolean))]
+      : [];
+    if (cleanedUrls.length > 0) {
+      createData.urls = JSON.stringify(cleanedUrls);
+    }
+
     // Add aliases if they exist
     if (stashTag.aliases && stashTag.aliases.length > 0) {
       createData.aliases = {
@@ -2116,8 +2129,20 @@ router.post('/tags/create', asyncHandler(async (req, res) => {
 
     console.log('   - Created in local DB:', localTag.id, localTag.name);
 
+    // Fire-and-forget: create wiki page for the new tag
+    try {
+      const StashWikiService = require('../services/StashWikiService');
+      const stashWikiService = new StashWikiService();
+      stashWikiService.onTagCreated(localTag.id).catch(err => 
+        console.error('Stash wiki tag-created hook failed:', err.message)
+      );
+    } catch (err) { /* wiki service optional */ }
+
     sendSuccess(res, {
-      tag: localTag,
+      tag: {
+        ...localTag,
+        urls: JSON.parse(localTag.urls || '[]')
+      },
       message: `Tag "${name}" created successfully`
     });
 
@@ -11771,6 +11796,7 @@ router.get('/tags/:id', asyncHandler(async (req, res) => {
     id: tag.id,
     name: tag.name,
     description: tag.description,
+    urls: JSON.parse(tag.urls || '[]'),
     aliases: tag.aliases ? tag.aliases.map(a => a.alias) : [],
     image: tag.image,
     favorite: tag.favorite,
@@ -11798,11 +11824,13 @@ router.get('/tags/:id', asyncHandler(async (req, res) => {
 // PUT /api/stash/tags/:id/parent - Update tag's parent
 router.put('/tags/:id/parent', asyncHandler(async (req, res) => {
   const { id } = req.params;
-  const { parentId } = req.body;
+  const { parentId, parentIds, mode } = req.body;
   
-  console.log('🏷️  [Update Tag Parent] Request received');
+  console.log('🏷️  [Update Tag Parent(s)] Request received');
   console.log('   - Tag ID:', id);
-  console.log('   - New Parent ID:', parentId);
+  console.log('   - Parent ID:', parentId);
+  console.log('   - Parent IDs:', parentIds);
+  console.log('   - Mode:', mode || '(default)');
   
   // Validate tag exists
   const tag = await prisma.stashTag.findUnique({
@@ -11820,53 +11848,107 @@ router.put('/tags/:id/parent', asyncHandler(async (req, res) => {
     return sendNotFound(res, 'Tag not found');
   }
   
-  // If parentId is provided, validate it exists and isn't the same as the tag
-  if (parentId) {
-    if (parentId === id) {
-      return sendBadRequest(res, 'A tag cannot be its own parent');
-    }
-    
-    const parentTag = await prisma.stashTag.findUnique({
-      where: { id: parentId }
-    });
-    
-    if (!parentTag) {
-      return sendNotFound(res, 'Parent tag not found');
-    }
-    
-    // Check for circular relationship (would make parentId a child of id)
-    const wouldCreateCircular = await prisma.stashTagHierarchy.findFirst({
-      where: {
-        parentTagId: id,
-        childTagId: parentId
-      }
-    });
-    
-    if (wouldCreateCircular) {
-      return sendBadRequest(res, 'Cannot create circular parent-child relationship');
+  const currentParentIds = tag.parentTags.map(pt => pt.parentTagId);
+
+  let requestedParentIds = [];
+  if (Array.isArray(parentIds)) {
+    requestedParentIds = [...new Set(parentIds.map(String).filter(Boolean))];
+  } else if (parentId === null || parentId === '') {
+    requestedParentIds = [];
+  } else if (parentId) {
+    requestedParentIds = [String(parentId)];
+  }
+
+  let effectiveMode = mode;
+  if (!effectiveMode) {
+    // Backward compatibility:
+    // - parentIds array means replace all parents
+    // - parentId single value means add parent without removing existing
+    // - null/empty means clear all parents
+    if (Array.isArray(parentIds) || parentId === null || parentId === '') {
+      effectiveMode = 'set';
+    } else {
+      effectiveMode = 'add';
     }
   }
-  
-  // Remove existing parent relationships
-  await prisma.stashTagHierarchy.deleteMany({
-    where: { childTagId: id }
-  });
-  
-  console.log('   - Removed existing parent relationships');
-  
-  // Add new parent relationship if parentId provided
-  if (parentId) {
-    await prisma.stashTagHierarchy.create({
-      data: {
-        parentTagId: parentId,
-        childTagId: id
+
+  if (!['set', 'add', 'remove'].includes(effectiveMode)) {
+    return sendBadRequest(res, 'Invalid mode. Allowed values: set, add, remove');
+  }
+
+  const hasPath = async (startId, targetId) => {
+    if (startId === targetId) return true;
+
+    const visited = new Set([startId]);
+    let frontier = [startId];
+
+    while (frontier.length > 0) {
+      const edges = await prisma.stashTagHierarchy.findMany({
+        where: { parentTagId: { in: frontier } },
+        select: { childTagId: true }
+      });
+
+      const next = [];
+      for (const edge of edges) {
+        if (edge.childTagId === targetId) return true;
+        if (!visited.has(edge.childTagId)) {
+          visited.add(edge.childTagId);
+          next.push(edge.childTagId);
+        }
       }
-    });
-    
-    console.log(`   - Added new parent relationship: ${parentId}`);
+
+      frontier = next;
+    }
+
+    return false;
+  };
+
+  // Validate candidate parents for add/set modes
+  if (effectiveMode !== 'remove') {
+    for (const candidateParentId of requestedParentIds) {
+      if (candidateParentId === id) {
+        return sendBadRequest(res, 'A tag cannot be its own parent');
+      }
+
+      const parentTag = await prisma.stashTag.findUnique({ where: { id: candidateParentId } });
+      if (!parentTag) {
+        return sendNotFound(res, `Parent tag not found: ${candidateParentId}`);
+      }
+
+      const wouldCreateCircular = await hasPath(id, candidateParentId);
+      if (wouldCreateCircular) {
+        return sendBadRequest(res, `Cannot create circular parent-child relationship with parent ${candidateParentId}`);
+      }
+    }
+  }
+
+  let nextParentIds;
+  if (effectiveMode === 'set') {
+    nextParentIds = requestedParentIds;
+  } else if (effectiveMode === 'add') {
+    nextParentIds = [...new Set([...currentParentIds, ...requestedParentIds])];
   } else {
-    console.log('   - No parent set (root tag)');
+    // remove
+    const removeSet = new Set(requestedParentIds);
+    nextParentIds = currentParentIds.filter(parentTagId => !removeSet.has(parentTagId));
   }
+
+  await prisma.$transaction(async (tx) => {
+    await tx.stashTagHierarchy.deleteMany({
+      where: { childTagId: id }
+    });
+
+    if (nextParentIds.length > 0) {
+      await tx.stashTagHierarchy.createMany({
+        data: nextParentIds.map(parentTagId => ({
+          parentTagId,
+          childTagId: id
+        }))
+      });
+    }
+  });
+
+  console.log('   - Updated parent relationships:', nextParentIds);
   
   // Update in Stash via GraphQL
   if (!stashSyncService) {
@@ -11878,9 +11960,9 @@ router.put('/tags/:id/parent', asyncHandler(async (req, res) => {
       const isConfigured = await stashSyncService.isConfigured();
       
       if (isConfigured) {
-        console.log('📡 [STASH UPDATE] Updating tag parent in Stash...');
+        console.log('📡 [STASH UPDATE] Updating tag parents in Stash...');
         console.log('   - Tag ID:', id);
-        console.log('   - Parent ID:', parentId);
+        console.log('   - Parent IDs:', nextParentIds);
         
         const updateMutation = `
           mutation TagUpdate($input: TagUpdateInput!) {
@@ -11897,12 +11979,14 @@ router.put('/tags/:id/parent', asyncHandler(async (req, res) => {
         
         // Convert IDs to integers for Stash
         const tagIdInt = parseInt(id);
-        const parentIdInt = parentId ? parseInt(parentId) : null;
+        const parentIdsInt = nextParentIds
+          .map(parentTagId => parseInt(parentTagId, 10))
+          .filter(Number.isInteger);
         
         const variables = {
           input: {
             id: tagIdInt,
-            parent_ids: parentIdInt ? [parentIdInt] : []
+            parent_ids: parentIdsInt
           }
         };
         
@@ -11913,7 +11997,7 @@ router.put('/tags/:id/parent', asyncHandler(async (req, res) => {
         console.log('   - GraphQL result:', JSON.stringify(result, null, 2));
         
         if (result && result.tagUpdate) {
-          console.log('   - ✅ Tag parent updated in Stash successfully');
+          console.log('   - ✅ Tag parents updated in Stash successfully');
         } else {
           console.warn('   - ⚠️ Unexpected response from Stash:', result);
         }
@@ -11927,7 +12011,7 @@ router.put('/tags/:id/parent', asyncHandler(async (req, res) => {
     }
   }
   
-  // Fetch updated tag with new parent
+  // Fetch updated tag with new parents
   const updatedTag = await prisma.stashTag.findUnique({
     where: { id },
     include: {
@@ -11954,21 +12038,21 @@ router.put('/tags/:id/parent', asyncHandler(async (req, res) => {
   return sendSuccess(res, response);
 }));
 
-// PUT /api/stash/tags/:id - Update tag name
+// PUT /api/stash/tags/:id - Update tag metadata
 router.put('/tags/:id', asyncHandler(async (req, res) => {
   const { id } = req.params;
-  const { name } = req.body;
+  const { name, urls } = req.body;
   
   console.log('🏷️  [Update Tag Name] Request received');
   console.log('   - Tag ID:', id);
   console.log('   - New Name:', name);
   
   // Validate inputs
-  if (!name || !name.trim()) {
-    return sendBadRequest(res, 'Tag name is required');
+  if (name === undefined && urls === undefined) {
+    return sendBadRequest(res, 'At least one field is required: name or urls');
   }
-  
-  const trimmedName = name.trim();
+
+  const trimmedName = typeof name === 'string' ? name.trim() : null;
   
   // Validate tag exists
   const tag = await prisma.stashTag.findUnique({
@@ -11979,41 +12063,66 @@ router.put('/tags/:id', asyncHandler(async (req, res) => {
     return sendNotFound(res, 'Tag not found');
   }
   
-  // Check if new name is the same as current name
-  if (tag.name === trimmedName) {
-    console.log('   - Name unchanged, skipping update');
+  const updateData = {};
+  const nameChanged = trimmedName && trimmedName !== tag.name;
+
+  if (name !== undefined) {
+    if (!trimmedName) {
+      return sendBadRequest(res, 'Tag name cannot be empty');
+    }
+
+    if (nameChanged) {
+      // Check if another tag already has this name
+      const existingTag = await prisma.stashTag.findFirst({
+        where: {
+          name: trimmedName,
+          id: { not: id }
+        }
+      });
+
+      if (existingTag) {
+        return sendBadRequest(res, `A tag named "${trimmedName}" already exists`);
+      }
+      updateData.name = trimmedName;
+    }
+  }
+
+  if (urls !== undefined) {
+    if (!Array.isArray(urls)) {
+      return sendBadRequest(res, 'urls must be an array of strings');
+    }
+
+    const cleanedUrls = [...new Set(urls.map(u => String(u || '').trim()).filter(Boolean))];
+    updateData.urls = JSON.stringify(cleanedUrls);
+  }
+
+  if (Object.keys(updateData).length === 0) {
     return sendSuccess(res, {
       id: tag.id,
-      name: tag.name
+      name: tag.name,
+      urls: JSON.parse(tag.urls || '[]')
     });
   }
   
-  // Check if another tag already has this name
-  const existingTag = await prisma.stashTag.findFirst({
-    where: {
-      name: trimmedName,
-      id: { not: id }
-    }
-  });
-  
-  if (existingTag) {
-    return sendBadRequest(res, `A tag named "${trimmedName}" already exists`);
-  }
-  
-  // Update tag name in local database
+  // Update tag in local database
   const updatedTag = await prisma.stashTag.update({
     where: { id },
-    data: { name: trimmedName }
+    data: updateData
   });
   
-  console.log(`   - Updated tag name in local database: "${tag.name}" → "${trimmedName}"`);
+  if (nameChanged) {
+    console.log(`   - Updated tag name in local database: "${tag.name}" → "${trimmedName}"`);
+  }
+  if (urls !== undefined) {
+    console.log('   - Updated tag URLs in local database');
+  }
   
   // Update in Stash via GraphQL
   if (!stashSyncService) {
     await initializeStashSyncService();
   }
   
-  if (stashSyncService) {
+  if (stashSyncService && nameChanged) {
     try {
       const isConfigured = await stashSyncService.isConfigured();
       
@@ -12062,7 +12171,8 @@ router.put('/tags/:id', asyncHandler(async (req, res) => {
   
   return sendSuccess(res, {
     id: updatedTag.id,
-    name: updatedTag.name
+    name: updatedTag.name,
+    urls: JSON.parse(updatedTag.urls || '[]')
   });
 }));
 
@@ -12314,6 +12424,15 @@ router.post('/tags/merge', asyncHandler(async (req, res) => {
   if (!result.success) {
     return sendServerError(res, result.error || 'Failed to merge tags');
   }
+  
+  // Fire-and-forget: merge wiki pages for the merged tags
+  try {
+    const StashWikiService = require('../services/StashWikiService');
+    const stashWikiService = new StashWikiService();
+    stashWikiService.onTagMerged(mergeTagIds, mainTagId).catch(err => 
+      console.error('Stash wiki tag-merged hook failed:', err.message)
+    );
+  } catch (err) { /* wiki service optional */ }
   
   sendSuccess(res, {
     message: `Successfully merged ${result.mergedCount} tag(s) into ${result.mainTag.name}`,

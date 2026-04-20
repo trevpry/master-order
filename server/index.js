@@ -65,6 +65,8 @@ const { getTimezoneAwarePeriodBounds, getTimezoneAwareDateGrouping, formatDateIn
 const StatisticsService = require('./services/statisticsService');
 const WatchStatsRoutes = require('./routes/watchStatsRoutes');
 const WeatherSchedulerService = require('./services/WeatherSchedulerService'); // Added import
+const WikiBackgroundService = require('./services/WikiBackgroundService'); // Wiki background ingest
+const StashWikiBackgroundService = require('./services/StashWikiBackgroundService'); // Stash wiki background generation
 
 // Initialize services
 const plexDb = new PlexDatabaseService();
@@ -76,6 +78,8 @@ const watchLogService = new WatchLogService(prisma); // Initialize watch log ser
 const statisticsService = new StatisticsService(prisma, watchLogService);
 const watchStatsRoutes = new WatchStatsRoutes(watchLogService, statisticsService);
 const weatherScheduler = new WeatherSchedulerService(); // Initialize weather scheduler service
+const wikiBackground = new WikiBackgroundService(); // Initialize wiki background ingest service
+const stashWikiBackground = new StashWikiBackgroundService(); // Initialize stash wiki background service
 const ListScrapeBackgroundService = require('./services/ListScrapeBackgroundService');
 const tvdbServiceInstance = require('./tvdbService');
 const listScrapeBackground = new ListScrapeBackgroundService(tvdbServiceInstance);
@@ -253,6 +257,14 @@ app.use('/api/locations', locationsRoutes);
 // Chat (Ollama AI) API routes
 const chatRoutes = require('./routes/chat');
 app.use('/api/chat', chatRoutes);
+
+// Wiki (LLM Knowledge Base) API routes
+const wikiRoutes = require('./routes/wiki');
+app.use('/api/wiki', wikiRoutes);
+
+// Stash Tag Wiki API routes
+const stashWikiRoutes = require('./routes/stashWiki');
+app.use('/api/stash-wiki', stashWikiRoutes);
 
 // Settings API routes
 app.use('/api/settings', settingsRoutes);
@@ -758,6 +770,20 @@ server.listen(PORT, '0.0.0.0', async () => {
     await weatherScheduler.start();
   } catch (error) {
     console.error('Failed to start weather scheduler service:', error);
+  }
+  
+  // Start wiki background ingest service
+  try {
+    await wikiBackground.start();
+  } catch (error) {
+    console.error('Failed to start wiki background ingest service:', error);
+  }
+  
+  // Start stash wiki background generation service
+  try {
+    await stashWikiBackground.start();
+  } catch (error) {
+    console.error('Failed to start stash wiki background service:', error);
   }
   
   // Start list scrape background service

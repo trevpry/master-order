@@ -5,6 +5,7 @@ import Button from '../../../../shared/components/Button';
 import config from '../../../../config';
 
 export default function TagsPage() {
+  const ALL_TAGS_PER_PAGE = 999999;
   const [searchParams, setSearchParams] = useSearchParams();
   const [tags, setTags] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -15,7 +16,7 @@ export default function TagsPage() {
     total: 0,
     totalPages: 1,
     hasMore: false,
-    perPage: 24
+    perPage: ALL_TAGS_PER_PAGE
   });
   const [expandedTags, setExpandedTags] = useState(new Set());
   const [draggedTag, setDraggedTag] = useState(null);
@@ -25,7 +26,8 @@ export default function TagsPage() {
   const [mergeData, setMergeData] = useState(null);
   const [showHidden, setShowHidden] = useState(false);
 
-  const currentPage = parseInt(searchParams.get('page') || '1', 10);
+  const currentPage = 1;
+  const displayedParentTagCount = tags.length;
 
   useEffect(() => {
     loadTags();
@@ -71,7 +73,7 @@ export default function TagsPage() {
           total: result.total || 0,
           totalPages: result.totalPages || 1,
           hasMore: result.hasMore || false,
-          perPage: 24
+          perPage: ALL_TAGS_PER_PAGE
         });
       } else {
         setError(result.error || 'Failed to load tags');
@@ -86,13 +88,7 @@ export default function TagsPage() {
 
   const handleSearch = (e) => {
     e.preventDefault();
-    setSearchParams({ page: '1', search: searchQuery });
-  };
-
-  const goToPage = (page) => {
-    const params = { page: page.toString() };
-    if (searchQuery) params.search = searchQuery;
-    setSearchParams(params);
+    setSearchParams({ search: searchQuery });
   };
 
   const toggleTag = (tagId) => {
@@ -244,60 +240,6 @@ export default function TagsPage() {
     }
   };
 
-  const toggleTagHidden = async (tag, e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    
-    const newHiddenStatus = !tag.hidden;
-    
-    try {
-      const response = await fetch(`${config.apiBaseUrl}/api/stash/tags/${tag.id}/hidden`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ hidden: newHiddenStatus })
-      });
-
-      const result = await response.json();
-
-      if (result.success) {
-        toast.success(`"${tag.name}" ${newHiddenStatus ? 'hidden' : 'shown'}`);
-        loadTags(); // Reload to see the changes
-      } else {
-        toast.error(result.error || 'Failed to update tag visibility');
-      }
-    } catch (err) {
-      console.error('Error updating tag visibility:', err);
-      toast.error('Failed to update tag visibility');
-    }
-  };
-
-  const toggleTagClipTagging = async (tag, e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    
-    const newClipTaggingStatus = !tag.includeInClipTagging;
-    
-    try {
-      const response = await fetch(`${config.apiBaseUrl}/api/stash/tags/${tag.id}/clip-tagging`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ includeInClipTagging: newClipTaggingStatus })
-      });
-
-      const result = await response.json();
-
-      if (result.success) {
-        toast.success(`"${tag.name}" ${newClipTaggingStatus ? 'included in' : 'excluded from'} clip tagging`);
-        loadTags(); // Reload to see the changes
-      } else {
-        toast.error(result.error || 'Failed to update clip tagging setting');
-      }
-    } catch (err) {
-      console.error('Error updating clip tagging setting:', err);
-      toast.error('Failed to update clip tagging setting');
-    }
-  };
-
   const renderTagCard = (tag, level = 0, parentExpanded = true) => {
     if (!parentExpanded && level > 0) return null;
     
@@ -309,7 +251,7 @@ export default function TagsPage() {
     return (
       <div key={tag.id} className="tag-card-wrapper">
         <div 
-          className={`content-card tag-card-enhanced ${tag.favorite ? 'favorite-tag' : ''} ${tag.hidden ? 'hidden-tag' : ''} ${isDropTarget ? (dropAction === 'child' ? 'drop-target-child' : 'drop-target-merge') : ''} ${isDragging ? 'dragging' : ''}`}
+          className={`tag-card-enhanced ${tag.favorite ? 'favorite-tag' : ''} ${tag.hidden ? 'hidden-tag' : ''} ${isDropTarget ? (dropAction === 'child' ? 'drop-target-child' : 'drop-target-merge') : ''} ${isDragging ? 'dragging' : ''}`}
           style={{ marginLeft: level > 0 ? `${level * 1.5}rem` : '0' }}
           draggable="true"
           onDragStart={(e) => handleDragStart(e, tag)}
@@ -318,60 +260,6 @@ export default function TagsPage() {
           onDragLeave={handleDragLeave}
           onDrop={(e) => handleDrop(e, tag)}
         >
-          {/* Tag Image/Icon */}
-          <div className="tag-visual">
-            {tag.image ? (
-              <img 
-                src={tag.image} 
-                alt={tag.name}
-                className="tag-image"
-                onError={(e) => {
-                  e.target.style.display = 'none';
-                  e.target.nextSibling.style.display = 'flex';
-                }}
-              />
-            ) : null}
-            <div 
-              className="tag-icon-fallback" 
-              style={{ display: tag.image ? 'none' : 'flex' }}
-            >
-              🏷️
-            </div>
-            
-            {/* Favorite Badge */}
-            {tag.favorite && (
-              <div className="tag-favorite-badge" title="Favorite Tag">
-                ⭐
-              </div>
-            )}
-            
-            {/* Hidden Badge */}
-            {tag.hidden && (
-              <div className="tag-hidden-badge" title="Hidden Tag">
-                👁️‍🗨️
-              </div>
-            )}
-            
-            {/* Clip Tagging Badge */}
-            {tag.includeInClipTagging === false && (
-              <div className="tag-clip-tagging-badge" title="Excluded from Clip Tagging" style={{
-                position: 'absolute',
-                top: '10px',
-                right: tag.hidden ? '50px' : '10px',
-                backgroundColor: '#f59e0b',
-                color: 'white',
-                padding: '6px 10px',
-                borderRadius: '6px',
-                fontSize: '0.75rem',
-                fontWeight: 'bold',
-                boxShadow: '0 2px 4px rgba(0,0,0,0.2)',
-                zIndex: 2
-              }}>
-                🚫 Clip Tagging
-              </div>
-            )}
-          </div>
-
           {/* Tag Content */}
           <div className="tag-content-enhanced">
             {/* Header with Name, Counts, and Expand Button */}
@@ -380,39 +268,24 @@ export default function TagsPage() {
                 <Link to={`/media/stash/tags/${tag.id}`} className="tag-name-link">
                   <h3 className="tag-name" title={tag.name}>{tag.name}</h3>
                 </Link>
+                <div className="tag-stats tag-stats-inline">
+                  {tag.scene_count > 0 && (
+                    <span className="stat-badge scene-badge" title="Scenes">
+                      🎬 {tag.scene_count}
+                    </span>
+                  )}
+                  {tag.performer_count > 0 && (
+                    <span className="stat-badge performer-badge" title="Performers">
+                      👤 {tag.performer_count}
+                    </span>
+                  )}
+                  {hasChildren && (
+                    <span className="stat-badge children-badge" title="Child Tags">
+                      📂 {tag.child_count}
+                    </span>
+                  )}
+                </div>
                 <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
-                  <button 
-                    className="tag-hide-button"
-                    onClick={(e) => toggleTagHidden(tag, e)}
-                    title={tag.hidden ? 'Show tag' : 'Hide tag'}
-                    style={{
-                      padding: '0.25rem 0.5rem',
-                      fontSize: '0.75rem',
-                      backgroundColor: tag.hidden ? '#10b981' : '#6b7280',
-                      color: 'white',
-                      border: 'none',
-                      borderRadius: '4px',
-                      cursor: 'pointer'
-                    }}
-                  >
-                    {tag.hidden ? '👁️ Show' : '🚫 Hide'}
-                  </button>
-                  <button 
-                    className="tag-clip-tagging-button"
-                    onClick={(e) => toggleTagClipTagging(tag, e)}
-                    title={tag.includeInClipTagging === false ? 'Include in clip tagging' : 'Exclude from clip tagging'}
-                    style={{
-                      padding: '0.25rem 0.5rem',
-                      fontSize: '0.75rem',
-                      backgroundColor: tag.includeInClipTagging === false ? '#f59e0b' : '#3b82f6',
-                      color: 'white',
-                      border: 'none',
-                      borderRadius: '4px',
-                      cursor: 'pointer'
-                    }}
-                  >
-                    {tag.includeInClipTagging === false ? '🏷️ Include Clips' : '🏷️ Clip Tagging'}
-                  </button>
                   {hasChildren && (
                     <button 
                       className="tag-expand-button"
@@ -424,58 +297,7 @@ export default function TagsPage() {
                   )}
                 </div>
               </div>
-              <div className="tag-stats">
-                {tag.scene_count > 0 && (
-                  <span className="stat-badge scene-badge" title="Scenes">
-                    🎬 {tag.scene_count}
-                  </span>
-                )}
-                {tag.performer_count > 0 && (
-                  <span className="stat-badge performer-badge" title="Performers">
-                    👤 {tag.performer_count}
-                  </span>
-                )}
-                {hasChildren && (
-                  <span className="stat-badge children-badge" title="Child Tags">
-                    📂 {tag.child_count}
-                  </span>
-                )}
-              </div>
             </div>
-
-            {/* Description */}
-            {tag.description && (
-              <p className="tag-description-enhanced" title={tag.description}>
-                {tag.description}
-              </p>
-            )}
-
-            {/* Aliases */}
-            {tag.aliases && tag.aliases.length > 0 && (
-              <div className="tag-aliases-enhanced" style={{ marginTop: '0.5rem' }}>
-                <span className="aliases-label" style={{ fontWeight: '500', marginRight: '0.5rem', fontSize: '0.875rem' }}>
-                  Aliases:
-                </span>
-                <div style={{ display: 'inline-flex', flexWrap: 'wrap', gap: '0.25rem', alignItems: 'center' }}>
-                  {tag.aliases.map((alias, idx) => (
-                    <span 
-                      key={idx}
-                      style={{
-                        backgroundColor: '#e3f2fd',
-                        color: '#1976d2',
-                        padding: '0.125rem 0.5rem',
-                        borderRadius: '10px',
-                        fontSize: '0.75rem',
-                        fontWeight: '500',
-                        border: '1px solid #bbdefb'
-                      }}
-                    >
-                      {alias}
-                    </span>
-                  ))}
-                </div>
-              </div>
-            )}
           </div>
         </div>
 
@@ -499,11 +321,16 @@ export default function TagsPage() {
 
       <div className="header">
         <h1>🏷️ Tags</h1>
-        <p className="muted">Browse and explore your tag library</p>        <div style={{ marginTop: '1rem' }}>
+        <p className="muted">Browse and explore your tag library</p>
+        <p className="muted" style={{ marginTop: '0.25rem' }}>
+          Showing {displayedParentTagCount} parent tags
+        </p>
+        <div style={{ marginTop: '1rem' }}>
           <Link to="/media/stash/clip-tagging-flow">
             <Button>🎯 Configure Clip Tagging Flow</Button>
           </Link>
-        </div>      </div>
+        </div>
+      </div>
 
       {/* Search */}
       <form onSubmit={handleSearch} className="search-section">
@@ -566,26 +393,6 @@ export default function TagsPage() {
             )}
           </div>
 
-          {/* Pagination */}
-          {pagination.totalPages > 1 && (
-            <div className="pagination">
-              <Button 
-                onClick={() => goToPage(currentPage - 1)}
-                disabled={currentPage === 1}
-              >
-                ← Previous
-              </Button>
-              <span className="page-info">
-                Page {currentPage} of {pagination.totalPages}
-              </span>
-              <Button 
-                onClick={() => goToPage(currentPage + 1)}
-                disabled={currentPage >= pagination.totalPages}
-              >
-                Next →
-              </Button>
-            </div>
-          )}
         </>
       )}
 

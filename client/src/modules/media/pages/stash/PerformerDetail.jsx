@@ -64,6 +64,7 @@ export default function PerformerDetail() {
   const [isSearching, setIsSearching] = useState(false);
   const [selectedPerformers, setSelectedPerformers] = useState([]);
   const [isMerging, setIsMerging] = useState(false);
+  const [isUpdatingWiki, setIsUpdatingWiki] = useState(false);
 
   // Scene merge state
   const [selectedScenes, setSelectedScenes] = useState(new Set());
@@ -392,6 +393,38 @@ export default function PerformerDetail() {
       });
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleUpdatePerformerWiki = async () => {
+    setIsUpdatingWiki(true);
+    try {
+      const response = await fetch(`${config.apiBaseUrl}/api/stash-wiki/performers/${id}/update`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        }
+      });
+
+      const result = await response.json();
+      if (!result.success) {
+        throw new Error(result.error || 'Failed to update performer wiki page');
+      }
+
+      const actionText = result.data?.action === 'created' ? 'created' : 'updated';
+      const pageSlug = result.data?.page?.slug || 'unknown';
+      toast.success(`Performer wiki page ${actionText}: ${pageSlug}`, {
+        duration: 3000,
+        position: 'bottom-right'
+      });
+    } catch (error) {
+      console.error('Failed to update performer wiki page:', error);
+      toast.error(`Failed to update performer wiki page: ${error.message}`, {
+        duration: 5000,
+        position: 'bottom-right'
+      });
+    } finally {
+      setIsUpdatingWiki(false);
     }
   };
 
@@ -1307,6 +1340,14 @@ export default function PerformerDetail() {
                     title="Sync latest data from Stash"
                   >
                     🔄
+                  </button>
+                  <button
+                    className="sync-performer-btn"
+                    onClick={handleUpdatePerformerWiki}
+                    title="Create or update wiki page from app database performer data"
+                    disabled={isUpdatingWiki}
+                  >
+                    {isUpdatingWiki ? '📚…' : '📚'}
                   </button>
                   <button 
                     className="merge-performer-btn merge-into-btn"

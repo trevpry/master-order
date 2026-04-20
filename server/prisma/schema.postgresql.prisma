@@ -43,6 +43,16 @@ model Settings {
   ollamaUrl                         String?
   ollamaDefaultModel                String?
   ollamaEmbeddingModel              String?
+  wikiContextEnabled                Boolean   @default(true)
+  wikiAutoIngestEnabled             Boolean   @default(true)
+  wikiAutoIngestInterval            Int       @default(60) // minutes
+  wikiChatExtractionEnabled         Boolean   @default(true)
+  wikiSchema                        String?   // Custom Layer 3 schema instructions
+  lastWikiIngestAt                  DateTime?
+  stashWikiAutoGenEnabled           Boolean   @default(false)
+  stashWikiAutoGenInterval          Int       @default(120) // minutes
+  stashWikiSchema                   String?   // Custom stash wiki schema instructions
+  lastStashWikiGenAt                DateTime?
   createdAt                         DateTime  @default(now())
   updatedAt                         DateTime  @updatedAt
 }
@@ -1240,6 +1250,7 @@ model StashTag {
   id            String              @id
   name          String              @unique
   description   String?
+  urls          String?             // JSON array of app-managed reference URLs for this tag
   image         String?
   favorite      Boolean             @default(false)
   ignoreAutoTag Boolean             @default(false)
@@ -2495,9 +2506,115 @@ model ChatMessage {
   content        String
   model          String?
   embedding      String?          // JSON-encoded embedding vector for RAG
+  wikiExtracted  Boolean          @default(false) // Whether wiki extraction has been processed
   createdAt      DateTime         @default(now())
   conversation   ChatConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
 
   @@index([conversationId])
+  @@index([createdAt])
+  @@index([wikiExtracted])
+}
+
+// =====================================
+// LLM WIKI SYSTEM (Karpathy-inspired)
+// =====================================
+
+model WikiPage {
+  id            Int      @id @default(autoincrement())
+  slug          String   @unique
+  title         String
+  content       String   @default("")    // Markdown content
+  type          String   @default("concept") // "entity", "concept", "index", "comparison"
+  category      String   @default("general") // "personal", "health", "work", "interests", etc.
+  inboundLinks  String   @default("[]")  // JSON array of slugs linking TO this page
+  outboundLinks String   @default("[]")  // JSON array of slugs this page links TO
+  sourceNoteIds String   @default("[]")  // JSON array of Note IDs that contributed
+  sourceChatIds String   @default("[]")  // JSON array of ChatConversation IDs that contributed
+  embedding     String?                  // JSON-encoded embedding vector for semantic search
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([type])
+  @@index([category])
+  @@index([updatedAt])
+}
+
+model WikiLog {
+  id            Int      @id @default(autoincrement())
+  action        String                   // "ingest", "update", "lint", "query-filed", "chat-extract"
+  description   String
+  sourceType    String   @default("note") // "note", "daily_note", "chat", "manual", "lint"
+  sourceId      Int?                     // ID of the source note or conversation
+  affectedPages String   @default("[]")  // JSON array of slugs affected
+  createdAt     DateTime @default(now())
+
+  @@index([action])
+  @@index([sourceType])
+  @@index([createdAt])
+}
+
+// =====================================
+// STASH TAG WIKI SYSTEM
+// =====================================
+
+model StashWikiPage {
+  id            Int      @id @default(autoincrement())
+  slug          String   @unique
+  title         String
+  content       String   @default("")    // Markdown content (description, relationships, notes)
+  tagId         String?                  // Stash tag ID this page represents (null for relationship/index pages)
+  relatedTagIds String   @default("[]")  // JSON array of related Stash tag IDs
+  inboundLinks  String   @default("[]")  // JSON array of slugs linking TO this page
+  outboundLinks String   @default("[]")  // JSON array of slugs this page links TO
+  embedding     String?                  // JSON-encoded embedding vector for semantic search
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([tagId])
+  @@index([updatedAt])
+}
+
+model StashWikiLog {
+  id            Int      @id @default(autoincrement())
+  action        String                   // "generate", "update", "merge", "delete", "correct", "rebuild"
+  description   String
+  sourceType    String   @default("tag") // "tag", "manual", "merge", "sync"
+  sourceId      String?                  // Stash tag ID that triggered the action
+  affectedPages String   @default("[]")  // JSON array of slugs affected
+  createdAt     DateTime @default(now())
+
+  @@index([action])
+  @@index([sourceType])
+  @@index([createdAt])
+}
+
+model StashPerformerWikiPage {
+  id            Int      @id @default(autoincrement())
+  slug          String   @unique
+  title         String
+  content       String   @default("")    // Markdown content (bio, filmography notes, relationships)
+  performerId   String?  @unique         // Stash performer ID this page represents
+  relatedPerformerIds String @default("[]") // JSON array of related performer IDs
+  inboundLinks  String   @default("[]")  // JSON array of slugs linking TO this page
+  outboundLinks String   @default("[]")  // JSON array of slugs this page links TO
+  embedding     String?                  // JSON-encoded embedding vector for semantic search
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([performerId])
+  @@index([updatedAt])
+}
+
+model StashPerformerWikiLog {
+  id            Int      @id @default(autoincrement())
+  action        String                   // "generate", "update", "delete", "correct", "rebuild"
+  description   String
+  sourceType    String   @default("performer") // "performer", "manual", "sync"
+  sourceId      String?                  // Stash performer ID that triggered the action
+  affectedPages String   @default("[]")  // JSON array of slugs affected
+  createdAt     DateTime @default(now())
+
+  @@index([action])
+  @@index([sourceType])
   @@index([createdAt])
 }

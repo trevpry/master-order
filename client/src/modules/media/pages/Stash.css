@@ -3891,6 +3891,68 @@
   color: #2563eb;
 }
 
+/* Tags page list view cleanup */
+.tags-page .tags-grid-hierarchical {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.tags-page .tags-grid-hierarchical > .tag-card-wrapper {
+  display: block;
+  flex: 1 1 calc((100% - 2rem) / 5);
+  max-width: calc((100% - 2rem) / 5);
+  min-width: 220px;
+}
+
+.tags-page .tag-children-container {
+  flex: 1 0 100%;
+}
+
+.tags-page .tag-card-enhanced {
+  border: none !important;
+  outline: none !important;
+  box-shadow: none !important;
+}
+
+.tags-page .tag-card-enhanced:hover {
+  transform: none;
+  box-shadow: none !important;
+  border: none !important;
+  outline: none !important;
+}
+
+.tags-page .tag-content-enhanced {
+  padding: 0.625rem 0.875rem;
+  gap: 0;
+}
+
+.tags-page .tag-header-enhanced {
+  gap: 0;
+}
+
+.tags-page .tag-name-row {
+  flex-wrap: nowrap;
+}
+
+.tags-page .tag-name-link {
+  min-width: 0;
+  flex: 1;
+}
+
+.tags-page .tag-name {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: block;
+  font-size: 1rem;
+}
+
+.tags-page .tag-stats-inline {
+  flex-wrap: nowrap;
+  margin-left: auto;
+}
+
 /* Tag Detail Page Styles */
 .tag-detail .tag-header-detail {
   display: flex;

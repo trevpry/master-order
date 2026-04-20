@@ -43,6 +43,7 @@ import CalendarHome from './modules/calendar/pages/CalendarHome';
 import Locations from './modules/locations/pages/Locations';
 import EddieSettings from './modules/eddie/pages/EddieSettings';
 import ChatHome from './modules/chat/pages/ChatHome';
+import WikiHome from './modules/wiki/pages/WikiHome';
 import Dating from './pages/Dating';
 import ConnectionDetail from './pages/ConnectionDetail';
 import DateDetail from './pages/DateDetail';
@@ -130,6 +131,7 @@ function App() {
           <Route path="/history-plus/categories" element={<Categories />} />
           <Route path="/history-plus/courses" element={<Courses />} />
           <Route path="/chat" element={<ChatHome />} />
+          <Route path="/wiki" element={<WikiHome />} />
           <Route path="/eddie-settings" element={<EddieSettings />} />
         </Routes>
       </Layout>

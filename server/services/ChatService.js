@@ -1,6 +1,11 @@
 const prisma = require('../prismaClient');
+const WikiService = require('./WikiService');
 
 class ChatService {
+  constructor() {
+    this.wikiService = new WikiService();
+  }
+
   /**
    * Get Ollama connection settings from the database
    */
@@ -115,7 +120,7 @@ class ChatService {
           model: ollamaEmbeddingModel,
           input: text.substring(0, 8000)
         }),
-        signal: AbortSignal.timeout(15000)
+        signal: AbortSignal.timeout(60000) // 60s — model may need cold start
       });
       if (!response.ok) return null;
       const data = await response.json();
@@ -160,9 +165,17 @@ class ChatService {
   }
 
   /**
-   * RAG retrieval: embed the query and find the most relevant past messages
+   * RAG retrieval: embed the query and find the most relevant past messages + wiki pages
    */
   async retrieveRelevantContext(queryText, excludeConversationId, topK = 20) {
+    // Get wiki context (Layer 2 synthesized knowledge)
+    let wikiContext = null;
+    try {
+      wikiContext = await this.wikiService.getWikiContext(queryText, 5);
+    } catch (err) {
+      console.error('Wiki context retrieval failed:', err.message);
+    }
+
     const queryEmbedding = await this.generateEmbedding(queryText);
 
     if (!queryEmbedding) {
@@ -195,7 +208,7 @@ class ChatService {
     scored.sort((a, b) => b.score - a.score);
     const topMessages = scored.slice(0, topK).filter(m => m.score >= 0.3);
 
-    if (topMessages.length === 0) return null;
+    if (topMessages.length === 0) return wikiContext || null;
 
     const byConversation = {};
     for (const msg of topMessages) {
@@ -214,7 +227,13 @@ class ChatService {
       }
     }
 
-    return `You have memory of the user's previous conversations. Use these relevant excerpts to remember personal details, preferences, and facts the user has shared before. Do not mention you are reading previous conversations unless asked.\n\n--- Relevant Memory ---${context}--- End Memory ---`;
+    const memorySection = `You have memory of the user's previous conversations. Use these relevant excerpts to remember personal details, preferences, and facts the user has shared before. Do not mention you are reading previous conversations unless asked.\n\n--- Relevant Memory ---${context}--- End Memory ---`;
+
+    // Combine wiki context (higher priority) with conversation memory
+    if (wikiContext) {
+      return wikiContext + '\n\n' + memorySection;
+    }
+    return memorySection;
   }
 
   /**
@@ -361,15 +380,68 @@ class ChatService {
   }
 
   /**
-   * Save the complete assistant response after streaming finishes
+   * Save the complete assistant response after streaming finishes.
+   * Also triggers wiki extraction in the background (fire-and-forget).
    */
   async saveAssistantMessage(conversationId, content, model) {
-    return this.saveMessageWithEmbedding({
+    const message = await this.saveMessageWithEmbedding({
       conversationId,
       role: 'assistant',
       content,
       model
     });
+
+    // Fire-and-forget: extract personal facts from this exchange into the wiki
+    this.triggerWikiExtraction(conversationId, content).catch(err => {
+      console.error('Wiki extraction background error:', err.message);
+    });
+
+    return message;
+  }
+
+  /**
+   * Background wiki extraction from a chat exchange
+   */
+  async triggerWikiExtraction(conversationId, assistantContent) {
+    // Find the most recent user message in this conversation
+    const userMsg = await prisma.chatMessage.findFirst({
+      where: { conversationId, role: 'user' },
+      orderBy: { createdAt: 'desc' }
+    });
+    if (!userMsg) return;
+
+    const conversation = await prisma.chatConversation.findUnique({
+      where: { id: conversationId },
+      select: { title: true }
+    });
+
+    await this.wikiService.extractFromChat(
+      userMsg.content,
+      assistantContent,
+      conversation?.title || 'Untitled',
+      conversationId
+    );
+
+    // Mark both messages as wiki-extracted
+    await prisma.chatMessage.updateMany({
+      where: {
+        conversationId,
+        id: { in: [userMsg.id] },
+        wikiExtracted: false
+      },
+      data: { wikiExtracted: true }
+    });
+    // Mark the assistant message too (find the latest one)
+    const assistantMsg = await prisma.chatMessage.findFirst({
+      where: { conversationId, role: 'assistant' },
+      orderBy: { createdAt: 'desc' }
+    });
+    if (assistantMsg) {
+      await prisma.chatMessage.update({
+        where: { id: assistantMsg.id },
+        data: { wikiExtracted: true }
+      });
+    }
   }
 }
 

@@ -10,12 +10,15 @@ import StashContentRenderers from './stash/components/StashContentRenderers';
 import StashModals from './stash/components/StashModals';
 import MergePerformersModal from '../../../components/stash/MergePerformersModal';
 import ImageTagger from './stash/components/ImageTagger';
+import StashWikiTab from './stash/components/StashWikiTab';
+import StashPerformerWikiTab from './stash/components/StashPerformerWikiTab';
 import { getSceneDisplayTitle, getSceneImageUrl, formatDate, formatDuration, formatTime, isVideoFormatSupported } from '../utils/stashUtils';
 import './Stash.css';
 import config from '../../../config';
 
 export default function Stash() {
   const [searchParams, setSearchParams] = useSearchParams();
+  const wikiSlugParam = searchParams.get('wikiSlug');
   
   // State Management
   const [connectionStatus, setConnectionStatus] = useState({ 
@@ -973,6 +976,15 @@ export default function Stash() {
     }
   }, [searchParams, connectionStatus.connected, mainTab, libraryTab, currentPage.performers, loadData]);
 
+  // Support direct tab navigation via ?mainTab=wiki|performer-wiki|library|upnext|stats
+  useEffect(() => {
+    const requestedMainTab = searchParams.get('mainTab');
+    const allowedMainTabs = new Set(['upnext', 'library', 'stats', 'wiki', 'performer-wiki']);
+    if (requestedMainTab && allowedMainTabs.has(requestedMainTab) && mainTab !== requestedMainTab) {
+      setMainTab(requestedMainTab);
+    }
+  }, [searchParams, mainTab]);
+
   return (
     <div className="stash-page">
       {/* Video Player Component */}
@@ -1045,6 +1057,18 @@ export default function Stash() {
                 onClick={() => setMainTab('stats')}
               >
                 📊 Stats
+              </button>
+              <button 
+                className={mainTab === 'wiki' ? 'active' : ''}
+                onClick={() => setMainTab('wiki')}
+              >
+                📖 Tag Wiki
+              </button>
+              <button 
+                className={mainTab === 'performer-wiki' ? 'active' : ''}
+                onClick={() => setMainTab('performer-wiki')}
+              >
+                👤 Performer Wiki
               </button>
             </div>
 
@@ -1131,6 +1155,14 @@ export default function Stash() {
                 loadStats={loadStats}
                 setSelectedPerformer={setSelectedPerformer}
               />
+            )}
+
+            {mainTab === 'wiki' && (
+              <StashWikiTab initialSlug={wikiSlugParam} />
+            )}
+
+            {mainTab === 'performer-wiki' && (
+              <StashPerformerWikiTab />
             )}
           </>
         )}
