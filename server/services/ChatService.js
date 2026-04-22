@@ -147,6 +147,104 @@ class ChatService {
   }
 
   /**
+   * Retrieve relevant notes directly (keyword/phrase scoring).
+   */
+  async retrieveRelevantNotes(queryText, topK = 5) {
+    const raw = (queryText || '').trim();
+    if (!raw) return null;
+
+    const words = [...new Set(
+      raw
+        .toLowerCase()
+        .split(/[^a-z0-9]+/)
+        .filter(w => w.length > 2)
+    )].slice(0, 8);
+
+    if (words.length === 0) return null;
+
+    const orConditions = [
+      { title: { contains: raw } },
+      { content: { contains: raw } }
+    ];
+
+    for (const word of words) {
+      orConditions.push({ title: { contains: word } });
+      orConditions.push({ content: { contains: word } });
+      orConditions.push({ tags: { contains: word } });
+    }
+
+    const candidates = await prisma.note.findMany({
+      where: {
+        OR: orConditions,
+        content: { not: '' }
+      },
+      orderBy: { updatedAt: 'desc' },
+      take: 60,
+      select: {
+        id: true,
+        title: true,
+        content: true,
+        tags: true,
+        updatedAt: true,
+        isFavorite: true,
+        type: true
+      }
+    });
+
+    if (candidates.length === 0) return null;
+
+    const scored = candidates.map(note => {
+      const haystack = `${note.title} ${note.content} ${note.tags || ''}`.toLowerCase();
+      let score = 0;
+
+      if (haystack.includes(raw.toLowerCase())) score += 5;
+      for (const word of words) {
+        if (note.title.toLowerCase().includes(word)) score += 2;
+        if ((note.tags || '').toLowerCase().includes(word)) score += 1;
+        if (note.content.toLowerCase().includes(word)) score += 1;
+      }
+      if (note.isFavorite) score += 1;
+
+      return { ...note, score };
+    });
+
+    scored.sort((a, b) => b.score - a.score || new Date(b.updatedAt) - new Date(a.updatedAt));
+    const topNotes = scored.filter(n => n.score > 0).slice(0, topK);
+    if (topNotes.length === 0) return null;
+
+    let notesContext = '';
+    for (const note of topNotes) {
+      const snippet = this.buildNoteSnippet(note.content, words, 450);
+      notesContext += `\n- Note #${note.id}: ${note.title} (type: ${note.type}, updated: ${new Date(note.updatedAt).toISOString().split('T')[0]})\n  ${snippet}\n`;
+    }
+
+    return `You can also use the user's direct notes as high-signal personal context. Use these note excerpts when relevant, and prefer concrete note facts over assumptions.\n\n--- Relevant Notes ---${notesContext}--- End Notes ---`;
+  }
+
+  buildNoteSnippet(content, words, maxLen = 450) {
+    const text = (content || '').replace(/\s+/g, ' ').trim();
+    if (!text) return '(empty note)';
+
+    const lower = text.toLowerCase();
+    let start = 0;
+    for (const word of words) {
+      const idx = lower.indexOf(word);
+      if (idx >= 0) {
+        start = Math.max(0, idx - 90);
+        break;
+      }
+    }
+
+    const snippet = text.slice(start, start + maxLen);
+    return snippet + (start + maxLen < text.length ? ' ...' : '');
+  }
+
+  combineContextSections(...sections) {
+    const compact = sections.filter(Boolean).map(s => s.trim()).filter(Boolean);
+    return compact.length ? compact.join('\n\n') : null;
+  }
+
+  /**
    * Save a message and queue embedding generation in background
    */
   async saveMessageWithEmbedding(data) {
@@ -170,16 +268,21 @@ class ChatService {
   async retrieveRelevantContext(queryText, excludeConversationId, topK = 20) {
     // Get wiki context (Layer 2 synthesized knowledge)
     let wikiContext = null;
+    let notesContext = null;
     try {
-      wikiContext = await this.wikiService.getWikiContext(queryText, 5);
+      [wikiContext, notesContext] = await Promise.all([
+        this.wikiService.getWikiContext(queryText, 5),
+        this.retrieveRelevantNotes(queryText, 5)
+      ]);
     } catch (err) {
-      console.error('Wiki context retrieval failed:', err.message);
+      console.error('Context retrieval failed:', err.message);
     }
 
     const queryEmbedding = await this.generateEmbedding(queryText);
 
     if (!queryEmbedding) {
-      return this.fallbackRecentContext(excludeConversationId);
+      const recentContext = await this.fallbackRecentContext(excludeConversationId);
+      return this.combineContextSections(wikiContext, notesContext, recentContext);
     }
 
     const embeddedMessages = await prisma.chatMessage.findMany({
@@ -197,7 +300,8 @@ class ChatService {
     });
 
     if (embeddedMessages.length === 0) {
-      return this.fallbackRecentContext(excludeConversationId);
+      const recentContext = await this.fallbackRecentContext(excludeConversationId);
+      return this.combineContextSections(wikiContext, notesContext, recentContext);
     }
 
     const scored = embeddedMessages.map(msg => ({
@@ -208,7 +312,7 @@ class ChatService {
     scored.sort((a, b) => b.score - a.score);
     const topMessages = scored.slice(0, topK).filter(m => m.score >= 0.3);
 
-    if (topMessages.length === 0) return wikiContext || null;
+    if (topMessages.length === 0) return this.combineContextSections(wikiContext, notesContext);
 
     const byConversation = {};
     for (const msg of topMessages) {
@@ -229,11 +333,8 @@ class ChatService {
 
     const memorySection = `You have memory of the user's previous conversations. Use these relevant excerpts to remember personal details, preferences, and facts the user has shared before. Do not mention you are reading previous conversations unless asked.\n\n--- Relevant Memory ---${context}--- End Memory ---`;
 
-    // Combine wiki context (higher priority) with conversation memory
-    if (wikiContext) {
-      return wikiContext + '\n\n' + memorySection;
-    }
-    return memorySection;
+    // Combine wiki context, direct notes, and conversation memory.
+    return this.combineContextSections(wikiContext, notesContext, memorySection);
   }
 
   /**

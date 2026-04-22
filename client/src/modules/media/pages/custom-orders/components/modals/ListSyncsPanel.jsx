@@ -28,6 +28,7 @@ const ListSyncsPanel = ({ isOpen, onClose, onRefreshOrders }) => {
     url: '',
     parserType: 'css-selectors',
     parserConfig: '',
+    articleHtml: '',
     itemSelector: '',
     titleSelector: '',
     mediaTypeSelector: '',
@@ -71,6 +72,7 @@ const ListSyncsPanel = ({ isOpen, onClose, onRefreshOrders }) => {
   const resetForm = () => {
     setFormData({
       name: '', url: '', parserType: 'css-selectors', parserConfig: '',
+      articleHtml: '',
       itemSelector: '', titleSelector: '', mediaTypeSelector: '',
       urlSelector: '', yearSelector: '', defaultMediaType: 'movie',
       useJavaScript: false, isActive: true, headImportCount: '', tailImportCount: ''
@@ -86,11 +88,24 @@ const ListSyncsPanel = ({ isOpen, onClose, onRefreshOrders }) => {
   };
 
   const openEdit = (cfg) => {
+    let articleHtml = '';
+    if ((cfg.parserType || '') === 'avp-timeline') {
+      if (cfg.parserConfig) {
+        try {
+          const parsed = JSON.parse(cfg.parserConfig);
+          articleHtml = parsed?.articleHtml || parsed?.sourceHtml || parsed?.article || '';
+        } catch (_error) {
+          articleHtml = cfg.parserConfig;
+        }
+      }
+    }
+
     setFormData({
       name: cfg.name || '',
       url: cfg.url || '',
       parserType: cfg.parserType || 'css-selectors',
       parserConfig: cfg.parserConfig || '',
+      articleHtml,
       itemSelector: cfg.itemSelector || '',
       titleSelector: cfg.titleSelector || '',
       mediaTypeSelector: cfg.mediaTypeSelector || '',
@@ -118,6 +133,11 @@ const ListSyncsPanel = ({ isOpen, onClose, onRefreshOrders }) => {
       return;
     }
 
+    if (formData.parserType === 'avp-timeline' && !formData.articleHtml.trim()) {
+      setError('Source Article HTML is required for the Alien vs Predator parser');
+      return;
+    }
+
     setError('');
     try {
       const method = editingConfig ? 'PUT' : 'POST';
@@ -125,10 +145,17 @@ const ListSyncsPanel = ({ isOpen, onClose, onRefreshOrders }) => {
         ? `${config.apiBaseUrl}/api/list-scraping/configs/${editingConfig.id}`
         : `${config.apiBaseUrl}/api/list-scraping/configs`;
 
+      const payload = {
+        ...formData,
+        parserConfig: formData.parserType === 'avp-timeline'
+          ? JSON.stringify({ articleHtml: formData.articleHtml })
+          : formData.parserConfig
+      };
+
       const res = await fetch(url, {
         method,
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(formData)
+        body: JSON.stringify(payload)
       });
 
       const data = await res.json();
@@ -259,6 +286,7 @@ const ListSyncsPanel = ({ isOpen, onClose, onRefreshOrders }) => {
 
   const selectedParser = parsers.find(p => p.type === formData.parserType);
   const isCssParser = formData.parserType === 'css-selectors';
+  const isAvpParser = formData.parserType === 'avp-timeline';
 
   return (
     <>
@@ -354,7 +382,21 @@ const ListSyncsPanel = ({ isOpen, onClose, onRefreshOrders }) => {
             )}
 
             {/* Parser config (for custom parsers) */}
-            {!isCssParser && selectedParser?.configFields?.length > 0 && (
+            {isAvpParser && (
+              <div className="mb-3">
+                <label className="block text-sm font-medium mb-1">Source Article HTML *</label>
+                <textarea className="w-full border rounded px-3 py-2 text-sm font-mono"
+                          rows={12}
+                          value={formData.articleHtml}
+                          onChange={(e) => setFormData({...formData, articleHtml: e.target.value})}
+                          placeholder={'Paste the full <article class="message-body js-selectToQuote">...</article> HTML here'} />
+                <p className="text-xs text-gray-500 mt-1">
+                  Stored in DB and used as the parser source for updates.
+                </p>
+              </div>
+            )}
+
+            {!isCssParser && !isAvpParser && selectedParser?.configFields?.length > 0 && (
               <div className="mb-3">
                 <label className="block text-sm font-medium mb-1">Parser Config (JSON)</label>
                 <textarea className="w-full border rounded px-3 py-2 text-sm font-mono"

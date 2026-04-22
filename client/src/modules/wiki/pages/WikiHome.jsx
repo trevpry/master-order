@@ -100,6 +100,24 @@ const WikiHome = () => {
     }
   };
 
+  const handleIngestDating = async () => {
+    setLoading(true);
+    try {
+      const res = await fetch('/api/wiki/ingest/dating', { method: 'POST' });
+      const json = await res.json();
+      if (json.success) {
+        await fetchPages();
+        await fetchStats();
+        alert(`Processed ${json.data.processed} dating records into ${json.data.pages.length} wiki pages`);
+      }
+    } catch (err) {
+      console.error('Dating ingest failed:', err);
+      alert('Dating ingest failed — is Ollama running?');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handleLint = async () => {
     setLoading(true);
     try {
@@ -196,6 +214,13 @@ const WikiHome = () => {
                   className="px-4 py-2 bg-purple-600 hover:bg-purple-700 disabled:opacity-50 rounded-lg text-white text-sm"
                 >
                   {loading ? 'Processing...' : 'Backfill from Chat'}
+                </button>
+                <button
+                  onClick={handleIngestDating}
+                  disabled={loading}
+                  className="px-4 py-2 bg-pink-600 hover:bg-pink-700 disabled:opacity-50 rounded-lg text-white text-sm"
+                >
+                  {loading ? 'Processing...' : 'Ingest Dating Data'}
                 </button>
                 <button
                   onClick={handleLint}

@@ -99,6 +99,12 @@ class WikiBackgroundService {
         }
       }
 
+      // 1b. Ingest dating-section records modified since last ingest
+      const datingResult = await this.wikiService.ingestDatingData(lastIngest || null);
+      if (datingResult.processed > 0) {
+        console.log(`Wiki: Ingested ${datingResult.processed} updated dating records`);
+      }
+
       // 2. Backfill chat extraction for any un-extracted messages
       const unextractedCount = await prisma.chatMessage.count({
         where: { wikiExtracted: false, role: 'user' }

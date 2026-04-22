@@ -94,6 +94,12 @@ router.post('/ingest/all', asyncHandler(async (req, res) => {
   sendSuccess(res, result);
 }));
 
+// POST /api/wiki/ingest/dating - Ingest dating-section data into wiki
+router.post('/ingest/dating', asyncHandler(async (req, res) => {
+  const result = await wikiService.ingestDatingData();
+  sendSuccess(res, result);
+}));
+
 // POST /api/wiki/backfill-chat - Backfill wiki extraction from past chats
 router.post('/backfill-chat', asyncHandler(async (req, res) => {
   const batchSize = parseInt(req.query.batchSize) || 20;

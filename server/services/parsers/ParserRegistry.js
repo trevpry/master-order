@@ -1,3 +1,4 @@
+const AlienVsPredatorTimelineParser = require('./AlienVsPredatorTimelineParser');
 const CssSelectorParser = require('./CssSelectorParser');
 const DcuTimelineParser = require('./DcuTimelineParser');
 const McuTimelineParser = require('./McuTimelineParser');
@@ -8,6 +9,7 @@ const StarWarsTimelineParser = require('./StarWarsTimelineParser');
  * Add new parsers here when creating custom list parsers.
  */
 const parsers = {
+  'avp-timeline': new AlienVsPredatorTimelineParser(),
   'css-selectors': new CssSelectorParser(),
   'dcu-timeline': new DcuTimelineParser(),
   'mcu-timeline': new McuTimelineParser(),

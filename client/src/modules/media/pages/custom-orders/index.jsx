@@ -1243,7 +1243,8 @@ function CustomOrders() {
         const errorData = await response.json();
         if (!skipUIUpdate) {
           if (response.status === 409) {
-            setMessage(`Duplicate item: "${errorData.existingItem.title}" is already in this custom order`);
+            const duplicateTitle = errorData?.existingItem?.title || requestBody?.title || mediaItem?.title || 'This item';
+            setMessage(`Duplicate item: "${duplicateTitle}" is already in this custom order`);
           } else {
             setMessage(`Error: ${errorData.error}`);
           }

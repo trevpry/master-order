@@ -5,7 +5,7 @@ const DEFAULT_WIKI_SCHEMA = `
 # Personal Wiki Schema (Layer 3)
 
 ## Purpose
-You are maintaining a personal knowledge wiki about the user. Your job is to synthesize raw information from notes, daily journals, and chat conversations into structured, interlinked Markdown wiki pages.
+You are maintaining a personal knowledge wiki about the user. Your job is to synthesize raw information from notes, daily journals, chat conversations, and dating-section data into structured, interlinked Markdown wiki pages.
 
 ## Page Types
 - **entity**: Wikipedia-style pages for people, places, tools, companies, media the user interacts with
@@ -368,7 +368,15 @@ class WikiService {
 
     const uningested = allNotes.filter(n => !ingestedNoteIds.has(n.id)).map(n => n.id);
 
-    if (uningested.length === 0) return { processed: 0, pages: [] };
+    if (uningested.length === 0) {
+      const datingResult = await this.ingestDatingData();
+      return {
+        processed: datingResult.processed,
+        pages: datingResult.pages,
+        notesProcessed: 0,
+        datingProcessed: datingResult.processed
+      };
+    }
 
     // Process in batches of 5 to avoid overwhelming Ollama
     let totalProcessed = 0;
@@ -381,7 +389,117 @@ class WikiService {
       allAffectedPages.push(...result.pages);
     }
 
-    return { processed: totalProcessed, pages: [...new Set(allAffectedPages)] };
+    const datingResult = await this.ingestDatingData();
+
+    return {
+      processed: totalProcessed + datingResult.processed,
+      pages: [...new Set([...allAffectedPages, ...datingResult.pages])],
+      notesProcessed: totalProcessed,
+      datingProcessed: datingResult.processed
+    };
+  }
+
+  // ==========================================
+  // OPERATION A2: INGEST (Dating Section -> Wiki)
+  // ==========================================
+
+  async ingestDatingData(since = null) {
+    const whereClause = since ? { updatedAt: { gt: since } } : {};
+
+    const connections = await prisma.connection.findMany({
+      where: whereClause,
+      orderBy: { updatedAt: 'desc' },
+      take: 50,
+      include: {
+        app: { select: { name: true } },
+        dates: {
+          orderBy: { dateTime: 'desc' },
+          take: 5,
+          select: {
+            id: true,
+            dateTime: true,
+            location: true,
+            activity: true,
+            rating: true,
+            chemistry: true,
+            attraction: true,
+            outcome: true,
+            secondDate: true,
+            notes: true
+          }
+        },
+        encounters: {
+          orderBy: { dateTime: 'desc' },
+          take: 5,
+          select: {
+            id: true,
+            dateTime: true,
+            type: true,
+            location: true,
+            satisfaction: true,
+            chemistry: true,
+            protection: true,
+            tested: true,
+            notes: true
+          }
+        },
+        messages: {
+          orderBy: { timestamp: 'desc' },
+          take: 15,
+          select: {
+            id: true,
+            timestamp: true,
+            sender: true,
+            content: true,
+            platform: true
+          }
+        }
+      }
+    });
+
+    if (connections.length === 0) {
+      return { processed: 0, pages: [] };
+    }
+
+    const schema = await this.getWikiSchema();
+    const existingPages = await this.getAllPages();
+    const existingIndex = existingPages.map(p => `- [[${p.slug}]]: ${p.title} (${p.type}/${p.category})`).join('\n');
+
+    const affectedSlugs = [];
+    let processed = 0;
+
+    for (const connection of connections) {
+      try {
+        const datingPayload = this.serializeDatingConnection(connection);
+        const prompt = this.buildDatingIngestionPrompt(datingPayload, existingIndex, connection.id);
+
+        const aiResponse = await this.callOllama([
+          { role: 'system', content: schema },
+          { role: 'user', content: prompt }
+        ]);
+
+        const updates = this.parseWikiResponse(aiResponse);
+        for (const update of updates) {
+          const slugs = await this.applyWikiUpdate(update, connection.id, 'dating');
+          affectedSlugs.push(...slugs);
+        }
+
+        await this.addLog(
+          'ingest-dating',
+          `Ingested dating connection #${connection.id} (${connection.guyName})`,
+          'dating',
+          connection.id,
+          affectedSlugs
+        );
+
+        processed++;
+      } catch (err) {
+        console.error(`Wiki ingest failed for dating connection ${connection.id}:`, err.message);
+        await this.addLog('ingest-dating', `Failed to ingest dating connection ${connection.id}: ${err.message}`, 'dating', connection.id, []);
+      }
+    }
+
+    return { processed, pages: [...new Set(affectedSlugs)] };
   }
 
   // ==========================================
@@ -499,7 +617,7 @@ If the user revealed genuinely new personal information not already captured in 
       "title": "Page Title",
       "type": "entity" | "concept" | "comparison",
       "category": "personal" | "health" | "work" | "interests" | "relationships" | "goals" | "habits" | "media" | "technology" | "finance" | "travel" | "food" | "general",
-      "content": "Full markdown page content (complete and merged)",
+      "content": "Markdown content to merge (full page or incremental additions)",
       "reason": "Brief explanation of what new information was extracted"
     }
   ]
@@ -512,7 +630,7 @@ If NO new personal information was revealed (trivial chat, technical questions, 
 \`\`\`
 
 CRITICAL RULES:
-- For "update" actions: provide the COMPLETE MERGED page content — take the existing page shown above and integrate new facts into it. The content will REPLACE the entire page. Do NOT duplicate any information.
+- For "update" actions: provide AUGMENTING content that adds new facts without deleting existing verified information. You may return a full merged page, but it must preserve prior facts.
 - NEVER create a page that already exists in the Existing Wiki Pages list. Use "update" instead.
 - Only extract genuinely personal and meaningful information. Do NOT extract:
   - Information already in existing wiki pages
@@ -690,7 +808,7 @@ Based on this source, respond with wiki page creates/updates in this exact JSON 
       "title": "Page Title",
       "type": "entity" | "concept" | "comparison",
       "category": "personal" | "health" | "work" | "interests" | "relationships" | "goals" | "habits" | "media" | "technology" | "finance" | "travel" | "food" | "general",
-      "content": "Full markdown page content (complete and merged)",
+      "content": "Markdown content to merge (full page or incremental additions)",
       "reason": "Brief explanation of what was extracted or changed"
     }
   ]
@@ -704,9 +822,87 @@ If no meaningful personal information can be extracted, respond with:
 
 CRITICAL RULES:
 - For "create" actions: provide the FULL page content in Markdown.
-- For "update" actions: provide the COMPLETE MERGED page content — take the existing page content shown above and integrate the new information into it. The content you return will REPLACE the entire page. Do NOT just provide a fragment to append. Do NOT duplicate bullet points or sections that already exist. Merge new facts into the appropriate existing sections.
+- For "update" actions: provide AUGMENTING content that adds new facts without deleting existing verified information. You may return either a full merged page or incremental additions, but avoid duplicate bullets/sections.
 - NEVER create a page that already exists in the Existing Wiki Pages list above. Use "update" instead.
 - Always include wiki-links using [[slug]] format when referencing other pages.`;
+  }
+
+  buildDatingIngestionPrompt(datingPayload, existingIndex, connectionId) {
+    return `Ingest the following dating-section record into the personal wiki. Extract only meaningful, durable personal insights and relationship patterns.
+
+## Existing Wiki Pages
+${existingIndex || '(No pages yet — you are starting the wiki from scratch)'}
+
+## Source Content (Dating Connection #${connectionId})
+${datingPayload}
+
+## Instructions
+Respond with wiki page creates/updates in this exact JSON format:
+
+\`\`\`json
+{
+  "updates": [
+    {
+      "action": "create" | "update",
+      "slug": "page-slug",
+      "title": "Page Title",
+      "type": "entity" | "concept" | "comparison",
+      "category": "personal" | "health" | "work" | "interests" | "relationships" | "goals" | "habits" | "media" | "technology" | "finance" | "travel" | "food" | "general",
+      "content": "Markdown content to merge (full page or incremental additions)",
+      "reason": "Brief explanation of what was extracted or changed"
+    }
+  ]
+}
+\`\`\`
+
+If no meaningful wiki-worthy information should be added, respond with:
+\`\`\`json
+{"updates": []}
+\`\`\`
+
+CRITICAL RULES:
+- Focus on relationship patterns, preferences, boundaries, compatibility signals, communication habits, and recurring themes.
+- Avoid explicit sexual detail; keep summaries high-level and respectful.
+- For "update" actions: provide augmenting content that preserves existing page facts.
+- NEVER create a page that already exists in the Existing Wiki Pages list above. Use "update" instead.
+- Include source references in the page Sources section using dating IDs (e.g., connection #${connectionId}, date IDs, encounter IDs, message IDs).`;
+  }
+
+  serializeDatingConnection(connection) {
+    const safeMessages = (connection.messages || []).map(m => ({
+      id: m.id,
+      timestamp: m.timestamp,
+      sender: m.sender,
+      platform: m.platform,
+      content: (m.content || '').substring(0, 400)
+    }));
+
+    const payload = {
+      connection: {
+        id: connection.id,
+        app: connection.app?.name,
+        guyName: connection.guyName,
+        age: connection.age,
+        location: connection.location,
+        status: connection.status,
+        firstContact: connection.firstContact,
+        lastContact: connection.lastContact,
+        responseRate: connection.responseRate,
+        avgResponseTime: connection.avgResponseTime,
+        relationshipStatus: connection.relationshipStatus,
+        lookingFor: connection.lookingFor,
+        openTo: connection.openTo,
+        interests: connection.interests,
+        notes: connection.notes,
+        messagesExchanged: connection.messagesExchanged,
+        updatedAt: connection.updatedAt
+      },
+      recentDates: connection.dates || [],
+      recentEncounters: connection.encounters || [],
+      recentMessages: safeMessages
+    };
+
+    return JSON.stringify(payload, null, 2);
   }
 
   parseWikiResponse(aiResponse) {
@@ -740,6 +936,9 @@ CRITICAL RULES:
     if (update.action === 'create' && !existing) {
       // Create new page
       const outboundLinks = this.extractWikiLinks(update.content || '');
+      const noteIds = sourceType === 'note' || sourceType === 'daily_note' ? [sourceId] : [];
+      const chatIds = sourceType === 'chat' ? [sourceId] : [];
+
       await this.createPage({
         slug: update.slug,
         title: update.title || update.slug,
@@ -747,8 +946,8 @@ CRITICAL RULES:
         type: update.type || 'concept',
         category: update.category || 'general',
         outboundLinks: JSON.stringify(outboundLinks),
-        sourceNoteIds: sourceType !== 'chat' ? JSON.stringify([sourceId]) : '[]',
-        sourceChatIds: sourceType === 'chat' ? JSON.stringify([sourceId]) : '[]'
+        sourceNoteIds: JSON.stringify(noteIds),
+        sourceChatIds: JSON.stringify(chatIds)
       });
       affectedSlugs.push(update.slug);
 
@@ -756,9 +955,8 @@ CRITICAL RULES:
       await this.updateInboundLinks(update.slug, outboundLinks);
     } else if (existing) {
       // Update existing page (both "update" action and "create" on existing page)
-      // Use the AI-provided content as a full REPLACEMENT, not an append.
-      // The prompts instruct the AI to return complete merged content.
-      const newContent = update.content || existing.content;
+      // Merge safely so partial AI updates augment instead of clobbering existing page content.
+      const newContent = this.mergeWikiContent(existing.content, update.content, update.title || existing.title);
 
       // Safety: skip if the content is identical (no actual change)
       if (newContent.trim() === existing.content.trim()) {
@@ -770,7 +968,7 @@ CRITICAL RULES:
       // Update source tracking
       const existingNoteIds = JSON.parse(existing.sourceNoteIds || '[]');
       const existingChatIds = JSON.parse(existing.sourceChatIds || '[]');
-      if (sourceType !== 'chat' && !existingNoteIds.includes(sourceId)) {
+      if ((sourceType === 'note' || sourceType === 'daily_note') && !existingNoteIds.includes(sourceId)) {
         existingNoteIds.push(sourceId);
       }
       if (sourceType === 'chat' && !existingChatIds.includes(sourceId)) {
@@ -796,6 +994,83 @@ CRITICAL RULES:
   extractWikiLinks(content) {
     const matches = content.match(/\[\[([^\]]+)\]\]/g) || [];
     return [...new Set(matches.map(m => m.replace(/\[\[|\]\]/g, '')))];
+  }
+
+  mergeWikiContent(existingContent, incomingContent, title = 'Wiki Page') {
+    const existing = (existingContent || '').trim();
+    const incoming = (incomingContent || '').trim();
+
+    if (!incoming) return existing;
+    if (!existing) return incoming;
+
+    const normalizedExisting = this.normalizeForMerge(existing);
+    const normalizedIncoming = this.normalizeForMerge(incoming);
+
+    if (normalizedExisting === normalizedIncoming) return existing;
+
+    const incomingLooksFullPage = incoming.startsWith('# ');
+    const incomingIsReasonablySized = incoming.length >= Math.floor(existing.length * 0.75);
+    if (incomingLooksFullPage && incomingIsReasonablySized) {
+      return incoming;
+    }
+
+    const existingLines = existing.split(/\r?\n/);
+    const existingLineSet = new Set(
+      existingLines
+        .map(line => this.normalizeForMerge(line))
+        .filter(Boolean)
+    );
+
+    const incomingLines = incoming
+      .split(/\r?\n/)
+      .map(line => line.trim())
+      .filter(Boolean);
+
+    const uniqueIncomingLines = incomingLines.filter(line => {
+      const normalized = this.normalizeForMerge(line);
+      return normalized && !existingLineSet.has(normalized);
+    });
+
+    if (uniqueIncomingLines.length === 0) {
+      return existing;
+    }
+
+    const insertionIndex = this.findMergeInsertionIndex(existingLines);
+    const mergedLines = [...existingLines];
+    const spacer = mergedLines[insertionIndex - 1]?.trim() === '' ? [] : [''];
+
+    mergedLines.splice(
+      insertionIndex,
+      0,
+      ...spacer,
+      '## Chat Additions',
+      ...uniqueIncomingLines,
+      ''
+    );
+
+    if (!mergedLines[0]?.startsWith('# ')) {
+      mergedLines.unshift(`# ${title}`, '');
+    }
+
+    return mergedLines.join('\n').replace(/\n{3,}/g, '\n\n').trim();
+  }
+
+  findMergeInsertionIndex(lines) {
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i].trim().toLowerCase();
+      if (line === '## sources' || line === '## last updated') {
+        return i;
+      }
+    }
+    return lines.length;
+  }
+
+  normalizeForMerge(value) {
+    return (value || '')
+      .toLowerCase()
+      .replace(/\r/g, '')
+      .replace(/\s+/g, ' ')
+      .trim();
   }
 
   async updateInboundLinks(fromSlug, targetSlugs) {

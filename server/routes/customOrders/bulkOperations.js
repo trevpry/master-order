@@ -92,17 +92,28 @@ function createBulkOperationsRoutes(prisma, services) {
       let existingItem;
       
       if (mediaType === 'comic') {
-        // For comics, check for duplicates by series, year, issue, and main title
-        // This allows the same comic to be added multiple times with different titles
-        existingItem = await prisma.customOrderItem.findFirst({
+        // For comics, allow duplicate comic identity entries when the effective display title differs.
+        // Effective display title is customTitle when present, otherwise title.
+        const candidateDisplayTitle = (customTitle || title || '').trim();
+        const matchingComics = await prisma.customOrderItem.findMany({
           where: {
             customOrderId: parseInt(id),
             mediaType: 'comic',
             comicSeries: comicSeries,
             comicYear: comicYear ? parseInt(comicYear) : null,
-            comicIssue: comicIssue ? String(comicIssue) : null,
-            title: title // Include title to allow same comic with different custom titles
+            comicIssue: comicIssue ? String(comicIssue) : null
+          },
+          select: {
+            id: true,
+            title: true,
+            customTitle: true,
+            mediaType: true
           }
+        });
+
+        existingItem = matchingComics.find((item) => {
+          const existingDisplayTitle = (item.customTitle || item.title || '').trim();
+          return existingDisplayTitle === candidateDisplayTitle;
         });
       } else if (mediaType === 'book') {
         existingItem = await prisma.customOrderItem.findFirst({
@@ -158,7 +169,13 @@ function createBulkOperationsRoutes(prisma, services) {
       }
 
       if (existingItem) {
-        return res.status(409).json({ error: 'This item is already in the custom order' });
+        return res.status(409).json({
+          error: 'This item is already in the custom order',
+          existingItem: {
+            title: existingItem.title || title || 'This item',
+            mediaType: existingItem.mediaType || mediaType
+          }
+        });
       }
 
       // Get the next sort order
