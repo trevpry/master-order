@@ -516,12 +516,17 @@ class ChatService {
       select: { title: true }
     });
 
-    await this.wikiService.extractFromChat(
+    const extractionResult = await this.wikiService.extractFromChat(
       userMsg.content,
       assistantContent,
       conversation?.title || 'Untitled',
       conversationId
     );
+
+    // Keep messages retriable if extraction is disabled or fails.
+    if (extractionResult && extractionResult.processed === false) {
+      return;
+    }
 
     // Mark both messages as wiki-extracted
     await prisma.chatMessage.updateMany({

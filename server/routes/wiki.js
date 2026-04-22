@@ -107,6 +107,80 @@ router.post('/backfill-chat', asyncHandler(async (req, res) => {
   sendSuccess(res, result);
 }));
 
+// POST /api/wiki/backfill-chat/reset-flags - Reset wiki extraction flags for scoped chat messages
+router.post('/backfill-chat/reset-flags', asyncHandler(async (req, res) => {
+  const {
+    conversationId,
+    startDate,
+    endDate,
+    roles,
+    limit,
+    dryRun = true,
+    confirm = false
+  } = req.body || {};
+
+  const hasScope = !!conversationId || !!startDate || !!endDate;
+  if (!hasScope) {
+    return sendBadRequest(res, 'At least one scope filter is required: conversationId, startDate, or endDate');
+  }
+
+  const parsedConversationId = conversationId !== undefined && conversationId !== null
+    ? parseInt(conversationId)
+    : undefined;
+  if (parsedConversationId !== undefined && Number.isNaN(parsedConversationId)) {
+    return sendBadRequest(res, 'conversationId must be a valid number');
+  }
+
+  const parsedStartDate = startDate ? new Date(startDate) : null;
+  const parsedEndDate = endDate ? new Date(endDate) : null;
+  if (parsedStartDate && Number.isNaN(parsedStartDate.getTime())) {
+    return sendBadRequest(res, 'startDate must be a valid date/time');
+  }
+  if (parsedEndDate && Number.isNaN(parsedEndDate.getTime())) {
+    return sendBadRequest(res, 'endDate must be a valid date/time');
+  }
+  if (parsedStartDate && parsedEndDate && parsedStartDate > parsedEndDate) {
+    return sendBadRequest(res, 'startDate must be earlier than or equal to endDate');
+  }
+
+  let parsedRoles = ['user', 'assistant'];
+  if (roles !== undefined) {
+    if (!Array.isArray(roles) || roles.length === 0) {
+      return sendBadRequest(res, 'roles must be a non-empty array when provided');
+    }
+    const allowedRoles = new Set(['user', 'assistant']);
+    const invalidRole = roles.find(r => !allowedRoles.has(r));
+    if (invalidRole) {
+      return sendBadRequest(res, `Invalid role: ${invalidRole}. Allowed roles: user, assistant`);
+    }
+    parsedRoles = roles;
+  }
+
+  let parsedLimit;
+  if (limit !== undefined && limit !== null) {
+    parsedLimit = parseInt(limit);
+    if (Number.isNaN(parsedLimit) || parsedLimit <= 0) {
+      return sendBadRequest(res, 'limit must be a positive integer');
+    }
+  }
+
+  const isDryRun = !!dryRun;
+  if (!isDryRun && confirm !== true) {
+    return sendBadRequest(res, 'confirm=true is required when dryRun is false');
+  }
+
+  const result = await wikiService.resetChatExtractionFlags({
+    conversationId: parsedConversationId,
+    startDate: startDate || undefined,
+    endDate: endDate || undefined,
+    roles: parsedRoles,
+    limit: parsedLimit,
+    dryRun: isDryRun
+  });
+
+  sendSuccess(res, result);
+}));
+
 // ============================================================================
 // LINT
 // ============================================================================

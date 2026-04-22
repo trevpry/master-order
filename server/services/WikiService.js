@@ -411,48 +411,21 @@ class WikiService {
       orderBy: { updatedAt: 'desc' },
       take: 50,
       include: {
-        app: { select: { name: true } },
+        app: true,
         dates: {
-          orderBy: { dateTime: 'desc' },
-          take: 5,
-          select: {
-            id: true,
-            dateTime: true,
-            location: true,
-            activity: true,
-            rating: true,
-            chemistry: true,
-            attraction: true,
-            outcome: true,
-            secondDate: true,
-            notes: true
-          }
+          orderBy: { dateTime: 'desc' }
         },
         encounters: {
-          orderBy: { dateTime: 'desc' },
-          take: 5,
-          select: {
-            id: true,
-            dateTime: true,
-            type: true,
-            location: true,
-            satisfaction: true,
-            chemistry: true,
-            protection: true,
-            tested: true,
-            notes: true
-          }
+          orderBy: { dateTime: 'desc' }
         },
         messages: {
-          orderBy: { timestamp: 'desc' },
-          take: 15,
-          select: {
-            id: true,
-            timestamp: true,
-            sender: true,
-            content: true,
-            platform: true
-          }
+          orderBy: { timestamp: 'desc' }
+        },
+        screenshots: {
+          orderBy: { createdAt: 'desc' }
+        },
+        connectionPhotos: {
+          orderBy: { createdAt: 'asc' }
         }
       }
     });
@@ -579,10 +552,14 @@ class WikiService {
 
   async extractFromChat(userMessage, assistantResponse, conversationTitle, conversationId) {
     const settings = await this.getWikiSettings();
-    if (!settings.wikiChatExtractionEnabled) return null;
+    if (!settings.wikiChatExtractionEnabled) {
+      return { processed: false, skipped: 'disabled' };
+    }
 
     // Skip trivial messages
-    if (!userMessage || userMessage.trim().length < 20) return null;
+    if (!userMessage || userMessage.trim().length < 20) {
+      return { processed: true, extracted: 0, pages: [], skipped: 'trivial' };
+    }
 
     const schema = await this.getWikiSchema();
     const existingPages = await this.getAllPages();
@@ -592,7 +569,10 @@ class WikiService {
     const relevantPages = await this.findRelevantPages(userMessage, 5);
     const relevantContext = relevantPages.map(p => `### [[${p.slug}]]\n${p.content}`).join('\n\n');
 
-    const prompt = `Analyze the following chat exchange and extract any NEW personal facts, preferences, goals, habits, opinions, biographical details, or other meaningful personal information the user revealed.
+    const prompt = `Analyze the following chat exchange and extract any NEW meaningful information suitable for the personal wiki, including:
+  - facts/preferences/goals/habits/opinions about the user
+  - durable information about other individuals/entities the conversation references
+  - relationship context and recurring patterns
 
 ## Existing Wiki Pages
 ${existingIndex || '(No pages yet)'}
@@ -606,7 +586,7 @@ ${relevantContext || '(No relevant pages)'}
 **Assistant:** ${assistantResponse}
 
 ## Instructions
-If the user revealed genuinely new personal information not already captured in the existing wiki pages above, respond with wiki page updates in this exact JSON format:
+If the exchange revealed genuinely new wiki-worthy information not already captured in the existing wiki pages above, respond with wiki page updates in this exact JSON format:
 
 \`\`\`json
 {
@@ -632,6 +612,8 @@ If NO new personal information was revealed (trivial chat, technical questions, 
 CRITICAL RULES:
 - For "update" actions: provide AUGMENTING content that adds new facts without deleting existing verified information. You may return a full merged page, but it must preserve prior facts.
 - NEVER create a page that already exists in the Existing Wiki Pages list. Use "update" instead.
+- When an entity/person appears that is not yet represented, create a new entity page for them.
+- When an entity/person already exists, update that existing page with new verified details.
 - Only extract genuinely personal and meaningful information. Do NOT extract:
   - Information already in existing wiki pages
   - Generic knowledge or technical facts
@@ -644,7 +626,9 @@ CRITICAL RULES:
       ]);
 
       const updates = this.parseWikiResponse(aiResponse);
-      if (updates.length === 0) return null;
+      if (updates.length === 0) {
+        return { processed: true, extracted: 0, pages: [] };
+      }
 
       const affectedSlugs = [];
       for (const update of updates) {
@@ -662,10 +646,10 @@ CRITICAL RULES:
         );
       }
 
-      return { extracted: updates.length, pages: affectedSlugs };
+      return { processed: true, extracted: updates.length, pages: affectedSlugs };
     } catch (err) {
       console.error('Wiki chat extraction failed:', err.message);
-      return null;
+      return { processed: false, error: err.message };
     }
   }
 
@@ -696,12 +680,17 @@ CRITICAL RULES:
       });
 
       if (assistantMsg) {
-        await this.extractFromChat(
+        const result = await this.extractFromChat(
           msg.content,
           assistantMsg.content,
           msg.conversation.title,
           msg.conversation.id
         );
+
+        // Preserve failed pairs for retry instead of permanently marking as extracted.
+        if (result && result.processed === false) {
+          continue;
+        }
       }
 
       // Mark both messages as extracted
@@ -720,6 +709,110 @@ CRITICAL RULES:
     }
 
     return { processed, total: unextracted.length };
+  }
+
+  async resetChatExtractionFlags(options = {}) {
+    const {
+      conversationId,
+      startDate,
+      endDate,
+      roles = ['user', 'assistant'],
+      limit,
+      dryRun = true
+    } = options;
+
+    const where = {
+      wikiExtracted: true,
+      role: { in: roles }
+    };
+
+    if (conversationId !== undefined && conversationId !== null) {
+      where.conversationId = conversationId;
+    }
+
+    if (startDate || endDate) {
+      where.createdAt = {};
+      if (startDate) where.createdAt.gte = new Date(startDate);
+      if (endDate) where.createdAt.lte = new Date(endDate);
+    }
+
+    const matched = await prisma.chatMessage.count({ where });
+
+    if (dryRun) {
+      return {
+        dryRun: true,
+        matched,
+        updated: 0,
+        filters: {
+          conversationId: conversationId ?? null,
+          startDate: startDate || null,
+          endDate: endDate || null,
+          roles,
+          limit: limit || null
+        }
+      };
+    }
+
+    if (limit && limit > 0) {
+      const rows = await prisma.chatMessage.findMany({
+        where,
+        select: { id: true },
+        orderBy: { createdAt: 'desc' },
+        take: limit
+      });
+
+      const ids = rows.map(r => r.id);
+      if (ids.length === 0) {
+        return {
+          dryRun: false,
+          matched,
+          updated: 0,
+          filters: {
+            conversationId: conversationId ?? null,
+            startDate: startDate || null,
+            endDate: endDate || null,
+            roles,
+            limit
+          }
+        };
+      }
+
+      const result = await prisma.chatMessage.updateMany({
+        where: { id: { in: ids } },
+        data: { wikiExtracted: false }
+      });
+
+      return {
+        dryRun: false,
+        matched,
+        updated: result.count,
+        filters: {
+          conversationId: conversationId ?? null,
+          startDate: startDate || null,
+          endDate: endDate || null,
+          roles,
+          limit
+        }
+      };
+    }
+
+    const result = await prisma.chatMessage.updateMany({
+      where,
+      data: { wikiExtracted: false }
+    });
+
+    return {
+      dryRun: false,
+      matched,
+      updated: result.count,
+      filters: {
+        conversationId: conversationId ?? null,
+        startDate: startDate || null,
+        endDate: endDate || null,
+        roles,
+        limit: limit || null
+      }
+    };
   }
 
   // ==========================================
@@ -785,7 +878,7 @@ CRITICAL RULES:
   // ==========================================
 
   buildIngestionPrompt(noteContent, existingIndex, relevantContext, noteId, sourceType) {
-    return `Ingest the following ${sourceType} into the personal wiki. Analyze it for personal facts, preferences, goals, habits, opinions, and any other meaningful personal information.
+    return `Ingest the following ${sourceType} into the personal wiki. Analyze it for meaningful durable information, including user facts and information about other people/entities mentioned.
 
 ## Existing Wiki Pages
 ${existingIndex || '(No pages yet — you are starting the wiki from scratch)'}
@@ -824,6 +917,8 @@ CRITICAL RULES:
 - For "create" actions: provide the FULL page content in Markdown.
 - For "update" actions: provide AUGMENTING content that adds new facts without deleting existing verified information. You may return either a full merged page or incremental additions, but avoid duplicate bullets/sections.
 - NEVER create a page that already exists in the Existing Wiki Pages list above. Use "update" instead.
+- If the source introduces a new person/entity, create a new entity page.
+- If the source adds facts about an existing person/entity, update the existing page rather than creating duplicates.
 - Always include wiki-links using [[slug]] format when referencing other pages.`;
   }
 
@@ -861,6 +956,9 @@ If no meaningful wiki-worthy information should be added, respond with:
 \`\`\`
 
 CRITICAL RULES:
+- Treat the Source Content as authoritative and complete for this connection. Do not ignore sections.
+- Ensure extraction considers all available fields, including the About section (bio and notes), profile attributes, dates, encounters, messages, screenshots, and photos metadata.
+- Create or update pages for relevant individuals/entities referenced in this record (not just abstract relationship pages).
 - Focus on relationship patterns, preferences, boundaries, compatibility signals, communication habits, and recurring themes.
 - Avoid explicit sexual detail; keep summaries high-level and respectful.
 - For "update" actions: provide augmenting content that preserves existing page facts.
@@ -869,51 +967,57 @@ CRITICAL RULES:
   }
 
   serializeDatingConnection(connection) {
-    const safeMessages = (connection.messages || []).map(m => ({
-      id: m.id,
-      timestamp: m.timestamp,
-      sender: m.sender,
-      platform: m.platform,
-      content: (m.content || '').substring(0, 400)
-    }));
-
     const payload = {
-      connection: {
-        id: connection.id,
-        app: connection.app?.name,
-        guyName: connection.guyName,
-        age: connection.age,
-        location: connection.location,
-        status: connection.status,
-        firstContact: connection.firstContact,
-        lastContact: connection.lastContact,
-        responseRate: connection.responseRate,
-        avgResponseTime: connection.avgResponseTime,
-        relationshipStatus: connection.relationshipStatus,
-        lookingFor: connection.lookingFor,
-        openTo: connection.openTo,
-        interests: connection.interests,
-        notes: connection.notes,
-        messagesExchanged: connection.messagesExchanged,
-        updatedAt: connection.updatedAt
-      },
-      recentDates: connection.dates || [],
-      recentEncounters: connection.encounters || [],
-      recentMessages: safeMessages
+      connection,
+      summary: {
+        about: {
+          bio: connection.bio || null,
+          notes: connection.notes || null
+        },
+        counts: {
+          dates: (connection.dates || []).length,
+          encounters: (connection.encounters || []).length,
+          messages: (connection.messages || []).length,
+          screenshots: (connection.screenshots || []).length,
+          photos: (connection.connectionPhotos || []).length
+        }
+      }
     };
 
     return JSON.stringify(payload, null, 2);
   }
 
   parseWikiResponse(aiResponse) {
+    const tryParse = (raw) => {
+      if (!raw) return null;
+      try {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed?.updates)) return parsed.updates;
+        return null;
+      } catch {
+        return null;
+      }
+    };
+
     try {
       // Extract JSON from the response (may be wrapped in markdown code blocks)
       const jsonMatch = aiResponse.match(/```json\s*([\s\S]*?)```/) ||
                         aiResponse.match(/```\s*([\s\S]*?)```/) ||
                         [null, aiResponse];
       const jsonStr = jsonMatch[1].trim();
-      const parsed = JSON.parse(jsonStr);
-      return parsed.updates || [];
+      const parsedUpdates = tryParse(jsonStr);
+      if (parsedUpdates) return parsedUpdates;
+
+      // Fallback: if model wrapped JSON with additional text, extract the first JSON object.
+      const start = aiResponse.indexOf('{');
+      const end = aiResponse.lastIndexOf('}');
+      if (start !== -1 && end !== -1 && end > start) {
+        const objectStr = aiResponse.slice(start, end + 1).trim();
+        const objectUpdates = tryParse(objectStr);
+        if (objectUpdates) return objectUpdates;
+      }
+
+      return [];
     } catch (err) {
       // Try parsing the whole response as JSON
       try {
@@ -933,7 +1037,11 @@ CRITICAL RULES:
 
     const existing = await this.getPage(update.slug);
 
-    if (update.action === 'create' && !existing) {
+    const wantsCreate = update.action === 'create';
+    const wantsUpdate = update.action === 'update';
+
+    // Treat "update on missing page" as create to avoid dropping valid ingestion output.
+    if ((wantsCreate && !existing) || (wantsUpdate && !existing)) {
       // Create new page
       const outboundLinks = this.extractWikiLinks(update.content || '');
       const noteIds = sourceType === 'note' || sourceType === 'daily_note' ? [sourceId] : [];
