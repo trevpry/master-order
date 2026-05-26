@@ -1900,13 +1900,11 @@ class HistoryPlusService {
       }
     }
 
-    // Check sections (skip if parent chapter or book is already read)
+    // Check sections directly linked to the event
     for (const section of event.bookSections || []) {
       const isCompleted = section.sectionCompletions && section.sectionCompletions.length > 0 && section.sectionCompletions[0].isCompleted;
-      const parentChapterRead = section.chapter?.chapterCompletions?.[0]?.isCompleted;
-      const parentBookRead = section.chapter?.book?.bookCompletions?.[0]?.isCompleted;
-      console.log(`    📄 Section "${section.title}": ${!isCompleted && !parentChapterRead && !parentBookRead ? 'UNREVIEWED' : 'reviewed'}`);
-      if (!isCompleted && !parentChapterRead && !parentBookRead) {
+      console.log(`    📄 Section "${section.title}": ${!isCompleted ? 'UNREVIEWED' : 'reviewed'}`);
+      if (!isCompleted) {
         return true;
       }
     }
@@ -2088,9 +2086,7 @@ class HistoryPlusService {
       // Sections directly linked to events
       event.bookSections?.forEach(section => {
         const isRead = section.sectionCompletions?.[0]?.isCompleted;
-        const parentChapterRead = section.chapter?.chapterCompletions?.[0]?.isCompleted;
-        const parentBookRead = section.chapter?.book?.bookCompletions?.[0]?.isCompleted;
-        if (!isRead && !parentChapterRead && !parentBookRead && !addedSectionIds.has(section.id)) {
+        if (!isRead && !addedSectionIds.has(section.id)) {
           addedSectionIds.add(section.id);
           const parentChapter = section.chapter;
           const parentBook = parentChapter?.book;
