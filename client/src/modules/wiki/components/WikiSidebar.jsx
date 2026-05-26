@@ -1,4 +1,5 @@
 import React from 'react';
+import { formatDate } from '../utils/dateFormat';
 
 const WikiSidebar = ({ pages, activeSlug, onSelectPage, activeView, onViewChange, stats, filters, onFiltersChange }) => {
   // Group pages by type
@@ -124,7 +125,7 @@ const WikiSidebar = ({ pages, activeSlug, onSelectPage, activeView, onViewChange
                 >
                   <div className="font-medium truncate">{page.title}</div>
                   <div className="text-xs text-gray-500 mt-0.5">
-                    {page.category} · {new Date(page.updatedAt).toLocaleDateString()}
+                    {page.category} · {formatDate(page.updatedAt)}
                   </div>
                 </button>
               ))}

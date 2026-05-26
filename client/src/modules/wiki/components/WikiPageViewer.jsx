@@ -1,4 +1,5 @@
 import React from 'react';
+import { formatDate } from '../utils/dateFormat';
 
 const WikiPageViewer = ({ page, onWikiLinkClick, onDelete }) => {
   if (!page) return null;
@@ -177,7 +178,7 @@ const WikiPageViewer = ({ page, onWikiLinkClick, onDelete }) => {
           </div>
           <h1 className="text-3xl font-bold text-white">{page.title}</h1>
           <div className="text-sm text-gray-500 mt-1">
-            Updated {new Date(page.updatedAt).toLocaleString()} · Created {new Date(page.createdAt).toLocaleDateString()}
+            Updated {formatDate(page.updatedAt, { includeTime: true })} · Created {formatDate(page.createdAt)}
           </div>
         </div>
         <button

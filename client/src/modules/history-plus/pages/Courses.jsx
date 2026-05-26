@@ -129,8 +129,8 @@ const Courses = () => {
     }
 
     // Validate URL format
-    if (!newCourseUrl.includes('thegreatcoursesplus.com') && !newCourseUrl.includes('wondrium.com')) {
-      alert('Please enter a valid Great Courses Plus or Wondrium URL');
+    if (!newCourseUrl.includes('thegreatcoursesplus.com') && !newCourseUrl.includes('thegreatcourses.com') && !newCourseUrl.includes('wondrium.com')) {
+      alert('Please enter a valid Great Courses, Great Courses Plus, or Wondrium URL');
       return;
     }
 
@@ -427,6 +427,7 @@ const Courses = () => {
               
               <div className="mb-3 text-xs text-gray-500">
                 <div className="mb-1"><strong>Single Course:</strong> https://www.thegreatcoursesplus.com/history-of-ancient-egypt</div>
+                <div className="mb-1"><strong>Single Course (New Format):</strong> https://plus.thegreatcourses.com/the-story-of-the-mediterranean-world</div>
                 <div><strong>Category/Collection:</strong> https://www.thegreatcoursesplus.com/category/history</div>
               </div>
               
@@ -471,8 +472,9 @@ const Courses = () => {
                 <p><strong>Examples:</strong></p>
                 <ul className="mt-1 space-y-1">
                   <li>• https://www.thegreatcoursesplus.com/browse/history</li>
+                  <li>• https://plus.thegreatcourses.com/the-story-of-the-mediterranean-world</li>
                   <li>• https://www.wondrium.com/browse/history</li>
-                  <li>• Any Great Courses Plus category or collection page</li>
+                  <li>• Any Great Courses / Great Courses Plus category or collection page</li>
                 </ul>
               </div>
             </div>

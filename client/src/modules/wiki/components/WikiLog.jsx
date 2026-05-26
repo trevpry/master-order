@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { formatDate } from '../utils/dateFormat';
 
 const WikiLog = () => {
   const [logs, setLogs] = useState([]);
@@ -101,7 +102,7 @@ const WikiLog = () => {
                   </div>
                 </div>
                 <span className="text-xs text-gray-500 whitespace-nowrap">
-                  {new Date(log.createdAt).toLocaleString()}
+                  {formatDate(log.createdAt, { includeTime: true })}
                 </span>
               </div>
             </div>

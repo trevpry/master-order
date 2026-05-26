@@ -7,6 +7,7 @@ const CourseScrapingService = require('../services/CourseScrapingService');
 const GeminiService = require('../services/GeminiService');
 const { asyncHandler, sendSuccess, sendBadRequest, sendServerError } = require('../utils/responses');
 const { validateRequiredFieldsDirect } = require('../middleware/validation');
+const { isSupportedGreatCoursesUrl } = require('../utils/courseUrlValidation');
 
 const prisma = new PrismaClient();
 const courseScrapingService = new CourseScrapingService();
@@ -312,8 +313,8 @@ router.post('/scrape-from-url', asyncHandler(async (req, res) => {
   const { url } = req.body;
   
   // Validate URL format
-  if (!url.includes('thegreatcoursesplus.com') && !url.includes('wondrium.com')) {
-    return sendBadRequest(res, 'Please provide a valid Great Courses Plus or Wondrium URL');
+  if (!isSupportedGreatCoursesUrl(url)) {
+    return sendBadRequest(res, 'Please provide a valid Great Courses, Great Courses Plus, or Wondrium URL');
   }
   
   console.log(`🔍 Starting course scraping from: ${url}`);

@@ -102,8 +102,12 @@ router.post('/ingest/dating', asyncHandler(async (req, res) => {
 
 // POST /api/wiki/backfill-chat - Backfill wiki extraction from past chats
 router.post('/backfill-chat', asyncHandler(async (req, res) => {
-  const batchSize = parseInt(req.query.batchSize) || 20;
-  const result = await wikiService.backfillChatExtraction(batchSize);
+  const parsedBatchSize = parseInt(req.query.batchSize, 10);
+  const batchSize = Number.isNaN(parsedBatchSize) ? 0 : parsedBatchSize;
+  const reprocessRecent = parseInt(req.query.reprocessRecent, 10);
+  const result = await wikiService.backfillChatExtraction(batchSize, {
+    reprocessRecent: Number.isNaN(reprocessRecent) ? 1 : reprocessRecent
+  });
   sendSuccess(res, result);
 }));
 
@@ -187,7 +191,12 @@ router.post('/backfill-chat/reset-flags', asyncHandler(async (req, res) => {
 
 // POST /api/wiki/lint
 router.post('/lint', asyncHandler(async (req, res) => {
-  const result = await wikiService.lintWiki();
+  const fixInput = req.query.fix ?? req.body?.fix;
+  const autoFix = fixInput === undefined
+    ? true
+    : !['0', 'false', 'no'].includes(String(fixInput).toLowerCase());
+
+  const result = await wikiService.lintWiki({ autoFix });
   sendSuccess(res, result);
 }));
 
@@ -206,6 +215,13 @@ router.get('/log', asyncHandler(async (req, res) => {
 router.get('/stats', asyncHandler(async (req, res) => {
   const stats = await wikiService.getStats();
   sendSuccess(res, stats);
+}));
+
+// GET /api/wiki/chat-extraction-health
+router.get('/chat-extraction-health', asyncHandler(async (req, res) => {
+  const { hours, limit } = req.query;
+  const health = await wikiService.getChatExtractionHealth({ hours, limit });
+  sendSuccess(res, health);
 }));
 
 module.exports = router;

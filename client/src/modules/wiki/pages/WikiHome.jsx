@@ -85,16 +85,30 @@ const WikiHome = () => {
   const handleBackfillChat = async () => {
     setLoading(true);
     try {
-      const res = await fetch('/api/wiki/backfill-chat', { method: 'POST' });
+      const res = await fetch('/api/wiki/backfill-chat?batchSize=0&reprocessRecent=1', { method: 'POST' });
       const json = await res.json();
-      if (json.success) {
-        await fetchPages();
-        await fetchStats();
-        alert(`Processed ${json.data.processed} chat messages for wiki extraction`);
+      if (!res.ok || !json.success) {
+        throw new Error(json?.error || json?.message || 'Chat backfill request failed');
       }
+
+      await fetchPages();
+      await fetchStats();
+
+      const data = json.data || {};
+      alert(
+        `Chat backfill complete\n\n` +
+        `• Scanned user messages: ${data.total ?? 0}\n` +
+        `• Unextracted queue: ${data.fromUnextracted ?? 0}\n` +
+        `• Recent reprocessed: ${data.reprocessedRecent ?? 0}\n` +
+        `• Processed pairs: ${data.processed ?? 0}\n` +
+        `• Updated wiki pages: ${data.withUpdates ?? 0}\n` +
+        `• No new wiki facts: ${data.noUpdates ?? 0}\n` +
+        `• Failed extractions: ${data.failed ?? 0}\n` +
+        `• Missing assistant pair: ${data.skippedNoAssistant ?? 0}`
+      );
     } catch (err) {
       console.error('Backfill failed:', err);
-      alert('Chat backfill failed — is Ollama running?');
+      alert(`Chat backfill failed: ${err.message}`);
     } finally {
       setLoading(false);
     }
@@ -121,11 +135,21 @@ const WikiHome = () => {
   const handleLint = async () => {
     setLoading(true);
     try {
-      const res = await fetch('/api/wiki/lint', { method: 'POST' });
+      const res = await fetch('/api/wiki/lint?fix=1', { method: 'POST' });
       const json = await res.json();
       if (json.success) {
-        const { issues, totalPages } = json.data;
-        alert(`Lint: ${issues.length} issues found across ${totalPages} pages`);
+        const { issues, totalPages, fixes } = json.data;
+        alert(
+          `Lint complete\n\n` +
+          `• Pages scanned: ${totalPages}\n` +
+          `• Remaining issues: ${issues.length}\n` +
+          `• Pages with content fixed: ${fixes?.contentPagesUpdated ?? 0}\n` +
+          `• Link targets retargeted: ${fixes?.contentLinksRetargeted ?? 0}\n` +
+          `• Broken links unlinked in content: ${fixes?.contentLinksUnlinked ?? 0}\n` +
+          `• Pages with outbound rebuilt: ${fixes?.outboundRebuilt ?? 0}\n` +
+          `• Pages with inbound rebuilt: ${fixes?.inboundRebuilt ?? 0}\n` +
+          `• Broken links removed from metadata: ${fixes?.strippedBrokenLinks ?? 0}`
+        );
         await fetchStats();
       }
     } catch (err) {

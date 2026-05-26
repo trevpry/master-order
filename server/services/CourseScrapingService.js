@@ -2,6 +2,7 @@ const cheerio = require('cheerio');
 const { PrismaClient } = require('@prisma/client');
 const fs = require('fs');
 const path = require('path');
+const { getGreatCoursesAnchorSelectors, isSupportedGreatCoursesUrl } = require('../utils/courseUrlValidation');
 
 const prisma = new PrismaClient();
 
@@ -79,8 +80,7 @@ class CourseScrapingService {
         'div.product_t',
         '.course-card a',
         '.course-card',
-        'a[href*="thegreatcoursesplus.com"]',
-        'a[href*="wondrium.com"]'
+        ...getGreatCoursesAnchorSelectors()
       ];
 
       console.log(`📄 Page loaded. Title: ${$('title').text()}`);
@@ -237,7 +237,7 @@ class CourseScrapingService {
     }
     
     // Validate URL format
-    if (!courseUrl.includes('thegreatcoursesplus.com') && !courseUrl.includes('wondrium.com')) {
+    if (!isSupportedGreatCoursesUrl(courseUrl)) {
       return null;
     }
     

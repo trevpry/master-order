@@ -5,12 +5,17 @@ const DEFAULT_WIKI_SCHEMA = `
 # Personal Wiki Schema (Layer 3)
 
 ## Purpose
-You are maintaining a personal knowledge wiki about the user. Your job is to synthesize raw information from notes, daily journals, chat conversations, and dating-section data into structured, interlinked Markdown wiki pages.
+You are maintaining a source-backed personal knowledge wiki about the user. Your job is to compile durable facts from raw inputs into structured, interlinked Markdown wiki pages that compound over time.
+
+Treat the wiki as the maintained knowledge layer between raw sources and future questions. Do not rewrite or forget prior knowledge unless a newer source clearly contradicts it.
 
 ## Page Types
 - **entity**: Wikipedia-style pages for people, places, tools, companies, media the user interacts with
-- **concept**: Synthesized topic pages — habits, goals, interests, recurring themes, opinions
+- **concept**: Synthesized topic pages - habits, goals, interests, recurring themes, opinions
 - **comparison**: Side-by-side analysis pages when the user evaluates options
+- **source-summary**: One page per raw source, capturing what it said and how it changed the wiki
+- **query**: Filed answers to useful questions worth preserving
+- **overview**: High-level synthesis pages that summarize the current state of understanding
 - **index**: Master catalog pages (auto-managed)
 
 ## Categories
@@ -44,6 +49,10 @@ When processing a source, extract:
 - Health-related information
 - Work and career details
 
+When a query answer or chat exchange produces a durable synthesis, file it back into the wiki as a query or concept page instead of leaving the knowledge only in chat.
+
+Prefer generic knowledge capture over hardcoded topical routing. Infer the right page type and category from the content itself and from existing wiki pages.
+
 ## What NOT to Extract
 - Trivial small talk with no personal information
 - Purely technical questions with no personal context (e.g., "How do I sort an array?")
@@ -54,6 +63,7 @@ When processing a source, extract:
 - When new info CONTRADICTS existing info, add a contradiction blockquote with dates
 - When new info EXTENDS existing info, append to the relevant section
 - Always update the "Sources" and "Last Updated" sections
+- During lint or maintenance passes, check for contradictions, orphan pages, missing concepts, stale claims, and unanswered gaps that should become new wiki pages.
 `;
 
 class WikiService {
@@ -451,7 +461,20 @@ class WikiService {
           { role: 'user', content: prompt }
         ]);
 
-        const updates = this.parseWikiResponse(aiResponse);
+        let updates = this.parseWikiResponse(aiResponse);
+        if (updates.length === 0 && this.hasMeaningfulDatingData(connection)) {
+          const strictPrompt = this.buildStrictDatingIngestionPrompt(datingPayload, existingIndex, connection.id);
+          const strictResponse = await this.callOllama([
+            { role: 'system', content: schema },
+            { role: 'user', content: strictPrompt }
+          ]);
+          updates = this.parseWikiResponse(strictResponse);
+        }
+
+        if (updates.length === 0 && this.hasMeaningfulDatingData(connection)) {
+          updates = this.buildDatingFallbackUpdates(connection, existingPages);
+        }
+
         for (const update of updates) {
           const slugs = await this.applyWikiUpdate(update, connection.id, 'dating');
           affectedSlugs.push(...slugs);
@@ -550,7 +573,7 @@ class WikiService {
   // CHAT → WIKI EXTRACTION
   // ==========================================
 
-  async extractFromChat(userMessage, assistantResponse, conversationTitle, conversationId) {
+  async extractFromChat(userMessage, assistantResponse, conversationTitle, conversationId, options = {}) {
     const settings = await this.getWikiSettings();
     if (!settings.wikiChatExtractionEnabled) {
       return { processed: false, skipped: 'disabled' };
@@ -564,6 +587,21 @@ class WikiService {
     const schema = await this.getWikiSchema();
     const existingPages = await this.getAllPages();
     const existingIndex = existingPages.map(p => `- [[${p.slug}]]: ${p.title} (${p.type}/${p.category})`).join('\n');
+    const recentMessages = Array.isArray(options.recentMessages) ? options.recentMessages : [];
+    const userSnippet = this.buildChatLogSnippet(userMessage);
+    const turnLabel = options.userMessageId
+      ? `turn #${options.userMessageId}`
+      : 'chat turn';
+    const recentContext = recentMessages.length > 0
+      ? recentMessages.map(msg => {
+        const marker = msg.id === options.userMessageId
+          ? ' (current user turn)'
+          : msg.id === options.assistantMessageId
+            ? ' (current assistant turn)'
+            : '';
+        return `- ${msg.role}${marker}: ${msg.content}`;
+      }).join('\n')
+      : '';
 
     // Find pages relevant to this conversation for dedup context
     const relevantPages = await this.findRelevantPages(userMessage, 5);
@@ -584,6 +622,9 @@ ${relevantContext || '(No relevant pages)'}
 **Conversation:** ${conversationTitle}
 **User:** ${userMessage}
 **Assistant:** ${assistantResponse}
+
+## Nearby Conversation Context
+${recentContext || '(No additional nearby context)'}
 
 ## Instructions
 If the exchange revealed genuinely new wiki-worthy information not already captured in the existing wiki pages above, respond with wiki page updates in this exact JSON format:
@@ -614,6 +655,8 @@ CRITICAL RULES:
 - NEVER create a page that already exists in the Existing Wiki Pages list. Use "update" instead.
 - When an entity/person appears that is not yet represented, create a new entity page for them.
 - When an entity/person already exists, update that existing page with new verified details.
+- Explicit user preferences are wiki-worthy unless already captured (examples: "I enjoy fantasy", "I like Lord of the Rings", "I prefer...", "my favorite...").
+- Use the Nearby Conversation Context to interpret follow-up turns in ongoing conversations, but only extract facts attributable to the user and supported by the current exchange/context.
 - Only extract genuinely personal and meaningful information. Do NOT extract:
   - Information already in existing wiki pages
   - Generic knowledge or technical facts
@@ -625,8 +668,39 @@ CRITICAL RULES:
         { role: 'user', content: prompt }
       ]);
 
-      const updates = this.parseWikiResponse(aiResponse);
+      let updates = this.parseWikiResponse(aiResponse);
+      const hasPreferenceSignal = this.hasStrongPreferenceSignal(userMessage);
+      const updatesAreGrounded = this.hasGroundedChatUpdates(userMessage, updates);
+
+      if (hasPreferenceSignal && (!updates.length || !updatesAreGrounded)) {
+        const strictPrompt = this.buildStrictChatExtractionPrompt(
+          userMessage,
+          assistantResponse,
+          conversationTitle,
+          existingIndex,
+          relevantContext
+        );
+
+        const strictResponse = await this.callOllama([
+          { role: 'system', content: schema },
+          { role: 'user', content: strictPrompt }
+        ]);
+
+        updates = this.parseWikiResponse(strictResponse);
+      }
+
+      if (updates.length === 0 || (hasPreferenceSignal && !this.hasGroundedChatUpdates(userMessage, updates))) {
+        updates = this.extractPreferenceFallbackUpdates(userMessage, conversationTitle, existingPages, relevantPages);
+      }
+
       if (updates.length === 0) {
+        await this.addLog(
+          'chat-extract',
+          `No wiki-worthy info from ${turnLabel} in "${conversationTitle}": "${userSnippet}"`,
+          'chat',
+          conversationId,
+          []
+        );
         return { processed: true, extracted: 0, pages: [] };
       }
 
@@ -639,7 +713,7 @@ CRITICAL RULES:
       if (affectedSlugs.length > 0) {
         await this.addLog(
           'chat-extract',
-          `Extracted from chat: "${conversationTitle}" — ${updates.map(u => u.reason || u.slug).join(', ')}`,
+          `Extracted from ${turnLabel} in "${conversationTitle}": "${userSnippet}" — ${updates.map(u => u.reason || u.slug).join(', ')}`,
           'chat',
           conversationId,
           affectedSlugs
@@ -649,11 +723,30 @@ CRITICAL RULES:
       return { processed: true, extracted: updates.length, pages: affectedSlugs };
     } catch (err) {
       console.error('Wiki chat extraction failed:', err.message);
+
+      try {
+        await this.addLog(
+          'chat-extract',
+          `Failed chat extraction for ${turnLabel} in "${conversationTitle}": "${userSnippet}" — ${err.message}`,
+          'chat',
+          conversationId,
+          []
+        );
+      } catch (logErr) {
+        console.error('Failed to write chat extraction failure log:', logErr.message);
+      }
+
       return { processed: false, error: err.message };
     }
   }
 
-  async backfillChatExtraction(batchSize = 20) {
+  async backfillChatExtraction(batchSize = 0, options = {}) {
+    const rawBatchSize = parseInt(batchSize, 10);
+    const normalizedBatchSize = Number.isFinite(rawBatchSize) ? rawBatchSize : 0;
+    const processAllUnextracted = normalizedBatchSize <= 0;
+    const rawRecent = parseInt(options.reprocessRecent, 10);
+    const reprocessRecent = Number.isFinite(rawRecent) ? Math.max(0, Math.min(rawRecent, 50)) : 1;
+
     // Find user messages not yet extracted
     const unextracted = await prisma.chatMessage.findMany({
       where: {
@@ -661,54 +754,102 @@ CRITICAL RULES:
         role: 'user'
       },
       orderBy: { createdAt: 'asc' },
-      take: batchSize,
+      take: processAllUnextracted ? undefined : normalizedBatchSize,
       include: {
         conversation: { select: { id: true, title: true } }
       }
     });
 
-    let processed = 0;
+    // Optionally reprocess most recent already-extracted user turns.
+    // This helps when extraction logic/schema changed, or latest chats were paired incorrectly before.
+    let recentExtracted = [];
+    if (reprocessRecent > 0) {
+      recentExtracted = await prisma.chatMessage.findMany({
+        where: {
+          wikiExtracted: true,
+          role: 'user'
+        },
+        orderBy: { id: 'desc' },
+        take: reprocessRecent,
+        include: {
+          conversation: { select: { id: true, title: true } }
+        }
+      });
+    }
+
+    const candidateMap = new Map();
     for (const msg of unextracted) {
-      // Find the next assistant response
+      candidateMap.set(msg.id, msg);
+    }
+    for (const msg of recentExtracted) {
+      candidateMap.set(msg.id, msg);
+    }
+    const candidates = Array.from(candidateMap.values()).sort((a, b) => a.id - b.id);
+
+    let processed = 0;
+    let withUpdates = 0;
+    let noUpdates = 0;
+    let failed = 0;
+    let skippedNoAssistant = 0;
+
+    for (const msg of candidates) {
+      // Find the next assistant response by message order
       const assistantMsg = await prisma.chatMessage.findFirst({
         where: {
           conversationId: msg.conversationId,
           role: 'assistant',
-          createdAt: { gt: msg.createdAt }
+          id: { gt: msg.id }
         },
-        orderBy: { createdAt: 'asc' }
+        orderBy: { id: 'asc' }
       });
 
-      if (assistantMsg) {
-        const result = await this.extractFromChat(
-          msg.content,
-          assistantMsg.content,
-          msg.conversation.title,
-          msg.conversation.id
-        );
+      if (!assistantMsg) {
+        // Keep for retry: do not mark as extracted without a matching assistant turn.
+        skippedNoAssistant++;
+        continue;
+      }
 
-        // Preserve failed pairs for retry instead of permanently marking as extracted.
-        if (result && result.processed === false) {
-          continue;
-        }
+      const result = await this.extractFromChat(
+        msg.content,
+        assistantMsg.content,
+        msg.conversation.title,
+        msg.conversation.id
+      );
+
+      // Preserve failed pairs for retry instead of permanently marking as extracted.
+      if (result && result.processed === false) {
+        failed++;
+        continue;
       }
 
       // Mark both messages as extracted
-      await prisma.chatMessage.update({
-        where: { id: msg.id },
+      await prisma.chatMessage.updateMany({
+        where: {
+          id: { in: [msg.id, assistantMsg.id] },
+          wikiExtracted: false
+        },
         data: { wikiExtracted: true }
       });
-      if (assistantMsg) {
-        await prisma.chatMessage.update({
-          where: { id: assistantMsg.id },
-          data: { wikiExtracted: true }
-        });
-      }
 
       processed++;
+      if (result?.extracted > 0) {
+        withUpdates++;
+      } else {
+        noUpdates++;
+      }
     }
 
-    return { processed, total: unextracted.length };
+    return {
+      processed,
+      total: candidates.length,
+      processAllUnextracted,
+      fromUnextracted: unextracted.length,
+      reprocessedRecent: recentExtracted.length,
+      withUpdates,
+      noUpdates,
+      failed,
+      skippedNoAssistant
+    };
   }
 
   async resetChatExtractionFlags(options = {}) {
@@ -815,18 +956,206 @@ CRITICAL RULES:
     };
   }
 
+  async getChatExtractionHealth(options = {}) {
+    const rawHours = parseInt(options.hours, 10);
+    const rawLimit = parseInt(options.limit, 10);
+    const hours = Number.isFinite(rawHours) ? Math.min(Math.max(rawHours, 1), 24 * 30) : 24;
+    const limit = Number.isFinite(rawLimit) ? Math.min(Math.max(rawLimit, 10), 1000) : 200;
+    const since = new Date(Date.now() - hours * 60 * 60 * 1000);
+
+    const [
+      settings,
+      recentUserMessages,
+      recentAssistantMessages,
+      processedUserMessages,
+      pendingUserMessages,
+      rawLogs
+    ] = await Promise.all([
+      this.getWikiSettings(),
+      prisma.chatMessage.count({
+        where: {
+          role: 'user',
+          createdAt: { gte: since }
+        }
+      }),
+      prisma.chatMessage.count({
+        where: {
+          role: 'assistant',
+          createdAt: { gte: since }
+        }
+      }),
+      prisma.chatMessage.count({
+        where: {
+          role: 'user',
+          wikiExtracted: true,
+          createdAt: { gte: since }
+        }
+      }),
+      prisma.chatMessage.count({
+        where: {
+          role: 'user',
+          wikiExtracted: false,
+          createdAt: { gte: since }
+        }
+      }),
+      prisma.wikiLog.findMany({
+        where: {
+          action: 'chat-extract',
+          createdAt: { gte: since }
+        },
+        orderBy: { createdAt: 'desc' },
+        take: limit
+      })
+    ]);
+
+    const logs = rawLogs.map(log => ({
+      ...log,
+      affectedPages: JSON.parse(log.affectedPages || '[]')
+    }));
+
+    let successWithUpdates = 0;
+    let successNoUpdates = 0;
+    let failed = 0;
+
+    for (const log of logs) {
+      const description = (log.description || '').toLowerCase();
+      if (description.startsWith('failed') || description.includes('failed chat extraction')) {
+        failed++;
+      } else if ((log.affectedPages || []).length > 0) {
+        successWithUpdates++;
+      } else {
+        successNoUpdates++;
+      }
+    }
+
+    return {
+      windowHours: hours,
+      extractionEnabled: settings.wikiChatExtractionEnabled,
+      queue: {
+        processedUserMessages,
+        pendingUserMessages
+      },
+      recentMessages: {
+        users: recentUserMessages,
+        assistants: recentAssistantMessages
+      },
+      extractionRuns: {
+        successWithUpdates,
+        successNoUpdates,
+        failed,
+        totalLoggedRuns: logs.length
+      },
+      recentLogs: logs.slice(0, 25)
+    };
+  }
+
   // ==========================================
   // OPERATION C: LINT
   // ==========================================
 
-  async lintWiki() {
+  async lintWiki(options = {}) {
+    const autoFix = options.autoFix !== false;
     const issues = [];
     const allPages = await prisma.wikiPage.findMany();
     const allSlugs = new Set(allPages.map(p => p.slug));
+    const titleSlugMap = new Map();
 
     for (const page of allPages) {
-      const outbound = JSON.parse(page.outboundLinks || '[]');
-      const inbound = JSON.parse(page.inboundLinks || '[]');
+      if (page?.title) {
+        titleSlugMap.set(this.slugifyWikiTarget(page.title), page.slug);
+      }
+      titleSlugMap.set(this.slugifyWikiTarget(page.slug), page.slug);
+    }
+
+    let outboundRebuilt = 0;
+    let inboundRebuilt = 0;
+    let strippedBrokenLinks = 0;
+    let contentPagesUpdated = 0;
+    let contentLinksRetargeted = 0;
+    let contentLinksUnlinked = 0;
+
+    // Canonical outbound links for lint/fix checks.
+    // When auto-fix is enabled, this rebuilds link metadata from page content.
+    const canonicalOutboundBySlug = new Map();
+    const contentBySlug = new Map();
+
+    for (const page of allPages) {
+      const originalContent = page.content || '';
+      let workingContent = originalContent;
+      if (autoFix) {
+        const repaired = this.repairWikiLinksInContent(workingContent, allSlugs, titleSlugMap);
+        workingContent = repaired.content;
+        contentLinksRetargeted += repaired.retargeted;
+        contentLinksUnlinked += repaired.unlinked;
+      }
+      contentBySlug.set(page.slug, workingContent);
+
+      const storedOutbound = JSON.parse(page.outboundLinks || '[]');
+      const extractedFromContent = this.extractWikiLinks(workingContent);
+      const uniqueExtracted = [...new Set(extractedFromContent)];
+
+      const validOutbound = uniqueExtracted.filter(slug => allSlugs.has(slug));
+      const removedBroken = uniqueExtracted.length - validOutbound.length;
+      if (removedBroken > 0) strippedBrokenLinks += removedBroken;
+
+      const canonicalOutbound = autoFix ? validOutbound : storedOutbound;
+      canonicalOutboundBySlug.set(page.slug, canonicalOutbound);
+
+      const contentChanged = workingContent !== originalContent;
+      const outboundChanged = !this.areStringArraysEqual(storedOutbound, canonicalOutbound);
+
+      if (autoFix && (contentChanged || outboundChanged)) {
+        const data = {};
+        if (contentChanged) {
+          data.content = workingContent;
+          contentPagesUpdated++;
+        }
+        if (outboundChanged) {
+          data.outboundLinks = JSON.stringify(canonicalOutbound);
+          outboundRebuilt++;
+        }
+
+        await prisma.wikiPage.update({
+          where: { id: page.id },
+          data
+        });
+      }
+    }
+
+    if (autoFix) {
+      const inboundBySlug = new Map();
+      for (const slug of allSlugs) {
+        inboundBySlug.set(slug, []);
+      }
+
+      for (const [fromSlug, outbound] of canonicalOutboundBySlug.entries()) {
+        for (const targetSlug of outbound) {
+          const inbound = inboundBySlug.get(targetSlug);
+          if (inbound) inbound.push(fromSlug);
+        }
+      }
+
+      for (const page of allPages) {
+        const storedInbound = JSON.parse(page.inboundLinks || '[]');
+        const computedInbound = [...new Set(inboundBySlug.get(page.slug) || [])].sort();
+
+        if (!this.areStringArraysEqual(storedInbound, computedInbound)) {
+          await prisma.wikiPage.update({
+            where: { id: page.id },
+            data: { inboundLinks: JSON.stringify(computedInbound) }
+          });
+          inboundRebuilt++;
+        }
+      }
+    }
+
+    for (const page of allPages) {
+      const outbound = canonicalOutboundBySlug.get(page.slug) || JSON.parse(page.outboundLinks || '[]');
+      const inbound = autoFix
+        ? allPages
+          .map(p => p.slug)
+          .filter(slug => (canonicalOutboundBySlug.get(slug) || []).includes(page.slug))
+        : JSON.parse(page.inboundLinks || '[]');
 
       // Check for broken outbound links
       for (const slug of outbound) {
@@ -859,7 +1188,8 @@ CRITICAL RULES:
       }
 
       // Check for empty content
-      if (!page.content || page.content.trim().length < 10) {
+      const effectiveContent = contentBySlug.get(page.slug) || page.content || '';
+      if (!effectiveContent || effectiveContent.trim().length < 10) {
         issues.push({
           type: 'empty',
           page: page.slug,
@@ -868,9 +1198,26 @@ CRITICAL RULES:
       }
     }
 
-    await this.addLog('lint', `Lint found ${issues.length} issues across ${allPages.length} pages`, 'lint', null, []);
+    const fixes = {
+      enabled: autoFix,
+      outboundRebuilt,
+      inboundRebuilt,
+      contentPagesUpdated,
+      contentLinksRetargeted,
+      contentLinksUnlinked,
+      strippedBrokenLinks,
+      totalFixed: outboundRebuilt + inboundRebuilt + contentPagesUpdated
+    };
 
-    return { totalPages: allPages.length, issues };
+    await this.addLog(
+      'lint',
+      `Lint found ${issues.length} issues across ${allPages.length} pages (fixes: ${fixes.totalFixed}, retargeted links: ${fixes.contentLinksRetargeted}, unlinked: ${fixes.contentLinksUnlinked}, broken links stripped: ${fixes.strippedBrokenLinks})`,
+      'lint',
+      null,
+      []
+    );
+
+    return { totalPages: allPages.length, issues, fixes };
   }
 
   // ==========================================
@@ -966,6 +1313,36 @@ CRITICAL RULES:
 - Include source references in the page Sources section using dating IDs (e.g., connection #${connectionId}, date IDs, encounter IDs, message IDs).`;
   }
 
+  buildStrictDatingIngestionPrompt(datingPayload, existingIndex, connectionId) {
+    return `You must decide whether this dating record contains durable wiki-worthy information and respond with JSON only.
+
+## Existing Wiki Pages
+${existingIndex || '(No pages yet)'}
+
+## Dating Record (Connection #${connectionId})
+${datingPayload}
+
+## Decision Rule
+- If the record includes meaningful personal/relationship information (bio, notes, interests, communication patterns, date outcomes, boundaries, compatibility signals, recurring behavior), return at least one update.
+- Return {"updates": []} only when the record is effectively empty/noisy and has no durable insight.
+- Prefer updating existing relevant pages over creating duplicates.
+
+## Response Format (JSON only)
+{
+  "updates": [
+    {
+      "action": "create" | "update",
+      "slug": "page-slug",
+      "title": "Page Title",
+      "type": "entity" | "concept" | "comparison",
+      "category": "personal" | "health" | "work" | "interests" | "relationships" | "goals" | "habits" | "media" | "technology" | "finance" | "travel" | "food" | "general",
+      "content": "Markdown content to merge",
+      "reason": "Brief explanation"
+    }
+  ]
+}`;
+  }
+
   serializeDatingConnection(connection) {
     const payload = {
       connection,
@@ -985,6 +1362,72 @@ CRITICAL RULES:
     };
 
     return JSON.stringify(payload, null, 2);
+  }
+
+  hasMeaningfulDatingData(connection) {
+    if (!connection) return false;
+
+    const textFields = [
+      connection.guyName,
+      connection.bio,
+      connection.notes,
+      connection.interests,
+      connection.lookingFor,
+      connection.relationshipStatus,
+      connection.location,
+      connection.openTo,
+      connection.theyAre,
+      connection.theyAreInto
+    ].filter(v => typeof v === 'string' && v.trim().length >= 3);
+
+    const activityCount = (connection.dates || []).length +
+      (connection.encounters || []).length +
+      (connection.messages || []).length;
+
+    return textFields.length > 0 || activityCount > 0;
+  }
+
+  buildDatingFallbackUpdates(connection, existingPages = []) {
+    const name = (connection.guyName || `Connection ${connection.id}`).trim();
+    const slugBase = this.slugifyWikiTarget(name) || `connection-${connection.id}`;
+    const slug = `dating-connection-${connection.id}-${slugBase}`;
+    const existingPage = (existingPages || []).find(p => p.slug === slug);
+
+    const facts = [];
+    if (connection.bio) facts.push(`- Bio: ${connection.bio}`);
+    if (connection.notes) facts.push(`- Notes: ${connection.notes}`);
+    if (connection.interests) facts.push(`- Interests: ${connection.interests}`);
+    if (connection.lookingFor) facts.push(`- Looking for: ${connection.lookingFor}`);
+    if (connection.relationshipStatus) facts.push(`- Relationship status: ${connection.relationshipStatus}`);
+    if (connection.location) facts.push(`- Location: ${connection.location}`);
+
+    facts.push(`- Dating app: ${connection.app?.name || `App #${connection.appId}`}`);
+    facts.push(`- Messages exchanged: ${connection.messagesExchanged || 0}`);
+    facts.push(`- Recorded dates: ${(connection.dates || []).length}`);
+    facts.push(`- Recorded encounters: ${(connection.encounters || []).length}`);
+
+    const content = [
+      `# ${name}`,
+      '',
+      '## Dating Profile Summary',
+      ...facts,
+      '',
+      '## Sources',
+      `- Dating connection #${connection.id}`,
+      '',
+      '## Last Updated',
+      `- ${new Date().toISOString().slice(0, 10)}`
+    ].join('\n');
+
+    return [{
+      action: existingPage ? 'update' : 'create',
+      slug,
+      title: name,
+      type: 'entity',
+      category: 'relationships',
+      content,
+      reason: 'Fallback extraction from dating connection metadata'
+    }];
   }
 
   parseWikiResponse(aiResponse) {
@@ -1028,6 +1471,247 @@ CRITICAL RULES:
         return [];
       }
     }
+  }
+
+  buildStrictChatExtractionPrompt(userMessage, assistantResponse, conversationTitle, existingIndex, relevantContext) {
+    return `You must decide if this chat includes durable personal preferences/interests and return JSON only.
+
+## Existing Wiki Pages
+${existingIndex || '(No pages yet)'}
+
+## Relevant Existing Page Content
+${relevantContext || '(No relevant pages)'}
+
+## Chat Exchange
+**Conversation:** ${conversationTitle}
+**User:** ${userMessage}
+**Assistant:** ${assistantResponse}
+
+## Decision Rule
+- If the user states a durable preference or interest (examples: "I like...", "I enjoy...", "I love...", "I prefer...", "my favorite...", "I hate...", "I dislike..."), you MUST return at least one update unless that exact fact is already present in the relevant existing page content.
+- Durable preference statements about activities, foods, media, people, tools, or habits are wiki-worthy and should produce updates when new.
+- For user preference statements, do NOT create or update assistant-centric pages/slugs (e.g., assistant-interaction). Target user knowledge pages instead.
+
+## Response Format (JSON only)
+{
+  "updates": [
+    {
+      "action": "create" | "update",
+      "slug": "page-slug",
+      "title": "Page Title",
+      "type": "entity" | "concept" | "comparison",
+      "category": "personal" | "health" | "work" | "interests" | "relationships" | "goals" | "habits" | "media" | "technology" | "finance" | "travel" | "food" | "general",
+      "content": "Markdown content to merge",
+      "reason": "Brief explanation"
+    }
+  ]
+}
+
+If and only if there is truly no durable personal information, return exactly:
+{"updates": []}`;
+  }
+
+  hasStrongPreferenceSignal(userMessage) {
+    const text = String(userMessage || '').trim();
+    if (!text) return false;
+
+    const preferenceCue = /(\bi\s+(also\s+)?(enjoy|like|love|prefer|hate|dislike)\b|\bmy\s+favorite\b|\bi\s+cant\s+stand\b|\bi\s+cannot\s+stand\b)/i;
+    const tinyOrNonDurable = /^\s*(thanks|ok|okay|cool|nice|got it|hello|hi|hey)[.!?\s]*$/i;
+
+    return preferenceCue.test(text) && !tinyOrNonDurable.test(text);
+  }
+
+  hasGroundedChatUpdates(userMessage, updates = []) {
+    if (!Array.isArray(updates) || updates.length === 0) return false;
+
+    const userTokens = this.extractGroundingTokens(userMessage);
+    if (userTokens.length === 0) return true;
+
+    const disallowedSlugs = new Set(['assistant-interaction', 'assistant-preferences', 'chat-assistant']);
+
+    for (const update of updates) {
+      const slug = String(update?.slug || '').toLowerCase();
+      if (disallowedSlugs.has(slug)) {
+        continue;
+      }
+
+      const haystack = [
+        update?.slug || '',
+        update?.title || '',
+        update?.reason || '',
+        update?.content || ''
+      ].join(' ').toLowerCase();
+
+      const tokenOverlap = userTokens.some(token => haystack.includes(token));
+      const looksLikeUserPrefs = /(preference|favorite|likes|dislikes|interests|color|board\s+game|games?)/i.test(haystack);
+
+      if (tokenOverlap || looksLikeUserPrefs) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  extractGroundingTokens(text) {
+    return [...new Set(
+      String(text || '')
+        .toLowerCase()
+        .replace(/[^a-z0-9\s]/g, ' ')
+        .split(/\s+/)
+        .filter(token => token.length >= 4)
+        .filter(token => ![
+          'always', 'prefer', 'favorite', 'color', 'board', 'games', 'playing', 'with', 'that', 'this', 'from', 'have'
+        ].includes(token))
+    )];
+  }
+
+  buildChatLogSnippet(text, maxLen = 90) {
+    const normalized = String(text || '').replace(/\s+/g, ' ').trim();
+    if (!normalized) return '(empty message)';
+    if (normalized.length <= maxLen) return normalized;
+    return `${normalized.slice(0, maxLen - 3)}...`;
+  }
+
+  extractPreferenceFallbackUpdates(userMessage, conversationTitle, existingPages, relevantPages) {
+    const text = (userMessage || '').trim();
+    if (!text) return [];
+
+    const preferenceCue = /(\bi\s+(also\s+)?(enjoy|like|love|prefer|hate|dislike)\b|\bmy\s+favorite\b|\bi\s+cant\s+stand\b|\bi\s+cannot\s+stand\b)/i.test(text);
+    if (!preferenceCue) return [];
+    const relevantCorpus = (relevantPages || []).map(p => `${p.title || ''}\n${p.content || ''}`).join('\n').toLowerCase();
+
+    const newFacts = [];
+
+    // Generic durable preference extraction from explicit like/love/enjoy/prefer/hate/dislike statements.
+    const preferencePhrases = this.extractPreferencePhrases(text);
+    for (const pref of preferencePhrases) {
+      const normalized = this.normalizeForMerge(pref.fact.replace(/^-\s*/, ''));
+      if (normalized && !this.normalizeForMerge(relevantCorpus).includes(normalized)) {
+        newFacts.push(pref.fact);
+      }
+    }
+
+    if (newFacts.length === 0) return [];
+
+    const target = this.selectGenericPreferencePage(existingPages);
+
+    const content = [
+      '## Preferences',
+      ...[...new Set(newFacts)],
+      `- Source context: ${conversationTitle}`
+    ].join('\n');
+
+    return [{
+      action: target.exists ? 'update' : 'create',
+      slug: target.slug,
+      title: target.title,
+      type: 'concept',
+      category: 'interests',
+      content,
+      reason: 'Extracted explicit user preferences/dislikes from chat message'
+    }];
+  }
+
+  selectGenericPreferencePage(existingPages = []) {
+    const pages = Array.isArray(existingPages) ? existingPages : [];
+
+    const exactSlug = pages.find(p => p.slug === 'personal-preferences');
+    if (exactSlug) {
+      return { exists: true, slug: exactSlug.slug, title: exactSlug.title || 'Personal Preferences' };
+    }
+
+    const reusable = pages.find(p => /preference|taste|interests?/i.test(`${p.slug || ''} ${p.title || ''}`));
+    if (reusable) {
+      return { exists: true, slug: reusable.slug, title: reusable.title || 'Personal Preferences' };
+    }
+
+    return {
+      exists: false,
+      slug: 'personal-preferences',
+      title: 'Personal Preferences'
+    };
+  }
+
+  extractPreferencePhrases(text) {
+    const phrases = [];
+    const sentenceCandidates = String(text || '')
+      .split(/[.!?\n]+/)
+      .map(s => s.trim())
+      .filter(Boolean);
+
+    for (const sentence of sentenceCandidates) {
+      let match = sentence.match(/^i\s+(?:(?:also|always|usually|generally|often)\s+)?(like|love|enjoy|prefer)\s+(?:to\s+)?(.+)$/i);
+      if (match) {
+        const item = this.cleanPreferenceTail(match[2]);
+        if (item) {
+          const gerund = this.gerundify(item);
+          const fact = gerund
+            ? `- Likes ${gerund}.`
+            : `- Likes ${this.humanizePreference(item)}.`;
+          phrases.push({ fact });
+          continue;
+        }
+      }
+
+      match = sentence.match(/^i\s+(?:really\s+)?(hate|dislike)\s+(.+)$/i);
+      if (match) {
+        const item = this.cleanPreferenceTail(match[2]);
+        if (item) {
+          phrases.push({ fact: `- Dislikes ${this.humanizePreference(item)}.` });
+          continue;
+        }
+      }
+
+      match = sentence.match(/^my\s+favorite\s+(.+)$/i);
+      if (match) {
+        const item = this.cleanPreferenceTail(match[1]);
+        if (item) {
+          const colorMatch = item.match(/^color\s+is\s+(.+)$/i);
+          if (colorMatch) {
+            phrases.push({ fact: `- Favorite color: ${this.humanizePreference(colorMatch[1])}.` });
+          } else {
+            phrases.push({ fact: `- Favorite: ${this.humanizePreference(item)}.` });
+          }
+        }
+      }
+    }
+
+    return phrases;
+  }
+
+  cleanPreferenceTail(value) {
+    return String(value || '')
+      .replace(/^(the|a|an)\s+/i, '')
+      .replace(/\s+/g, ' ')
+      .replace(/[,:;]+$/g, '')
+      .trim();
+  }
+
+  gerundify(value) {
+    const cleaned = String(value || '').trim().toLowerCase();
+    const word = cleaned.split(/\s+/)[0];
+    const gerundMap = {
+      cook: 'cooking',
+      read: 'reading',
+      run: 'running',
+      swim: 'swimming',
+      hike: 'hiking',
+      write: 'writing'
+    };
+
+    if (gerundMap[word]) {
+      const remainder = cleaned.split(/\s+/).slice(1).join(' ');
+      return [gerundMap[word], remainder].filter(Boolean).join(' ').trim();
+    }
+
+    return null;
+  }
+
+  humanizePreference(value) {
+    const cleaned = String(value || '').trim();
+    if (!cleaned) return cleaned;
+    return cleaned.charAt(0).toLowerCase() + cleaned.slice(1);
   }
 
   async applyWikiUpdate(update, sourceId, sourceType) {
@@ -1101,7 +1785,48 @@ CRITICAL RULES:
 
   extractWikiLinks(content) {
     const matches = content.match(/\[\[([^\]]+)\]\]/g) || [];
-    return [...new Set(matches.map(m => m.replace(/\[\[|\]\]/g, '')))];
+    return [...new Set(matches
+      .map(m => m.replace(/\[\[|\]\]/g, '').trim())
+      .map(link => link.split('|')[0].trim())
+      .filter(Boolean))];
+  }
+
+  repairWikiLinksInContent(content, allSlugs, titleSlugMap) {
+    if (!content) {
+      return { content: content || '', retargeted: 0, unlinked: 0 };
+    }
+
+    let retargeted = 0;
+    let unlinked = 0;
+
+    const repairedContent = content.replace(/\[\[([^\]]+)\]\]/g, (_full, rawTarget) => {
+      const raw = String(rawTarget || '').trim();
+      if (!raw) return _full;
+
+      const parts = raw.split('|');
+      const linkTarget = (parts[0] || '').trim();
+      const alias = parts.length > 1 ? parts.slice(1).join('|').trim() : '';
+
+      if (allSlugs.has(linkTarget)) {
+        return alias ? `[[${linkTarget}|${alias}]]` : `[[${linkTarget}]]`;
+      }
+
+      const normalized = this.slugifyWikiTarget(linkTarget);
+      const resolvedSlug = titleSlugMap.get(normalized);
+      if (resolvedSlug && allSlugs.has(resolvedSlug)) {
+        retargeted++;
+        return alias ? `[[${resolvedSlug}|${alias}]]` : `[[${resolvedSlug}]]`;
+      }
+
+      unlinked++;
+      return alias || linkTarget;
+    });
+
+    return {
+      content: repairedContent,
+      retargeted,
+      unlinked
+    };
   }
 
   mergeWikiContent(existingContent, incomingContent, title = 'Wiki Page') {
@@ -1120,6 +1845,11 @@ CRITICAL RULES:
     const incomingIsReasonablySized = incoming.length >= Math.floor(existing.length * 0.75);
     if (incomingLooksFullPage && incomingIsReasonablySized) {
       return incoming;
+    }
+
+    const resolvedSectionMerge = this.mergeResolvedSections(existing, incoming, title);
+    if (resolvedSectionMerge) {
+      return resolvedSectionMerge;
     }
 
     const existingLines = existing.split(/\r?\n/);
@@ -1163,6 +1893,126 @@ CRITICAL RULES:
     return mergedLines.join('\n').replace(/\n{3,}/g, '\n\n').trim();
   }
 
+  mergeResolvedSections(existingContent, incomingContent, title = 'Wiki Page') {
+    const existingLines = (existingContent || '').split(/\r?\n/);
+    const incomingLines = (incomingContent || '').split(/\r?\n/).map(line => line.replace(/\s+$/g, ''));
+
+    const incomingSections = this.extractMarkdownSections(incomingLines);
+    if (incomingSections.length === 0) return null;
+
+    let workingLines = [...existingLines];
+    let changed = false;
+
+    for (const incomingSection of incomingSections) {
+      const resolved = this.findResolvableSectionMatch(workingLines, incomingSection);
+      if (!resolved) continue;
+
+      const replacementBlock = incomingSection.lines.length > 0
+        ? [...incomingSection.lines]
+        : [incomingSection.headingLine];
+
+      workingLines.splice(
+        resolved.startIndex,
+        resolved.endIndex - resolved.startIndex,
+        ...replacementBlock
+      );
+      changed = true;
+    }
+
+    if (!changed) return null;
+
+    const merged = workingLines.join('\n').replace(/\n{3,}/g, '\n\n').trim();
+    if (!merged.startsWith('# ')) {
+      return `# ${title}\n\n${merged}`.trim();
+    }
+    return merged;
+  }
+
+  extractMarkdownSections(lines = []) {
+    const sections = [];
+    let current = null;
+
+    for (const line of lines) {
+      const heading = line.match(/^(#{2,6})\s+(.*)$/);
+      if (heading) {
+        if (current) sections.push(current);
+        current = {
+          headingLine: line,
+          level: heading[1].length,
+          title: heading[2].trim(),
+          lines: [line]
+        };
+        continue;
+      }
+
+      if (current) {
+        current.lines.push(line);
+      }
+    }
+
+    if (current) sections.push(current);
+    return sections;
+  }
+
+  findResolvableSectionMatch(lines, incomingSection) {
+    const incomingBase = this.normalizeSectionTitle(incomingSection.title);
+    if (!incomingBase) return null;
+
+    const headings = [];
+    for (let i = 0; i < lines.length; i++) {
+      const match = lines[i].match(/^(#{2,6})\s+(.*)$/);
+      if (!match) continue;
+
+      headings.push({
+        index: i,
+        level: match[1].length,
+        title: match[2].trim(),
+        base: this.normalizeSectionTitle(match[2].trim()),
+        isPending: /\(pending\)/i.test(match[2]),
+        isDefinitive: /\(definitive\)|\(resolved\)|\(final\)/i.test(match[2])
+      });
+    }
+
+    const exactHeading = headings.find(h => h.base === incomingBase && h.isPending);
+    if (exactHeading) {
+      const endIndex = this.findSectionEndIndex(lines, exactHeading.index, exactHeading.level);
+      return { startIndex: exactHeading.index, endIndex };
+    }
+
+    const relatedPending = headings.find(h => h.base === incomingBase && h.isPending);
+    if (relatedPending) {
+      const endIndex = this.findSectionEndIndex(lines, relatedPending.index, relatedPending.level);
+      return { startIndex: relatedPending.index, endIndex };
+    }
+
+    const sameBase = headings.find(h => h.base === incomingBase);
+    if (sameBase && incomingSection.title && /\b(definitive|resolved|final)\b/i.test(incomingSection.title)) {
+      const endIndex = this.findSectionEndIndex(lines, sameBase.index, sameBase.level);
+      return { startIndex: sameBase.index, endIndex };
+    }
+
+    return null;
+  }
+
+  findSectionEndIndex(lines, startIndex, level) {
+    for (let i = startIndex + 1; i < lines.length; i++) {
+      const match = lines[i].match(/^(#{2,6})\s+(.*)$/);
+      if (match && match[1].length <= level) {
+        return i;
+      }
+    }
+    return lines.length;
+  }
+
+  normalizeSectionTitle(title) {
+    return this.normalizeForMerge(String(title || '')
+      .replace(/\((pending|definitive|resolved|final|updated|current)\)/ig, '')
+      .replace(/[:\-–—]\s*(pending|definitive|resolved|final|updated|current)\b/ig, '')
+      .replace(/\b(pending|definitive|resolved|final|updated|current)\b/ig, '')
+      .replace(/\s+/g, ' ')
+      .trim());
+  }
+
   findMergeInsertionIndex(lines) {
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i].trim().toLowerCase();
@@ -1179,6 +2029,26 @@ CRITICAL RULES:
       .replace(/\r/g, '')
       .replace(/\s+/g, ' ')
       .trim();
+  }
+
+  areStringArraysEqual(a = [], b = []) {
+    if (a.length !== b.length) return false;
+
+    const left = [...a].map(String).sort();
+    const right = [...b].map(String).sort();
+    for (let i = 0; i < left.length; i++) {
+      if (left[i] !== right[i]) return false;
+    }
+
+    return true;
+  }
+
+  slugifyWikiTarget(value) {
+    return String(value || '')
+      .toLowerCase()
+      .replace(/['’]/g, '')
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '');
   }
 
   async updateInboundLinks(fromSlug, targetSlugs) {

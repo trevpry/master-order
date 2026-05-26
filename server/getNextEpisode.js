@@ -81,51 +81,44 @@ async function getOrderTypeSettings() {
   }
 }
 
-async function selectOrderType() {
-  const settings = await getOrderTypeSettings();
-  console.log(`Order type percentages - TV General: ${settings.tvGeneralPercent}%, Movies General: ${settings.moviesGeneralPercent}%, Custom Order: ${settings.customOrderPercent}%, History Plus: ${settings.historyPlusPercent}%`);
-  
+function getEffectiveOrderTypePercentages(settings) {
   const limiters = settings.mediaTypeLimiters;
   const allEnabled = !limiters || Object.values(limiters).every(v => v);
-  
-  // Determine eligible order types based on media type limiters
+
   let tvPercent = settings.tvGeneralPercent;
   let moviesPercent = settings.moviesGeneralPercent;
   let customPercent = settings.customOrderPercent;
   let historyPercent = settings.historyPlusPercent;
-  
+
   if (!allEnabled && limiters) {
-    console.log(`🎯 Media type limiters active:`, limiters);
-    
     // TV_GENERAL only produces episodes
     if (!limiters.episode) {
       tvPercent = 0;
     }
-    
+
     // MOVIES_GENERAL only produces movies
     if (!limiters.movie) {
       moviesPercent = 0;
     }
-    
+
     // CUSTOM_ORDER can produce any type - eligible if any limiter is enabled
-    const customEligible = limiters.episode || limiters.movie || limiters.book || 
-                           limiters.webvideo || limiters.videogame || limiters.comic;
+    const customEligible = limiters.episode || limiters.movie || limiters.book ||
+      limiters.webvideo || limiters.videogame || limiters.comic;
     if (!customEligible) {
       customPercent = 0;
     }
-    
+
     // HISTORY_PLUS produces video, book, chapter, section
     const historyEligible = limiters.webvideo || limiters.book;
     if (!historyEligible) {
       historyPercent = 0;
     }
-    
+
     // Re-normalize percentages if any were zeroed out
     const total = tvPercent + moviesPercent + customPercent + historyPercent;
     if (total === 0) {
       // All configured order types were excluded by limiters, but some order types
       // COULD serve the requested media types (they just had 0% configured).
-      // Promote eligible-but-unconfigured order types instead of ignoring limiters.
       const eligibleTypes = [];
       if (limiters.episode) eligibleTypes.push('tv');
       if (limiters.movie) eligibleTypes.push('movies');
@@ -138,15 +131,15 @@ async function selectOrderType() {
         moviesPercent = eligibleTypes.includes('movies') ? share : 0;
         customPercent = eligibleTypes.includes('custom') ? share : 0;
         historyPercent = eligibleTypes.includes('history') ? share : 0;
+
         // Absorb rounding remainder into the last eligible type
         const remainder = 100 - (tvPercent + moviesPercent + customPercent + historyPercent);
         if (eligibleTypes.includes('history')) historyPercent += remainder;
         else if (eligibleTypes.includes('custom')) customPercent += remainder;
         else if (eligibleTypes.includes('movies')) moviesPercent += remainder;
         else tvPercent += remainder;
-        console.log(`🎯 Promoted eligible order types - TV: ${tvPercent}%, Movies: ${moviesPercent}%, Custom: ${customPercent}%, History+: ${historyPercent}%`);
       } else {
-        console.log('⚠️ No order types can serve the selected media types, falling back to no filtering');
+        // No limiter-eligible types found, preserve original settings
         tvPercent = settings.tvGeneralPercent;
         moviesPercent = settings.moviesGeneralPercent;
         customPercent = settings.customOrderPercent;
@@ -158,8 +151,45 @@ async function selectOrderType() {
       moviesPercent = Math.round(moviesPercent * scale);
       customPercent = Math.round(customPercent * scale);
       historyPercent = 100 - tvPercent - moviesPercent - customPercent; // Absorb rounding error
-      console.log(`🎯 Re-normalized percentages - TV: ${tvPercent}%, Movies: ${moviesPercent}%, Custom: ${customPercent}%, History+: ${historyPercent}%`);
     }
+  }
+
+  return {
+    limiters,
+    allEnabled,
+    tvPercent,
+    moviesPercent,
+    customPercent,
+    historyPercent
+  };
+}
+
+function selectWeightedTvOrMovie(tvWeight, movieWeight) {
+  const total = tvWeight + movieWeight;
+  if (total <= 0) {
+    return null;
+  }
+
+  const random = Math.floor(Math.random() * total) + 1;
+  return random <= tvWeight ? 'episode' : 'movie';
+}
+
+async function selectOrderType() {
+  const settings = await getOrderTypeSettings();
+  console.log(`Order type percentages - TV General: ${settings.tvGeneralPercent}%, Movies General: ${settings.moviesGeneralPercent}%, Custom Order: ${settings.customOrderPercent}%, History Plus: ${settings.historyPlusPercent}%`);
+
+  const {
+    limiters,
+    allEnabled,
+    tvPercent,
+    moviesPercent,
+    customPercent,
+    historyPercent
+  } = getEffectiveOrderTypePercentages(settings);
+
+  if (!allEnabled && limiters) {
+    console.log(`🎯 Media type limiters active:`, limiters);
+    console.log(`🎯 Effective percentages - TV: ${tvPercent}%, Movies: ${moviesPercent}%, Custom: ${customPercent}%, History+: ${historyPercent}%`);
   }
   
   // Generate random number between 1-100
@@ -846,11 +876,12 @@ async function findNewRelease(settings) {
   const lastYear = currentYear - 1;
 
   const candidates = [];
-  const limiters = settings.mediaTypeLimiters || { episode: true, movie: true, book: true, webvideo: true, videogame: true, comic: true };
+  const effective = getEffectiveOrderTypePercentages(settings);
+  const limiters = effective.limiters || { episode: true, movie: true, book: true, webvideo: true, videogame: true, comic: true };
 
-  // Respect order type percentages — only search types with non-zero percent
-  const tvEnabled = limiters.episode && settings.tvGeneralPercent > 0;
-  const moviesEnabled = limiters.movie && settings.moviesGeneralPercent > 0;
+  // Respect effective order type percentages after limiter filtering/re-normalization
+  const tvEnabled = limiters.episode && effective.tvPercent > 0;
+  const moviesEnabled = limiters.movie && effective.moviesPercent > 0;
 
   try {
     // Check for new release movies (respecting collection + ignored collections)
@@ -903,7 +934,11 @@ async function findNewRelease(settings) {
 
     if (candidates.length === 0) return null;
 
-    const chosen = candidates[Math.floor(Math.random() * candidates.length)];
+    // Keep balance picks aligned with configured TV/Movie ratio.
+    const preferredType = selectWeightedTvOrMovie(effective.tvPercent, effective.moviesPercent);
+    const preferredCandidates = candidates.filter(candidate => candidate.type === preferredType);
+    const pool = preferredCandidates.length > 0 ? preferredCandidates : candidates;
+    const chosen = pool[Math.floor(Math.random() * pool.length)];
     console.log(`🆕 New release selected: "${chosen.data.title}" (${chosen.type})`);
 
     if (chosen.type === 'movie') {
@@ -936,12 +971,13 @@ async function findNewRelease(settings) {
 
 // Find content from a series/order that hasn't been viewed recently
 async function findLongUnwatched(settings) {
-  const limiters = settings.mediaTypeLimiters || { episode: true, movie: true, book: true, webvideo: true, videogame: true, comic: true };
+  const effective = getEffectiveOrderTypePercentages(settings);
+  const limiters = effective.limiters || { episode: true, movie: true, book: true, webvideo: true, videogame: true, comic: true };
   const candidates = [];
 
-  // Respect order type percentages
-  const tvEnabled = limiters.episode && settings.tvGeneralPercent > 0;
-  const moviesEnabled = limiters.movie && settings.moviesGeneralPercent > 0;
+  // Respect effective order type percentages after limiter filtering/re-normalization
+  const tvEnabled = limiters.episode && effective.tvPercent > 0;
+  const moviesEnabled = limiters.movie && effective.moviesPercent > 0;
 
   try {
     // Find TV shows with unwatched content, sorted by oldest lastViewedAt (respecting collection + ignored)
@@ -999,10 +1035,14 @@ async function findLongUnwatched(settings) {
 
     if (candidates.length === 0) return null;
 
-    // Sort by oldest lastViewed and pick from the top quartile
+    // Sort by oldest lastViewed and pick from the top quartile.
+    // Apply weighted TV/Movie preference before random pick.
     candidates.sort((a, b) => (a.lastViewed || 0) - (b.lastViewed || 0));
     const topQuartile = candidates.slice(0, Math.max(1, Math.ceil(candidates.length / 4)));
-    const chosen = topQuartile[Math.floor(Math.random() * topQuartile.length)];
+    const preferredType = selectWeightedTvOrMovie(effective.tvPercent, effective.moviesPercent);
+    const preferredCandidates = topQuartile.filter(candidate => candidate.type === preferredType);
+    const pool = preferredCandidates.length > 0 ? preferredCandidates : topQuartile;
+    const chosen = pool[Math.floor(Math.random() * pool.length)];
     console.log(`⏳ Long unwatched selected: "${chosen.data.title}" (${chosen.type})`);
 
     if (chosen.type === 'movie') {

@@ -485,7 +485,7 @@ class ChatService {
    * Also triggers wiki extraction in the background (fire-and-forget).
    */
   async saveAssistantMessage(conversationId, content, model) {
-    const message = await this.saveMessageWithEmbedding({
+    const assistantMessage = await this.saveMessageWithEmbedding({
       conversationId,
       role: 'assistant',
       content,
@@ -493,23 +493,60 @@ class ChatService {
     });
 
     // Fire-and-forget: extract personal facts from this exchange into the wiki
-    this.triggerWikiExtraction(conversationId, content).catch(err => {
+    this.triggerWikiExtraction(conversationId, assistantMessage).catch(err => {
       console.error('Wiki extraction background error:', err.message);
     });
 
-    return message;
+    return assistantMessage;
   }
 
   /**
    * Background wiki extraction from a chat exchange
    */
-  async triggerWikiExtraction(conversationId, assistantContent) {
-    // Find the most recent user message in this conversation
-    const userMsg = await prisma.chatMessage.findFirst({
-      where: { conversationId, role: 'user' },
-      orderBy: { createdAt: 'desc' }
+  async triggerWikiExtraction(conversationId, assistantMessage) {
+    if (!assistantMessage || assistantMessage.role !== 'assistant') {
+      return;
+    }
+
+    // Pair with the nearest unextracted user turn before this assistant response.
+    // Fallback to the nearest user turn to avoid missing a valid pair when flags drift.
+    let userMsg = await prisma.chatMessage.findFirst({
+      where: {
+        conversationId,
+        role: 'user',
+        wikiExtracted: false,
+        id: { lt: assistantMessage.id }
+      },
+      orderBy: { id: 'desc' }
     });
+    if (!userMsg) {
+      userMsg = await prisma.chatMessage.findFirst({
+        where: {
+          conversationId,
+          role: 'user',
+          id: { lt: assistantMessage.id }
+        },
+        orderBy: { id: 'desc' }
+      });
+    }
     if (!userMsg) return;
+
+    // Include a short rolling window so follow-up turns in ongoing conversations
+    // can be interpreted with nearby context instead of as isolated first-turn prompts.
+    const recentWindow = await prisma.chatMessage.findMany({
+      where: {
+        conversationId,
+        id: { lte: assistantMessage.id }
+      },
+      orderBy: { id: 'desc' },
+      take: 6,
+      select: {
+        id: true,
+        role: true,
+        content: true
+      }
+    });
+    const recentMessages = recentWindow.reverse();
 
     const conversation = await prisma.chatConversation.findUnique({
       where: { id: conversationId },
@@ -518,9 +555,10 @@ class ChatService {
 
     const extractionResult = await this.wikiService.extractFromChat(
       userMsg.content,
-      assistantContent,
+      assistantMessage.content,
       conversation?.title || 'Untitled',
-      conversationId
+      conversationId,
+      { recentMessages, userMessageId: userMsg.id, assistantMessageId: assistantMessage.id }
     );
 
     // Keep messages retriable if extraction is disabled or fails.
@@ -531,23 +569,11 @@ class ChatService {
     // Mark both messages as wiki-extracted
     await prisma.chatMessage.updateMany({
       where: {
-        conversationId,
-        id: { in: [userMsg.id] },
+        id: { in: [userMsg.id, assistantMessage.id] },
         wikiExtracted: false
       },
       data: { wikiExtracted: true }
     });
-    // Mark the assistant message too (find the latest one)
-    const assistantMsg = await prisma.chatMessage.findFirst({
-      where: { conversationId, role: 'assistant' },
-      orderBy: { createdAt: 'desc' }
-    });
-    if (assistantMsg) {
-      await prisma.chatMessage.update({
-        where: { id: assistantMsg.id },
-        data: { wikiExtracted: true }
-      });
-    }
   }
 }
 

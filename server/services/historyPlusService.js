@@ -1135,24 +1135,19 @@ class HistoryPlusService {
         !bookLink.book.bookCompletions?.length || !bookLink.book.bookCompletions[0]?.isCompleted
       );
       
-      // Check for any unread unified chapters (directly linked, skip if parent book is read)
+      // Check for any unread unified chapters (directly linked)
       const unreadUnifiedChapters = (event.bookChapters || []).filter(chapter =>
-        (!chapter.chapterCompletions?.length || !chapter.chapterCompletions[0]?.isCompleted) &&
-        !chapter.book?.bookCompletions?.[0]?.isCompleted
+        !chapter.chapterCompletions?.length || !chapter.chapterCompletions[0]?.isCompleted
       );
       
       // Check for any unread unified sections (directly linked)
       const unreadUnifiedSections = (event.bookSections || []).filter(section =>
-        (!section.sectionCompletions?.length || !section.sectionCompletions[0]?.isCompleted) &&
-        !section.chapter?.chapterCompletions?.[0]?.isCompleted &&
-        !section.chapter?.book?.bookCompletions?.[0]?.isCompleted
+        !section.sectionCompletions?.length || !section.sectionCompletions[0]?.isCompleted
       );
       
       // Check sections nested under event-linked chapters
       let unreadNestedUnifiedSections = 0;
       for (const chapter of (event.bookChapters || [])) {
-        if (chapter.book?.bookCompletions?.[0]?.isCompleted) continue;
-        if (chapter.chapterCompletions?.[0]?.isCompleted) continue;
         for (const section of (chapter.sections || [])) {
           if (!section.sectionCompletions?.length || !section.sectionCompletions[0]?.isCompleted) {
             unreadNestedUnifiedSections++;
@@ -1163,14 +1158,12 @@ class HistoryPlusService {
       // Check chapters/sections nested under event-linked books
       let unreadNestedUnifiedBookContent = 0;
       for (const bookLink of (event.bookLinks || [])) {
-        if (bookLink.book.bookCompletions?.[0]?.isCompleted) continue;
         for (const chapter of (bookLink.book.chapters || [])) {
           if (!chapter.chapterCompletions?.length || !chapter.chapterCompletions[0]?.isCompleted) {
             unreadNestedUnifiedBookContent++;
           }
           for (const section of (chapter.sections || [])) {
-            if ((!section.sectionCompletions?.length || !section.sectionCompletions[0]?.isCompleted) &&
-                (!chapter.chapterCompletions?.length || !chapter.chapterCompletions[0]?.isCompleted)) {
+            if (!section.sectionCompletions?.length || !section.sectionCompletions[0]?.isCompleted) {
               unreadNestedUnifiedBookContent++;
             }
           }
@@ -1207,7 +1200,6 @@ class HistoryPlusService {
       // Check chapters/sections nested under event-linked legacy books
       let unreadNestedLegacyBookContent = 0;
       for (const book of (event.books || [])) {
-        if (book.user_book_reads?.read) continue;
         for (const chapter of (book.chapters || [])) {
           if (!chapter.user_chapter_reads?.read) {
             unreadNestedLegacyBookContent++;
