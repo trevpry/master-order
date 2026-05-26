@@ -1631,13 +1631,20 @@ class HistoryPlusService {
         const hasUnwatchedContent = await this.checkEventHasUnwatchedContent(event);
         
         if (hasUnwatchedContent) {
-          if (hasTypeFilter) {
-            // Ensure this event can produce at least one item in the allowed type set.
-            const matchingContent = await this.getRandomContentFromEvent(event, allowedTypes);
-            if (!matchingContent) {
+          // Validate with the same content builder used for final selection so we
+          // never select an event that yields zero playable items.
+          const matchingContent = await this.getRandomContentFromEvent(
+            event,
+            hasTypeFilter ? allowedTypes : null
+          );
+
+          if (!matchingContent) {
+            if (hasTypeFilter) {
               console.log(`⏭️ Event "${event.title}" has no content matching allowed types (${allowedTypes.join(', ')}), continuing to next event...`);
-              continue;
+            } else {
+              console.log(`⏭️ Event "${event.title}" reported unwatched content but yielded no selectable items, continuing...`);
             }
+            continue;
           }
 
           console.log(`✅ Selected event with unwatched content: "${event.title}"`);
@@ -2049,36 +2056,38 @@ class HistoryPlusService {
             bookCoverUrl: parentBook?.coverUrl,
             bookDescription: parentBook?.description
           });
-          
-          // Also add unread sections nested under this chapter
-          for (const section of (chapter.sections || [])) {
-            if (!section.sectionCompletions?.[0]?.isCompleted && !addedSectionIds.has(section.id)) {
-              addedSectionIds.add(section.id);
-              availableContent.push({
-                type: 'section',
-                content: section,
-                title: `${parentBook?.title || 'Unknown Book'} - Chapter ${chapter.chapterNumber || ''}: ${chapter.title} - Section ${section.sectionNumber || ''}: ${section.title}`,
-                description: section.description || '',
-                sectionNumber: section.sectionNumber || 0,
-                sectionTitle: section.title,
-                sectionDescription: section.description,
-                sectionPageStart: section.pageStart,
-                sectionPageEnd: section.pageEnd,
-                chapterNumber: chapter.chapterNumber || 0,
-                chapterTitle: chapter.title,
-                chapterDescription: chapter.description,
-                pageStart: chapter.pageStart,
-                pageEnd: chapter.pageEnd,
-                bookTitle: parentBook?.title || 'Unknown Book',
-                bookAuthor: parentBook?.author || 'Unknown Author',
-                bookYear: parentBook?.publishYear,
-                bookIsbn: parentBook?.isbn,
-                bookPublisher: parentBook?.publisher,
-                bookPageCount: parentBook?.pageCount,
-                bookCoverUrl: parentBook?.coverUrl,
-                bookDescription: parentBook?.description
-              });
-            }
+        }
+
+        // Always add unread sections nested under this chapter, even if the
+        // chapter/book itself is already completed.
+        const parentBook = chapter.book;
+        for (const section of (chapter.sections || [])) {
+          if (!section.sectionCompletions?.[0]?.isCompleted && !addedSectionIds.has(section.id)) {
+            addedSectionIds.add(section.id);
+            availableContent.push({
+              type: 'section',
+              content: section,
+              title: `${parentBook?.title || 'Unknown Book'} - Chapter ${chapter.chapterNumber || ''}: ${chapter.title} - Section ${section.sectionNumber || ''}: ${section.title}`,
+              description: section.description || '',
+              sectionNumber: section.sectionNumber || 0,
+              sectionTitle: section.title,
+              sectionDescription: section.description,
+              sectionPageStart: section.pageStart,
+              sectionPageEnd: section.pageEnd,
+              chapterNumber: chapter.chapterNumber || 0,
+              chapterTitle: chapter.title,
+              chapterDescription: chapter.description,
+              pageStart: chapter.pageStart,
+              pageEnd: chapter.pageEnd,
+              bookTitle: parentBook?.title || 'Unknown Book',
+              bookAuthor: parentBook?.author || 'Unknown Author',
+              bookYear: parentBook?.publishYear,
+              bookIsbn: parentBook?.isbn,
+              bookPublisher: parentBook?.publisher,
+              bookPageCount: parentBook?.pageCount,
+              bookCoverUrl: parentBook?.coverUrl,
+              bookDescription: parentBook?.description
+            });
           }
         }
       });
