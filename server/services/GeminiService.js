@@ -521,52 +521,28 @@ Respond in a clear, structured format.`;
   }
 
   /**
-   * Build a course analysis prompt for manual Gemini use
-   * @param {Object} course - Course object with title, instructor, description, etc.
-   * @param {Array} lectures - Array of lecture objects with title, order, description
-   * @param {string} guidebookContent - Text content extracted from course guidebook PDF
-   * @param {Array} availableEvents - List of existing events
-   * @param {Array} availableCategories - List of available categories
-   * @returns {string} - Complete prompt for manual Gemini input
+   * Default editable prompt template for course assignment analysis.
+   * Variables are injected using {{VARIABLE_NAME}} placeholders.
    */
-  buildCourseAssignmentPrompt(course, lectures, guidebookContent, availableEvents, availableCategories) {
-    const eventsList = availableEvents.map(event => 
-      `- "${event.title}" (${event.startDate} - ${event.endDate || 'Ongoing'}) - Category: ${event.category}`
-    ).join('\n');
-
-    const categoryList = availableCategories.map(cat => 
-      `- "${cat.name}": ${cat.description || 'Historical category'}`
-    ).join('\n');
-
-    const lecturesList = lectures
-      .sort((a, b) => (a.order || 0) - (b.order || 0))
-      .map(lecture => 
-        `${lecture.order || 'N/A'}. ${lecture.title}${lecture.description ? ` - ${lecture.description}` : ''}`
-      ).join('\n');
-
-    const guidebookSection = guidebookContent ? `
-Course Guidebook Content:
-${guidebookContent.substring(0, 8000)}${guidebookContent.length > 8000 ? '...[content truncated]' : ''}
-` : 'No guidebook content available.';
-
+  getDefaultCourseAssignmentPromptTemplate() {
     return `You are an expert historian and educational content analyst. Your task is to analyze a complete course and assign each lecture to appropriate historical events, creating new events as needed for chronological accuracy.
 
 COURSE INFORMATION:
-Title: ${course.title}
-Instructor: ${course.instructor || 'Unknown'}
-Category: ${course.category || 'General'}
-Description: ${course.description || 'No description available'}
+Title: {{COURSE_TITLE}}
+Instructor: {{COURSE_INSTRUCTOR}}
+Category: {{COURSE_CATEGORY}}
+Description: {{COURSE_DESCRIPTION}}
 
-COURSE LECTURES (${lectures.length} total):
-${lecturesList}
+COURSE LECTURES ({{COURSE_LECTURE_COUNT}} total):
+{{COURSE_LECTURES}}
 
-${guidebookSection}
+{{GUIDEBOOK_SECTION}}
 
 EXISTING HISTORICAL EVENTS:
-${eventsList || 'No existing events'}
+{{EXISTING_EVENTS}}
 
 AVAILABLE CATEGORIES:
-${categoryList}
+{{AVAILABLE_CATEGORIES}}
 
 ANALYSIS REQUIREMENTS:
 
@@ -581,14 +557,14 @@ ANALYSIS REQUIREMENTS:
    - Introductory lectures like "Why we study...", "Introduction to...", "Overview of..." should use PAIR_WITH_NEXT
    - The paired lectures will be assigned to the SAME historical event as the next specific lecture
    - Examples:
-     * Lecture 1: "Why we study Ancient Egypt" (PAIR_WITH_NEXT) + Lecture 2: "Pre-Dynastic Egypt" → Both assigned to "Pre-Dynastic Egypt" event
-     * Lecture 5: "Understanding Medieval Society" (PAIR_WITH_NEXT) + Lecture 6: "The Black Death" → Both assigned to "The Black Death" event
+     * Lecture 1: "Why we study Ancient Egypt" (PAIR_WITH_NEXT) + Lecture 2: "Pre-Dynastic Egypt" -> Both assigned to "Pre-Dynastic Egypt" event
+     * Lecture 5: "Understanding Medieval Society" (PAIR_WITH_NEXT) + Lecture 6: "The Black Death" -> Both assigned to "The Black Death" event
    - This ensures NO lectures are skipped while maintaining chronological accuracy
 
 4. **EVENT GRANULARITY**: Create specific, focused events rather than broad ones. For example:
-   - Instead of "Roman Empire" → "Fall of the Western Roman Empire (476 CE)"
-   - Instead of "World War II" → "Battle of Stalingrad (1942-1943)"
-   - Instead of "Medieval Period" → "The Crusades (1095-1291)"
+   - Instead of "Roman Empire" -> "Fall of the Western Roman Empire (476 CE)"
+   - Instead of "World War II" -> "Battle of Stalingrad (1942-1943)"
+   - Instead of "Medieval Period" -> "The Crusades (1095-1291)"
 
 4. **CATEGORY GUIDELINES**:
    - **USE EXISTING CATEGORIES** whenever possible
@@ -604,8 +580,8 @@ Respond with a JSON object containing an array of suggestions for each lecture:
 
 {
   "courseAnalysis": {
-    "title": "${course.title}",
-    "totalLectures": ${lectures.length},
+    "title": "{{COURSE_TITLE}}",
+    "totalLectures": {{COURSE_LECTURE_COUNT}},
     "recommendedStrategy": "Brief overview of the chronological approach"
   },
   "suggestions": [
@@ -635,7 +611,7 @@ Respond with a JSON object containing an array of suggestions for each lecture:
 }
 
 CRITICAL REQUIREMENTS:
-- **NO LECTURES SHALL BE SKIPPED**: Include ALL ${lectures.length} lectures in the suggestions array
+- **NO LECTURES SHALL BE SKIPPED**: Include ALL {{COURSE_LECTURE_COUNT}} lectures in the suggestions array
 - **PAIRING STRATEGY**: For analytical/concept/introductory lectures (like "Why we study Ancient Egypt", "Introduction to...", "Overview of..."), use "PAIR_WITH_NEXT" action to group them with the next specific historical event
 - **EXAMPLE PAIRING**: If Lecture 1 is "Why we study Ancient Egypt" and Lecture 2 is "Pre-Dynastic Egypt", both should be assigned to the same "Pre-Dynastic Egypt" event
 - Maintain chronological order (lecture 1 = earliest event, lecture N = latest event)
@@ -643,6 +619,61 @@ CRITICAL REQUIREMENTS:
 - Use guidebook content to determine precise historical periods
 - Each lecture must have a clear historical timeframe assignment - no exceptions
 - Return ONLY the JSON object, no additional text`;
+  }
+
+  applyCoursePromptTemplate(template, replacements) {
+    let rendered = String(template || '');
+
+    for (const [key, value] of Object.entries(replacements || {})) {
+      rendered = rendered.split(`{{${key}}}`).join(String(value ?? ''));
+    }
+
+    return rendered;
+  }
+
+  /**
+   * Build a course analysis prompt for manual Gemini use
+   * @param {Object} course - Course object with title, instructor, description, etc.
+   * @param {Array} lectures - Array of lecture objects with title, order, description
+   * @param {string} guidebookContent - Text content extracted from course guidebook PDF
+   * @param {Array} availableEvents - List of existing events
+   * @param {Array} availableCategories - List of available categories
+   * @param {string|null} promptTemplate - Optional custom prompt template with {{PLACEHOLDERS}}
+   * @returns {string} - Complete prompt for manual Gemini input
+   */
+  buildCourseAssignmentPrompt(course, lectures, guidebookContent, availableEvents, availableCategories, promptTemplate = null) {
+    const eventsList = availableEvents.map(event => 
+      `- "${event.title}" (${event.startDate} - ${event.endDate || 'Ongoing'}) - Category: ${event.category}`
+    ).join('\n');
+
+    const categoryList = availableCategories.map(cat => 
+      `- "${cat.name}": ${cat.description || 'Historical category'}`
+    ).join('\n');
+
+    const lecturesList = lectures
+      .sort((a, b) => (a.order || 0) - (b.order || 0))
+      .map(lecture => 
+        `${lecture.order || 'N/A'}. ${lecture.title}${lecture.description ? ` - ${lecture.description}` : ''}`
+      ).join('\n');
+
+    const guidebookSection = guidebookContent ? `
+Course Guidebook Content:
+${guidebookContent.substring(0, 8000)}${guidebookContent.length > 8000 ? '...[content truncated]' : ''}
+` : 'No guidebook content available.';
+
+    const activeTemplate = String(promptTemplate || '').trim() || this.getDefaultCourseAssignmentPromptTemplate();
+
+    return this.applyCoursePromptTemplate(activeTemplate, {
+      COURSE_TITLE: course.title,
+      COURSE_INSTRUCTOR: course.instructor || 'Unknown',
+      COURSE_CATEGORY: course.category || 'General',
+      COURSE_DESCRIPTION: course.description || 'No description available',
+      COURSE_LECTURE_COUNT: lectures.length,
+      COURSE_LECTURES: lecturesList,
+      GUIDEBOOK_SECTION: guidebookSection,
+      EXISTING_EVENTS: eventsList || 'No existing events',
+      AVAILABLE_CATEGORIES: categoryList || 'No available categories'
+    });
   }
 
   /**

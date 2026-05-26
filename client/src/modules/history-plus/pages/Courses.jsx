@@ -30,6 +30,14 @@ const Courses = () => {
   // AI assignment state
   const [selectedAiCourse, setSelectedAiCourse] = useState(null);
   const [showAiAssignment, setShowAiAssignment] = useState(false);
+
+  // Course AI prompt template editor state
+  const [showPromptTemplateEditor, setShowPromptTemplateEditor] = useState(false);
+  const [promptTemplate, setPromptTemplate] = useState('');
+  const [defaultPromptTemplate, setDefaultPromptTemplate] = useState('');
+  const [isCustomPromptTemplate, setIsCustomPromptTemplate] = useState(false);
+  const [promptTemplateLoading, setPromptTemplateLoading] = useState(false);
+  const [promptTemplateSaving, setPromptTemplateSaving] = useState(false);
   
   // Local state for UI
   const [addedCourses, setAddedCourses] = useState(() => {
@@ -223,6 +231,61 @@ const Courses = () => {
     setShowAiAssignment(true);
   };
 
+  const loadPromptTemplate = useCallback(async () => {
+    try {
+      setPromptTemplateLoading(true);
+      const response = await fetch('/api/courses/ai-prompt-template');
+      if (!response.ok) throw new Error('Failed to load prompt template');
+
+      const data = await response.json();
+      if (!data.success) throw new Error(data.message || 'Failed to load prompt template');
+
+      setPromptTemplate(data.data.template || '');
+      setDefaultPromptTemplate(data.data.defaultTemplate || '');
+      setIsCustomPromptTemplate(Boolean(data.data.isCustom));
+    } catch (loadError) {
+      console.error('Error loading Course AI prompt template:', loadError);
+      alert(`Failed to load prompt template: ${loadError.message}`);
+    } finally {
+      setPromptTemplateLoading(false);
+    }
+  }, []);
+
+  const handleOpenPromptTemplateEditor = async () => {
+    setShowPromptTemplateEditor(true);
+    await loadPromptTemplate();
+  };
+
+  const handleSavePromptTemplate = async () => {
+    try {
+      setPromptTemplateSaving(true);
+
+      const response = await fetch('/api/courses/ai-prompt-template', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ template: promptTemplate })
+      });
+
+      if (!response.ok) throw new Error('Failed to save prompt template');
+
+      const data = await response.json();
+      if (!data.success) throw new Error(data.message || 'Failed to save prompt template');
+
+      setPromptTemplate(data.data.template || promptTemplate);
+      setIsCustomPromptTemplate(Boolean(data.data.isCustom));
+      alert('Course AI prompt template saved successfully.');
+    } catch (saveError) {
+      console.error('Error saving Course AI prompt template:', saveError);
+      alert(`Failed to save prompt template: ${saveError.message}`);
+    } finally {
+      setPromptTemplateSaving(false);
+    }
+  };
+
+  const handleResetPromptTemplate = () => {
+    setPromptTemplate(defaultPromptTemplate || '');
+  };
+
   // Handle AI assignment completion
   const handleAiAssignmentComplete = async (courseId, result) => {
     console.log('AI assignment completed for course:', courseId, result);
@@ -400,6 +463,13 @@ const Courses = () => {
                 className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors"
               >
                 📚 Add Course(s)
+              </button>
+
+              <button
+                onClick={handleOpenPromptTemplateEditor}
+                className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors"
+              >
+                ✏️ Edit AI Prompt Template
               </button>
               
               {addedCourses.size > 0 && (
@@ -879,6 +949,80 @@ const Courses = () => {
                 onCreateNewEvent={handleAiAssignmentComplete}
                 className="w-full"
               />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Course AI Prompt Template Editor Modal */}
+      {showPromptTemplateEditor && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-lg max-w-5xl w-full max-h-[95vh] overflow-hidden">
+            <div className="p-4 border-b bg-gradient-to-r from-indigo-600 to-blue-600 text-white">
+              <div className="flex justify-between items-center">
+                <div>
+                  <h2 className="text-xl font-semibold">Great Courses AI Prompt Template</h2>
+                  <p className="text-sm text-indigo-100 mt-1">
+                    Customize the template used to generate Course AI analysis prompts.
+                  </p>
+                </div>
+                <button
+                  onClick={() => setShowPromptTemplateEditor(false)}
+                  className="text-white hover:text-gray-200"
+                >
+                  ✕
+                </button>
+              </div>
+            </div>
+
+            <div className="p-6 overflow-y-auto max-h-[calc(95vh-130px)]">
+              {promptTemplateLoading ? (
+                <div className="text-center py-12">
+                  <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-indigo-600 mx-auto mb-4"></div>
+                  <p className="text-gray-600">Loading prompt template...</p>
+                </div>
+              ) : (
+                <>
+                  <div className="mb-4 flex items-center justify-between gap-3">
+                    <div className="text-sm text-gray-600">
+                      Status: {isCustomPromptTemplate ? 'Custom template saved' : 'Using default template'}
+                    </div>
+                    <button
+                      onClick={handleResetPromptTemplate}
+                      className="px-3 py-2 rounded-md border border-gray-300 text-sm text-gray-700 hover:bg-gray-50"
+                    >
+                      Reset Editor to Default
+                    </button>
+                  </div>
+
+                  <textarea
+                    value={promptTemplate}
+                    onChange={(e) => setPromptTemplate(e.target.value)}
+                    className="w-full h-[60vh] border border-gray-300 rounded-lg p-3 font-mono text-sm leading-6 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                    placeholder="Enter Course AI prompt template..."
+                  />
+
+                  <div className="mt-4 text-xs text-gray-500">
+                    Available placeholders: {'{{COURSE_TITLE}}'}, {'{{COURSE_INSTRUCTOR}}'}, {'{{COURSE_CATEGORY}}'}, {'{{COURSE_DESCRIPTION}}'}, {'{{COURSE_LECTURE_COUNT}}'}, {'{{COURSE_LECTURES}}'}, {'{{GUIDEBOOK_SECTION}}'}, {'{{EXISTING_EVENTS}}'}, {'{{AVAILABLE_CATEGORIES}}'}
+                  </div>
+
+                  <div className="mt-6 flex justify-end gap-3">
+                    <button
+                      onClick={() => setShowPromptTemplateEditor(false)}
+                      className="px-4 py-2 rounded-md border border-gray-300 text-gray-700 hover:bg-gray-50"
+                    >
+                      Close
+                    </button>
+                    <button
+                      onClick={handleSavePromptTemplate}
+                      disabled={promptTemplateSaving}
+                      className="px-4 py-2 rounded-md bg-indigo-600 text-white hover:bg-indigo-700 disabled:bg-gray-400"
+                    >
+                      {promptTemplateSaving ? 'Saving...' : 'Save Template'}
+                    </button>
+                  </div>
+                </>
+              )}
             </div>
           </div>
         </div>

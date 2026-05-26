@@ -1131,21 +1131,7 @@ async function getNextEpisode() {
     if (orderType === 'HISTORY_PLUS') {
       try {
         console.log('🏛️ History Plus order type selected - finding next unreviewed event');
-        
-        // Get the next unreviewed event
-        const nextEvent = await historyPlusService.getNextUnreviewedEvent();
-        
-        if (!nextEvent) {
-          console.log('No unreviewed events found');
-          return {
-            message: 'No History Plus content available',
-            orderType: 'HISTORY_PLUS',
-            mediaTypeLimiters
-          };
-        }
-        
-        console.log(`📚 Found unreviewed event: ${nextEvent.title}`);
-        
+
         // Determine allowed History Plus content types based on limiters
         let allowedTypes = null;
         if (mediaTypeLimiters && !Object.values(mediaTypeLimiters).every(v => v)) {
@@ -1154,6 +1140,20 @@ async function getNextEpisode() {
           if (mediaTypeLimiters.book) allowedTypes.push('book', 'chapter', 'section');
           console.log(`🎯 History Plus filtered to types: ${allowedTypes.join(', ')}`);
         }
+
+        // Get the next unreviewed event that can actually yield allowed content.
+        const nextEvent = await historyPlusService.getNextUnreviewedEvent(allowedTypes);
+
+        if (!nextEvent) {
+          console.log('No unreviewed events found for active History Plus media type limiters');
+          return {
+            message: 'No History Plus content available for selected media types',
+            orderType: 'HISTORY_PLUS',
+            mediaTypeLimiters
+          };
+        }
+
+        console.log(`📚 Found unreviewed event: ${nextEvent.title}`);
         
         // Get random content from the event, filtered by allowed types
         const randomContent = await historyPlusService.getRandomContentFromEvent(nextEvent, allowedTypes);
@@ -1161,7 +1161,7 @@ async function getNextEpisode() {
         if (!randomContent) {
           console.log('No content found in event');
           return {
-            message: 'No content available in selected event',
+            message: 'No content available in selected event for selected media types',
             orderType: 'HISTORY_PLUS',
             mediaTypeLimiters
           };

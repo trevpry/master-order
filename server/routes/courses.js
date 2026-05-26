@@ -78,6 +78,50 @@ router.get('/categories', asyncHandler(async (req, res) => {
   sendSuccess(res, categories.map(c => c.category));
 }));
 
+// GET /api/courses/ai-prompt-template - Get current Course AI prompt template
+router.get('/ai-prompt-template', asyncHandler(async (req, res) => {
+  const settings = await prisma.settings.findUnique({
+    where: { id: 1 },
+    select: { courseAiPromptTemplate: true }
+  });
+
+  const savedTemplate = settings?.courseAiPromptTemplate || '';
+  const defaultTemplate = geminiService.getDefaultCourseAssignmentPromptTemplate();
+
+  sendSuccess(res, {
+    template: savedTemplate || defaultTemplate,
+    isCustom: !!savedTemplate,
+    defaultTemplate
+  });
+}));
+
+// PUT /api/courses/ai-prompt-template - Save Course AI prompt template
+router.put('/ai-prompt-template', asyncHandler(async (req, res) => {
+  const templateInput = req.body?.template;
+  if (typeof templateInput !== 'string') {
+    return sendBadRequest(res, 'template must be a string');
+  }
+
+  const normalizedTemplate = templateInput.trim();
+
+  await prisma.settings.upsert({
+    where: { id: 1 },
+    update: {
+      courseAiPromptTemplate: normalizedTemplate || null
+    },
+    create: {
+      id: 1,
+      courseAiPromptTemplate: normalizedTemplate || null
+    }
+  });
+
+  sendSuccess(res, {
+    saved: true,
+    isCustom: !!normalizedTemplate,
+    template: normalizedTemplate || geminiService.getDefaultCourseAssignmentPromptTemplate()
+  });
+}));
+
 // GET /api/courses/:id - Get a specific course with videos
 router.get('/:id', asyncHandler(async (req, res) => {
   const { id } = req.params;
@@ -622,13 +666,19 @@ router.post('/:id/ai-analyze', asyncHandler(async (req, res) => {
   }
   
   if (preview === 'true') {
+    const settings = await prisma.settings.findUnique({
+      where: { id: 1 },
+      select: { courseAiPromptTemplate: true }
+    });
+
     // Generate prompt for manual use
     const fullPrompt = geminiService.buildCourseAssignmentPrompt(
       course,
       course.videos,
       guidebookContent,
       events,
-      categories
+      categories,
+      settings?.courseAiPromptTemplate || null
     );
     
     sendSuccess(res, {

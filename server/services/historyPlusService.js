@@ -1525,7 +1525,7 @@ class HistoryPlusService {
    * An event is considered "unreviewed" if it has at least one piece of content 
    * (video, book, chapter, or section) that hasn't been marked as read/watched
    */
-  async getNextUnreviewedEvent() {
+  async getNextUnreviewedEvent(allowedTypes = null) {
     try {
       const events = await this.prisma.historicalEvent.findMany({
         where: { hidden: false },
@@ -1620,6 +1620,8 @@ class HistoryPlusService {
 
       console.log(`🔍 Checking ${sortedEvents.length} events for unreviewed content...`);
       
+      const hasTypeFilter = Array.isArray(allowedTypes) && allowedTypes.length > 0;
+
       // Find the first event with actual unreviewed content
       for (const event of sortedEvents) {
         const isEventReviewed = event.user_event_reviews && event.user_event_reviews.reviewed;
@@ -1629,6 +1631,15 @@ class HistoryPlusService {
         const hasUnwatchedContent = await this.checkEventHasUnwatchedContent(event);
         
         if (hasUnwatchedContent) {
+          if (hasTypeFilter) {
+            // Ensure this event can produce at least one item in the allowed type set.
+            const matchingContent = await this.getRandomContentFromEvent(event, allowedTypes);
+            if (!matchingContent) {
+              console.log(`⏭️ Event "${event.title}" has no content matching allowed types (${allowedTypes.join(', ')}), continuing...`);
+              continue;
+            }
+          }
+
           console.log(`✅ Selected event with unwatched content: "${event.title}"`);
           return event;
         } else {
@@ -1650,6 +1661,12 @@ class HistoryPlusService {
       }
 
       // If no unreviewed events, return the first event (or null if no events)
+      // unless we were explicitly filtering by allowed content types.
+      if (hasTypeFilter) {
+        console.log(`⚠️ No unreviewed events found with allowed types (${allowedTypes.join(', ')})`);
+        return null;
+      }
+
       console.log('⚠️ No unreviewed events found, returning first event');
       return sortedEvents.length > 0 ? sortedEvents[0] : null;
     } catch (error) {

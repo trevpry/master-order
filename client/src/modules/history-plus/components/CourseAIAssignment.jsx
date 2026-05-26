@@ -108,6 +108,40 @@ const CourseAIAssignment = ({
     window.URL.revokeObjectURL(url);
   };
 
+  const copyTextToClipboard = async (text) => {
+    const value = String(text || '');
+    if (!value) return false;
+
+    // Preferred path: async clipboard API (requires secure context/permissions)
+    if (navigator?.clipboard?.writeText) {
+      try {
+        await navigator.clipboard.writeText(value);
+        return true;
+      } catch (error) {
+        console.warn('Clipboard API failed, falling back to execCommand copy:', error?.message || error);
+      }
+    }
+
+    // Fallback for production browsers/environments with blocked clipboard API.
+    try {
+      const textArea = document.createElement('textarea');
+      textArea.value = value;
+      textArea.setAttribute('readonly', '');
+      textArea.style.position = 'fixed';
+      textArea.style.top = '-9999px';
+      textArea.style.left = '-9999px';
+      document.body.appendChild(textArea);
+      textArea.focus();
+      textArea.select();
+      const copied = document.execCommand('copy');
+      document.body.removeChild(textArea);
+      return copied;
+    } catch (error) {
+      console.error('Fallback clipboard copy failed:', error);
+      return false;
+    }
+  };
+
   const handleAnalyzeCourse = async () => {
     if (!course?.id) {
       setError('No course ID available for analysis');
@@ -230,8 +264,13 @@ const CourseAIAssignment = ({
       const safeCourseTitle = sanitizeFileName(course?.title);
       const contextFileName = `${safeCourseTitle}-events-categories-context.txt`;
 
+      // Copy first while still in the direct button interaction context.
+      const copied = await copyTextToClipboard(promptWithoutEventsAndCategories);
+      if (!copied) {
+        setError('Could not copy prompt to clipboard in this browser/environment.');
+      }
+
       downloadTextFile(contextFileName, contextText);
-      await navigator.clipboard.writeText(promptWithoutEventsAndCategories);
       console.log('Course AI prompt copied to clipboard and context file downloaded');
     } catch (error) {
       console.error('Failed to copy course prompt:', error);

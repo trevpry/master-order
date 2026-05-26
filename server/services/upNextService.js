@@ -47,15 +47,15 @@ function formatHistoryPlusResponse(data) {
  */
 async function tryGetHistoryPlusContent(mediaTypeLimiters) {
   try {
-    const nextEvent = await historyPlusService.getNextUnreviewedEvent();
-    if (!nextEvent) return null;
-
     let allowedTypes = null;
     if (mediaTypeLimiters && !Object.values(mediaTypeLimiters).every(v => v)) {
       allowedTypes = [];
       if (mediaTypeLimiters.webvideo) allowedTypes.push('video');
       if (mediaTypeLimiters.book) allowedTypes.push('book', 'chapter', 'section');
     }
+
+    const nextEvent = await historyPlusService.getNextUnreviewedEvent(allowedTypes);
+    if (!nextEvent) return null;
 
     const randomContent = await historyPlusService.getRandomContentFromEvent(nextEvent, allowedTypes);
     if (!randomContent) return null;
