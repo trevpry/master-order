@@ -147,10 +147,23 @@ function getEffectiveOrderTypePercentages(settings) {
       }
     } else if (total !== 100) {
       const scale = 100 / total;
-      tvPercent = Math.round(tvPercent * scale);
-      moviesPercent = Math.round(moviesPercent * scale);
-      customPercent = Math.round(customPercent * scale);
-      historyPercent = 100 - tvPercent - moviesPercent - customPercent; // Absorb rounding error
+      // Track which types were eligible (non-zero) before scaling
+      const tvEligible = tvPercent > 0;
+      const moviesEligible = moviesPercent > 0;
+      const customEligible2 = customPercent > 0;
+      const historyEligible2 = historyPercent > 0;
+      tvPercent = tvEligible ? Math.round(tvPercent * scale) : 0;
+      moviesPercent = moviesEligible ? Math.round(moviesPercent * scale) : 0;
+      customPercent = customEligible2 ? Math.round(customPercent * scale) : 0;
+      historyPercent = historyEligible2 ? Math.round(historyPercent * scale) : 0;
+      // Absorb rounding remainder into the last eligible type
+      const remainder = 100 - tvPercent - moviesPercent - customPercent - historyPercent;
+      if (remainder !== 0) {
+        if (historyEligible2) historyPercent += remainder;
+        else if (customEligible2) customPercent += remainder;
+        else if (moviesEligible) moviesPercent += remainder;
+        else if (tvEligible) tvPercent += remainder;
+      }
     }
   }
 
@@ -189,14 +202,20 @@ async function selectOrderType() {
 
   if (!allEnabled && limiters) {
     console.log(`🎯 Media type limiters active:`, limiters);
-    console.log(`🎯 Effective percentages - TV: ${tvPercent}%, Movies: ${moviesPercent}%, Custom: ${customPercent}%, History+: ${historyPercent}%`);
   }
+  console.log(`🎯 Effective percentages - TV: ${tvPercent}%, Movies: ${moviesPercent}%, Custom: ${customPercent}%, History+: ${historyPercent}%`);
+
+  // Use the actual sum as the range so selection is correct even if percentages don't sum to exactly 100
+  const totalWeight = tvPercent + moviesPercent + customPercent + historyPercent;
+  if (totalWeight <= 0) {
+    console.log('No order type weights configured, defaulting to TV General');
+    return { orderType: 'TV_GENERAL', mediaTypeLimiters: limiters };
+  }
+
+  const randomPercent = Math.floor(Math.random() * totalWeight) + 1;
+  console.log(`Random selection: ${randomPercent}/${totalWeight}`);
   
-  // Generate random number between 1-100
-  const randomPercent = Math.floor(Math.random() * 100) + 1;
-  console.log(`Random selection: ${randomPercent}%`);
-  
-  // Determine order type based on cumulative percentages
+  // Determine order type based on cumulative weights
   if (randomPercent <= tvPercent) {
     console.log('Selected order type: TV General');
     return { orderType: 'TV_GENERAL', mediaTypeLimiters: limiters };
