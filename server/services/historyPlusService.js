@@ -1635,8 +1635,8 @@ class HistoryPlusService {
             // Ensure this event can produce at least one item in the allowed type set.
             const matchingContent = await this.getRandomContentFromEvent(event, allowedTypes);
             if (!matchingContent) {
-              console.log(`⏭️ Event "${event.title}" has no content matching allowed types (${allowedTypes.join(', ')}), skipping History Plus`);
-              return null;
+              console.log(`⏭️ Event "${event.title}" has no content matching allowed types (${allowedTypes.join(', ')}), continuing to next event...`);
+              continue;
             }
           }
 
