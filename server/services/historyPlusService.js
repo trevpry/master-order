@@ -1148,6 +1148,7 @@ class HistoryPlusService {
       // Check sections nested under event-linked chapters
       let unreadNestedUnifiedSections = 0;
       for (const chapter of (event.bookChapters || [])) {
+        if (chapter.chapterCompletions?.[0]?.isCompleted) continue;
         for (const section of (chapter.sections || [])) {
           if (!section.sectionCompletions?.length || !section.sectionCompletions[0]?.isCompleted) {
             unreadNestedUnifiedSections++;
@@ -1190,6 +1191,7 @@ class HistoryPlusService {
       // Check sections nested under event-linked legacy chapters
       let unreadNestedLegacySections = 0;
       for (const chapter of (event.chapters || [])) {
+        if (chapter.user_chapter_reads?.read) continue;
         for (const section of (chapter.sections || [])) {
           if (!section.user_section_reads?.read) {
             unreadNestedLegacySections++;
@@ -1715,6 +1717,7 @@ class HistoryPlusService {
       // Check sections nested under event-linked chapters (sections without their own eventId)
       let unreadNestedUnifiedSections = 0;
       for (const chapter of (event.bookChapters || [])) {
+        if (chapter.chapterCompletions?.[0]?.isCompleted) continue;
         for (const section of (chapter.sections || [])) {
           if (!section.sectionCompletions?.[0]?.isCompleted) {
             unreadNestedUnifiedSections++;
@@ -1757,6 +1760,7 @@ class HistoryPlusService {
       // Check sections nested under event-linked legacy chapters
       let unreadNestedLegacySections = 0;
       for (const chapter of (event.chapters || [])) {
+        if (chapter.user_chapter_reads?.read) continue;
         for (const section of (chapter.sections || [])) {
           if (!section.user_section_reads?.read) {
             unreadNestedLegacySections++;
@@ -2058,36 +2062,38 @@ class HistoryPlusService {
           });
         }
 
-        // Always add unread sections nested under this chapter, even if the
-        // chapter/book itself is already completed.
-        const parentBook = chapter.book;
-        for (const section of (chapter.sections || [])) {
-          if (!section.sectionCompletions?.[0]?.isCompleted && !addedSectionIds.has(section.id)) {
-            addedSectionIds.add(section.id);
-            availableContent.push({
-              type: 'section',
-              content: section,
-              title: `${parentBook?.title || 'Unknown Book'} - Chapter ${chapter.chapterNumber || ''}: ${chapter.title} - Section ${section.sectionNumber || ''}: ${section.title}`,
-              description: section.description || '',
-              sectionNumber: section.sectionNumber || 0,
-              sectionTitle: section.title,
-              sectionDescription: section.description,
-              sectionPageStart: section.pageStart,
-              sectionPageEnd: section.pageEnd,
-              chapterNumber: chapter.chapterNumber || 0,
-              chapterTitle: chapter.title,
-              chapterDescription: chapter.description,
-              pageStart: chapter.pageStart,
-              pageEnd: chapter.pageEnd,
-              bookTitle: parentBook?.title || 'Unknown Book',
-              bookAuthor: parentBook?.author || 'Unknown Author',
-              bookYear: parentBook?.publishYear,
-              bookIsbn: parentBook?.isbn,
-              bookPublisher: parentBook?.publisher,
-              bookPageCount: parentBook?.pageCount,
-              bookCoverUrl: parentBook?.coverUrl,
-              bookDescription: parentBook?.description
-            });
+        // Only add nested sections when the event-linked chapter itself is unread.
+        // Explicitly linked sections are handled separately via event.bookSections.
+        if (!isRead) {
+          const parentBook = chapter.book;
+          for (const section of (chapter.sections || [])) {
+            if (!section.sectionCompletions?.[0]?.isCompleted && !addedSectionIds.has(section.id)) {
+              addedSectionIds.add(section.id);
+              availableContent.push({
+                type: 'section',
+                content: section,
+                title: `${parentBook?.title || 'Unknown Book'} - Chapter ${chapter.chapterNumber || ''}: ${chapter.title} - Section ${section.sectionNumber || ''}: ${section.title}`,
+                description: section.description || '',
+                sectionNumber: section.sectionNumber || 0,
+                sectionTitle: section.title,
+                sectionDescription: section.description,
+                sectionPageStart: section.pageStart,
+                sectionPageEnd: section.pageEnd,
+                chapterNumber: chapter.chapterNumber || 0,
+                chapterTitle: chapter.title,
+                chapterDescription: chapter.description,
+                pageStart: chapter.pageStart,
+                pageEnd: chapter.pageEnd,
+                bookTitle: parentBook?.title || 'Unknown Book',
+                bookAuthor: parentBook?.author || 'Unknown Author',
+                bookYear: parentBook?.publishYear,
+                bookIsbn: parentBook?.isbn,
+                bookPublisher: parentBook?.publisher,
+                bookPageCount: parentBook?.pageCount,
+                bookCoverUrl: parentBook?.coverUrl,
+                bookDescription: parentBook?.description
+              });
+            }
           }
         }
       });
@@ -2228,28 +2234,31 @@ class HistoryPlusService {
           });
         }
 
-        // Always add unread sections nested under this chapter, even if the chapter itself is already read.
-        for (const section of (chapter.sections || [])) {
-          if (!section.user_section_reads?.read && !addedLegacySectionIds.has(section.id)) {
-            addedLegacySectionIds.add(section.id);
-            availableContent.push({
-              type: 'section',
-              content: section,
-              title: `Chapter ${chapter.chapterNumber || ''}: ${chapter.title} - Section ${section.sectionNumber || ''}: ${section.title}`,
-              description: section.description || '',
-              sectionNumber: section.sectionNumber || 0,
-              sectionTitle: section.title,
-              sectionDescription: section.description,
-              sectionPageStart: section.pageStart,
-              sectionPageEnd: section.pageEnd,
-              chapterNumber: chapter.chapterNumber || 0,
-              chapterTitle: chapter.title,
-              chapterDescription: chapter.description,
-              pageStart: chapter.pageStart,
-              pageEnd: chapter.pageEnd,
-              bookTitle: 'Unknown Book',
-              bookAuthor: 'Unknown Author'
-            });
+        // Only add nested sections when the event-linked chapter itself is unread.
+        // Explicitly linked legacy sections are handled separately via event.sections.
+        if (!chapter.user_chapter_reads?.read) {
+          for (const section of (chapter.sections || [])) {
+            if (!section.user_section_reads?.read && !addedLegacySectionIds.has(section.id)) {
+              addedLegacySectionIds.add(section.id);
+              availableContent.push({
+                type: 'section',
+                content: section,
+                title: `Chapter ${chapter.chapterNumber || ''}: ${chapter.title} - Section ${section.sectionNumber || ''}: ${section.title}`,
+                description: section.description || '',
+                sectionNumber: section.sectionNumber || 0,
+                sectionTitle: section.title,
+                sectionDescription: section.description,
+                sectionPageStart: section.pageStart,
+                sectionPageEnd: section.pageEnd,
+                chapterNumber: chapter.chapterNumber || 0,
+                chapterTitle: chapter.title,
+                chapterDescription: chapter.description,
+                pageStart: chapter.pageStart,
+                pageEnd: chapter.pageEnd,
+                bookTitle: 'Unknown Book',
+                bookAuthor: 'Unknown Author'
+              });
+            }
           }
         }
       });
