@@ -1635,8 +1635,8 @@ class HistoryPlusService {
             // Ensure this event can produce at least one item in the allowed type set.
             const matchingContent = await this.getRandomContentFromEvent(event, allowedTypes);
             if (!matchingContent) {
-              console.log(`⏭️ Event "${event.title}" has no content matching allowed types (${allowedTypes.join(', ')}), continuing...`);
-              continue;
+              console.log(`⏭️ Event "${event.title}" has no content matching allowed types (${allowedTypes.join(', ')}), skipping History Plus`);
+              return null;
             }
           }
 
@@ -1966,16 +1966,45 @@ class HistoryPlusService {
             bookCoverUrl: book.coverUrl,
             bookDescription: book.description
           });
-          
-          // Also add unread chapters/sections nested under this book
-          for (const chapter of (book.chapters || [])) {
-            if (!chapter.chapterCompletions?.[0]?.isCompleted && !addedChapterIds.has(chapter.id)) {
-              addedChapterIds.add(chapter.id);
+          }
+
+        // Always add unread chapters/sections nested under this book, even if the book itself is already completed.
+        for (const chapter of (book.chapters || [])) {
+          if (!chapter.chapterCompletions?.[0]?.isCompleted && !addedChapterIds.has(chapter.id)) {
+            addedChapterIds.add(chapter.id);
+            availableContent.push({
+              type: 'chapter',
+              content: chapter,
+              title: `${book.title} - Chapter ${chapter.chapterNumber || ''}: ${chapter.title}`,
+              description: chapter.description || '',
+              chapterNumber: chapter.chapterNumber || 0,
+              chapterTitle: chapter.title,
+              chapterDescription: chapter.description,
+              pageStart: chapter.pageStart,
+              pageEnd: chapter.pageEnd,
+              bookTitle: book.title,
+              bookAuthor: book.author || 'Unknown Author',
+              bookYear: book.publishYear,
+              bookIsbn: book.isbn,
+              bookPublisher: book.publisher,
+              bookPageCount: book.pageCount,
+              bookCoverUrl: book.coverUrl,
+              bookDescription: book.description
+            });
+          }
+          for (const section of (chapter.sections || [])) {
+            if (!section.sectionCompletions?.[0]?.isCompleted && !addedSectionIds.has(section.id)) {
+              addedSectionIds.add(section.id);
               availableContent.push({
-                type: 'chapter',
-                content: chapter,
-                title: `${book.title} - Chapter ${chapter.chapterNumber || ''}: ${chapter.title}`,
-                description: chapter.description || '',
+                type: 'section',
+                content: section,
+                title: `${book.title} - Chapter ${chapter.chapterNumber || ''}: ${chapter.title} - Section ${section.sectionNumber || ''}: ${section.title}`,
+                description: section.description || '',
+                sectionNumber: section.sectionNumber || 0,
+                sectionTitle: section.title,
+                sectionDescription: section.description,
+                sectionPageStart: section.pageStart,
+                sectionPageEnd: section.pageEnd,
                 chapterNumber: chapter.chapterNumber || 0,
                 chapterTitle: chapter.title,
                 chapterDescription: chapter.description,
@@ -1991,38 +2020,8 @@ class HistoryPlusService {
                 bookDescription: book.description
               });
             }
-            for (const section of (chapter.sections || [])) {
-              if (!section.sectionCompletions?.[0]?.isCompleted && 
-                  !chapter.chapterCompletions?.[0]?.isCompleted &&
-                  !addedSectionIds.has(section.id)) {
-                addedSectionIds.add(section.id);
-                availableContent.push({
-                  type: 'section',
-                  content: section,
-                  title: `${book.title} - Chapter ${chapter.chapterNumber || ''}: ${chapter.title} - Section ${section.sectionNumber || ''}: ${section.title}`,
-                  description: section.description || '',
-                  sectionNumber: section.sectionNumber || 0,
-                  sectionTitle: section.title,
-                  sectionDescription: section.description,
-                  sectionPageStart: section.pageStart,
-                  sectionPageEnd: section.pageEnd,
-                  chapterNumber: chapter.chapterNumber || 0,
-                  chapterTitle: chapter.title,
-                  chapterDescription: chapter.description,
-                  pageStart: chapter.pageStart,
-                  pageEnd: chapter.pageEnd,
-                  bookTitle: book.title,
-                  bookAuthor: book.author || 'Unknown Author',
-                  bookYear: book.publishYear,
-                  bookIsbn: book.isbn,
-                  bookPublisher: book.publisher,
-                  bookPageCount: book.pageCount,
-                  bookCoverUrl: book.coverUrl,
-                  bookDescription: book.description
-                });
-              }
-            }
           }
+        }
         }
       });
 
@@ -2148,8 +2147,9 @@ class HistoryPlusService {
             bookCoverUrl: book.coverUrl,
             bookDescription: book.description
           });
-          
-          // Also add unread chapters/sections nested under this book
+          }
+
+          // Always add unread chapters/sections nested under this book, even if the book itself is already read.
           for (const chapter of (book.chapters || [])) {
             if (!chapter.user_chapter_reads?.read && !addedLegacyChapterIds.has(chapter.id)) {
               addedLegacyChapterIds.add(chapter.id);
@@ -2223,30 +2223,30 @@ class HistoryPlusService {
             bookTitle: 'Unknown Book',
             bookAuthor: 'Unknown Author'
           });
-          
-          // Also add unread sections nested under this chapter
-          for (const section of (chapter.sections || [])) {
-            if (!section.user_section_reads?.read && !addedLegacySectionIds.has(section.id)) {
-              addedLegacySectionIds.add(section.id);
-              availableContent.push({
-                type: 'section',
-                content: section,
-                title: `Chapter ${chapter.chapterNumber || ''}: ${chapter.title} - Section ${section.sectionNumber || ''}: ${section.title}`,
-                description: section.description || '',
-                sectionNumber: section.sectionNumber || 0,
-                sectionTitle: section.title,
-                sectionDescription: section.description,
-                sectionPageStart: section.pageStart,
-                sectionPageEnd: section.pageEnd,
-                chapterNumber: chapter.chapterNumber || 0,
-                chapterTitle: chapter.title,
-                chapterDescription: chapter.description,
-                pageStart: chapter.pageStart,
-                pageEnd: chapter.pageEnd,
-                bookTitle: 'Unknown Book',
-                bookAuthor: 'Unknown Author'
-              });
-            }
+        }
+
+        // Always add unread sections nested under this chapter, even if the chapter itself is already read.
+        for (const section of (chapter.sections || [])) {
+          if (!section.user_section_reads?.read && !addedLegacySectionIds.has(section.id)) {
+            addedLegacySectionIds.add(section.id);
+            availableContent.push({
+              type: 'section',
+              content: section,
+              title: `Chapter ${chapter.chapterNumber || ''}: ${chapter.title} - Section ${section.sectionNumber || ''}: ${section.title}`,
+              description: section.description || '',
+              sectionNumber: section.sectionNumber || 0,
+              sectionTitle: section.title,
+              sectionDescription: section.description,
+              sectionPageStart: section.pageStart,
+              sectionPageEnd: section.pageEnd,
+              chapterNumber: chapter.chapterNumber || 0,
+              chapterTitle: chapter.title,
+              chapterDescription: chapter.description,
+              pageStart: chapter.pageStart,
+              pageEnd: chapter.pageEnd,
+              bookTitle: 'Unknown Book',
+              bookAuthor: 'Unknown Author'
+            });
           }
         }
       });

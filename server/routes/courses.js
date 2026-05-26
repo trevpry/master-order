@@ -13,6 +13,23 @@ const prisma = new PrismaClient();
 const courseScrapingService = new CourseScrapingService();
 const geminiService = new GeminiService();
 
+async function markEventUnreviewed(eventId) {
+  if (!eventId) return;
+
+  await prisma.user_event_reviews.upsert({
+    where: { eventId: parseInt(eventId) },
+    update: {
+      reviewed: false,
+      reviewedAt: null
+    },
+    create: {
+      eventId: parseInt(eventId),
+      reviewed: false,
+      reviewedAt: null
+    }
+  });
+}
+
 // ==========================================
 // COURSE CRUD OPERATIONS
 // ==========================================
@@ -875,6 +892,7 @@ router.post('/:id/ai-assign-lectures', asyncHandler(async (req, res) => {
           assignedByAI: true
         }
       });
+      await markEventUnreviewed(eventId);
       console.log(`✅ Created HistoryVideo link for lecture ${suggestion.lectureNumber}: ${lecture.title} -> Event ${eventId}`);
     } catch (error) {
       // If URL already exists, update the existing record
@@ -888,6 +906,7 @@ router.post('/:id/ai-assign-lectures', asyncHandler(async (req, res) => {
             lectureNumber: lecture.order
           }
         });
+        await markEventUnreviewed(eventId);
         console.log(`✅ Updated existing HistoryVideo link for lecture ${suggestion.lectureNumber}: ${lecture.title} -> Event ${eventId}`);
       } else {
         console.error(`Error processing lecture ${suggestion.lectureNumber}:`, error);
