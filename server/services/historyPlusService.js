@@ -290,7 +290,7 @@ class HistoryPlusService {
       // Find events linked to this specific book and its chapters/sections
       const book = await this.prisma.historyBook.findUnique({
         where: { id: parseInt(bookId) },
-        include: { 
+        include: {
           event: true,
           chapters: {
             include: {
@@ -2022,7 +2022,6 @@ class HistoryPlusService {
             }
           }
         }
-        }
       });
 
       // Chapters directly linked to events
@@ -2203,7 +2202,6 @@ class HistoryPlusService {
               }
             }
           }
-        }
       });
 
       // Legacy chapters (directly linked to event)
