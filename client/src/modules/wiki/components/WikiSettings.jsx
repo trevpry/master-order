@@ -5,7 +5,11 @@ const WikiSettings = ({ onSettingsChanged }) => {
     wikiContextEnabled: true,
     wikiAutoIngestEnabled: true,
     wikiAutoIngestInterval: 60,
-    wikiChatExtractionEnabled: true
+    wikiChatExtractionEnabled: true,
+    ollamaWikiExtractionModel: '',
+    ollamaChatExtractionModel: '',
+    ollamaNotesExtractionModel: '',
+    ollamaDatingExtractionModel: ''
   });
   const [schema, setSchema] = useState('');
   const [saving, setSaving] = useState(false);
@@ -25,7 +29,11 @@ const WikiSettings = ({ onSettingsChanged }) => {
           wikiContextEnabled: json.data.wikiContextEnabled,
           wikiAutoIngestEnabled: json.data.wikiAutoIngestEnabled,
           wikiAutoIngestInterval: json.data.wikiAutoIngestInterval,
-          wikiChatExtractionEnabled: json.data.wikiChatExtractionEnabled
+          wikiChatExtractionEnabled: json.data.wikiChatExtractionEnabled,
+          ollamaWikiExtractionModel: json.data.ollamaWikiExtractionModel || '',
+          ollamaChatExtractionModel: json.data.ollamaChatExtractionModel || '',
+          ollamaNotesExtractionModel: json.data.ollamaNotesExtractionModel || '',
+          ollamaDatingExtractionModel: json.data.ollamaDatingExtractionModel || ''
         });
       }
     } catch (err) {
@@ -135,6 +143,69 @@ const WikiSettings = ({ onSettingsChanged }) => {
             onChange={e => setSettings(s => ({ ...s, wikiAutoIngestInterval: parseInt(e.target.value) || 60 }))}
             className="w-24 bg-gray-800 text-gray-200 text-sm rounded px-3 py-1.5 border border-gray-700 focus:border-blue-500 focus:outline-none"
           />
+        </div>
+
+        <button
+          onClick={saveSettings}
+          disabled={saving}
+          className="mt-4 px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 rounded-lg text-white text-sm"
+        >
+          {saving ? 'Saving...' : 'Save Settings'}
+        </button>
+      </div>
+
+      {/* Extraction Models */}
+      <div className="bg-gray-900 rounded-lg p-6 border border-gray-800 mb-6">
+        <h3 className="text-lg font-semibold text-white mb-4">Extraction Models</h3>
+        <p className="text-xs text-gray-500 mb-4">
+          Optional per-source model overrides for wiki extraction. Leave blank to use the default extraction model chain.
+        </p>
+
+        <div className="space-y-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-200 mb-1">Generic Wiki Extraction Model</label>
+            <input
+              type="text"
+              value={settings.ollamaWikiExtractionModel}
+              onChange={e => setSettings(s => ({ ...s, ollamaWikiExtractionModel: e.target.value }))}
+              placeholder="e.g. llama3.1:8b-instruct"
+              className="w-full bg-gray-800 text-gray-200 text-sm rounded px-3 py-2 border border-gray-700 focus:border-blue-500 focus:outline-none"
+            />
+            <p className="text-xs text-gray-500 mt-1">Fallback extraction model for any source without a source-specific override.</p>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-200 mb-1">Chat Extraction Model</label>
+            <input
+              type="text"
+              value={settings.ollamaChatExtractionModel}
+              onChange={e => setSettings(s => ({ ...s, ollamaChatExtractionModel: e.target.value }))}
+              placeholder="e.g. mistral:latest"
+              className="w-full bg-gray-800 text-gray-200 text-sm rounded px-3 py-2 border border-gray-700 focus:border-blue-500 focus:outline-none"
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-200 mb-1">Notes Extraction Model</label>
+            <input
+              type="text"
+              value={settings.ollamaNotesExtractionModel}
+              onChange={e => setSettings(s => ({ ...s, ollamaNotesExtractionModel: e.target.value }))}
+              placeholder="e.g. llama3:latest"
+              className="w-full bg-gray-800 text-gray-200 text-sm rounded px-3 py-2 border border-gray-700 focus:border-blue-500 focus:outline-none"
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-200 mb-1">Dating Extraction Model</label>
+            <input
+              type="text"
+              value={settings.ollamaDatingExtractionModel}
+              onChange={e => setSettings(s => ({ ...s, ollamaDatingExtractionModel: e.target.value }))}
+              placeholder="e.g. llama3.1:latest"
+              className="w-full bg-gray-800 text-gray-200 text-sm rounded px-3 py-2 border border-gray-700 focus:border-blue-500 focus:outline-none"
+            />
+          </div>
         </div>
 
         <button

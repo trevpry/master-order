@@ -1634,9 +1634,14 @@ class HistoryPlusService {
         } else {
           // Event has no unwatched content
           if (!isEventReviewed) {
-            // Event has no unwatched content but isn't marked as reviewed - mark it as reviewed
-            console.log(`🔄 Event "${event.title}" has no unwatched content, marking as reviewed and continuing...`);
-            await this.markEventReviewed(event.id, true);
+            // Safety: re-run authoritative completion check before auto-marking.
+            // This prevents false positives from partial parent-level completion state.
+            console.log(`🔄 Event "${event.title}" has no unwatched content in candidate scan, verifying before marking reviewed...`);
+            const verifiedCompleted = await this.checkAndMarkEventAsReviewed(event.id);
+            if (!verifiedCompleted) {
+              console.log(`⚠️ Verification kept event "${event.title}" unreviewed due to remaining unread content`);
+              return event;
+            }
           } else {
             console.log(`⏭️ Event "${event.title}" already reviewed and has no unwatched content, continuing...`);
           }
@@ -1675,22 +1680,17 @@ class HistoryPlusService {
       
       // Check for any unread unified chapters (directly linked to event)
       const unreadUnifiedChapters = (event.bookChapters || []).filter(chapter =>
-        !chapter.chapterCompletions?.[0]?.isCompleted &&
-        !chapter.book?.bookCompletions?.[0]?.isCompleted
+        !chapter.chapterCompletions?.[0]?.isCompleted
       );
       
       // Check for any unread unified sections (directly linked to event)
       const unreadUnifiedSections = (event.bookSections || []).filter(section =>
-        !section.sectionCompletions?.[0]?.isCompleted &&
-        !section.chapter?.chapterCompletions?.[0]?.isCompleted &&
-        !section.chapter?.book?.bookCompletions?.[0]?.isCompleted
+        !section.sectionCompletions?.[0]?.isCompleted
       );
       
       // Check sections nested under event-linked chapters (sections without their own eventId)
       let unreadNestedUnifiedSections = 0;
       for (const chapter of (event.bookChapters || [])) {
-        if (chapter.book?.bookCompletions?.[0]?.isCompleted) continue;
-        if (chapter.chapterCompletions?.[0]?.isCompleted) continue;
         for (const section of (chapter.sections || [])) {
           if (!section.sectionCompletions?.[0]?.isCompleted) {
             unreadNestedUnifiedSections++;
@@ -1701,13 +1701,12 @@ class HistoryPlusService {
       // Check chapters/sections nested under event-linked books (via bookLinks)
       let unreadNestedUnifiedBookContent = 0;
       for (const bookLink of (event.bookLinks || [])) {
-        if (bookLink.book.bookCompletions?.[0]?.isCompleted) continue;
         for (const chapter of (bookLink.book.chapters || [])) {
           if (!chapter.chapterCompletions?.[0]?.isCompleted) {
             unreadNestedUnifiedBookContent++;
           }
           for (const section of (chapter.sections || [])) {
-            if (!section.sectionCompletions?.[0]?.isCompleted && !chapter.chapterCompletions?.[0]?.isCompleted) {
+            if (!section.sectionCompletions?.[0]?.isCompleted) {
               unreadNestedUnifiedBookContent++;
             }
           }

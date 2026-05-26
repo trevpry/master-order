@@ -17,12 +17,25 @@ router.get('/settings', asyncHandler(async (req, res) => {
 
 // PUT /api/wiki/settings
 router.put('/settings', asyncHandler(async (req, res) => {
-  const { wikiContextEnabled, wikiAutoIngestEnabled, wikiAutoIngestInterval, wikiChatExtractionEnabled } = req.body;
+  const {
+    wikiContextEnabled,
+    wikiAutoIngestEnabled,
+    wikiAutoIngestInterval,
+    wikiChatExtractionEnabled,
+    ollamaWikiExtractionModel,
+    ollamaChatExtractionModel,
+    ollamaNotesExtractionModel,
+    ollamaDatingExtractionModel
+  } = req.body;
   const data = {};
   if (wikiContextEnabled !== undefined) data.wikiContextEnabled = wikiContextEnabled;
   if (wikiAutoIngestEnabled !== undefined) data.wikiAutoIngestEnabled = wikiAutoIngestEnabled;
   if (wikiAutoIngestInterval !== undefined) data.wikiAutoIngestInterval = wikiAutoIngestInterval;
   if (wikiChatExtractionEnabled !== undefined) data.wikiChatExtractionEnabled = wikiChatExtractionEnabled;
+  if (ollamaWikiExtractionModel !== undefined) data.ollamaWikiExtractionModel = String(ollamaWikiExtractionModel || '').trim();
+  if (ollamaChatExtractionModel !== undefined) data.ollamaChatExtractionModel = String(ollamaChatExtractionModel || '').trim();
+  if (ollamaNotesExtractionModel !== undefined) data.ollamaNotesExtractionModel = String(ollamaNotesExtractionModel || '').trim();
+  if (ollamaDatingExtractionModel !== undefined) data.ollamaDatingExtractionModel = String(ollamaDatingExtractionModel || '').trim();
   await wikiService.updateWikiSettings(data);
   sendSuccess(res, data);
 }));

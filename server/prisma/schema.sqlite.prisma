@@ -43,6 +43,10 @@ model Settings {
   ollamaUrl                         String?
   ollamaDefaultModel                String?
   ollamaEmbeddingModel              String?
+  ollamaWikiExtractionModel         String?
+  ollamaChatExtractionModel         String?
+  ollamaNotesExtractionModel        String?
+  ollamaDatingExtractionModel       String?
   wikiContextEnabled                Boolean   @default(true)
   wikiAutoIngestEnabled             Boolean   @default(true)
   wikiAutoIngestInterval            Int       @default(60) // minutes

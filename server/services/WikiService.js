@@ -78,6 +78,10 @@ class WikiService {
       wikiAutoIngestEnabled: settings?.wikiAutoIngestEnabled ?? true,
       wikiAutoIngestInterval: settings?.wikiAutoIngestInterval ?? 60,
       wikiChatExtractionEnabled: settings?.wikiChatExtractionEnabled ?? true,
+      ollamaWikiExtractionModel: settings?.ollamaWikiExtractionModel || process.env.OLLAMA_WIKI_EXTRACTION_MODEL || '',
+      ollamaChatExtractionModel: settings?.ollamaChatExtractionModel || process.env.OLLAMA_CHAT_EXTRACTION_MODEL || '',
+      ollamaNotesExtractionModel: settings?.ollamaNotesExtractionModel || process.env.OLLAMA_NOTES_EXTRACTION_MODEL || '',
+      ollamaDatingExtractionModel: settings?.ollamaDatingExtractionModel || process.env.OLLAMA_DATING_EXTRACTION_MODEL || '',
       wikiSchema: settings?.wikiSchema || DEFAULT_WIKI_SCHEMA,
       lastWikiIngestAt: settings?.lastWikiIngestAt || null
     };
@@ -109,13 +113,56 @@ class WikiService {
     return {
       ollamaUrl: settings?.ollamaUrl || 'http://localhost:11434',
       ollamaDefaultModel: settings?.ollamaDefaultModel || 'llama3',
-      ollamaEmbeddingModel: settings?.ollamaEmbeddingModel || 'nomic-embed-text'
+      ollamaEmbeddingModel: settings?.ollamaEmbeddingModel || 'nomic-embed-text',
+      // Optional extraction-model overrides (settings value first, then env var).
+      ollamaWikiExtractionModel: settings?.ollamaWikiExtractionModel || process.env.OLLAMA_WIKI_EXTRACTION_MODEL || '',
+      ollamaChatExtractionModel: settings?.ollamaChatExtractionModel || process.env.OLLAMA_CHAT_EXTRACTION_MODEL || '',
+      ollamaNotesExtractionModel: settings?.ollamaNotesExtractionModel || process.env.OLLAMA_NOTES_EXTRACTION_MODEL || '',
+      ollamaDatingExtractionModel: settings?.ollamaDatingExtractionModel || process.env.OLLAMA_DATING_EXTRACTION_MODEL || ''
     };
   }
 
-  async callOllama(messages, model) {
-    const { ollamaUrl, ollamaDefaultModel } = await this.getOllamaSettings();
-    const activeModel = model || ollamaDefaultModel;
+  normalizeSourceKey(source) {
+    const key = String(source || '').trim().toLowerCase();
+    if (key === 'note' || key === 'notes' || key === 'daily_note' || key === 'daily-note') return 'notes';
+    if (key === 'dating' || key === 'relationships') return 'dating';
+    if (key === 'chat' || key === 'conversation') return 'chat';
+    return 'general';
+  }
+
+  resolveWikiExtractionModel(source, ollamaSettings, explicitModel) {
+    const chosenExplicit = String(explicitModel || '').trim();
+    if (chosenExplicit) return chosenExplicit;
+
+    const sourceKey = this.normalizeSourceKey(source);
+    const sourceSpecific = {
+      chat: String(ollamaSettings?.ollamaChatExtractionModel || '').trim(),
+      notes: String(ollamaSettings?.ollamaNotesExtractionModel || '').trim(),
+      dating: String(ollamaSettings?.ollamaDatingExtractionModel || '').trim()
+    };
+
+    if (sourceSpecific[sourceKey]) return sourceSpecific[sourceKey];
+
+    const genericExtraction = String(ollamaSettings?.ollamaWikiExtractionModel || '').trim();
+    if (genericExtraction) return genericExtraction;
+
+    return ollamaSettings?.ollamaDefaultModel || 'llama3';
+  }
+
+  async callOllama(messages, options = {}) {
+    const ollamaSettings = await this.getOllamaSettings();
+    const { ollamaUrl } = ollamaSettings;
+
+    // Backward-compatible: callOllama(messages, 'model-name')
+    const normalizedOptions = typeof options === 'string'
+      ? { model: options, source: 'general' }
+      : (options || {});
+
+    const activeModel = this.resolveWikiExtractionModel(
+      normalizedOptions.source,
+      ollamaSettings,
+      normalizedOptions.model
+    );
 
     const response = await fetch(`${ollamaUrl}/api/chat`, {
       method: 'POST',
@@ -338,7 +385,7 @@ class WikiService {
         const aiResponse = await this.callOllama([
           { role: 'system', content: schema },
           { role: 'user', content: prompt }
-        ]);
+        ], { source: 'notes' });
 
         const updates = this.parseWikiResponse(aiResponse);
         for (const update of updates) {
@@ -459,7 +506,7 @@ class WikiService {
         const aiResponse = await this.callOllama([
           { role: 'system', content: schema },
           { role: 'user', content: prompt }
-        ]);
+        ], { source: 'dating' });
 
         let updates = this.parseWikiResponse(aiResponse);
         if (updates.length === 0 && this.hasMeaningfulDatingData(connection)) {
@@ -467,7 +514,7 @@ class WikiService {
           const strictResponse = await this.callOllama([
             { role: 'system', content: schema },
             { role: 'user', content: strictPrompt }
-          ]);
+          ], { source: 'dating' });
           updates = this.parseWikiResponse(strictResponse);
         }
 
@@ -666,13 +713,16 @@ CRITICAL RULES:
       const aiResponse = await this.callOllama([
         { role: 'system', content: schema },
         { role: 'user', content: prompt }
-      ]);
+      ], { source: 'chat' });
 
       let updates = this.parseWikiResponse(aiResponse);
       const hasPreferenceSignal = this.hasStrongPreferenceSignal(userMessage);
+      const hasPersonalFactSignal = this.hasStrongPersonalFactSignal(userMessage);
+      const hasGeneralUsefulSignal = this.hasGeneralUsefulInfoSignal(userMessage);
+      const shouldForceDurableExtraction = hasPreferenceSignal || hasPersonalFactSignal || hasGeneralUsefulSignal;
       const updatesAreGrounded = this.hasGroundedChatUpdates(userMessage, updates);
 
-      if (hasPreferenceSignal && (!updates.length || !updatesAreGrounded)) {
+      if (shouldForceDurableExtraction && (!updates.length || !updatesAreGrounded)) {
         const strictPrompt = this.buildStrictChatExtractionPrompt(
           userMessage,
           assistantResponse,
@@ -684,13 +734,21 @@ CRITICAL RULES:
         const strictResponse = await this.callOllama([
           { role: 'system', content: schema },
           { role: 'user', content: strictPrompt }
-        ]);
+        ], { source: 'chat' });
 
         updates = this.parseWikiResponse(strictResponse);
       }
 
-      if (updates.length === 0 || (hasPreferenceSignal && !this.hasGroundedChatUpdates(userMessage, updates))) {
+      if (updates.length === 0 || (shouldForceDurableExtraction && !this.hasGroundedChatUpdates(userMessage, updates))) {
         updates = this.extractPreferenceFallbackUpdates(userMessage, conversationTitle, existingPages, relevantPages);
+      }
+
+      if (updates.length === 0 && hasPersonalFactSignal) {
+        updates = this.extractPersonalFactFallbackUpdates(userMessage, conversationTitle, existingPages, relevantPages);
+      }
+
+      if (updates.length === 0 && hasGeneralUsefulSignal) {
+        updates = this.extractGeneralUsefulFallbackUpdates(userMessage, conversationTitle, existingPages, relevantPages);
       }
 
       if (updates.length === 0) {
@@ -1474,7 +1532,7 @@ ${datingPayload}
   }
 
   buildStrictChatExtractionPrompt(userMessage, assistantResponse, conversationTitle, existingIndex, relevantContext) {
-    return `You must decide if this chat includes durable personal preferences/interests and return JSON only.
+    return `You must decide if this chat includes durable personal information and return JSON only.
 
 ## Existing Wiki Pages
 ${existingIndex || '(No pages yet)'}
@@ -1490,6 +1548,8 @@ ${relevantContext || '(No relevant pages)'}
 ## Decision Rule
 - If the user states a durable preference or interest (examples: "I like...", "I enjoy...", "I love...", "I prefer...", "my favorite...", "I hate...", "I dislike..."), you MUST return at least one update unless that exact fact is already present in the relevant existing page content.
 - Durable preference statements about activities, foods, media, people, tools, or habits are wiki-worthy and should produce updates when new.
+- Significant personal facts and life events are wiki-worthy and should produce updates when new (examples: identity details like name, major health/family events, bereavement, major relationship/work changes).
+- Durable self-descriptions and ongoing personal context are wiki-worthy when new (examples: work role, where the user lives, recurring routines, explicit goals/plans, stable constraints like allergies/medications).
 - For user preference statements, do NOT create or update assistant-centric pages/slugs (e.g., assistant-interaction). Target user knowledge pages instead.
 
 ## Response Format (JSON only)
@@ -1521,6 +1581,46 @@ If and only if there is truly no durable personal information, return exactly:
     return preferenceCue.test(text) && !tinyOrNonDurable.test(text);
   }
 
+  hasStrongPersonalFactSignal(userMessage) {
+    const text = String(userMessage || '').trim();
+    if (!text) return false;
+
+    const identityCue = /\bmy\s+name\s+is\s+[a-z][a-z\-']*/i;
+    const bereavementCue = /\bmy\s+(mom|mother|dad|father|parent|brother|sister|wife|husband|partner|son|daughter|grandma|grandmother|grandpa|grandfather)\b[^.!?\n]*\b(died|passed\s+away|passed)\b/i;
+    const majorEventCue = /\b(i\s+was\s+diagnosed|i\s+lost\s+my\s+job|i\s+got\s+married|i\s+got\s+divorced|i\s+moved\s+to)\b/i;
+
+    return identityCue.test(text) || bereavementCue.test(text) || majorEventCue.test(text);
+  }
+
+  hasGeneralUsefulInfoSignal(userMessage) {
+    const text = String(userMessage || '').trim();
+    if (!text) return false;
+
+    const normalized = text.toLowerCase();
+    const sentenceCandidates = normalized
+      .split(/[.!?\n]+/)
+      .map(s => s.trim())
+      .filter(Boolean);
+
+    const durableCue = /(\bi\s+(am|m|was|have|ve\s+been|work|live|moved|grew\s+up|plan\s+to|want\s+to|need\s+to|usually|normally|often)\b|\bmy\s+(job|work|schedule|routine|goal|goals|plan|plans|health|family|partner|kids?|children|project|projects|allergy|allergies|medication|medications)\b|\bevery\s+(day|week|month)\b)/i;
+    const nonDurableRequestCue = /^(can\s+you|could\s+you|would\s+you|please\b|help\s+me\b|what\s+is\b|how\s+do\s+i\b)/i;
+    const technicalSupportCue = /(error|stack\s*trace|bug|code|compile|build|deploy|api|endpoint|sql|database\s+migration)/i;
+
+    for (const sentence of sentenceCandidates) {
+      if (!durableCue.test(sentence)) continue;
+      if (nonDurableRequestCue.test(sentence)) continue;
+
+      // Ignore purely technical debugging requests unless they also carry clear personal context.
+      if (technicalSupportCue.test(sentence) && !/\bmy\s+(routine|goal|plan|health|family|work)\b/i.test(sentence)) {
+        continue;
+      }
+
+      return true;
+    }
+
+    return false;
+  }
+
   hasGroundedChatUpdates(userMessage, updates = []) {
     if (!Array.isArray(updates) || updates.length === 0) return false;
 
@@ -1544,8 +1644,9 @@ If and only if there is truly no durable personal information, return exactly:
 
       const tokenOverlap = userTokens.some(token => haystack.includes(token));
       const looksLikeUserPrefs = /(preference|favorite|likes|dislikes|interests|color|board\s+game|games?)/i.test(haystack);
+      const looksLikeUserFacts = /(name|identity|personal\s+profile|life\s+event|bereavement|passed\s+away|died|family|relationship\s+status|health\s+event)/i.test(haystack);
 
-      if (tokenOverlap || looksLikeUserPrefs) {
+      if (tokenOverlap || looksLikeUserPrefs || looksLikeUserFacts) {
         return true;
       }
     }
@@ -1611,6 +1712,130 @@ If and only if there is truly no durable personal information, return exactly:
       content,
       reason: 'Extracted explicit user preferences/dislikes from chat message'
     }];
+  }
+
+  extractPersonalFactFallbackUpdates(userMessage, conversationTitle, existingPages, relevantPages) {
+    const text = String(userMessage || '').trim();
+    if (!text) return [];
+
+    const relevantCorpus = (relevantPages || []).map(p => `${p.title || ''}\n${p.content || ''}`).join('\n').toLowerCase();
+    const facts = [];
+
+    const nameMatch = text.match(/\bmy\s+name\s+is\s+([a-z][a-z\-']*)\b/i);
+    if (nameMatch) {
+      const name = nameMatch[1];
+      const nameFact = `- Name: ${name}.`;
+      if (!this.normalizeForMerge(relevantCorpus).includes(this.normalizeForMerge(nameFact))) {
+        facts.push(nameFact);
+      }
+    }
+
+    const bereavementMatch = text.match(/\bmy\s+(mom|mother|dad|father|parent|brother|sister|wife|husband|partner|son|daughter|grandma|grandmother|grandpa|grandfather)\b[^.!?\n]*\b(died|passed\s+away|passed)\b[^.!?\n]*/i);
+    if (bereavementMatch) {
+      const bereavementDetail = bereavementMatch[0].replace(/\s+/g, ' ').trim();
+      const fact = `- Major life event: ${bereavementDetail}.`;
+      if (!this.normalizeForMerge(relevantCorpus).includes(this.normalizeForMerge(bereavementDetail))) {
+        facts.push(fact);
+      }
+    }
+
+    if (facts.length === 0) return [];
+
+    const target = this.selectPersonalProfilePage(existingPages);
+    const content = [
+      '## Personal Profile',
+      ...facts,
+      `- Source context: ${conversationTitle}`
+    ].join('\n');
+
+    return [{
+      action: target.exists ? 'update' : 'create',
+      slug: target.slug,
+      title: target.title,
+      type: 'concept',
+      category: 'personal',
+      content,
+      reason: 'Extracted significant personal facts/life events from chat message'
+    }];
+  }
+
+  extractGeneralUsefulFallbackUpdates(userMessage, conversationTitle, existingPages, relevantPages) {
+    const text = String(userMessage || '').trim();
+    if (!text) return [];
+
+    const relevantCorpus = (relevantPages || []).map(p => `${p.title || ''}\n${p.content || ''}`).join('\n').toLowerCase();
+    const normalizedCorpus = this.normalizeForMerge(relevantCorpus);
+    const durableLines = this.extractDurablePersonalStatements(text)
+      .map(sentence => `- ${sentence}`)
+      .filter(line => !normalizedCorpus.includes(this.normalizeForMerge(line)));
+
+    if (durableLines.length === 0) return [];
+
+    const target = this.selectPersonalProfilePage(existingPages);
+    const content = [
+      '## Personal Profile',
+      ...[...new Set(durableLines)],
+      `- Source context: ${conversationTitle}`
+    ].join('\n');
+
+    return [{
+      action: target.exists ? 'update' : 'create',
+      slug: target.slug,
+      title: target.title,
+      type: 'concept',
+      category: 'personal',
+      content,
+      reason: 'Extracted durable personal context from chat message'
+    }];
+  }
+
+  extractDurablePersonalStatements(text) {
+    const normalizedText = String(text || '');
+    if (!normalizedText) return [];
+
+    const sentences = normalizedText
+      .split(/(?<=[.!?])\s+|\n+/)
+      .map(s => s.trim())
+      .filter(Boolean);
+
+    const includeCue = /(\bi\s+(am|m|was|have|ve\s+been|work\s+as|work\s+at|live\s+in|moved\s+to|grew\s+up|plan\s+to|want\s+to|need\s+to|usually|normally|often)\b|\bmy\s+(job|work|schedule|routine|goal|goals|plan|plans|health|family|partner|kids?|children|project|projects|allergy|allergies|medication|medications)\b|\bevery\s+(day|week|month)\b)/i;
+    const excludeCue = /^(can\s+you|could\s+you|would\s+you|please\b|help\s+me\b|what\s+is\b|how\s+do\s+i\b)|\?$/i;
+    const technicalOnlyCue = /(error|stack\s*trace|bug|compile|build|deploy|api|endpoint|sql|database\s+migration)/i;
+    const technicalWithPersonalCue = /\bmy\s+(workflow|routine|goal|plan|work|health|family)\b/i;
+
+    const candidates = [];
+    for (const sentence of sentences) {
+      if (excludeCue.test(sentence)) continue;
+      if (!includeCue.test(sentence)) continue;
+      if (technicalOnlyCue.test(sentence) && !technicalWithPersonalCue.test(sentence)) continue;
+
+      let cleaned = sentence.replace(/^[-*]\s*/, '').replace(/\s+/g, ' ').trim();
+      if (!cleaned) continue;
+      if (!/[.!?]$/.test(cleaned)) cleaned = `${cleaned}.`;
+      candidates.push(cleaned);
+    }
+
+    return [...new Set(candidates)];
+  }
+
+  selectPersonalProfilePage(existingPages = []) {
+    const pages = Array.isArray(existingPages) ? existingPages : [];
+
+    const exactSlug = pages.find(p => p.slug === 'personal-profile');
+    if (exactSlug) {
+      return { exists: true, slug: exactSlug.slug, title: exactSlug.title || 'Personal Profile' };
+    }
+
+    const reusable = pages.find(p => /personal\s+profile|about\s+me|biography|identity/i.test(`${p.slug || ''} ${p.title || ''}`));
+    if (reusable) {
+      return { exists: true, slug: reusable.slug, title: reusable.title || 'Personal Profile' };
+    }
+
+    return {
+      exists: false,
+      slug: 'personal-profile',
+      title: 'Personal Profile'
+    };
   }
 
   selectGenericPreferencePage(existingPages = []) {

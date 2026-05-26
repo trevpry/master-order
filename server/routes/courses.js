@@ -640,6 +640,8 @@ router.post('/:id/ai-analyze', asyncHandler(async (req, res) => {
       },
       lectureCount: course.videos.length,
       hasGuidebook: !!course.guidebook,
+      events,
+      categories,
       fullPrompt
     });
   } else {

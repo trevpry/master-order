@@ -19,6 +19,95 @@ const CourseAIAssignment = ({
   const [showJsonImport, setShowJsonImport] = useState(false);
   const [jsonInput, setJsonInput] = useState('');
 
+  const formatEventLine = (event) => {
+    const title = event?.title || 'Untitled Event';
+    const start = event?.startDate || 'Unknown Start';
+    const end = event?.endDate || 'Ongoing';
+    const category = event?.category || 'Uncategorized';
+    return `- "${title}" (${start} - ${end}) - Category: ${category}`;
+  };
+
+  const formatCategoryLine = (category) => {
+    if (typeof category === 'string') {
+      return `- "${category}"`;
+    }
+
+    const name = category?.name || 'Unnamed Category';
+    const description = category?.description ? `: ${category.description}` : '';
+    return `- "${name}"${description}`;
+  };
+
+  const buildEventsCategoriesText = () => {
+    const events = Array.isArray(promptData?.events) ? promptData.events : [];
+    const categories = Array.isArray(promptData?.categories) ? promptData.categories : [];
+
+    const eventsText = events.length > 0
+      ? events.map(formatEventLine).join('\n')
+      : 'No existing events';
+
+    const categoriesText = categories.length > 0
+      ? categories.map(formatCategoryLine).join('\n')
+      : 'No available categories';
+
+    return [
+      `Course: ${course?.title || 'Unknown Course'}`,
+      `Generated: ${new Date().toISOString()}`,
+      '',
+      'EXISTING HISTORICAL EVENTS:',
+      eventsText,
+      '',
+      'AVAILABLE CATEGORIES:',
+      categoriesText,
+      ''
+    ].join('\n');
+  };
+
+  const buildPromptWithoutEventsAndCategories = (fullPrompt) => {
+    const prompt = String(fullPrompt || '');
+    if (!prompt) return '';
+
+    const eventsMarker = 'EXISTING HISTORICAL EVENTS:';
+    const categoriesMarker = 'AVAILABLE CATEGORIES:';
+    const analysisMarker = 'ANALYSIS REQUIREMENTS:';
+
+    const eventsIndex = prompt.indexOf(eventsMarker);
+    const categoriesIndex = prompt.indexOf(categoriesMarker);
+    const analysisIndex = prompt.indexOf(analysisMarker);
+
+    if (eventsIndex === -1 || categoriesIndex === -1 || analysisIndex === -1) {
+      return prompt;
+    }
+
+    const before = prompt.slice(0, eventsIndex).trimEnd();
+    const after = prompt.slice(analysisIndex).trimStart();
+
+    return [
+      before,
+      'EXISTING HISTORICAL EVENTS and AVAILABLE CATEGORIES were exported to a separate text file.',
+      '',
+      after
+    ].join('\n\n').trim();
+  };
+
+  const sanitizeFileName = (name) => {
+    return String(name || 'course-analysis')
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/(^-|-$)/g, '') || 'course-analysis';
+  };
+
+  const downloadTextFile = (filename, textContent) => {
+    const blob = new Blob([textContent], { type: 'text/plain;charset=utf-8' });
+    const url = window.URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = filename;
+    document.body.appendChild(anchor);
+    anchor.click();
+    document.body.removeChild(anchor);
+    window.URL.revokeObjectURL(url);
+  };
+
   const handleAnalyzeCourse = async () => {
     if (!course?.id) {
       setError('No course ID available for analysis');
@@ -136,11 +225,17 @@ const CourseAIAssignment = ({
     if (!promptData?.fullPrompt) return;
     
     try {
-      await navigator.clipboard.writeText(promptData.fullPrompt);
-      console.log('Course AI prompt copied to clipboard');
+      const contextText = buildEventsCategoriesText();
+      const promptWithoutEventsAndCategories = buildPromptWithoutEventsAndCategories(promptData.fullPrompt);
+      const safeCourseTitle = sanitizeFileName(course?.title);
+      const contextFileName = `${safeCourseTitle}-events-categories-context.txt`;
+
+      downloadTextFile(contextFileName, contextText);
+      await navigator.clipboard.writeText(promptWithoutEventsAndCategories);
+      console.log('Course AI prompt copied to clipboard and context file downloaded');
     } catch (error) {
       console.error('Failed to copy course prompt:', error);
-      setError('Failed to copy prompt to clipboard');
+      setError('Failed to copy prompt and download context file');
     }
   };
 
@@ -289,7 +384,7 @@ const CourseAIAssignment = ({
                 onClick={handleCopyPrompt}
                 className="px-4 py-2 border border-gray-300 rounded hover:bg-gray-100"
               >
-                📋 Copy Prompt
+                📋 Copy Prompt + Download Context
               </button>
               
               <button
