@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import { Link } from 'react-router-dom';
 import { HistoryPlusApiService } from '../services/historyPlusApi';
 import CourseAIAssignment from '../components/CourseAIAssignment';
 
@@ -637,9 +638,13 @@ const Courses = () => {
                     <div className={`h-32 bg-gradient-to-r ${getGradientColors(course.title)} relative`}>
                       <div className="absolute inset-0 bg-black bg-opacity-20"></div>
                       <div className="absolute bottom-4 left-4 right-4">
-                        <h3 className="text-white font-semibold text-sm line-clamp-2 leading-tight">
+                        <Link
+                          to={`/history-plus/courses/${course.id}`}
+                          className="text-white font-semibold text-sm line-clamp-2 leading-tight hover:underline"
+                          title={`Open details for ${course.title}`}
+                        >
                           {course.title}
-                        </h3>
+                        </Link>
                       </div>
                       {isAdded && (
                         <div className="absolute top-2 right-2">

@@ -95,6 +95,100 @@ router.get('/categories', asyncHandler(async (req, res) => {
   sendSuccess(res, categories.map(c => c.category));
 }));
 
+// GET /api/courses/:id/details - Get full course details with lecture watch/linking/event status
+router.get('/:id/details', asyncHandler(async (req, res) => {
+  const courseId = parseInt(req.params.id);
+
+  if (Number.isNaN(courseId)) {
+    return sendBadRequest(res, 'Invalid course ID');
+  }
+
+  const course = await prisma.historyCourse.findUnique({
+    where: { id: courseId },
+    include: {
+      videos: {
+        orderBy: [
+          { order: 'asc' },
+          { createdAt: 'asc' }
+        ]
+      }
+    }
+  });
+
+  if (!course) {
+    return sendBadRequest(res, 'Course not found');
+  }
+
+  const linkedHistoryVideos = await prisma.historyVideo.findMany({
+    where: {
+      courseTitle: course.title,
+      deleted: false
+    },
+    include: {
+      user_video_watches: true,
+      event: {
+        select: {
+          id: true,
+          title: true,
+          startDate: true,
+          endDate: true
+        }
+      }
+    },
+    orderBy: [
+      { lectureNumber: 'asc' },
+      { createdAt: 'asc' }
+    ]
+  });
+
+  const linkedByLecture = new Map(
+    linkedHistoryVideos
+      .filter(video => video.lectureNumber !== null)
+      .map(video => [video.lectureNumber, video])
+  );
+
+  const lectures = (course.videos || []).map(lecture => {
+    const linkedVideo = linkedByLecture.get(lecture.order);
+    const linkedWatched = linkedVideo?.user_video_watches?.watched || false;
+
+    return {
+      ...lecture,
+      watchStatus: {
+        courseVideoWatched: !!lecture.watched,
+        linkedHistoryVideoWatched: linkedWatched,
+        effectiveWatched: !!lecture.watched || linkedWatched
+      },
+      linkedHistoryVideo: linkedVideo ? {
+        id: linkedVideo.id,
+        title: linkedVideo.title,
+        url: linkedVideo.url,
+        lectureNumber: linkedVideo.lectureNumber,
+        watched: linkedWatched,
+        event: linkedVideo.event ? {
+          id: linkedVideo.event.id,
+          title: linkedVideo.event.title,
+          startDate: linkedVideo.event.startDate,
+          endDate: linkedVideo.event.endDate
+        } : null
+      } : null
+    };
+  });
+
+  sendSuccess(res, {
+    course: {
+      ...course,
+      videos: undefined
+    },
+    lectures,
+    summary: {
+      totalLectures: lectures.length,
+      watchedLectures: lectures.filter(l => l.watchStatus.effectiveWatched).length,
+      linkedLectures: lectures.filter(l => !!l.linkedHistoryVideo).length,
+      linkedToEvents: lectures.filter(l => !!l.linkedHistoryVideo?.event).length
+    }
+  });
+}));
+
 // GET /api/courses/ai-prompt-template - Get current Course AI prompt template
 router.get('/ai-prompt-template', asyncHandler(async (req, res) => {
   const settings = await prisma.settings.findUnique({
@@ -683,6 +777,29 @@ router.post('/:id/ai-analyze', asyncHandler(async (req, res) => {
   }
   
   if (preview === 'true') {
+    const assignedHistoryVideos = await prisma.historyVideo.findMany({
+      where: {
+        courseTitle: course.title,
+        lectureNumber: { not: null },
+        eventId: { not: null },
+        deleted: false
+      },
+      select: {
+        lectureNumber: true
+      }
+    });
+
+    const assignedLectureNumbers = new Set(
+      assignedHistoryVideos
+        .map(video => video.lectureNumber)
+        .filter(number => number !== null && number !== undefined)
+    );
+
+    const unassignedLectures = (course.videos || []).filter(lecture => {
+      if (lecture.order === null || lecture.order === undefined) return true;
+      return !assignedLectureNumbers.has(lecture.order);
+    });
+
     const settings = await prisma.settings.findUnique({
       where: { id: 1 },
       select: { courseAiPromptTemplate: true }
@@ -691,7 +808,7 @@ router.post('/:id/ai-analyze', asyncHandler(async (req, res) => {
     // Generate prompt for manual use
     const fullPrompt = geminiService.buildCourseAssignmentPrompt(
       course,
-      course.videos,
+      unassignedLectures,
       guidebookContent,
       events,
       categories,
@@ -705,7 +822,9 @@ router.post('/:id/ai-analyze', asyncHandler(async (req, res) => {
         instructor: course.instructor,
         category: course.category
       },
-      lectureCount: course.videos.length,
+      lectureCount: unassignedLectures.length,
+      totalLectureCount: course.videos.length,
+      excludedAssignedLectureCount: course.videos.length - unassignedLectures.length,
       hasGuidebook: !!course.guidebook,
       events,
       categories,

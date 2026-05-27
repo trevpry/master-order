@@ -54,6 +54,7 @@ import Videos from './modules/history-plus/pages/Videos';
 import Channels from './modules/history-plus/pages/Channels';
 import Categories from './modules/history-plus/pages/Categories';
 import Courses from './modules/history-plus/pages/Courses';
+import CourseDetails from './modules/history-plus/pages/CourseDetails';
 
 function App() {
   // WebSocket hook for Stash clip overlay notifications
@@ -130,6 +131,7 @@ function App() {
           <Route path="/history-plus/channels" element={<Channels />} />
           <Route path="/history-plus/categories" element={<Categories />} />
           <Route path="/history-plus/courses" element={<Courses />} />
+          <Route path="/history-plus/courses/:id" element={<CourseDetails />} />
           <Route path="/chat" element={<ChatHome />} />
           <Route path="/wiki" element={<WikiHome />} />
           <Route path="/eddie-settings" element={<EddieSettings />} />

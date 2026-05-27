@@ -389,7 +389,13 @@ const CourseAIAssignment = ({
                 <div className="mb-4">
                   <h4 className="font-medium text-gray-900 mb-2">Course Structure</h4>
                   <div className="bg-blue-50 p-3 rounded text-sm">
-                    <p><strong>Total Lectures:</strong> {promptData.lectureCount}</p>
+                    <p><strong>Lectures Included In Prompt:</strong> {promptData.lectureCount}</p>
+                    {typeof promptData.totalLectureCount === 'number' && (
+                      <p><strong>Total Course Lectures:</strong> {promptData.totalLectureCount}</p>
+                    )}
+                    {typeof promptData.excludedAssignedLectureCount === 'number' && promptData.excludedAssignedLectureCount > 0 && (
+                      <p><strong>Excluded (already assigned to event):</strong> {promptData.excludedAssignedLectureCount}</p>
+                    )}
                     <p><strong>Analysis Goal:</strong> Chronologically assign lectures to historical events with guidebook context</p>
                   </div>
                 </div>
