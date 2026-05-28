@@ -900,42 +900,9 @@ async function findNewRelease(settings) {
 
   // Respect effective order type percentages after limiter filtering/re-normalization
   const tvEnabled = limiters.episode && effective.tvPercent > 0;
-  const moviesEnabled = limiters.movie && effective.moviesPercent > 0;
 
   try {
-    // Check for new release movies (respecting collection + ignored collections)
-    if (moviesEnabled) {
-      const collection = await getCollectionName();
-      let movies;
-      if (collection) {
-        movies = await plexDb.getMoviesByCollection(collection);
-        if (!movies || movies.length === 0) {
-          movies = await plexDb.getAllMovies();
-        }
-      } else {
-        movies = await plexDb.getAllMovies();
-      }
-
-      // Filter to unwatched + new release + not in ignored collections
-      let ignoredMovieCollections = [];
-      const dbSettings = await prisma.settings.findUnique({ where: { id: 1 } });
-      if (dbSettings?.ignoredMovieCollections) {
-        try { ignoredMovieCollections = JSON.parse(dbSettings.ignoredMovieCollections); } catch (e) {}
-      }
-
-      for (const movie of movies) {
-        if (movie.removed) continue;
-        if (movie.viewCount && movie.viewCount > 0) continue;
-        if (!movie.year || movie.year < lastYear) continue;
-        if (ignoredMovieCollections.length > 0) {
-          const movieCollections = plexDb.parseCollections(movie.collections || '');
-          if (movieCollections.some(c => ignoredMovieCollections.includes(c))) continue;
-        }
-        candidates.push({ type: 'movie', source: 'MOVIES_GENERAL', data: movie });
-      }
-    }
-
-    // Check for new release TV episodes (respecting collection + ignored collections)
+    // Balance features apply to TV only — only check for new release TV episodes
     if (tvEnabled) {
       const collection = await getCollectionName();
       const seriesList = await getSeriesFromCollection(collection);
@@ -956,8 +923,14 @@ async function findNewRelease(settings) {
     // Keep balance picks aligned with configured TV/Movie ratio.
     const preferredType = selectWeightedTvOrMovie(effective.tvPercent, effective.moviesPercent);
     const preferredCandidates = candidates.filter(candidate => candidate.type === preferredType);
-    const pool = preferredCandidates.length > 0 ? preferredCandidates : candidates;
-    const chosen = pool[Math.floor(Math.random() * pool.length)];
+    // Strictly respect the preferred type — do NOT fall back to the other type.
+    // Falling back (e.g. picking a movie when TV was rolled) is what inflates movie counts
+    // beyond the configured percentage.
+    if (preferredCandidates.length === 0) {
+      console.log(`🆕 No new-release ${preferredType}s found (preferred per configured ratio), falling through to normal selection`);
+      return null;
+    }
+    const chosen = preferredCandidates[Math.floor(Math.random() * preferredCandidates.length)];
     console.log(`🆕 New release selected: "${chosen.data.title}" (${chosen.type})`);
 
     if (chosen.type === 'movie') {
@@ -994,9 +967,8 @@ async function findLongUnwatched(settings) {
   const limiters = effective.limiters || { episode: true, movie: true, book: true, webvideo: true, videogame: true, comic: true };
   const candidates = [];
 
-  // Respect effective order type percentages after limiter filtering/re-normalization
+  // Balance features apply to TV only
   const tvEnabled = limiters.episode && effective.tvPercent > 0;
-  const moviesEnabled = limiters.movie && effective.moviesPercent > 0;
 
   try {
     // Find TV shows with unwatched content, sorted by oldest lastViewedAt (respecting collection + ignored)
@@ -1016,76 +988,27 @@ async function findLongUnwatched(settings) {
       }
     }
 
-    // Find unwatched movies from collection, preferring oldest added (respecting collection + ignored)
-    if (moviesEnabled) {
-      const collection = await getCollectionName();
-      let movies;
-      if (collection) {
-        movies = await plexDb.getMoviesByCollection(collection);
-        if (!movies || movies.length === 0) {
-          movies = await plexDb.getAllMovies();
-        }
-      } else {
-        movies = await plexDb.getAllMovies();
-      }
-
-      let ignoredMovieCollections = [];
-      const dbSettings = await prisma.settings.findUnique({ where: { id: 1 } });
-      if (dbSettings?.ignoredMovieCollections) {
-        try { ignoredMovieCollections = JSON.parse(dbSettings.ignoredMovieCollections); } catch (e) {}
-      }
-
-      const unwatchedMovies = movies
-        .filter(movie => {
-          if (movie.removed) return false;
-          if (movie.viewCount && movie.viewCount > 0) return false;
-          if (ignoredMovieCollections.length > 0) {
-            const movieCollections = plexDb.parseCollections(movie.collections || '');
-            if (movieCollections.some(c => ignoredMovieCollections.includes(c))) return false;
-          }
-          return true;
-        })
-        .sort((a, b) => (a.addedAt || 0) - (b.addedAt || 0));
-
-      for (const movie of unwatchedMovies.slice(0, 20)) {
-        candidates.push({ type: 'movie', source: 'MOVIES_GENERAL', data: movie, lastViewed: movie.addedAt || 0 });
-      }
-    }
-
     if (candidates.length === 0) return null;
 
-    // Sort by oldest lastViewed and pick from the top quartile.
-    // Apply weighted TV/Movie preference before random pick.
+    // Pick from the oldest-viewed top quartile
     candidates.sort((a, b) => (a.lastViewed || 0) - (b.lastViewed || 0));
     const topQuartile = candidates.slice(0, Math.max(1, Math.ceil(candidates.length / 4)));
-    const preferredType = selectWeightedTvOrMovie(effective.tvPercent, effective.moviesPercent);
-    const preferredCandidates = topQuartile.filter(candidate => candidate.type === preferredType);
-    const pool = preferredCandidates.length > 0 ? preferredCandidates : topQuartile;
-    const chosen = pool[Math.floor(Math.random() * pool.length)];
-    console.log(`⏳ Long unwatched selected: "${chosen.data.title}" (${chosen.type})`);
+    const chosen = topQuartile[Math.floor(Math.random() * topQuartile.length)];
+    console.log(`⏳ Long-unwatched TV show selected: "${chosen.data.title}"`);
 
-    if (chosen.type === 'movie') {
+    const nextEpisode = await plexDb.getNextUnwatchedEpisode(chosen.data.ratingKey);
+    if (nextEpisode) {
       return {
         ...chosen.data,
-        type: 'movie',
-        orderType: 'MOVIES_GENERAL',
+        type: 'episode',
+        episodeRatingKey: nextEpisode.ratingKey,
+        episodeTitle: nextEpisode.title,
+        seasonNumber: nextEpisode.seasonNumber,
+        episodeNumber: nextEpisode.episodeNumber,
+        originallyAvailableAt: nextEpisode.originallyAvailableAt,
+        orderType: 'TV_GENERAL',
         balanceReason: 'long_unwatched'
       };
-    } else {
-      const nextEpisode = await plexDb.getNextUnwatchedEpisode(chosen.data.ratingKey);
-      if (nextEpisode) {
-        return {
-          ...chosen.data,
-          type: 'episode',
-          episodeRatingKey: nextEpisode.ratingKey,
-          episodeTitle: nextEpisode.title,
-          seasonNumber: nextEpisode.seasonNumber,
-          episodeNumber: nextEpisode.episodeNumber,
-          originallyAvailableAt: nextEpisode.originallyAvailableAt,
-          orderType: 'TV_GENERAL',
-          balanceReason: 'long_unwatched'
-        };
-      }
     }
   } catch (error) {
     console.error('Error finding long unwatched:', error.message);
@@ -1095,38 +1018,11 @@ async function findLongUnwatched(settings) {
 
 async function getNextEpisode() {
   try {
-    // Check balance preferences before normal order type selection
     const settings = await getOrderTypeSettings();
     const { preferNewRelease, preferLongUnwatched } = settings;
-    console.log(`⚖️ Balance settings - Prefer New Release: ${preferNewRelease}%, Prefer Long Unwatched: ${preferLongUnwatched}%`);
+    console.log(`⚖️ Balance settings - Prefer New Release: ${preferNewRelease}%, Prefer Long Unwatched: ${preferLongUnwatched}% (TV only)`);
 
-    // Roll for Prefer New Release
-    if (preferNewRelease > 0) {
-      const roll = Math.floor(Math.random() * 100) + 1;
-      if (roll <= preferNewRelease) {
-        console.log(`🆕 New Release roll: ${roll}% <= ${preferNewRelease}% — searching for new releases`);
-        const newRelease = await findNewRelease(settings);
-        if (newRelease) {
-          return newRelease;
-        }
-        console.log('🆕 No new releases found, falling through to normal selection');
-      }
-    }
-
-    // Roll for Prefer Long Unwatched
-    if (preferLongUnwatched > 0) {
-      const roll = Math.floor(Math.random() * 100) + 1;
-      if (roll <= preferLongUnwatched) {
-        console.log(`⏳ Long Unwatched roll: ${roll}% <= ${preferLongUnwatched}% — searching for long unwatched`);
-        const longUnwatched = await findLongUnwatched(settings);
-        if (longUnwatched) {
-          return longUnwatched;
-        }
-        console.log('⏳ No long unwatched content found, falling through to normal selection');
-      }
-    }
-
-    // Normal order type selection
+    // Normal order type selection — balance checks only run when TV_GENERAL is selected (see below)
     const { orderType, mediaTypeLimiters } = await selectOrderType();
     
     if (orderType === 'MOVIES_GENERAL') {
@@ -1202,7 +1098,31 @@ async function getNextEpisode() {
         };
       }
     }
-      // Continue with TV General (original logic)
+      // TV General — apply balance preferences to influence which TV show is picked
+    if (preferNewRelease > 0) {
+      const roll = Math.floor(Math.random() * 100) + 1;
+      if (roll <= preferNewRelease) {
+        console.log(`🆕 New Release roll: ${roll}% <= ${preferNewRelease}% — searching for new TV releases`);
+        const newRelease = await findNewRelease(settings);
+        if (newRelease) {
+          return newRelease;
+        }
+        console.log('🆕 No new TV releases found, falling through to normal TV selection');
+      }
+    }
+
+    if (preferLongUnwatched > 0) {
+      const roll = Math.floor(Math.random() * 100) + 1;
+      if (roll <= preferLongUnwatched) {
+        console.log(`⏳ Long Unwatched roll: ${roll}% <= ${preferLongUnwatched}% — searching for long-unwatched TV shows`);
+        const longUnwatched = await findLongUnwatched(settings);
+        if (longUnwatched) {
+          return longUnwatched;
+        }
+        console.log('⏳ No long-unwatched TV shows found, falling through to normal TV selection');
+      }
+    }
+
     const collection = await getCollectionName();
     console.log('Collection:', collection);
 
@@ -1224,8 +1144,24 @@ async function getNextEpisode() {
     const finalSelection = await selectEarliestUnplayedFromCollections(selectedSeries);
     console.log('Final selection (earliest unplayed):', finalSelection?.title || 'Unknown');
 
+    // If the collection-ordering logic returned a movie instead of a TV episode,
+    // respect the configured TV/Movie percentages rather than blindly returning a movie.
+    // The collection logic is designed for franchise chronological ordering, but it should
+    // not override the user's configured order-type weights.
+    let selectionToEnhance = finalSelection;
+    if (finalSelection.libraryType === 'movie') {
+      const effective = getEffectiveOrderTypePercentages(settings);
+      const typeRoll = selectWeightedTvOrMovie(effective.tvPercent, effective.moviesPercent);
+      if (typeRoll === 'episode') {
+        console.log(`🎯 Collection returned movie "${finalSelection.title}" but TV was selected — reverting to TV episode per configured percentages (TV: ${effective.tvPercent}%, Movies: ${effective.moviesPercent}%)`);
+        selectionToEnhance = selectedSeries;
+      } else {
+        console.log(`🎯 Collection returned movie "${finalSelection.title}" and movie roll succeeded — proceeding with movie`);
+      }
+    }
+
     // Enhance with TVDB artwork
-    const enhancedSelection = await enhanceWithTVDBArtwork(finalSelection);
+    const enhancedSelection = await enhanceWithTVDBArtwork(selectionToEnhance);
     
     // Add order type to the response
     enhancedSelection.orderType = 'TV_GENERAL';
