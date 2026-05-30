@@ -47,7 +47,7 @@ POST_DEPLOY_COUNTS_FILE=""
 
 # Parse command line arguments
 USE_CACHE=true
-if [ "$1" == "--no-cache" ]; then
+if [ "${1-}" = "--no-cache" ]; then
     USE_CACHE=false
     echo "⚠️  No-cache mode: Full rebuild requested"
 fi
