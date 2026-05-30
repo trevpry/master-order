@@ -36,6 +36,7 @@ model Settings {
   stashApiKey                       String?
   rawgApiKey                        String?
   geminiApiKey                      String?
+  backgroundImageStoragePath        String?
   listScrapeInterval                Int       @default(6)
   mediaTypeLimiters                 String?
   preferNewRelease                  Int       @default(0)
@@ -725,6 +726,7 @@ model PlexArtist {
   works                 Work[]
   artistTypes           ArtistTypeAssignment[]
   trackArtists          TrackArtist[]
+  albumArtists          AlbumArtist[]
   librarySection        PlexLibrarySection?      @relation(fields: [librarySectionID], references: [id])
 
   @@map("PlexArtist")
@@ -772,6 +774,7 @@ model PlexAlbum {
   librarySection        PlexLibrarySection? @relation(fields: [librarySectionID], references: [id])
   work                  Work?               @relation(fields: [workId], references: [id], onDelete: SetNull)
   tracks                PlexTrack[]
+  albumArtists          AlbumArtist[]
 
   @@map("PlexAlbum")
 }
@@ -889,6 +892,7 @@ model ArtistType {
   artists     ArtistTypeAssignment[]
   workParts   WorkPartArtistType[]
   trackArtists TrackArtist[]
+  albumArtists AlbumArtist[]
 
   @@map("ArtistType")
 }
@@ -929,6 +933,20 @@ model TrackArtist {
 
   @@unique([trackKey, artistKey, artistTypeId])
   @@map("TrackArtist")
+}
+
+model AlbumArtist {
+  id           Int        @id @default(autoincrement())
+  albumKey     String
+  artistKey    String
+  artistTypeId Int
+  album        PlexAlbum  @relation(fields: [albumKey], references: [ratingKey], onDelete: Cascade)
+  artist       PlexArtist @relation(fields: [artistKey], references: [ratingKey], onDelete: Cascade)
+  artistType   ArtistType @relation(fields: [artistTypeId], references: [id], onDelete: Cascade)
+  createdAt    DateTime   @default(now())
+
+  @@unique([albumKey, artistKey, artistTypeId])
+  @@map("AlbumArtist")
 }
 
 model IdentificationCandidate {

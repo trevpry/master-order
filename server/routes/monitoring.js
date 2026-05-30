@@ -26,12 +26,40 @@ router.get('/', asyncHandler(async (req, res) => {
   const results = {
     plexSessions: [],
     plexSessionsError: null,
+    androidMusic: null,
     lastPlexItem: null,
     lastMusicTrack: null,
     lastStashScene: null,
     lastStashClip: null,
     fetchedAt: new Date().toISOString(),
   };
+
+  // ── Android-reported music playback state ────────────────────────────────
+  try {
+    const androidMusicState = global.androidMusicState;
+    if (androidMusicState && androidMusicState.title) {
+      results.androidMusic = {
+        title: androidMusicState.title,
+        artist: androidMusicState.artist || null,
+        album: androidMusicState.album || null,
+        ratingKey: androidMusicState.ratingKey || null,
+        userRating: androidMusicState.userRating ?? null,
+        artworkUrl: androidMusicState.artworkUrl || null,
+        thumb: androidMusicState.thumb || null,
+        parentThumb: androidMusicState.parentThumb || null,
+        grandparentThumb: androidMusicState.grandparentThumb || null,
+        art: androidMusicState.art || null,
+        isPlaying: Boolean(androidMusicState.isPlaying),
+        positionMs: androidMusicState.positionMs ?? null,
+        durationMs: androidMusicState.durationMs ?? null,
+        source: androidMusicState.source || 'android_app',
+        appName: androidMusicState.appName || null,
+        updatedAt: androidMusicState.updatedAt || null,
+      };
+    }
+  } catch (err) {
+    // non-fatal
+  }
 
   // ── Active Plex sessions ─────────────────────────────────────────────────
   try {

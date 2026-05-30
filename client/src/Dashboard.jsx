@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import { Link } from "react-router-dom";
 import config from './config';
+import StarRating from './components/StarRating';
 
 const POLL_INTERVAL_MS = 15_000;
 
@@ -37,6 +38,16 @@ function plexArtworkUrl(thumb) {
   if (thumb.startsWith('http')) return thumb;
   const clean = thumb.startsWith('/') ? thumb.substring(1) : thumb;
   return `${config.apiBaseUrl}/api/artwork/${clean}`;
+}
+
+function musicArtworkUrl(track) {
+  if (!track) return null;
+  if (track.artworkUrl && track.artworkUrl.startsWith('http')) return track.artworkUrl;
+  if (track.artworkUrl && track.artworkUrl.startsWith('/')) {
+    return `${config.apiBaseUrl}${track.artworkUrl}`;
+  }
+  const thumb = track.parentThumb || track.grandparentThumb || track.thumb || track.art;
+  return plexArtworkUrl(thumb);
 }
 
 function progressPercent(offset, duration) {
@@ -178,6 +189,9 @@ function Dashboard() {
   const [error, setError] = useState(null);
   const [lastRefreshed, setLastRefreshed] = useState(null);
   const [appMusic, setAppMusic] = useState(null);
+  const [showMusicRatingModal, setShowMusicRatingModal] = useState(false);
+  const [musicRatingSaving, setMusicRatingSaving] = useState(false);
+  const [musicRatingError, setMusicRatingError] = useState(null);
   const timerRef = useRef(null);
 
   const fetchData = useCallback(async (isManual = false) => {
@@ -205,7 +219,20 @@ function Dashboard() {
   useEffect(() => {
     const applyState = ({ track, isPlaying: playing }) => {
       if (track) {
-        setAppMusic({ title: track.title, artist: track.artist || track.grandparentTitle, album: track.album || track.parentTitle, isPlaying: playing });
+        setAppMusic({
+          title: track.title,
+          artist: track.artist || track.grandparentTitle,
+          album: track.album || track.parentTitle,
+          isPlaying: playing,
+          ratingKey: track.ratingKey || null,
+          userRating: track.userRating ?? null,
+          artworkUrl: track.artworkUrl || null,
+          thumb: track.thumb || null,
+          parentThumb: track.parentThumb || null,
+          grandparentThumb: track.grandparentThumb || null,
+          art: track.art || null,
+          source: 'web_player',
+        });
       } else {
         setAppMusic(null);
       }
@@ -220,7 +247,22 @@ function Dashboard() {
     // Fallback: catch the initial startMusicPlayback before player has processed it
     const onStart = (e) => {
       const first = e.detail?.playlist?.tracks?.[0];
-      if (first) setAppMusic({ title: first.title, artist: first.artist, album: first.album, isPlaying: true });
+      if (first) {
+        setAppMusic({
+          title: first.title,
+          artist: first.artist,
+          album: first.album,
+          isPlaying: true,
+          ratingKey: first.ratingKey || null,
+          userRating: first.userRating ?? null,
+          artworkUrl: first.artworkUrl || null,
+          thumb: first.thumb || null,
+          parentThumb: first.parentThumb || null,
+          grandparentThumb: first.grandparentThumb || null,
+          art: first.art || null,
+          source: 'web_player',
+        });
+      }
     };
     window.addEventListener('musicPlayerStateChanged', onStateChanged);
     window.addEventListener('startMusicPlayback', onStart);
@@ -245,6 +287,56 @@ function Dashboard() {
   const sessions = data?.plexSessions || [];
   const playingSessions = sessions.filter(s => s.state === 'playing');
   const pausedSessions = sessions.filter(s => s.state !== 'playing');
+  const dashboardMusic = appMusic || data?.androidMusic || null;
+  const dashboardMusicArt = musicArtworkUrl(dashboardMusic);
+
+  const openMusicRatingModal = () => {
+    if (!dashboardMusic) return;
+    setMusicRatingError(null);
+    setShowMusicRatingModal(true);
+  };
+
+  const closeMusicRatingModal = () => {
+    setShowMusicRatingModal(false);
+    setMusicRatingSaving(false);
+    setMusicRatingError(null);
+  };
+
+  const handleMusicRatingChange = async (rating) => {
+    if (!dashboardMusic?.ratingKey) {
+      setMusicRatingError('This playback source did not provide a track rating key.');
+      return;
+    }
+
+    setMusicRatingSaving(true);
+    setMusicRatingError(null);
+    try {
+      const response = await fetch(`${config.apiBaseUrl}/api/music/tracks/${dashboardMusic.ratingKey}/rating`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ rating }),
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to update track rating');
+      }
+
+      const payload = await response.json();
+      const newUserRating = payload?.track?.userRating ?? null;
+
+      setAppMusic(prev => prev ? { ...prev, userRating: newUserRating } : prev);
+      setData(prev => prev ? {
+        ...prev,
+        androidMusic: prev.androidMusic ? { ...prev.androidMusic, userRating: newUserRating } : prev.androidMusic,
+      } : prev);
+    } catch (error) {
+      setMusicRatingError(error.message || 'Failed to update track rating');
+    } finally {
+      setMusicRatingSaving(false);
+    }
+  };
 
   return (
     <div style={{ padding: '1.5rem', maxWidth: '1200px', margin: '0 auto', background: '#f1f5f9', minHeight: '100vh' }}>
@@ -316,20 +408,59 @@ function Dashboard() {
       {/* Music in App */}
       <Card style={{ marginBottom: '1.5rem' }}>
         <SectionHeader icon="🎵" title="Music in App" />
-        {appMusic ? (
-          <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
-            <div style={{ width: 48, height: 48, borderRadius: 8, background: '#e0e7ff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '1.5rem', flexShrink: 0 }}>🎵</div>
+        {dashboardMusic ? (
+          <button
+            type="button"
+            onClick={openMusicRatingModal}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '1rem',
+              width: '100%',
+              textAlign: 'left',
+              border: 'none',
+              background: 'transparent',
+              padding: 0,
+              cursor: 'pointer',
+              opacity: 1,
+            }}
+            title="Click to rate this track"
+          >
+            <div style={{ width: 48, height: 48, borderRadius: 8, background: '#e0e7ff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '1.5rem', flexShrink: 0, overflow: 'hidden' }}>
+              {dashboardMusicArt ? (
+                <img
+                  src={dashboardMusicArt}
+                  alt={dashboardMusic.album ? `${dashboardMusic.album} artwork` : `${dashboardMusic.title} artwork`}
+                  style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                  onError={(e) => {
+                    e.target.style.display = 'none';
+                    e.target.nextSibling.style.display = 'flex';
+                  }}
+                />
+              ) : null}
+              <span style={{ display: dashboardMusicArt ? 'none' : 'flex', alignItems: 'center', justifyContent: 'center', width: '100%', height: '100%' }}>🎵</span>
+            </div>
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                <span style={{ display: 'inline-block', width: 8, height: 8, borderRadius: '50%', background: appMusic.isPlaying ? '#22c55e' : '#f59e0b', animation: appMusic.isPlaying ? 'pulse 1.5s ease-in-out infinite' : 'none' }} />
-                <span style={{ fontWeight: 600, fontSize: '0.95rem', color: '#1e293b', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{appMusic.title}</span>
+                <span style={{ display: 'inline-block', width: 8, height: 8, borderRadius: '50%', background: dashboardMusic.isPlaying ? '#22c55e' : '#f59e0b', animation: dashboardMusic.isPlaying ? 'pulse 1.5s ease-in-out infinite' : 'none' }} />
+                <span style={{ fontWeight: 600, fontSize: '0.95rem', color: '#1e293b', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{dashboardMusic.title}</span>
               </div>
-              {(appMusic.artist || appMusic.album) && (
-                <div style={{ fontSize: '0.82rem', color: '#64748b', marginTop: '0.2rem' }}>{[appMusic.artist, appMusic.album].filter(Boolean).join(' · ')}</div>
+              {(dashboardMusic.artist || dashboardMusic.album) && (
+                <div style={{ fontSize: '0.82rem', color: '#64748b', marginTop: '0.2rem' }}>{[dashboardMusic.artist, dashboardMusic.album].filter(Boolean).join(' · ')}</div>
               )}
-              <div style={{ fontSize: '0.78rem', color: '#94a3b8', marginTop: '0.15rem' }}>{appMusic.isPlaying ? '▶ Playing' : '⏸ Paused'} in Music Player</div>
+              <div style={{ fontSize: '0.78rem', color: '#94a3b8', marginTop: '0.15rem' }}>
+                {dashboardMusic.isPlaying ? '▶ Playing' : '⏸ Paused'} in {dashboardMusic.source === 'android_app' ? (dashboardMusic.appName || 'Android App') : 'Music Player'}
+              </div>
+              <div style={{ fontSize: '0.74rem', color: '#3b82f6', marginTop: '0.1rem' }}>
+                Click to rate this track
+              </div>
+              {dashboardMusic.source === 'android_app' && dashboardMusic.updatedAt && (
+                <div style={{ fontSize: '0.74rem', color: '#94a3b8', marginTop: '0.1rem' }}>
+                  Android update: {timeAgo(dashboardMusic.updatedAt)}
+                </div>
+              )}
             </div>
-          </div>
+          </button>
         ) : (
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
             <EmptyState label="Music player is not active" />
@@ -341,6 +472,95 @@ function Dashboard() {
           </div>
         )}
       </Card>
+
+      {showMusicRatingModal && dashboardMusic && (
+        <div
+          onClick={closeMusicRatingModal}
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(15, 23, 42, 0.55)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 2000,
+            padding: '1rem',
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              width: '100%',
+              maxWidth: 560,
+              background: 'white',
+              borderRadius: 12,
+              padding: '1.25rem',
+              boxShadow: '0 12px 32px rgba(15, 23, 42, 0.28)',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.85rem' }}>
+              <h3 style={{ margin: 0, fontSize: '1.05rem', color: '#0f172a' }}>Rate Current Track</h3>
+              <button
+                type="button"
+                onClick={closeMusicRatingModal}
+                style={{ border: 'none', background: 'transparent', cursor: 'pointer', fontSize: '1rem', color: '#64748b' }}
+              >
+                ✕
+              </button>
+            </div>
+
+            <div style={{ marginBottom: '0.85rem', display: 'flex', gap: '0.85rem' }}>
+              <div style={{ width: 64, height: 64, borderRadius: 10, background: '#e0e7ff', overflow: 'hidden', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                {dashboardMusicArt ? (
+                  <img
+                    src={dashboardMusicArt}
+                    alt={dashboardMusic.album ? `${dashboardMusic.album} artwork` : `${dashboardMusic.title} artwork`}
+                    style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                    onError={(e) => {
+                      e.target.style.display = 'none';
+                      e.target.nextSibling.style.display = 'flex';
+                    }}
+                  />
+                ) : null}
+                <span style={{ display: dashboardMusicArt ? 'none' : 'flex', alignItems: 'center', justifyContent: 'center', width: '100%', height: '100%', fontSize: '1.35rem' }}>🎵</span>
+              </div>
+              <div style={{ minWidth: 0 }}>
+              <div style={{ fontWeight: 700, color: '#1e293b' }}>{dashboardMusic.title}</div>
+              {(dashboardMusic.artist || dashboardMusic.album) && (
+                <div style={{ color: '#64748b', fontSize: '0.9rem' }}>{[dashboardMusic.artist, dashboardMusic.album].filter(Boolean).join(' · ')}</div>
+              )}
+              <div style={{ color: '#94a3b8', fontSize: '0.8rem', marginTop: '0.2rem' }}>
+                Source: {dashboardMusic.source === 'android_app' ? (dashboardMusic.appName || 'Android App') : 'Music Player'}
+              </div>
+              </div>
+            </div>
+
+            {dashboardMusic.ratingKey ? (
+              <>
+                <StarRating
+                  value={dashboardMusic.userRating || 0}
+                  onChange={handleMusicRatingChange}
+                  readOnly={musicRatingSaving}
+                  size="medium"
+                />
+                <div style={{ color: '#94a3b8', fontSize: '0.8rem', marginTop: '0.45rem' }}>
+                  Uses the same music track rating system as the Music page.
+                </div>
+              </>
+            ) : (
+              <div style={{ color: '#b45309', fontSize: '0.9rem' }}>
+                Track rating is unavailable because this playback update did not include a Plex track key.
+              </div>
+            )}
+
+            {musicRatingError && (
+              <div style={{ marginTop: '0.75rem', color: '#dc2626', fontSize: '0.85rem' }}>
+                {musicRatingError}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Last Played grid */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(270px, 1fr))', gap: '1.25rem' }}>
@@ -373,15 +593,31 @@ function Dashboard() {
         <Card>
           <SectionHeader icon="🎵" title="Last Music Track" />
           {data?.lastMusicTrack ? (
-            <div>
-              <div style={{ fontWeight: 600, fontSize: '0.95rem', color: '#1e293b', marginBottom: '0.2rem' }}>{data.lastMusicTrack.title}</div>
-              {data.lastMusicTrack.artist && <div style={{ fontSize: '0.82rem', color: '#64748b' }}>{data.lastMusicTrack.artist}</div>}
-              {data.lastMusicTrack.album && <div style={{ fontSize: '0.82rem', color: '#94a3b8' }}>{data.lastMusicTrack.album}</div>}
-              <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginTop: '0.5rem', flexWrap: 'wrap' }}>
-                {data.lastMusicTrack.duration && <span style={{ fontSize: '0.78rem', color: '#94a3b8' }}>⏱ {formatDuration(data.lastMusicTrack.duration)}</span>}
-                <span style={{ fontSize: '0.78rem', color: '#94a3b8' }}>{timeAgo(data.lastMusicTrack.lastViewedAt)}</span>
+            <div style={{ display: 'flex', gap: '0.8rem' }}>
+              <div style={{ width: 56, height: 56, borderRadius: 8, background: '#e0e7ff', overflow: 'hidden', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                {plexArtworkUrl(data.lastMusicTrack.thumb) ? (
+                  <img
+                    src={plexArtworkUrl(data.lastMusicTrack.thumb)}
+                    alt={data.lastMusicTrack.album ? `${data.lastMusicTrack.album} artwork` : `${data.lastMusicTrack.title} artwork`}
+                    style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                    onError={(e) => {
+                      e.target.style.display = 'none';
+                      e.target.nextSibling.style.display = 'flex';
+                    }}
+                  />
+                ) : null}
+                <span style={{ display: plexArtworkUrl(data.lastMusicTrack.thumb) ? 'none' : 'flex', alignItems: 'center', justifyContent: 'center', width: '100%', height: '100%' }}>🎵</span>
               </div>
-              <Link to="/media/music" style={{ display: 'inline-block', marginTop: '0.75rem', fontSize: '0.8rem', color: '#3b82f6', textDecoration: 'none' }}>Open Music →</Link>
+              <div style={{ minWidth: 0, flex: 1 }}>
+                <div style={{ fontWeight: 600, fontSize: '0.95rem', color: '#1e293b', marginBottom: '0.2rem' }}>{data.lastMusicTrack.title}</div>
+                {data.lastMusicTrack.artist && <div style={{ fontSize: '0.82rem', color: '#64748b' }}>{data.lastMusicTrack.artist}</div>}
+                {data.lastMusicTrack.album && <div style={{ fontSize: '0.82rem', color: '#94a3b8' }}>{data.lastMusicTrack.album}</div>}
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginTop: '0.5rem', flexWrap: 'wrap' }}>
+                  {data.lastMusicTrack.duration && <span style={{ fontSize: '0.78rem', color: '#94a3b8' }}>⏱ {formatDuration(data.lastMusicTrack.duration)}</span>}
+                  <span style={{ fontSize: '0.78rem', color: '#94a3b8' }}>{timeAgo(data.lastMusicTrack.lastViewedAt)}</span>
+                </div>
+                <Link to="/media/music" style={{ display: 'inline-block', marginTop: '0.75rem', fontSize: '0.8rem', color: '#3b82f6', textDecoration: 'none' }}>Open Music →</Link>
+              </div>
             </div>
           ) : <EmptyState label="No music played yet" />}
         </Card>

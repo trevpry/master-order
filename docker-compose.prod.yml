@@ -15,9 +15,15 @@ services:
       # Database and uploads persistence
       - ./master_order.db:/app/master_order.db
       - ./data:/app/data
+      # Background images persistent storage
+      - /mnt/user/Media/Other/Images/background-images:/mnt/user/Media/Other/Images/background-images
     environment:
       - NODE_ENV=production
       - PORT=3001
+      # UNC path translation for Docker/Unraid background image storage
+      - "UNRAID_SERVER_NAME=tower"
+      - "UNRAID_SHARE_ROOT=/mnt/user"
+      - "BACKGROUND_UNC_PATH_MAPPINGS=//tower/Media/Other/Images/background-images=/mnt/user/Media/Other/Images/background-images"
       # External IP for Android API responses - UPDATE THIS FOR YOUR NETWORK
       - "EXTERNAL_IP=192.168.1.114"
       # Gemini AI API Key for AI categorization features

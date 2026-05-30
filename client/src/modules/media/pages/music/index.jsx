@@ -51,6 +51,7 @@ const Music = () => {
   const albumRatingKey = searchParams.get('album');
   const trackRatingKey = searchParams.get('track');
   const workId = searchParams.get('work');
+  const albumSourceView = searchParams.get('from');
   const [selectedArtist, setSelectedArtist] = useState(null);
   const [selectedAlbum, setSelectedAlbum] = useState(null);
   const [selectedTrack, setSelectedTrack] = useState(null);
@@ -123,17 +124,38 @@ const Music = () => {
 
   const navigateToView = (view, params = {}) => {
     const updates = { view, ...params };
+
+    if (view !== 'album') {
+      updates.from = null;
+    }
     
     // Clear irrelevant params based on view
     if (view === 'artists') {
       updates.artist = null;
       updates.album = null;
+      updates.track = null;
+      updates.work = null;
+    } else if (view === 'artist') {
+      updates.album = null;
+      updates.track = null;
+      updates.work = null;
+    } else if (view === 'albums') {
+      updates.album = null;
+      updates.track = null;
+      updates.work = null;
     } else if (view === 'albums' && !params.artist) {
       updates.artist = null;
       updates.album = null;
     } else if (view === 'tracks' && !params.album && !params.artist) {
       updates.artist = null;
       updates.album = null;
+      updates.track = null;
+      updates.work = null;
+    } else if (view === 'album') {
+      updates.track = null;
+      updates.work = null;
+    } else if (view === 'track') {
+      updates.work = null;
     }
     
     // For major view changes, create new history entries (not replace)
@@ -964,7 +986,8 @@ const Music = () => {
     setSelectedAlbum(album);
     navigateToView('album', { 
       artist: selectedArtist?.ratingKey || artistRatingKey,
-      album: album.ratingKey 
+      album: album.ratingKey,
+      from: activeView
     });
     
     try {
@@ -1187,6 +1210,12 @@ const Music = () => {
   };
 
   const goBackToAlbums = () => {
+    if (albumSourceView === 'artist' && (selectedArtist || artistRatingKey)) {
+      navigateToView('artist', { artist: selectedArtist?.ratingKey || artistRatingKey });
+      setSelectedAlbum(null);
+      return;
+    }
+
     if (selectedArtist || artistRatingKey) {
       navigateToView('albums', { artist: selectedArtist?.ratingKey || artistRatingKey });
       setSelectedAlbum(null);
@@ -1285,6 +1314,51 @@ const Music = () => {
       setExtractingMetadata(prev => {
         const newSet = new Set(prev);
         newSet.delete(album.ratingKey);
+        return newSet;
+      });
+    }
+  };
+
+  const extractArtistMetadata = async (artist) => {
+    try {
+      setExtractingMetadata(prev => new Set([...prev, artist.ratingKey]));
+
+      const response = await fetch(`${config.apiBaseUrl}/api/music/artists/${artist.ratingKey}/extract-file-metadata`, {
+        method: 'POST'
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const result = await safeJsonParse(response, `${config.apiBaseUrl}/api/music/artists/${artist.ratingKey}/extract-file-metadata`);
+
+      setMetadataResults(prev => ({
+        ...prev,
+        ...Object.fromEntries((result.extractedAlbums || []).map(albumResult => [albumResult.albumRatingKey, albumResult]))
+      }));
+
+      if (selectedArtist && selectedArtist.ratingKey === artist.ratingKey) {
+        try {
+          const albumsResponse = await fetch(`${config.apiBaseUrl}/api/music/albums/artist/${artist.ratingKey}`);
+          if (albumsResponse.ok) {
+            const refreshedAlbums = await albumsResponse.json();
+            setAlbums(refreshedAlbums);
+          }
+        } catch (err) {
+          console.error('Error refreshing artist albums after bulk metadata extraction:', err);
+        }
+      }
+
+      setCurrentMetadataResult(result);
+      setShowMetadataModal(true);
+    } catch (error) {
+      console.error('Error extracting artist metadata:', error);
+      alert(`Failed to extract metadata for artist: ${error.message}`);
+    } finally {
+      setExtractingMetadata(prev => {
+        const newSet = new Set(prev);
+        newSet.delete(artist.ratingKey);
         return newSet;
       });
     }
@@ -1869,11 +1943,14 @@ const Music = () => {
             stats={{
               totalTracks: tracks?.length || 0
             }}
+            onExtractArtistMetadata={extractArtistMetadata}
+            isExtractingMetadata={extractingMetadata.has(selectedArtist.ratingKey)}
             onGoBack={() => {
               setSelectedArtist(null);
               navigateToView('artists');
             }}
             onSelectAlbum={selectAlbum}
+            onSelectTrack={selectTrack}
             onArtistUpdate={(updatedArtist) => {
               // Update selectedArtist with new data
               setSelectedArtist(updatedArtist);
@@ -1896,6 +1973,7 @@ const Music = () => {
             isPlaying={isPlaying}
             playlists={playlists}
             selectedSection={selectedSection}
+            backLabel={albumSourceView === 'artist' ? 'Back to Artist' : 'Back to Albums'}
             onGoBack={goBackToAlbums}
             onPlayTrack={playTrack}
             onSelectArtist={selectArtist}
@@ -2099,23 +2177,114 @@ const Music = () => {
               <div className="metadata-summary">
                 <h3>Summary</h3>
                 <div className="metadata-stats">
-                  <div className="stat">
-                    <span className="stat-label">Tracks Processed:</span>
-                    <span className="stat-value">{currentMetadataResult.tracksProcessed}</span>
-                  </div>
-                  <div className="stat">
-                    <span className="stat-label">Successful:</span>
-                    <span className="stat-value success">{currentMetadataResult.successCount}</span>
-                  </div>
-                  <div className="stat">
-                    <span className="stat-label">Errors:</span>
-                    <span className="stat-value error">{currentMetadataResult.errorCount}</span>
-                  </div>
+                  {currentMetadataResult.extractedAlbums ? (
+                    <>
+                      <div className="stat">
+                        <span className="stat-label">Albums Processed:</span>
+                        <span className="stat-value">{currentMetadataResult.albumsProcessed}</span>
+                      </div>
+                      <div className="stat">
+                        <span className="stat-label">Tracks Processed:</span>
+                        <span className="stat-value">{currentMetadataResult.tracksProcessed}</span>
+                      </div>
+                      <div className="stat">
+                        <span className="stat-label">Successful:</span>
+                        <span className="stat-value success">{currentMetadataResult.successCount}</span>
+                      </div>
+                      <div className="stat">
+                        <span className="stat-label">Errors:</span>
+                        <span className="stat-value error">{currentMetadataResult.errorCount}</span>
+                      </div>
+                      <div className="stat">
+                        <span className="stat-label">Merged Albums:</span>
+                        <span className="stat-value">{currentMetadataResult.mergedAlbumCount || 0}</span>
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <div className="stat">
+                        <span className="stat-label">Tracks Processed:</span>
+                        <span className="stat-value">{currentMetadataResult.tracksProcessed}</span>
+                      </div>
+                      <div className="stat">
+                        <span className="stat-label">Successful:</span>
+                        <span className="stat-value success">{currentMetadataResult.successCount}</span>
+                      </div>
+                      <div className="stat">
+                        <span className="stat-label">Errors:</span>
+                        <span className="stat-value error">{currentMetadataResult.errorCount}</span>
+                      </div>
+                      <div className="stat">
+                        <span className="stat-label">Merged Albums:</span>
+                        <span className="stat-value">{currentMetadataResult.mergedAlbums?.length || 0}</span>
+                      </div>
+                    </>
+                  )}
                 </div>
               </div>
 
               <div className="metadata-tracks">
-                {currentMetadataResult.extractedMetadata?.map((track, index) => (
+                {currentMetadataResult.extractedAlbums ? currentMetadataResult.extractedAlbums.map((albumResult, albumIndex) => (
+                  <div key={albumResult.albumRatingKey || albumIndex} className="metadata-track">
+                    <div className="metadata-track-header">
+                      <h4>
+                        {albumResult.error ? '❌' : '✅'} {albumResult.albumTitle}
+                      </h4>
+                    </div>
+
+                    <div className="metadata-saved-notice">
+                      <small>
+                        ✓ {albumResult.successCount || 0}/{albumResult.tracksProcessed || 0} tracks extracted
+                        {albumResult.mergedAlbums?.length ? ` · merged ${albumResult.mergedAlbums.length} duplicate album${albumResult.mergedAlbums.length === 1 ? '' : 's'}` : ''}
+                      </small>
+                    </div>
+
+                    {albumResult.error && (
+                      <div className="metadata-error">
+                        <p><strong>Error:</strong> {albumResult.error}</p>
+                      </div>
+                    )}
+
+                    {albumResult.mergedAlbums?.length > 0 && (
+                      <div className="metadata-details">
+                        <p><strong>Merged duplicate albums:</strong> {albumResult.mergedAlbums.map(merged => merged.title).join(', ')}</p>
+                      </div>
+                    )}
+
+                    {(albumResult.extractedMetadata || []).map((track, index) => (
+                      <div key={track.ratingKey || `${albumIndex}-${index}`} className="metadata-details" style={{ marginTop: '1rem' }}>
+                        <div className="metadata-track-header">
+                          <h4>
+                            {track.error ? '❌' : '✅'} {track.title}
+                          </h4>
+                          {track.filePath && (
+                            <small className="file-path">{track.filePath}</small>
+                          )}
+                        </div>
+
+                        {track.error ? (
+                          <div className="metadata-error">
+                            <p><strong>Error:</strong> {track.error}</p>
+                          </div>
+                        ) : track.common && (
+                          renderMetadataSection('Basic Information', {
+                            Title: track.common.title,
+                            Artist: track.common.artist,
+                            'Album Artist': track.common.albumartist,
+                            Album: track.common.album,
+                            Year: track.common.year,
+                            Track: track.trackNumber ? `${track.trackNumber}${track.trackTotal ? `/${track.trackTotal}` : ''}` : track.common.track,
+                            Disc: track.discNumber ? `${track.discNumber}${track.discTotal ? `/${track.discTotal}` : ''}` : track.common.disk,
+                            Genre: track.common.genre?.join(', '),
+                            Duration: formatMetadataDuration(track.formatInfo?.duration),
+                            Composer: track.common.composer?.join(', '),
+                            Comment: track.common.comment?.join(', ')
+                          }, `${albumIndex}-${index}`, true)
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )) : currentMetadataResult.extractedMetadata?.map((track, index) => (
                   <div key={track.ratingKey || index} className="metadata-track">
                     <div className="metadata-track-header">
                       <h4>
@@ -2129,7 +2298,16 @@ const Music = () => {
                     {/* Note about auto-saved data */}
                     {track.success && !track.error && (
                       <div className="metadata-saved-notice">
-                        <small>✓ File path, audio format, and MusicBrainz IDs automatically saved to database</small>
+                        <small>
+                          ✓ File path, audio format, MusicBrainz IDs, and album metadata are automatically saved to the database
+                          {currentMetadataResult.mergedAlbums?.length ? ` · merged ${currentMetadataResult.mergedAlbums.length} duplicate album${currentMetadataResult.mergedAlbums.length === 1 ? '' : 's'}` : ''}
+                        </small>
+                      </div>
+                    )}
+
+                    {currentMetadataResult.mergedAlbums?.length > 0 && index === 0 && (
+                      <div className="metadata-details">
+                        <p><strong>Merged duplicate albums:</strong> {currentMetadataResult.mergedAlbums.map(merged => merged.title).join(', ')}</p>
                       </div>
                     )}
                     

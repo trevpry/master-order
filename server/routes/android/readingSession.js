@@ -12,6 +12,53 @@ const WatchLogService = require('../../watchLogService');
 const BookCompletionService = require('../../services/BookCompletionService');
 const prisma = require('../../prismaClient');
 
+function normalizeAndroidMusicPayload(payload = {}) {
+  if (!payload || typeof payload !== 'object') return null;
+
+  const title = typeof payload.title === 'string' ? payload.title.trim() : '';
+  if (!title) return null;
+
+  return {
+    title,
+    artist: typeof payload.artist === 'string' ? payload.artist.trim() || null : null,
+    album: typeof payload.album === 'string' ? payload.album.trim() || null : null,
+    ratingKey: typeof payload.ratingKey === 'string' ? payload.ratingKey.trim() || null : null,
+    userRating: Number.isFinite(Number(payload.userRating)) ? Number(payload.userRating) : null,
+    artworkUrl: typeof payload.artworkUrl === 'string' ? payload.artworkUrl.trim() || null : null,
+    thumb: typeof payload.thumb === 'string' ? payload.thumb.trim() || null : null,
+    parentThumb: typeof payload.parentThumb === 'string' ? payload.parentThumb.trim() || null : null,
+    grandparentThumb: typeof payload.grandparentThumb === 'string' ? payload.grandparentThumb.trim() || null : null,
+    art: typeof payload.art === 'string' ? payload.art.trim() || null : null,
+    isPlaying: payload.isPlaying !== undefined ? Boolean(payload.isPlaying) : true,
+    positionMs: Number.isFinite(Number(payload.positionMs)) ? Number(payload.positionMs) : null,
+    durationMs: Number.isFinite(Number(payload.durationMs)) ? Number(payload.durationMs) : null,
+    source: 'android_app',
+    appName: typeof payload.appName === 'string' ? payload.appName.trim() || null : 'Android Reading Session',
+    updatedAt: new Date().toISOString(),
+  };
+}
+
+function clearAndroidMusicState() {
+  global.androidMusicState = {
+    title: null,
+    artist: null,
+    album: null,
+    ratingKey: null,
+    userRating: null,
+    artworkUrl: null,
+    thumb: null,
+    parentThumb: null,
+    grandparentThumb: null,
+    art: null,
+    isPlaying: false,
+    positionMs: null,
+    durationMs: null,
+    source: 'android_app',
+    appName: 'Android Reading Session',
+    updatedAt: new Date().toISOString(),
+  };
+}
+
 /**
  * Create reading session routes for Android app
  * @param {PrismaClient} prisma - Database client instance
@@ -28,7 +75,7 @@ function createReadingSessionRoutes(prisma) {
     console.log('📱 Request body received:', JSON.stringify(req.body, null, 2));
     console.log('📱 Request headers:', JSON.stringify(req.headers, null, 2));
     
-    const { mediaType, title, seriesTitle, customOrderItemId, id, historyPlus } = req.body;
+    const { mediaType, title, seriesTitle, customOrderItemId, id, historyPlus, music, musicTrack } = req.body;
 
     // The Android app might send the custom order item ID as either 'customOrderItemId' or 'id'
     const actualCustomOrderItemId = customOrderItemId || id;
@@ -67,6 +114,11 @@ function createReadingSessionRoutes(prisma) {
           customOrderItemId: null
         });
         
+        const normalizedMusic = normalizeAndroidMusicPayload(music || musicTrack);
+        if (normalizedMusic) {
+          global.androidMusicState = normalizedMusic;
+        }
+
         return sendSuccess(res, {
           success: true,
           sessionId: readingSession.id,
@@ -96,6 +148,11 @@ function createReadingSessionRoutes(prisma) {
         seriesTitle: historyPlusSeriesTitle,
         customOrderItemId: null // No customOrderItemId for History Plus
       });
+
+      const normalizedMusic = normalizeAndroidMusicPayload(music || musicTrack);
+      if (normalizedMusic) {
+        global.androidMusicState = normalizedMusic;
+      }
       
       const androidResponse = {
         type: 'READING_SESSION_STARTED',
@@ -194,6 +251,11 @@ function createReadingSessionRoutes(prisma) {
       customOrderItemId: finalCustomOrderItemId
     });
 
+    const normalizedMusic = normalizeAndroidMusicPayload(music || musicTrack);
+    if (normalizedMusic) {
+      global.androidMusicState = normalizedMusic;
+    }
+
     console.log('✅ Reading session started successfully:', readingSession.id);
 
     // Success response in Android format
@@ -230,6 +292,14 @@ function createReadingSessionRoutes(prisma) {
 
     // Pause the reading session
     const updatedSession = await watchLogService.pauseReading(activeSession.id);
+
+    if (global.androidMusicState && global.androidMusicState.title) {
+      global.androidMusicState = {
+        ...global.androidMusicState,
+        isPlaying: !updatedSession.isPaused,
+        updatedAt: new Date().toISOString(),
+      };
+    }
     
     console.log('✅ Reading session paused/resumed successfully:', updatedSession.id);
 
@@ -275,6 +345,7 @@ function createReadingSessionRoutes(prisma) {
 
     // Stop the reading session
     const stoppedSession = await watchLogService.stopReading(activeSession.id);
+    clearAndroidMusicState();
 
     // Handle different scenarios based on session outcome
     if (stoppedSession.deleted) {

@@ -14,6 +14,123 @@ const { getAndroidApiBaseUrl, createAndroidResponse, createAndroidErrorResponse 
 function createPlaybackControlRoutes() {
   const router = express.Router();
 
+  // Android app reports current music playback state for dashboard monitoring
+  router.post('/music/state', async (req, res) => {
+    try {
+      const {
+        title,
+        artist,
+        album,
+        ratingKey = null,
+        userRating = null,
+        artworkUrl = null,
+        thumb = null,
+        parentThumb = null,
+        grandparentThumb = null,
+        art = null,
+        isPlaying = true,
+        positionMs = null,
+        durationMs = null,
+        source = 'android_app',
+        appName = null,
+      } = req.body || {};
+
+      if (!title || typeof title !== 'string' || !title.trim()) {
+        return res.status(400).json({
+          type: 'MUSIC_STATE_ERROR',
+          data: {
+            success: false,
+            error: 'title is required',
+            message: 'Provide at least a track title for Android music state updates',
+          },
+        });
+      }
+
+      const normalized = {
+        title: title.trim(),
+        artist: typeof artist === 'string' ? artist.trim() || null : null,
+        album: typeof album === 'string' ? album.trim() || null : null,
+        ratingKey: typeof ratingKey === 'string' ? ratingKey.trim() || null : null,
+        userRating: Number.isFinite(Number(userRating)) ? Number(userRating) : null,
+        artworkUrl: typeof artworkUrl === 'string' ? artworkUrl.trim() || null : null,
+        thumb: typeof thumb === 'string' ? thumb.trim() || null : null,
+        parentThumb: typeof parentThumb === 'string' ? parentThumb.trim() || null : null,
+        grandparentThumb: typeof grandparentThumb === 'string' ? grandparentThumb.trim() || null : null,
+        art: typeof art === 'string' ? art.trim() || null : null,
+        isPlaying: Boolean(isPlaying),
+        positionMs: Number.isFinite(Number(positionMs)) ? Number(positionMs) : null,
+        durationMs: Number.isFinite(Number(durationMs)) ? Number(durationMs) : null,
+        source,
+        appName: typeof appName === 'string' ? appName.trim() || null : null,
+        updatedAt: new Date().toISOString(),
+      };
+
+      // Store in global process memory for lightweight dashboard monitoring.
+      global.androidMusicState = normalized;
+
+      return res.json({
+        type: 'MUSIC_STATE_UPDATED',
+        data: {
+          success: true,
+          message: 'Android music state updated',
+          state: normalized,
+        },
+      });
+    } catch (error) {
+      console.error('Failed to update Android music state:', error);
+      return res.status(500).json({
+        type: 'MUSIC_STATE_ERROR',
+        data: {
+          success: false,
+          error: 'Internal server error',
+          details: error.message,
+        },
+      });
+    }
+  });
+
+  // Explicitly clear Android music playback state
+  router.post('/music/stop', async (req, res) => {
+    try {
+      global.androidMusicState = {
+        title: null,
+        artist: null,
+        album: null,
+        ratingKey: null,
+        userRating: null,
+        artworkUrl: null,
+        thumb: null,
+        parentThumb: null,
+        grandparentThumb: null,
+        art: null,
+        isPlaying: false,
+        positionMs: null,
+        durationMs: null,
+        source: 'android_app',
+        appName: null,
+        updatedAt: new Date().toISOString(),
+      };
+
+      return res.json({
+        type: 'MUSIC_STATE_STOPPED',
+        data: {
+          success: true,
+          message: 'Android music state cleared',
+        },
+      });
+    } catch (error) {
+      console.error('Failed to clear Android music state:', error);
+      return res.status(500).json({
+        type: 'MUSIC_STATE_ERROR',
+        data: {
+          success: false,
+          error: 'Internal server error',
+          details: error.message,
+        },
+      });
+    }
+  });
+
   // Generic Stash playback control with WebSocket
   router.post('/play', async (req, res) => {
     try {

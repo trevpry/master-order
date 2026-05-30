@@ -4,6 +4,7 @@ import ArtistTypesManager from './ArtistTypesManager';
 import MusicBrainzSearchModal from '../../../../../components/music/MusicBrainzSearchModal';
 import IdentifyModal from '../../../../../components/IdentifyModal';
 import MetadataEditor from '../../../../../components/MetadataEditor';
+import EmbeddedPicardTagsPanel from './EmbeddedPicardTagsPanel';
 import './ArtistDetail.css';
 
 const ArtistDetail = ({
@@ -12,7 +13,10 @@ const ArtistDetail = ({
   stats,
   onGoBack,
   onSelectAlbum,
-  onArtistUpdate
+  onSelectTrack,
+  onArtistUpdate,
+  onExtractArtistMetadata,
+  isExtractingMetadata = false
 }) => {
   const [isEditing, setIsEditing] = useState(false);
   const [editedTitle, setEditedTitle] = useState(artist?.title || '');
@@ -24,6 +28,9 @@ const ArtistDetail = ({
   const [isMetadataEditMode, setIsMetadataEditMode] = useState(false);
   const [showMusicBrainzData, setShowMusicBrainzData] = useState(false);
   const [artistData, setArtistData] = useState(artist);
+
+  const linkedAlbums = artist?.linkedAlbums || [];
+  const linkedTracks = artist?.linkedTracks || [];
 
   if (!artist) return null;
 
@@ -79,6 +86,15 @@ const ArtistDetail = ({
           ← Back to Artists
         </button>
         <div style={{ display: 'flex', gap: '0.5rem' }}>
+          <button
+            className="musicbrainz-button"
+            onClick={() => onExtractArtistMetadata && onExtractArtistMetadata(artist)}
+            title="Extract metadata for all albums by this artist"
+            style={{ backgroundColor: '#0f766e' }}
+            disabled={isExtractingMetadata}
+          >
+            {isExtractingMetadata ? 'Extracting…' : '🏷️ Extract All Album Metadata'}
+          </button>
           <button 
             className="musicbrainz-button"
             onClick={() => setShowIdentifyModal(true)}
@@ -260,6 +276,8 @@ const ArtistDetail = ({
                 <p className="artist-summary">{artist.summary}</p>
               )}
 
+              <EmbeddedPicardTagsPanel entityType="artist" entityKey={artist.ratingKey} />
+
               {/* MusicBrainz Metadata Section */}
               {artist.musicBrainzId && (
                 <div className="musicbrainz-metadata">
@@ -381,6 +399,69 @@ const ArtistDetail = ({
                       {album.totalPlayCount} {album.totalPlayCount === 1 ? 'play' : 'plays'}
                     </p>
                   )}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {linkedAlbums.length > 0 && (
+        <div className="artist-linked-section">
+          <h2>Linked Albums</h2>
+          <div className="albums-grid">
+            {linkedAlbums.map((album) => (
+              <div
+                key={`linked-album-${album.ratingKey}`}
+                className="album-card"
+                onClick={() => onSelectAlbum && onSelectAlbum(album)}
+              >
+                {album.thumb && (
+                  <div className="album-image">
+                    <img
+                      src={`${config.plexUrl}${album.thumb}?X-Plex-Token=${config.plexToken}`}
+                      alt={album.title}
+                      onError={(e) => e.target.style.display = 'none'}
+                    />
+                  </div>
+                )}
+                <div className="album-info">
+                  <h3 className="album-title-line">
+                    {album.title}
+                    {album.year && <span className="album-year"> ({album.year})</span>}
+                  </h3>
+                  <p className="linked-meta-line">
+                    {album.artist?.title || album.parentTitle || 'Unknown Artist'}
+                  </p>
+                  <p className="linked-meta-line">
+                    Linked as: {(album.linkedArtistTypes || []).join(', ')}
+                  </p>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {linkedTracks.length > 0 && (
+        <div className="artist-linked-section">
+          <h2>Linked Tracks</h2>
+          <div className="linked-tracks-list">
+            {linkedTracks.map((track) => (
+              <div
+                key={`linked-track-${track.ratingKey}`}
+                className="linked-track-row"
+                onClick={() => onSelectTrack && onSelectTrack(track)}
+              >
+                <div className="linked-track-main">
+                  <div className="linked-track-title">{track.title || 'Untitled'}</div>
+                  <div className="linked-track-subtitle">
+                    {track.album?.title || 'Unknown Album'}
+                    {track.album?.artist?.title ? ` • ${track.album.artist.title}` : ''}
+                  </div>
+                </div>
+                <div className="linked-track-meta">
+                  Linked as: {(track.linkedArtistTypes || []).join(', ')}
                 </div>
               </div>
             ))}

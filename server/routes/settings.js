@@ -77,9 +77,20 @@ router.post('/', asyncHandler(async (req, res) => {
   if (settingsData.ignoredTVCollections && Array.isArray(settingsData.ignoredTVCollections)) {
     processedData.ignoredTVCollections = JSON.stringify(settingsData.ignoredTVCollections);
   }
+
+  // Allow explicit clear for background image storage path
+  if (Object.prototype.hasOwnProperty.call(settingsData, 'backgroundImageStoragePath')) {
+    const trimmedPath = typeof settingsData.backgroundImageStoragePath === 'string'
+      ? settingsData.backgroundImageStoragePath.trim()
+      : '';
+    processedData.backgroundImageStoragePath = trimmedPath || null;
+  }
   
   // Remove any undefined or null values
   Object.keys(processedData).forEach(key => {
+    if (key === 'backgroundImageStoragePath') {
+      return;
+    }
     if (processedData[key] === undefined || processedData[key] === null || processedData[key] === '') {
       delete processedData[key];
     }

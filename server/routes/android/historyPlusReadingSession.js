@@ -11,6 +11,53 @@ const WatchLogService = require('../../watchLogService');
 const HistoryPlusService = require('../../services/historyPlusService');
 const { createAndroidResponse, createAndroidErrorResponse } = require('./utilities/androidHelpers');
 
+function normalizeAndroidMusicPayload(payload = {}) {
+  if (!payload || typeof payload !== 'object') return null;
+
+  const title = typeof payload.title === 'string' ? payload.title.trim() : '';
+  if (!title) return null;
+
+  return {
+    title,
+    artist: typeof payload.artist === 'string' ? payload.artist.trim() || null : null,
+    album: typeof payload.album === 'string' ? payload.album.trim() || null : null,
+    ratingKey: typeof payload.ratingKey === 'string' ? payload.ratingKey.trim() || null : null,
+    userRating: Number.isFinite(Number(payload.userRating)) ? Number(payload.userRating) : null,
+    artworkUrl: typeof payload.artworkUrl === 'string' ? payload.artworkUrl.trim() || null : null,
+    thumb: typeof payload.thumb === 'string' ? payload.thumb.trim() || null : null,
+    parentThumb: typeof payload.parentThumb === 'string' ? payload.parentThumb.trim() || null : null,
+    grandparentThumb: typeof payload.grandparentThumb === 'string' ? payload.grandparentThumb.trim() || null : null,
+    art: typeof payload.art === 'string' ? payload.art.trim() || null : null,
+    isPlaying: payload.isPlaying !== undefined ? Boolean(payload.isPlaying) : true,
+    positionMs: Number.isFinite(Number(payload.positionMs)) ? Number(payload.positionMs) : null,
+    durationMs: Number.isFinite(Number(payload.durationMs)) ? Number(payload.durationMs) : null,
+    source: 'android_app',
+    appName: typeof payload.appName === 'string' ? payload.appName.trim() || null : 'Android Reading Session',
+    updatedAt: new Date().toISOString(),
+  };
+}
+
+function clearAndroidMusicState() {
+  global.androidMusicState = {
+    title: null,
+    artist: null,
+    album: null,
+    ratingKey: null,
+    userRating: null,
+    artworkUrl: null,
+    thumb: null,
+    parentThumb: null,
+    grandparentThumb: null,
+    art: null,
+    isPlaying: false,
+    positionMs: null,
+    durationMs: null,
+    source: 'android_app',
+    appName: 'Android Reading Session',
+    updatedAt: new Date().toISOString(),
+  };
+}
+
 /**
  * Create History Plus reading session routes for Android app
  * @param {PrismaClient} prisma - Database client instance
@@ -38,7 +85,8 @@ function createHistoryPlusReadingSessionRoutes(prisma) {
       contentType, contentId, bookId, bookTitle,
       chapterId, chapterTitle, chapterNumber,
       sectionId, sectionTitle, sectionNumber,
-      eventId, eventTitle 
+      eventId, eventTitle,
+      music, musicTrack
     } = req.body;
 
     // Validate required fields
@@ -120,6 +168,11 @@ function createHistoryPlusReadingSessionRoutes(prisma) {
         timestamp: new Date().toISOString()
       };
 
+      const normalizedMusic = normalizeAndroidMusicPayload(music || musicTrack);
+      if (normalizedMusic) {
+        global.androidMusicState = normalizedMusic;
+      }
+
       res.json(createAndroidResponse('HISTORY_PLUS_READING_SESSION_STARTED', responseData));
 
     } catch (error) {
@@ -180,6 +233,14 @@ function createHistoryPlusReadingSessionRoutes(prisma) {
 
       // Pause or resume the session
       const updatedSession = await watchLogService.pauseReading(activeSession.id);
+
+      if (global.androidMusicState && global.androidMusicState.title) {
+        global.androidMusicState = {
+          ...global.androidMusicState,
+          isPlaying: !updatedSession.isPaused,
+          updatedAt: new Date().toISOString(),
+        };
+      }
       
       // Build response title based on content type
       let formattedTitle = activeSession.title;
@@ -261,6 +322,7 @@ function createHistoryPlusReadingSessionRoutes(prisma) {
 
       // Stop the session
       const stoppedSession = await watchLogService.stopReading(activeSession.id);
+      clearAndroidMusicState();
       
       // Build response title based on content type
       let formattedTitle = activeSession.title;

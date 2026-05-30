@@ -1931,6 +1931,98 @@ class HistoryPlusService {
   async getRandomContentFromEvent(event, allowedTypes = null) {
     try {
       let availableContent = [];
+      const getOrderedSequenceGroupKey = (item) => {
+        if (item.type === 'chapter' || item.type === 'section') {
+          const bookId = item.content?.bookId || item.content?.book?.id || item.bookId || item.content?.chapter?.bookId || null;
+          const bookTitle = item.bookTitle || item.content?.book?.title || item.content?.chapter?.book?.title || null;
+
+          if (bookId || bookTitle) {
+            return `book:${bookId || bookTitle}`;
+          }
+        }
+
+        if (item.type === 'video' && item.courseTitle && item.lectureNumber !== null && item.lectureNumber !== undefined) {
+          return `course:${item.courseTitle}`;
+        }
+
+        return null;
+      };
+
+      const compareOrderedSequenceItems = (leftItem, rightItem) => {
+        if (leftItem.type === 'video' && rightItem.type === 'video') {
+          const leftLecture = Number.isFinite(leftItem.lectureNumber) ? leftItem.lectureNumber : Number.MAX_SAFE_INTEGER;
+          const rightLecture = Number.isFinite(rightItem.lectureNumber) ? rightItem.lectureNumber : Number.MAX_SAFE_INTEGER;
+
+          if (leftLecture !== rightLecture) {
+            return leftLecture - rightLecture;
+          }
+
+          return leftItem.title.localeCompare(rightItem.title);
+        }
+
+        const leftChapter = Number.isFinite(leftItem.chapterNumber) ? leftItem.chapterNumber : Number.MAX_SAFE_INTEGER;
+        const rightChapter = Number.isFinite(rightItem.chapterNumber) ? rightItem.chapterNumber : Number.MAX_SAFE_INTEGER;
+
+        if (leftChapter !== rightChapter) {
+          return leftChapter - rightChapter;
+        }
+
+        const typeRank = {
+          chapter: 0,
+          section: 1
+        };
+
+        const leftTypeRank = typeRank[leftItem.type] ?? 99;
+        const rightTypeRank = typeRank[rightItem.type] ?? 99;
+
+        if (leftTypeRank !== rightTypeRank) {
+          return leftTypeRank - rightTypeRank;
+        }
+
+        const leftSection = Number.isFinite(leftItem.sectionNumber) ? leftItem.sectionNumber : Number.MAX_SAFE_INTEGER;
+        const rightSection = Number.isFinite(rightItem.sectionNumber) ? rightItem.sectionNumber : Number.MAX_SAFE_INTEGER;
+
+        if (leftSection !== rightSection) {
+          return leftSection - rightSection;
+        }
+
+        return leftItem.title.localeCompare(rightItem.title);
+      };
+
+      const collapseSequentialContentGroups = (items) => {
+        const groupedContent = new Map();
+        const fallbackItems = [];
+
+        for (const item of items) {
+          const groupKey = getOrderedSequenceGroupKey(item);
+
+          if (!groupKey) {
+            fallbackItems.push(item);
+            continue;
+          }
+
+          if (!groupedContent.has(groupKey)) {
+            groupedContent.set(groupKey, []);
+          }
+
+          groupedContent.get(groupKey).push(item);
+        }
+
+        const orderedItems = [];
+
+        for (const [groupKey, groupedItems] of groupedContent.entries()) {
+          if (groupedItems.length === 1) {
+            orderedItems.push(groupedItems[0]);
+            continue;
+          }
+
+          const nextSequentialItem = [...groupedItems].sort(compareOrderedSequenceItems)[0];
+          console.log(`📚 Preserving sequence for ${groupKey} — next item is ${nextSequentialItem.title}`);
+          orderedItems.push(nextSequentialItem);
+        }
+
+        return [...fallbackItems, ...orderedItems];
+      };
 
       // Collect only UNREVIEWED content
       event.videos?.forEach(video => {
@@ -1943,7 +2035,9 @@ class HistoryPlusService {
             description: video.description || '',
             duration: video.duration,
             thumbnail: video.thumbnail,
-            channel: video.channel?.name || 'Unknown Channel'
+            channel: video.channel?.name || 'Unknown Channel',
+            courseTitle: video.courseTitle || null,
+            lectureNumber: video.lectureNumber ?? null
           });
         }
       });
@@ -2294,9 +2388,11 @@ class HistoryPlusService {
         return null;
       }
 
-      // Randomly select one piece of unreviewed content
-      const randomIndex = Math.floor(Math.random() * availableContent.length);
-      const selectedContent = availableContent[randomIndex];
+      const selectableContent = collapseSequentialContentGroups(availableContent);
+
+      // Randomly select one piece of content, but never skip ahead within the same book/course.
+      const randomIndex = Math.floor(Math.random() * selectableContent.length);
+      const selectedContent = selectableContent[randomIndex];
 
       console.log(`🎲 Randomly selected ${selectedContent.type}: ${selectedContent.title}`);
 

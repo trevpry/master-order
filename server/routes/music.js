@@ -3,6 +3,8 @@ const router = express.Router();
 const PlexDatabaseService = require('../plexDatabaseService');
 const PlexSyncService = require('../plexSyncService');
 const fetch = require('node-fetch');
+const path = require('path');
+const fs = require('fs').promises;
 const { validateRequiredFields } = require('../middleware/validation');
 const { sendBadRequest, sendSuccess, sendServerError, asyncHandler } = require('../utils/responses');
 const ArtistMergeService = require('../services/artistMergeService');
@@ -10,6 +12,947 @@ const ArtistMergeService = require('../services/artistMergeService');
 const prisma = require('../prismaClient'); // Use shared singleton instance
 const plexDb = new PlexDatabaseService();
 const plexSync = new PlexSyncService();
+
+const PICARD_TAG_SECTIONS = [
+  {
+    title: 'MusicBrainz IDs',
+    fields: [
+      { key: 'musicbrainz_recordingid', label: 'Recording ID' },
+      { key: 'musicbrainz_trackid', label: 'Track ID' },
+      { key: 'musicbrainz_albumid', label: 'Album ID' },
+      { key: 'musicbrainz_releasegroupid', label: 'Release Group ID' },
+      { key: 'musicbrainz_artistid', label: 'Artist ID' },
+      { key: 'musicbrainz_albumartistid', label: 'Album Artist ID' },
+      { key: 'musicbrainz_workid', label: 'Work ID' },
+      { key: 'musicbrainz_discid', label: 'Disc ID' },
+      { key: 'musicbrainz_originalartistid', label: 'Original Artist ID' },
+    ],
+  },
+  {
+    title: 'Release Metadata',
+    fields: [
+      { key: 'album', label: 'Album' },
+      { key: 'albumartist', label: 'Album Artist' },
+      { key: 'artists', label: 'Artists' },
+      { key: 'date', label: 'Date' },
+      { key: 'originaldate', label: 'Original Date' },
+      { key: 'originalyear', label: 'Original Year' },
+      { key: 'releasetype', label: 'Release Type' },
+      { key: 'releasestatus', label: 'Release Status' },
+      { key: 'releasecountry', label: 'Release Country' },
+      { key: 'label', label: 'Label' },
+      { key: 'barcode', label: 'Barcode' },
+      { key: 'catalognumber', label: 'Catalog Number' },
+      { key: 'asin', label: 'ASIN' },
+      { key: 'isrc', label: 'ISRC' },
+      { key: 'acoustid_id', label: 'AcoustID' },
+      { key: 'musicip_puid', label: 'MusicIP PUID' },
+    ],
+  },
+  {
+    title: 'Credits & Work Tags',
+    fields: [
+      { key: 'title', label: 'Title' },
+      { key: 'artist', label: 'Artist' },
+      { key: 'composer', label: 'Composer' },
+      { key: 'lyricist', label: 'Lyricist' },
+      { key: 'writer', label: 'Writer' },
+      { key: 'conductor', label: 'Conductor' },
+      { key: 'arranger', label: 'Arranger' },
+      { key: 'producer', label: 'Producer' },
+      { key: 'engineer', label: 'Engineer' },
+      { key: 'mixer', label: 'Mixer' },
+      { key: 'djmixer', label: 'DJ Mixer' },
+      { key: 'work', label: 'Work' },
+      { key: 'movement', label: 'Movement' },
+      { key: 'movementIndex', label: 'Movement Index' },
+      { key: 'movementTotal', label: 'Movement Total' },
+      { key: 'discsubtitle', label: 'Disc Subtitle' },
+    ],
+  },
+  {
+    title: 'Sort & Additional Tags',
+    fields: [
+      { key: 'artistsort', label: 'Artist Sort' },
+      { key: 'albumartistsort', label: 'Album Artist Sort' },
+      { key: 'albumsort', label: 'Album Sort' },
+      { key: 'titlesort', label: 'Title Sort' },
+      { key: 'genre', label: 'Genre' },
+      { key: 'language', label: 'Language' },
+      { key: 'mood', label: 'Mood' },
+      { key: 'comment', label: 'Comment' },
+      { key: 'license', label: 'License' },
+      { key: 'copyright', label: 'Copyright' },
+      { key: 'encodedby', label: 'Encoded By' },
+      { key: 'encodersettings', label: 'Encoder Settings' },
+    ],
+  },
+];
+
+const PICARD_TRACK_SELECT = {
+  ratingKey: true,
+  key: true,
+  title: true,
+  index: true,
+  file: true,
+  duration: true,
+  size: true,
+  container: true,
+  audioCodec: true,
+  audioChannels: true,
+  bitrate: true,
+};
+
+const PICARD_NATIVE_TAG_MATCHERS = [
+  /musicbrainz/,
+  /acoustid/,
+  /musicip/,
+  /barcode/,
+  /catalog/,
+  /^asin$/,
+  /^isrc$/,
+  /release(country|status|type)/,
+  /artistsort/,
+  /albumartistsort/,
+  /albumsort/,
+  /discsubtitle/,
+  /work/,
+  /movement/,
+  /lyricist/,
+  /writer/,
+  /composer/,
+  /conductor/,
+  /arranger/,
+  /producer/,
+  /engineer/,
+  /mixer/,
+  /djmixer/,
+];
+
+function normalizePicardValues(value) {
+  if (value === null || value === undefined || value === '') {
+    return [];
+  }
+
+  if (Array.isArray(value)) {
+    return [...new Set(value.flatMap(normalizePicardValues))];
+  }
+
+  if (value instanceof Date) {
+    return [value.toISOString()];
+  }
+
+  if (typeof value === 'object') {
+    if (Object.prototype.hasOwnProperty.call(value, 'no') || Object.prototype.hasOwnProperty.call(value, 'of')) {
+      const no = value.no ?? '?';
+      const of = value.of ? `/${value.of}` : '';
+      return [`${no}${of}`];
+    }
+
+    return Object.values(value).flatMap(normalizePicardValues);
+  }
+
+  return [String(value).trim()].filter(Boolean);
+}
+
+function collectMappedPicardSections(common = {}) {
+  return PICARD_TAG_SECTIONS.map((section) => {
+    const tags = section.fields
+      .map((field) => {
+        const values = normalizePicardValues(common[field.key]);
+        if (values.length === 0) return null;
+        return {
+          key: field.key,
+          label: field.label,
+          values,
+        };
+      })
+      .filter(Boolean);
+
+    if (tags.length === 0) return null;
+
+    return {
+      title: section.title,
+      tags,
+    };
+  }).filter(Boolean);
+}
+
+function isPicardNativeTag(tagId) {
+  if (!tagId) return false;
+  const normalized = String(tagId).trim().toLowerCase();
+  return PICARD_NATIVE_TAG_MATCHERS.some((matcher) => matcher.test(normalized));
+}
+
+function collectRawPicardNativeTags(native = {}) {
+  const tagMap = new Map();
+
+  Object.entries(native).forEach(([format, tags]) => {
+    if (!Array.isArray(tags)) return;
+
+    tags.forEach((tag) => {
+      const tagId = tag?.id || tag?.key;
+      if (!isPicardNativeTag(tagId)) return;
+
+      const values = normalizePicardValues(tag?.value);
+      if (values.length === 0) return;
+
+      if (!tagMap.has(tagId)) {
+        tagMap.set(tagId, {
+          key: tagId,
+          values: new Set(),
+          formats: new Set(),
+        });
+      }
+
+      const entry = tagMap.get(tagId);
+      values.forEach((value) => entry.values.add(value));
+      entry.formats.add(format);
+    });
+  });
+
+  return [...tagMap.values()]
+    .map((entry) => ({
+      key: entry.key,
+      values: [...entry.values],
+      formats: [...entry.formats],
+    }))
+    .sort((left, right) => left.key.localeCompare(right.key));
+}
+
+async function ensureTrackFilePath(track) {
+  let plexPath = track.file;
+
+  if (!plexPath && track.key) {
+    const trackData = await plexSync.makeRequest(track.key);
+    const metadata = trackData?.MediaContainer?.Metadata?.[0];
+    const mediaPart = metadata?.Media?.[0]?.Part?.[0];
+    const stream = metadata?.Media?.[0]?.Part?.[0]?.Stream?.[0];
+
+    if (mediaPart?.file) {
+      plexPath = mediaPart.file;
+
+      const updateData = {
+        file: mediaPart.file,
+        duration: mediaPart.duration ? parseInt(mediaPart.duration, 10) : track.duration,
+        size: mediaPart.size ? parseInt(mediaPart.size, 10) : track.size,
+        container: mediaPart.container || track.container,
+      };
+
+      if (stream) {
+        updateData.audioCodec = stream.codec || track.audioCodec;
+        updateData.audioChannels = stream.channels ? parseInt(stream.channels, 10) : track.audioChannels;
+        updateData.bitrate = stream.bitrate ? parseInt(stream.bitrate, 10) : track.bitrate;
+      }
+
+      await prisma.plexTrack.update({
+        where: { ratingKey: track.ratingKey },
+        data: updateData,
+      });
+    }
+  }
+
+  const localPath = mapPlexPathToLocal(plexPath);
+  if (!localPath) {
+    throw new Error('No file path available');
+  }
+
+  await fs.access(localPath);
+
+  return {
+    plexPath,
+    localPath,
+  };
+}
+
+async function extractTrackPicardTags(track) {
+  const { parseFile } = await import('music-metadata');
+  const { plexPath, localPath } = await ensureTrackFilePath(track);
+  const metadata = await parseFile(localPath);
+  const mappedSections = collectMappedPicardSections(metadata.common);
+  const rawTags = collectRawPicardNativeTags(metadata.native);
+
+  return {
+    track: {
+      ratingKey: track.ratingKey,
+      title: track.title,
+      index: track.index ?? null,
+      plexPath,
+      filePath: localPath,
+    },
+    mappedSections,
+    rawTags,
+  };
+}
+
+function aggregatePicardResults(results) {
+  const mappedSectionMap = new Map();
+  const rawTagMap = new Map();
+
+  results.forEach((result) => {
+    result.mappedSections.forEach((section) => {
+      if (!mappedSectionMap.has(section.title)) {
+        mappedSectionMap.set(section.title, new Map());
+      }
+
+      const sectionMap = mappedSectionMap.get(section.title);
+      section.tags.forEach((tag) => {
+        if (!sectionMap.has(tag.key)) {
+          sectionMap.set(tag.key, {
+            key: tag.key,
+            label: tag.label,
+            values: new Set(),
+            tracks: new Set(),
+          });
+        }
+
+        const entry = sectionMap.get(tag.key);
+        tag.values.forEach((value) => entry.values.add(value));
+        entry.tracks.add(result.track.title);
+      });
+    });
+
+    result.rawTags.forEach((tag) => {
+      if (!rawTagMap.has(tag.key)) {
+        rawTagMap.set(tag.key, {
+          key: tag.key,
+          values: new Set(),
+          formats: new Set(),
+          tracks: new Set(),
+        });
+      }
+
+      const entry = rawTagMap.get(tag.key);
+      tag.values.forEach((value) => entry.values.add(value));
+      tag.formats.forEach((format) => entry.formats.add(format));
+      entry.tracks.add(result.track.title);
+    });
+  });
+
+  const sections = [...mappedSectionMap.entries()].map(([title, tagMap]) => ({
+    title,
+    tags: [...tagMap.values()]
+      .map((tag) => ({
+        key: tag.key,
+        label: tag.label,
+        values: [...tag.values],
+        trackCount: tag.tracks.size,
+      }))
+      .sort((left, right) => left.label.localeCompare(right.label)),
+  }));
+
+  const rawTags = [...rawTagMap.values()]
+    .map((tag) => ({
+      key: tag.key,
+      values: [...tag.values],
+      formats: [...tag.formats],
+      trackCount: tag.tracks.size,
+    }))
+    .sort((left, right) => left.key.localeCompare(right.key));
+
+  return { sections, rawTags };
+}
+
+function firstMetadataValue(value) {
+  if (Array.isArray(value)) {
+    return value.find((entry) => entry !== null && entry !== undefined && entry !== '') ?? null;
+  }
+
+  if (value === undefined || value === null || value === '') {
+    return null;
+  }
+
+  return value;
+}
+
+function formatMetadataPosition(value) {
+  if (!value) {
+    return { no: null, of: null };
+  }
+
+  if (typeof value === 'object') {
+    return {
+      no: value.no ?? value.position ?? null,
+      of: value.of ?? value.total ?? null,
+    };
+  }
+
+  return { no: value, of: null };
+}
+
+function buildAlbumExtractionUpdates(common = {}) {
+  const updates = {};
+
+  const albumTitle = firstMetadataValue(common.album);
+  const albumArtist = firstMetadataValue(common.albumartist);
+  const albumId = firstMetadataValue(common.musicbrainz_albumid);
+  const releaseDate = firstMetadataValue(common.date);
+  const originalDate = firstMetadataValue(common.originaldate);
+  const originalYear = firstMetadataValue(common.originalyear);
+  const releaseCountry = firstMetadataValue(common.releasecountry);
+  const releaseStatus = firstMetadataValue(common.releasestatus);
+  const releaseType = firstMetadataValue(common.releasetype);
+  const barcode = firstMetadataValue(common.barcode);
+  const asin = firstMetadataValue(common.asin);
+  const label = firstMetadataValue(common.label);
+
+  if (albumTitle) {
+    updates.title = albumTitle;
+  }
+
+  if (albumArtist) {
+    updates.albumArtist = albumArtist;
+  }
+
+  if (albumId) {
+    updates.musicBrainzId = albumId;
+  }
+
+  if (releaseDate) {
+    updates.musicBrainzReleaseDate = String(releaseDate);
+    const parsedReleaseDate = new Date(releaseDate);
+    if (!Number.isNaN(parsedReleaseDate.getTime())) {
+      updates.originallyAvailableAt = parsedReleaseDate;
+      updates.year = parsedReleaseDate.getUTCFullYear();
+    }
+  }
+
+  if (!updates.originallyAvailableAt && originalDate) {
+    const parsedOriginalDate = new Date(originalDate);
+    if (!Number.isNaN(parsedOriginalDate.getTime())) {
+      updates.originallyAvailableAt = parsedOriginalDate;
+    }
+  }
+
+  if (!updates.year && originalYear) {
+    const parsedYear = parseInt(originalYear, 10);
+    if (!Number.isNaN(parsedYear)) {
+      updates.year = parsedYear;
+    }
+  }
+
+  if (releaseCountry) {
+    updates.musicBrainzCountry = String(releaseCountry);
+  }
+
+  if (releaseStatus) {
+    updates.musicBrainzStatus = String(releaseStatus);
+  }
+
+  if (releaseType) {
+    updates.musicBrainzPackaging = String(releaseType);
+  }
+
+  if (barcode) {
+    updates.musicBrainzBarcode = String(barcode);
+  }
+
+  if (asin) {
+    updates.musicBrainzAsin = String(asin);
+  }
+
+  if (label) {
+    updates.musicBrainzLabel = String(label);
+  }
+
+  return updates;
+}
+
+function mergeCollectionValues(primaryCollections, duplicateCollections) {
+  const parseCollections = (value) => {
+    if (!value) return [];
+    try {
+      const parsed = JSON.parse(value);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  };
+
+  const merged = [...new Set([...parseCollections(primaryCollections), ...parseCollections(duplicateCollections)])];
+  return merged.length > 0 ? JSON.stringify(merged) : null;
+}
+
+function buildAlbumMergePatch(primaryAlbum, duplicateAlbum) {
+  const patch = {};
+  const copyIfMissing = (field) => {
+    if ((primaryAlbum[field] === null || primaryAlbum[field] === undefined || primaryAlbum[field] === '')
+      && duplicateAlbum[field] !== null
+      && duplicateAlbum[field] !== undefined
+      && duplicateAlbum[field] !== '') {
+      patch[field] = duplicateAlbum[field];
+      primaryAlbum[field] = duplicateAlbum[field];
+    }
+  };
+
+  [
+    'titleSort',
+    'summary',
+    'year',
+    'thumb',
+    'art',
+    'parentThumb',
+    'originallyAvailableAt',
+    'musicBrainzReleaseDate',
+    'musicBrainzCountry',
+    'musicBrainzStatus',
+    'musicBrainzPackaging',
+    'musicBrainzLabel',
+    'musicBrainzBarcode',
+    'musicBrainzAsin',
+    'albumArtist',
+    'workId',
+    'userTitle',
+    'userReleaseDate',
+    'userLabel',
+    'metadataPreferences',
+    'identificationStatus',
+    'identificationConfidence',
+    'lastIdentificationAttempt',
+  ].forEach(copyIfMissing);
+
+  const mergedCollections = mergeCollectionValues(primaryAlbum.collections, duplicateAlbum.collections);
+  if (mergedCollections && mergedCollections !== primaryAlbum.collections) {
+    patch.collections = mergedCollections;
+    primaryAlbum.collections = mergedCollections;
+  }
+
+  return patch;
+}
+
+async function mergeDuplicateAlbumsForPrimaryAlbum(primaryAlbumRatingKey) {
+  const primaryAlbum = await prisma.plexAlbum.findUnique({
+    where: { ratingKey: primaryAlbumRatingKey },
+  });
+
+  if (!primaryAlbum?.musicBrainzId) {
+    return [];
+  }
+
+  const duplicateWhere = {
+    removed: false,
+    musicBrainzId: primaryAlbum.musicBrainzId,
+    ratingKey: { not: primaryAlbum.ratingKey },
+  };
+
+  if (primaryAlbum.parentRatingKey) {
+    duplicateWhere.parentRatingKey = primaryAlbum.parentRatingKey;
+  }
+
+  if (primaryAlbum.librarySectionID) {
+    duplicateWhere.librarySectionID = primaryAlbum.librarySectionID;
+  }
+
+  const duplicates = await prisma.plexAlbum.findMany({
+    where: duplicateWhere,
+    orderBy: [{ addedAt: 'asc' }, { id: 'asc' }],
+  });
+
+  if (duplicates.length === 0) {
+    return [];
+  }
+
+  return prisma.$transaction(async (tx) => {
+    const mergedAlbums = [];
+    const mutablePrimary = { ...primaryAlbum };
+
+    for (const duplicateAlbum of duplicates) {
+      const patch = buildAlbumMergePatch(mutablePrimary, duplicateAlbum);
+
+      if (Object.keys(patch).length > 0) {
+        await tx.plexAlbum.update({
+          where: { ratingKey: primaryAlbum.ratingKey },
+          data: patch,
+        });
+      }
+
+      const trackUpdateData = { parentRatingKey: primaryAlbum.ratingKey };
+      if (primaryAlbum.parentRatingKey) {
+        trackUpdateData.grandparentRatingKey = primaryAlbum.parentRatingKey;
+      }
+
+      await tx.plexTrack.updateMany({
+        where: { parentRatingKey: duplicateAlbum.ratingKey },
+        data: trackUpdateData,
+      });
+
+      await tx.plexAlbum.delete({
+        where: { ratingKey: duplicateAlbum.ratingKey },
+      });
+
+      mergedAlbums.push({
+        ratingKey: duplicateAlbum.ratingKey,
+        title: duplicateAlbum.title,
+      });
+    }
+
+    return mergedAlbums;
+  });
+}
+
+async function extractAlbumFileMetadataByRatingKey(ratingKey) {
+  const { parseFile } = await import('music-metadata');
+
+  const album = await plexDb.getAlbumByRatingKey(ratingKey);
+  if (!album) {
+    const notFoundError = new Error('Album not found');
+    notFoundError.statusCode = 404;
+    throw notFoundError;
+  }
+
+  const tracks = await plexDb.getTracksByAlbum(ratingKey);
+  console.log(`Processing ${tracks.length} tracks for album "${album.title}"`);
+
+  let successCount = 0;
+  let failedCount = 0;
+  const results = [];
+  const albumIdVotes = new Map();
+  const unresolvedPathMappingEntries = [];
+  const unresolvedPathMappingTrackKeys = new Set();
+
+  const isLikelyPlexInternalPath = (value) => {
+    return typeof value === 'string' && value.startsWith('/');
+  };
+
+  const addUnresolvedPathMappingEntry = (track, plexPathValue, localPathValue, reason) => {
+    if (!track?.ratingKey || unresolvedPathMappingTrackKeys.has(track.ratingKey)) {
+      return;
+    }
+
+    unresolvedPathMappingTrackKeys.add(track.ratingKey);
+    unresolvedPathMappingEntries.push({
+      ratingKey: track.ratingKey,
+      title: track.title,
+      plexPath: plexPathValue || null,
+      mappedPath: localPathValue || null,
+      reason,
+    });
+  };
+  const albumMetadataState = {
+    title: album.title || null,
+    albumArtist: album.albumArtist || null,
+    musicBrainzId: album.musicBrainzId || null,
+    originallyAvailableAt: album.originallyAvailableAt || null,
+    year: album.year || null,
+    musicBrainzReleaseDate: album.musicBrainzReleaseDate || null,
+    musicBrainzCountry: album.musicBrainzCountry || null,
+    musicBrainzStatus: album.musicBrainzStatus || null,
+    musicBrainzPackaging: album.musicBrainzPackaging || null,
+    musicBrainzLabel: album.musicBrainzLabel || null,
+    musicBrainzBarcode: album.musicBrainzBarcode || null,
+    musicBrainzAsin: album.musicBrainzAsin || null,
+  };
+
+  for (const track of tracks) {
+    const result = {
+      ratingKey: track.ratingKey,
+      title: track.title,
+      index: track.index,
+      trackNumber: null,
+      trackTotal: null,
+      discNumber: null,
+      discTotal: null,
+      filePath: track.file,
+      plexPath: null,
+      success: false,
+      common: null,
+      formatInfo: null,
+      error: null,
+    };
+
+    let plexPath = track.file;
+
+    if (!plexPath) {
+      try {
+        console.log(`Fetching track metadata from Plex: ${track.key}`);
+
+        const trackData = await plexSync.makeRequest(track.key);
+        const metadata = trackData?.MediaContainer?.Metadata?.[0];
+        const mediaPart = metadata?.Media?.[0]?.Part?.[0];
+        const stream = metadata?.Media?.[0]?.Part?.[0]?.Stream?.[0];
+
+        console.log(`Track ${track.title} media info:`, mediaPart);
+
+        if (mediaPart?.file) {
+          plexPath = mediaPart.file;
+          result.plexPath = plexPath;
+          console.log(`Found Plex path: ${plexPath}`);
+
+          const updateData = {
+            file: mediaPart.file,
+            duration: mediaPart.duration ? parseInt(mediaPart.duration, 10) : track.duration,
+            size: mediaPart.size ? parseInt(mediaPart.size, 10) : track.size,
+            container: mediaPart.container || track.container,
+          };
+
+          if (stream) {
+            updateData.audioCodec = stream.codec || track.audioCodec;
+            updateData.audioChannels = stream.channels ? parseInt(stream.channels, 10) : track.audioChannels;
+            updateData.bitrate = stream.bitrate ? parseInt(stream.bitrate, 10) : track.bitrate;
+          }
+
+          await prisma.plexTrack.update({
+            where: { ratingKey: track.ratingKey },
+            data: updateData,
+          });
+
+          console.log(`Updated track ${track.title} with Plex metadata`);
+        } else {
+          console.log(`No file path in Plex response for ${track.title}`);
+        }
+      } catch (error) {
+        console.error(`Error fetching file path from Plex for track ${track.title}:`, error.message);
+      }
+    } else {
+      result.plexPath = plexPath;
+    }
+
+    const pathResolution = mapPlexPathToLocalDetailed(plexPath);
+    const localPath = pathResolution.localPath;
+    result.filePath = localPath;
+
+    if (!localPath) {
+      result.error = 'No file path available';
+      if (isLikelyPlexInternalPath(plexPath)) {
+        addUnresolvedPathMappingEntry(track, plexPath, localPath, 'No local path mapping available');
+      }
+      failedCount++;
+      results.push(result);
+      continue;
+    }
+
+    try {
+      await fs.access(localPath);
+      const metadata = await parseFile(localPath);
+
+      result.formatInfo = {
+        container: metadata.format.container,
+        codec: metadata.format.codec,
+        lossless: metadata.format.lossless,
+        duration: metadata.format.duration,
+        bitrate: metadata.format.bitrate,
+        sampleRate: metadata.format.sampleRate,
+        numberOfChannels: metadata.format.numberOfChannels,
+        bitsPerSample: metadata.format.bitsPerSample,
+        size: track.size,
+      };
+
+      result.common = {
+        title: metadata.common.title,
+        artist: metadata.common.artist,
+        artists: metadata.common.artists,
+        album: metadata.common.album,
+        albumartist: metadata.common.albumartist,
+        year: metadata.common.year,
+        date: metadata.common.date,
+        originaldate: metadata.common.originaldate,
+        originalyear: metadata.common.originalyear,
+        track: metadata.common.track,
+        disk: metadata.common.disk,
+        genre: metadata.common.genre,
+        comment: metadata.common.comment,
+        composer: metadata.common.composer,
+        label: metadata.common.label,
+        isrc: metadata.common.isrc,
+        barcode: metadata.common.barcode,
+        catalognumber: metadata.common.catalognumber,
+        language: metadata.common.language,
+        mood: metadata.common.mood,
+        bpm: metadata.common.bpm,
+        key: metadata.common.key,
+        rating: metadata.common.rating,
+        compilation: metadata.common.compilation,
+        gapless: metadata.common.gapless,
+        copyright: metadata.common.copyright,
+        license: metadata.common.license,
+        encodedby: metadata.common.encodedby,
+        encodersettings: metadata.common.encodersettings,
+        releasetype: metadata.common.releasetype,
+        releasestatus: metadata.common.releasestatus,
+        releasecountry: metadata.common.releasecountry,
+        musicbrainz_recordingid: metadata.common.musicbrainz_recordingid,
+        musicbrainz_trackid: metadata.common.musicbrainz_trackid,
+        musicbrainz_albumid: metadata.common.musicbrainz_albumid,
+        musicbrainz_artistid: metadata.common.musicbrainz_artistid,
+        musicbrainz_albumartistid: metadata.common.musicbrainz_albumartistid,
+        musicbrainz_releasegroupid: metadata.common.musicbrainz_releasegroupid,
+        musicbrainz_workid: metadata.common.musicbrainz_workid,
+      };
+
+      const trackPosition = formatMetadataPosition(metadata.common.track);
+      const discPosition = formatMetadataPosition(metadata.common.disk);
+      result.trackNumber = trackPosition.no;
+      result.trackTotal = trackPosition.of;
+      result.discNumber = discPosition.no;
+      result.discTotal = discPosition.of;
+
+      result.success = true;
+      successCount++;
+
+      console.log(`MusicBrainz IDs for ${track.title}:`, {
+        recordingid: metadata.common.musicbrainz_recordingid,
+        trackid: metadata.common.musicbrainz_trackid,
+        albumid: metadata.common.musicbrainz_albumid,
+      });
+
+      const trackUpdates = {};
+      if (trackPosition.no !== null && trackPosition.no !== undefined) {
+        const parsedTrackNumber = parseInt(trackPosition.no, 10);
+        if (!Number.isNaN(parsedTrackNumber)) {
+          trackUpdates.index = parsedTrackNumber;
+        }
+      }
+
+      if (metadata.common.musicbrainz_recordingid) {
+        const recordingId = Array.isArray(metadata.common.musicbrainz_recordingid)
+          ? metadata.common.musicbrainz_recordingid[0]
+          : metadata.common.musicbrainz_recordingid;
+        if (recordingId) {
+          trackUpdates.musicBrainzTrackId = recordingId;
+        }
+      }
+
+      if (Object.keys(trackUpdates).length > 0) {
+        try {
+          await prisma.plexTrack.update({
+            where: { ratingKey: track.ratingKey },
+            data: trackUpdates,
+          });
+          console.log(`✓ Updated track ${track.title} with MusicBrainz Recording ID: ${trackUpdates.musicBrainzTrackId}`);
+        } catch (dbError) {
+          console.error(`Error updating track ${track.title} with file metadata:`, dbError.message);
+        }
+      } else {
+        console.log(`No MusicBrainz Recording ID found in file for ${track.title}`);
+      }
+
+      const extractedAlbumUpdates = buildAlbumExtractionUpdates(metadata.common);
+
+      const extractedAlbumId = extractedAlbumUpdates.musicBrainzId;
+      if (extractedAlbumId) {
+        albumIdVotes.set(extractedAlbumId, (albumIdVotes.get(extractedAlbumId) || 0) + 1);
+      }
+
+      if (Object.keys(extractedAlbumUpdates).length > 0) {
+        const albumPatch = {};
+
+        for (const [key, value] of Object.entries(extractedAlbumUpdates)) {
+          if (key === 'musicBrainzId') {
+            continue;
+          }
+
+          if (value === null || value === undefined || value === '') {
+            continue;
+          }
+
+          if (!albumMetadataState[key]) {
+            albumPatch[key] = value;
+          }
+        }
+
+        if (Object.keys(albumPatch).length > 0) {
+          try {
+            await prisma.plexAlbum.update({
+              where: { ratingKey },
+              data: albumPatch,
+            });
+
+            Object.assign(albumMetadataState, albumPatch);
+            console.log(`✓ Updated album ${album.title} with extracted metadata:`, albumPatch);
+          } catch (dbError) {
+            console.error('Error updating album with extracted metadata:', dbError.message);
+          }
+        }
+      }
+    } catch (error) {
+      console.error(`Error extracting metadata for track ${track.title}:`, error.message);
+      result.error = error.message;
+      if (!pathResolution.mappingMatched && isLikelyPlexInternalPath(plexPath)) {
+        addUnresolvedPathMappingEntry(track, plexPath, localPath, error.message || 'Mapped path could not be accessed');
+      }
+      failedCount++;
+    }
+
+    results.push(result);
+  }
+
+  if (albumIdVotes.size > 0) {
+    const sortedAlbumIdVotes = [...albumIdVotes.entries()].sort((left, right) => right[1] - left[1]);
+    const [bestAlbumId, bestAlbumIdCount] = sortedAlbumIdVotes[0];
+    const totalAlbumIdVotes = sortedAlbumIdVotes.reduce((total, [, count]) => total + count, 0);
+    const currentAlbumId = albumMetadataState.musicBrainzId;
+    const currentAlbumIdCount = currentAlbumId ? (albumIdVotes.get(currentAlbumId) || 0) : 0;
+
+    const hasMajority = totalAlbumIdVotes === 1 || (bestAlbumIdCount / totalAlbumIdVotes) > 0.5;
+    const shouldUpdateAlbumId = hasMajority && (
+      !currentAlbumId
+      || currentAlbumId === bestAlbumId
+      || bestAlbumIdCount > currentAlbumIdCount
+    );
+
+    if (shouldUpdateAlbumId && currentAlbumId !== bestAlbumId) {
+      try {
+        await prisma.plexAlbum.update({
+          where: { ratingKey },
+          data: { musicBrainzId: bestAlbumId },
+        });
+
+        albumMetadataState.musicBrainzId = bestAlbumId;
+        console.log(`✓ Updated album ${album.title} with voted MusicBrainz album ID: ${bestAlbumId} (${bestAlbumIdCount}/${totalAlbumIdVotes})`);
+      } catch (dbError) {
+        console.error('Error updating album with voted MusicBrainz album ID:', dbError.message);
+      }
+    }
+  }
+
+  const mergedAlbums = await mergeDuplicateAlbumsForPrimaryAlbum(ratingKey);
+
+  return {
+    albumTitle: album.title,
+    albumRatingKey: ratingKey,
+    tracksProcessed: tracks.length,
+    successCount,
+    errorCount: failedCount,
+    unresolvedPathMappingsCount: unresolvedPathMappingEntries.length,
+    unresolvedPathMappings: unresolvedPathMappingEntries,
+    extractedMetadata: results,
+    mergedAlbums,
+  };
+}
+
+async function buildPicardTagPayload({ entityType, entityKey, entityTitle, tracks }) {
+  const extractedTracks = [];
+  const errors = [];
+
+  for (const track of tracks) {
+    try {
+      extractedTracks.push(await extractTrackPicardTags(track));
+    } catch (error) {
+      errors.push({
+        ratingKey: track.ratingKey,
+        title: track.title,
+        error: error.message,
+      });
+    }
+  }
+
+  const aggregated = aggregatePicardResults(extractedTracks);
+
+  return {
+    entityType,
+    entityKey,
+    entityTitle,
+    summary: {
+      tracksScanned: tracks.length,
+      tracksParsed: extractedTracks.length,
+      tracksFailed: errors.length,
+    },
+    sections: aggregated.sections,
+    rawTags: aggregated.rawTags,
+    perTrack: entityType === 'track' ? extractedTracks : [],
+    errors,
+  };
+}
 
 // Helper function to get tracks filtered by unplayed albums/artists/works
 // sectionKey: the Plex sectionKey string (e.g. "6"), or null for all sections
@@ -457,7 +1400,7 @@ router.get('/artists/section/:sectionKey', asyncHandler(async (req, res) => {
 
   if (search) {
     artists = await plexDb.searchArtistsBySection(sectionKey, search, limitNum, offset);
-    total = await plexDb.getArtistsBySectionCount(sectionKey); // For simplicity, using section total
+    total = await plexDb.searchArtistsBySectionCount(sectionKey, search);
   } else {
     artists = await plexDb.getArtistsBySection(sectionKey, limitNum, offset);
     total = await plexDb.getArtistsBySectionCount(sectionKey);
@@ -482,6 +1425,93 @@ router.get('/artists/:ratingKey', asyncHandler(async (req, res) => {
   if (!artist) {
     return res.status(404).json({ error: 'Artist not found' });
   }
+
+  const linkedAlbumAssignments = await prisma.albumArtist.findMany({
+    where: { artistKey: artist.ratingKey },
+    include: {
+      artistType: true,
+      album: {
+        include: {
+          artist: true
+        }
+      }
+    },
+    orderBy: [
+      { album: { title: 'asc' } },
+      { artistType: { name: 'asc' } }
+    ]
+  });
+
+  const linkedTrackAssignments = await prisma.trackArtist.findMany({
+    where: { artistKey: artist.ratingKey },
+    include: {
+      artistType: true,
+      track: {
+        include: {
+          album: {
+            include: {
+              artist: true
+            }
+          }
+        }
+      }
+    },
+    orderBy: [
+      { track: { title: 'asc' } },
+      { artistType: { name: 'asc' } }
+    ]
+  });
+
+  const linkedAlbumMap = new Map();
+  for (const assignment of linkedAlbumAssignments) {
+    if (!assignment.album) {
+      continue;
+    }
+
+    const existing = linkedAlbumMap.get(assignment.album.ratingKey) || {
+      ...assignment.album,
+      linkedArtistTypes: []
+    };
+
+    if (!existing.linkedArtistTypes.includes(assignment.artistType.name)) {
+      existing.linkedArtistTypes.push(assignment.artistType.name);
+    }
+
+    linkedAlbumMap.set(assignment.album.ratingKey, existing);
+  }
+
+  const linkedTrackMap = new Map();
+  for (const assignment of linkedTrackAssignments) {
+    if (!assignment.track) {
+      continue;
+    }
+
+    const existing = linkedTrackMap.get(assignment.track.ratingKey) || {
+      ...assignment.track,
+      linkedArtistTypes: []
+    };
+
+    if (!existing.linkedArtistTypes.includes(assignment.artistType.name)) {
+      existing.linkedArtistTypes.push(assignment.artistType.name);
+    }
+
+    linkedTrackMap.set(assignment.track.ratingKey, existing);
+  }
+
+  artist.linkedAlbums = [...linkedAlbumMap.values()]
+    .sort((left, right) => (left.title || '').localeCompare(right.title || ''));
+  artist.linkedTracks = [...linkedTrackMap.values()]
+    .sort((left, right) => {
+      const leftTitle = left.title || '';
+      const rightTitle = right.title || '';
+      if (leftTitle !== rightTitle) {
+        return leftTitle.localeCompare(rightTitle);
+      }
+
+      const leftIndex = Number.isInteger(left.index) ? left.index : Number.MAX_SAFE_INTEGER;
+      const rightIndex = Number.isInteger(right.index) ? right.index : Number.MAX_SAFE_INTEGER;
+      return leftIndex - rightIndex;
+    });
   
   // Add totalPlayCount for the artist
   const playCount = await prisma.plexTrack.aggregate({
@@ -688,6 +1718,7 @@ router.post('/artists/merge', asyncHandler(async (req, res) => {
     console.log(`   - Transferred ${result.transferredWorks} work(s)`);
     console.log(`   - Transferred ${result.transferredTypes} artist type(s)`);
     console.log(`   - Transferred ${result.transferredTrackArtists} track artist relationship(s)`);
+    console.log(`   - Transferred ${result.transferredAlbumArtists || 0} album artist relationship(s)`);
     
     sendSuccess(res, {
       mainArtist: result.mainArtist,
@@ -696,6 +1727,7 @@ router.post('/artists/merge', asyncHandler(async (req, res) => {
       transferredWorks: result.transferredWorks,
       transferredTypes: result.transferredTypes,
       transferredTrackArtists: result.transferredTrackArtists,
+      transferredAlbumArtists: result.transferredAlbumArtists || 0,
       message: `Successfully merged ${result.mergedCount} artist(s) into "${result.mainArtist.title}"`
     });
   } else {
@@ -928,265 +1960,482 @@ router.get('/albums/not-in-playlist/:playlistId', asyncHandler(async (req, res) 
 }));
 
 // Extract File Metadata from Album
-// Helper function to map Plex path to local filesystem path
-function mapPlexPathToLocal(plexPath) {
-  if (!plexPath) return null;
-  
-  // Get path mappings from environment variables
-  const pathMappings = [
+function getConfiguredPathMappings() {
+  const numberedMappings = [];
+  for (let i = 1; i <= 50; i += 1) {
+    const configuredPlexPath = process.env[`PLEX_PATH_${i}`];
+    const configuredLocalPath = process.env[`LOCAL_PATH_${i}`];
+
+    if (!configuredPlexPath || !configuredLocalPath) {
+      continue;
+    }
+
+    numberedMappings.push({
+      plexPath: configuredPlexPath.trim(),
+      localPath: configuredLocalPath.trim(),
+    });
+  }
+
+  // Legacy fallback mappings kept for backward compatibility
+  const legacyMappings = [
     { plexPath: '/xmas', localPath: process.env.XMAS_PATH },
     { plexPath: '/classical', localPath: process.env.CLASSICAL_PATH }
-  ].filter(m => m.localPath); // Only include mappings that are defined
+  ];
+
+  return [...numberedMappings, ...legacyMappings]
+    .filter((mapping) => mapping.plexPath && mapping.localPath)
+    // Prefer longest Plex prefix first so nested mappings resolve correctly
+    .sort((left, right) => right.plexPath.length - left.plexPath.length);
+}
+
+function mapPlexPathToLocalDetailed(plexPath) {
+  if (!plexPath) {
+    return {
+      localPath: null,
+      mappingMatched: false,
+      matchedPlexPath: null,
+      matchedLocalPath: null,
+    };
+  }
+
+  const pathMappings = getConfiguredPathMappings();
   
   // Try each mapping
   for (const mapping of pathMappings) {
-    if (plexPath.toLowerCase().startsWith(mapping.plexPath)) {
+    if (plexPath.toLowerCase().startsWith(mapping.plexPath.toLowerCase())) {
       const relativePath = plexPath.substring(mapping.plexPath.length);
-      const localPath = mapping.localPath + relativePath.replace(/\//g, require('path').sep);
+      const localPath = mapping.localPath + relativePath.replace(/\//g, path.sep);
       console.log(`Mapped Plex path: ${plexPath} -> ${localPath}`);
-      return localPath;
+      return {
+        localPath,
+        mappingMatched: true,
+        matchedPlexPath: mapping.plexPath,
+        matchedLocalPath: mapping.localPath,
+      };
     }
   }
   
   // If no mapping found, return original path (useful for Docker where paths match)
   console.log(`No path mapping found for: ${plexPath}, using as-is`);
+  return {
+    localPath: plexPath,
+    mappingMatched: false,
+    matchedPlexPath: null,
+    matchedLocalPath: null,
+  };
+}
+
+// Helper function to map Plex path to local filesystem path
+function mapPlexPathToLocal(plexPath) {
+  return mapPlexPathToLocalDetailed(plexPath).localPath;
+}
+
+async function ensureTrackPlexPath(track) {
+  let plexPath = track.file;
+
+  if (!plexPath && track.key) {
+    try {
+      const trackData = await plexSync.makeRequest(track.key);
+      const metadata = trackData?.MediaContainer?.Metadata?.[0];
+      const mediaPart = metadata?.Media?.[0]?.Part?.[0];
+      const stream = metadata?.Media?.[0]?.Part?.[0]?.Stream?.[0];
+
+      if (mediaPart?.file) {
+        plexPath = mediaPart.file;
+
+        const updateData = {
+          file: mediaPart.file,
+          duration: mediaPart.duration ? parseInt(mediaPart.duration, 10) : track.duration,
+          size: mediaPart.size ? parseInt(mediaPart.size, 10) : track.size,
+          container: mediaPart.container || track.container,
+        };
+
+        if (stream) {
+          updateData.audioCodec = stream.codec || track.audioCodec;
+          updateData.audioChannels = stream.channels ? parseInt(stream.channels, 10) : track.audioChannels;
+          updateData.bitrate = stream.bitrate ? parseInt(stream.bitrate, 10) : track.bitrate;
+        }
+
+        await prisma.plexTrack.update({
+          where: { ratingKey: track.ratingKey },
+          data: updateData,
+        });
+      }
+    } catch (error) {
+      console.error(`Error resolving Plex file path for track ${track.ratingKey}:`, error.message);
+    }
+  }
+
   return plexPath;
 }
 
-router.post('/albums/:ratingKey/extract-file-metadata', asyncHandler(async (req, res) => {
-  const { ratingKey } = req.params;
-  const { parseFile } = await import('music-metadata');
-  const fs = require('fs').promises;
-  
-  // Get album and its tracks using PlexDatabaseService
-  const album = await plexDb.getAlbumByRatingKey(ratingKey);
-  
-  if (!album) {
-    return res.status(404).json({ error: 'Album not found' });
+async function buildSplitAlbumCreateData(sourceAlbum, targetAlbumId, suffix) {
+  return {
+    ratingKey: `${sourceAlbum.ratingKey}-split-${suffix}`,
+    key: `${sourceAlbum.key}::split:${suffix}`,
+    parentRatingKey: sourceAlbum.parentRatingKey,
+    guid: sourceAlbum.guid,
+    type: sourceAlbum.type || 'album',
+    title: sourceAlbum.title,
+    titleSort: sourceAlbum.titleSort,
+    summary: sourceAlbum.summary,
+    index: sourceAlbum.index,
+    year: sourceAlbum.year,
+    thumb: sourceAlbum.thumb,
+    art: sourceAlbum.art,
+    parentThumb: sourceAlbum.parentThumb,
+    originallyAvailableAt: sourceAlbum.originallyAvailableAt,
+    addedAt: sourceAlbum.addedAt,
+    updatedAt: sourceAlbum.updatedAt,
+    librarySectionID: sourceAlbum.librarySectionID,
+    collections: sourceAlbum.collections,
+    removed: false,
+    musicBrainzId: targetAlbumId,
+    musicBrainzReleaseDate: sourceAlbum.musicBrainzReleaseDate,
+    musicBrainzCountry: sourceAlbum.musicBrainzCountry,
+    musicBrainzStatus: sourceAlbum.musicBrainzStatus,
+    musicBrainzPackaging: sourceAlbum.musicBrainzPackaging,
+    musicBrainzLabel: sourceAlbum.musicBrainzLabel,
+    musicBrainzBarcode: sourceAlbum.musicBrainzBarcode,
+    musicBrainzAsin: sourceAlbum.musicBrainzAsin,
+    albumArtist: sourceAlbum.albumArtist,
+    workId: sourceAlbum.workId,
+    userTitle: sourceAlbum.userTitle,
+    userReleaseDate: sourceAlbum.userReleaseDate,
+    userLabel: sourceAlbum.userLabel,
+    metadataPreferences: sourceAlbum.metadataPreferences,
+    identificationStatus: sourceAlbum.identificationStatus,
+    identificationConfidence: sourceAlbum.identificationConfidence,
+    lastIdentificationAttempt: sourceAlbum.lastIdentificationAttempt,
+  };
+}
+
+async function resolveUniqueSplitAlbumRatingKey(baseRatingKey) {
+  let candidate = baseRatingKey;
+  let suffix = 2;
+
+  while (await prisma.plexAlbum.findUnique({ where: { ratingKey: candidate } })) {
+    candidate = `${baseRatingKey}-${suffix}`;
+    suffix += 1;
   }
-  
-  // Get tracks for this album
-  const tracks = await plexDb.getTracksByAlbum(ratingKey);
-  
-  console.log(`Processing ${tracks.length} tracks for album "${album.title}"`);
-  
-  let successCount = 0;
-  let failedCount = 0;
-  const results = [];
-  let albumMusicBrainzUpdated = false; // Track if we've already updated album MB ID
-  
-  // Process each track
+
+  return candidate;
+}
+
+router.post('/albums/:ratingKey/split-by-album-id', asyncHandler(async (req, res) => {
+  const { parseFile } = await import('music-metadata');
+  const { ratingKey } = req.params;
+
+  const sourceAlbum = await prisma.plexAlbum.findUnique({
+    where: { ratingKey }
+  });
+
+  if (!sourceAlbum) {
+    return sendBadRequest(res, 'Album not found');
+  }
+
+  const tracks = await prisma.plexTrack.findMany({
+    where: { parentRatingKey: ratingKey, removed: false },
+    orderBy: { index: 'asc' }
+  });
+
+  if (tracks.length === 0) {
+    return sendSuccess(res, {
+      message: 'No tracks to split',
+      sourceAlbumRatingKey: ratingKey,
+      sourceAlbumTitle: sourceAlbum.title,
+      groupsFound: 0,
+      movedTrackCount: 0,
+      createdAlbums: [],
+      unresolvedTracks: []
+    });
+  }
+
+  const unresolvedTracks = [];
+  const groupedByAlbumId = new Map();
+
   for (const track of tracks) {
-    const result = {
-      ratingKey: track.ratingKey,
-      title: track.title,
-      index: track.index,
-      filePath: track.file,
-      plexPath: null,
-      success: false,
-      common: null,
-      formatInfo: null,
-      error: null
-    };
-    
-    let plexPath = track.file;
-    
-    // If no file path in database, query Plex directly for the track's media info
-    if (!plexPath) {
-      try {
-        console.log(`Fetching track metadata from Plex: ${track.key}`);
-        
-        const trackData = await plexSync.makeRequest(track.key);
-        const metadata = trackData?.MediaContainer?.Metadata?.[0];
-        const mediaPart = metadata?.Media?.[0]?.Part?.[0];
-        const stream = metadata?.Media?.[0]?.Part?.[0]?.Stream?.[0];
-        
-        console.log(`Track ${track.title} media info:`, mediaPart);
-        
-        if (mediaPart?.file) {
-          plexPath = mediaPart.file;
-          result.plexPath = plexPath;
-          console.log(`Found Plex path: ${plexPath}`);
-          
-          // Save Plex metadata to database
-          const updateData = {
-            file: mediaPart.file,
-            duration: mediaPart.duration ? parseInt(mediaPart.duration) : track.duration,
-            size: mediaPart.size ? parseInt(mediaPart.size) : track.size,
-            container: mediaPart.container || track.container
-          };
-          
-          // Add stream info if available
-          if (stream) {
-            updateData.audioCodec = stream.codec || track.audioCodec;
-            updateData.audioChannels = stream.channels ? parseInt(stream.channels) : track.audioChannels;
-            updateData.bitrate = stream.bitrate ? parseInt(stream.bitrate) : track.bitrate;
-          }
-          
-          // Update track with Plex metadata
-          await prisma.plexTrack.update({
-            where: { ratingKey: track.ratingKey },
-            data: updateData
-          });
-          
-          console.log(`Updated track ${track.title} with Plex metadata`);
-        } else {
-          console.log(`No file path in Plex response for ${track.title}`);
-        }
-      } catch (error) {
-        console.error(`Error fetching file path from Plex for track ${track.title}:`, error.message);
-      }
-    } else {
-      result.plexPath = plexPath;
-    }
-    
-    // Map Plex path to local filesystem path
-    const localPath = mapPlexPathToLocal(plexPath);
-    result.filePath = localPath;
-    
-    if (!localPath) {
-      result.error = 'No file path available';
-      failedCount++;
-      results.push(result);
+    const plexPath = await ensureTrackPlexPath(track);
+    const pathResolution = mapPlexPathToLocalDetailed(plexPath);
+
+    if (!pathResolution.localPath) {
+      unresolvedTracks.push({
+        ratingKey: track.ratingKey,
+        title: track.title,
+        reason: 'No local path mapping available',
+        plexPath: plexPath || null,
+        mappedPath: null,
+      });
       continue;
     }
-    
+
     try {
-      // Check if file exists
-      await fs.access(localPath);
-      
-      // Parse audio file metadata
-      const metadata = await parseFile(localPath);
-      
-      // Extract format info
-      result.formatInfo = {
-        container: metadata.format.container,
-        codec: metadata.format.codec,
-        lossless: metadata.format.lossless,
-        duration: metadata.format.duration,
-        bitrate: metadata.format.bitrate,
-        sampleRate: metadata.format.sampleRate,
-        numberOfChannels: metadata.format.numberOfChannels,
-        bitsPerSample: metadata.format.bitsPerSample,
-        size: track.size
-      };
-      
-      // Extract common metadata
-      result.common = {
-        title: metadata.common.title,
-        artist: metadata.common.artist,
-        artists: metadata.common.artists,
-        album: metadata.common.album,
-        albumartist: metadata.common.albumartist,
-        year: metadata.common.year,
-        date: metadata.common.date,
-        originaldate: metadata.common.originaldate,
-        originalyear: metadata.common.originalyear,
-        track: metadata.common.track,
-        disk: metadata.common.disk,
-        genre: metadata.common.genre,
-        comment: metadata.common.comment,
-        composer: metadata.common.composer,
-        label: metadata.common.label,
-        isrc: metadata.common.isrc,
-        barcode: metadata.common.barcode,
-        catalognumber: metadata.common.catalognumber,
-        language: metadata.common.language,
-        mood: metadata.common.mood,
-        bpm: metadata.common.bpm,
-        key: metadata.common.key,
-        rating: metadata.common.rating,
-        compilation: metadata.common.compilation,
-        gapless: metadata.common.gapless,
-        copyright: metadata.common.copyright,
-        license: metadata.common.license,
-        encodedby: metadata.common.encodedby,
-        encodersettings: metadata.common.encodersettings,
-        releasetype: metadata.common.releasetype,
-        releasestatus: metadata.common.releasestatus,
-        releasecountry: metadata.common.releasecountry,
-        musicbrainz_recordingid: metadata.common.musicbrainz_recordingid,
-        musicbrainz_trackid: metadata.common.musicbrainz_trackid,
-        musicbrainz_albumid: metadata.common.musicbrainz_albumid,
-        musicbrainz_artistid: metadata.common.musicbrainz_artistid,
-        musicbrainz_albumartistid: metadata.common.musicbrainz_albumartistid,
-        musicbrainz_releasegroupid: metadata.common.musicbrainz_releasegroupid,
-        musicbrainz_workid: metadata.common.musicbrainz_workid
-      };
-      
-      result.success = true;
-      successCount++;
-      
-      // Update track with file metadata (MusicBrainz Recording ID)
-      console.log(`MusicBrainz IDs for ${track.title}:`, {
-        recordingid: metadata.common.musicbrainz_recordingid,
-        trackid: metadata.common.musicbrainz_trackid,
-        albumid: metadata.common.musicbrainz_albumid
-      });
-      
-      const updates = {};
-      
-      // Save Recording ID to track (this is the actual recording identifier)
-      if (metadata.common.musicbrainz_recordingid) {
-        const recordingId = Array.isArray(metadata.common.musicbrainz_recordingid) 
-          ? metadata.common.musicbrainz_recordingid[0]
-          : metadata.common.musicbrainz_recordingid;
-        if (recordingId) {
-          updates.musicBrainzTrackId = recordingId;
-        }
+      await fs.access(pathResolution.localPath);
+      const metadata = await parseFile(pathResolution.localPath);
+      const parsedAlbumId = firstMetadataValue(metadata.common.musicbrainz_albumid);
+
+      if (!parsedAlbumId) {
+        unresolvedTracks.push({
+          ratingKey: track.ratingKey,
+          title: track.title,
+          reason: 'No musicbrainz_albumid tag found',
+          plexPath: plexPath || null,
+          mappedPath: pathResolution.localPath,
+        });
+        continue;
       }
-      
-      if (Object.keys(updates).length > 0) {
-        try {
-          await prisma.plexTrack.update({
-            where: { ratingKey: track.ratingKey },
-            data: updates
-          });
-          console.log(`✓ Updated track ${track.title} with MusicBrainz Recording ID: ${updates.musicBrainzTrackId}`);
-        } catch (dbError) {
-          console.error(`Error updating track ${track.title} with file metadata:`, dbError.message);
-        }
-      } else {
-        console.log(`No MusicBrainz Recording ID found in file for ${track.title}`);
+
+      if (!groupedByAlbumId.has(parsedAlbumId)) {
+        groupedByAlbumId.set(parsedAlbumId, []);
       }
-      
-      // Save Album ID to album (once, not per track)
-      if (metadata.common.musicbrainz_albumid && !albumMusicBrainzUpdated) {
-        const albumId = Array.isArray(metadata.common.musicbrainz_albumid)
-          ? metadata.common.musicbrainz_albumid[0]
-          : metadata.common.musicbrainz_albumid;
-        
-        if (albumId) {
-          try {
-            await prisma.plexAlbum.update({
-              where: { ratingKey: ratingKey },
-              data: { musicBrainzId: albumId }
-            });
-            console.log(`✓ Updated album ${album.title} with MusicBrainz Release ID: ${albumId}`);
-            albumMusicBrainzUpdated = true;
-          } catch (dbError) {
-            console.error(`Error updating album with MusicBrainz ID:`, dbError.message);
-          }
-        }
-      }
-      
+
+      groupedByAlbumId.get(parsedAlbumId).push(track);
     } catch (error) {
-      console.error(`Error extracting metadata for track ${track.title}:`, error.message);
-      result.error = error.message;
-      failedCount++;
+      unresolvedTracks.push({
+        ratingKey: track.ratingKey,
+        title: track.title,
+        reason: error.message || 'Failed to parse metadata',
+        plexPath: plexPath || null,
+        mappedPath: pathResolution.localPath,
+      });
     }
-    
-    results.push(result);
   }
-  
-  res.json({ 
-    albumTitle: album.title,
-    albumRatingKey: ratingKey,
-    tracksProcessed: tracks.length,
-    successCount,
-    errorCount: failedCount,
-    extractedMetadata: results
+
+  if (groupedByAlbumId.size <= 1) {
+    const onlyAlbumId = [...groupedByAlbumId.keys()][0] || sourceAlbum.musicBrainzId || null;
+
+    if (onlyAlbumId && sourceAlbum.musicBrainzId !== onlyAlbumId) {
+      await prisma.plexAlbum.update({
+        where: { ratingKey },
+        data: { musicBrainzId: onlyAlbumId }
+      });
+    }
+
+    return sendSuccess(res, {
+      message: 'No split needed',
+      sourceAlbumRatingKey: ratingKey,
+      sourceAlbumTitle: sourceAlbum.title,
+      groupsFound: groupedByAlbumId.size,
+      movedTrackCount: 0,
+      createdAlbums: [],
+      unresolvedTracks,
+      selectedAlbumId: onlyAlbumId,
+    });
+  }
+
+  const sortedGroups = [...groupedByAlbumId.entries()].sort((left, right) => right[1].length - left[1].length);
+  const sourceGroupEntry = sourceAlbum.musicBrainzId
+    ? sortedGroups.find(([albumId]) => albumId === sourceAlbum.musicBrainzId)
+    : null;
+  const [primaryAlbumId] = sourceGroupEntry || sortedGroups[0];
+
+  if (sourceAlbum.musicBrainzId !== primaryAlbumId) {
+    await prisma.plexAlbum.update({
+      where: { ratingKey },
+      data: { musicBrainzId: primaryAlbumId }
+    });
+  }
+
+  const createdAlbums = [];
+  let movedTrackCount = 0;
+
+  for (const [albumId, groupedTracks] of sortedGroups) {
+    if (albumId === primaryAlbumId) {
+      continue;
+    }
+
+    let targetAlbum = await prisma.plexAlbum.findFirst({
+      where: {
+        ratingKey: { not: sourceAlbum.ratingKey },
+        removed: false,
+        parentRatingKey: sourceAlbum.parentRatingKey,
+        librarySectionID: sourceAlbum.librarySectionID,
+        musicBrainzId: albumId,
+      }
+    });
+
+    if (!targetAlbum) {
+      const suffix = albumId.slice(0, 8);
+      const createData = await buildSplitAlbumCreateData(sourceAlbum, albumId, suffix);
+      createData.ratingKey = await resolveUniqueSplitAlbumRatingKey(createData.ratingKey);
+
+      targetAlbum = await prisma.plexAlbum.create({ data: createData });
+
+      createdAlbums.push({
+        ratingKey: targetAlbum.ratingKey,
+        title: targetAlbum.title,
+        musicBrainzId: targetAlbum.musicBrainzId,
+      });
+    }
+
+    const trackKeys = groupedTracks.map((track) => track.ratingKey);
+    if (trackKeys.length > 0) {
+      const updateResult = await prisma.plexTrack.updateMany({
+        where: {
+          ratingKey: { in: trackKeys },
+          parentRatingKey: sourceAlbum.ratingKey,
+        },
+        data: {
+          parentRatingKey: targetAlbum.ratingKey,
+          grandparentRatingKey: sourceAlbum.parentRatingKey || undefined,
+        }
+      });
+
+      movedTrackCount += updateResult.count;
+    }
+  }
+
+  const refreshedPrimaryAlbum = await prisma.plexAlbum.findUnique({ where: { ratingKey } });
+
+  sendSuccess(res, {
+    message: 'Album split by MusicBrainz album ID completed',
+    sourceAlbumRatingKey: sourceAlbum.ratingKey,
+    sourceAlbumTitle: sourceAlbum.title,
+    selectedAlbumId: primaryAlbumId,
+    groupsFound: groupedByAlbumId.size,
+    movedTrackCount,
+    createdAlbums,
+    unresolvedTracks,
+    primaryAlbum: refreshedPrimaryAlbum,
   });
+}));
+
+router.post('/albums/:ratingKey/extract-file-metadata', asyncHandler(async (req, res) => {
+  const { ratingKey } = req.params;
+  const result = await extractAlbumFileMetadataByRatingKey(ratingKey);
+  res.json(result);
+}));
+
+router.post('/artists/:ratingKey/extract-file-metadata', asyncHandler(async (req, res) => {
+  const { ratingKey } = req.params;
+
+  const artist = await prisma.plexArtist.findUnique({
+    where: { ratingKey },
+    select: { ratingKey: true, title: true },
+  });
+
+  if (!artist) {
+    return res.status(404).json({ error: 'Artist not found' });
+  }
+
+  const albums = await plexDb.getAlbumsByArtist(ratingKey);
+  const extractedAlbums = [];
+  let tracksProcessed = 0;
+  let successCount = 0;
+  let errorCount = 0;
+  let mergedAlbumCount = 0;
+
+  for (const album of albums) {
+    try {
+      const result = await extractAlbumFileMetadataByRatingKey(album.ratingKey);
+      extractedAlbums.push(result);
+      tracksProcessed += result.tracksProcessed || 0;
+      successCount += result.successCount || 0;
+      errorCount += result.errorCount || 0;
+      mergedAlbumCount += result.mergedAlbums?.length || 0;
+    } catch (error) {
+      extractedAlbums.push({
+        albumTitle: album.title,
+        albumRatingKey: album.ratingKey,
+        tracksProcessed: 0,
+        successCount: 0,
+        errorCount: 1,
+        extractedMetadata: [],
+        mergedAlbums: [],
+        error: error.message,
+      });
+      errorCount += 1;
+    }
+  }
+
+  res.json({
+    artistTitle: artist.title,
+    artistRatingKey: artist.ratingKey,
+    albumsProcessed: albums.length,
+    mergedAlbumCount,
+    tracksProcessed,
+    successCount,
+    errorCount,
+    extractedAlbums,
+  });
+}));
+
+router.get('/artists/:ratingKey/picard-tags', asyncHandler(async (req, res) => {
+  const { ratingKey } = req.params;
+
+  const artist = await prisma.plexArtist.findUnique({
+    where: { ratingKey },
+    select: { ratingKey: true, title: true },
+  });
+
+  if (!artist) {
+    return sendBadRequest(res, 'Artist not found');
+  }
+
+  const tracks = await prisma.plexTrack.findMany({
+    where: { grandparentRatingKey: ratingKey, removed: false },
+    select: PICARD_TRACK_SELECT,
+    orderBy: [{ parentRatingKey: 'asc' }, { index: 'asc' }],
+  });
+
+  const payload = await buildPicardTagPayload({
+    entityType: 'artist',
+    entityKey: artist.ratingKey,
+    entityTitle: artist.title,
+    tracks,
+  });
+
+  sendSuccess(res, payload);
+}));
+
+router.get('/albums/:ratingKey/picard-tags', asyncHandler(async (req, res) => {
+  const { ratingKey } = req.params;
+
+  const album = await prisma.plexAlbum.findUnique({
+    where: { ratingKey },
+    select: { ratingKey: true, title: true },
+  });
+
+  if (!album) {
+    return sendBadRequest(res, 'Album not found');
+  }
+
+  const tracks = await prisma.plexTrack.findMany({
+    where: { parentRatingKey: ratingKey, removed: false },
+    select: PICARD_TRACK_SELECT,
+    orderBy: { index: 'asc' },
+  });
+
+  const payload = await buildPicardTagPayload({
+    entityType: 'album',
+    entityKey: album.ratingKey,
+    entityTitle: album.title,
+    tracks,
+  });
+
+  sendSuccess(res, payload);
+}));
+
+router.get('/track/:ratingKey/picard-tags', asyncHandler(async (req, res) => {
+  const { ratingKey } = req.params;
+
+  const track = await prisma.plexTrack.findUnique({
+    where: { ratingKey },
+    select: PICARD_TRACK_SELECT,
+  });
+
+  if (!track) {
+    return sendBadRequest(res, 'Track not found');
+  }
+
+  const payload = await buildPicardTagPayload({
+    entityType: 'track',
+    entityKey: track.ratingKey,
+    entityTitle: track.title,
+    tracks: [track],
+  });
+
+  sendSuccess(res, payload);
 }));
 
 // Music Tracks - All
@@ -1657,6 +2906,14 @@ router.get('/track/:ratingKey', asyncHandler(async (req, res) => {
   const track = await prisma.plexTrack.findUnique({
     where: { ratingKey },
     include: {
+      work: {
+        include: {
+          composer: true,
+          parts: {
+            orderBy: { order: 'asc' }
+          }
+        }
+      },
       album: {
         include: {
           artist: true

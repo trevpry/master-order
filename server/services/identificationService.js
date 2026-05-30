@@ -44,33 +44,59 @@ class IdentificationService {
       }
     });
 
-    // Search MusicBrainz
-    const searchResults = await this.musicBrainz.searchRelease(
-      album.title,
-      album.artist?.title
-    );
-
-    // Calculate confidence scores and store candidates
     const candidates = [];
-    for (const result of searchResults.slice(0, 10)) { // Top 10 matches
-      const confidence = this.calculateAlbumConfidence(album, result);
-      
-      // Store candidate
-      const candidate = await this.prisma.identificationCandidate.create({
-        data: {
-          entityType: 'album',
-          entityKey: ratingKey,
-          musicBrainzId: result.id,
-          title: result.title,
-          artist: result['artist-credit']?.[0]?.name,
-          releaseDate: result.date ? new Date(result.date) : null,
-          confidence,
-          metadata: JSON.stringify(result),
-          status: 'pending'
-        }
-      });
 
-      candidates.push(candidate);
+    if (album.musicBrainzId) {
+      try {
+        const directResult = await this.musicBrainz.getRelease(album.musicBrainzId);
+        const candidate = await this.prisma.identificationCandidate.create({
+          data: {
+            entityType: 'album',
+            entityKey: ratingKey,
+            musicBrainzId: directResult.id,
+            title: directResult.title,
+            artist: directResult['artist-credit']?.[0]?.name,
+            releaseDate: directResult.date ? new Date(directResult.date) : null,
+            confidence: 1,
+            metadata: JSON.stringify(directResult),
+            status: 'pending'
+          }
+        });
+
+        candidates.push(candidate);
+      } catch (error) {
+        console.warn(`MusicBrainz direct album lookup failed for ${album.musicBrainzId}, falling back to search`, error.message);
+      }
+    }
+
+    if (candidates.length === 0) {
+      // Search MusicBrainz when no stored MusicBrainz album ID is available or lookup fails
+      const searchResults = await this.musicBrainz.searchRelease(
+        album.title,
+        album.artist?.title
+      );
+
+      // Calculate confidence scores and store candidates
+      for (const result of searchResults.slice(0, 10)) { // Top 10 matches
+        const confidence = this.calculateAlbumConfidence(album, result);
+        
+        // Store candidate
+        const candidate = await this.prisma.identificationCandidate.create({
+          data: {
+            entityType: 'album',
+            entityKey: ratingKey,
+            musicBrainzId: result.id,
+            title: result.title,
+            artist: result['artist-credit']?.[0]?.name,
+            releaseDate: result.date ? new Date(result.date) : null,
+            confidence,
+            metadata: JSON.stringify(result),
+            status: 'pending'
+          }
+        });
+
+        candidates.push(candidate);
+      }
     }
 
     // Update album identification status
@@ -231,12 +257,34 @@ class IdentificationService {
    * @private
    */
   async applyAlbumMetadata(ratingKey, metadata) {
+    const album = await this.prisma.plexAlbum.findUnique({
+      where: { ratingKey },
+      include: {
+        artist: true,
+        tracks: {
+          orderBy: [
+            { index: 'asc' },
+            { ratingKey: 'asc' }
+          ]
+        }
+      }
+    });
+
+    if (!album) {
+      throw new Error(`Album not found: ${ratingKey}`);
+    }
+
     const updateData = {
       musicBrainzId: metadata.id,
       identificationStatus: 'identified',
       identificationConfidence: 1.0,
       lastIdentificationAttempt: new Date()
     };
+
+    if (metadata.title) {
+      updateData.title = metadata.title;
+      updateData.titleSort = metadata.title;
+    }
 
     // Extract relevant MusicBrainz fields
     if (metadata['first-release-date']) {
@@ -283,9 +331,730 @@ class IdentificationService {
       updateData.albumArtist = mbArtistName;
     }
 
-    return await this.prisma.plexAlbum.update({
+    const updatedAlbum = await this.prisma.plexAlbum.update({
       where: { ratingKey },
       data: updateData
+    });
+
+    await this.applyReleaseTrackMetadata(album, metadata);
+
+    return updatedAlbum;
+  }
+
+  async applyReleaseTrackMetadata(album, metadata) {
+    const releaseTracks = this.flattenReleaseTracks(metadata);
+
+    if (releaseTracks.length === 0 || album.tracks.length === 0) {
+      return;
+    }
+
+    const matchedTracks = this.matchLocalTracksToReleaseTracks(album.tracks, releaseTracks);
+
+    for (const { localTrack, releaseTrack } of matchedTracks) {
+      await this.applyTrackMetadata(localTrack, releaseTrack);
+    }
+  }
+
+  flattenReleaseTracks(metadata) {
+    if (!Array.isArray(metadata?.media)) {
+      return [];
+    }
+
+    return metadata.media.flatMap(medium => (medium?.tracks || []).map(track => ({
+      ...track,
+      mediaTitle: medium?.title || null,
+      mediaPosition: medium?.position || null
+    })));
+  }
+
+  matchLocalTracksToReleaseTracks(localTracks, releaseTracks) {
+    const matchedLocalTrackKeys = new Set();
+    const matches = [];
+
+    for (let position = 0; position < releaseTracks.length; position += 1) {
+      const releaseTrack = releaseTracks[position];
+      const releaseIndex = Number.parseInt(releaseTrack.number || releaseTrack.position, 10);
+      const releaseTrackId = releaseTrack?.recording?.id || releaseTrack?.id || null;
+      const releaseHasTrackId = Boolean(releaseTrackId);
+      const releaseHasTrackNumber = Number.isInteger(releaseIndex);
+
+      const localTrack = localTracks.find(track => {
+        if (matchedLocalTrackKeys.has(track.ratingKey)) {
+          return false;
+        }
+
+        const localTrackId = track.musicBrainzTrackId || null;
+        const localTrackIndex = Number.isInteger(track.index) ? track.index : null;
+
+        if (releaseHasTrackId && localTrackId) {
+          if (localTrackId !== releaseTrackId) {
+            return false;
+          }
+
+          if (releaseHasTrackNumber && localTrackIndex !== null) {
+            return localTrackIndex === releaseIndex;
+          }
+
+          return true;
+        }
+
+        if (releaseHasTrackId && !localTrackId) {
+          return releaseHasTrackNumber && localTrackIndex === releaseIndex;
+        }
+
+        if (releaseHasTrackNumber) {
+          return localTrackIndex === releaseIndex;
+        }
+
+        return false;
+      }) || null;
+
+      if (!localTrack) {
+        continue;
+      }
+
+      matchedLocalTrackKeys.add(localTrack.ratingKey);
+      matches.push({ localTrack, releaseTrack });
+    }
+
+    return matches;
+  }
+
+  async applyTrackMetadata(localTrack, releaseTrack) {
+    let recording = releaseTrack?.recording || null;
+    let workRelation = this.findTrackWorkRelation(recording);
+
+    // Some release payloads omit nested recording work relations.
+    // Fetching the recording directly gives reliable "performance -> work" data.
+    if (!workRelation && recording?.id) {
+      try {
+        recording = await this.musicBrainz.getRecordingDetails(recording.id);
+        workRelation = this.findTrackWorkRelation(recording);
+      } catch (error) {
+        console.warn(`MusicBrainz recording detail lookup failed for ${recording.id}`, error.message);
+      }
+    }
+
+    const contributors = this.collectTrackContributors(releaseTrack, recording, workRelation?.work);
+    let fallbackComposerKey = localTrack.grandparentRatingKey || null;
+
+    const composerContributor = contributors.find(contributor => contributor.typeNames.includes('Composer'));
+    if (composerContributor) {
+      const composerArtist = await this.ensureArtistFromMusicBrainz(composerContributor.artist);
+      if (composerArtist?.ratingKey) {
+        fallbackComposerKey = composerArtist.ratingKey;
+      }
+    }
+
+    const workImport = workRelation
+      ? await this.importWorkHierarchy(
+          workRelation.work,
+          localTrack.ratingKey,
+          fallbackComposerKey,
+          releaseTrack?.title || recording?.title || localTrack?.title || null,
+          releaseTrack?.number || releaseTrack?.position || localTrack?.index || null
+        )
+      : null;
+    const composerNames = this.extractComposerNames(workRelation?.work);
+
+    const trackUpdateData = {
+      musicBrainzTrackId: recording?.id || releaseTrack?.id || null,
+      identificationStatus: 'identified',
+      identificationConfidence: 1.0,
+      lastIdentificationAttempt: new Date(),
+      userComposer: composerNames.length > 0 ? composerNames.join(', ') : null,
+      workId: workImport?.workId || null
+    };
+
+    await this.prisma.plexTrack.update({
+      where: { ratingKey: localTrack.ratingKey },
+      data: trackUpdateData
+    });
+
+    if (workImport?.workPartId) {
+      await this.prisma.workPartTrack.upsert({
+        where: {
+          workPartId_trackKey: {
+            workPartId: workImport.workPartId,
+            trackKey: localTrack.ratingKey
+          }
+        },
+        update: {},
+        create: {
+          workPartId: workImport.workPartId,
+          trackKey: localTrack.ratingKey
+        }
+      });
+
+      const relationshipTypeNames = [...new Set(
+        contributors.flatMap(contributor => contributor.typeNames || [])
+      )];
+
+      for (const typeName of relationshipTypeNames) {
+        await this.ensureWorkPartArtistTypeAssignmentByName(workImport.workPartId, typeName);
+      }
+    }
+
+    for (const contributor of contributors) {
+      const artist = await this.ensureArtistFromMusicBrainz(contributor.artist);
+      if (!artist) {
+        continue;
+      }
+
+      for (const typeName of contributor.typeNames) {
+        await this.ensureTrackArtistAssignment(localTrack.ratingKey, artist.ratingKey, typeName);
+        if (localTrack.parentRatingKey) {
+          await this.ensureAlbumArtistAssignment(localTrack.parentRatingKey, artist.ratingKey, typeName);
+        }
+      }
+    }
+  }
+
+  findTrackWorkRelation(recording) {
+    const relationLists = [
+      recording?.relations,
+      recording?.['relation-list'],
+      recording?.['work-relation-list'],
+      recording?.['work-rels']
+    ].filter(Array.isArray);
+
+    const relations = relationLists.flat();
+
+    return relations.find(relation => relation?.work && relation?.type === 'performance')
+      || relations.find(relation => relation?.work)
+      || null;
+  }
+
+  getEntityRelations(entity) {
+    const relationLists = [
+      entity?.relations,
+      entity?.['relation-list'],
+      entity?.['artist-relation-list'],
+      entity?.['work-relation-list'],
+      entity?.['place-relation-list'],
+      entity?.['url-relation-list']
+    ].filter(Array.isArray);
+
+    return relationLists.flat();
+  }
+
+  shouldExcludeRelationshipType(relationType) {
+    if (!relationType) {
+      return false;
+    }
+
+    const normalized = String(relationType).trim().toLowerCase();
+    return normalized === 'engineer'
+      || normalized === 'producer'
+      || normalized === 'recorded at'
+      || normalized === 'recording of';
+  }
+
+  shouldExcludeArtistTypeName(typeName) {
+    if (!typeName) {
+      return true;
+    }
+
+    const normalized = String(typeName).trim().toLowerCase();
+    return normalized === 'engineer'
+      || normalized === 'producer'
+      || normalized === 'recorded at'
+      || normalized === 'recording of'
+      || normalized === 'recording'
+      || normalized === 'person'
+      || normalized === 'editor'
+      || normalized === 'sound';
+  }
+
+  isSoloArtistTypeName(typeName) {
+    if (!typeName) {
+      return false;
+    }
+
+    return String(typeName).trim().toLowerCase() === 'solo';
+  }
+
+  pruneContributorTypeNames(typeNames) {
+    const uniqueTypeNames = [...new Set(
+      (typeNames || [])
+        .map(typeName => String(typeName || '').trim())
+        .filter(Boolean)
+    )];
+
+    if (uniqueTypeNames.length === 0) {
+      return [];
+    }
+
+    const hasSolo = uniqueTypeNames.some(typeName => this.isSoloArtistTypeName(typeName));
+    const nonSoloAllowed = uniqueTypeNames.filter(typeName => {
+      return !this.isSoloArtistTypeName(typeName) && !this.shouldExcludeArtistTypeName(typeName);
+    });
+
+    if (nonSoloAllowed.length > 0) {
+      return nonSoloAllowed;
+    }
+
+    if (hasSolo) {
+      const preferredSolo = uniqueTypeNames.find(typeName => this.isSoloArtistTypeName(typeName)) || 'Solo';
+      return [preferredSolo];
+    }
+
+    return uniqueTypeNames.filter(typeName => !this.shouldExcludeArtistTypeName(typeName));
+  }
+
+  extractComposerNames(work) {
+    const workRelations = this.getEntityRelations(work);
+
+    if (workRelations.length === 0) {
+      return [];
+    }
+
+    return [...new Set(
+      workRelations
+        .filter(relation => relation?.type === 'composer' && relation?.artist?.name)
+        .map(relation => relation.artist.name)
+    )];
+  }
+
+  collectTrackContributors(releaseTrack, recording, work) {
+    const assignments = new Map();
+
+    const addContributor = (artist, typeNames) => {
+      if (!artist?.id || typeNames.length === 0) {
+        return;
+      }
+
+      const key = artist.id;
+      const existing = assignments.get(key) || {
+        artist,
+        typeNames: new Set()
+      };
+
+      typeNames
+        .filter(Boolean)
+        .map(typeName => String(typeName).trim())
+        .filter(Boolean)
+        .forEach(typeName => existing.typeNames.add(typeName));
+      assignments.set(key, existing);
+    };
+
+    for (const relation of this.getEntityRelations(recording)) {
+      if (!relation?.artist) {
+        continue;
+      }
+
+      if (this.shouldExcludeRelationshipType(relation.type)) {
+        continue;
+      }
+
+      addContributor(relation.artist, this.mapArtistTypeNames(relation.type, relation.artist, relation.attributes || []));
+    }
+
+    for (const credit of recording?.['artist-credit'] || []) {
+      if (!credit?.artist) {
+        continue;
+      }
+
+      addContributor(credit.artist, this.mapArtistTypeNames(null, credit.artist, []));
+    }
+
+    for (const credit of releaseTrack?.['artist-credit'] || []) {
+      if (!credit?.artist) {
+        continue;
+      }
+
+      const typeNames = this.shouldAssignComposerArtistType(credit.artist)
+        ? ['Composer']
+        : this.mapArtistTypeNames(null, credit.artist, []);
+
+      addContributor(credit.artist, typeNames);
+    }
+
+    for (const relation of this.getEntityRelations(work)) {
+      if (!relation?.artist) {
+        continue;
+      }
+
+      if (this.shouldExcludeRelationshipType(relation.type)) {
+        continue;
+      }
+
+      if (relation.type === 'composer') {
+        addContributor(relation.artist, ['Composer']);
+        continue;
+      }
+
+      addContributor(relation.artist, this.mapArtistTypeNames(relation.type, relation.artist, relation.attributes || []));
+    }
+
+    return [...assignments.values()]
+      .map(entry => ({
+        artist: entry.artist,
+        typeNames: this.pruneContributorTypeNames([...entry.typeNames])
+      }))
+      .filter(entry => entry.typeNames.length > 0);
+  }
+
+  mapArtistTypeNames(relationType, artist, attributes) {
+    if (relationType === 'conductor') {
+      return ['Conductor'];
+    }
+
+    if (relationType === 'performing orchestra' || artist?.type === 'Orchestra') {
+      return ['Orchestra'];
+    }
+
+    if (relationType === 'composer' || this.shouldAssignComposerArtistType(artist)) {
+      return ['Composer'];
+    }
+
+    if (relationType === 'instrument') {
+      const instrumentTypes = attributes
+        .map(attribute => this.formatArtistTypeName(attribute))
+        .filter(Boolean);
+
+      return instrumentTypes.length > 0 ? instrumentTypes : ['Instrument'];
+    }
+
+    if (relationType) {
+      return [this.formatArtistTypeName(relationType)];
+    }
+
+    if (artist?.type) {
+      return [this.formatArtistTypeName(artist.type)];
+    }
+
+    return ['Performer'];
+  }
+
+  formatArtistTypeName(value) {
+    if (!value) {
+      return null;
+    }
+
+    return String(value)
+      .split(/[-\s]+/)
+      .filter(Boolean)
+      .map(segment => segment.charAt(0).toUpperCase() + segment.slice(1))
+      .join(' ');
+  }
+
+  async importWorkHierarchy(work, trackKey, fallbackComposerKey = null, fallbackPartTitle = null, fallbackPartOrder = null) {
+    if (!work) {
+      return null;
+    }
+
+    const workRelations = this.getEntityRelations(work);
+    const composerRelation = workRelations.find(relation => relation?.type === 'composer' && relation?.artist);
+    const composerArtist = composerRelation?.artist ? await this.ensureArtistFromMusicBrainz(composerRelation.artist) : null;
+    const parentRelation = workRelations.find(relation => relation?.type === 'parts' && relation?.direction === 'backward' && relation?.work);
+    const relatedWorkRelation = workRelations.find(relation => {
+      return relation?.work && relation?.type === 'related works';
+    });
+    let effectiveComposerKey = composerArtist?.ratingKey || fallbackComposerKey || null;
+
+    if (!effectiveComposerKey) {
+      effectiveComposerKey = await this.ensureFallbackComposerArtistKey();
+    }
+
+    const primaryWork = parentRelation?.work || relatedWorkRelation?.work || work;
+    const workRecord = await this.ensureWorkRecord(primaryWork, effectiveComposerKey);
+
+    if (!workRecord) {
+      return null;
+    }
+
+    if (composerArtist?.ratingKey) {
+      await this.ensureArtistTypeAssignmentByName(composerArtist.ratingKey, 'Composer');
+    }
+
+    if (!parentRelation?.work) {
+      const inferredPartTitle = fallbackPartTitle || work.title || null;
+      const inferredPartOrder = Number.parseInt(fallbackPartOrder, 10);
+
+      const inferredWorkPart = inferredPartTitle
+        ? await this.ensureWorkPartRecord(
+            workRecord.id,
+            inferredPartTitle,
+            Number.isInteger(inferredPartOrder) ? inferredPartOrder : 1
+          )
+        : null;
+
+      return {
+        workId: workRecord.id,
+        workPartId: inferredWorkPart?.id || null
+      };
+    }
+
+    const workPart = await this.ensureWorkPartRecord(
+      workRecord.id,
+      work.title,
+      parentRelation['ordering-key'] || 1
+    );
+
+    return {
+      workId: workRecord.id,
+      workPartId: workPart?.id || null
+    };
+  }
+
+  async ensureWorkRecord(work, composerKey) {
+    if (!work?.id && !work?.title) {
+      return null;
+    }
+
+    let existing = null;
+
+    if (work?.id) {
+      existing = await this.prisma.work.findFirst({
+        where: { musicBrainzWorkId: work.id }
+      });
+    }
+
+    if (!existing && work?.title) {
+      existing = await this.prisma.work.findFirst({
+        where: {
+          title: work.title,
+          ...(composerKey ? { composerKey } : {})
+        }
+      });
+    }
+
+    const data = {
+      title: work.title,
+      composerKey,
+      musicBrainzWorkId: work.id || null,
+      identificationStatus: 'identified',
+      identificationConfidence: 1.0
+    };
+
+    if (existing) {
+      return await this.prisma.work.update({
+        where: { id: existing.id },
+        data: {
+          title: data.title,
+          composerKey: composerKey || existing.composerKey,
+          musicBrainzWorkId: data.musicBrainzWorkId,
+          identificationStatus: data.identificationStatus,
+          identificationConfidence: data.identificationConfidence
+        }
+      });
+    }
+
+    return await this.prisma.work.create({
+      data
+    });
+  }
+
+  async ensureFallbackComposerArtistKey() {
+    const fallbackRatingKey = 'mb-artist:unknown-composer';
+
+    const existing = await this.prisma.plexArtist.findUnique({
+      where: { ratingKey: fallbackRatingKey }
+    });
+
+    if (existing) {
+      return existing.ratingKey;
+    }
+
+    const created = await this.prisma.plexArtist.create({
+      data: {
+        ratingKey: fallbackRatingKey,
+        key: `/library/metadata/${fallbackRatingKey}`,
+        title: 'Unknown Composer',
+        titleSort: 'Unknown Composer',
+        identificationStatus: 'identified',
+        identificationConfidence: 0.5,
+        lastIdentificationAttempt: new Date()
+      }
+    });
+
+    await this.ensureArtistTypeAssignmentByName(created.ratingKey, 'Composer');
+
+    return created.ratingKey;
+  }
+
+  async ensureWorkPartRecord(workId, title, order) {
+    const existing = await this.prisma.workPart.findFirst({
+      where: {
+        workId,
+        title
+      }
+    });
+
+    if (existing) {
+      return await this.prisma.workPart.update({
+        where: { id: existing.id },
+        data: {
+          order: order || existing.order
+        }
+      });
+    }
+
+    return await this.prisma.workPart.create({
+      data: {
+        workId,
+        title,
+        order: order || 1
+      }
+    });
+  }
+
+  async ensureArtistFromMusicBrainz(artist) {
+    if (!artist?.name) {
+      return null;
+    }
+
+    let existingArtist = artist.id
+      ? await this.prisma.plexArtist.findFirst({
+          where: { musicBrainzId: artist.id }
+        })
+      : null;
+
+    if (!existingArtist) {
+      existingArtist = await this.prisma.plexArtist.findFirst({
+        where: { title: artist.name }
+      });
+    }
+
+    const artistData = {
+      title: artist.name,
+      titleSort: artist['sort-name'] || artist['sortName'] || artist.sortName || null,
+      musicBrainzId: artist.id || null,
+      musicBrainzCountry: artist.country || null,
+      identificationStatus: 'identified',
+      identificationConfidence: 1.0,
+      lastIdentificationAttempt: new Date()
+    };
+
+    if (existingArtist) {
+      return await this.prisma.plexArtist.update({
+        where: { ratingKey: existingArtist.ratingKey },
+        data: artistData
+      });
+    }
+
+    const syntheticKey = artist.id ? `mb-artist:${artist.id}` : `mb-artist:${artist.name.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`;
+
+    return await this.prisma.plexArtist.create({
+      data: {
+        ratingKey: syntheticKey,
+        key: `/library/metadata/${syntheticKey}`,
+        ...artistData
+      }
+    });
+  }
+
+  async ensureTrackArtistAssignment(trackKey, artistKey, typeName) {
+    const trimmedTypeName = typeName.trim();
+
+    let artistType = await this.prisma.artistType.findUnique({
+      where: { name: trimmedTypeName }
+    });
+
+    if (!artistType) {
+      artistType = await this.prisma.artistType.create({
+        data: {
+          name: trimmedTypeName,
+          description: `${trimmedTypeName} artists`
+        }
+      });
+    }
+
+    await this.ensureArtistTypeAssignmentByName(artistKey, trimmedTypeName);
+
+    const existingAssignment = await this.prisma.trackArtist.findFirst({
+      where: {
+        trackKey,
+        artistKey,
+        artistTypeId: artistType.id
+      }
+    });
+
+    if (existingAssignment) {
+      return existingAssignment;
+    }
+
+    return await this.prisma.trackArtist.create({
+      data: {
+        trackKey,
+        artistKey,
+        artistTypeId: artistType.id
+      }
+    });
+  }
+
+  async ensureAlbumArtistAssignment(albumKey, artistKey, typeName) {
+    const trimmedTypeName = typeName.trim();
+
+    if (this.shouldExcludeArtistTypeName(trimmedTypeName)) {
+      return null;
+    }
+
+    let artistType = await this.prisma.artistType.findUnique({
+      where: { name: trimmedTypeName }
+    });
+
+    if (!artistType) {
+      artistType = await this.prisma.artistType.create({
+        data: {
+          name: trimmedTypeName,
+          description: `${trimmedTypeName} artists`
+        }
+      });
+    }
+
+    await this.ensureArtistTypeAssignmentByName(artistKey, trimmedTypeName);
+
+    return await this.prisma.albumArtist.upsert({
+      where: {
+        albumKey_artistKey_artistTypeId: {
+          albumKey,
+          artistKey,
+          artistTypeId: artistType.id
+        }
+      },
+      update: {},
+      create: {
+        albumKey,
+        artistKey,
+        artistTypeId: artistType.id
+      }
+    });
+  }
+
+  async ensureWorkPartArtistTypeAssignmentByName(workPartId, typeName) {
+    const trimmedTypeName = typeName.trim();
+
+    if (this.shouldExcludeArtistTypeName(trimmedTypeName)) {
+      return null;
+    }
+
+    let artistType = await this.prisma.artistType.findUnique({
+      where: { name: trimmedTypeName }
+    });
+
+    if (!artistType) {
+      artistType = await this.prisma.artistType.create({
+        data: {
+          name: trimmedTypeName,
+          description: `${trimmedTypeName} artists`
+        }
+      });
+    }
+
+    return await this.prisma.workPartArtistType.upsert({
+      where: {
+        workPartId_artistTypeId: {
+          workPartId,
+          artistTypeId: artistType.id
+        }
+      },
+      update: {},
+      create: {
+        workPartId,
+        artistTypeId: artistType.id
+      }
     });
   }
 
@@ -303,15 +1072,101 @@ class IdentificationService {
 
     // Extract relevant MusicBrainz fields that exist in schema
     if (metadata.country) {
-      updateData.country = metadata.country;
+      updateData.musicBrainzCountry = metadata.country;
     }
     if (metadata['sort-name']) {
-      updateData.sortTitle = metadata['sort-name'];
+      updateData.titleSort = metadata['sort-name'];
+    }
+    if (metadata['life-span']?.begin) {
+      updateData.musicBrainzBeginDate = metadata['life-span'].begin;
+    }
+    if (metadata['life-span']?.end) {
+      updateData.musicBrainzEndDate = metadata['life-span'].end;
+    }
+    if (typeof metadata['life-span']?.ended === 'boolean') {
+      updateData.musicBrainzEnded = metadata['life-span'].ended;
+    }
+    if (Array.isArray(metadata.aliases) && metadata.aliases.length > 0) {
+      updateData.musicBrainzAliases = JSON.stringify(
+        metadata.aliases.map(alias => ({
+          name: alias.name,
+          sortName: alias['sort-name'] || null,
+          locale: alias.locale || null,
+          type: alias.type || null,
+          primary: typeof alias.primary === 'boolean' ? alias.primary : null
+        }))
+      );
+    }
+    if (Array.isArray(metadata.relations) && metadata.relations.length > 0) {
+      updateData.musicBrainzLinks = JSON.stringify(
+        metadata.relations.map(relation => ({
+          type: relation.type || null,
+          url: relation.url?.resource || null
+        })).filter(relation => relation.url)
+      );
     }
 
-    return await this.prisma.plexArtist.update({
+    const updatedArtist = await this.prisma.plexArtist.update({
       where: { ratingKey },
       data: updateData
+    });
+
+    if (this.shouldAssignComposerArtistType(metadata)) {
+      await this.ensureArtistTypeAssignmentByName(ratingKey, 'Composer');
+    }
+
+    return updatedArtist;
+  }
+
+  shouldAssignComposerArtistType(metadata) {
+    const summaryText = [
+      metadata?.disambiguation,
+      metadata?.annotation,
+      metadata?.summary,
+      metadata?.['artist-summary']
+    ].filter(Boolean).join(' ');
+
+    const typeText = [
+      metadata?.type,
+      metadata?.['type-id']
+    ].filter(Boolean).join(' ');
+
+    const tagText = [
+      ...(Array.isArray(metadata?.tags) ? metadata.tags.map(tag => tag?.name).filter(Boolean) : []),
+      ...(Array.isArray(metadata?.genres) ? metadata.genres.map(genre => genre?.name).filter(Boolean) : [])
+    ].join(' ');
+
+    return /\bcomposer\b/i.test(`${summaryText} ${typeText} ${tagText}`);
+  }
+
+  async ensureArtistTypeAssignmentByName(artistKey, typeName) {
+    const trimmedName = typeName.trim();
+
+    let artistType = await this.prisma.artistType.findUnique({
+      where: { name: trimmedName }
+    });
+
+    if (!artistType) {
+      artistType = await this.prisma.artistType.create({
+        data: {
+          name: trimmedName,
+          description: `${trimmedName} artists`
+        }
+      });
+    }
+
+    await this.prisma.artistTypeAssignment.upsert({
+      where: {
+        artistKey_artistTypeId: {
+          artistKey,
+          artistTypeId: artistType.id
+        }
+      },
+      update: {},
+      create: {
+        artistKey,
+        artistTypeId: artistType.id
+      }
     });
   }
 

@@ -21,11 +21,17 @@ const IdentifyModal = ({
   entityType, 
   entityKey, 
   entityTitle,
+  albumTracks = [],
   onIdentified 
 }) => {
   const [loading, setLoading] = useState(false);
   const [candidates, setCandidates] = useState([]);
   const [selectedCandidate, setSelectedCandidate] = useState(null);
+  const [showAlbumDetails, setShowAlbumDetails] = useState(false);
+  const [albumDetails, setAlbumDetails] = useState(null);
+  const [albumDetailsCandidateId, setAlbumDetailsCandidateId] = useState(null);
+  const [albumDetailsLoading, setAlbumDetailsLoading] = useState(false);
+  const [albumDetailsError, setAlbumDetailsError] = useState(null);
   const [accepting, setAccepting] = useState(false);
   const [error, setError] = useState(null);
 
@@ -36,9 +42,22 @@ const IdentifyModal = ({
       // Reset state when modal closes
       setCandidates([]);
       setSelectedCandidate(null);
+      setShowAlbumDetails(false);
+      setAlbumDetails(null);
+      setAlbumDetailsCandidateId(null);
+      setAlbumDetailsLoading(false);
+      setAlbumDetailsError(null);
       setError(null);
     }
   }, [isOpen, entityKey]);
+
+  useEffect(() => {
+    setShowAlbumDetails(false);
+    setAlbumDetails(null);
+    setAlbumDetailsCandidateId(null);
+    setAlbumDetailsLoading(false);
+    setAlbumDetailsError(null);
+  }, [selectedCandidate?.id]);
 
   const searchMusicBrainz = async () => {
     setLoading(true);
@@ -96,6 +115,170 @@ const IdentifyModal = ({
     }
   };
 
+  const flattenReleaseTracks = (releaseDetails) => {
+    const getRelationWorkTitle = (entity) => {
+      const relationLists = [
+        entity?.relations,
+        entity?.['relation-list'],
+        entity?.['work-relation-list'],
+        entity?.['work-rels']
+      ].filter(Array.isArray);
+
+      const relations = relationLists.flat();
+
+      const preferred = relations.find((relation) => relation?.work && relation?.type === 'performance')
+        || relations.find((relation) => relation?.work && relation?.type === 'related works')
+        || relations.find((relation) => relation?.work)
+        || null;
+
+      return preferred?.work?.title || null;
+    };
+
+    return (releaseDetails?.media || []).flatMap((medium, mediumIndex) => {
+      const discNumber = medium?.position || mediumIndex + 1;
+
+      return (medium?.tracks || []).map((track, trackIndex) => ({
+        _previewKey: `${discNumber}-${track?.position || track?.number || trackIndex + 1}-${track?.recording?.id || track?.id || trackIndex}`,
+        discNumber,
+        trackNumber: track?.position || track?.number || trackIndex + 1,
+        title: track?.title || 'Untitled',
+        length: track?.length || null,
+        recordingId: track?.recording?.id || null,
+        recordingTitle: track?.recording?.title || null,
+        workTitle: getRelationWorkTitle(track) || getRelationWorkTitle(track?.recording),
+        mediumTitle: medium?.title || null
+      }));
+    });
+  };
+
+  const buildTrackPreview = () => {
+    if (!albumDetails) {
+      return { rows: [], unmatchedRemoteTracks: [] };
+    }
+
+    const local = [...(albumTracks || [])].sort((left, right) => (left.index || 0) - (right.index || 0));
+    const remote = flattenReleaseTracks(albumDetails);
+    const usedRemoteTrackKeys = new Set();
+
+    const getTrackNumber = (track) => {
+      const value = track?.index ?? track?.trackNumber ?? null;
+      const parsed = Number.parseInt(value, 10);
+      return Number.isInteger(parsed) ? parsed : null;
+    };
+
+    const getTrackId = (track) => track?.musicBrainzTrackId || track?.recordingId || null;
+
+    const findStrictMatch = (localTrack) => {
+      const localTrackNumber = getTrackNumber(localTrack);
+      const localTrackId = getTrackId(localTrack);
+
+      if (localTrackId) {
+        return remote.find((remoteTrack) => {
+          if (usedRemoteTrackKeys.has(remoteTrack._previewKey)) {
+            return false;
+          }
+
+          const remoteTrackId = getTrackId(remoteTrack);
+          if (!remoteTrackId || remoteTrackId !== localTrackId) {
+            return false;
+          }
+
+          const remoteTrackNumber = getTrackNumber(remoteTrack);
+          if (localTrackNumber !== null && remoteTrackNumber !== null) {
+            return remoteTrackNumber === localTrackNumber;
+          }
+
+          return true;
+        }) || null;
+      }
+
+      if (localTrackNumber === null) {
+        return null;
+      }
+
+      return remote.find((remoteTrack) => {
+        if (usedRemoteTrackKeys.has(remoteTrack._previewKey)) {
+          return false;
+        }
+
+        if (getTrackId(remoteTrack)) {
+          return false;
+        }
+
+        return getTrackNumber(remoteTrack) === localTrackNumber;
+      }) || null;
+    };
+
+    const rows = local.map((localTrack) => {
+      const remoteTrack = findStrictMatch(localTrack);
+      if (remoteTrack) {
+        usedRemoteTrackKeys.add(remoteTrack._previewKey);
+      }
+
+      const changes = [];
+
+      if (remoteTrack) {
+        if ((localTrack.index || null) !== (remoteTrack.trackNumber || null)) {
+          changes.push(`Track # ${localTrack.index || '—'} -> ${remoteTrack.trackNumber || '—'}`);
+        }
+
+        if ((localTrack.title || '') !== (remoteTrack.title || '')) {
+          changes.push(`Title -> ${remoteTrack.title}`);
+        }
+
+        if ((localTrack.musicBrainzTrackId || '') !== (remoteTrack.recordingId || '')) {
+          changes.push('MusicBrainz recording ID');
+        }
+      } else {
+        changes.push('No matching MusicBrainz track found');
+      }
+
+      return {
+        localTrack,
+        remoteTrack,
+        changes: changes.length > 0 ? changes.join(', ') : 'No change'
+      };
+    });
+
+    const unmatchedRemoteTracks = remote.filter((remoteTrack) => !usedRemoteTrackKeys.has(remoteTrack._previewKey));
+
+    return { rows, unmatchedRemoteTracks };
+  };
+
+  const loadAlbumDetails = async () => {
+    if (!selectedCandidate?.musicBrainzId) {
+      return;
+    }
+
+    if (albumDetails && albumDetailsCandidateId === selectedCandidate.id) {
+      setShowAlbumDetails((value) => !value);
+      return;
+    }
+
+    setAlbumDetailsLoading(true);
+    setAlbumDetailsError(null);
+
+    try {
+      const response = await fetch(
+        `/api/musicbrainz/release/${selectedCandidate.musicBrainzId}?inc=artists+labels+recordings+release-groups+media+recording-rels+work-rels+work-level-rels`
+      );
+
+      if (!response.ok) {
+        throw new Error('Failed to load album details');
+      }
+
+      const result = await response.json();
+      setAlbumDetails(result.data || null);
+      setAlbumDetailsCandidateId(selectedCandidate.id);
+      setShowAlbumDetails(true);
+    } catch (err) {
+      console.error('Error loading album details:', err);
+      setAlbumDetailsError(err.message || 'Failed to load album details');
+    } finally {
+      setAlbumDetailsLoading(false);
+    }
+  };
+
   const markAsManual = async () => {
     setAccepting(true);
     setError(null);
@@ -138,9 +321,11 @@ const IdentifyModal = ({
 
   if (!isOpen) return null;
 
+  const trackPreview = showAlbumDetails ? buildTrackPreview() : { rows: [], unmatchedRemoteTracks: [] };
+
   return (
     <div className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50 p-4">
-      <div className="bg-gray-900 rounded-lg max-w-4xl w-full max-h-[90vh] flex flex-col border border-gray-700">
+      <div className="bg-gray-900 rounded-lg max-w-7xl w-full max-h-[92vh] flex flex-col border border-gray-700">
         {/* Header */}
         <div className="flex items-center justify-between p-6 border-b border-gray-700">
           <div>
@@ -263,6 +448,154 @@ const IdentifyModal = ({
                   </div>
                 );
               })}
+
+              {entityType === 'album' && selectedCandidate && showAlbumDetails && (
+                <div className="mt-6 border border-gray-700 rounded-lg bg-gray-800 p-4 space-y-4">
+                  <div className="flex items-center justify-between gap-3 flex-wrap">
+                    <div>
+                      <h3 className="text-xl font-bold text-white">View Album Details</h3>
+                      <p className="text-gray-400 text-sm">
+                        Pulled MusicBrainz data and the current database track list for {entityTitle}
+                      </p>
+                    </div>
+                    <button
+                      onClick={() => setShowAlbumDetails(false)}
+                      className="px-3 py-2 border border-gray-600 text-white rounded hover:bg-gray-700 transition-colors"
+                    >
+                      Back to Matches
+                    </button>
+                  </div>
+
+                  {albumDetailsLoading ? (
+                    <div className="py-8 text-center text-gray-400">Loading album details...</div>
+                  ) : albumDetailsError ? (
+                    <div className="text-red-400 bg-red-950/40 border border-red-900 rounded p-3">
+                      {albumDetailsError}
+                    </div>
+                  ) : albumDetails ? (
+                    <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+                      <div className="space-y-4">
+                        <div className="border border-gray-700 rounded-lg bg-gray-900 p-4">
+                          <h4 className="text-lg font-semibold text-white mb-3">Pulled Data</h4>
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
+                            <div>
+                              <div className="text-gray-400">Title</div>
+                              <div className="text-white">{albumDetails.title || 'Unknown'}</div>
+                            </div>
+                            <div>
+                              <div className="text-gray-400">Artist</div>
+                              <div className="text-white">{albumDetails['artist-credit']?.map((credit) => credit.name || credit.artist?.name).join(', ') || 'Unknown'}</div>
+                            </div>
+                            <div>
+                              <div className="text-gray-400">Release Date</div>
+                              <div className="text-white">{albumDetails.date || 'Unknown'}</div>
+                            </div>
+                            <div>
+                              <div className="text-gray-400">Country</div>
+                              <div className="text-white">{albumDetails.country || 'Unknown'}</div>
+                            </div>
+                            <div>
+                              <div className="text-gray-400">Status</div>
+                              <div className="text-white">{albumDetails.status || 'Unknown'}</div>
+                            </div>
+                            <div>
+                              <div className="text-gray-400">Packaging</div>
+                              <div className="text-white">{albumDetails.packaging || 'Unknown'}</div>
+                            </div>
+                            <div>
+                              <div className="text-gray-400">Barcode</div>
+                              <div className="text-white">{albumDetails.barcode || 'Unknown'}</div>
+                            </div>
+                            <div>
+                              <div className="text-gray-400">Media</div>
+                              <div className="text-white">
+                                {(albumDetails.media || []).length} disc{(albumDetails.media || []).length === 1 ? '' : 's'}
+                              </div>
+                            </div>
+                          </div>
+
+                          <div className="mt-4 text-sm">
+                            <div className="text-gray-400 mb-1">Label</div>
+                            <div className="text-white">
+                              {(albumDetails['label-info'] || []).length > 0
+                                ? albumDetails['label-info'].map((entry) => `${entry.label?.name || 'Unknown'}${entry['catalog-number'] ? ` (${entry['catalog-number']})` : ''}`).join(', ')
+                                : 'Unknown'}
+                            </div>
+                          </div>
+
+                          <details className="mt-4">
+                            <summary className="cursor-pointer text-blue-300 hover:text-blue-200 text-sm">Raw pulled data</summary>
+                            <pre className="mt-3 max-h-64 overflow-auto rounded bg-black/40 p-3 text-xs text-gray-300 whitespace-pre-wrap break-all">
+                              {JSON.stringify(albumDetails, null, 2)}
+                            </pre>
+                          </details>
+                        </div>
+                      </div>
+
+                      <div className="border border-gray-700 rounded-lg bg-gray-900 p-4">
+                        <h4 className="text-lg font-semibold text-white mb-3">Track Updates</h4>
+                        {trackPreview.rows.length === 0 ? (
+                          <div className="text-gray-400 text-sm">No local track data available for comparison.</div>
+                        ) : (
+                          <div className="space-y-3 max-h-[52vh] overflow-y-auto pr-1">
+                            {trackPreview.rows.map((row, index) => (
+                              <div key={index} className="border border-gray-700 rounded p-3 bg-gray-800/60">
+                                <div className="flex items-start justify-between gap-3">
+                                  <div className="min-w-0">
+                                    <div className="text-xs uppercase tracking-wide text-gray-400 mb-1">Database track</div>
+                                    <div className="text-white font-medium truncate">
+                                      {row.localTrack ? `${row.localTrack.index || index + 1}. ${row.localTrack.title || 'Untitled'}` : 'No database track'}
+                                    </div>
+                                    {row.localTrack?.work?.title && (
+                                      <div className="text-xs text-gray-400 mt-1">Work: {row.localTrack.work.title}</div>
+                                    )}
+                                    {row.localTrack?.musicBrainzTrackId && (
+                                      <div className="text-xs text-gray-400 mt-1">MB Recording ID: {row.localTrack.musicBrainzTrackId}</div>
+                                    )}
+                                  </div>
+                                  <div className="text-right min-w-0">
+                                    <div className="text-xs uppercase tracking-wide text-gray-400 mb-1">Will update to</div>
+                                    <div className="text-white font-medium truncate">
+                                      {row.remoteTrack ? `${row.remoteTrack.trackNumber || index + 1}. ${row.remoteTrack.title}` : 'No MusicBrainz track'}
+                                    </div>
+                                    {row.remoteTrack?.workTitle && (
+                                      <div className="text-xs text-gray-400 mt-1">Work: {row.remoteTrack.workTitle}</div>
+                                    )}
+                                    {row.remoteTrack?.recordingId && (
+                                      <div className="text-xs text-gray-400 mt-1">MB Recording ID: {row.remoteTrack.recordingId}</div>
+                                    )}
+                                  </div>
+                                </div>
+                                <div className="mt-2 text-xs text-gray-300 bg-black/20 rounded px-2 py-1">
+                                  {row.changes}
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+
+                        {trackPreview.unmatchedRemoteTracks.length > 0 && (
+                          <div className="mt-4 border-t border-gray-700 pt-4">
+                            <h5 className="text-sm font-semibold text-white mb-3">Unmatched MusicBrainz Tracks</h5>
+                            <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
+                              {trackPreview.unmatchedRemoteTracks.map((remoteTrack) => (
+                                <div key={remoteTrack._previewKey} className="border border-gray-700 rounded px-3 py-2 bg-black/20 text-sm text-gray-300">
+                                  <div className="font-medium text-white">
+                                    {remoteTrack.discNumber}.{remoteTrack.trackNumber} {remoteTrack.title}
+                                  </div>
+                                  {remoteTrack.recordingId && (
+                                    <div className="text-xs text-gray-400 mt-1">MB Recording ID: {remoteTrack.recordingId}</div>
+                                  )}
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  ) : null}
+                </div>
+              )}
             </div>
           ) : null}
         </div>
@@ -278,6 +611,15 @@ const IdentifyModal = ({
           </button>
           
           <div className="flex gap-3">
+            {entityType === 'album' && selectedCandidate && (
+              <button
+                onClick={loadAlbumDetails}
+                disabled={albumDetailsLoading}
+                className="px-6 py-2 border border-blue-500 text-blue-300 rounded hover:bg-blue-950 transition-colors disabled:opacity-50"
+              >
+                {showAlbumDetails ? 'Hide Album Details' : 'View Album Details'}
+              </button>
+            )}
             <button
               onClick={onClose}
               disabled={accepting}

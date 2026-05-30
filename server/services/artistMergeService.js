@@ -78,7 +78,11 @@ class ArtistMergeService {
         const transferredTrackArtists = await this._transferTrackArtistRelationships(tx, mainArtistKey, mergeArtistKeys);
         console.log(`   - Transferred ${transferredTrackArtists} track artist relationship(s)`);
 
-        // 5. Delete merged artists from database
+        // 5. Transfer album artist relationships
+        const transferredAlbumArtists = await this._transferAlbumArtistRelationships(tx, mainArtistKey, mergeArtistKeys);
+        console.log(`   - Transferred ${transferredAlbumArtists} album artist relationship(s)`);
+
+        // 6. Delete merged artists from database
         await tx.plexArtist.deleteMany({
           where: { ratingKey: { in: mergeArtistKeys } }
         });
@@ -90,7 +94,8 @@ class ArtistMergeService {
           transferredAlbums,
           transferredWorks,
           transferredTypes,
-          transferredTrackArtists
+          transferredTrackArtists,
+          transferredAlbumArtists
         };
       });
 
@@ -102,7 +107,8 @@ class ArtistMergeService {
         transferredAlbums: result.transferredAlbums,
         transferredWorks: result.transferredWorks,
         transferredTypes: result.transferredTypes,
-        transferredTrackArtists: result.transferredTrackArtists
+        transferredTrackArtists: result.transferredTrackArtists,
+        transferredAlbumArtists: result.transferredAlbumArtists
       };
 
     } catch (error) {
@@ -246,6 +252,55 @@ class ArtistMergeService {
           where: {
             trackKey_artistKey_artistTypeId: {
               trackKey: relationship.trackKey,
+              artistKey: artistKey,
+              artistTypeId: relationship.artistTypeId
+            }
+          }
+        });
+      }
+    }
+
+    return transferredCount;
+  }
+
+  /**
+   * Transfer all album artist relationships from merged artists to main artist
+   * @private
+   */
+  async _transferAlbumArtistRelationships(tx, mainArtistKey, mergeArtistKeys) {
+    let transferredCount = 0;
+
+    for (const artistKey of mergeArtistKeys) {
+      const albumArtistRelationships = await tx.albumArtist.findMany({
+        where: { artistKey: artistKey }
+      });
+
+      for (const relationship of albumArtistRelationships) {
+        const existingRelationship = await tx.albumArtist.findUnique({
+          where: {
+            albumKey_artistKey_artistTypeId: {
+              albumKey: relationship.albumKey,
+              artistKey: mainArtistKey,
+              artistTypeId: relationship.artistTypeId
+            }
+          }
+        });
+
+        if (!existingRelationship) {
+          await tx.albumArtist.create({
+            data: {
+              albumKey: relationship.albumKey,
+              artistKey: mainArtistKey,
+              artistTypeId: relationship.artistTypeId
+            }
+          });
+          transferredCount++;
+        }
+
+        await tx.albumArtist.delete({
+          where: {
+            albumKey_artistKey_artistTypeId: {
+              albumKey: relationship.albumKey,
               artistKey: artistKey,
               artistTypeId: relationship.artistTypeId
             }

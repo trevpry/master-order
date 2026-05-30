@@ -905,12 +905,35 @@ class PlexDatabaseService {
   // Search artists by title
   async searchArtists(searchQuery) {
     try {
-      return await this.prisma.plexArtist.findMany({
-        where: {
-          title: {
-            contains: searchQuery
+      const makeContainsFilter = (value) => (
+        this.isPostgreSQL
+          ? { contains: value, mode: 'insensitive' }
+          : { contains: value }
+      );
+
+      const where = {
+        removed: false,
+        OR: [
+          {
+            title: makeContainsFilter(searchQuery)
+          },
+          {
+            titleSort: makeContainsFilter(searchQuery)
+          },
+          {
+            userTitle: makeContainsFilter(searchQuery)
+          },
+          {
+            userSortName: makeContainsFilter(searchQuery)
+          },
+          {
+            musicBrainzAliases: makeContainsFilter(searchQuery)
           }
-        },
+        ]
+      };
+
+      return await this.prisma.plexArtist.findMany({
+        where,
         include: {
           librarySection: true
         },
@@ -928,21 +951,44 @@ class PlexDatabaseService {
   // Search artists by title within a specific section
   async searchArtistsBySection(sectionKey, searchQuery, limit, offset) {
     try {
-      const query = {
-        where: {
-          AND: [
-            {
-              title: {
-                contains: searchQuery
-              }
-            },
-            {
-              librarySection: {
-                sectionKey: sectionKey
-              }
+      const makeContainsFilter = (value) => (
+        this.isPostgreSQL
+          ? { contains: value, mode: 'insensitive' }
+          : { contains: value }
+      );
+
+      const where = {
+        removed: false,
+        AND: [
+          {
+            librarySection: {
+              sectionKey: sectionKey
             }
-          ]
-        },
+          },
+          {
+            OR: [
+              {
+                title: makeContainsFilter(searchQuery)
+              },
+              {
+                titleSort: makeContainsFilter(searchQuery)
+              },
+              {
+                userTitle: makeContainsFilter(searchQuery)
+              },
+              {
+                userSortName: makeContainsFilter(searchQuery)
+              },
+              {
+                musicBrainzAliases: makeContainsFilter(searchQuery)
+              }
+            ]
+          }
+        ]
+      };
+
+      const query = {
+        where,
         include: {
           librarySection: true
         },
@@ -970,21 +1016,44 @@ class PlexDatabaseService {
   // Get total count of searched artists in a specific section
   async searchArtistsBySectionCount(sectionKey, searchQuery) {
     try {
-      return await this.prisma.plexArtist.count({
-        where: {
-          AND: [
-            {
-              title: {
-                contains: searchQuery
-              }
-            },
-            {
-              librarySection: {
-                sectionKey: sectionKey
-              }
+      const makeContainsFilter = (value) => (
+        this.isPostgreSQL
+          ? { contains: value, mode: 'insensitive' }
+          : { contains: value }
+      );
+
+      const where = {
+        removed: false,
+        AND: [
+          {
+            librarySection: {
+              sectionKey: sectionKey
             }
-          ]
-        }
+          },
+          {
+            OR: [
+              {
+                title: makeContainsFilter(searchQuery)
+              },
+              {
+                titleSort: makeContainsFilter(searchQuery)
+              },
+              {
+                userTitle: makeContainsFilter(searchQuery)
+              },
+              {
+                userSortName: makeContainsFilter(searchQuery)
+              },
+              {
+                musicBrainzAliases: makeContainsFilter(searchQuery)
+              }
+            ]
+          }
+        ]
+      };
+
+      return await this.prisma.plexArtist.count({
+        where
       });
     } catch (error) {
       console.error('Error counting searched artists by section:', error);
@@ -1106,7 +1175,17 @@ class PlexDatabaseService {
         include: {
           librarySection: true,
           artist: true,
-          tracks: true
+          tracks: true,
+          albumArtists: {
+            include: {
+              artist: true,
+              artistType: true
+            },
+            orderBy: [
+              { artistType: { name: 'asc' } },
+              { artist: { title: 'asc' } }
+            ]
+          }
         }
       });
     } catch (error) {
@@ -1301,6 +1380,7 @@ class PlexDatabaseService {
         where: { parentRatingKey: albumRatingKey },
         include: {
           librarySection: true,
+          work: true,
           album: {
             include: {
               artist: true

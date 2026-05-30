@@ -64,12 +64,12 @@ class MusicBrainzService {
         query += ` AND artist:"${artist}"`;
       }
 
-      const result = await this.request('release-group', {
+      const result = await this.request('release', {
         query,
         limit
       });
 
-      return result['release-groups'] || [];
+      return result.releases || [];
     } catch (error) {
       console.error('MusicBrainz release search error:', error);
       throw error;
@@ -96,7 +96,7 @@ class MusicBrainzService {
   }
 
   /**
-   * Get detailed album information by MBID
+   * Get detailed release-group information by MBID
    */
   async getAlbumDetails(mbid) {
     try {
@@ -110,10 +110,57 @@ class MusicBrainzService {
   }
 
   /**
-   * Get release details by MBID (alias for getAlbumDetails)
+   * Get detailed release information by MBID
+   */
+  async getReleaseDetails(mbid) {
+    try {
+      return await this.request(`release/${mbid}`, {
+        inc: 'artist-credits+labels+recordings+release-groups+media+tags+artist-rels+recording-rels+work-rels+work-level-rels'
+      });
+    } catch (error) {
+      console.error('MusicBrainz release details error:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get album details by MBID, supporting both release and release-group IDs
    */
   async getRelease(mbid) {
-    return await this.getAlbumDetails(mbid);
+    try {
+      return await this.getReleaseDetails(mbid);
+    } catch (error) {
+      if (!String(error.message).includes('404')) {
+        throw error;
+      }
+
+      const releaseGroup = await this.getAlbumDetails(mbid);
+      const fallbackReleaseId = releaseGroup?.releases?.[0]?.id;
+
+      if (!fallbackReleaseId) {
+        return releaseGroup;
+      }
+
+      const release = await this.getReleaseDetails(fallbackReleaseId);
+      return {
+        ...release,
+        releaseGroup
+      };
+    }
+  }
+
+  /**
+   * Get detailed recording information by MBID
+   */
+  async getRecordingDetails(mbid) {
+    try {
+      return await this.request(`recording/${mbid}`, {
+        inc: 'artist-credits+artist-rels+work-rels+work-level-rels+tags'
+      });
+    } catch (error) {
+      console.error('MusicBrainz recording details error:', error);
+      throw error;
+    }
   }
 
   /**

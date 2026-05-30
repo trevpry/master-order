@@ -201,49 +201,45 @@ echo "[INFO] Checking for existing database data..."
 PRESERVE_EXISTING_DATA=false
 
 # Test if we can connect and if key tables exist with data
-if npx prisma db pull --force-reset >/dev/null 2>&1; then
-    # Database exists and is accessible, check for user data
-    echo "[INFO] Database connection successful, checking for existing data..."
-    
-    # Check if key tables have data using Prisma
-    EXISTING_DATA_CHECK=$(node -e "
-        const { PrismaClient } = require('@prisma/client');
-        const prisma = new PrismaClient();
-        
-        async function checkData() {
-            try {
-                const settings = await prisma.settings.count().catch(() => 0);
-                const customOrders = await prisma.customOrder.count().catch(() => 0);
-                const plexData = await prisma.plexMovie.count().catch(() => 0);
-                const total = settings + customOrders + plexData;
-                
-                if (total > 0) {
-                    console.log('HAS_DATA');
-                    console.log('Settings: ' + settings);
-                    console.log('Custom Orders: ' + customOrders);
-                    console.log('Plex Movies: ' + plexData);
-                } else {
-                    console.log('NO_DATA');
-                }
-            } catch (error) {
-                console.log('CHECK_FAILED');
-            } finally {
-                await prisma.\$disconnect();
+EXISTING_DATA_CHECK=$(node -e "
+    const { PrismaClient } = require('@prisma/client');
+    const prisma = new PrismaClient();
+
+    async function checkData() {
+        try {
+            await prisma.\$connect();
+            const settings = await prisma.settings.count().catch(() => 0);
+            const customOrders = await prisma.customOrder.count().catch(() => 0);
+            const plexData = await prisma.plexMovie.count().catch(() => 0);
+            const total = settings + customOrders + plexData;
+
+            if (total > 0) {
+                console.log('HAS_DATA');
+                console.log('Settings: ' + settings);
+                console.log('Custom Orders: ' + customOrders);
+                console.log('Plex Movies: ' + plexData);
+            } else {
+                console.log('NO_DATA');
             }
+        } catch (error) {
+            console.log('CHECK_FAILED');
+        } finally {
+            await prisma.\$disconnect().catch(() => {});
         }
-        
-        checkData();
-    " 2>/dev/null || echo "CHECK_FAILED")
-    
-    if echo "$EXISTING_DATA_CHECK" | grep -q "HAS_DATA"; then
-        echo "[INFO] FOUND EXISTING USER DATA:"
-        echo "$EXISTING_DATA_CHECK" | grep -E "(Settings|Custom Orders|Plex Movies):"
-        echo "[INFO] PRESERVING EXISTING DATABASE - Will only apply new migrations"
-        PRESERVE_EXISTING_DATA=true
-    else
-        echo "[INFO] Database exists but has no user data"
-        PRESERVE_EXISTING_DATA=false
-    fi
+    }
+
+    checkData();
+" 2>/dev/null || echo "CHECK_FAILED")
+
+if echo "$EXISTING_DATA_CHECK" | grep -q "HAS_DATA"; then
+    echo "[INFO] Database connection successful, checking for existing data..."
+    echo "[INFO] FOUND EXISTING USER DATA:"
+    echo "$EXISTING_DATA_CHECK" | grep -E "(Settings|Custom Orders|Plex Movies):"
+    echo "[INFO] PRESERVING EXISTING DATABASE - Will only apply new migrations"
+    PRESERVE_EXISTING_DATA=true
+elif echo "$EXISTING_DATA_CHECK" | grep -q "NO_DATA"; then
+    echo "[INFO] Database connection successful, but no existing user data was found"
+    PRESERVE_EXISTING_DATA=false
 else
     echo "[INFO] Database does not exist or is not accessible - will initialize new database"
     PRESERVE_EXISTING_DATA=false
@@ -263,21 +259,26 @@ if [ "$PRESERVE_EXISTING_DATA" = true ]; then
         
         # Try push again with more verbose output
         echo "[DEBUG] Retry db push with verbose output..."
-        if ! npx prisma db push --accept-data-loss=false --force-reset=false 2>&1; then
+        if ! npx prisma db push --accept-data-loss=false 2>&1; then
             echo "[ERROR] DB push failed - schema may have breaking changes"
-            echo "[INFO] Falling back to migration approach..."
-            
-            # Check migration status and try to resolve
             MIGRATION_STATUS=$(npx prisma migrate status 2>&1)
             if echo "$MIGRATION_STATUS" | grep -q "following migration have not yet been applied"; then
-                echo "[INFO] Applying pending migrations..."
-                npx prisma migrate deploy
+                echo "[DATA-SAFE] Pending migrations detected, but automatic migrate deploy is blocked for existing databases"
+                echo "[INFO] Manual intervention required to review those migrations before applying them"
+                echo "[INFO] Your data is completely safe - no migration was applied"
+                exit 1
             elif echo "$MIGRATION_STATUS" | grep -q "Your local migration history and the migrations table"; then
                 echo "[WARNING] Migration history conflict detected"
                 echo "[DATA-SAFE] Will NOT reset database to preserve your data"
-                echo "[INFO] Continuing with existing schema - manual intervention may be needed"
+                echo "[INFO] Manual intervention is required before proceeding"
                 echo "[INFO] Your data is completely safe"
                 echo "[INFO] To resolve manually, use: npx prisma db push --accept-data-loss=false"
+                exit 1
+            else
+                echo "[DATA-SAFE] Automatic migration fallback is blocked for existing databases"
+                echo "[INFO] Manual intervention is required to review the schema change safely"
+                echo "[INFO] Your data is completely safe - no destructive operation was attempted"
+                exit 1
             fi
         else
             echo "[SUCCESS] Schema updated successfully with db push"

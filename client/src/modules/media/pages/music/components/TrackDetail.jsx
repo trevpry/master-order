@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import config from '../../../../../config';
+import EmbeddedPicardTagsPanel from './EmbeddedPicardTagsPanel';
 import './TrackDetail.css';
 
 const TrackDetail = ({ trackRatingKey, onGoBack, onSelectAlbum, onSelectArtist, onSelectWork, onPlayTrack }) => {
@@ -225,6 +226,8 @@ const TrackDetail = ({ trackRatingKey, onGoBack, onSelectAlbum, onSelectArtist, 
     return `${mb.toFixed(2)} MB`;
   };
 
+  const linkedWork = track?.work || track?.workPartTracks?.[0]?.workPart?.work || null;
+
   if (loading) {
     return (
       <div className="track-detail">
@@ -299,6 +302,34 @@ const TrackDetail = ({ trackRatingKey, onGoBack, onSelectAlbum, onSelectArtist, 
             <div className="track-number">
               <span className="label">Track:</span>
               <span>{track.index}</span>
+            </div>
+          )}
+
+          {linkedWork && (
+            <div className="track-work-info">
+              <div className="track-work-row">
+                <span className="label">Work:</span>
+                <button
+                  className="link-button"
+                  onClick={() => onSelectWork && onSelectWork(linkedWork.id)}
+                >
+                  {linkedWork.title}
+                </button>
+              </div>
+              {linkedWork.composer?.title && (
+                <div className="track-work-composer">
+                  <span className="label">Composer:</span>
+                  <span>{linkedWork.composer.title}</span>
+                </div>
+              )}
+              {linkedWork.parts && linkedWork.parts.length > 0 && (
+                <div className="track-work-parts">
+                  <span className="label">Parts:</span>
+                  <span>
+                    {linkedWork.parts.map((part) => part.title).join(', ')}
+                  </span>
+                </div>
+              )}
             </div>
           )}
 
@@ -380,6 +411,9 @@ const TrackDetail = ({ trackRatingKey, onGoBack, onSelectAlbum, onSelectArtist, 
             </div>
           )}
         </div>
+
+        {/* Work Parts */}
+        <EmbeddedPicardTagsPanel entityType="track" entityKey={track.ratingKey} />
 
         {/* Work Parts */}
         <div className="track-works">

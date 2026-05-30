@@ -22,6 +22,7 @@ function Settings() {
   const [stashUrl, setStashUrl] = useState('');
   const [rawgApiKey, setRawgApiKey] = useState('');
   const [geminiApiKey, setGeminiApiKey] = useState('');
+  const [backgroundImageStoragePath, setBackgroundImageStoragePath] = useState('');
   // Percentage states
   const [partiallyWatchedCollectionPercent, setPartiallyWatchedCollectionPercent] = useState(75);
   const [plexSyncInterval, setPlexSyncInterval] = useState(12);
@@ -48,6 +49,8 @@ function Settings() {
   const [listScrapeLoading, setListScrapeLoading] = useState(false);
   const [listScrapeMessage, setListScrapeMessage] = useState('');
   const [listScrapeStatus, setListScrapeStatus] = useState(null);
+  const [backgroundImportLoading, setBackgroundImportLoading] = useState(false);
+  const [backgroundImportMessage, setBackgroundImportMessage] = useState('');
   
   // Collection states
   const [availableCollections, setAvailableCollections] = useState([]);
@@ -131,6 +134,7 @@ function Settings() {
           setStashUrl(settings.stashUrl || '');
           setRawgApiKey(settings.rawgApiKey || '');
           setGeminiApiKey(settings.geminiApiKey || '');
+          setBackgroundImageStoragePath(settings.backgroundImageStoragePath || '');
           setSelectedPlayer(settings.selectedPlayer || '');
           setSelectedPlexUser(settings.selectedPlexUser || '');
           setPartiallyWatchedCollectionPercent(settings.partiallyWatchedCollectionPercent ?? 75);
@@ -349,6 +353,7 @@ function Settings() {
           stashUrl,
           rawgApiKey,
           geminiApiKey,
+          backgroundImageStoragePath,
           plexToken,
           plexUrl,
           tvdbApiKey,
@@ -532,6 +537,34 @@ function Settings() {
     }
   };
 
+  const handleImportBackgroundsFromStorage = async () => {
+    try {
+      if (!backgroundImageStoragePath.trim()) {
+        showMessage('Set a background image storage path before importing.', true);
+        return;
+      }
+
+      setBackgroundImportLoading(true);
+      setBackgroundImportMessage('Scanning storage path and importing images...');
+
+      const result = await fetchWithErrorHandling(`${config.apiBaseUrl}/api/backgrounds/import-from-storage`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        }
+      });
+
+      const stats = result?.stats || {};
+      setBackgroundImportMessage(
+        `Import finished. Scanned: ${stats.scanned || 0}, Imported: ${stats.imported || 0}, Skipped: ${stats.skipped || 0}, Failed: ${stats.failed || 0}`
+      );
+    } catch (error) {
+      setBackgroundImportMessage(`Import failed: ${error.message}`);
+    } finally {
+      setBackgroundImportLoading(false);
+    }
+  };
+
   if (loading) {
     return (
       <main className="settings-main">
@@ -690,6 +723,38 @@ function Settings() {
                   <small className="field-note">
                     Get your API key from: <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener noreferrer">https://aistudio.google.com/apikey</a>
                   </small>
+                </div>
+
+                <div className="config-field compact">
+                  <label htmlFor="background_image_storage_path">🖼️ Background Image Storage Path:</label>
+                  <input
+                    type="text"
+                    id="background_image_storage_path"
+                    name="background_image_storage_path"
+                    value={backgroundImageStoragePath}
+                    onChange={(e) => setBackgroundImageStoragePath(e.target.value)}
+                    placeholder="\\\\NAS\\media\\eddie-backgrounds"
+                    className="api-input compact"
+                  />
+                  <p className="setting-description">
+                    Uploaded and downloaded background images will be stored in this folder instead of the app directory.
+                    Use a persistent local path or network share path.
+                    In Docker/Unraid, UNC paths like \\tower\Media\Other\Images\background-images are translated to mounted container paths.
+                  </p>
+                  <div className="background-import-actions">
+                    <Button
+                      onClick={handleImportBackgroundsFromStorage}
+                      disabled={backgroundImportLoading || !backgroundImageStoragePath.trim()}
+                      className="sync-button force compact"
+                    >
+                      {backgroundImportLoading ? '🧭 Importing...' : '📥 Bulk Import Images From Path'}
+                    </Button>
+                  </div>
+                  {backgroundImportMessage && (
+                    <div className="sync-message compact">
+                      <p>{backgroundImportMessage}</p>
+                    </div>
+                  )}
                 </div>
 
                 <div className="config-field compact">

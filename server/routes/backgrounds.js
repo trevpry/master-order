@@ -4,6 +4,7 @@ const multer = require('multer');
 const fetch = require('node-fetch');
 const path = require('path');
 const fs = require('fs');
+const fsp = require('fs/promises');
 
 const prisma = require('../prismaClient'); // Use shared singleton instance
 
@@ -13,14 +14,150 @@ function getUploadDirectory(type = '') {
   return type ? path.join(baseDir, type) : baseDir;
 }
 
+function sanitizeStoragePath(storagePath) {
+  if (typeof storagePath !== 'string') return '';
+  const trimmed = storagePath.trim();
+  return trimmed;
+}
+
+function normalizeSlashes(inputPath) {
+  return inputPath.replace(/\\/g, '/');
+}
+
+function parseUncPath(inputPath) {
+  const normalized = normalizeSlashes(inputPath);
+  const match = normalized.match(/^\/\/([^/]+)\/([^/]+)(\/.*)?$/);
+  if (!match) return null;
+
+  return {
+    server: match[1],
+    share: match[2],
+    rest: (match[3] || '').replace(/^\/+/, '')
+  };
+}
+
+function applyUncMappings(inputPath) {
+  const mappings = process.env.BACKGROUND_UNC_PATH_MAPPINGS;
+  if (!mappings) return null;
+
+  const normalizedInput = normalizeSlashes(inputPath);
+  const mappingPairs = mappings
+    .split(';')
+    .map(entry => entry.trim())
+    .filter(Boolean);
+
+  for (const pair of mappingPairs) {
+    const separatorIndex = pair.indexOf('=');
+    if (separatorIndex <= 0) continue;
+
+    const uncPrefix = normalizeSlashes(pair.slice(0, separatorIndex).trim()).replace(/\/+$/, '');
+    const targetPrefix = pair.slice(separatorIndex + 1).trim();
+    if (!uncPrefix || !targetPrefix) continue;
+
+    const inputLower = normalizedInput.toLowerCase();
+    const prefixLower = uncPrefix.toLowerCase();
+    if (inputLower === prefixLower || inputLower.startsWith(`${prefixLower}/`)) {
+      const remainder = normalizedInput.slice(uncPrefix.length).replace(/^\/+/, '');
+      return remainder ? path.join(targetPrefix, remainder) : targetPrefix;
+    }
+  }
+
+  return null;
+}
+
+function resolveConfiguredStoragePath(configuredPath) {
+  const rawPath = sanitizeStoragePath(configuredPath);
+  if (!rawPath) return '';
+
+  const unc = parseUncPath(rawPath);
+  if (!unc) {
+    return path.resolve(rawPath);
+  }
+
+  // UNC paths are directly usable on Windows hosts.
+  if (process.platform === 'win32') {
+    return path.resolve(rawPath);
+  }
+
+  // First priority: explicit mapping provided via environment variable.
+  const mappedPath = applyUncMappings(rawPath);
+  if (mappedPath) {
+    return path.resolve(mappedPath);
+  }
+
+  // Unraid default heuristic: //tower/Media/... -> /mnt/user/Media/...
+  const unraidServerName = (process.env.UNRAID_SERVER_NAME || 'tower').toLowerCase();
+  if (unc.server.toLowerCase() === unraidServerName) {
+    const unraidShareRoot = process.env.UNRAID_SHARE_ROOT || '/mnt/user';
+    return path.resolve(path.join(unraidShareRoot, unc.share, unc.rest));
+  }
+
+  // Generic Linux fallback for externally mounted SMB shares.
+  const uncMountRoot = process.env.UNC_MOUNT_ROOT || '/mnt/remotes';
+  return path.resolve(path.join(uncMountRoot, unc.server, unc.share, unc.rest));
+}
+
+function isImageFile(filePath) {
+  const ext = path.extname(filePath).toLowerCase();
+  return ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp', '.tif', '.tiff', '.avif'].includes(ext);
+}
+
+async function getConfiguredBackgroundStoragePath() {
+  const settings = await prisma.settings.findUnique({
+    where: { id: 1 },
+    select: { backgroundImageStoragePath: true }
+  });
+
+  return sanitizeStoragePath(settings?.backgroundImageStoragePath);
+}
+
+async function getBackgroundUploadDirectory() {
+  const configuredPath = await getConfiguredBackgroundStoragePath();
+  if (configuredPath) {
+    return resolveConfiguredStoragePath(configuredPath);
+  }
+
+  return path.resolve(getUploadDirectory('backgrounds'));
+}
+
+async function ensureBackgroundUploadDirectory() {
+  const uploadDir = await getBackgroundUploadDirectory();
+  if (!fs.existsSync(uploadDir)) {
+    fs.mkdirSync(uploadDir, { recursive: true });
+  }
+
+  return uploadDir;
+}
+
+async function walkImageFilesRecursive(rootDir, maxFiles = 5000) {
+  const files = [];
+
+  async function walk(dir) {
+    if (files.length >= maxFiles) return;
+    const entries = await fsp.readdir(dir, { withFileTypes: true });
+
+    for (const entry of entries) {
+      if (files.length >= maxFiles) break;
+      const fullPath = path.join(dir, entry.name);
+
+      if (entry.isDirectory()) {
+        await walk(fullPath);
+      } else if (entry.isFile() && isImageFile(fullPath)) {
+        files.push(fullPath);
+      }
+    }
+  }
+
+  await walk(rootDir);
+  return files;
+}
+
 // Configure multer for file uploads
 const backgroundStorage = multer.diskStorage({
   destination: (req, file, cb) => {
-    const uploadDir = getUploadDirectory('backgrounds');
-    if (!fs.existsSync(uploadDir)) {
-      fs.mkdirSync(uploadDir, { recursive: true });
-    }
-    cb(null, uploadDir);
+    ensureBackgroundUploadDirectory()
+      .then(uploadDir => cb(null, uploadDir))
+      .catch(error => cb(error));
   },
   filename: (req, file, cb) => {
     // Generate unique filename with original extension
@@ -296,10 +433,7 @@ router.post('/download', async (req, res) => {
       `bg-downloaded-${uniqueSuffix}${ext}`;
 
     // Ensure upload directory exists
-    const uploadDir = getUploadDirectory('backgrounds');
-    if (!fs.existsSync(uploadDir)) {
-      fs.mkdirSync(uploadDir, { recursive: true });
-    }
+    const uploadDir = await ensureBackgroundUploadDirectory();
 
     const filePath = path.join(uploadDir, generatedFilename);
 
@@ -444,10 +578,7 @@ router.post('/download-gallery-bulk', async (req, res) => {
         const generatedFilename = `bg-gallery-${i + 1}-${uniqueSuffix}${ext}`;
 
         // Ensure upload directory exists
-        const uploadDir = getUploadDirectory('backgrounds');
-        if (!fs.existsSync(uploadDir)) {
-          fs.mkdirSync(uploadDir, { recursive: true });
-        }
+        const uploadDir = await ensureBackgroundUploadDirectory();
 
         const filePath = path.join(uploadDir, generatedFilename);
 
@@ -493,6 +624,108 @@ router.post('/download-gallery-bulk', async (req, res) => {
     res.status(500).json({
       success: false,
       error: 'Failed to bulk download from gallery',
+      message: error.message
+    });
+  }
+});
+
+// Bulk import existing image files from configured background storage path
+router.post('/import-from-storage', async (req, res) => {
+  console.log('📸 [BACKGROUNDS] Bulk import from storage endpoint called');
+
+  try {
+    const { maxFiles = 2000 } = req.body || {};
+    const configuredPath = await getConfiguredBackgroundStoragePath();
+
+    if (!configuredPath) {
+      return res.status(400).json({
+        success: false,
+        error: 'Background image storage path is not configured in Media Settings'
+      });
+    }
+
+    const storagePath = resolveConfiguredStoragePath(configuredPath);
+    if (!fs.existsSync(storagePath)) {
+      return res.status(400).json({
+        success: false,
+        error: `Configured storage path does not exist: ${storagePath}`
+      });
+    }
+
+    const discoveredFiles = await walkImageFilesRecursive(storagePath, Number(maxFiles) || 2000);
+
+    if (discoveredFiles.length === 0) {
+      return res.json({
+        success: true,
+        message: 'No image files found to import',
+        stats: { scanned: 0, imported: 0, skipped: 0, failed: 0 },
+        imported: [],
+        errors: []
+      });
+    }
+
+    const existingRecords = await prisma.backgroundImage.findMany({
+      where: { path: { in: discoveredFiles } },
+      select: { path: true }
+    });
+
+    const existingPaths = new Set(existingRecords.map(record => path.resolve(record.path)));
+    const imported = [];
+    const errors = [];
+    let skipped = 0;
+
+    for (const filePath of discoveredFiles) {
+      const normalizedPath = path.resolve(filePath);
+      if (existingPaths.has(normalizedPath)) {
+        skipped += 1;
+        continue;
+      }
+
+      try {
+        const stats = await fsp.stat(normalizedPath);
+        const ext = path.extname(normalizedPath).toLowerCase();
+        const mimetype =
+          ext === '.png' ? 'image/png' :
+          ext === '.gif' ? 'image/gif' :
+          ext === '.webp' ? 'image/webp' :
+          ext === '.bmp' ? 'image/bmp' :
+          ext === '.avif' ? 'image/avif' :
+          ext === '.tif' || ext === '.tiff' ? 'image/tiff' :
+          'image/jpeg';
+
+        const created = await prisma.backgroundImage.create({
+          data: {
+            filename: path.basename(normalizedPath),
+            originalName: path.basename(normalizedPath),
+            path: normalizedPath,
+            mimetype,
+            size: stats.size
+          }
+        });
+
+        imported.push(created);
+      } catch (error) {
+        errors.push({ filePath: normalizedPath, error: error.message });
+      }
+    }
+
+    return res.json({
+      success: true,
+      message: `Imported ${imported.length} images from storage path`,
+      stats: {
+        scanned: discoveredFiles.length,
+        imported: imported.length,
+        skipped,
+        failed: errors.length
+      },
+      imported,
+      errors
+    });
+  } catch (error) {
+    console.error('📸 [BACKGROUNDS] Import from storage error:', error);
+    return res.status(500).json({
+      success: false,
+      error: 'Failed to import backgrounds from storage path',
       message: error.message
     });
   }

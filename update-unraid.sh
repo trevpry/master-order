@@ -12,6 +12,8 @@
 # - Same data protection as original build
 # - See DOCKER_OPTIMIZED_DATA_SAFETY.md for details
 
+set -euo pipefail
+
 # ===============================================================================
 # CONFIGURATION SECTION - UPDATE THESE VALUES FOR YOUR ENVIRONMENT
 # ===============================================================================
@@ -31,6 +33,18 @@ POSTGRES_USER="master_order_user"
 POSTGRES_PASSWORD="secure_password_change_me"
 DATABASE_URL="postgresql://$POSTGRES_USER:$POSTGRES_PASSWORD@$POSTGRES_HOST:$POSTGRES_PORT/$POSTGRES_DB"
 
+# Background image storage (UNC path compatibility for Docker/Unraid)
+UNRAID_SERVER_NAME="tower"
+BACKGROUND_STORAGE_HOST_PATH="/mnt/user/Media/Other/Images/background-images"
+BACKGROUND_STORAGE_CONTAINER_PATH="/mnt/user/Media/Other/Images/background-images"
+# Windows UNC path users will set this in Media Settings UI:
+# \\tower\Media\Other\Images\background-images
+BACKGROUND_UNC_PATH_MAPPINGS="//${UNRAID_SERVER_NAME}/Media/Other/Images/background-images=${BACKGROUND_STORAGE_CONTAINER_PATH}"
+RUN_MIGRATION_AFTER_DEPLOY=false
+CURRENT_BACKUP_FILE=""
+PRE_DEPLOY_COUNTS_FILE=""
+POST_DEPLOY_COUNTS_FILE=""
+
 # Parse command line arguments
 USE_CACHE=true
 if [ "$1" == "--no-cache" ]; then
@@ -45,6 +59,8 @@ fi
 echo "🔄 Starting Master Order update on Unraid..."
 echo "🗃️  Target PostgreSQL: $POSTGRES_HOST:$POSTGRES_PORT/$POSTGRES_DB"
 echo "⚡ Build mode: $([ "$USE_CACHE" = true ] && echo 'Optimized (with layer caching)' || echo 'Full rebuild (no cache)')"
+echo "🖼️  Background storage mount: ${BACKGROUND_STORAGE_HOST_PATH} -> ${BACKGROUND_STORAGE_CONTAINER_PATH}"
+echo "🔀 UNC mapping: ${BACKGROUND_UNC_PATH_MAPPINGS}"
 
 # Basic pre-flight checks
 echo ""
@@ -119,12 +135,137 @@ log_error() {
     echo "❌ $1" | tee -a "$MIGRATION_LOG"
 }
 
+require_existing_directory() {
+    local directory_path="$1"
+    local description="$2"
+
+    if [ ! -d "$directory_path" ]; then
+        log_error "$description directory is missing: $directory_path"
+        log_error "Refusing to deploy because Docker would create a new empty mount path"
+        exit 1
+    fi
+
+    log_success "$description directory verified: $directory_path"
+}
+
+run_postgres_psql() {
+    local sql="$1"
+
+    if command -v psql &> /dev/null; then
+        PGPASSWORD="$POSTGRES_PASSWORD" psql \
+            -h "$POSTGRES_HOST" \
+            -p "$POSTGRES_PORT" \
+            -U "$POSTGRES_USER" \
+            -d "$POSTGRES_DB" \
+            -tA \
+            -c "$sql"
+        return $?
+    fi
+
+    if docker ps --format '{{.Names}}' | grep -qx "$CONTAINER_NAME"; then
+        docker exec -e PGPASSWORD="$POSTGRES_PASSWORD" "$CONTAINER_NAME" \
+            psql -h "$POSTGRES_HOST" -p "$POSTGRES_PORT" -U "$POSTGRES_USER" -d "$POSTGRES_DB" -tA -c "$sql"
+        return $?
+    fi
+
+    if docker ps --format '{{.Names}}' | grep -qx "postgresql16"; then
+        docker exec -e PGPASSWORD="$POSTGRES_PASSWORD" postgresql16 \
+            psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -tA -c "$sql"
+        return $?
+    fi
+
+    return 1
+}
+
+verify_backup_artifact() {
+    local backup_file="$1"
+
+    if [ ! -s "$backup_file" ]; then
+        log_error "Backup artifact is missing or empty: $backup_file"
+        return 1
+    fi
+
+    if [[ "$backup_file" == *.sql ]] && ! grep -q "PostgreSQL database dump" "$backup_file"; then
+        log_error "Backup artifact does not look like a valid PostgreSQL dump: $backup_file"
+        return 1
+    fi
+
+    return 0
+}
+
+capture_table_counts() {
+    local snapshot_file="$1"
+    local snapshot_label="$2"
+    local table_names
+
+    log_info "Capturing ${snapshot_label} PostgreSQL table counts..."
+    table_names=$(run_postgres_psql "SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' AND table_type = 'BASE TABLE' ORDER BY table_name;") || {
+        log_error "Failed to list PostgreSQL tables for ${snapshot_label} snapshot"
+        return 1
+    }
+
+    : > "$snapshot_file"
+
+    while IFS= read -r table_name; do
+        local row_count
+
+        [ -z "$table_name" ] && continue
+        [ "$table_name" = "_prisma_migrations" ] && continue
+
+        row_count=$(run_postgres_psql "SELECT COUNT(*) FROM \"$table_name\";") || {
+            log_error "Failed to count rows for table '$table_name'"
+            return 1
+        }
+
+        echo "${table_name}|${row_count}" >> "$snapshot_file"
+    done <<EOF
+$table_names
+EOF
+
+    if [ ! -s "$snapshot_file" ]; then
+        log_error "No table counts were captured in ${snapshot_file}"
+        return 1
+    fi
+
+    log_success "Captured ${snapshot_label} table counts: $(basename "$snapshot_file")"
+}
+
+compare_table_count_snapshots() {
+    local before_file="$1"
+    local after_file="$2"
+
+    log_info "Comparing pre-deploy and post-deploy table counts..."
+
+    while IFS='|' read -r table_name before_count; do
+        local after_count
+
+        [ -z "$table_name" ] && continue
+        after_count=$(awk -F'|' -v table_name="$table_name" '$1 == table_name { print $2 }' "$after_file")
+
+        if [ -z "$after_count" ]; then
+            log_error "Table '$table_name' is missing from the post-deploy snapshot"
+            return 1
+        fi
+
+        if [ "$after_count" -lt "$before_count" ]; then
+            log_error "Table '$table_name' row count decreased from $before_count to $after_count"
+            log_error "Potential data loss detected. Restore from backup before using the new container."
+            return 1
+        fi
+    done < "$before_file"
+
+    log_success "Post-deploy table counts did not decrease"
+}
+
 # Check for required files (now using updated repository)
 log_info "Checking for required files in updated repository..."
 REQUIRED_FILES=(
     "server/index.js"
     "Dockerfile"
+    "Dockerfile.optimized"
+    "Dockerfile.optimized-no-buildkit"
     "docker-compose.yml"
+    "verify-safety.sh"
     "package.json"
 )
 
@@ -146,29 +287,36 @@ fi
 
 log_success "All required files present in updated repository"
 
+log_info "Running mandatory data safety verification..."
+chmod +x ./verify-safety.sh
+./verify-safety.sh
+log_success "Data safety verification passed"
+
+log_info "Validating persistent host mount directories..."
+require_existing_directory "/mnt/user/appdata/master-order/data" "Persistent app data"
+require_existing_directory "/mnt/user/appdata/master-order/artwork-cache" "Artwork cache"
+require_existing_directory "/mnt/user/appdata/master-order/logs" "Application logs"
+require_existing_directory "$BACKGROUND_STORAGE_HOST_PATH" "Background image storage"
+
 # Function to test PostgreSQL connectivity (skip if tools not available)
 test_postgresql_connection() {
     log_info "Testing PostgreSQL connection..."
-    
-    # Try to connect using psql if available
-    if command -v psql &> /dev/null; then
-        if psql "$DATABASE_URL" -c "SELECT 1;" &> /dev/null; then
-            log_success "PostgreSQL connection successful"
-            return 0
-        else
-            log_error "PostgreSQL connection failed"
-            return 1
-        fi
-    else
-        log_warning "psql not available, skipping connection test"
+
+    if run_postgres_psql "SELECT 1;" >/dev/null; then
+        log_success "PostgreSQL connection successful"
         return 0
     fi
+
+    log_error "PostgreSQL connection failed"
+    log_error "No working psql path was available on the host or running containers"
+    return 1
 }
 
 # Function to create SQLite backup (only used when SQLite is detected)
 create_sqlite_backup() {
     local backup_timestamp=$(date +"%Y%m%d_%H%M%S")
     local sqlite_backup_file="$BACKUP_DIR/master_order_backup_$backup_timestamp.db"
+    CURRENT_BACKUP_FILE=""
     
     log_info "Creating SQLite database backup..."
     
@@ -178,7 +326,7 @@ create_sqlite_backup() {
             if docker cp "$CONTAINER_NAME:/app/data/master_order.db" "$sqlite_backup_file"; then
                 local backup_size=$(ls -lh "$sqlite_backup_file" | awk '{print $5}')
                 log_success "SQLite backup created from container: $(basename "$sqlite_backup_file") ($backup_size)"
-                echo "$sqlite_backup_file"
+                CURRENT_BACKUP_FILE="$sqlite_backup_file"
                 return 0
             else
                 log_warning "Failed to copy SQLite database from container"
@@ -193,7 +341,7 @@ create_sqlite_backup() {
         if cp "./master_order.db" "$sqlite_backup_file"; then
             local backup_size=$(ls -lh "$sqlite_backup_file" | awk '{print $5}')
             log_success "SQLite backup created from local file: $(basename "$sqlite_backup_file") ($backup_size)"
-            echo "$sqlite_backup_file"
+            CURRENT_BACKUP_FILE="$sqlite_backup_file"
             return 0
         else
             log_warning "Failed to copy local SQLite database"
@@ -248,6 +396,7 @@ create_database_backup() {
 create_postgresql_backup() {
     local backup_timestamp=$(date +"%Y%m%d_%H%M%S")
     local postgres_backup_file="$BACKUP_DIR/postgresql_backup_$backup_timestamp.sql"
+    CURRENT_BACKUP_FILE=""
     
     log_info "Creating PostgreSQL database backup..."
     
@@ -260,7 +409,7 @@ create_postgresql_backup() {
             if [ -s "$postgres_backup_file" ]; then
                 local backup_size=$(ls -lh "$postgres_backup_file" | awk '{print $5}')
                 log_success "PostgreSQL backup created: $(basename "$postgres_backup_file") ($backup_size)"
-                echo "$postgres_backup_file"
+                CURRENT_BACKUP_FILE="$postgres_backup_file"
                 return 0
             else
                 log_warning "Backup file created but is empty"
@@ -279,7 +428,7 @@ create_postgresql_backup() {
             if [ -s "$postgres_backup_file" ]; then
                 local backup_size=$(ls -lh "$postgres_backup_file" | awk '{print $5}')
                 log_success "PostgreSQL backup created via postgresql16 container: $(basename "$postgres_backup_file") ($backup_size)"
-                echo "$postgres_backup_file"
+                CURRENT_BACKUP_FILE="$postgres_backup_file"
                 return 0
             else
                 log_warning "Backup file created but is empty"
@@ -296,7 +445,7 @@ create_postgresql_backup() {
             if [ -s "$postgres_backup_file" ]; then
                 local backup_size=$(ls -lh "$postgres_backup_file" | awk '{print $5}')
                 log_success "PostgreSQL backup created via host pg_dump: $(basename "$postgres_backup_file") ($backup_size)"
-                echo "$postgres_backup_file"
+                CURRENT_BACKUP_FILE="$postgres_backup_file"
                 return 0
             else
                 log_warning "Host backup file created but is empty"
@@ -319,6 +468,7 @@ create_postgresql_backup() {
 log_info "Creating automatic database backup..."
 BACKUP_TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
 BACKUP_FILE="$BACKUP_DIR/master_order_backup_$BACKUP_TIMESTAMP.db"
+BACKUP_SUCCESS=false
 
 # First try to backup from running container
 if docker ps | grep -q "$CONTAINER_NAME"; then
@@ -370,21 +520,36 @@ else
     log_warning "No database found to backup"
     log_info "Checked: Container at /app/data/master_order.db"
     log_info "Checked: Host at $REPO_PATH/master_order.db"
-    log_info "Continuing with update (this might be first run)..."
+    log_info "Continuing to mandatory PostgreSQL backup verification before deployment"
 fi
 
 # Return to repo root
 cd "$REPO_PATH"
 
 # Step 2: Test PostgreSQL connection before proceeding (if tools available)
-test_postgresql_connection
+if ! test_postgresql_connection; then
+    log_error "Refusing to deploy without a verified PostgreSQL connection"
+    exit 1
+fi
 
 # Step 3: Create database backup before any changes
-BACKUP_FILE=$(create_database_backup)
-if [ $? -eq 0 ]; then
-    log_success "Database backup completed: $(basename "$BACKUP_FILE")"
+if create_database_backup; then
+    BACKUP_FILE="$CURRENT_BACKUP_FILE"
+    if [ -n "$BACKUP_FILE" ] && verify_backup_artifact "$BACKUP_FILE"; then
+        log_success "Database backup completed: $(basename "$BACKUP_FILE")"
+    else
+        log_error "Database backup command returned success but no usable backup file was created"
+        exit 1
+    fi
 else
-    log_warning "Database backup failed, but continuing with update"
+    log_error "Database backup failed; refusing to continue"
+    exit 1
+fi
+
+PRE_DEPLOY_COUNTS_FILE="$BACKUP_DIR/table-counts-before_${BACKUP_TIMESTAMP}.txt"
+if ! capture_table_counts "$PRE_DEPLOY_COUNTS_FILE" "pre-deploy"; then
+    log_error "Failed to capture a pre-deploy database snapshot"
+    exit 1
 fi
 
 # ===============================================================================
@@ -481,10 +646,14 @@ docker run -d \
     -v "/mnt/user/Media/TV:/tv:ro" \
     -v "/mnt/user/Media/VideoGames:/video_games:ro" \
     -v "/mnt/user/Media/PopMusic:/pop_music:ro" \
+    -v "${BACKGROUND_STORAGE_HOST_PATH}:${BACKGROUND_STORAGE_CONTAINER_PATH}" \
     -e NODE_ENV=production \
     -e "DATABASE_URL=$DATABASE_URL" \
     -e "POSTGRES_PASSWORD=$POSTGRES_PASSWORD" \
     -e PORT=3001 \
+    -e "UNRAID_SERVER_NAME=${UNRAID_SERVER_NAME}" \
+    -e "UNRAID_SHARE_ROOT=/mnt/user" \
+    -e "BACKGROUND_UNC_PATH_MAPPINGS=${BACKGROUND_UNC_PATH_MAPPINGS}" \
     -e "EXTERNAL_IP=192.168.1.114" \
     -e "STASH_URL=http://stash.internal:9999" \
     -e "STASH_URL_FALLBACK_1=http://192.168.1.154:9999" \
@@ -531,6 +700,16 @@ else
     exit 1
 fi
 
+POST_DEPLOY_COUNTS_FILE="$BACKUP_DIR/table-counts-after_${BACKUP_TIMESTAMP}.txt"
+if ! capture_table_counts "$POST_DEPLOY_COUNTS_FILE" "post-deploy"; then
+    log_error "Failed to capture a post-deploy database snapshot"
+    exit 1
+fi
+
+if ! compare_table_count_snapshots "$PRE_DEPLOY_COUNTS_FILE" "$POST_DEPLOY_COUNTS_FILE"; then
+    exit 1
+fi
+
 log_success "Master Order updated successfully on Unraid!"
 echo "🌐 Application should be available at: http://192.168.1.252:$HOST_PORT"
 echo "🗃️  Using PostgreSQL database: $POSTGRES_HOST:$POSTGRES_PORT/$POSTGRES_DB"
@@ -553,6 +732,5 @@ if [ "$RUN_MIGRATION_AFTER_DEPLOY" = true ]; then
     echo "🎯 MIGRATION STATUS:"
     echo "   ✅ Container deployed successfully"
     echo "   📊 Check migration results in the log above"
-    echo "   echo "   🎯 Access your application at: http://[your-unraid-ip]:$HOST_PORT"
-    echo """
+    echo "   🎯 Access your application at: http://[your-unraid-ip]:$HOST_PORT"
 fi

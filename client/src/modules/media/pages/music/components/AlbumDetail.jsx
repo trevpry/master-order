@@ -4,6 +4,7 @@ import TracksPlaylistPlayer from './TracksPlaylistPlayer';
 import StarRating from '../../../../../components/StarRating';
 import IdentifyModal from '../../../../../components/IdentifyModal';
 import MetadataEditor from '../../../../../components/MetadataEditor';
+import EmbeddedPicardTagsPanel from './EmbeddedPicardTagsPanel';
 import './AlbumDetail.css';
 
 const AlbumDetail = ({
@@ -13,6 +14,7 @@ const AlbumDetail = ({
   isPlaying,
   playlists,
   selectedSection,
+  backLabel = 'Back to Albums',
   onGoBack,
   onPlayTrack,
   onSelectArtist,
@@ -28,6 +30,7 @@ const AlbumDetail = ({
   const [isEditMode, setIsEditMode] = useState(false);
   const [showMusicBrainzData, setShowMusicBrainzData] = useState(false);
   const [albumData, setAlbumData] = useState(album);
+  const [isSplittingByAlbumId, setIsSplittingByAlbumId] = useState(false);
   
   // Sync local state when prop changes
   useEffect(() => {
@@ -73,14 +76,138 @@ const AlbumDetail = ({
   const handleAlbumUpdate = (updatedAlbum) => {
     setAlbumData(updatedAlbum);
     console.log('Album updated with MusicBrainz metadata:', updatedAlbum);
+
+    const refreshAlbumAndTracks = async () => {
+      try {
+        const [albumRes, tracksRes] = await Promise.all([
+          fetch(`${config.apiBaseUrl}/api/music/albums/${album.ratingKey}`),
+          fetch(`${config.apiBaseUrl}/api/music/tracks/album/${album.ratingKey}`),
+        ]);
+
+        if (albumRes.ok) {
+          const refreshedAlbum = await albumRes.json();
+          setAlbumData(refreshedAlbum);
+        }
+
+        if (tracksRes.ok) {
+          const refreshedTracks = await tracksRes.json();
+          setTracks(refreshedTracks);
+        }
+      } catch (error) {
+        console.error('Error refreshing album after identification:', error);
+      }
+    };
+
+    refreshAlbumAndTracks();
   };
+
+  const handleSplitByAlbumId = async () => {
+    if (!albumData?.ratingKey || isSplittingByAlbumId) {
+      return;
+    }
+
+    const confirmed = window.confirm('Split this album by embedded MusicBrainz album IDs? Tracks will be moved to matching albums.');
+    if (!confirmed) {
+      return;
+    }
+
+    try {
+      setIsSplittingByAlbumId(true);
+
+      const splitResponse = await fetch(`${config.apiBaseUrl}/api/music/albums/${albumData.ratingKey}/split-by-album-id`, {
+        method: 'POST',
+      });
+
+      if (!splitResponse.ok) {
+        const errorData = await splitResponse.json().catch(() => null);
+        throw new Error(errorData?.error || `Failed to split album (${splitResponse.status})`);
+      }
+
+      const splitResult = await splitResponse.json();
+      const resultData = splitResult?.data || {};
+
+      const [albumRes, tracksRes] = await Promise.all([
+        fetch(`${config.apiBaseUrl}/api/music/albums/${albumData.ratingKey}`),
+        fetch(`${config.apiBaseUrl}/api/music/tracks/album/${albumData.ratingKey}`),
+      ]);
+
+      if (albumRes.ok) {
+        const refreshedAlbum = await albumRes.json();
+        setAlbumData(refreshedAlbum);
+      }
+
+      if (tracksRes.ok) {
+        const refreshedTracks = await tracksRes.json();
+        setTracks(refreshedTracks);
+      }
+
+      const unresolvedCount = resultData?.unresolvedTracks?.length || 0;
+      alert(
+        `Split complete. Moved ${resultData.movedTrackCount || 0} track(s) across ${resultData.groupsFound || 0} album ID group(s).`
+        + (unresolvedCount > 0 ? `\n${unresolvedCount} track(s) could not be classified by album ID.` : '')
+      );
+    } catch (error) {
+      console.error('Error splitting album by album ID:', error);
+      alert(`Failed to split album by album ID: ${error.message}`);
+    } finally {
+      setIsSplittingByAlbumId(false);
+    }
+  };
+
+  const buildTrackGroups = (trackList) => {
+    const sortedTracks = [...(trackList || [])].sort((left, right) => {
+      const leftIndex = Number.isInteger(left.index) ? left.index : Number.MAX_SAFE_INTEGER;
+      const rightIndex = Number.isInteger(right.index) ? right.index : Number.MAX_SAFE_INTEGER;
+      return leftIndex - rightIndex;
+    });
+
+    const groups = [];
+    const groupMap = new Map();
+
+    for (const track of sortedTracks) {
+      const workId = track.work?.id || null;
+      const workTitle = track.work?.title || 'Standalone Tracks';
+      const groupKey = workId ? `work-${workId}` : `standalone-${track.ratingKey}`;
+
+      if (!groupMap.has(groupKey)) {
+        const group = {
+          key: groupKey,
+          workId,
+          title: workTitle,
+          tracks: []
+        };
+
+        groupMap.set(groupKey, group);
+        groups.push(group);
+      }
+
+      groupMap.get(groupKey).tracks.push(track);
+    }
+
+    return groups;
+  };
+
+  const trackGroups = buildTrackGroups(tracks);
+  const albumContributors = (albumData?.albumArtists || album?.albumArtists || [])
+    .filter((entry) => entry?.artist && entry?.artistType)
+    .sort((left, right) => {
+      const leftType = left.artistType?.name || '';
+      const rightType = right.artistType?.name || '';
+      if (leftType !== rightType) {
+        return leftType.localeCompare(rightType);
+      }
+
+      const leftName = left.artist?.title || '';
+      const rightName = right.artist?.title || '';
+      return leftName.localeCompare(rightName);
+    });
 
   return (
     <div className="album-detail">
       {/* Header with Back Button */}
       <div className="album-detail-header">
         <button className="back-button" onClick={onGoBack}>
-          ← Back to Albums
+          ← {backLabel}
         </button>
         <div style={{ display: 'flex', gap: '0.5rem' }}>
           <button 
@@ -90,6 +217,15 @@ const AlbumDetail = ({
             style={{ backgroundColor: '#3b82f6' }}
           >
             🔍 Identify Album
+          </button>
+          <button
+            className="musicbrainz-search-btn"
+            onClick={handleSplitByAlbumId}
+            disabled={isSplittingByAlbumId}
+            title="Split merged tracks into albums by embedded MusicBrainz album ID"
+            style={{ backgroundColor: '#b45309', opacity: isSplittingByAlbumId ? 0.7 : 1 }}
+          >
+            {isSplittingByAlbumId ? '⏳ Splitting...' : '🧩 Split By Album ID'}
           </button>
           <button 
             className="musicbrainz-search-btn"
@@ -200,6 +336,31 @@ const AlbumDetail = ({
               >
                 {album.parentTitle || album.artist?.title || 'Various Artists'}
               </p>
+
+              {albumContributors.length > 0 && (
+                <div className="album-contributors">
+                  <div className="album-contributors-label">Album Contributors</div>
+                  <div className="album-contributors-list">
+                    {albumContributors.map((entry) => (
+                      <div
+                        key={`${entry.albumKey || albumData.ratingKey}-${entry.artistKey}-${entry.artistTypeId}`}
+                        className="album-contributor-row"
+                      >
+                        <span className="album-contributor-type">{entry.artistType.name}:</span>
+                        <button
+                          type="button"
+                          className="album-contributor-link"
+                          onClick={() => onSelectArtist && onSelectArtist(entry.artist)}
+                          disabled={!onSelectArtist}
+                          title={onSelectArtist ? `View ${entry.artist.title}` : entry.artist.title}
+                        >
+                          {entry.artist.title}
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
             </>
           )}
           
@@ -231,6 +392,8 @@ const AlbumDetail = ({
           {album.summary && (
             <p className="album-summary">{album.summary}</p>
           )}
+
+          <EmbeddedPicardTagsPanel entityType="album" entityKey={album.ratingKey} dark />
         </div>
       </div>
 
@@ -267,77 +430,91 @@ const AlbumDetail = ({
               <span className="track-size">Size</span>
               <span className="track-playlist">Playlist</span>
             </div>
-            {tracks.map((track, index) => (
-              <div 
-                key={track.ratingKey} 
-                className={`track-row ${currentTrack?.ratingKey === track.ratingKey ? 'playing' : ''}`}
-              >
-                <button 
-                  className={`track-play-button ${currentTrack?.ratingKey === track.ratingKey && isPlaying ? 'playing' : ''}`}
-                  onClick={() => onPlayTrack(track)}
-                  title={currentTrack?.ratingKey === track.ratingKey && isPlaying ? 'Pause' : 'Play'}
-                >
-                  {currentTrack?.ratingKey === track.ratingKey && isPlaying ? '⏸' : '▶'}
-                </button>
-                <span className="track-number">{track.index || index + 1}</span>
-                <div className="track-title">
+            {trackGroups.map((group) => (
+              <div key={group.key} className="track-group">
+                <div className="track-group-header">
+                  <span className="track-group-title">{group.title}</span>
+                  <span className="track-group-count">{group.tracks.length} track{group.tracks.length !== 1 ? 's' : ''}</span>
+                </div>
+
+                {group.tracks.map((track, index) => (
                   <div 
-                    className="track-name track-name-link"
-                    onClick={() => onSelectTrack && onSelectTrack(track)}
+                    key={track.ratingKey} 
+                    className={`track-row ${currentTrack?.ratingKey === track.ratingKey ? 'playing' : ''}`}
                   >
-                    {track.title || 'Untitled'}
-                  </div>
-                  {track.originalTitle && (
-                    <div className="track-subtitle">{track.originalTitle}</div>
-                  )}
-                  {track.musicBrainzTrackId && (
-                    <div className="track-mbid">
-                      <a 
-                        href={`https://musicbrainz.org/recording/${track.musicBrainzTrackId}`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="mbid-link"
-                        title="View on MusicBrainz"
-                      >
-                        🏷️ MB
-                      </a>
-                    </div>
-                  )}
-                </div>
-                <div className="track-rating">
-                  <StarRating
-                    value={track.userRating || 0}
-                    onChange={(rating) => handleRatingChange(track.ratingKey, rating)}
-                    size="small"
-                  />
-                </div>
-                <span className="track-plays">
-                  {track.viewCount > 0 ? `${track.viewCount} ${track.viewCount === 1 ? 'play' : 'plays'}` : '—'}
-                </span>
-                <span className="track-duration">{formatDuration(track.duration)}</span>
-                <span className="track-size">{formatFileSize(track.size)}</span>
-                <div className="track-playlist">
-                  {playlists && playlists.length > 0 ? (
-                    <select 
-                      onChange={(e) => {
-                        if (e.target.value) {
-                          onAddTrackToCustomPlaylist(parseInt(e.target.value), track);
-                          e.target.value = '';
-                        }
-                      }}
-                      className="playlist-select"
+                    <button 
+                      className={`track-play-button ${currentTrack?.ratingKey === track.ratingKey && isPlaying ? 'playing' : ''}`}
+                      onClick={() => onPlayTrack(track)}
+                      title={currentTrack?.ratingKey === track.ratingKey && isPlaying ? 'Pause' : 'Play'}
                     >
-                      <option value="">+ Add to Playlist</option>
-                      {playlists.map(playlist => (
-                        <option key={playlist.id} value={playlist.id}>
-                          {playlist.title}
-                        </option>
-                      ))}
-                    </select>
-                  ) : (
-                    <span className="no-playlists">No playlists</span>
-                  )}
-                </div>
+                      {currentTrack?.ratingKey === track.ratingKey && isPlaying ? '⏸' : '▶'}
+                    </button>
+                    <span className="track-number">{track.index || index + 1}</span>
+                    <div className="track-title">
+                      <div 
+                        className="track-name track-name-link"
+                        onClick={() => onSelectTrack && onSelectTrack(track)}
+                      >
+                        {track.title || 'Untitled'}
+                      </div>
+                      {track.originalTitle && (
+                        <div className="track-subtitle">{track.originalTitle}</div>
+                      )}
+                      {group.workId && (
+                        <div className="track-subtitle">
+                          Work: {group.title}
+                        </div>
+                      )}
+                      {track.musicBrainzTrackId && (
+                        <div className="track-mbid">
+                          <a 
+                            href={`https://musicbrainz.org/recording/${track.musicBrainzTrackId}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="mbid-link"
+                            title="View on MusicBrainz"
+                          >
+                            🏷️ MB
+                          </a>
+                        </div>
+                      )}
+                    </div>
+                    <div className="track-rating">
+                      <StarRating
+                        value={track.userRating || 0}
+                        onChange={(rating) => handleRatingChange(track.ratingKey, rating)}
+                        size="small"
+                      />
+                    </div>
+                    <span className="track-plays">
+                      {track.viewCount > 0 ? `${track.viewCount} ${track.viewCount === 1 ? 'play' : 'plays'}` : '—'}
+                    </span>
+                    <span className="track-duration">{formatDuration(track.duration)}</span>
+                    <span className="track-size">{formatFileSize(track.size)}</span>
+                    <div className="track-playlist">
+                      {playlists && playlists.length > 0 ? (
+                        <select 
+                          onChange={(e) => {
+                            if (e.target.value) {
+                              onAddTrackToCustomPlaylist(parseInt(e.target.value), track);
+                              e.target.value = '';
+                            }
+                          }}
+                          className="playlist-select"
+                        >
+                          <option value="">+ Add to Playlist</option>
+                          {playlists.map(playlist => (
+                            <option key={playlist.id} value={playlist.id}>
+                              {playlist.title}
+                            </option>
+                          ))}
+                        </select>
+                      ) : (
+                        <span className="no-playlists">No playlists</span>
+                      )}
+                    </div>
+                  </div>
+                ))}
               </div>
             ))}
           </div>
@@ -433,8 +610,9 @@ const AlbumDetail = ({
         entityType="album"
         entityKey={album.ratingKey}
         entityTitle={albumData.title}
+        albumTracks={tracks}
         onIdentified={(updatedAlbum) => {
-          setAlbumData(updatedAlbum);
+          handleAlbumUpdate(updatedAlbum);
           setShowIdentifyModal(false);
         }}
       />

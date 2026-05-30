@@ -221,6 +221,58 @@
   color: #6c757d;
 }
 
+.artist-linked-section {
+  margin-top: 2rem;
+}
+
+.linked-meta-line {
+  margin: 0.25rem 0 0;
+  font-size: 0.85rem;
+  color: #6b7280;
+}
+
+.linked-tracks-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.linked-track-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.9rem 1rem;
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  background: #fff;
+  cursor: pointer;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.linked-track-row:hover {
+  border-color: #93c5fd;
+  box-shadow: 0 2px 6px rgba(59, 130, 246, 0.15);
+}
+
+.linked-track-title {
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: #111827;
+}
+
+.linked-track-subtitle {
+  margin-top: 0.2rem;
+  font-size: 0.85rem;
+  color: #6b7280;
+}
+
+.linked-track-meta {
+  font-size: 0.82rem;
+  color: #4b5563;
+  text-align: right;
+}
+
 .stat-item {
   display: flex;
   align-items: center;
