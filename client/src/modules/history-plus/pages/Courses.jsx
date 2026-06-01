@@ -1008,7 +1008,7 @@ const Courses = () => {
                   />
 
                   <div className="mt-4 text-xs text-gray-500">
-                    Available placeholders: {'{{COURSE_TITLE}}'}, {'{{COURSE_INSTRUCTOR}}'}, {'{{COURSE_CATEGORY}}'}, {'{{COURSE_DESCRIPTION}}'}, {'{{COURSE_LECTURE_COUNT}}'}, {'{{COURSE_LECTURES}}'}, {'{{GUIDEBOOK_SECTION}}'}, {'{{EXISTING_EVENTS}}'}, {'{{AVAILABLE_CATEGORIES}}'}
+                    Available placeholders: {'{{COURSE_TITLE}}'}, {'{{COURSE_INSTRUCTOR}}'}, {'{{COURSE_CATEGORY}}'}, {'{{COURSE_DESCRIPTION}}'}, {'{{COURSE_LECTURE_COUNT}}'}, {'{{COURSE_LECTURES}}'}, {'{{GUIDEBOOK_SECTION}}'}, {'{{EXISTING_EVENTS}}'}, {'{{AVAILABLE_CATEGORIES}}'}, {'{{SHARED_EVENT_DECISION_GUIDANCE}}'}
                   </div>
 
                   <div className="mt-6 flex justify-end gap-3">

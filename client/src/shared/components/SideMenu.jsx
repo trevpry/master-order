@@ -134,6 +134,13 @@ const SideMenu = ({ isMobile, closeMobileMenu }) => {
       isSubmenu: true
     },
     {
+      path: '/history-plus/prompts',
+      icon: '🤖',
+      label: 'AI Prompts',
+      description: 'Prompt templates',
+      isSubmenu: true
+    },
+    {
       path: '/chat',
       icon: '💬',
       label: 'AI Chat',

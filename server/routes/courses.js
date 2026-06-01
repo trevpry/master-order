@@ -193,7 +193,10 @@ router.get('/:id/details', asyncHandler(async (req, res) => {
 router.get('/ai-prompt-template', asyncHandler(async (req, res) => {
   const settings = await prisma.settings.findUnique({
     where: { id: 1 },
-    select: { courseAiPromptTemplate: true }
+    select: {
+      courseAiPromptTemplate: true,
+      sharedEventDecisionPromptTemplate: true
+    }
   });
 
   const savedTemplate = settings?.courseAiPromptTemplate || '';
@@ -812,7 +815,8 @@ router.post('/:id/ai-analyze', asyncHandler(async (req, res) => {
       guidebookContent,
       events,
       categories,
-      settings?.courseAiPromptTemplate || null
+      settings?.courseAiPromptTemplate || null,
+      settings?.sharedEventDecisionPromptTemplate || null
     );
     
     sendSuccess(res, {

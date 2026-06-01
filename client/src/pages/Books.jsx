@@ -15,6 +15,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { useSearchParams } from 'react-router-dom';
+import { historyPlusApi } from '../modules/history-plus/services/historyPlusApi';
 import { 
   Plus, 
   Book, 
@@ -42,6 +43,86 @@ import {
   Upload
 } from 'lucide-react';
 import readingSessionService from '../services/readingSessionService';
+import {
+  buildExistingEventsCsv,
+  downloadCsvFile,
+  getExistingEventsCsvFileName,
+  getExistingEventsCsvReferenceText
+} from '../modules/history-plus/utils/existingEventsCsv';
+
+const DEFAULT_BOOK_AI_PROMPT_TEMPLATE = `I need a structured breakdown of the book "{{BOOK_TITLE}}"{{BOOK_AUTHOR_SEGMENT}}{{BOOK_ISBN_SEGMENT}}.
+
+Please provide all chapters and their sections/subsections in the following JSON format. Each chapter and section should include an "event" field that either links to an existing historical event or creates a new one.
+
+Existing Historical Events:
+{{EXISTING_EVENTS}}
+
+Available Categories:
+{{AVAILABLE_CATEGORIES}}
+
+{{SHARED_EVENT_DECISION_GUIDANCE}}
+
+JSON Format:
+{
+  "chapters": [
+    {
+      "chapterNumber": 1,
+      "title": "Chapter Title",
+      "pageStart": null,
+      "pageEnd": null,
+      "event": {
+        "action": "CREATE_NEW",
+        "title": "Historical Event Title",
+        "startDate": "YYYY-MM-DD or YYYY",
+        "endDate": "YYYY-MM-DD or YYYY or null",
+        "category": "Category Name",
+        "details": "Brief description of the event"
+      },
+      "sections": [
+        {
+          "sectionNumber": 1,
+          "title": "Section Title",
+          "pageStart": null,
+          "pageEnd": null,
+          "event": {
+            "action": "LINK_EXISTING",
+            "title": "Exact Title of Existing Event"
+          }
+        }
+      ]
+    }
+  ]
+}
+
+Event action options:
+- "CREATE_NEW": Create a new historical event. Required fields: title, startDate, category. Optional: endDate, details
+- "LINK_EXISTING": Link to an existing event. Required field: title (must EXACTLY match one of the existing event titles listed above, case-sensitive)
+- "NONE": No event association for this chapter/section
+- Or omit the "event" field entirely to skip event linking
+
+Category rules:
+- For CREATE_NEW events, the category MUST exactly match one of the available categories listed above
+- Only suggest a new category if none of the existing categories fit
+
+Rules:
+- Include ALL chapters and sections from the table of contents
+- Use the exact titles from the book
+- chapterNumber and sectionNumber should be sequential integers starting at 1
+- pageStart and pageEnd are optional - include them if you know the page numbers, otherwise use null
+- sections array can be empty [] if a chapter has no subsections
+- For event linking, be specific with historical events - prefer narrow time periods over broad eras
+- If a chapter covers the same event as a section, you can link both to the same event
+- Return ONLY the JSON, no additional text`;
+
+const DEFAULT_SHARED_EVENT_DECISION_GUIDANCE = `SHARED EVENT DECISION GUIDANCE:
+
+1. Prefer assigning to an existing event when the content clearly matches one listed event in topic, date range, and scope.
+2. Create a new event when the content is more specific than the available events, when no listed event accurately fits, or when the content centers on a distinct sub-event within a broader period.
+3. New events should be narrowly scoped, historically grounded, date-aware, and reusable for future related content.
+4. Do not force a broad existing event if the content is really about a more focused battle, campaign, treaty, dynasty change, expedition, reform movement, or other discrete historical development.
+5. If choosing an existing event, use the exact event title from the provided list.
+6. If creating a new event, make the title specific and provide the best justified start date, end date, category, and concise description from the material.
+7. When uncertain between a weak existing-event match and a clearly supported new event, prefer the better-evidenced option rather than the broader one by default.`;
 
 const Books = () => {
   const [searchParams] = useSearchParams();
@@ -73,6 +154,8 @@ const Books = () => {
   const [aiPromptEvents, setAiPromptEvents] = useState([]);
   const [aiPromptCategories, setAiPromptCategories] = useState([]);
   const [aiPromptLoading, setAiPromptLoading] = useState(false);
+  const [aiPromptTemplate, setAiPromptTemplate] = useState(DEFAULT_BOOK_AI_PROMPT_TEMPLATE);
+  const [sharedEventDecisionGuidance, setSharedEventDecisionGuidance] = useState(DEFAULT_SHARED_EVENT_DECISION_GUIDANCE);
   const [activeReadingSession, setActiveReadingSession] = useState(null);
   
   // Editing states
@@ -106,6 +189,20 @@ const Books = () => {
 
   // Statistics
   const [systemStats, setSystemStats] = useState({});
+
+  const buildBookAiPrompt = (book, categoriesList, csvFileName, template = DEFAULT_BOOK_AI_PROMPT_TEMPLATE) => {
+    const categoriesListText = categoriesList.length > 0
+      ? categoriesList.map(c => typeof c === 'string' ? `- "${c}"` : `- "${c.name}"${c.description ? ': ' + c.description : ''}`).join('\n')
+      : '(No categories yet)';
+
+    return String(template || DEFAULT_BOOK_AI_PROMPT_TEMPLATE)
+      .replaceAll('{{BOOK_TITLE}}', book?.title || 'Untitled Book')
+      .replaceAll('{{BOOK_AUTHOR_SEGMENT}}', book?.author ? ` by ${book.author}` : '')
+      .replaceAll('{{BOOK_ISBN_SEGMENT}}', book?.isbn ? ` (ISBN: ${book.isbn})` : '')
+      .replaceAll('{{EXISTING_EVENTS}}', getExistingEventsCsvReferenceText(csvFileName))
+      .replaceAll('{{SHARED_EVENT_DECISION_GUIDANCE}}', sharedEventDecisionGuidance)
+      .replaceAll('{{AVAILABLE_CATEGORIES}}', categoriesListText);
+  };
 
   useEffect(() => {
     fetchBooks();
@@ -957,18 +1054,24 @@ const Books = () => {
                     setShowAIPrompt(true); setAiImportJson(''); setAiImportError(''); setPromptCopied(false);
                     setAiPromptLoading(true);
                     try {
-                      const [eventsRes, catsRes] = await Promise.all([
-                        fetch('/api/history-plus/events'),
-                        fetch('/api/history-plus/categories')
+                      const [eventsRes, catsRes, templateResponse, sharedGuidanceResponse] = await Promise.all([
+                        historyPlusApi.getEvents(),
+                        historyPlusApi.getCategories(),
+                        historyPlusApi.getBookPromptTemplate(),
+                        historyPlusApi.getPromptTemplate('eventDecision')
                       ]);
-                      const eventsData = await eventsRes.json();
-                      const catsData = await catsRes.json();
+                      const eventsData = eventsRes;
+                      const catsData = catsRes;
                       const events = eventsData.data?.events || eventsData.data || eventsData.events || [];
                       setAiPromptEvents(Array.isArray(events) ? events : []);
                       const cats = catsData.data || catsData.categories || [];
                       setAiPromptCategories(Array.isArray(cats) ? cats : []);
+                      setAiPromptTemplate(templateResponse.data?.template || DEFAULT_BOOK_AI_PROMPT_TEMPLATE);
+                      setSharedEventDecisionGuidance(sharedGuidanceResponse.data?.template || DEFAULT_SHARED_EVENT_DECISION_GUIDANCE);
                     } catch (err) {
                       console.error('Error fetching events/categories for AI prompt:', err);
+                      setAiPromptTemplate(DEFAULT_BOOK_AI_PROMPT_TEMPLATE);
+                      setSharedEventDecisionGuidance(DEFAULT_SHARED_EVENT_DECISION_GUIDANCE);
                     } finally {
                       setAiPromptLoading(false);
                     }
@@ -1579,76 +1682,15 @@ const Books = () => {
 
       {/* AI Prompt / Import Modal */}
       {showAIPrompt && selectedBook && (() => {
-        const eventsListText = aiPromptEvents.length > 0
-          ? aiPromptEvents.map(e => `- "${e.title}" (${e.startDate}${e.endDate ? ' - ' + e.endDate : ''}) - Category: ${e.category}`).join('\n')
-          : '(No existing events yet)';
+        const eventsCsvFileName = getExistingEventsCsvFileName(selectedBook.title || 'book-ai-import');
+        const aiPrompt = buildBookAiPrompt(selectedBook, aiPromptCategories, eventsCsvFileName, aiPromptTemplate);
 
-        const categoriesListText = aiPromptCategories.length > 0
-          ? aiPromptCategories.map(c => typeof c === 'string' ? `- "${c}"` : `- "${c.name}"${c.description ? ': ' + c.description : ''}`).join('\n')
-          : '(No categories yet)';
-
-        const aiPrompt = `I need a structured breakdown of the book "${selectedBook.title}"${selectedBook.author ? ` by ${selectedBook.author}` : ''}${selectedBook.isbn ? ` (ISBN: ${selectedBook.isbn})` : ''}.
-
-Please provide all chapters and their sections/subsections in the following JSON format. Each chapter and section should include an "event" field that either links to an existing historical event or creates a new one.
-
-Existing Historical Events:
-${eventsListText}
-
-Available Categories:
-${categoriesListText}
-
-JSON Format:
-{
-  "chapters": [
-    {
-      "chapterNumber": 1,
-      "title": "Chapter Title",
-      "pageStart": null,
-      "pageEnd": null,
-      "event": {
-        "action": "CREATE_NEW",
-        "title": "Historical Event Title",
-        "startDate": "YYYY-MM-DD or YYYY",
-        "endDate": "YYYY-MM-DD or YYYY or null",
-        "category": "Category Name",
-        "details": "Brief description of the event"
-      },
-      "sections": [
-        {
-          "sectionNumber": 1,
-          "title": "Section Title",
-          "pageStart": null,
-          "pageEnd": null,
-          "event": {
-            "action": "LINK_EXISTING",
-            "title": "Exact Title of Existing Event"
-          }
-        }
-      ]
-    }
-  ]
-}
-
-Event action options:
-- "CREATE_NEW": Create a new historical event. Required fields: title, startDate, category. Optional: endDate, details
-- "LINK_EXISTING": Link to an existing event. Required field: title (must EXACTLY match one of the existing event titles listed above, case-sensitive)
-- "NONE": No event association for this chapter/section
-- Or omit the "event" field entirely to skip event linking
-
-Category rules:
-- For CREATE_NEW events, the category MUST exactly match one of the available categories listed above
-- Only suggest a new category if none of the existing categories fit
-- PREFER LINK_EXISTING over CREATE_NEW when the chapter/section clearly matches an existing event
-
-Rules:
-- Include ALL chapters and sections from the table of contents
-- Use the exact titles from the book
-- chapterNumber and sectionNumber should be sequential integers starting at 1
-- pageStart and pageEnd are optional - include them if you know the page numbers, otherwise use null
-- sections array can be empty [] if a chapter has no subsections
-- For event linking, be specific with historical events - prefer narrow time periods over broad eras
-- If a chapter covers the same event as a section, you can link both to the same event
-- Return ONLY the JSON, no additional text`;
+        const handleCopyPrompt = () => {
+          navigator.clipboard.writeText(aiPrompt);
+          downloadCsvFile(eventsCsvFileName, buildExistingEventsCsv(aiPromptEvents || []));
+          setPromptCopied(true);
+          setTimeout(() => setPromptCopied(false), 2000);
+        };
 
         const handleImport = async () => {
           setAiImportError('');
@@ -1790,17 +1832,16 @@ Rules:
                 ) : (
                 <div className="relative">
                   <pre className="bg-gray-50 border rounded-lg p-3 text-xs whitespace-pre-wrap max-h-48 overflow-y-auto">{aiPrompt}</pre>
+                  <div className="mt-2 text-xs text-gray-600">
+                    Existing events will be downloaded as <strong>{eventsCsvFileName}</strong> with columns: Event Title, Start Date, End Date, Event Description.
+                  </div>
                   <button
-                    onClick={() => {
-                      navigator.clipboard.writeText(aiPrompt);
-                      setPromptCopied(true);
-                      setTimeout(() => setPromptCopied(false), 2000);
-                    }}
+                    onClick={handleCopyPrompt}
                     className={`absolute top-2 right-2 px-3 py-1 text-xs rounded ${
                       promptCopied ? 'bg-green-600 text-white' : 'bg-blue-600 text-white hover:bg-blue-700'
                     }`}
                   >
-                    {promptCopied ? 'Copied!' : 'Copy Prompt'}
+                    {promptCopied ? 'Copied!' : 'Copy Prompt + CSV'}
                   </button>
                 </div>
                 )}

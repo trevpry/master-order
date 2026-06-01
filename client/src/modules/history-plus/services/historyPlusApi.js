@@ -84,6 +84,66 @@ export class HistoryPlusApiService {
     return response.json();
   }
 
+  static async getVideoPromptTemplate() {
+    const response = await fetch(`${API_BASE}/video-ai-prompt-template`);
+    if (!response.ok) throw new Error('Failed to fetch video AI prompt template');
+    return response.json();
+  }
+
+  static async saveVideoPromptTemplate(template) {
+    const response = await fetch(`${API_BASE}/video-ai-prompt-template`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ template })
+    });
+    if (!response.ok) throw new Error('Failed to save video AI prompt template');
+    return response.json();
+  }
+
+  static async getBookPromptTemplate() {
+    const response = await fetch(`${API_BASE}/book-ai-prompt-template`);
+    if (!response.ok) throw new Error('Failed to fetch book AI prompt template');
+    return response.json();
+  }
+
+  static async saveBookPromptTemplate(template) {
+    const response = await fetch(`${API_BASE}/book-ai-prompt-template`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ template })
+    });
+    if (!response.ok) throw new Error('Failed to save book AI prompt template');
+    return response.json();
+  }
+
+  static async getPromptTemplates() {
+    const response = await fetch(`${API_BASE}/prompt-templates`);
+    if (!response.ok) throw new Error('Failed to fetch AI prompt templates');
+    return response.json();
+  }
+
+  static async getPromptTemplate(templateKey) {
+    const response = await fetch(`${API_BASE}/prompt-templates/${encodeURIComponent(templateKey)}`);
+    if (!response.ok) throw new Error('Failed to fetch AI prompt template');
+    return response.json();
+  }
+
+  static async savePromptTemplate(templateKey, template) {
+    const response = await fetch(`${API_BASE}/prompt-templates/${encodeURIComponent(templateKey)}`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ template })
+    });
+    if (!response.ok) throw new Error('Failed to save AI prompt template');
+    return response.json();
+  }
+
   static async getEventProgress(id) {
     const response = await fetch(`${API_BASE}/events/${id}/progress`);
     if (!response.ok) throw new Error('Failed to fetch event progress');
@@ -509,6 +569,13 @@ export const historyPlusApi = {
   mergeEvents: HistoryPlusApiService.mergeEvents,
   getTimelinePromptTemplate: HistoryPlusApiService.getTimelinePromptTemplate,
   saveTimelinePromptTemplate: HistoryPlusApiService.saveTimelinePromptTemplate,
+  getVideoPromptTemplate: HistoryPlusApiService.getVideoPromptTemplate,
+  saveVideoPromptTemplate: HistoryPlusApiService.saveVideoPromptTemplate,
+  getBookPromptTemplate: HistoryPlusApiService.getBookPromptTemplate,
+  saveBookPromptTemplate: HistoryPlusApiService.saveBookPromptTemplate,
+  getPromptTemplates: HistoryPlusApiService.getPromptTemplates,
+  getPromptTemplate: HistoryPlusApiService.getPromptTemplate,
+  savePromptTemplate: HistoryPlusApiService.savePromptTemplate,
   getEventProgress: HistoryPlusApiService.getEventProgress,
   getBooksByEvent: HistoryPlusApiService.getBooksByEvent,
   getBookById: HistoryPlusApiService.getBookById,

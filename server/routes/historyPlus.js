@@ -3,6 +3,7 @@ const router = express.Router();
 const { PrismaClient } = require('@prisma/client');
 const multer = require('multer');
 const HistoryPlusService = require('../services/historyPlusService');
+const GeminiService = require('../services/GeminiService');
 const { asyncHandler, sendSuccess, sendBadRequest, sendServerError } = require('../utils/responses');
 const { validateRequiredFields } = require('../middleware/validation');
 const { spawn } = require('child_process');
@@ -11,6 +12,7 @@ const fs = require('fs');
 
 const prisma = new PrismaClient();
 const historyPlusService = new HistoryPlusService();
+const geminiService = new GeminiService();
 const DEFAULT_TIMELINE_AI_PROMPT_TEMPLATE = `You are assisting with curation for a historical timeline knowledge base.
 
 Analyze the event below and provide an improved event profile that can be reused by AI systems to better assign videos and books to this event in the future.
@@ -57,6 +59,127 @@ List at least 5 relevant videos (or as many as you can find) with:
 - Why it is relevant
 
 If information is uncertain, say so explicitly rather than guessing.`;
+
+const DEFAULT_BOOK_AI_PROMPT_TEMPLATE = `I need a structured breakdown of the book "{{BOOK_TITLE}}"{{BOOK_AUTHOR_SEGMENT}}{{BOOK_ISBN_SEGMENT}}.
+
+Please provide all chapters and their sections/subsections in the following JSON format. Each chapter and section should include an "event" field that either links to an existing historical event or creates a new one.
+
+Existing Historical Events:
+{{EXISTING_EVENTS}}
+
+Available Categories:
+{{AVAILABLE_CATEGORIES}}
+
+{{SHARED_EVENT_DECISION_GUIDANCE}}
+
+JSON Format:
+{
+  "chapters": [
+    {
+      "chapterNumber": 1,
+      "title": "Chapter Title",
+      "pageStart": null,
+      "pageEnd": null,
+      "event": {
+        "action": "CREATE_NEW",
+        "title": "Historical Event Title",
+        "startDate": "YYYY-MM-DD or YYYY",
+        "endDate": "YYYY-MM-DD or YYYY or null",
+        "category": "Category Name",
+        "details": "Brief description of the event"
+      },
+      "sections": [
+        {
+          "sectionNumber": 1,
+          "title": "Section Title",
+          "pageStart": null,
+          "pageEnd": null,
+          "event": {
+            "action": "LINK_EXISTING",
+            "title": "Exact Title of Existing Event"
+          }
+        }
+      ]
+    }
+  ]
+}
+
+Event action options:
+- "CREATE_NEW": Create a new historical event. Required fields: title, startDate, category. Optional: endDate, details
+- "LINK_EXISTING": Link to an existing event. Required field: title (must EXACTLY match one of the existing event titles listed above, case-sensitive)
+- "NONE": No event association for this chapter/section
+- Or omit the "event" field entirely to skip event linking
+
+Category rules:
+- For CREATE_NEW events, the category MUST exactly match one of the available categories listed above
+- Only suggest a new category if none of the existing categories fit
+
+Rules:
+- Include ALL chapters and sections from the table of contents
+- Use the exact titles from the book
+- chapterNumber and sectionNumber should be sequential integers starting at 1
+- pageStart and pageEnd are optional - include them if you know the page numbers, otherwise use null
+- sections array can be empty [] if a chapter has no subsections
+- For event linking, be specific with historical events - prefer narrow time periods over broad eras
+- If a chapter covers the same event as a section, you can link both to the same event
+- Return ONLY the JSON, no additional text`;
+
+const DEFAULT_SHARED_EVENT_DECISION_PROMPT_TEMPLATE = geminiService.getDefaultSharedEventDecisionPromptTemplate();
+
+const getPromptTemplateDefinitions = () => ({
+  timeline: {
+    key: 'timeline',
+    title: 'Timeline Events',
+    description: 'Prompt used to generate improved event descriptions and matching metadata from a timeline event.',
+    settingField: 'timelineAiPromptTemplate',
+    defaultTemplate: DEFAULT_TIMELINE_AI_PROMPT_TEMPLATE,
+    placeholders: ['{{eventTitle}}', '{{dateRange}}', '{{eventDescription}}', '{{linkedYouTubeVideos}}']
+  },
+  video: {
+    key: 'video',
+    title: 'Video Assignment',
+    description: 'Prompt used to assign videos to existing events or categories.',
+    settingField: 'videoAiPromptTemplate',
+    defaultTemplate: geminiService.getDefaultVideoAssignmentPromptTemplate(),
+    placeholders: ['{{VIDEO_URL}}', '{{VIDEO_TITLE_LINE}}', '{{VIDEO_DESCRIPTION_LINE}}', '{{EXISTING_EVENTS}}', '{{AVAILABLE_CATEGORIES}}', '{{SHARED_EVENT_DECISION_GUIDANCE}}']
+  },
+  course: {
+    key: 'course',
+    title: 'Courses',
+    description: 'Prompt used when analyzing courses and assigning lectures to historical events.',
+    settingField: 'courseAiPromptTemplate',
+    defaultTemplate: geminiService.getDefaultCourseAssignmentPromptTemplate(),
+    placeholders: ['{{COURSE_TITLE}}', '{{COURSE_INSTRUCTOR}}', '{{COURSE_CATEGORY}}', '{{COURSE_DESCRIPTION}}', '{{COURSE_LECTURE_COUNT}}', '{{COURSE_LECTURES}}', '{{GUIDEBOOK_SECTION}}', '{{EXISTING_EVENTS}}', '{{AVAILABLE_CATEGORIES}}', '{{SHARED_EVENT_DECISION_GUIDANCE}}']
+  },
+  book: {
+    key: 'book',
+    title: 'Books / Chapters / Sections',
+    description: 'Prompt used to generate structured chapter and section imports with event linking suggestions for books.',
+    settingField: 'bookAiPromptTemplate',
+    defaultTemplate: DEFAULT_BOOK_AI_PROMPT_TEMPLATE,
+    placeholders: ['{{BOOK_TITLE}}', '{{BOOK_AUTHOR_SEGMENT}}', '{{BOOK_ISBN_SEGMENT}}', '{{EXISTING_EVENTS}}', '{{AVAILABLE_CATEGORIES}}', '{{SHARED_EVENT_DECISION_GUIDANCE}}']
+  },
+  eventDecision: {
+    key: 'eventDecision',
+    title: 'Shared Event Decision Guidance',
+    description: 'Shared instructions for deciding when AI should attach content to an existing event versus create a new one.',
+    settingField: 'sharedEventDecisionPromptTemplate',
+    defaultTemplate: DEFAULT_SHARED_EVENT_DECISION_PROMPT_TEMPLATE,
+    placeholders: []
+  }
+});
+
+const getPromptTemplateDefinition = (templateKey) => getPromptTemplateDefinitions()[templateKey] || null;
+
+const buildPromptTemplatePayload = (definition, savedTemplate = '') => ({
+  key: definition.key,
+  title: definition.title,
+  description: definition.description,
+  placeholders: definition.placeholders,
+  template: savedTemplate || definition.defaultTemplate,
+  isCustom: !!savedTemplate,
+  defaultTemplate: definition.defaultTemplate
+});
 
 // Configure multer for CSV file uploads
 const storage = multer.diskStorage({
@@ -144,6 +267,165 @@ router.put('/ai-prompt-template', asyncHandler(async (req, res) => {
     isCustom: !!normalizedTemplate,
     template: normalizedTemplate || DEFAULT_TIMELINE_AI_PROMPT_TEMPLATE,
     defaultTemplate: DEFAULT_TIMELINE_AI_PROMPT_TEMPLATE
+  });
+}));
+
+// GET /api/history-plus/video-ai-prompt-template
+router.get('/video-ai-prompt-template', asyncHandler(async (req, res) => {
+  const settings = await prisma.settings.findUnique({
+    where: { id: 1 },
+    select: { videoAiPromptTemplate: true }
+  });
+
+  const savedTemplate = settings?.videoAiPromptTemplate || '';
+  const defaultTemplate = geminiService.getDefaultVideoAssignmentPromptTemplate();
+
+  sendSuccess(res, {
+    template: savedTemplate || defaultTemplate,
+    isCustom: !!savedTemplate,
+    defaultTemplate
+  });
+}));
+
+// PUT /api/history-plus/video-ai-prompt-template
+router.put('/video-ai-prompt-template', asyncHandler(async (req, res) => {
+  const templateInput = req.body?.template;
+  if (typeof templateInput !== 'string') {
+    return sendBadRequest(res, 'template must be a string');
+  }
+
+  const normalizedTemplate = templateInput.trim();
+  const defaultTemplate = geminiService.getDefaultVideoAssignmentPromptTemplate();
+
+  await prisma.settings.upsert({
+    where: { id: 1 },
+    update: {
+      videoAiPromptTemplate: normalizedTemplate || null
+    },
+    create: {
+      id: 1,
+      videoAiPromptTemplate: normalizedTemplate || null
+    }
+  });
+
+  sendSuccess(res, {
+    saved: true,
+    isCustom: !!normalizedTemplate,
+    template: normalizedTemplate || defaultTemplate,
+    defaultTemplate
+  });
+}));
+
+// GET /api/history-plus/book-ai-prompt-template
+router.get('/book-ai-prompt-template', asyncHandler(async (req, res) => {
+  const settings = await prisma.settings.findUnique({
+    where: { id: 1 },
+    select: { bookAiPromptTemplate: true }
+  });
+
+  const savedTemplate = settings?.bookAiPromptTemplate || '';
+
+  sendSuccess(res, {
+    template: savedTemplate || DEFAULT_BOOK_AI_PROMPT_TEMPLATE,
+    isCustom: !!savedTemplate,
+    defaultTemplate: DEFAULT_BOOK_AI_PROMPT_TEMPLATE
+  });
+}));
+
+// PUT /api/history-plus/book-ai-prompt-template
+router.put('/book-ai-prompt-template', asyncHandler(async (req, res) => {
+  const templateInput = req.body?.template;
+  if (typeof templateInput !== 'string') {
+    return sendBadRequest(res, 'template must be a string');
+  }
+
+  const normalizedTemplate = templateInput.trim();
+
+  await prisma.settings.upsert({
+    where: { id: 1 },
+    update: {
+      bookAiPromptTemplate: normalizedTemplate || null
+    },
+    create: {
+      id: 1,
+      bookAiPromptTemplate: normalizedTemplate || null
+    }
+  });
+
+  sendSuccess(res, {
+    saved: true,
+    isCustom: !!normalizedTemplate,
+    template: normalizedTemplate || DEFAULT_BOOK_AI_PROMPT_TEMPLATE,
+    defaultTemplate: DEFAULT_BOOK_AI_PROMPT_TEMPLATE
+  });
+}));
+
+// GET /api/history-plus/prompt-templates
+router.get('/prompt-templates', asyncHandler(async (req, res) => {
+  const settings = await prisma.settings.findUnique({
+    where: { id: 1 },
+    select: {
+      timelineAiPromptTemplate: true,
+      videoAiPromptTemplate: true,
+      courseAiPromptTemplate: true,
+      bookAiPromptTemplate: true,
+      sharedEventDecisionPromptTemplate: true
+    }
+  });
+
+  const definitions = Object.values(getPromptTemplateDefinitions());
+  const templates = definitions.map(definition => (
+    buildPromptTemplatePayload(definition, settings?.[definition.settingField] || '')
+  ));
+
+  sendSuccess(res, { templates });
+}));
+
+// GET /api/history-plus/prompt-templates/:templateKey
+router.get('/prompt-templates/:templateKey', asyncHandler(async (req, res) => {
+  const definition = getPromptTemplateDefinition(req.params.templateKey);
+  if (!definition) {
+    return sendBadRequest(res, 'Unknown prompt template key');
+  }
+
+  const settings = await prisma.settings.findUnique({
+    where: { id: 1 },
+    select: {
+      [definition.settingField]: true
+    }
+  });
+
+  sendSuccess(res, buildPromptTemplatePayload(definition, settings?.[definition.settingField] || ''));
+}));
+
+// PUT /api/history-plus/prompt-templates/:templateKey
+router.put('/prompt-templates/:templateKey', asyncHandler(async (req, res) => {
+  const definition = getPromptTemplateDefinition(req.params.templateKey);
+  if (!definition) {
+    return sendBadRequest(res, 'Unknown prompt template key');
+  }
+
+  const templateInput = req.body?.template;
+  if (typeof templateInput !== 'string') {
+    return sendBadRequest(res, 'template must be a string');
+  }
+
+  const normalizedTemplate = templateInput.trim();
+
+  await prisma.settings.upsert({
+    where: { id: 1 },
+    update: {
+      [definition.settingField]: normalizedTemplate || null
+    },
+    create: {
+      id: 1,
+      [definition.settingField]: normalizedTemplate || null
+    }
+  });
+
+  sendSuccess(res, {
+    saved: true,
+    ...buildPromptTemplatePayload(definition, normalizedTemplate)
   });
 }));
 
@@ -572,6 +854,15 @@ router.post('/ai/categorize-video/:videoId', asyncHandler(async (req, res) => {
       historyPlusService.getAllEvents(),
       historyPlusService.getCategories()
     ]);
+    const settings = await prisma.settings.findUnique({
+      where: { id: 1 },
+      select: {
+        videoAiPromptTemplate: true,
+        sharedEventDecisionPromptTemplate: true
+      }
+    });
+    const videoPromptTemplate = settings?.videoAiPromptTemplate || null;
+    const sharedEventDecisionPromptTemplate = settings?.sharedEventDecisionPromptTemplate || null;
 
     if (!categories || categories.length === 0) {
       return sendBadRequest(res, 'No categories available for AI analysis');
@@ -598,7 +889,9 @@ router.post('/ai/categorize-video/:videoId', asyncHandler(async (req, res) => {
           video.title || '',
           video.description || '',
           events || [],
-          categories || []
+          categories || [],
+          videoPromptTemplate,
+          sharedEventDecisionPromptTemplate
         )
       };
 
@@ -611,7 +904,9 @@ router.post('/ai/categorize-video/:videoId', asyncHandler(async (req, res) => {
       video.title || '', 
       video.description || '',
       events || [], 
-      categories || []
+      categories || [],
+      videoPromptTemplate,
+      sharedEventDecisionPromptTemplate
     );
     
     sendSuccess(res, {

@@ -7,6 +7,7 @@ const TimelineItem = ({
   categories = [],
   selected = false,
   onToggleSelect,
+  onReassignContent,
   onEdit, 
   onDelete, 
   onToggleReviewed,
@@ -332,20 +333,39 @@ const TimelineItem = ({
                     : displayTitle;
                   
                   return (
-                    <button
+                    <div
                       key={video.id}
-                      onClick={() => handleVideoClick(video)}
-                      className="flex items-center justify-start gap-2 p-3 text-xs text-red-700 transition-colors border border-red-200 bg-red-50 hover:bg-red-100 hover:text-red-800 h-auto min-h-[2.5rem] rounded"
-                      title={`${displayTitle}${video.watched ? ' (Watched)' : ' (Unwatched)'}${canEdit ? ' - Click to view' : ''}`}
+                      className="flex items-stretch border border-red-200 bg-red-50 rounded overflow-hidden"
                     >
-                      <span className="flex-shrink-0">
-                        {isYouTube ? '📺' : '▶️'}
-                      </span>
-                      <span className="flex-1 text-left leading-tight">{truncatedTitle}</span>
-                      <div className="flex items-center gap-1">
-                        {video.watched && <span className="flex-shrink-0 text-green-600">✓</span>}
-                      </div>
-                    </button>
+                      <button
+                        onClick={() => onReassignContent && onReassignContent({
+                          type: 'video',
+                          item: video,
+                          sourceEventId: localEvent.id,
+                          sourceEventTitle: localEvent.title
+                        })}
+                        className="flex items-center justify-start gap-2 p-3 text-xs text-red-700 transition-colors hover:bg-red-100 hover:text-red-800 h-auto min-h-[2.5rem] flex-1"
+                        title={`${displayTitle}${video.watched ? ' (Watched)' : ' (Unwatched)'}${canEdit ? ' - Click to reassign' : ''}`}
+                      >
+                        <span className="flex-shrink-0">
+                          {isYouTube ? '📺' : '▶️'}
+                        </span>
+                        <span className="flex-1 text-left leading-tight">{truncatedTitle}</span>
+                        <div className="flex items-center gap-1">
+                          {video.watched && <span className="flex-shrink-0 text-green-600">✓</span>}
+                        </div>
+                      </button>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleVideoClick(video);
+                        }}
+                        className="px-2 text-xs border-l border-red-200 text-red-600 hover:bg-red-100"
+                        title="Preview video"
+                      >
+                        👁️
+                      </button>
+                    </div>
                   );
                 })}
                 
@@ -386,21 +406,27 @@ const TimelineItem = ({
               </h4>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                 {event.books.slice(0, 4).map((book) => (
-                  <div
+                  <button
                     key={book.id}
+                    onClick={() => onReassignContent && onReassignContent({
+                      type: 'book',
+                      item: book,
+                      sourceEventId: localEvent.id,
+                      sourceEventTitle: localEvent.title
+                    })}
                     className={`flex items-center justify-start gap-2 p-3 text-xs border-blue-200 h-auto min-h-[2.5rem] rounded ${
                       book.read 
                         ? 'text-blue-800 bg-blue-100' 
                         : 'text-blue-700 bg-blue-50'
                     }`}
-                    title={`${book.title}${book.read ? ' (Read)' : ' (Unread)'}`}
+                    title={`${book.title}${book.read ? ' (Read)' : ' (Unread)'} - Click to reassign`}
                   >
                     <span className="flex-shrink-0">📖</span>
                     <span className="flex-1 text-left leading-tight">{book.title}</span>
                     <div className="flex items-center gap-1">
                       {book.read && <span className="flex-shrink-0 text-green-600">✓</span>}
                     </div>
-                  </div>
+                  </button>
                 ))}
                 {event.books.length > 4 && (
                   <div className="flex items-center justify-center p-3 text-xs text-gray-500 border border-dashed border-gray-300 rounded min-h-[2.5rem]">
@@ -418,14 +444,20 @@ const TimelineItem = ({
               </h4>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                 {event.chapters.slice(0, 4).map((chapter) => (
-                  <div
+                  <button
                     key={chapter.id}
+                    onClick={() => onReassignContent && onReassignContent({
+                      type: 'chapter',
+                      item: chapter,
+                      sourceEventId: localEvent.id,
+                      sourceEventTitle: localEvent.title
+                    })}
                     className={`flex items-center justify-start gap-2 p-3 text-xs border-green-200 h-auto min-h-[2.5rem] rounded ${
                       chapter.read 
                         ? 'text-green-800 bg-green-100' 
                         : 'text-green-700 bg-green-50'
                     }`}
-                    title={`${chapter.title} from ${chapter.book?.title}${chapter.read ? ' (Read)' : ' (Unread)'}`}
+                    title={`${chapter.title} from ${chapter.book?.title}${chapter.read ? ' (Read)' : ' (Unread)'} - Click to reassign`}
                   >
                     <span className="flex-shrink-0">📝</span>
                     <div className="flex-1 text-left leading-tight">
@@ -435,7 +467,7 @@ const TimelineItem = ({
                     <div className="flex items-center gap-1">
                       {chapter.read && <span className="flex-shrink-0 text-green-600">✓</span>}
                     </div>
-                  </div>
+                  </button>
                 ))}
                 {event.chapters.length > 4 && (
                   <div className="flex items-center justify-center p-3 text-xs text-gray-500 border border-dashed border-gray-300 rounded min-h-[2.5rem]">
@@ -453,14 +485,20 @@ const TimelineItem = ({
               </h4>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                 {event.sections.slice(0, 4).map((section) => (
-                  <div
+                  <button
                     key={section.id}
+                    onClick={() => onReassignContent && onReassignContent({
+                      type: 'section',
+                      item: section,
+                      sourceEventId: localEvent.id,
+                      sourceEventTitle: localEvent.title
+                    })}
                     className={`flex items-center justify-start gap-2 p-3 text-xs border-purple-200 h-auto min-h-[2.5rem] rounded ${
                       section.read 
                         ? 'text-purple-800 bg-purple-100' 
                         : 'text-purple-700 bg-purple-50'
                     }`}
-                    title={`${section.title} from ${section.chapter?.book?.title}${section.read ? ' (Read)' : ' (Unread)'}`}
+                    title={`${section.title} from ${section.chapter?.book?.title}${section.read ? ' (Read)' : ' (Unread)'} - Click to reassign`}
                   >
                     <span className="flex-shrink-0">📄</span>
                     <div className="flex-1 text-left leading-tight">
@@ -470,7 +508,7 @@ const TimelineItem = ({
                     <div className="flex items-center gap-1">
                       {section.read && <span className="flex-shrink-0 text-green-600">✓</span>}
                     </div>
-                  </div>
+                  </button>
                 ))}
                 {event.sections.length > 4 && (
                   <div className="flex items-center justify-center p-3 text-xs text-gray-500 border border-dashed border-gray-300 rounded min-h-[2.5rem]">

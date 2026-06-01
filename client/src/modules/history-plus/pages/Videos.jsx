@@ -3,9 +3,25 @@ import { Link } from 'react-router-dom';
 import { historyPlusApi } from '../services/historyPlusApi';
 import VideoCard from '../components/VideoCard';
 import VideoForm from '../components/VideoForm';
+import {
+  buildExistingEventsCsv,
+  downloadCsvFile,
+  getExistingEventsCsvFileName,
+  getExistingEventsCsvReferenceText
+} from '../utils/existingEventsCsv';
 import './Videos.css';
 
 const Videos = () => {
+  const DEFAULT_SHARED_EVENT_DECISION_GUIDANCE = `SHARED EVENT DECISION GUIDANCE:
+
+1. Prefer assigning to an existing event when the content clearly matches one listed event in topic, date range, and scope.
+2. Create a new event when the content is more specific than the available events, when no listed event accurately fits, or when the content centers on a distinct sub-event within a broader period.
+3. New events should be narrowly scoped, historically grounded, date-aware, and reusable for future related content.
+4. Do not force a broad existing event if the content is really about a more focused battle, campaign, treaty, dynasty change, expedition, reform movement, or other discrete historical development.
+5. If choosing an existing event, use the exact event title from the provided list.
+6. If creating a new event, make the title specific and provide the best justified start date, end date, category, and concise description from the material.
+7. When uncertain between a weak existing-event match and a clearly supported new event, prefer the better-evidenced option rather than the broader one by default.`;
+
   const [videos, setVideos] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -37,6 +53,12 @@ const Videos = () => {
   const [showAiPromptEditor, setShowAiPromptEditor] = useState(false);
   const [aiPromptData, setAiPromptData] = useState(null);
   const [loadingPrompt, setLoadingPrompt] = useState(false);
+  const [promptTemplate, setPromptTemplate] = useState('');
+  const [defaultPromptTemplate, setDefaultPromptTemplate] = useState('');
+  const [isCustomPromptTemplate, setIsCustomPromptTemplate] = useState(false);
+  const [promptTemplateSaving, setPromptTemplateSaving] = useState(false);
+  const [promptTemplateStatus, setPromptTemplateStatus] = useState('');
+  const [sharedEventDecisionGuidance, setSharedEventDecisionGuidance] = useState(DEFAULT_SHARED_EVENT_DECISION_GUIDANCE);
 
   useEffect(() => {
     fetchData();
@@ -426,6 +448,29 @@ const Videos = () => {
     }
   };
 
+  const renderVideoPromptPreview = (template, eventsList = [], categoriesList = []) => {
+    const activeTemplate = String(template || '');
+    const existingEventsCsvFileName = getExistingEventsCsvFileName('video-ai-assignment');
+
+    const renderedCategories = categoriesList.map(category => 
+      `- "${category.name}": ${category.description || 'Historical category'}`
+    ).join('\n');
+
+    return activeTemplate
+      .replaceAll('{{VIDEO_URL}}', 'https://www.youtube.com/watch?v=SAMPLE_VIDEO_ID')
+      .replaceAll('{{VIDEO_TITLE_LINE}}', 'Video Title: Sample Educational History Video')
+      .replaceAll('{{VIDEO_DESCRIPTION_LINE}}', 'Video Description: Sample video description for AI analysis')
+      .replaceAll('{{EXISTING_EVENTS}}', getExistingEventsCsvReferenceText(existingEventsCsvFileName))
+      .replaceAll('{{SHARED_EVENT_DECISION_GUIDANCE}}', sharedEventDecisionGuidance)
+      .replaceAll('{{AVAILABLE_CATEGORIES}}', renderedCategories || 'No available categories');
+  };
+
+  const downloadExistingEventsCsv = (fileBaseName = 'video-ai-assignment') => {
+    const fileName = getExistingEventsCsvFileName(fileBaseName);
+    downloadCsvFile(fileName, buildExistingEventsCsv(aiPromptData?.events || []));
+    return fileName;
+  };
+
   // AI Prompt Editor Handlers
   const handleOpenAiPromptEditor = async () => {
     setLoadingPrompt(true);
@@ -433,91 +478,29 @@ const Videos = () => {
     
     try {
       // Fetch sample data to build a representative prompt
-      const [eventsResponse, categoriesResponse] = await Promise.all([
+      const [eventsResponse, categoriesResponse, templateResponse, sharedGuidanceResponse] = await Promise.all([
         historyPlusApi.getEvents(),
-        historyPlusApi.getCategories()
+        historyPlusApi.getCategories(),
+        historyPlusApi.getVideoPromptTemplate(),
+        historyPlusApi.getPromptTemplate('eventDecision')
       ]);
       
       const events = eventsResponse.data || eventsResponse;
       const categories = categoriesResponse.data || categoriesResponse;
-      
-      // Build a sample prompt using representative data
-      const sampleVideoUrl = 'https://www.youtube.com/watch?v=SAMPLE_VIDEO_ID';
-      const sampleVideoTitle = 'Sample Educational History Video';
-      const sampleVideoDescription = 'Sample video description for AI analysis';
-      
-      // Create a prompt similar to GeminiService.buildVideoAssignmentPrompt
-      const eventsList = events.slice(0, 20).map(event => 
-        `- "${event.title}" (${event.startDate} - ${event.endDate || 'Ongoing'}) - Category: ${event.category}`
-      ).join('\n');
-      
-      const categoryList = categories.map(cat => 
-        `- "${cat.name}": ${cat.description || 'Historical category'}`
-      ).join('\n');
-      
-      const fullPrompt = `You are an expert historian and content analyst. Your task is to analyze an educational video and determine how it should be assigned to historical events.
+      const templatePayload = templateResponse.data || {};
+      const loadedTemplate = templatePayload.template || '';
 
-Video URL: ${sampleVideoUrl}
-Video Title: ${sampleVideoTitle}
-Video Description: ${sampleVideoDescription}
-
-Existing Historical Events:
-${eventsList || 'No existing events'}
-
-Available Categories:
-${categoryList}
-
-Analyze the video transcript to identify a specific, narrow period of time and its corresponding events, which may be within a larger, ongoing event or period. If no existing event or category is a suitable match for this specific period, create a new event that is narrowly focused on the dates and topics discussed. Additionally, if the general subject of the conflict (e.g., a specific war or historical period) is not represented by an existing category, propose a new category to encompass it.
-
-1. **ASSIGN_TO_EXISTING**: If this video clearly belongs to an existing event
-2. **CREATE_NEW_EVENT**: If this video represents a new historical topic/event. The event should be as specific as possible and be a single event, but broad enough for additional videos to be assigned to it later. If the video covers a more focused event within a larger event, suggest a new event for the more focused event. For example, a video on a specific battle would create an event for that battle, not the war in which the battle took place.
-3. **UNCERTAIN**: If you cannot determine with reasonable confidence
-
-## CATEGORY SELECTION GUIDELINES (CRITICAL - READ CAREFULLY):
-
-**WHEN TO USE EXISTING CATEGORIES:**
-- If ANY existing category reasonably encompasses the video's historical topic
-- Use broad existing categories even if they're not perfect matches
-- Examples:
-  - Ancient Roman battle → Use "Ancient History" or "Military History"
-  - Medieval trade routes → Use "Medieval History" or "Economic History"
-  - World War 2 specific campaign → Use "World War II" or "20th Century"
-  - Renaissance art/culture → Use "Renaissance" or "Cultural History"
-
-**WHEN TO CREATE NEW CATEGORIES (ONLY):**
-- The video's topic represents a MAJOR historical domain that is completely missing
-- No existing category can reasonably accommodate the content
-- The new category would be broad enough for multiple future events
-- Examples where NEW categories would be appropriate:
-  - Indigenous American civilizations (if no "Pre-Columbian History" exists)
-  - African kingdoms and empires (if no "African History" exists)
-  - Scientific revolution topics (if no "History of Science" exists)
-  - Religious history topics (if no "Religious History" exists)
-
-**CRITICAL RULE**: Prefer existing categories unless absolutely necessary. Only create new categories for major historical domains that are genuinely missing.
-
-Respond ONLY with a valid JSON object in this exact format:
-{
-  "action": "ASSIGN_TO_EXISTING" | "CREATE_NEW_EVENT" | "UNCERTAIN",
-  "confidence": 0.85,
-  "reasoning": "Brief explanation of the decision and category choice rationale",
-  "existingEventTitle": "EXACT_EVENT_TITLE_IF_ASSIGNING",
-  "newEventSuggestion": {
-    "title": "Suggested event title",
-    "startDate": "YYYY-MM-DD or YYYY",
-    "endDate": "YYYY-MM-DD or YYYY or null",
-    "category": "EXACT_CATEGORY_NAME",
-    "details": "Brief event description"
-  },
-  "alternativeAction": "Alternative suggestion if confidence is medium"
-}`;
+      setPromptTemplate(loadedTemplate);
+      setDefaultPromptTemplate(templatePayload.defaultTemplate || '');
+      setIsCustomPromptTemplate(Boolean(templatePayload.isCustom));
+      setSharedEventDecisionGuidance(sharedGuidanceResponse.data?.template || DEFAULT_SHARED_EVENT_DECISION_GUIDANCE);
+      setPromptTemplateStatus('');
       
       setAiPromptData({
         events,
         categories,
         eventsCount: events.length,
-        categoriesCount: categories.length,
-        fullPrompt
+        categoriesCount: categories.length
       });
       
     } catch (error) {
@@ -529,9 +512,49 @@ Respond ONLY with a valid JSON object in this exact format:
   };
   
   const handleCopyAiPrompt = () => {
-    if (aiPromptData?.fullPrompt) {
-      navigator.clipboard.writeText(aiPromptData.fullPrompt);
-      alert('AI prompt copied to clipboard!');
+    if (aiPromptData) {
+      const preview = renderVideoPromptPreview(promptTemplate, aiPromptData.events, aiPromptData.categories);
+      downloadExistingEventsCsv('video-ai-assignment');
+      navigator.clipboard.writeText(preview);
+      alert('AI prompt copied to clipboard and existing events CSV downloaded!');
+    }
+  };
+
+  const handleSaveAiPromptTemplate = async () => {
+    try {
+      setPromptTemplateSaving(true);
+      const response = await historyPlusApi.saveVideoPromptTemplate(promptTemplate);
+      const payload = response.data || {};
+
+      setPromptTemplate(payload.template || promptTemplate);
+      setDefaultPromptTemplate(payload.defaultTemplate || defaultPromptTemplate);
+      setIsCustomPromptTemplate(Boolean(payload.isCustom));
+      setPromptTemplateStatus('Template saved');
+    } catch (error) {
+      console.error('Error saving video AI prompt template:', error);
+      setPromptTemplateStatus('Failed to save template');
+    } finally {
+      setPromptTemplateSaving(false);
+      setTimeout(() => setPromptTemplateStatus(''), 2500);
+    }
+  };
+
+  const handleResetAiPromptTemplate = async () => {
+    try {
+      setPromptTemplateSaving(true);
+      const response = await historyPlusApi.saveVideoPromptTemplate('');
+      const payload = response.data || {};
+
+      setPromptTemplate(payload.template || defaultPromptTemplate);
+      setDefaultPromptTemplate(payload.defaultTemplate || defaultPromptTemplate);
+      setIsCustomPromptTemplate(false);
+      setPromptTemplateStatus('Template reset to default');
+    } catch (error) {
+      console.error('Error resetting video AI prompt template:', error);
+      setPromptTemplateStatus('Failed to reset template');
+    } finally {
+      setPromptTemplateSaving(false);
+      setTimeout(() => setPromptTemplateStatus(''), 2500);
     }
   };
 
@@ -896,26 +919,44 @@ Respond ONLY with a valid JSON object in this exact format:
                     <div><strong>Available Events:</strong> {aiPromptData.eventsCount} historical events</div>
                     <div><strong>Available Categories:</strong> {aiPromptData.categoriesCount} categories</div>
                     <div><strong>Usage:</strong> This prompt is used for all video AI assignments</div>
+                    <div><strong>Status:</strong> {isCustomPromptTemplate ? 'Custom template saved' : 'Using default template'}</div>
                   </div>
                 </div>
 
+                <div className="bg-purple-50 p-3 rounded border border-purple-200">
+                  <h4 className="font-medium text-purple-900 mb-2">Template Placeholders</h4>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-2 font-mono text-xs text-purple-800">
+                    <div>{'{{VIDEO_URL}}'}</div>
+                    <div>{'{{VIDEO_TITLE_LINE}}'}</div>
+                    <div>{'{{VIDEO_DESCRIPTION_LINE}}'}</div>
+                    <div>{'{{EXISTING_EVENTS}}'}</div>
+                    <div>{'{{SHARED_EVENT_DECISION_GUIDANCE}}'}</div>
+                    <div>{'{{AVAILABLE_CATEGORIES}}'}</div>
+                  </div>
+                </div>
+
+                <div className="bg-white p-3 rounded border border-gray-200">
+                  <h4 className="font-medium text-gray-900 mb-2">Editable Template</h4>
+                  <textarea
+                    value={promptTemplate}
+                    onChange={(e) => setPromptTemplate(e.target.value)}
+                    className="w-full min-h-[320px] border border-gray-300 rounded p-3 font-mono text-xs"
+                    placeholder="Enter video AI assignment prompt template..."
+                  />
+                </div>
+
                 <div className="bg-green-50 p-3 rounded border border-green-200">
-                  <h4 className="font-medium text-green-900 mb-2">📚 Events Context ({aiPromptData.eventsCount} total)</h4>
-                  <div className="text-sm max-h-32 overflow-y-auto">
-                    {aiPromptData.events?.length > 0 ? (
-                      <ul className="space-y-1">
-                        {aiPromptData.events.slice(0, 10).map((event, index) => (
-                          <li key={index} className="text-gray-700">
-                            • "{event.title}" ({event.startDate} - {event.endDate || 'Ongoing'}) - {event.category}
-                          </li>
-                        ))}
-                        {aiPromptData.events.length > 10 && (
-                          <li className="text-gray-500 italic">... and {aiPromptData.events.length - 10} more events</li>
-                        )}
-                      </ul>
-                    ) : (
-                      <p className="text-gray-500">No events available</p>
-                    )}
+                  <h4 className="font-medium text-green-900 mb-2">📚 Existing Events CSV Export</h4>
+                  <div className="text-sm space-y-1 text-gray-700">
+                    <div><strong>Rows:</strong> {aiPromptData.eventsCount}</div>
+                    <div><strong>Columns:</strong> Event Title, Start Date, End Date, Event Description</div>
+                    <div><strong>File:</strong> {getExistingEventsCsvFileName('video-ai-assignment')}</div>
+                    <button
+                      onClick={() => downloadExistingEventsCsv('video-ai-assignment')}
+                      className="mt-2 px-3 py-1 text-xs bg-green-600 text-white rounded hover:bg-green-700"
+                    >
+                      Download Existing Events CSV
+                    </button>
                   </div>
                 </div>
 
@@ -937,20 +978,37 @@ Respond ONLY with a valid JSON object in this exact format:
                 </div>
 
                 <div className="bg-gray-50 p-3 rounded border border-gray-200">
-                  <h4 className="font-medium text-gray-900 mb-2">🤖 Complete AI Prompt</h4>
+                  <h4 className="font-medium text-gray-900 mb-2">🤖 Rendered Prompt Preview</h4>
                   <div className="bg-white p-3 rounded border font-mono text-xs whitespace-pre-wrap max-h-96 overflow-y-auto">
-                    {aiPromptData.fullPrompt}
+                    {renderVideoPromptPreview(promptTemplate, aiPromptData.events, aiPromptData.categories)}
                   </div>
                 </div>
               </div>
             </div>
             
             <div className="p-4 border-t bg-gray-50 flex gap-3">
+              {promptTemplateStatus && (
+                <div className="flex-1 self-center text-sm text-green-700">{promptTemplateStatus}</div>
+              )}
+              <button
+                onClick={handleResetAiPromptTemplate}
+                disabled={promptTemplateSaving}
+                className="px-4 py-2 border border-gray-300 rounded hover:bg-gray-100 disabled:opacity-50"
+              >
+                Reset Default
+              </button>
+              <button
+                onClick={handleSaveAiPromptTemplate}
+                disabled={promptTemplateSaving}
+                className="px-4 py-2 border border-purple-300 text-purple-700 rounded hover:bg-purple-50 disabled:opacity-50"
+              >
+                {promptTemplateSaving ? 'Saving...' : 'Save Template'}
+              </button>
               <button
                 onClick={handleCopyAiPrompt}
-                className="flex-1 bg-green-600 hover:bg-green-700 text-white py-2 px-4 rounded font-medium"
+                className="bg-green-600 hover:bg-green-700 text-white py-2 px-4 rounded font-medium"
               >
-                📋 Copy Complete Prompt
+                📋 Copy Preview + Download CSV
               </button>
               <button
                 onClick={() => setShowAiPromptEditor(false)}

@@ -1,4 +1,11 @@
 import React, { useState } from 'react';
+import {
+  buildExistingEventsCsv,
+  downloadCsvFile,
+  getExistingEventsCsvFileName,
+  getExistingEventsCsvReferenceText,
+  sanitizeDownloadName
+} from '../utils/existingEventsCsv';
 
 const CourseAIAssignment = ({ 
   course, 
@@ -19,14 +26,6 @@ const CourseAIAssignment = ({
   const [showJsonImport, setShowJsonImport] = useState(false);
   const [jsonInput, setJsonInput] = useState('');
 
-  const formatEventLine = (event) => {
-    const title = event?.title || 'Untitled Event';
-    const start = event?.startDate || 'Unknown Start';
-    const end = event?.endDate || 'Ongoing';
-    const category = event?.category || 'Uncategorized';
-    return `- "${title}" (${start} - ${end}) - Category: ${category}`;
-  };
-
   const formatCategoryLine = (category) => {
     if (typeof category === 'string') {
       return `- "${category}"`;
@@ -37,75 +36,39 @@ const CourseAIAssignment = ({
     return `- "${name}"${description}`;
   };
 
-  const buildEventsCategoriesText = () => {
-    const events = Array.isArray(promptData?.events) ? promptData.events : [];
-    const categories = Array.isArray(promptData?.categories) ? promptData.categories : [];
-
-    const eventsText = events.length > 0
-      ? events.map(formatEventLine).join('\n')
-      : 'No existing events';
-
-    const categoriesText = categories.length > 0
-      ? categories.map(formatCategoryLine).join('\n')
-      : 'No available categories';
-
-    return [
-      `Course: ${course?.title || 'Unknown Course'}`,
-      `Generated: ${new Date().toISOString()}`,
-      '',
-      'EXISTING HISTORICAL EVENTS:',
-      eventsText,
-      '',
-      'AVAILABLE CATEGORIES:',
-      categoriesText,
-      ''
-    ].join('\n');
-  };
-
-  const buildPromptWithoutEventsAndCategories = (fullPrompt) => {
+  const buildPromptWithoutExistingEvents = (fullPrompt, csvFileName) => {
     const prompt = String(fullPrompt || '');
     if (!prompt) return '';
 
     const eventsMarker = 'EXISTING HISTORICAL EVENTS:';
     const categoriesMarker = 'AVAILABLE CATEGORIES:';
-    const analysisMarker = 'ANALYSIS REQUIREMENTS:';
 
     const eventsIndex = prompt.indexOf(eventsMarker);
     const categoriesIndex = prompt.indexOf(categoriesMarker);
-    const analysisIndex = prompt.indexOf(analysisMarker);
 
-    if (eventsIndex === -1 || categoriesIndex === -1 || analysisIndex === -1) {
-      return prompt;
+    if (eventsIndex === -1 || categoriesIndex === -1) {
+      return prompt.replaceAll('{{EXISTING_EVENTS}}', getExistingEventsCsvReferenceText(csvFileName));
     }
 
     const before = prompt.slice(0, eventsIndex).trimEnd();
-    const after = prompt.slice(analysisIndex).trimStart();
+    const after = prompt.slice(categoriesIndex).trimStart();
 
     return [
       before,
-      'EXISTING HISTORICAL EVENTS and AVAILABLE CATEGORIES were exported to a separate text file.',
+      `${eventsMarker}\n${getExistingEventsCsvReferenceText(csvFileName)}`,
       '',
       after
     ].join('\n\n').trim();
   };
 
-  const sanitizeFileName = (name) => {
-    return String(name || 'course-analysis')
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, '-')
-      .replace(/(^-|-$)/g, '') || 'course-analysis';
-  };
+  const buildCategoriesText = () => {
+    const categories = Array.isArray(promptData?.categories) ? promptData.categories : [];
 
-  const downloadTextFile = (filename, textContent) => {
-    const blob = new Blob([textContent], { type: 'text/plain;charset=utf-8' });
-    const url = window.URL.createObjectURL(blob);
-    const anchor = document.createElement('a');
-    anchor.href = url;
-    anchor.download = filename;
-    document.body.appendChild(anchor);
-    anchor.click();
-    document.body.removeChild(anchor);
-    window.URL.revokeObjectURL(url);
+    const categoriesText = categories.length > 0
+      ? categories.map(formatCategoryLine).join('\n')
+      : 'No available categories';
+
+    return categoriesText;
   };
 
   const copyTextToClipboard = async (text) => {
@@ -259,22 +222,21 @@ const CourseAIAssignment = ({
     if (!promptData?.fullPrompt) return;
     
     try {
-      const contextText = buildEventsCategoriesText();
-      const promptWithoutEventsAndCategories = buildPromptWithoutEventsAndCategories(promptData.fullPrompt);
-      const safeCourseTitle = sanitizeFileName(course?.title);
-      const contextFileName = `${safeCourseTitle}-events-categories-context.txt`;
+      const csvFileName = getExistingEventsCsvFileName(course?.title || 'course-analysis');
+      const promptWithoutExistingEvents = buildPromptWithoutExistingEvents(promptData.fullPrompt, csvFileName);
+      const existingEventsCsv = buildExistingEventsCsv(promptData?.events || []);
 
       // Copy first while still in the direct button interaction context.
-      const copied = await copyTextToClipboard(promptWithoutEventsAndCategories);
+      const copied = await copyTextToClipboard(promptWithoutExistingEvents);
       if (!copied) {
         setError('Could not copy prompt to clipboard in this browser/environment.');
       }
 
-      downloadTextFile(contextFileName, contextText);
-      console.log('Course AI prompt copied to clipboard and context file downloaded');
+      downloadCsvFile(csvFileName, existingEventsCsv);
+      console.log('Course AI prompt copied to clipboard and existing events CSV downloaded');
     } catch (error) {
       console.error('Failed to copy course prompt:', error);
-      setError('Failed to copy prompt and download context file');
+      setError('Failed to copy prompt and download existing events CSV');
     }
   };
 
@@ -404,7 +366,20 @@ const CourseAIAssignment = ({
               <div className="mb-4">
                 <h4 className="font-medium text-gray-900 mb-2">AI Prompt</h4>
                 <div className="bg-gray-100 p-3 rounded border text-sm font-mono max-h-96 overflow-y-auto">
-                  {promptData.fullPrompt}
+                  {buildPromptWithoutExistingEvents(
+                    promptData.fullPrompt,
+                    getExistingEventsCsvFileName(course?.title || 'course-analysis')
+                  )}
+                </div>
+              </div>
+
+              <div className="mb-4">
+                <h4 className="font-medium text-gray-900 mb-2">Existing Events CSV Export</h4>
+                <div className="bg-green-50 p-3 rounded text-sm border border-green-200">
+                  <p><strong>File:</strong> {getExistingEventsCsvFileName(course?.title || 'course-analysis')}</p>
+                  <p><strong>Rows:</strong> {Array.isArray(promptData.events) ? promptData.events.length : 0}</p>
+                  <p><strong>Columns:</strong> Event Title, Start Date, End Date, Event Description</p>
+                  <p><strong>Categories remain inline</strong> in the copied prompt.</p>
                 </div>
               </div>
             </div>
@@ -429,7 +404,7 @@ const CourseAIAssignment = ({
                 onClick={handleCopyPrompt}
                 className="px-4 py-2 border border-gray-300 rounded hover:bg-gray-100"
               >
-                📋 Copy Prompt + Download Context
+                📋 Copy Prompt + Download Events CSV
               </button>
               
               <button

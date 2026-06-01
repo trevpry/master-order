@@ -244,7 +244,7 @@ Requirements:
    * @param {Array} availableCategories - List of available categories
    * @returns {Promise<Object>} - Analysis result with assignment suggestion
    */
-  async categorizeVideoForEventAssignment(videoUrl, videoTitle = '', videoDescription = '', availableEvents = [], availableCategories = []) {
+  async categorizeVideoForEventAssignment(videoUrl, videoTitle = '', videoDescription = '', availableEvents = [], availableCategories = [], promptTemplate = null) {
     if (!this.isAvailable()) {
       throw new Error('Gemini AI Service is not available. Please check your API key configuration.');
     }
@@ -255,7 +255,7 @@ Requirements:
 
     try {
       // Build the assignment analysis prompt
-      const prompt = this.buildVideoAssignmentPrompt(videoUrl, videoTitle, videoDescription, availableEvents, availableCategories);
+      const prompt = this.buildVideoAssignmentPrompt(videoUrl, videoTitle, videoDescription, availableEvents, availableCategories, promptTemplate);
       
       // Generate response using Flash model matching web interface quality
       const model = this.ai.getGenerativeModel({ 
@@ -287,31 +287,23 @@ Requirements:
    * @param {Array} categories - Available categories
    * @returns {string} - Formatted prompt
    */
-  buildVideoAssignmentPrompt(videoUrl, videoTitle, videoDescription, events, categories) {
-    const eventsList = events.map(event => 
-      `- "${event.title}" (${event.startDate} - ${event.endDate || 'Ongoing'}) - Category: ${event.category}`
-    ).join('\n');
-
-    const categoryList = categories.map(cat => 
-      `- "${cat.name}": ${cat.description || 'Historical category'}`
-    ).join('\n');
-
+  getDefaultVideoAssignmentPromptTemplate() {
     return `You are an expert historian and content analyst. Your task is to analyze an educational video and determine how it should be assigned to historical events.
 
-Video URL: ${videoUrl}
-${videoTitle ? `Video Title: ${videoTitle}` : ''}
-${videoDescription ? `Video Description: ${videoDescription}` : ''}
+Video URL: {{VIDEO_URL}}
+{{VIDEO_TITLE_LINE}}
+{{VIDEO_DESCRIPTION_LINE}}
 
 Existing Historical Events:
-${eventsList || 'No existing events'}
+{{EXISTING_EVENTS}}
 
 Available Categories:
-${categoryList}
+{{AVAILABLE_CATEGORIES}}
 
 Analyze the video transcript to identify a specific, narrow period of time and its corresponding events, which may be within a larger, ongoing event or period. If no existing event or category is a suitable match for this specific period, create a new event that is narrowly focused on the dates and topics discussed. Additionally, if the general subject of the conflict (e.g., a specific war or historical period) is not represented by an existing category, propose a new category to encompass it.
 
-1. **ASSIGN_TO_EXISTING**: Ifbeing sure to write modular and reusable code, with clear component separation, reusing existing code where available. always refer to copilot-instructions this video clearly belongs to an existing event
-2. **CREATE_NEW_EVENT**: If this video represents a new historical topic/event. The event should be as specific as possible and be a single event, but broad enough for additional videos to be assigned to it later. If the video covers a more focused event within a larger event, suggest a new event for the more focused event. For example, a video on a specific battle would create an event for that battle, not the war in which the battle took place.
+{{SHARED_EVENT_DECISION_GUIDANCE}}
+
 3. **UNCERTAIN**: If you cannot determine with reasonable confidence
 
 ## CATEGORY SELECTION GUIDELINES (CRITICAL - READ CAREFULLY):
@@ -320,10 +312,10 @@ Analyze the video transcript to identify a specific, narrow period of time and i
 - If ANY existing category reasonably encompasses the video's historical topic
 - Use broad existing categories even if they're not perfect matches
 - Examples:
-  - Ancient Roman battle → Use "Ancient History" or "Military History"
-  - Medieval trade routes → Use "Medieval History" or "Economic History"
-  - World War 2 specific campaign → Use "World War II" or "20th Century"
-  - Renaissance art/culture → Use "Renaissance" or "Cultural History"
+  - Ancient Roman battle -> Use "Ancient History" or "Military History"
+  - Medieval trade routes -> Use "Medieval History" or "Economic History"
+  - World War 2 specific campaign -> Use "World War II" or "20th Century"
+  - Renaissance art/culture -> Use "Renaissance" or "Cultural History"
 
 **WHEN TO CREATE NEW CATEGORIES (ONLY):**
 - The video's topic represents a MAJOR historical domain that is completely missing
@@ -351,7 +343,7 @@ Respond ONLY with a valid JSON object in this exact format:
     "details": "Brief description"
   },
   "newCategorySuggestion": {
-    "name": "New Category Name", 
+    "name": "New Category Name",
     "description": "Brief description explaining why this new category is necessary"
   },
   "alternativeAction": "Alternative suggestion if confidence is medium"
@@ -367,6 +359,63 @@ Requirements:
 - newEventSuggestion should be null if action is ASSIGN_TO_EXISTING
 - existingEventTitle should be null if action is CREATE_NEW_EVENT
 - Return ONLY the JSON object, no additional text`;
+  }
+
+  getDefaultSharedEventDecisionPromptTemplate() {
+    return `SHARED EVENT DECISION GUIDANCE:
+
+1. Prefer assigning to an existing event when the content clearly matches one listed event in topic, date range, and scope.
+2. Create a new event when the content is more specific than the available events, when no listed event accurately fits, or when the content centers on a distinct sub-event within a broader period.
+3. New events should be narrowly scoped, historically grounded, date-aware, and reusable for future related content.
+4. Do not force a broad existing event if the content is really about a more focused battle, campaign, treaty, dynasty change, expedition, reform movement, or other discrete historical development.
+5. If choosing an existing event, use the exact event title from the provided list.
+6. If creating a new event, make the title specific and provide the best justified start date, end date, category, and concise description from the material.
+7. When uncertain between a weak existing-event match and a clearly supported new event, prefer the better-evidenced option rather than the broader one by default.`;
+  }
+
+  renderPromptWithSharedEventDecisionGuidance(template, replacements, sharedEventDecisionGuidance = null) {
+    const sourceTemplate = String(template || '');
+    const sharedGuidance = String(sharedEventDecisionGuidance || '').trim() || this.getDefaultSharedEventDecisionPromptTemplate();
+    const rendered = this.applyPromptTemplate(sourceTemplate, {
+      ...replacements,
+      SHARED_EVENT_DECISION_GUIDANCE: sharedGuidance
+    });
+
+    if (sourceTemplate.includes('{{SHARED_EVENT_DECISION_GUIDANCE}}')) {
+      return rendered;
+    }
+
+    return `${rendered}\n\n${sharedGuidance}`.trim();
+  }
+
+  applyPromptTemplate(template, replacements) {
+    let rendered = String(template || '');
+
+    for (const [key, value] of Object.entries(replacements || {})) {
+      rendered = rendered.split(`{{${key}}}`).join(String(value ?? ''));
+    }
+
+    return rendered;
+  }
+
+  buildVideoAssignmentPrompt(videoUrl, videoTitle, videoDescription, events, categories, promptTemplate = null, sharedEventDecisionGuidance = null) {
+    const eventsList = events.map(event => 
+      `- "${event.title}" (${event.startDate} - ${event.endDate || 'Ongoing'}) - Category: ${event.category}`
+    ).join('\n');
+
+    const categoryList = categories.map(cat => 
+      `- "${cat.name}": ${cat.description || 'Historical category'}`
+    ).join('\n');
+
+    const activeTemplate = String(promptTemplate || '').trim() || this.getDefaultVideoAssignmentPromptTemplate();
+
+    return this.renderPromptWithSharedEventDecisionGuidance(activeTemplate, {
+      VIDEO_URL: videoUrl || 'No video URL provided',
+      VIDEO_TITLE_LINE: videoTitle ? `Video Title: ${videoTitle}` : '',
+      VIDEO_DESCRIPTION_LINE: videoDescription ? `Video Description: ${videoDescription}` : '',
+      EXISTING_EVENTS: eventsList || 'No existing events',
+      AVAILABLE_CATEGORIES: categoryList || 'No available categories'
+    }, sharedEventDecisionGuidance);
   }
 
   /**
@@ -549,9 +598,8 @@ ANALYSIS REQUIREMENTS:
 1. **CHRONOLOGICAL ORDERING**: Lectures should be assigned to events in chronological order. The first lecture should be assigned to the earliest historical period/event, and subsequent lectures should follow historical progression.
 
 2. **EVENT ASSIGNMENT STRATEGY**:
-   - **ASSIGN_TO_EXISTING**: If a lecture clearly belongs to an existing event
-   - **CREATE_NEW_EVENT**: If a lecture requires a new historical event (preferred for specificity)
-   - **PAIR_WITH_NEXT**: For analytical/concept/introductory lectures that should be grouped with the next specific historical event
+{{SHARED_EVENT_DECISION_GUIDANCE}}
+  - **PAIR_WITH_NEXT**: For analytical/concept/introductory lectures that should be grouped with the next specific historical event
 
 3. **PAIRING GUIDELINES FOR INTRODUCTORY LECTURES**:
    - Introductory lectures like "Why we study...", "Introduction to...", "Overview of..." should use PAIR_WITH_NEXT
@@ -641,7 +689,7 @@ CRITICAL REQUIREMENTS:
    * @param {string|null} promptTemplate - Optional custom prompt template with {{PLACEHOLDERS}}
    * @returns {string} - Complete prompt for manual Gemini input
    */
-  buildCourseAssignmentPrompt(course, lectures, guidebookContent, availableEvents, availableCategories, promptTemplate = null) {
+  buildCourseAssignmentPrompt(course, lectures, guidebookContent, availableEvents, availableCategories, promptTemplate = null, sharedEventDecisionGuidance = null) {
     const eventsList = availableEvents.map(event => 
       `- "${event.title}" (${event.startDate} - ${event.endDate || 'Ongoing'}) - Category: ${event.category}`
     ).join('\n');
@@ -663,7 +711,7 @@ ${guidebookContent.substring(0, 8000)}${guidebookContent.length > 8000 ? '...[co
 
     const activeTemplate = String(promptTemplate || '').trim() || this.getDefaultCourseAssignmentPromptTemplate();
 
-    return this.applyCoursePromptTemplate(activeTemplate, {
+    return this.renderPromptWithSharedEventDecisionGuidance(activeTemplate, {
       COURSE_TITLE: course.title,
       COURSE_INSTRUCTOR: course.instructor || 'Unknown',
       COURSE_CATEGORY: course.category || 'General',
@@ -673,7 +721,7 @@ ${guidebookContent.substring(0, 8000)}${guidebookContent.length > 8000 ? '...[co
       GUIDEBOOK_SECTION: guidebookSection,
       EXISTING_EVENTS: eventsList || 'No existing events',
       AVAILABLE_CATEGORIES: categoryList || 'No available categories'
-    });
+    }, sharedEventDecisionGuidance);
   }
 
   /**

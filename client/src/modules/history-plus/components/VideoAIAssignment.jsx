@@ -1,4 +1,10 @@
 import React, { useState } from 'react';
+import {
+  buildExistingEventsCsv,
+  downloadCsvFile,
+  getExistingEventsCsvFileName,
+  getExistingEventsCsvReferenceText
+} from '../utils/existingEventsCsv';
 
 const VideoAIAssignment = ({ 
   video, 
@@ -182,12 +188,18 @@ const VideoAIAssignment = ({
     if (!promptData?.fullPrompt) return;
     
     try {
-      await navigator.clipboard.writeText(promptData.fullPrompt);
-      // Could add a temporary success message here
-      console.log('AI prompt copied to clipboard');
+      const csvFileName = getExistingEventsCsvFileName(video?.title || `video-${video?.id || 'prompt'}`);
+      const promptWithoutExistingEvents = String(promptData.fullPrompt || '').replaceAll(
+        '{{EXISTING_EVENTS}}',
+        getExistingEventsCsvReferenceText(csvFileName)
+      );
+
+      await navigator.clipboard.writeText(promptWithoutExistingEvents);
+      downloadCsvFile(csvFileName, buildExistingEventsCsv(promptData?.events || []));
+      console.log('AI prompt copied to clipboard and existing events CSV downloaded');
     } catch (error) {
       console.error('Failed to copy prompt:', error);
-      setError('Failed to copy prompt to clipboard');
+      setError('Failed to copy prompt and download existing events CSV');
     }
   };
 
@@ -249,6 +261,12 @@ const VideoAIAssignment = ({
   };
 
   const isUnassignedVideo = video?.url && !video?.eventId;
+
+  const existingEventsCsvFileName = getExistingEventsCsvFileName(video?.title || `video-${video?.id || 'prompt'}`);
+  const promptPreview = String(promptData?.fullPrompt || '').replaceAll(
+    '{{EXISTING_EVENTS}}',
+    getExistingEventsCsvReferenceText(existingEventsCsvFileName)
+  );
 
   if (!isUnassignedVideo) {
     return null;
@@ -315,22 +333,12 @@ const VideoAIAssignment = ({
                 </div>
 
                 <div className="bg-green-50 p-3 rounded border border-green-200">
-                  <h4 className="font-medium text-green-900 mb-2">📚 Available Events ({promptData.events?.length || 0})</h4>
-                  <div className="text-sm max-h-40 overflow-y-auto">
-                    {promptData.events?.length > 0 ? (
-                      <ul className="space-y-1">
-                        {promptData.events.slice(0, 10).map((event, index) => (
-                          <li key={index} className="text-gray-700">
-                            • "{event.title}" ({event.startDate} - {event.endDate || 'Ongoing'}) - {event.category}
-                          </li>
-                        ))}
-                        {promptData.events.length > 10 && (
-                          <li className="text-gray-500 italic">...and {promptData.events.length - 10} more events</li>
-                        )}
-                      </ul>
-                    ) : (
-                      <p className="text-gray-500">No events available</p>
-                    )}
+                  <h4 className="font-medium text-green-900 mb-2">📚 Existing Events CSV Export</h4>
+                  <div className="text-sm space-y-1 text-gray-700">
+                    <div><strong>File:</strong> {existingEventsCsvFileName}</div>
+                    <div><strong>Rows:</strong> {promptData.events?.length || 0}</div>
+                    <div><strong>Columns:</strong> Event Title, Start Date, End Date, Event Description</div>
+                    <div>The copied prompt references this CSV instead of embedding the full event list.</div>
                   </div>
                 </div>
 
@@ -354,7 +362,7 @@ const VideoAIAssignment = ({
                 <div className="bg-gray-50 p-3 rounded border border-gray-200">
                   <h4 className="font-medium text-gray-900 mb-2">🤖 Complete AI Prompt</h4>
                   <div className="bg-white p-3 rounded border font-mono text-xs whitespace-pre-wrap max-h-96 overflow-y-auto">
-                    {promptData.fullPrompt}
+                    {promptPreview}
                   </div>
                 </div>
               </div>
@@ -366,7 +374,7 @@ const VideoAIAssignment = ({
                   onClick={handleCopyPrompt}
                   className="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700 transition-colors"
                 >
-                  📋 Copy AI Prompt
+                  📋 Copy AI Prompt + Download CSV
                 </button>
                 <button
                   onClick={handleJsonImport}

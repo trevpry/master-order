@@ -3,6 +3,7 @@ import { historyPlusApi } from '../services/historyPlusApi';
 import TimelineItem from '../components/TimelineItem';
 import EventForm from '../components/EventForm';
 import SearchFilters from '../components/SearchFilters';
+import SearchableEventSelect from '../components/SearchableEventSelect';
 import LoadingSpinner from '../../../components/LoadingSpinner';
 
 const DEFAULT_TIMELINE_PROMPT_TEMPLATE = `You are assisting with curation for a historical timeline knowledge base.
@@ -104,6 +105,24 @@ const Timeline = () => {
     }
   };
 
+  const compareTimelineEvents = (a, b) => {
+    const startDateA = parseHistoricalDate(a.startDate || '0000-01-01');
+    const startDateB = parseHistoricalDate(b.startDate || '0000-01-01');
+
+    if (startDateA !== startDateB) {
+      return startDateA - startDateB;
+    }
+
+    const endDateA = parseHistoricalDate(a.endDate || a.startDate || '0000-01-01');
+    const endDateB = parseHistoricalDate(b.endDate || b.startDate || '0000-01-01');
+
+    if (endDateA !== endDateB) {
+      return endDateB - endDateA;
+    }
+
+    return (a.title || '').localeCompare(b.title || '');
+  };
+
   // State management
   // State management
   const [events, setEvents] = useState([]);
@@ -151,6 +170,12 @@ const Timeline = () => {
   const [promptTemplateSaving, setPromptTemplateSaving] = useState(false);
   const [defaultPromptTemplate, setDefaultPromptTemplate] = useState(DEFAULT_TIMELINE_PROMPT_TEMPLATE);
   const [isCustomPromptTemplate, setIsCustomPromptTemplate] = useState(false);
+
+  // Content reassignment state
+  const [showReassignModal, setShowReassignModal] = useState(false);
+  const [reassignTarget, setReassignTarget] = useState(null);
+  const [reassignEventId, setReassignEventId] = useState('');
+  const [reassignLoading, setReassignLoading] = useState(false);
   
   // Import state
   const [importing, setImporting] = useState(false);
@@ -280,12 +305,9 @@ const Timeline = () => {
       });
     }
 
-    // Sort by start date (earliest first)
-    filtered.sort((a, b) => {
-      const dateA = parseHistoricalDate(a.startDate || '0000-01-01');
-      const dateB = parseHistoricalDate(b.startDate || '0000-01-01');
-      return dateA - dateB;
-    });
+    // Sort by start date (earliest first), then by end date (latest first)
+    // so broader date ranges appear before narrower ones when starts match.
+    filtered.sort(compareTimelineEvents);
 
     setFilteredEvents(filtered);
   };
@@ -298,11 +320,7 @@ const Timeline = () => {
   const selectedEvents = events.filter(event => selectedEventIds.includes(event.id));
 
   const deriveMergeDefaults = (mergeCandidates) => {
-    const sortedByStartDate = [...mergeCandidates].sort((a, b) => {
-      const dateA = parseHistoricalDate(a.startDate || '0000-01-01');
-      const dateB = parseHistoricalDate(b.startDate || '0000-01-01');
-      return dateA - dateB;
-    });
+    const sortedByStartDate = [...mergeCandidates].sort(compareTimelineEvents);
 
     const sortedByEndDate = [...mergeCandidates]
       .filter(event => event.endDate)
@@ -791,6 +809,98 @@ const Timeline = () => {
     }, 2500);
   };
 
+  const handleOpenReassignModal = ({ type, item, sourceEventId, sourceEventTitle }) => {
+    setReassignTarget({ type, item, sourceEventId, sourceEventTitle });
+    setReassignEventId('');
+    setShowReassignModal(true);
+  };
+
+  const getReassignLabel = () => {
+    if (!reassignTarget) return '';
+
+    const title = reassignTarget.item?.title || `ID ${reassignTarget.item?.id}`;
+    switch (reassignTarget.type) {
+      case 'video':
+        return `Video: ${title}`;
+      case 'book':
+        return `Book: ${title}`;
+      case 'chapter':
+        return `Chapter: ${title}`;
+      case 'section':
+        return `Section: ${title}`;
+      default:
+        return title;
+    }
+  };
+
+  const handleReassignSubmit = async (e) => {
+    e.preventDefault();
+
+    if (!reassignTarget || !reassignEventId) {
+      setError('Please select a destination event');
+      return;
+    }
+
+    const destinationEventId = Number(reassignEventId);
+
+    try {
+      setReassignLoading(true);
+      setError(null);
+
+      if (reassignTarget.type === 'video') {
+        await historyPlusApi.updateVideo(reassignTarget.item.id, { eventId: destinationEventId });
+      } else if (reassignTarget.type === 'book') {
+        const linkResponse = await fetch(`/api/books/history-events/${destinationEventId}/link-book`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ bookId: reassignTarget.item.id })
+        });
+
+        if (!linkResponse.ok) {
+          throw new Error('Failed to link book to destination event');
+        }
+
+        const unlinkResponse = await fetch(`/api/books/history-events/${reassignTarget.sourceEventId}/unlink-book/${reassignTarget.item.id}`, {
+          method: 'DELETE'
+        });
+
+        if (!unlinkResponse.ok) {
+          throw new Error('Failed to unlink book from source event');
+        }
+      } else if (reassignTarget.type === 'chapter') {
+        const response = await fetch(`/api/books/history-events/${destinationEventId}/link-chapter`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ chapterId: reassignTarget.item.id })
+        });
+
+        if (!response.ok) {
+          throw new Error('Failed to reassign chapter');
+        }
+      } else if (reassignTarget.type === 'section') {
+        const response = await fetch(`/api/books/history-events/${destinationEventId}/link-section`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ sectionId: reassignTarget.item.id })
+        });
+
+        if (!response.ok) {
+          throw new Error('Failed to reassign section');
+        }
+      }
+
+      setShowReassignModal(false);
+      setReassignTarget(null);
+      setReassignEventId('');
+      await loadData();
+    } catch (err) {
+      console.error('Error reassigning content:', err);
+      setError(`Failed to reassign content: ${err.message}`);
+    } finally {
+      setReassignLoading(false);
+    }
+  };
+
   // Pagination calculations
   const totalPages = Math.ceil(filteredEvents.length / itemsPerPage);
   const startIndex = (currentPage - 1) * itemsPerPage;
@@ -1061,6 +1171,7 @@ const Timeline = () => {
               categories={categories}
               selected={selectedEventIds.includes(event.id)}
               onToggleSelect={toggleEventSelection}
+              onReassignContent={handleOpenReassignModal}
               onEdit={handleEditEvent}
               onDelete={handleDeleteEvent}
               onToggleReviewed={handleToggleReviewed}
@@ -1401,6 +1512,54 @@ const Timeline = () => {
                   className="px-4 py-2 bg-indigo-600 text-white rounded hover:bg-indigo-700"
                 >
                   Merge Events
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {showReassignModal && reassignTarget && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-lg shadow-lg w-full max-w-xl p-6">
+            <h2 className="text-xl font-semibold mb-2">Reassign Content</h2>
+            <p className="text-sm text-gray-600 mb-4">
+              Move this item from <strong>{reassignTarget.sourceEventTitle}</strong> to another event.
+            </p>
+
+            <div className="mb-4 p-3 bg-gray-50 border border-gray-200 rounded text-sm">
+              {getReassignLabel()}
+            </div>
+
+            <form onSubmit={handleReassignSubmit} className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Destination Event</label>
+                <SearchableEventSelect
+                  events={events.filter(evt => evt.id !== reassignTarget.sourceEventId)}
+                  value={reassignEventId}
+                  onChange={(e) => setReassignEventId(e.target.value)}
+                  placeholder="Search events to reassign..."
+                />
+              </div>
+
+              <div className="flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowReassignModal(false);
+                    setReassignTarget(null);
+                    setReassignEventId('');
+                  }}
+                  className="px-4 py-2 border border-gray-300 rounded hover:bg-gray-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={reassignLoading}
+                  className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:bg-gray-400"
+                >
+                  {reassignLoading ? 'Reassigning...' : 'Reassign'}
                 </button>
               </div>
             </form>

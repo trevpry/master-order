@@ -179,6 +179,14 @@ const HistoryPlusHome = () => {
                     <p>Create and edit event categories</p>
                   </div>
                 </Link>
+
+                <Link to="/history-plus/prompts" className="action-card">
+                  <span className="action-icon">🤖</span>
+                  <div className="action-content">
+                    <h3>AI Prompt Templates</h3>
+                    <p>Review and edit all History Plus AI prompts</p>
+                  </div>
+                </Link>
               </div>
             </div>
 
