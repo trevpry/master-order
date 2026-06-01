@@ -5,6 +5,8 @@ import EventEditModal from './EventEditModal';
 const TimelineItem = ({ 
   event, 
   categories = [],
+  selected = false,
+  onToggleSelect,
   onEdit, 
   onDelete, 
   onToggleReviewed,
@@ -164,6 +166,20 @@ const TimelineItem = ({
       {/* Header Section */}
       <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
         <div className="flex-1 min-w-0">
+          {onToggleSelect && (
+            <div className="mb-3">
+              <label className="inline-flex items-center gap-2 text-sm text-gray-600 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={selected}
+                  onChange={() => onToggleSelect(localEvent.id)}
+                  className="w-4 h-4"
+                />
+                Select for merge
+              </label>
+            </div>
+          )}
+
           {/* Title and Category */}
           <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-3 mb-3">
             <h3 className="text-lg sm:text-xl font-semibold text-gray-800 leading-tight">

@@ -11,6 +11,47 @@ class HistoryPlusService {
     this.completionService = new BookCompletionService(this.prisma);
   }
 
+  parseHistoricalDateValue(dateInput) {
+    if (!dateInput) return null;
+
+    const dateString = String(dateInput);
+
+    if (dateString.startsWith('-')) {
+      const secondDashIndex = dateString.indexOf('-', 1);
+
+      if (secondDashIndex === -1) {
+        const year = parseInt(dateString.slice(1), 10);
+        if (Number.isNaN(year)) return null;
+        return -(year * 10000 + 101);
+      }
+
+      const year = parseInt(dateString.slice(1, secondDashIndex), 10);
+      const remainingDate = dateString.slice(secondDashIndex);
+      const parts = remainingDate.split('-');
+      const month = parseInt(parts[1], 10) || 1;
+      const day = parseInt(parts[2], 10) || 1;
+
+      if (Number.isNaN(year)) return null;
+      return -(year * 10000 + month * 100 + day);
+    }
+
+    const firstDashIndex = dateString.indexOf('-');
+    if (firstDashIndex === -1) {
+      const year = parseInt(dateString, 10);
+      if (Number.isNaN(year)) return null;
+      return year * 10000 + 101;
+    }
+
+    const year = parseInt(dateString.slice(0, firstDashIndex), 10);
+    const remainingDate = dateString.slice(firstDashIndex);
+    const parts = remainingDate.split('-');
+    const month = parseInt(parts[1], 10) || 1;
+    const day = parseInt(parts[2], 10) || 1;
+
+    if (Number.isNaN(year)) return null;
+    return year * 10000 + month * 100 + day;
+  }
+
   // ==========================================
   // HISTORICAL EVENTS
   // ==========================================
@@ -249,6 +290,177 @@ class HistoryPlusService {
     return await this.prisma.historicalEvent.delete({
       where: { id: parseInt(id) }
     });
+  }
+
+  async mergeEvents({ eventIds = [], primaryEventId = null, mergedData = {} }) {
+    const uniqueEventIds = [...new Set((eventIds || []).map(id => parseInt(id, 10)).filter(Number.isInteger))];
+
+    if (uniqueEventIds.length < 2) {
+      throw new Error('At least two event IDs are required to merge events');
+    }
+
+    const parsedPrimaryId = primaryEventId !== null && primaryEventId !== undefined
+      ? parseInt(primaryEventId, 10)
+      : uniqueEventIds[0];
+
+    const targetEventId = uniqueEventIds.includes(parsedPrimaryId) ? parsedPrimaryId : uniqueEventIds[0];
+    const sourceEventIds = uniqueEventIds.filter(id => id !== targetEventId);
+
+    if (sourceEventIds.length === 0) {
+      throw new Error('At least one source event must be provided for merge');
+    }
+
+    const events = await this.prisma.historicalEvent.findMany({
+      where: { id: { in: uniqueEventIds } }
+    });
+
+    if (events.length !== uniqueEventIds.length) {
+      throw new Error('One or more events were not found');
+    }
+
+    const targetEvent = events.find(event => event.id === targetEventId);
+
+    const sortedByStartDate = [...events]
+      .filter(event => event.startDate)
+      .sort((a, b) => {
+        const dateA = this.parseHistoricalDateValue(a.startDate) ?? Number.MAX_SAFE_INTEGER;
+        const dateB = this.parseHistoricalDateValue(b.startDate) ?? Number.MAX_SAFE_INTEGER;
+        return dateA - dateB;
+      });
+
+    const eventsWithEndDate = events
+      .filter(event => event.endDate)
+      .sort((a, b) => {
+        const dateA = this.parseHistoricalDateValue(a.endDate) ?? Number.MIN_SAFE_INTEGER;
+        const dateB = this.parseHistoricalDateValue(b.endDate) ?? Number.MIN_SAFE_INTEGER;
+        return dateB - dateA;
+      });
+
+    const hasOngoingEvent = events.some(event => !event.endDate);
+    const mergedDetails = events
+      .map(event => event.details)
+      .filter(Boolean)
+      .map(details => String(details).trim())
+      .filter(Boolean)
+      .join('\n\n');
+
+    const targetData = {
+      title: mergedData.title || targetEvent.title,
+      category: mergedData.category || targetEvent.category,
+      startDate: mergedData.startDate || sortedByStartDate[0]?.startDate || targetEvent.startDate,
+      endDate: Object.prototype.hasOwnProperty.call(mergedData, 'endDate')
+        ? (mergedData.endDate || null)
+        : (hasOngoingEvent ? null : (eventsWithEndDate[0]?.endDate || targetEvent.endDate || null)),
+      details: Object.prototype.hasOwnProperty.call(mergedData, 'details')
+        ? (mergedData.details || null)
+        : (mergedDetails || targetEvent.details || null)
+    };
+
+    const mergedEventId = await this.prisma.$transaction(async (tx) => {
+      const reviews = await tx.user_event_reviews.findMany({
+        where: { eventId: { in: uniqueEventIds } }
+      });
+
+      const shouldBeReviewed = events.some(event => event.reviewed) || reviews.some(review => review.reviewed);
+
+      await tx.historyVideo.updateMany({
+        where: { eventId: { in: sourceEventIds } },
+        data: { eventId: targetEventId }
+      });
+
+      await tx.historyBook.updateMany({
+        where: { eventId: { in: sourceEventIds } },
+        data: { eventId: targetEventId }
+      });
+
+      await tx.historyChapter.updateMany({
+        where: { eventId: { in: sourceEventIds } },
+        data: { eventId: targetEventId }
+      });
+
+      await tx.historySection.updateMany({
+        where: { eventId: { in: sourceEventIds } },
+        data: { eventId: targetEventId }
+      });
+
+      await tx.bookChapter.updateMany({
+        where: { eventId: { in: sourceEventIds } },
+        data: { eventId: targetEventId }
+      });
+
+      await tx.bookSection.updateMany({
+        where: { eventId: { in: sourceEventIds } },
+        data: { eventId: targetEventId }
+      });
+
+      await tx.readingList.updateMany({
+        where: { eventId: { in: sourceEventIds } },
+        data: { eventId: targetEventId }
+      });
+
+      const sourceBookLinks = await tx.historyBookLink.findMany({
+        where: { eventId: { in: sourceEventIds } },
+        select: { bookId: true }
+      });
+
+      if (sourceBookLinks.length > 0) {
+        const targetBookLinks = await tx.historyBookLink.findMany({
+          where: { eventId: targetEventId },
+          select: { bookId: true }
+        });
+
+        const existingBookIds = new Set(targetBookLinks.map(link => link.bookId));
+        const uniqueBookIdsToAdd = [...new Set(sourceBookLinks.map(link => link.bookId))]
+          .filter(bookId => !existingBookIds.has(bookId));
+
+        if (uniqueBookIdsToAdd.length > 0) {
+          await tx.historyBookLink.createMany({
+            data: uniqueBookIdsToAdd.map(bookId => ({
+              bookId,
+              eventId: targetEventId
+            })),
+            skipDuplicates: true
+          });
+        }
+
+        await tx.historyBookLink.deleteMany({
+          where: { eventId: { in: sourceEventIds } }
+        });
+      }
+
+      await tx.user_event_reviews.deleteMany({
+        where: { eventId: { in: sourceEventIds } }
+      });
+
+      await tx.user_event_reviews.upsert({
+        where: { eventId: targetEventId },
+        update: {
+          reviewed: shouldBeReviewed,
+          reviewedAt: shouldBeReviewed ? new Date() : null
+        },
+        create: {
+          eventId: targetEventId,
+          reviewed: shouldBeReviewed,
+          reviewedAt: shouldBeReviewed ? new Date() : null
+        }
+      });
+
+      await tx.historicalEvent.update({
+        where: { id: targetEventId },
+        data: {
+          ...targetData,
+          reviewed: shouldBeReviewed
+        }
+      });
+
+      await tx.historicalEvent.deleteMany({
+        where: { id: { in: sourceEventIds } }
+      });
+
+      return targetEventId;
+    });
+
+    return this.getEventById(mergedEventId);
   }
 
   async getEventsByContent(filters) {

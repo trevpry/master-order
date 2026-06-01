@@ -11,6 +11,52 @@ const fs = require('fs');
 
 const prisma = new PrismaClient();
 const historyPlusService = new HistoryPlusService();
+const DEFAULT_TIMELINE_AI_PROMPT_TEMPLATE = `You are assisting with curation for a historical timeline knowledge base.
+
+Analyze the event below and provide an improved event profile that can be reused by AI systems to better assign videos and books to this event in the future.
+
+Event Context
+- Event Title: {{eventTitle}}
+- Date Range: {{dateRange}}
+- Existing Description:
+{{eventDescription}}
+
+Linked YouTube Videos
+{{linkedYouTubeVideos}}
+
+Tasks
+1. Write a clear, historically accurate event description suitable for future AI matching of videos/books.
+2. Confirm whether the current date range is correct.
+3. If the date range is inaccurate or too broad/narrow, propose a corrected range and explain why.
+4. Identify key subtopics, people, places, and keywords that define this event for better matching.
+5. Recommend additional YouTube videos that cover this event (or major subtopics), including direct URLs when possible.
+
+Output Format
+Return your response in this exact structure:
+
+## Improved Event Description
+[Write 1-3 paragraphs]
+
+## Date Range Validation
+- Current Range Assessment: [Accurate / Partially Accurate / Inaccurate]
+- Suggested Range: [YYYY-MM-DD to YYYY-MM-DD, BCE format if applicable]
+- Rationale: [Concise explanation]
+
+## AI Matching Metadata
+- Core Topics: [bullet list]
+- Key People: [bullet list]
+- Key Places: [bullet list]
+- Search Keywords: [comma-separated list]
+- Recommended Category Label(s): [1-3 labels]
+
+## Additional YouTube Coverage
+List at least 5 relevant videos (or as many as you can find) with:
+- Video Title
+- Channel
+- URL
+- Why it is relevant
+
+If information is uncertain, say so explicitly rather than guessing.`;
 
 // Configure multer for CSV file uploads
 const storage = multer.diskStorage({
@@ -56,6 +102,50 @@ const upload = multer({
 // ==========================================
 // CSV FILE UPLOAD AND IMPORT ROUTES
 // ==========================================
+
+// GET /api/history-plus/ai-prompt-template
+router.get('/ai-prompt-template', asyncHandler(async (req, res) => {
+  const settings = await prisma.settings.findUnique({
+    where: { id: 1 },
+    select: { timelineAiPromptTemplate: true }
+  });
+
+  const savedTemplate = settings?.timelineAiPromptTemplate || '';
+
+  sendSuccess(res, {
+    template: savedTemplate || DEFAULT_TIMELINE_AI_PROMPT_TEMPLATE,
+    isCustom: !!savedTemplate,
+    defaultTemplate: DEFAULT_TIMELINE_AI_PROMPT_TEMPLATE
+  });
+}));
+
+// PUT /api/history-plus/ai-prompt-template
+router.put('/ai-prompt-template', asyncHandler(async (req, res) => {
+  const templateInput = req.body?.template;
+  if (typeof templateInput !== 'string') {
+    return sendBadRequest(res, 'template must be a string');
+  }
+
+  const normalizedTemplate = templateInput.trim();
+
+  await prisma.settings.upsert({
+    where: { id: 1 },
+    update: {
+      timelineAiPromptTemplate: normalizedTemplate || null
+    },
+    create: {
+      id: 1,
+      timelineAiPromptTemplate: normalizedTemplate || null
+    }
+  });
+
+  sendSuccess(res, {
+    saved: true,
+    isCustom: !!normalizedTemplate,
+    template: normalizedTemplate || DEFAULT_TIMELINE_AI_PROMPT_TEMPLATE,
+    defaultTemplate: DEFAULT_TIMELINE_AI_PROMPT_TEMPLATE
+  });
+}));
 
 // POST /api/history-plus/upload-csv
 router.post('/upload-csv', upload.array('csvFiles', 20), asyncHandler(async (req, res) => {
@@ -158,6 +248,26 @@ router.post('/events', asyncHandler(async (req, res) => {
 router.put('/events/:id', asyncHandler(async (req, res) => {
   const event = await historyPlusService.updateEvent(req.params.id, req.body);
   sendSuccess(res, event);
+}));
+
+// POST /api/history-plus/events/merge
+router.post('/events/merge', asyncHandler(async (req, res) => {
+  const { eventIds, primaryEventId, mergedData } = req.body;
+
+  if (!Array.isArray(eventIds) || eventIds.length < 2) {
+    return sendBadRequest(res, 'At least two event IDs are required to merge');
+  }
+
+  const mergedEvent = await historyPlusService.mergeEvents({
+    eventIds,
+    primaryEventId,
+    mergedData
+  });
+
+  sendSuccess(res, {
+    message: 'Events merged successfully',
+    event: mergedEvent
+  });
 }));
 
 // DELETE /api/history-plus/events/:id

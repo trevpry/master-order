@@ -54,6 +54,36 @@ export class HistoryPlusApiService {
     return response.json();
   }
 
+  static async mergeEvents(mergeData) {
+    const response = await fetch(`${API_BASE}/events/merge`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(mergeData)
+    });
+    if (!response.ok) throw new Error('Failed to merge events');
+    return response.json();
+  }
+
+  static async getTimelinePromptTemplate() {
+    const response = await fetch(`${API_BASE}/ai-prompt-template`);
+    if (!response.ok) throw new Error('Failed to fetch timeline prompt template');
+    return response.json();
+  }
+
+  static async saveTimelinePromptTemplate(template) {
+    const response = await fetch(`${API_BASE}/ai-prompt-template`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ template })
+    });
+    if (!response.ok) throw new Error('Failed to save timeline prompt template');
+    return response.json();
+  }
+
   static async getEventProgress(id) {
     const response = await fetch(`${API_BASE}/events/${id}/progress`);
     if (!response.ok) throw new Error('Failed to fetch event progress');
@@ -476,6 +506,9 @@ export const historyPlusApi = {
   createEvent: HistoryPlusApiService.createEvent,
   updateEvent: HistoryPlusApiService.updateEvent,
   deleteEvent: HistoryPlusApiService.deleteEvent,
+  mergeEvents: HistoryPlusApiService.mergeEvents,
+  getTimelinePromptTemplate: HistoryPlusApiService.getTimelinePromptTemplate,
+  saveTimelinePromptTemplate: HistoryPlusApiService.saveTimelinePromptTemplate,
   getEventProgress: HistoryPlusApiService.getEventProgress,
   getBooksByEvent: HistoryPlusApiService.getBooksByEvent,
   getBookById: HistoryPlusApiService.getBookById,

@@ -275,7 +275,6 @@ async function extractTrackPicardTags(track) {
   return {
     track: {
       ratingKey: track.ratingKey,
-      title: track.title,
       index: track.index ?? null,
       plexPath,
       filePath: localPath,
@@ -2030,6 +2029,74 @@ function mapPlexPathToLocal(plexPath) {
   return mapPlexPathToLocalDetailed(plexPath).localPath;
 }
 
+function getUnraidMusicFallbackCandidates(plexPath) {
+  if (!plexPath || !plexPath.startsWith('/')) {
+    return [];
+  }
+
+  const normalizedPath = plexPath.replace(/\\/g, '/');
+  const prefixToShare = {
+    '/xmas': 'Christmas',
+    '/movies': 'Movies',
+    '/music': 'Music',
+    '/classical': 'Classical',
+    '/tv': 'TV',
+    '/video_games': 'VideoGames',
+    '/pop_music': 'PopMusic',
+  };
+
+  const matchingPrefix = Object.keys(prefixToShare)
+    .filter((prefix) => normalizedPath.toLowerCase().startsWith(prefix.toLowerCase()))
+    .sort((left, right) => right.length - left.length)[0];
+
+  if (!matchingPrefix) {
+    return [];
+  }
+
+  const shareRoot = process.env.UNRAID_SHARE_ROOT || '/mnt/user';
+  const relativePath = normalizedPath.substring(matchingPrefix.length).replace(/^\//, '');
+
+  return [path.join(shareRoot, 'Media', prefixToShare[matchingPrefix], relativePath)];
+}
+
+async function resolveExistingMusicFilePath(plexPath) {
+  const candidatePaths = [];
+  const mappedPath = mapPlexPathToLocal(plexPath);
+
+  if (mappedPath) {
+    candidatePaths.push(mappedPath);
+  }
+
+  for (const fallbackPath of getUnraidMusicFallbackCandidates(plexPath)) {
+    if (!candidatePaths.includes(fallbackPath)) {
+      candidatePaths.push(fallbackPath);
+    }
+  }
+
+  for (const candidatePath of candidatePaths) {
+    try {
+      await fs.access(candidatePath);
+      return {
+        localPath: candidatePath,
+        mappingMatched: candidatePath === mappedPath,
+        matchedPlexPath: null,
+        matchedLocalPath: candidatePath,
+      };
+    } catch (error) {
+      if (error.code !== 'ENOENT') {
+        throw error;
+      }
+    }
+  }
+
+  return {
+    localPath: mappedPath || null,
+    mappingMatched: !!mappedPath,
+    matchedPlexPath: null,
+    matchedLocalPath: mappedPath || null,
+  };
+}
+
 async function ensureTrackPlexPath(track) {
   let plexPath = track.file;
 
@@ -2156,7 +2223,7 @@ router.post('/albums/:ratingKey/split-by-album-id', asyncHandler(async (req, res
 
   for (const track of tracks) {
     const plexPath = await ensureTrackPlexPath(track);
-    const pathResolution = mapPlexPathToLocalDetailed(plexPath);
+    const pathResolution = await resolveExistingMusicFilePath(plexPath);
 
     if (!pathResolution.localPath) {
       unresolvedTracks.push({
@@ -2170,7 +2237,6 @@ router.post('/albums/:ratingKey/split-by-album-id', asyncHandler(async (req, res
     }
 
     try {
-      await fs.access(pathResolution.localPath);
       const metadata = await parseFile(pathResolution.localPath);
       const parsedAlbumId = firstMetadataValue(metadata.common.musicbrainz_albumid);
 

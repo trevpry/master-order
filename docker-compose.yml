@@ -51,6 +51,20 @@ services:
       # \\tower\Media\Other\Images\background-images -> /mnt/user/Media/Other/Images/background-images
       - "UNRAID_SERVER_NAME=tower"
       - "UNRAID_SHARE_ROOT=/mnt/user"
+      - "PLEX_PATH_1=/xmas"
+      - "LOCAL_PATH_1=/mnt/user/Media/Christmas"
+      - "PLEX_PATH_2=/movies"
+      - "LOCAL_PATH_2=/mnt/user/Media/Movies"
+      - "PLEX_PATH_3=/music"
+      - "LOCAL_PATH_3=/mnt/user/Media/Music"
+      - "PLEX_PATH_4=/classical"
+      - "LOCAL_PATH_4=/mnt/user/Media/Classical"
+      - "PLEX_PATH_5=/tv"
+      - "LOCAL_PATH_5=/mnt/user/Media/TV"
+      - "PLEX_PATH_6=/video_games"
+      - "LOCAL_PATH_6=/mnt/user/Media/VideoGames"
+      - "PLEX_PATH_7=/pop_music"
+      - "LOCAL_PATH_7=/mnt/user/Media/PopMusic"
       - "BACKGROUND_UNC_PATH_MAPPINGS=//tower/Media/Other/Images/background-images=/mnt/user/Media/Other/Images/background-images"
       # Add your API keys and settings here or use a .env file
       # - PLEX_URL=http://your-plex-server:32400

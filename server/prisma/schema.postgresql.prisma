@@ -58,6 +58,7 @@ model Settings {
   stashWikiAutoGenInterval          Int       @default(120) // minutes
   stashWikiSchema                   String?   // Custom stash wiki schema instructions
   courseAiPromptTemplate            String?   // Custom template for Great Courses AI analysis prompt
+  timelineAiPromptTemplate          String?   // Custom template for History Plus timeline event prompt generation
   lastStashWikiGenAt                DateTime?
   createdAt                         DateTime  @default(now())
   updatedAt                         DateTime  @updatedAt

@@ -5,6 +5,53 @@ import EventForm from '../components/EventForm';
 import SearchFilters from '../components/SearchFilters';
 import LoadingSpinner from '../../../components/LoadingSpinner';
 
+const DEFAULT_TIMELINE_PROMPT_TEMPLATE = `You are assisting with curation for a historical timeline knowledge base.
+
+Analyze the event below and provide an improved event profile that can be reused by AI systems to better assign videos and books to this event in the future.
+
+Event Context
+- Event Title: {{eventTitle}}
+- Date Range: {{dateRange}}
+- Existing Description:
+{{eventDescription}}
+
+Linked YouTube Videos
+{{linkedYouTubeVideos}}
+
+Tasks
+1. Write a clear, historically accurate event description suitable for future AI matching of videos/books.
+2. Confirm whether the current date range is correct.
+3. If the date range is inaccurate or too broad/narrow, propose a corrected range and explain why.
+4. Identify key subtopics, people, places, and keywords that define this event for better matching.
+5. Recommend additional YouTube videos that cover this event (or major subtopics), including direct URLs when possible.
+
+Output Format
+Return your response in this exact structure:
+
+## Improved Event Description
+[Write 1-3 paragraphs]
+
+## Date Range Validation
+- Current Range Assessment: [Accurate / Partially Accurate / Inaccurate]
+- Suggested Range: [YYYY-MM-DD to YYYY-MM-DD, BCE format if applicable]
+- Rationale: [Concise explanation]
+
+## AI Matching Metadata
+- Core Topics: [bullet list]
+- Key People: [bullet list]
+- Key Places: [bullet list]
+- Search Keywords: [comma-separated list]
+- Recommended Category Label(s): [1-3 labels]
+
+## Additional YouTube Coverage
+List at least 5 relevant videos (or as many as you can find) with:
+- Video Title
+- Channel
+- URL
+- Why it is relevant
+
+If information is uncertain, say so explicitly rather than guessing.`;
+
 const Timeline = () => {
   // Helper function to parse BCE/CE dates for proper chronological sorting
   const parseHistoricalDate = (dateInput) => {
@@ -80,6 +127,30 @@ const Timeline = () => {
   // Modal state
   const [showEventForm, setShowEventForm] = useState(false);
   const [editingEvent, setEditingEvent] = useState(null);
+
+  // Merge selection state
+  const [selectedEventIds, setSelectedEventIds] = useState([]);
+  const [showMergeModal, setShowMergeModal] = useState(false);
+  const [mergeForm, setMergeForm] = useState({
+    primaryEventId: '',
+    title: '',
+    category: '',
+    startDate: '',
+    endDate: '',
+    details: ''
+  });
+
+  // AI prompt generation state
+  const [showPromptModal, setShowPromptModal] = useState(false);
+  const [promptData, setPromptData] = useState(null);
+  const [promptCopyStatus, setPromptCopyStatus] = useState('');
+  const [showPromptTemplateEditor, setShowPromptTemplateEditor] = useState(false);
+  const [promptTemplate, setPromptTemplate] = useState(DEFAULT_TIMELINE_PROMPT_TEMPLATE);
+  const [promptTemplateStatus, setPromptTemplateStatus] = useState('');
+  const [promptTemplateLoading, setPromptTemplateLoading] = useState(false);
+  const [promptTemplateSaving, setPromptTemplateSaving] = useState(false);
+  const [defaultPromptTemplate, setDefaultPromptTemplate] = useState(DEFAULT_TIMELINE_PROMPT_TEMPLATE);
+  const [isCustomPromptTemplate, setIsCustomPromptTemplate] = useState(false);
   
   // Import state
   const [importing, setImporting] = useState(false);
@@ -101,6 +172,31 @@ const Timeline = () => {
   useEffect(() => {
     setCurrentPage(1);
   }, [searchTerm, selectedCategory, reviewedFilter, contentTypeFilter, startDateFilter, endDateFilter]);
+
+  useEffect(() => {
+    loadPromptTemplate();
+  }, []);
+
+  const loadPromptTemplate = async () => {
+    try {
+      setPromptTemplateLoading(true);
+      const response = await historyPlusApi.getTimelinePromptTemplate();
+      const payload = response.data || {};
+
+      setPromptTemplate(payload.template || DEFAULT_TIMELINE_PROMPT_TEMPLATE);
+      setDefaultPromptTemplate(payload.defaultTemplate || DEFAULT_TIMELINE_PROMPT_TEMPLATE);
+      setIsCustomPromptTemplate(Boolean(payload.isCustom));
+    } catch (loadError) {
+      console.error('Error loading Timeline AI prompt template:', loadError);
+      setPromptTemplateStatus('Failed to load saved template; using default');
+      setPromptTemplate(DEFAULT_TIMELINE_PROMPT_TEMPLATE);
+      setDefaultPromptTemplate(DEFAULT_TIMELINE_PROMPT_TEMPLATE);
+      setIsCustomPromptTemplate(false);
+      setTimeout(() => setPromptTemplateStatus(''), 2500);
+    } finally {
+      setPromptTemplateLoading(false);
+    }
+  };
 
   const loadData = async () => {
     try {
@@ -197,6 +293,110 @@ const Timeline = () => {
   const handleCreateEvent = () => {
     setEditingEvent(null);
     setShowEventForm(true);
+  };
+
+  const selectedEvents = events.filter(event => selectedEventIds.includes(event.id));
+
+  const deriveMergeDefaults = (mergeCandidates) => {
+    const sortedByStartDate = [...mergeCandidates].sort((a, b) => {
+      const dateA = parseHistoricalDate(a.startDate || '0000-01-01');
+      const dateB = parseHistoricalDate(b.startDate || '0000-01-01');
+      return dateA - dateB;
+    });
+
+    const sortedByEndDate = [...mergeCandidates]
+      .filter(event => event.endDate)
+      .sort((a, b) => parseHistoricalDate(b.endDate) - parseHistoricalDate(a.endDate));
+
+    const details = mergeCandidates
+      .map(event => (event.details || '').trim())
+      .filter(Boolean)
+      .join('\n\n');
+
+    const hasOngoingEvent = mergeCandidates.some(event => !event.endDate);
+    const primary = sortedByStartDate[0];
+
+    return {
+      primaryEventId: primary?.id || '',
+      title: primary?.title || '',
+      category: primary?.category || '',
+      startDate: sortedByStartDate[0]?.startDate || '',
+      endDate: hasOngoingEvent ? '' : (sortedByEndDate[0]?.endDate || ''),
+      details
+    };
+  };
+
+  const toggleEventSelection = (eventId) => {
+    setSelectedEventIds(prev => (
+      prev.includes(eventId)
+        ? prev.filter(id => id !== eventId)
+        : [...prev, eventId]
+    ));
+  };
+
+  const toggleSelectAllCurrentPage = () => {
+    const currentPageIds = currentEvents.map(event => event.id);
+    const allSelected = currentPageIds.every(id => selectedEventIds.includes(id));
+
+    if (allSelected) {
+      setSelectedEventIds(prev => prev.filter(id => !currentPageIds.includes(id)));
+    } else {
+      setSelectedEventIds(prev => [...new Set([...prev, ...currentPageIds])]);
+    }
+  };
+
+  const clearSelection = () => {
+    setSelectedEventIds([]);
+  };
+
+  const openMergeModal = () => {
+    if (selectedEventIds.length < 2) {
+      setError('Select at least two events to merge');
+      return;
+    }
+
+    const defaults = deriveMergeDefaults(selectedEvents);
+    setMergeForm(defaults);
+    setShowMergeModal(true);
+  };
+
+  const closeMergeModal = () => {
+    setShowMergeModal(false);
+  };
+
+  const handleMergeSubmit = async (event) => {
+    event.preventDefault();
+
+    if (selectedEventIds.length < 2) {
+      setError('Select at least two events to merge');
+      return;
+    }
+
+    try {
+      setLoading(true);
+      setError(null);
+
+      await historyPlusApi.mergeEvents({
+        eventIds: selectedEventIds,
+        primaryEventId: mergeForm.primaryEventId,
+        mergedData: {
+          title: mergeForm.title,
+          category: mergeForm.category,
+          startDate: mergeForm.startDate,
+          endDate: mergeForm.endDate || null,
+          details: mergeForm.details
+        }
+      });
+
+      setSelectedEventIds([]);
+      setShowMergeModal(false);
+      await loadData();
+    } catch (err) {
+      console.error('Error merging events:', err);
+      setError('Failed to merge selected events');
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleEditEvent = (event) => {
@@ -447,9 +647,148 @@ const Timeline = () => {
     }
   };
 
+  const getDateRangeLabel = (startDate, endDate) => {
+    if (startDate && endDate) {
+      return `${startDate} to ${endDate}`;
+    }
+
+    if (startDate) {
+      return `${startDate} to Ongoing/Unknown end`;
+    }
+
+    if (endDate) {
+      return `Unknown start to ${endDate}`;
+    }
+
+    return 'Unknown date range';
+  };
+
+  const getYouTubeVideosForPrompt = (event) => {
+    const videos = Array.isArray(event?.videos) ? event.videos : [];
+
+    return videos
+      .filter(video => {
+        const url = String(video?.url || '').toLowerCase();
+        return url.includes('youtube.com') || url.includes('youtu.be');
+      })
+      .map((video, index) => ({
+        id: video.id || `yt-${index + 1}`,
+        title: video.title || `Linked YouTube Video ${index + 1}`,
+        url: video.url
+      }));
+  };
+
+  const buildEventAIPrompt = (event, youtubeVideos) => {
+    const title = event?.title || 'Untitled Event';
+    const dateRange = getDateRangeLabel(event?.startDate, event?.endDate);
+    const details = (event?.details || 'No description currently stored for this event.').trim();
+
+    const linkedVideosSection = youtubeVideos.length > 0
+      ? youtubeVideos.map((video, index) => `${index + 1}. ${video.title}\n   URL: ${video.url}`).join('\n')
+      : 'No linked YouTube videos are currently attached to this event.';
+
+    return (promptTemplate || DEFAULT_TIMELINE_PROMPT_TEMPLATE)
+      .replaceAll('{{eventTitle}}', title)
+      .replaceAll('{{dateRange}}', dateRange)
+      .replaceAll('{{eventDescription}}', details)
+      .replaceAll('{{linkedYouTubeVideos}}', linkedVideosSection);
+  };
+
+  const handleSavePromptTemplate = async () => {
+    try {
+      setPromptTemplateSaving(true);
+      const response = await historyPlusApi.saveTimelinePromptTemplate(promptTemplate);
+      const payload = response.data || {};
+
+      setPromptTemplate(payload.template || promptTemplate);
+      setDefaultPromptTemplate(payload.defaultTemplate || DEFAULT_TIMELINE_PROMPT_TEMPLATE);
+      setIsCustomPromptTemplate(Boolean(payload.isCustom));
+      setPromptTemplateStatus('Prompt template saved');
+    } catch (saveError) {
+      console.error('Unable to save timeline prompt template:', saveError);
+      setPromptTemplateStatus('Could not save prompt template');
+    } finally {
+      setPromptTemplateSaving(false);
+      setTimeout(() => {
+        setPromptTemplateStatus('');
+      }, 2500);
+    }
+  };
+
+  const handleResetPromptTemplate = async () => {
+    try {
+      setPromptTemplateSaving(true);
+      const response = await historyPlusApi.saveTimelinePromptTemplate('');
+      const payload = response.data || {};
+
+      setPromptTemplate(payload.template || DEFAULT_TIMELINE_PROMPT_TEMPLATE);
+      setDefaultPromptTemplate(payload.defaultTemplate || DEFAULT_TIMELINE_PROMPT_TEMPLATE);
+      setIsCustomPromptTemplate(false);
+      setPromptTemplateStatus('Prompt template reset to default');
+    } catch (resetError) {
+      console.error('Unable to reset timeline prompt template:', resetError);
+      setPromptTemplateStatus('Could not reset prompt template');
+    } finally {
+      setPromptTemplateSaving(false);
+      setTimeout(() => {
+        setPromptTemplateStatus('');
+      }, 2500);
+    }
+  };
+
+  const copyTextToClipboard = async (text) => {
+    try {
+      if (navigator?.clipboard?.writeText) {
+        await navigator.clipboard.writeText(text);
+        return true;
+      }
+    } catch (error) {
+      console.warn('Clipboard API copy failed, falling back to textarea copy:', error);
+    }
+
+    try {
+      const textArea = document.createElement('textarea');
+      textArea.value = text;
+      textArea.style.position = 'fixed';
+      textArea.style.opacity = '0';
+      document.body.appendChild(textArea);
+      textArea.focus();
+      textArea.select();
+      const copied = document.execCommand('copy');
+      document.body.removeChild(textArea);
+      return copied;
+    } catch (error) {
+      console.error('Fallback clipboard copy failed:', error);
+      return false;
+    }
+  };
+
   const handleGeneratePrompt = (event) => {
-    console.log('Generate prompt for event:', event);
-    // TODO: Implement prompt generation functionality
+    const youtubeVideos = getYouTubeVideosForPrompt(event);
+    const fullPrompt = buildEventAIPrompt(event, youtubeVideos);
+
+    setPromptData({
+      event,
+      youtubeVideos,
+      fullPrompt
+    });
+    setPromptCopyStatus('');
+    setShowPromptModal(true);
+  };
+
+  const handleCopyPrompt = async () => {
+    if (!promptData?.fullPrompt) return;
+
+    const copied = await copyTextToClipboard(promptData.fullPrompt);
+    if (copied) {
+      setPromptCopyStatus('Prompt copied to clipboard');
+    } else {
+      setPromptCopyStatus('Could not copy automatically - select and copy manually');
+    }
+
+    setTimeout(() => {
+      setPromptCopyStatus('');
+    }, 2500);
   };
 
   // Pagination calculations
@@ -532,6 +871,16 @@ const Timeline = () => {
               title="Import books directly to unified Books system from mounted directory (requires volume mount or docker cp)"
             >
               📁 Import Books from Directory
+            </button>
+
+            <button
+              onClick={async () => {
+                setShowPromptTemplateEditor(true);
+                await loadPromptTemplate();
+              }}
+              className="bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded-lg font-medium transition-colors"
+            >
+              ✏️ Edit Prompt Template
             </button>
           </div>
           
@@ -640,7 +989,7 @@ const Timeline = () => {
 
       {/* Items per page selector */}
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6">
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
           <label htmlFor="itemsPerPage" className="text-sm text-gray-600">
             Items per page:
           </label>
@@ -659,6 +1008,32 @@ const Timeline = () => {
             <option value={50}>50</option>
             <option value={100}>100</option>
           </select>
+
+          <button
+            onClick={toggleSelectAllCurrentPage}
+            disabled={currentEvents.length === 0}
+            className="ml-2 px-3 py-1 border border-gray-300 rounded text-sm hover:bg-gray-50 disabled:opacity-50"
+          >
+            {currentEvents.length > 0 && currentEvents.every(evt => selectedEventIds.includes(evt.id))
+              ? 'Unselect Page'
+              : 'Select Page'}
+          </button>
+
+          <button
+            onClick={openMergeModal}
+            disabled={selectedEventIds.length < 2}
+            className="px-3 py-1 rounded text-sm bg-indigo-600 text-white hover:bg-indigo-700 disabled:bg-gray-400"
+          >
+            Merge Selected ({selectedEventIds.length})
+          </button>
+
+          <button
+            onClick={clearSelection}
+            disabled={selectedEventIds.length === 0}
+            className="px-3 py-1 border border-gray-300 rounded text-sm hover:bg-gray-50 disabled:opacity-50"
+          >
+            Clear Selection
+          </button>
         </div>
 
         {/* Pagination info */}
@@ -684,6 +1059,8 @@ const Timeline = () => {
               key={event.id}
               event={event}
               categories={categories}
+              selected={selectedEventIds.includes(event.id)}
+              onToggleSelect={toggleEventSelection}
               onEdit={handleEditEvent}
               onDelete={handleDeleteEvent}
               onToggleReviewed={handleToggleReviewed}
@@ -783,6 +1160,252 @@ const Timeline = () => {
             setEditingEvent(null);
           }}
         />
+      )}
+
+      {showPromptModal && promptData && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-lg shadow-lg w-full max-w-4xl max-h-[90vh] overflow-hidden">
+            <div className="p-4 border-b bg-indigo-600 text-white flex justify-between items-center">
+              <h2 className="text-lg font-semibold">AI Event Prompt Preview</h2>
+              <button
+                onClick={() => setShowPromptModal(false)}
+                className="text-white hover:text-gray-200"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="p-4 overflow-y-auto max-h-[calc(90vh-190px)]">
+              <div className="mb-4 bg-gray-50 border border-gray-200 rounded p-3 text-sm">
+                <p><strong>Event:</strong> {promptData.event?.title}</p>
+                <p><strong>Date Range:</strong> {getDateRangeLabel(promptData.event?.startDate, promptData.event?.endDate)}</p>
+                <p><strong>Linked YouTube Videos:</strong> {promptData.youtubeVideos.length}</p>
+              </div>
+
+              {promptData.youtubeVideos.length > 0 && (
+                <div className="mb-4 bg-red-50 border border-red-200 rounded p-3 text-sm">
+                  <h3 className="font-medium text-red-900 mb-2">YouTube Links Included in Prompt</h3>
+                  <ul className="space-y-1 text-red-800">
+                    {promptData.youtubeVideos.map(video => (
+                      <li key={video.id}>
+                        <a
+                          href={video.url}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="underline hover:text-red-900"
+                        >
+                          {video.title}
+                        </a>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
+              <div>
+                <h3 className="font-medium text-gray-900 mb-2">Generated Prompt</h3>
+                <textarea
+                  readOnly
+                  value={promptData.fullPrompt}
+                  className="w-full min-h-[360px] border border-gray-300 rounded p-3 font-mono text-sm"
+                />
+              </div>
+            </div>
+
+            <div className="p-4 border-t bg-gray-50 flex flex-wrap items-center justify-end gap-2">
+              {promptCopyStatus && (
+                <span className="text-sm text-green-700 mr-auto">{promptCopyStatus}</span>
+              )}
+              <button
+                onClick={handleCopyPrompt}
+                className="px-4 py-2 border border-gray-300 rounded hover:bg-gray-100"
+              >
+                Copy Prompt
+              </button>
+              <button
+                onClick={() => setShowPromptModal(false)}
+                className="px-4 py-2 bg-indigo-600 text-white rounded hover:bg-indigo-700"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showPromptTemplateEditor && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-lg shadow-lg w-full max-w-4xl max-h-[90vh] overflow-hidden">
+            <div className="p-4 border-b bg-purple-600 text-white flex justify-between items-center">
+              <div>
+                <h2 className="text-lg font-semibold">Timeline Prompt Template</h2>
+                <p className="text-sm text-purple-100">Customize the prompt used by the Generate Prompt button.</p>
+              </div>
+              <button
+                onClick={() => setShowPromptTemplateEditor(false)}
+                className="text-white hover:text-gray-200"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="p-4 overflow-y-auto max-h-[calc(90vh-170px)] space-y-4">
+              {promptTemplateLoading ? (
+                <div className="flex items-center justify-center py-10 text-gray-600">
+                  Loading prompt template...
+                </div>
+              ) : (
+                <>
+                  <div className="bg-purple-50 border border-purple-200 rounded p-3 text-sm text-purple-900">
+                    <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
+                      <p className="font-medium">Available placeholders</p>
+                      <span className="text-xs text-purple-700">
+                        Status: {isCustomPromptTemplate ? 'Custom template saved' : 'Using default template'}
+                      </span>
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 font-mono text-xs">
+                      <div>{'{{eventTitle}}'}</div>
+                      <div>{'{{dateRange}}'}</div>
+                      <div>{'{{eventDescription}}'}</div>
+                      <div>{'{{linkedYouTubeVideos}}'}</div>
+                    </div>
+                  </div>
+
+                  <textarea
+                    value={promptTemplate}
+                    onChange={(e) => setPromptTemplate(e.target.value)}
+                    className="w-full min-h-[420px] border border-gray-300 rounded p-3 font-mono text-sm"
+                  />
+                </>
+              )}
+            </div>
+
+            <div className="p-4 border-t bg-gray-50 flex flex-wrap items-center justify-end gap-2">
+              {promptTemplateStatus && (
+                <span className="text-sm text-green-700 mr-auto">{promptTemplateStatus}</span>
+              )}
+              <button
+                onClick={handleResetPromptTemplate}
+                disabled={promptTemplateLoading || promptTemplateSaving}
+                className="px-4 py-2 border border-gray-300 rounded hover:bg-gray-100"
+              >
+                Reset Default
+              </button>
+              <button
+                onClick={handleSavePromptTemplate}
+                disabled={promptTemplateLoading || promptTemplateSaving}
+                className="px-4 py-2 border border-purple-300 text-purple-700 rounded hover:bg-purple-50"
+              >
+                {promptTemplateSaving ? 'Saving...' : 'Save Template'}
+              </button>
+              <button
+                onClick={() => setShowPromptTemplateEditor(false)}
+                className="px-4 py-2 bg-purple-600 text-white rounded hover:bg-purple-700"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showMergeModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-lg shadow-lg w-full max-w-2xl p-6 max-h-[90vh] overflow-y-auto">
+            <h2 className="text-xl font-semibold mb-4">Merge Events</h2>
+            <p className="text-sm text-gray-600 mb-4">
+              Merging will keep one event and move content from the others into it.
+            </p>
+
+            <form onSubmit={handleMergeSubmit} className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Primary Event</label>
+                <select
+                  value={mergeForm.primaryEventId}
+                  onChange={(e) => setMergeForm(prev => ({ ...prev, primaryEventId: Number(e.target.value) }))}
+                  className="w-full border border-gray-300 rounded px-3 py-2"
+                  required
+                >
+                  {selectedEvents.map(event => (
+                    <option key={event.id} value={event.id}>
+                      {event.title} ({event.startDate})
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Merged Title</label>
+                <input
+                  type="text"
+                  value={mergeForm.title}
+                  onChange={(e) => setMergeForm(prev => ({ ...prev, title: e.target.value }))}
+                  className="w-full border border-gray-300 rounded px-3 py-2"
+                  required
+                />
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Category</label>
+                  <input
+                    type="text"
+                    value={mergeForm.category}
+                    onChange={(e) => setMergeForm(prev => ({ ...prev, category: e.target.value }))}
+                    className="w-full border border-gray-300 rounded px-3 py-2"
+                    required
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Start Date</label>
+                  <input
+                    type="text"
+                    value={mergeForm.startDate}
+                    onChange={(e) => setMergeForm(prev => ({ ...prev, startDate: e.target.value }))}
+                    className="w-full border border-gray-300 rounded px-3 py-2"
+                    required
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">End Date (optional)</label>
+                <input
+                  type="text"
+                  value={mergeForm.endDate}
+                  onChange={(e) => setMergeForm(prev => ({ ...prev, endDate: e.target.value }))}
+                  className="w-full border border-gray-300 rounded px-3 py-2"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Details</label>
+                <textarea
+                  value={mergeForm.details}
+                  onChange={(e) => setMergeForm(prev => ({ ...prev, details: e.target.value }))}
+                  className="w-full border border-gray-300 rounded px-3 py-2 min-h-[140px]"
+                />
+              </div>
+
+              <div className="flex justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={closeMergeModal}
+                  className="px-4 py-2 border border-gray-300 rounded hover:bg-gray-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="px-4 py-2 bg-indigo-600 text-white rounded hover:bg-indigo-700"
+                >
+                  Merge Events
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
       )}
     </div>
   );
