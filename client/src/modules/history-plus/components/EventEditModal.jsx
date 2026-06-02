@@ -193,12 +193,13 @@ const EventEditModal = ({
             <div className="form-group">
               <label htmlFor="endDate">End Date</label>
               <input
-                type="date"
+                type="text"
                 id="endDate"
                 name="endDate"
                 value={formData.endDate}
                 onChange={handleInputChange}
                 disabled={isLoading}
+                placeholder="e.g., 2024-12-31 or -2287-01-01 for BCE"
               />
             </div>
           </div>

@@ -237,16 +237,16 @@ const EventForm = ({ event, categories, onSave, onCancel }) => {
                 End Date
               </label>
               <input
-                type={isBCEDate(formData.endDate) ? "text" : "date"}
+                type="text"
                 id="endDate"
                 name="endDate"
                 value={formData.endDate}
                 onChange={handleInputChange}
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                placeholder={isBCEDate(formData.endDate) ? "e.g., -2287-01-01 for 2287 BCE" : "Leave empty for single-day events"}
+                placeholder="e.g., 2024-12-31 or -2287-01-01 for BCE"
               />
               <p className="text-xs text-gray-500 mt-1">
-                Leave empty for single-day events
+                Leave empty for single-day events. You can type exact dates, including BCE dates with negative years.
               </p>
             </div>
           </div>

@@ -45,6 +45,7 @@ import {
 import readingSessionService from '../services/readingSessionService';
 import {
   buildExistingEventsCsv,
+  copyTextToClipboard,
   downloadCsvFile,
   getExistingEventsCsvFileName,
   getExistingEventsCsvReferenceText
@@ -1685,8 +1686,11 @@ const Books = () => {
         const eventsCsvFileName = getExistingEventsCsvFileName(selectedBook.title || 'book-ai-import');
         const aiPrompt = buildBookAiPrompt(selectedBook, aiPromptCategories, eventsCsvFileName, aiPromptTemplate);
 
-        const handleCopyPrompt = () => {
-          navigator.clipboard.writeText(aiPrompt);
+        const handleCopyPrompt = async () => {
+          const copied = await copyTextToClipboard(aiPrompt);
+          if (!copied) {
+            alert('Existing events CSV downloaded, but clipboard copy failed in this browser.');
+          }
           downloadCsvFile(eventsCsvFileName, buildExistingEventsCsv(aiPromptEvents || []));
           setPromptCopied(true);
           setTimeout(() => setPromptCopied(false), 2000);

@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import {
   buildExistingEventsCsv,
+  copyTextToClipboard,
   downloadCsvFile,
   getExistingEventsCsvFileName,
   getExistingEventsCsvReferenceText
@@ -194,8 +195,14 @@ const VideoAIAssignment = ({
         getExistingEventsCsvReferenceText(csvFileName)
       );
 
-      await navigator.clipboard.writeText(promptWithoutExistingEvents);
       downloadCsvFile(csvFileName, buildExistingEventsCsv(promptData?.events || []));
+
+      const copied = await copyTextToClipboard(promptWithoutExistingEvents);
+      if (!copied) {
+        setError('CSV downloaded, but clipboard copy failed in this browser.');
+        return;
+      }
+
       console.log('AI prompt copied to clipboard and existing events CSV downloaded');
     } catch (error) {
       console.error('Failed to copy prompt:', error);

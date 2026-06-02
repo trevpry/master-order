@@ -53,3 +53,35 @@ export const downloadCsvFile = (fileName, csvContent) => {
   document.body.removeChild(anchor);
   window.URL.revokeObjectURL(url);
 };
+
+export const copyTextToClipboard = async (text) => {
+  const value = String(text || '');
+  if (!value) return false;
+
+  if (navigator?.clipboard?.writeText) {
+    try {
+      await navigator.clipboard.writeText(value);
+      return true;
+    } catch (error) {
+      console.warn('Clipboard API failed, falling back to execCommand copy:', error?.message || error);
+    }
+  }
+
+  try {
+    const textArea = document.createElement('textarea');
+    textArea.value = value;
+    textArea.setAttribute('readonly', '');
+    textArea.style.position = 'fixed';
+    textArea.style.top = '-9999px';
+    textArea.style.left = '-9999px';
+    document.body.appendChild(textArea);
+    textArea.focus();
+    textArea.select();
+    const copied = document.execCommand('copy');
+    document.body.removeChild(textArea);
+    return copied;
+  } catch (error) {
+    console.error('Fallback clipboard copy failed:', error);
+    return false;
+  }
+};

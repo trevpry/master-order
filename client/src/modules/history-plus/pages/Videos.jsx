@@ -5,6 +5,7 @@ import VideoCard from '../components/VideoCard';
 import VideoForm from '../components/VideoForm';
 import {
   buildExistingEventsCsv,
+  copyTextToClipboard,
   downloadCsvFile,
   getExistingEventsCsvFileName,
   getExistingEventsCsvReferenceText
@@ -515,8 +516,19 @@ const Videos = () => {
     if (aiPromptData) {
       const preview = renderVideoPromptPreview(promptTemplate, aiPromptData.events, aiPromptData.categories);
       downloadExistingEventsCsv('video-ai-assignment');
-      navigator.clipboard.writeText(preview);
-      alert('AI prompt copied to clipboard and existing events CSV downloaded!');
+
+      copyTextToClipboard(preview)
+        .then((copied) => {
+          if (copied) {
+            alert('AI prompt copied to clipboard and existing events CSV downloaded!');
+          } else {
+            alert('Existing events CSV downloaded, but clipboard copy failed in this browser.');
+          }
+        })
+        .catch((error) => {
+          console.warn('Clipboard copy failed, but CSV download completed:', error);
+          alert('Existing events CSV downloaded, but clipboard copy failed in this browser.');
+        });
     }
   };
 

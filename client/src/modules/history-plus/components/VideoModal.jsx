@@ -1,5 +1,6 @@
 import React from 'react';
 import { historyPlusApi } from '../services/historyPlusApi';
+import { copyTextToClipboard } from '../utils/existingEventsCsv';
 
 const VideoModal = ({ video, isOpen, onClose, onWatchStatusChanged }) => {
   if (!isOpen || !video) return null;
@@ -154,7 +155,12 @@ const VideoModal = ({ video, isOpen, onClose, onWatchStatusChanged }) => {
                 className="flex-1 px-3 py-2 border border-gray-300 rounded text-sm bg-gray-50"
               />
               <button
-                onClick={() => navigator.clipboard.writeText(video.url)}
+                onClick={async () => {
+                  const copied = await copyTextToClipboard(video.url);
+                  if (!copied) {
+                    console.warn('Video URL copy failed in this browser.');
+                  }
+                }}
                 className="px-3 py-2 border border-gray-300 text-gray-700 hover:bg-gray-50 rounded text-sm"
               >
                 Copy

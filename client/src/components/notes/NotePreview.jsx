@@ -18,6 +18,7 @@ import {
   FileText
 } from 'lucide-react';
 import { Button } from '../ui/button';
+import { copyTextToClipboard } from '../../modules/history-plus/utils/existingEventsCsv';
 
 const NotePreview = ({ note, onEdit, onDelete, onFavorite }) => {
   const [showShareMenu, setShowShareMenu] = useState(false);
@@ -36,7 +37,10 @@ const NotePreview = ({ note, onEdit, onDelete, onFavorite }) => {
 
   const copyToClipboard = async (text) => {
     try {
-      await navigator.clipboard.writeText(text);
+      const copied = await copyTextToClipboard(text);
+      if (!copied) {
+        throw new Error('Clipboard copy failed');
+      }
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     } catch (error) {
