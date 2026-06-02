@@ -660,7 +660,7 @@ docker run -d \
     -e "PLEX_PATH_3=/music" \
     -e "LOCAL_PATH_3=/mnt/user/Media/Music" \
     -e "PLEX_PATH_4=/classical" \
-    -e "LOCAL_PATH_4=/mnt/user/Media/Classical" \
+    -e "LOCAL_PATH_4=/mnt/user/Media/Music" \
     -e "PLEX_PATH_5=/tv" \
     -e "LOCAL_PATH_5=/mnt/user/Media/TV" \
     -e "PLEX_PATH_6=/video_games" \

@@ -1987,6 +1987,28 @@ function getConfiguredPathMappings() {
     .sort((left, right) => right.plexPath.length - left.plexPath.length);
 }
 
+function mapUnraidMediaPathToHost(filePath) {
+  if (!filePath) {
+    return null;
+  }
+
+  const normalizedPath = filePath.replace(/\\/g, '/');
+  const unraidMediaPrefix = '/mnt/user/Media';
+  if (!normalizedPath.toLowerCase().startsWith(unraidMediaPrefix.toLowerCase())) {
+    return null;
+  }
+
+  const relativePath = normalizedPath.substring(unraidMediaPrefix.length).replace(/^\//, '');
+  if (process.platform === 'win32') {
+    const unraidServerName = process.env.UNRAID_SERVER_NAME || 'tower';
+    const uncRoot = `\\\\${unraidServerName}\\Media`;
+    return relativePath ? path.join(uncRoot, relativePath) : uncRoot;
+  }
+
+  const shareRoot = process.env.UNRAID_SHARE_ROOT || '/mnt/user';
+  return path.join(shareRoot, 'Media', relativePath);
+}
+
 function mapPlexPathToLocalDetailed(plexPath) {
   if (!plexPath) {
     return {
@@ -2012,6 +2034,17 @@ function mapPlexPathToLocalDetailed(plexPath) {
         matchedLocalPath: mapping.localPath,
       };
     }
+  }
+
+  const translatedUnraidPath = mapUnraidMediaPathToHost(plexPath);
+  if (translatedUnraidPath) {
+    console.log(`Translated Unraid media path: ${plexPath} -> ${translatedUnraidPath}`);
+    return {
+      localPath: translatedUnraidPath,
+      mappingMatched: true,
+      matchedPlexPath: '/mnt/user/Media',
+      matchedLocalPath: translatedUnraidPath,
+    };
   }
   
   // If no mapping found, return original path (useful for Docker where paths match)
@@ -2053,10 +2086,9 @@ function getUnraidMusicFallbackCandidates(plexPath) {
     return [];
   }
 
-  const shareRoot = process.env.UNRAID_SHARE_ROOT || '/mnt/user';
-  const relativePath = normalizedPath.substring(matchingPrefix.length).replace(/^\//, '');
-
-  return [path.join(shareRoot, 'Media', prefixToShare[matchingPrefix], relativePath)];
+  const unraidMediaPath = path.posix.join('/mnt/user/Media', prefixToShare[matchingPrefix], normalizedPath.substring(matchingPrefix.length));
+  const translatedPath = mapUnraidMediaPathToHost(unraidMediaPath);
+  return translatedPath ? [translatedPath] : [];
 }
 
 async function resolveExistingMusicFilePath(plexPath) {
