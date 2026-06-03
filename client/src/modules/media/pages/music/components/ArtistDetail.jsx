@@ -13,6 +13,7 @@ const ArtistDetail = ({
   stats,
   onGoBack,
   onSelectAlbum,
+  onSelectWork,
   onSelectTrack,
   onArtistUpdate,
   onExtractArtistMetadata,
@@ -31,6 +32,7 @@ const ArtistDetail = ({
 
   const linkedAlbums = artist?.linkedAlbums || [];
   const linkedTracks = artist?.linkedTracks || [];
+  const works = artist?.works || [];
 
   if (!artist) return null;
 
@@ -398,6 +400,38 @@ const ArtistDetail = ({
                     <p className="album-play-count">
                       {album.totalPlayCount} {album.totalPlayCount === 1 ? 'play' : 'plays'}
                     </p>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {works.length > 0 && (
+        <div className="artist-linked-section">
+          <h2>Works</h2>
+          <div className="artist-works-list">
+            {works.map((work) => (
+              <div
+                key={`artist-work-${work.id}`}
+                className="artist-work-row"
+                onClick={() => onSelectWork && onSelectWork(work)}
+              >
+                <div className="artist-work-main">
+                  <div className="artist-work-title">{work.title}</div>
+                  <div className="artist-work-subtitle">
+                    {work.partsCount || 0} part{work.partsCount !== 1 ? 's' : ''}
+                    {' • '}
+                    {work.tracksCount || 0} track{work.tracksCount !== 1 ? 's' : ''}
+                  </div>
+                </div>
+                <div className="artist-work-meta">
+                  {work.totalPlayCount > 0 && (
+                    <div>{work.totalPlayCount} {work.totalPlayCount === 1 ? 'play' : 'plays'}</div>
+                  )}
+                  {work.linkedArtistTypes?.length > 0 && (
+                    <div>Roles: {work.linkedArtistTypes.join(', ')}</div>
                   )}
                 </div>
               </div>

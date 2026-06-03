@@ -1447,9 +1447,19 @@ router.get('/artists/:ratingKey', asyncHandler(async (req, res) => {
       artistType: true,
       track: {
         include: {
+          work: true,
           album: {
             include: {
               artist: true
+            }
+          },
+          workPartTracks: {
+            include: {
+              workPart: {
+                include: {
+                  work: true
+                }
+              }
             }
           }
         }
@@ -1497,6 +1507,107 @@ router.get('/artists/:ratingKey', asyncHandler(async (req, res) => {
     linkedTrackMap.set(assignment.track.ratingKey, existing);
   }
 
+  const workMap = new Map();
+
+  const upsertWorkSummary = (work, linkedArtistTypeName = null) => {
+    if (!work) {
+      return;
+    }
+
+    const existing = workMap.get(work.id) || {
+      id: work.id,
+      title: work.title,
+      composerKey: work.composerKey,
+      linkedArtistTypes: [],
+      partsCount: 0,
+      tracksCount: 0,
+      totalPlayCount: 0,
+    };
+
+    if (linkedArtistTypeName && !existing.linkedArtistTypes.includes(linkedArtistTypeName)) {
+      existing.linkedArtistTypes.push(linkedArtistTypeName);
+    }
+
+    workMap.set(work.id, existing);
+  };
+
+  const works = await prisma.work.findMany({
+    where: {
+      OR: [
+        { composerKey: artist.ratingKey },
+        {
+          parts: {
+            some: {
+              tracks: {
+                some: {
+                  track: {
+                    trackArtists: {
+                      some: {
+                        artistKey: artist.ratingKey
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    include: {
+      parts: {
+        include: {
+          tracks: {
+            include: {
+              track: {
+                select: {
+                  viewCount: true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    orderBy: {
+      title: 'asc'
+    }
+  });
+
+  for (const work of works) {
+    const partsCount = work.parts.length;
+    const tracksCount = work.parts.reduce((sum, part) => sum + (part.tracks?.length || 0), 0);
+    const totalPlayCount = work.parts.reduce((workSum, part) => {
+      return workSum + part.tracks.reduce((partSum, trackRel) => partSum + (trackRel.track?.viewCount || 0), 0);
+    }, 0);
+
+    const linkedArtistTypes = [];
+    if (work.composerKey === artist.ratingKey) {
+      linkedArtistTypes.push('Composer');
+    }
+
+    workMap.set(work.id, {
+      id: work.id,
+      title: work.title,
+      composerKey: work.composerKey,
+      linkedArtistTypes,
+      partsCount,
+      tracksCount,
+      totalPlayCount,
+    });
+  }
+
+  for (const assignment of linkedTrackAssignments) {
+    const directWork = assignment.track?.work || null;
+    if (directWork) {
+      upsertWorkSummary(directWork, assignment.artistType?.name || null);
+    }
+
+    for (const relation of assignment.track?.workPartTracks || []) {
+      upsertWorkSummary(relation.workPart?.work || null, assignment.artistType?.name || null);
+    }
+  }
+
   artist.linkedAlbums = [...linkedAlbumMap.values()]
     .sort((left, right) => (left.title || '').localeCompare(right.title || ''));
   artist.linkedTracks = [...linkedTrackMap.values()]
@@ -1511,6 +1622,8 @@ router.get('/artists/:ratingKey', asyncHandler(async (req, res) => {
       const rightIndex = Number.isInteger(right.index) ? right.index : Number.MAX_SAFE_INTEGER;
       return leftIndex - rightIndex;
     });
+  artist.works = [...workMap.values()]
+    .sort((left, right) => (left.title || '').localeCompare(right.title || ''));
   
   // Add totalPlayCount for the artist
   const playCount = await prisma.plexTrack.aggregate({

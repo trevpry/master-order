@@ -350,8 +350,27 @@ class IdentificationService {
 
     const matchedTracks = this.matchLocalTracksToReleaseTracks(album.tracks, releaseTracks);
 
+    const matchedTrackContexts = [];
+    let albumHasExplicitWorkRelation = false;
+
     for (const { localTrack, releaseTrack } of matchedTracks) {
-      await this.applyTrackMetadata(localTrack, releaseTrack);
+      const trackWorkContext = await this.resolveTrackWorkContext(releaseTrack);
+      if (trackWorkContext.workRelation) {
+        albumHasExplicitWorkRelation = true;
+      }
+
+      matchedTrackContexts.push({
+        localTrack,
+        releaseTrack,
+        trackWorkContext,
+      });
+    }
+
+    for (const { localTrack, releaseTrack, trackWorkContext } of matchedTrackContexts) {
+      await this.applyTrackMetadata(localTrack, releaseTrack, {
+        ...trackWorkContext,
+        allowFallbackSingleTrackWork: albumHasExplicitWorkRelation,
+      });
     }
   }
 
@@ -420,12 +439,10 @@ class IdentificationService {
     return matches;
   }
 
-  async applyTrackMetadata(localTrack, releaseTrack) {
+  async resolveTrackWorkContext(releaseTrack) {
     let recording = releaseTrack?.recording || null;
     let workRelation = this.findTrackWorkRelation(recording);
 
-    // Some release payloads omit nested recording work relations.
-    // Fetching the recording directly gives reliable "performance -> work" data.
     if (!workRelation && recording?.id) {
       try {
         recording = await this.musicBrainz.getRecordingDetails(recording.id);
@@ -435,16 +452,68 @@ class IdentificationService {
       }
     }
 
+    return {
+      recording,
+      workRelation,
+    };
+  }
+
+  async createFallbackSingleTrackWorkImport(localTrack, releaseTrack, recording, fallbackComposerKey) {
+    const inferredWorkTitle = recording?.title || releaseTrack?.title || localTrack?.title || null;
+
+    if (!inferredWorkTitle) {
+      return null;
+    }
+
+    const effectiveComposerKey = fallbackComposerKey || await this.ensureFallbackComposerArtistKey();
+    const workRecord = await this.ensureWorkRecord({ title: inferredWorkTitle }, effectiveComposerKey);
+
+    if (!workRecord) {
+      return null;
+    }
+
+    const partOrder = Number.parseInt(
+      releaseTrack?.number || releaseTrack?.position || localTrack?.index || 1,
+      10
+    );
+    const workPart = await this.ensureWorkPartRecord(
+      workRecord.id,
+      inferredWorkTitle,
+      Number.isInteger(partOrder) ? partOrder : 1
+    );
+
+    return {
+      workId: workRecord.id,
+      workPartId: workPart?.id || null,
+    };
+  }
+
+  async applyTrackMetadata(localTrack, releaseTrack, options = {}) {
+    const {
+      recording: resolvedRecording = null,
+      workRelation: resolvedWorkRelation = null,
+      allowFallbackSingleTrackWork = false,
+    } = options;
+    const recording = resolvedRecording || releaseTrack?.recording || null;
+    const workRelation = resolvedWorkRelation || this.findTrackWorkRelation(recording);
+
     const contributors = this.collectTrackContributors(releaseTrack, recording, workRelation?.work);
     let fallbackComposerKey = localTrack.grandparentRatingKey || null;
 
     const composerContributor = contributors.find(contributor => contributor.typeNames.includes('Composer'));
+    let composerArtist = null;
     if (composerContributor) {
-      const composerArtist = await this.ensureArtistFromMusicBrainz(composerContributor.artist);
+      composerArtist = await this.ensureArtistFromMusicBrainz(composerContributor.artist);
       if (composerArtist?.ratingKey) {
         fallbackComposerKey = composerArtist.ratingKey;
       }
     }
+
+    const shouldCreateFallbackSingleTrackWork = allowFallbackSingleTrackWork || (
+      composerArtist?.ratingKey
+      && localTrack.grandparentRatingKey
+      && composerArtist.ratingKey === localTrack.grandparentRatingKey
+    );
 
     const workImport = workRelation
       ? await this.importWorkHierarchy(
@@ -454,6 +523,13 @@ class IdentificationService {
           releaseTrack?.title || recording?.title || localTrack?.title || null,
           releaseTrack?.number || releaseTrack?.position || localTrack?.index || null
         )
+      : shouldCreateFallbackSingleTrackWork
+        ? await this.createFallbackSingleTrackWorkImport(
+            localTrack,
+            releaseTrack,
+            recording,
+            fallbackComposerKey
+          )
       : null;
     const composerNames = this.extractComposerNames(workRelation?.work);
 

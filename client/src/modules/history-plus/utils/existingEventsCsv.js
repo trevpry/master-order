@@ -31,11 +31,16 @@ export const buildExistingEventsCsv = (events = []) => {
   const rows = [CSV_HEADERS.join(',')];
 
   events.forEach((event) => {
+    const eventDescription = event?.details
+      ?? event?.description
+      ?? event?.eventDescription
+      ?? '';
+
     rows.push([
       escapeCsvValue(event?.title || ''),
       escapeCsvValue(event?.startDate || ''),
       escapeCsvValue(event?.endDate || ''),
-      escapeCsvValue(event?.details || '')
+      escapeCsvValue(eventDescription)
     ].join(','));
   });
 

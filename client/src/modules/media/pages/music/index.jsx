@@ -957,23 +957,27 @@ const Music = () => {
     navigateToView('artist', { artist: artist.ratingKey, playlistFilter: null });
     
     try {
-      const [albumsRes, tracksRes] = await Promise.all([
+      const [artistRes, albumsRes, tracksRes] = await Promise.all([
+        fetch(`${config.apiBaseUrl}/api/music/artists/${artist.ratingKey}`),
         fetch(`${config.apiBaseUrl}/api/music/albums/artist/${artist.ratingKey}`),
         fetch(`${config.apiBaseUrl}/api/music/tracks/artist/${artist.ratingKey}`)
       ]);
       
-      if (!albumsRes.ok || !tracksRes.ok) {
+      if (!artistRes.ok || !albumsRes.ok || !tracksRes.ok) {
         const failedRequests = [];
+        if (!artistRes.ok) failedRequests.push(`artist (${artistRes.status})`);
         if (!albumsRes.ok) failedRequests.push(`albums (${albumsRes.status})`);
         if (!tracksRes.ok) failedRequests.push(`tracks (${tracksRes.status})`);
         throw new Error(`Failed to fetch artist data: ${failedRequests.join(', ')}`);
       }
       
-      const [albumsData, tracksData] = await Promise.all([
+      const [artistData, albumsData, tracksData] = await Promise.all([
+        safeJsonParse(artistRes, `${config.apiBaseUrl}/api/music/artists/${artist.ratingKey}`),
         safeJsonParse(albumsRes, `${config.apiBaseUrl}/api/music/albums/artist/${artist.ratingKey}`),
         safeJsonParse(tracksRes, `${config.apiBaseUrl}/api/music/tracks/artist/${artist.ratingKey}`)
       ]);
       
+      setSelectedArtist(artistData);
       setAlbums(albumsData);
       setTracks(tracksData);
     } catch (err) {
@@ -1016,7 +1020,12 @@ const Music = () => {
 
   const selectWork = (workIdOrWork) => {
     const id = typeof workIdOrWork === 'object' ? workIdOrWork.id : workIdOrWork;
-    navigateToView('workDetail', { work: id });
+    navigateToView('workDetail', {
+      artist: selectedArtist?.ratingKey || artistRatingKey,
+      album: selectedAlbum?.ratingKey || albumRatingKey,
+      track: selectedTrack?.ratingKey || trackRatingKey,
+      work: id
+    });
   };
 
   // Artist Types Management Functions
@@ -1950,10 +1959,20 @@ const Music = () => {
               navigateToView('artists');
             }}
             onSelectAlbum={selectAlbum}
+            onSelectWork={selectWork}
             onSelectTrack={selectTrack}
             onArtistUpdate={(updatedArtist) => {
               // Update selectedArtist with new data
-              setSelectedArtist(updatedArtist);
+              setSelectedArtist((prevArtist) => {
+                if (!prevArtist || prevArtist.ratingKey !== updatedArtist.ratingKey) {
+                  return updatedArtist;
+                }
+
+                return {
+                  ...prevArtist,
+                  ...updatedArtist
+                };
+              });
               
               // Update the artist in the artists list
               setArtists(prevArtists => 
@@ -2031,11 +2050,28 @@ const Music = () => {
           <WorkDetail
             workId={parseInt(workId)}
             onGoBack={() => {
-              const params = {};
-              if (artistRatingKey) params.artist = artistRatingKey;
-              if (albumRatingKey) params.album = albumRatingKey;
-              if (trackRatingKey) params.track = trackRatingKey;
-              navigateToView('track', params);
+              if (trackRatingKey) {
+                const params = {};
+                if (artistRatingKey) params.artist = artistRatingKey;
+                if (albumRatingKey) params.album = albumRatingKey;
+                params.track = trackRatingKey;
+                navigateToView('track', params);
+                return;
+              }
+
+              if (albumRatingKey) {
+                const params = { album: albumRatingKey };
+                if (artistRatingKey) params.artist = artistRatingKey;
+                navigateToView('album', params);
+                return;
+              }
+
+              if (artistRatingKey) {
+                navigateToView('artist', { artist: artistRatingKey });
+                return;
+              }
+
+              navigateToView('works');
             }}
             onSelectArtist={selectArtist}
             onSelectTrack={selectTrack}
