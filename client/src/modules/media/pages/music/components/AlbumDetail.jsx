@@ -15,6 +15,7 @@ const AlbumDetail = ({
   playlists,
   selectedSection,
   backLabel = 'Back to Albums',
+  onMergeWorks,
   onGoBack,
   onPlayTrack,
   onSelectArtist,
@@ -31,6 +32,25 @@ const AlbumDetail = ({
   const [showMusicBrainzData, setShowMusicBrainzData] = useState(false);
   const [albumData, setAlbumData] = useState(album);
   const [isSplittingByAlbumId, setIsSplittingByAlbumId] = useState(false);
+  const [workSelectionMode, setWorkSelectionMode] = useState(false);
+  const [selectedWorkIds, setSelectedWorkIds] = useState(new Set());
+  const [mergeMode, setMergeMode] = useState('existing');
+  const [mergeTargetWorkId, setMergeTargetWorkId] = useState('');
+  const [mergeTitle, setMergeTitle] = useState('');
+  const [isMergingWorks, setIsMergingWorks] = useState(false);
+  const [showLinkWorkModal, setShowLinkWorkModal] = useState(false);
+  const [trackToLink, setTrackToLink] = useState(null);
+  const [composerSearch, setComposerSearch] = useState('');
+  const [composerResults, setComposerResults] = useState([]);
+  const [searchingComposer, setSearchingComposer] = useState(false);
+  const [selectedComposer, setSelectedComposer] = useState(null);
+  const [composerWorks, setComposerWorks] = useState([]);
+  const [workSearch, setWorkSearch] = useState('');
+  const [selectedWork, setSelectedWork] = useState(null);
+  const [selectedPart, setSelectedPart] = useState(null);
+  const [linkingTrack, setLinkingTrack] = useState(false);
+  const [disconnectingTrackKey, setDisconnectingTrackKey] = useState(null);
+  const [disconnectingWorkTrackKey, setDisconnectingWorkTrackKey] = useState(null);
   
   // Sync local state when prop changes
   useEffect(() => {
@@ -41,6 +61,15 @@ const AlbumDetail = ({
   useEffect(() => {
     setAlbumData(album);
   }, [album]);
+
+  useEffect(() => {
+    setWorkSelectionMode(false);
+    setSelectedWorkIds(new Set());
+    setMergeMode('existing');
+    setMergeTargetWorkId('');
+    setMergeTitle('');
+    setIsMergingWorks(false);
+  }, [album?.ratingKey]);
   
   const handleRatingChange = async (trackRatingKey, newRating) => {
     try {
@@ -101,6 +130,27 @@ const AlbumDetail = ({
     refreshAlbumAndTracks();
   };
 
+  const refreshAlbumAndTracks = async () => {
+    try {
+      const [albumRes, tracksRes] = await Promise.all([
+        fetch(`${config.apiBaseUrl}/api/music/albums/${album.ratingKey}`),
+        fetch(`${config.apiBaseUrl}/api/music/tracks/album/${album.ratingKey}`),
+      ]);
+
+      if (albumRes.ok) {
+        const refreshedAlbum = await albumRes.json();
+        setAlbumData(refreshedAlbum);
+      }
+
+      if (tracksRes.ok) {
+        const refreshedTracks = await tracksRes.json();
+        setTracks(refreshedTracks);
+      }
+    } catch (error) {
+      console.error('Error refreshing album and tracks:', error);
+    }
+  };
+
   const handleSplitByAlbumId = async () => {
     if (!albumData?.ratingKey || isSplittingByAlbumId) {
       return;
@@ -126,20 +176,7 @@ const AlbumDetail = ({
       const splitResult = await splitResponse.json();
       const resultData = splitResult?.data || {};
 
-      const [albumRes, tracksRes] = await Promise.all([
-        fetch(`${config.apiBaseUrl}/api/music/albums/${albumData.ratingKey}`),
-        fetch(`${config.apiBaseUrl}/api/music/tracks/album/${albumData.ratingKey}`),
-      ]);
-
-      if (albumRes.ok) {
-        const refreshedAlbum = await albumRes.json();
-        setAlbumData(refreshedAlbum);
-      }
-
-      if (tracksRes.ok) {
-        const refreshedTracks = await tracksRes.json();
-        setTracks(refreshedTracks);
-      }
+      await refreshAlbumAndTracks();
 
       const unresolvedCount = resultData?.unresolvedTracks?.length || 0;
       alert(
@@ -188,6 +225,251 @@ const AlbumDetail = ({
   };
 
   const trackGroups = buildTrackGroups(tracks);
+  const albumWorks = trackGroups
+    .filter((group) => group.workId)
+    .map((group) => ({ id: group.workId, title: group.title, tracksCount: group.tracks.length }));
+
+  useEffect(() => {
+    if (!workSelectionMode || mergeMode !== 'existing') return;
+
+    const selectedIds = [...selectedWorkIds];
+    if (selectedIds.length === 0) {
+      setMergeTargetWorkId('');
+      return;
+    }
+
+    if (!selectedIds.includes(parseInt(mergeTargetWorkId, 10))) {
+      setMergeTargetWorkId(String(selectedIds[0]));
+    }
+  }, [workSelectionMode, mergeMode, selectedWorkIds, mergeTargetWorkId]);
+
+  const toggleWorkSelection = (workId) => {
+    setSelectedWorkIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(workId)) {
+        next.delete(workId);
+      } else {
+        next.add(workId);
+      }
+      return next;
+    });
+  };
+
+  const handleMergeSelectedWorks = async () => {
+    if (!onMergeWorks) return;
+
+    const sourceWorkIds = [...selectedWorkIds];
+    if (sourceWorkIds.length < 2) {
+      alert('Select at least two works to merge.');
+      return;
+    }
+
+    const payload = {
+      sourceWorkIds,
+      targetWorkId: null,
+      targetTitle: null,
+      refreshContext: 'album'
+    };
+
+    if (mergeMode === 'existing') {
+      const parsedTarget = parseInt(mergeTargetWorkId, 10);
+      if (!Number.isInteger(parsedTarget) || !selectedWorkIds.has(parsedTarget)) {
+        alert('Select a target work from the selected works.');
+        return;
+      }
+      payload.targetWorkId = parsedTarget;
+    } else {
+      if (!mergeTitle.trim()) {
+        alert('Enter a title for the new merged work.');
+        return;
+      }
+      payload.targetTitle = mergeTitle.trim();
+    }
+
+    const confirmed = window.confirm(
+      `Merge ${sourceWorkIds.length} album works into ${mergeMode === 'existing' ? 'the selected work' : 'a new work'}?`
+    );
+    if (!confirmed) return;
+
+    try {
+      setIsMergingWorks(true);
+      const result = await onMergeWorks(payload);
+      if (!result?.success) return;
+
+      const mergedTitle = result?.data?.destinationWorkTitle || 'merged work';
+      alert(`Works merged successfully into "${mergedTitle}".`);
+      setWorkSelectionMode(false);
+      setSelectedWorkIds(new Set());
+      setMergeMode('existing');
+      setMergeTargetWorkId('');
+      setMergeTitle('');
+    } finally {
+      setIsMergingWorks(false);
+    }
+  };
+
+  const searchComposers = async (query) => {
+    if (!query || query.trim().length < 2) {
+      setComposerResults([]);
+      return;
+    }
+
+    try {
+      setSearchingComposer(true);
+      const response = await fetch(
+        `${config.apiBaseUrl}/api/music/artists?search=${encodeURIComponent(query.trim())}&limit=10`
+      );
+      if (!response.ok) {
+        throw new Error('Failed to search composers');
+      }
+
+      const result = await response.json();
+      setComposerResults(result.artists || result || []);
+    } catch (error) {
+      console.error('Error searching composers:', error);
+    } finally {
+      setSearchingComposer(false);
+    }
+  };
+
+  const loadWorksForComposer = async (composerKey) => {
+    try {
+      const response = await fetch(`${config.apiBaseUrl}/api/works`);
+      if (!response.ok) {
+        throw new Error('Failed to load works');
+      }
+
+      const result = await response.json();
+      const allWorks = result.data || [];
+      setComposerWorks(allWorks.filter((work) => work.composerKey === composerKey));
+    } catch (error) {
+      console.error('Error loading works for composer:', error);
+      alert(`Error loading works: ${error.message}`);
+    }
+  };
+
+  const openLinkWorkModal = (track) => {
+    setTrackToLink(track);
+    setShowLinkWorkModal(true);
+    setComposerSearch('');
+    setComposerResults([]);
+    setSearchingComposer(false);
+    setSelectedComposer(null);
+    setComposerWorks([]);
+    setWorkSearch('');
+    setSelectedWork(null);
+    setSelectedPart(null);
+    setLinkingTrack(false);
+  };
+
+  const closeLinkWorkModal = () => {
+    setShowLinkWorkModal(false);
+    setTrackToLink(null);
+    setComposerSearch('');
+    setComposerResults([]);
+    setSelectedComposer(null);
+    setComposerWorks([]);
+    setWorkSearch('');
+    setSelectedWork(null);
+    setSelectedPart(null);
+  };
+
+  const handleSelectComposer = async (composer) => {
+    setSelectedComposer(composer);
+    setComposerSearch(composer.title || '');
+    setComposerResults([]);
+    setSelectedWork(null);
+    setSelectedPart(null);
+    await loadWorksForComposer(composer.ratingKey);
+  };
+
+  const handleLinkTrackToWork = async () => {
+    if (!trackToLink || !selectedWork || !selectedPart) return;
+
+    try {
+      setLinkingTrack(true);
+      const response = await fetch(
+        `${config.apiBaseUrl}/api/works/${selectedWork.id}/parts/${selectedPart.id}/tracks`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ trackKey: trackToLink.ratingKey })
+        }
+      );
+
+      const result = await response.json();
+      if (!response.ok) {
+        throw new Error(result.error || 'Failed to link track to work part');
+      }
+
+      await refreshAlbumAndTracks();
+      closeLinkWorkModal();
+    } catch (error) {
+      console.error('Error linking track to work:', error);
+      alert(`Error linking track to work: ${error.message}`);
+    } finally {
+      setLinkingTrack(false);
+    }
+  };
+
+  const handleDisconnectTrackFromAlbum = async (track) => {
+    if (!track?.ratingKey) return;
+
+    const confirmed = window.confirm(`Disconnect "${track.title || 'this track'}" from this album?`);
+    if (!confirmed) return;
+
+    try {
+      setDisconnectingTrackKey(track.ratingKey);
+      const response = await fetch(`${config.apiBaseUrl}/api/music/tracks/${track.ratingKey}/disconnect-album`, {
+        method: 'POST'
+      });
+
+      const result = await response.json();
+      if (!response.ok) {
+        throw new Error(result.error || 'Failed to disconnect track from album');
+      }
+
+      await refreshAlbumAndTracks();
+    } catch (error) {
+      console.error('Error disconnecting track from album:', error);
+      alert(`Error disconnecting track: ${error.message}`);
+    } finally {
+      setDisconnectingTrackKey(null);
+    }
+  };
+
+  const handleDisconnectTrackFromWork = async (track) => {
+    if (!track?.ratingKey) return;
+
+    const confirmed = window.confirm(`Disconnect "${track.title || 'this track'}" from its work?`);
+    if (!confirmed) return;
+
+    try {
+      setDisconnectingWorkTrackKey(track.ratingKey);
+      const response = await fetch(`${config.apiBaseUrl}/api/works/tracks/${track.ratingKey}/disconnect`, {
+        method: 'DELETE'
+      });
+
+      const result = await response.json();
+      if (!response.ok) {
+        throw new Error(result.error || 'Failed to disconnect track from work');
+      }
+
+      await refreshAlbumAndTracks();
+    } catch (error) {
+      console.error('Error disconnecting track from work:', error);
+      alert(`Error disconnecting track from work: ${error.message}`);
+    } finally {
+      setDisconnectingWorkTrackKey(null);
+    }
+  };
+
+  const filteredComposerWorks = composerWorks.filter((work) => {
+    const query = workSearch.trim().toLowerCase();
+    if (!query) return true;
+    return (work.title || '').toLowerCase().includes(query);
+  });
+
   const albumContributors = (albumData?.albumArtists || album?.albumArtists || [])
     .filter((entry) => entry?.artist && entry?.artistType)
     .sort((left, right) => {
@@ -411,6 +693,107 @@ const AlbumDetail = ({
         />
       )}
 
+      {albumWorks.length > 0 && (
+        <div className="album-works-panel">
+          <div className="album-works-header">
+            <h2>Works In This Album</h2>
+            <button
+              type="button"
+              className="album-works-select-btn"
+              onClick={() => {
+                const next = !workSelectionMode;
+                setWorkSelectionMode(next);
+                if (!next) {
+                  setSelectedWorkIds(new Set());
+                  setMergeTargetWorkId('');
+                  setMergeTitle('');
+                  setMergeMode('existing');
+                }
+              }}
+            >
+              {workSelectionMode ? 'Cancel Merge Selection' : 'Merge Works'}
+            </button>
+          </div>
+
+          {workSelectionMode && (
+            <div className="album-works-merge-row">
+              <span>{selectedWorkIds.size} selected</span>
+              <select
+                value={mergeMode}
+                onChange={(event) => setMergeMode(event.target.value)}
+                className="album-works-merge-select"
+              >
+                <option value="existing">Merge into selected work</option>
+                <option value="new">Merge into new parent work</option>
+              </select>
+
+              {mergeMode === 'existing' ? (
+                <select
+                  value={mergeTargetWorkId}
+                  onChange={(event) => setMergeTargetWorkId(event.target.value)}
+                  className="album-works-merge-select"
+                >
+                  <option value="">Select target work</option>
+                  {[...selectedWorkIds].map((workId) => {
+                    const work = albumWorks.find((entry) => entry.id === workId);
+                    return (
+                      <option key={workId} value={workId}>
+                        {work?.title || `Work ${workId}`}
+                      </option>
+                    );
+                  })}
+                </select>
+              ) : (
+                <input
+                  type="text"
+                  value={mergeTitle}
+                  onChange={(event) => setMergeTitle(event.target.value)}
+                  placeholder="New merged work title"
+                  className="album-works-merge-input"
+                />
+              )}
+
+              <button
+                type="button"
+                className="album-works-merge-confirm"
+                onClick={handleMergeSelectedWorks}
+                disabled={selectedWorkIds.size < 2 || isMergingWorks}
+              >
+                {isMergingWorks ? 'Merging...' : 'Merge Selected'}
+              </button>
+            </div>
+          )}
+
+          <div className="album-works-list">
+            {albumWorks.map((work) => (
+              <button
+                type="button"
+                key={`album-work-${work.id}`}
+                className="album-work-item"
+                onClick={() => {
+                  if (workSelectionMode) {
+                    toggleWorkSelection(work.id);
+                    return;
+                  }
+                }}
+              >
+                {workSelectionMode && (
+                  <span className="album-work-checkbox" onClick={(event) => event.stopPropagation()}>
+                    <input
+                      type="checkbox"
+                      checked={selectedWorkIds.has(work.id)}
+                      onChange={() => toggleWorkSelection(work.id)}
+                    />
+                  </span>
+                )}
+                <span className="album-work-item-title">{work.title}</span>
+                <span className="album-work-item-meta">{work.tracksCount} track{work.tracksCount !== 1 ? 's' : ''}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* Tracks List */}
       <div className="album-tracks">
         <h2>Tracks</h2>
@@ -478,6 +861,33 @@ const AlbumDetail = ({
                           </a>
                         </div>
                       )}
+                      <div className="track-inline-actions">
+                        <button
+                          type="button"
+                          className="track-inline-btn"
+                          onClick={() => openLinkWorkModal(track)}
+                        >
+                          Link To Work
+                        </button>
+                        <button
+                          type="button"
+                          className="track-inline-btn track-inline-btn-danger"
+                          onClick={() => handleDisconnectTrackFromAlbum(track)}
+                          disabled={disconnectingTrackKey === track.ratingKey}
+                        >
+                          {disconnectingTrackKey === track.ratingKey ? 'Disconnecting...' : 'Disconnect Album'}
+                        </button>
+                        {(group.workId || track.work?.id) && (
+                          <button
+                            type="button"
+                            className="track-inline-btn track-inline-btn-danger"
+                            onClick={() => handleDisconnectTrackFromWork(track)}
+                            disabled={disconnectingWorkTrackKey === track.ratingKey}
+                          >
+                            {disconnectingWorkTrackKey === track.ratingKey ? 'Disconnecting...' : 'Disconnect Work'}
+                          </button>
+                        )}
+                      </div>
                     </div>
                     <div className="track-rating">
                       <StarRating
@@ -616,6 +1026,125 @@ const AlbumDetail = ({
           setShowIdentifyModal(false);
         }}
       />
+
+      {showLinkWorkModal && (
+        <div className="modal-overlay" onClick={closeLinkWorkModal}>
+          <div className="modal-content" onClick={(event) => event.stopPropagation()}>
+            <h2>Link Track to Work</h2>
+            <p className="track-link-modal-subtitle">
+              Track: {trackToLink?.title || 'Unknown Track'}
+            </p>
+
+            <div className="track-link-modal-step">
+              <h4>1. Filter by Composer</h4>
+              <input
+                type="text"
+                value={composerSearch}
+                onChange={(event) => {
+                  const value = event.target.value;
+                  setComposerSearch(value);
+                  searchComposers(value);
+                }}
+                placeholder="Search composer..."
+                className="track-link-modal-input"
+              />
+              {searchingComposer && <div className="track-link-modal-hint">Searching…</div>}
+              {composerResults.length > 0 && (
+                <div className="track-link-modal-results">
+                  {composerResults.map((composer) => (
+                    <button
+                      key={composer.ratingKey}
+                      type="button"
+                      className="track-link-modal-result"
+                      onClick={() => handleSelectComposer(composer)}
+                    >
+                      {composer.title}
+                    </button>
+                  ))}
+                </div>
+              )}
+              {selectedComposer && (
+                <div className="track-link-modal-selected">
+                  Selected composer: {selectedComposer.title}
+                </div>
+              )}
+            </div>
+
+            {selectedComposer && (
+              <div className="track-link-modal-step">
+                <h4>2. Filter and Select Work</h4>
+                <input
+                  type="text"
+                  value={workSearch}
+                  onChange={(event) => setWorkSearch(event.target.value)}
+                  placeholder="Filter works by title..."
+                  className="track-link-modal-input"
+                />
+
+                {filteredComposerWorks.length === 0 ? (
+                  <div className="track-link-modal-hint">No works found for this composer.</div>
+                ) : (
+                  <div className="track-link-modal-results">
+                    {filteredComposerWorks.map((work) => (
+                      <button
+                        key={work.id}
+                        type="button"
+                        className={`track-link-modal-result ${selectedWork?.id === work.id ? 'selected' : ''}`}
+                        onClick={() => {
+                          setSelectedWork(work);
+                          setSelectedPart(null);
+                        }}
+                      >
+                        {work.title}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {selectedWork && (
+              <div className="track-link-modal-step">
+                <h4>3. Select Part</h4>
+                {selectedWork.parts?.length ? (
+                  <div className="track-link-modal-results">
+                    {selectedWork.parts.map((part) => (
+                      <button
+                        key={part.id}
+                        type="button"
+                        className={`track-link-modal-result ${selectedPart?.id === part.id ? 'selected' : ''}`}
+                        onClick={() => setSelectedPart(part)}
+                      >
+                        {part.order}. {part.title}
+                      </button>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="track-link-modal-hint">This work has no parts yet.</div>
+                )}
+              </div>
+            )}
+
+            <div className="track-link-modal-actions">
+              <button
+                type="button"
+                className="track-link-modal-btn-cancel"
+                onClick={closeLinkWorkModal}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="track-link-modal-btn-confirm"
+                onClick={handleLinkTrackToWork}
+                disabled={!selectedWork || !selectedPart || linkingTrack}
+              >
+                {linkingTrack ? 'Linking...' : 'Link Track'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

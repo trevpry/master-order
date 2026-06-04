@@ -144,6 +144,115 @@
   color: #ccc;
 }
 
+.album-works-panel {
+  margin-top: 1rem;
+  margin-bottom: 1.25rem;
+  padding: 1rem;
+  border-radius: 8px;
+  border: 1px solid #374151;
+  background: #20252f;
+}
+
+.album-works-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 0.75rem;
+}
+
+.album-works-header h2 {
+  margin: 0;
+  font-size: 1rem;
+  color: #f3f4f6;
+}
+
+.album-works-select-btn {
+  padding: 0.4rem 0.8rem;
+  border: 1px solid #3b82f6;
+  border-radius: 7px;
+  background: rgba(59, 130, 246, 0.18);
+  color: #dbeafe;
+  cursor: pointer;
+  font-size: 0.85rem;
+}
+
+.album-works-select-btn:hover {
+  background: rgba(59, 130, 246, 0.3);
+}
+
+.album-works-merge-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.55rem;
+  margin-bottom: 0.75rem;
+  color: #d1d5db;
+}
+
+.album-works-merge-select,
+.album-works-merge-input {
+  padding: 0.4rem 0.55rem;
+  border-radius: 6px;
+  border: 1px solid #4b5563;
+  background: #111827;
+  color: #f9fafb;
+  font-size: 0.85rem;
+}
+
+.album-works-merge-input {
+  min-width: 240px;
+}
+
+.album-works-merge-confirm {
+  padding: 0.45rem 0.8rem;
+  border: none;
+  border-radius: 7px;
+  background: #2563eb;
+  color: #fff;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.album-works-merge-confirm:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.album-works-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+
+.album-work-item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+  padding: 0.55rem 0.7rem;
+  border: 1px solid #374151;
+  border-radius: 8px;
+  background: #111827;
+  color: #e5e7eb;
+  text-align: left;
+}
+
+.album-work-item-title {
+  font-weight: 600;
+}
+
+.album-work-item-meta {
+  margin-left: auto;
+  font-size: 0.82rem;
+  color: #9ca3af;
+}
+
+.album-work-checkbox {
+  display: inline-flex;
+  align-items: center;
+}
+
 .album-tracks {
   margin-top: 30px;
 }
@@ -284,6 +393,138 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.album-detail .track-inline-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.album-detail .track-inline-btn {
+  padding: 4px 8px;
+  font-size: 11px;
+  border-radius: 6px;
+  border: 1px solid #3b82f6;
+  background: rgba(59, 130, 246, 0.15);
+  color: #dbeafe;
+  cursor: pointer;
+}
+
+.album-detail .track-inline-btn:hover {
+  background: rgba(59, 130, 246, 0.28);
+}
+
+.album-detail .track-inline-btn:disabled {
+  opacity: 0.65;
+  cursor: not-allowed;
+}
+
+.album-detail .track-inline-btn-danger {
+  border-color: #ef4444;
+  background: rgba(239, 68, 68, 0.16);
+  color: #fecaca;
+}
+
+.album-detail .track-inline-btn-danger:hover {
+  background: rgba(239, 68, 68, 0.3);
+}
+
+.track-link-modal-subtitle {
+  margin-top: 0;
+  margin-bottom: 0.75rem;
+  color: #d1d5db;
+  font-size: 0.9rem;
+}
+
+.track-link-modal-step {
+  margin-bottom: 0.85rem;
+}
+
+.track-link-modal-step h4 {
+  margin: 0 0 0.45rem;
+  color: #f3f4f6;
+  font-size: 0.95rem;
+}
+
+.track-link-modal-input {
+  width: 100%;
+  padding: 0.55rem 0.65rem;
+  border-radius: 8px;
+  border: 1px solid #4b5563;
+  background: #111827;
+  color: #f9fafb;
+  margin-bottom: 0.45rem;
+}
+
+.track-link-modal-hint {
+  color: #9ca3af;
+  font-size: 0.85rem;
+}
+
+.track-link-modal-results {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  max-height: 180px;
+  overflow-y: auto;
+}
+
+.track-link-modal-result {
+  padding: 0.5rem 0.65rem;
+  border: 1px solid #4b5563;
+  background: #1f2937;
+  color: #f3f4f6;
+  border-radius: 8px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.track-link-modal-result:hover {
+  border-color: #60a5fa;
+}
+
+.track-link-modal-result.selected {
+  border-color: #3b82f6;
+  background: rgba(59, 130, 246, 0.2);
+}
+
+.track-link-modal-selected {
+  margin-top: 0.35rem;
+  color: #bfdbfe;
+  font-size: 0.85rem;
+}
+
+.track-link-modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.6rem;
+  margin-top: 0.9rem;
+}
+
+.track-link-modal-btn-cancel,
+.track-link-modal-btn-confirm {
+  padding: 0.5rem 0.9rem;
+  border-radius: 8px;
+  border: none;
+  font-size: 0.9rem;
+  cursor: pointer;
+}
+
+.track-link-modal-btn-cancel {
+  background: #4b5563;
+  color: #f9fafb;
+}
+
+.track-link-modal-btn-confirm {
+  background: #2563eb;
+  color: #fff;
+}
+
+.track-link-modal-btn-confirm:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
 }
 
 .album-detail .track-duration,

@@ -6,37 +6,39 @@ const { validateRequiredFields } = require('../middleware/validation');
 
 const prisma = new PrismaClient();
 
-// Get all works with composer and parts
-router.get('/', asyncHandler(async (req, res) => {
-  const works = await prisma.work.findMany({
+const WORK_INCLUDE = {
+  composer: true,
+  parts: {
     include: {
-      composer: true,
-      parts: {
+      artistTypes: {
         include: {
-          artistTypes: {
+          artistType: true
+        }
+      },
+      tracks: {
+        include: {
+          track: {
             include: {
-              artistType: true
-            }
-          },
-          tracks: {
-            include: {
-              track: {
+              album: {
                 include: {
-                  album: {
-                    include: {
-                      artist: true
-                    }
-                  }
+                  artist: true
                 }
               }
             }
           }
-        },
-        orderBy: {
-          order: 'asc'
         }
       }
     },
+    orderBy: {
+      order: 'asc'
+    }
+  }
+};
+
+// Get all works with composer and parts
+router.get('/', asyncHandler(async (req, res) => {
+  const works = await prisma.work.findMany({
+    include: WORK_INCLUDE,
     orderBy: {
       title: 'asc'
     }
@@ -63,40 +65,176 @@ router.get('/', asyncHandler(async (req, res) => {
   sendSuccess(res, worksWithPlayCount);
 }));
 
-// Get single work by ID
-router.get('/:id', asyncHandler(async (req, res) => {
-  const { id } = req.params;
+// Merge multiple works into a single parent work
+router.post('/merge', asyncHandler(async (req, res) => {
+  const { sourceWorkIds, targetWorkId, targetTitle } = req.body;
 
-  const work = await prisma.work.findUnique({
-    where: { id: parseInt(id) },
+  if (!Array.isArray(sourceWorkIds) || sourceWorkIds.length < 2) {
+    return sendBadRequest(res, 'At least two work IDs are required to merge');
+  }
+
+  const normalizedSourceWorkIds = [...new Set(
+    sourceWorkIds
+      .map((id) => parseInt(id, 10))
+      .filter((id) => Number.isInteger(id) && id > 0)
+  )];
+
+  if (normalizedSourceWorkIds.length < 2) {
+    return sendBadRequest(res, 'At least two valid work IDs are required to merge');
+  }
+
+  const parsedTargetWorkId = targetWorkId ? parseInt(targetWorkId, 10) : null;
+  if (targetWorkId !== undefined && targetWorkId !== null && (!Number.isInteger(parsedTargetWorkId) || parsedTargetWorkId <= 0)) {
+    return sendBadRequest(res, 'Invalid target work ID');
+  }
+
+  const worksToMerge = await prisma.work.findMany({
+    where: {
+      id: {
+        in: normalizedSourceWorkIds
+      }
+    },
     include: {
-      composer: true,
       parts: {
         include: {
-          artistTypes: {
-            include: {
-              artistType: true
-            }
-          },
-          tracks: {
-            include: {
-              track: {
-                include: {
-                  album: {
-                    include: {
-                      artist: true
-                    }
-                  }
-                }
-              }
-            }
-          }
+          tracks: true,
+          artistTypes: true
         },
         orderBy: {
           order: 'asc'
         }
       }
     }
+  });
+
+  if (worksToMerge.length !== normalizedSourceWorkIds.length) {
+    return sendBadRequest(res, 'One or more works were not found');
+  }
+
+  const composerKey = worksToMerge[0].composerKey;
+  const mixedComposers = worksToMerge.some((work) => work.composerKey !== composerKey);
+  if (mixedComposers) {
+    return sendBadRequest(res, 'All works must have the same composer to merge');
+  }
+
+  if (parsedTargetWorkId && !normalizedSourceWorkIds.includes(parsedTargetWorkId)) {
+    return sendBadRequest(res, 'Target work must be one of the selected works');
+  }
+
+  if (!parsedTargetWorkId && !targetTitle?.trim()) {
+    return sendBadRequest(res, 'Target title is required when creating a new parent work');
+  }
+
+  const mergeResult = await prisma.$transaction(async (tx) => {
+    let destinationWorkId = parsedTargetWorkId;
+
+    if (!destinationWorkId) {
+      const newParent = await tx.work.create({
+        data: {
+          title: targetTitle.trim(),
+          composerKey
+        }
+      });
+      destinationWorkId = newParent.id;
+    }
+
+    const destinationWork = worksToMerge.find((work) => work.id === destinationWorkId);
+    const sourceWorks = worksToMerge.filter((work) => work.id !== destinationWorkId);
+
+    const existingDestinationParts = await tx.workPart.findMany({
+      where: { workId: destinationWorkId },
+      orderBy: { order: 'asc' }
+    });
+
+    let nextPartOrder = existingDestinationParts.length > 0
+      ? Math.max(...existingDestinationParts.map((part) => part.order)) + 1
+      : 1;
+
+    const movedTrackKeys = new Set();
+
+    for (const sourceWork of sourceWorks) {
+      for (const sourcePart of sourceWork.parts) {
+        const createdPart = await tx.workPart.create({
+          data: {
+            workId: destinationWorkId,
+            title: `${sourceWork.title}: ${sourcePart.title}`,
+            order: nextPartOrder
+          }
+        });
+
+        nextPartOrder += 1;
+
+        if (sourcePart.tracks.length > 0) {
+          const uniqueTrackKeys = [...new Set(sourcePart.tracks.map((trackRel) => trackRel.trackKey))];
+
+          await tx.workPartTrack.createMany({
+            data: uniqueTrackKeys.map((trackKey) => ({
+              workPartId: createdPart.id,
+              trackKey
+            }))
+          });
+
+          sourcePart.tracks.forEach((trackRel) => movedTrackKeys.add(trackRel.trackKey));
+        }
+
+        if (sourcePart.artistTypes.length > 0) {
+          const uniqueArtistTypeIds = [...new Set(sourcePart.artistTypes.map((artistTypeRel) => artistTypeRel.artistTypeId))];
+
+          await tx.workPartArtistType.createMany({
+            data: uniqueArtistTypeIds.map((artistTypeId) => ({
+              workPartId: createdPart.id,
+              artistTypeId
+            }))
+          });
+        }
+      }
+
+      await tx.plexAlbum.updateMany({
+        where: { workId: sourceWork.id },
+        data: { workId: destinationWorkId }
+      });
+
+      await tx.work.delete({
+        where: { id: sourceWork.id }
+      });
+    }
+
+    if (movedTrackKeys.size > 0) {
+      await tx.plexTrack.updateMany({
+        where: {
+          ratingKey: {
+            in: [...movedTrackKeys]
+          }
+        },
+        data: {
+          workId: destinationWorkId
+        }
+      });
+    }
+
+    const mergedWork = await tx.work.findUnique({
+      where: { id: destinationWorkId },
+      include: WORK_INCLUDE
+    });
+
+    return {
+      destinationWorkId,
+      destinationWorkTitle: mergedWork?.title || destinationWork?.title || targetTitle,
+      removedWorkIds: sourceWorks.map((work) => work.id),
+      mergedWork
+    };
+  });
+
+  sendSuccess(res, mergeResult);
+}));
+
+// Get single work by ID
+router.get('/:id', asyncHandler(async (req, res) => {
+  const { id } = req.params;
+
+  const work = await prisma.work.findUnique({
+    where: { id: parseInt(id) },
+    include: WORK_INCLUDE
   });
 
   if (!work) {
@@ -440,6 +578,11 @@ router.post('/:workId/parts/:partId/tracks', asyncHandler(async (req, res) => {
     }
   });
 
+  await prisma.plexTrack.update({
+    where: { ratingKey: trackKey },
+    data: { workId: parseInt(workId) }
+  });
+
   sendSuccess(res, workPartTrack);
 }));
 
@@ -476,7 +619,66 @@ router.delete('/:workId/parts/:partId/tracks/:trackKey', asyncHandler(async (req
     }
   });
 
+  const remainingAssociation = await prisma.workPartTrack.findFirst({
+    where: { trackKey },
+    include: {
+      workPart: {
+        select: {
+          workId: true
+        }
+      }
+    },
+    orderBy: {
+      id: 'asc'
+    }
+  });
+
+  await prisma.plexTrack.update({
+    where: { ratingKey: trackKey },
+    data: {
+      workId: remainingAssociation?.workPart?.workId || null
+    }
+  });
+
   sendSuccess(res, { message: 'Track removed from work part successfully' });
+}));
+
+// Disconnect a track from all works
+router.delete('/tracks/:trackKey/disconnect', asyncHandler(async (req, res) => {
+  const { trackKey } = req.params;
+
+  const track = await prisma.plexTrack.findUnique({
+    where: { ratingKey: trackKey }
+  });
+
+  if (!track) {
+    return sendBadRequest(res, 'Track not found');
+  }
+
+  const removedLinks = await prisma.workPartTrack.findMany({
+    where: { trackKey },
+    include: {
+      workPart: true
+    }
+  });
+
+  if (removedLinks.length > 0) {
+    await prisma.workPartTrack.deleteMany({
+      where: { trackKey }
+    });
+  }
+
+  await prisma.plexTrack.update({
+    where: { ratingKey: trackKey },
+    data: {
+      workId: null
+    }
+  });
+
+  sendSuccess(res, {
+    message: 'Track disconnected from work',
+    removedLinks: removedLinks.length
+  });
 }));
 
 // Assign artist type to work part

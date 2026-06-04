@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import config from '../../../../../config';
 import ArtistTypesManager from './ArtistTypesManager';
 import MusicBrainzSearchModal from '../../../../../components/music/MusicBrainzSearchModal';
@@ -15,6 +15,7 @@ const ArtistDetail = ({
   onSelectAlbum,
   onSelectWork,
   onSelectTrack,
+  onMergeWorks,
   onArtistUpdate,
   onExtractArtistMetadata,
   isExtractingMetadata = false
@@ -29,10 +30,41 @@ const ArtistDetail = ({
   const [isMetadataEditMode, setIsMetadataEditMode] = useState(false);
   const [showMusicBrainzData, setShowMusicBrainzData] = useState(false);
   const [artistData, setArtistData] = useState(artist);
+  const [workSelectionMode, setWorkSelectionMode] = useState(false);
+  const [selectedWorkIds, setSelectedWorkIds] = useState(new Set());
+  const [mergeMode, setMergeMode] = useState('existing');
+  const [mergeTargetWorkId, setMergeTargetWorkId] = useState('');
+  const [mergeTitle, setMergeTitle] = useState('');
+  const [isMergingWorks, setIsMergingWorks] = useState(false);
 
   const linkedAlbums = artist?.linkedAlbums || [];
   const linkedTracks = artist?.linkedTracks || [];
+  const tracksWithoutAlbum = artist?.tracksWithoutAlbum || [];
   const works = artist?.works || [];
+
+  useEffect(() => {
+    setArtistData(artist);
+    setWorkSelectionMode(false);
+    setSelectedWorkIds(new Set());
+    setMergeMode('existing');
+    setMergeTargetWorkId('');
+    setMergeTitle('');
+    setIsMergingWorks(false);
+  }, [artist]);
+
+  useEffect(() => {
+    if (!workSelectionMode || mergeMode !== 'existing') return;
+
+    const selectedIds = [...selectedWorkIds];
+    if (selectedIds.length === 0) {
+      setMergeTargetWorkId('');
+      return;
+    }
+
+    if (!selectedIds.includes(parseInt(mergeTargetWorkId, 10))) {
+      setMergeTargetWorkId(String(selectedIds[0]));
+    }
+  }, [workSelectionMode, mergeMode, selectedWorkIds, mergeTargetWorkId]);
 
   if (!artist) return null;
 
@@ -78,6 +110,71 @@ const ArtistDetail = ({
     setEditedTitleSort(artist.titleSort || '');
     setIsEditing(false);
     setSaveError(null);
+  };
+
+  const toggleWorkSelection = (workId) => {
+    setSelectedWorkIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(workId)) {
+        next.delete(workId);
+      } else {
+        next.add(workId);
+      }
+      return next;
+    });
+  };
+
+  const handleMergeSelectedWorks = async () => {
+    if (!onMergeWorks) return;
+
+    const sourceWorkIds = [...selectedWorkIds];
+    if (sourceWorkIds.length < 2) {
+      alert('Select at least two works to merge.');
+      return;
+    }
+
+    const payload = {
+      sourceWorkIds,
+      targetWorkId: null,
+      targetTitle: null,
+      refreshContext: 'artist'
+    };
+
+    if (mergeMode === 'existing') {
+      const parsedTarget = parseInt(mergeTargetWorkId, 10);
+      if (!Number.isInteger(parsedTarget) || !selectedWorkIds.has(parsedTarget)) {
+        alert('Select a target work from the selected works.');
+        return;
+      }
+      payload.targetWorkId = parsedTarget;
+    } else {
+      if (!mergeTitle.trim()) {
+        alert('Enter a title for the new merged work.');
+        return;
+      }
+      payload.targetTitle = mergeTitle.trim();
+    }
+
+    const confirmed = window.confirm(
+      `Merge ${sourceWorkIds.length} works into ${mergeMode === 'existing' ? 'the selected work' : 'a new work'}?`
+    );
+    if (!confirmed) return;
+
+    try {
+      setIsMergingWorks(true);
+      const result = await onMergeWorks(payload);
+      if (!result?.success) return;
+
+      const mergedTitle = result?.data?.destinationWorkTitle || 'merged work';
+      alert(`Works merged successfully into "${mergedTitle}".`);
+      setWorkSelectionMode(false);
+      setSelectedWorkIds(new Set());
+      setMergeMode('existing');
+      setMergeTargetWorkId('');
+      setMergeTitle('');
+    } finally {
+      setIsMergingWorks(false);
+    }
   };
 
   return (
@@ -410,14 +507,103 @@ const ArtistDetail = ({
 
       {works.length > 0 && (
         <div className="artist-linked-section">
-          <h2>Works</h2>
+          <div className="artist-works-header">
+            <h2>Works</h2>
+            <button
+              type="button"
+              className="artist-works-select-btn"
+              onClick={() => {
+                const next = !workSelectionMode;
+                setWorkSelectionMode(next);
+                if (!next) {
+                  setSelectedWorkIds(new Set());
+                  setMergeTargetWorkId('');
+                  setMergeTitle('');
+                  setMergeMode('existing');
+                }
+              }}
+            >
+              {workSelectionMode ? 'Cancel Merge Selection' : 'Merge Works'}
+            </button>
+          </div>
+
+          {workSelectionMode && (
+            <div className="artist-works-merge-panel">
+              <div className="artist-works-merge-row">
+                <span>{selectedWorkIds.size} selected</span>
+                <select
+                  value={mergeMode}
+                  onChange={(event) => setMergeMode(event.target.value)}
+                  className="artist-works-merge-select"
+                >
+                  <option value="existing">Merge into selected work</option>
+                  <option value="new">Merge into new parent work</option>
+                </select>
+
+                {mergeMode === 'existing' ? (
+                  <select
+                    value={mergeTargetWorkId}
+                    onChange={(event) => setMergeTargetWorkId(event.target.value)}
+                    className="artist-works-merge-select"
+                  >
+                    <option value="">Select target work</option>
+                    {[...selectedWorkIds].map((workId) => {
+                      const work = works.find((entry) => entry.id === workId);
+                      return (
+                        <option key={workId} value={workId}>
+                          {work?.title || `Work ${workId}`}
+                        </option>
+                      );
+                    })}
+                  </select>
+                ) : (
+                  <input
+                    type="text"
+                    value={mergeTitle}
+                    onChange={(event) => setMergeTitle(event.target.value)}
+                    placeholder="New merged work title"
+                    className="artist-works-merge-input"
+                  />
+                )}
+
+                <button
+                  type="button"
+                  className="artist-works-merge-confirm"
+                  onClick={handleMergeSelectedWorks}
+                  disabled={isMergingWorks || selectedWorkIds.size < 2}
+                >
+                  {isMergingWorks ? 'Merging...' : 'Merge Selected'}
+                </button>
+              </div>
+            </div>
+          )}
+
           <div className="artist-works-list">
             {works.map((work) => (
               <div
                 key={`artist-work-${work.id}`}
                 className="artist-work-row"
-                onClick={() => onSelectWork && onSelectWork(work)}
+                onClick={() => {
+                  if (workSelectionMode) {
+                    toggleWorkSelection(work.id);
+                    return;
+                  }
+
+                  onSelectWork && onSelectWork(work);
+                }}
               >
+                {workSelectionMode && (
+                  <label
+                    className="artist-work-checkbox"
+                    onClick={(event) => event.stopPropagation()}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={selectedWorkIds.has(work.id)}
+                      onChange={() => toggleWorkSelection(work.id)}
+                    />
+                  </label>
+                )}
                 <div className="artist-work-main">
                   <div className="artist-work-title">{work.title}</div>
                   <div className="artist-work-subtitle">
@@ -496,6 +682,31 @@ const ArtistDetail = ({
                 </div>
                 <div className="linked-track-meta">
                   Linked as: {(track.linkedArtistTypes || []).join(', ')}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {tracksWithoutAlbum.length > 0 && (
+        <div className="artist-linked-section">
+          <h2>Tracks Not In Albums</h2>
+          <div className="linked-tracks-list">
+            {tracksWithoutAlbum.map((track) => (
+              <div
+                key={`no-album-track-${track.ratingKey}`}
+                className="linked-track-row"
+                onClick={() => onSelectTrack && onSelectTrack(track)}
+              >
+                <div className="linked-track-main">
+                  <div className="linked-track-title">{track.title || 'Untitled'}</div>
+                  <div className="linked-track-subtitle">
+                    {track.work?.title ? `Work: ${track.work.title}` : 'No work linked'}
+                  </div>
+                </div>
+                <div className="linked-track-meta">
+                  {Number.isInteger(track.index) ? `Track #${track.index}` : 'Unnumbered'}
                 </div>
               </div>
             ))}

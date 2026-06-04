@@ -1028,6 +1028,76 @@ const Music = () => {
     });
   };
 
+  const handleMergeWorks = async ({ sourceWorkIds, targetWorkId, targetTitle, refreshContext }) => {
+    try {
+      const response = await fetch(`${config.apiBaseUrl}/api/works/merge`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          sourceWorkIds,
+          targetWorkId,
+          targetTitle
+        })
+      });
+
+      const result = await safeJsonParse(response, `${config.apiBaseUrl}/api/works/merge`);
+      if (!response.ok) {
+        throw new Error(result.error || 'Failed to merge works');
+      }
+
+      if (refreshContext === 'artist' && (selectedArtist?.ratingKey || artistRatingKey)) {
+        const activeArtistKey = selectedArtist?.ratingKey || artistRatingKey;
+        const [artistRes, albumsRes, tracksRes] = await Promise.all([
+          fetch(`${config.apiBaseUrl}/api/music/artists/${activeArtistKey}`),
+          fetch(`${config.apiBaseUrl}/api/music/albums/artist/${activeArtistKey}`),
+          fetch(`${config.apiBaseUrl}/api/music/tracks/artist/${activeArtistKey}`)
+        ]);
+
+        if (artistRes.ok) {
+          const artistData = await safeJsonParse(artistRes, `${config.apiBaseUrl}/api/music/artists/${activeArtistKey}`);
+          setSelectedArtist(artistData);
+          setArtists(prevArtists =>
+            prevArtists.map(artist => artist.ratingKey === artistData.ratingKey ? artistData : artist)
+          );
+        }
+
+        if (albumsRes.ok) {
+          const albumsData = await safeJsonParse(albumsRes, `${config.apiBaseUrl}/api/music/albums/artist/${activeArtistKey}`);
+          setAlbums(albumsData);
+        }
+
+        if (tracksRes.ok) {
+          const tracksData = await safeJsonParse(tracksRes, `${config.apiBaseUrl}/api/music/tracks/artist/${activeArtistKey}`);
+          setTracks(tracksData);
+        }
+      }
+
+      if (refreshContext === 'album' && (selectedAlbum?.ratingKey || albumRatingKey)) {
+        const activeAlbumKey = selectedAlbum?.ratingKey || albumRatingKey;
+        const [albumRes, tracksRes] = await Promise.all([
+          fetch(`${config.apiBaseUrl}/api/music/albums/${activeAlbumKey}`),
+          fetch(`${config.apiBaseUrl}/api/music/tracks/album/${activeAlbumKey}`)
+        ]);
+
+        if (albumRes.ok) {
+          const albumData = await safeJsonParse(albumRes, `${config.apiBaseUrl}/api/music/albums/${activeAlbumKey}`);
+          setSelectedAlbum(albumData);
+        }
+
+        if (tracksRes.ok) {
+          const tracksData = await safeJsonParse(tracksRes, `${config.apiBaseUrl}/api/music/tracks/album/${activeAlbumKey}`);
+          setTracks(tracksData);
+        }
+      }
+
+      return { success: true, data: result.data };
+    } catch (err) {
+      console.error('Error merging works:', err);
+      alert(`Error merging works: ${err.message}`);
+      return { success: false, error: err.message };
+    }
+  };
+
   // Artist Types Management Functions
   const loadArtistTypes = async () => {
     try {
@@ -1952,6 +2022,7 @@ const Music = () => {
             stats={{
               totalTracks: tracks?.length || 0
             }}
+            onMergeWorks={handleMergeWorks}
             onExtractArtistMetadata={extractArtistMetadata}
             isExtractingMetadata={extractingMetadata.has(selectedArtist.ratingKey)}
             onGoBack={() => {
@@ -1992,6 +2063,7 @@ const Music = () => {
             isPlaying={isPlaying}
             playlists={playlists}
             selectedSection={selectedSection}
+            onMergeWorks={handleMergeWorks}
             backLabel={albumSourceView === 'artist' ? 'Back to Artist' : 'Back to Albums'}
             onGoBack={goBackToAlbums}
             onPlayTrack={playTrack}

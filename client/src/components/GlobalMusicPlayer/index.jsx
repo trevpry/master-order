@@ -449,13 +449,14 @@ const GlobalMusicPlayer = () => {
     if (isCasting && castDeviceType === 'sonos' && sonosDeviceRef) {
       try {
         const action = isPlaying ? 'pause' : 'play';
-        const response = await fetch(`${config.apiBaseUrl}/api/sonos/${action}`, {
+        const response = await fetch(`${config.apiBaseUrl}/api/sonos/control`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
           },
           body: JSON.stringify({
-            deviceId: sonosDeviceRef.uuid || sonosDeviceRef.host
+            deviceId: sonosDeviceRef.uuid || sonosDeviceRef.host,
+            action
           }),
         });
         

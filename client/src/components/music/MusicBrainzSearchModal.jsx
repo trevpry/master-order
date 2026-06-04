@@ -2,6 +2,130 @@ import React, { useState } from 'react';
 import config from '../../config';
 import './MusicBrainzSearchModal.css';
 
+const hasLatinCharacters = (value) => /[A-Za-z]/.test(String(value || ''));
+const hasCommonNonLatinCharacters = (value) => /[\u0400-\u04FF\u0370-\u03FF\u0600-\u06FF\u3040-\u30FF\u4E00-\u9FFF]/.test(String(value || ''));
+const isAliasPrimary = (alias) => alias?.primary === true || alias?.primary === 'true' || alias?.primary === 1;
+const isEnglishLocaleAlias = (alias) => String(alias?.locale || '').trim().toLowerCase().startsWith('en');
+const isLatinAliasName = (alias) => {
+  const aliasName = String(alias?.name || '').trim();
+  return Boolean(aliasName) && hasLatinCharacters(aliasName) && !hasCommonNonLatinCharacters(aliasName);
+};
+
+const normalizeToken = (value) => String(value || '').toLowerCase().replace(/[^a-z0-9]+/g, '').trim();
+const splitTokens = (value) => String(value || '').toLowerCase().split(/[^a-z0-9]+/).map((token) => token.trim()).filter(Boolean);
+
+const extractFamilyNameFromSort = (sortName) => {
+  const raw = String(sortName || '').trim();
+  if (!raw) return null;
+  const family = raw.includes(',') ? raw.split(',')[0] : raw.split(/\s+/).slice(-1)[0];
+  const normalized = normalizeToken(family);
+  return normalized || null;
+};
+
+const extractAliasFamilyName = (alias) => {
+  const aliasSort = String(alias?.['sort-name'] || alias?.sortName || '').trim();
+  if (aliasSort) {
+    return extractFamilyNameFromSort(aliasSort);
+  }
+
+  const aliasName = String(alias?.name || '').trim();
+  if (!aliasName) return null;
+  const parts = aliasName.split(/\s+/).filter(Boolean);
+  return normalizeToken(parts[parts.length - 1]);
+};
+
+const scoreAliasAgainstCanonical = (alias, canonicalFamilyName, canonicalTokens) => {
+  if (!isLatinAliasName(alias)) {
+    return Number.NEGATIVE_INFINITY;
+  }
+
+  const aliasName = String(alias?.name || '').trim();
+  const aliasTokens = splitTokens(aliasName);
+  const aliasFamily = extractAliasFamilyName(alias);
+  const aliasType = String(alias?.type || '').trim().toLowerCase();
+
+  let score = 0;
+  if (isEnglishLocaleAlias(alias)) score += 100;
+  if (isAliasPrimary(alias)) score += 70;
+  if (aliasType === 'artist name') score += 30;
+  if (aliasType === 'search hint') score -= 40;
+
+  if (canonicalFamilyName && aliasFamily === canonicalFamilyName) {
+    score += 80;
+  }
+
+  if (canonicalTokens.length > 0) {
+    const overlap = aliasTokens.filter((token) => canonicalTokens.includes(token)).length;
+    score += overlap * 25;
+  }
+
+  return score;
+};
+
+const unsortMusicBrainzName = (sortName) => {
+  const value = String(sortName || '').trim();
+  if (!value || !value.includes(',')) {
+    return value || null;
+  }
+
+  const [familyName, ...givenParts] = value.split(',');
+  const givenName = givenParts.join(',').trim();
+  const family = familyName.trim();
+
+  if (!givenName || !family) {
+    return value;
+  }
+
+  return `${givenName} ${family}`.trim();
+};
+
+const getPreferredArtistName = (artist) => {
+  const rawName = String(artist?.name || '').trim();
+  const sortName = String(artist?.['sort-name'] || artist?.sortName || '').trim();
+  const aliases = Array.isArray(artist?.aliases) ? artist.aliases : [];
+  const rawNameIsNonLatin = rawName && hasCommonNonLatinCharacters(rawName);
+  const rawNameIsLatin = rawName && hasLatinCharacters(rawName) && !rawNameIsNonLatin;
+
+  if (rawNameIsLatin) {
+    return rawName;
+  }
+
+  const canonicalUnsorted = unsortMusicBrainzName(sortName) || '';
+  const canonicalTokens = splitTokens(canonicalUnsorted);
+  const canonicalFamilyName = extractFamilyNameFromSort(sortName);
+
+  let preferredAlias = null;
+  if (rawNameIsNonLatin) {
+    const rankedAliases = aliases
+      .map((alias) => ({
+        alias,
+        score: scoreAliasAgainstCanonical(alias, canonicalFamilyName, canonicalTokens),
+      }))
+      .filter((entry) => Number.isFinite(entry.score))
+      .sort((left, right) => right.score - left.score);
+
+    preferredAlias = rankedAliases[0]?.alias || null;
+  }
+
+  if (!preferredAlias) {
+    preferredAlias = aliases.find((alias) => isEnglishLocaleAlias(alias) && isLatinAliasName(alias))
+      || aliases.find((alias) => isLatinAliasName(alias));
+  }
+
+  if (preferredAlias?.name) {
+    return preferredAlias.name.trim();
+  }
+
+  if (rawNameIsNonLatin) {
+    const unsortedName = unsortMusicBrainzName(sortName);
+    if (unsortedName && hasLatinCharacters(unsortedName)) {
+      return unsortedName;
+    }
+  }
+
+  return rawName || sortName || null;
+};
+
 const MusicBrainzSearchModal = ({ artistName, artistRatingKey, onClose, onArtistUpdated }) => {
   const [searchResults, setSearchResults] = useState([]);
   const [selectedArtist, setSelectedArtist] = useState(null);
@@ -79,6 +203,8 @@ const MusicBrainzSearchModal = ({ artistName, artistRatingKey, onClose, onArtist
 
   const handleImportMetadata = async () => {
     if (!artistDetails || !artistRatingKey) return;
+
+    const preferredName = getPreferredArtistName(artistDetails) || artistDetails.name;
     
     setIsImporting(true);
     setError(null);
@@ -92,8 +218,8 @@ const MusicBrainzSearchModal = ({ artistName, artistRatingKey, onClose, onArtist
             'Content-Type': 'application/json'
           },
           body: JSON.stringify({
-            name: artistDetails.name,
-            sortName: artistDetails['sort-name'],
+            name: preferredName,
+            sortName: artistDetails['sort-name'] || preferredName,
             disambiguation: artistDetails.disambiguation,
             country: artistDetails.country,
             lifeSpan: artistDetails['life-span'],
@@ -192,12 +318,16 @@ const MusicBrainzSearchModal = ({ artistName, artistRatingKey, onClose, onArtist
               ) : searchResults.length > 0 ? (
                 <div className="artist-results">
                   {searchResults.map((artist) => (
+                    (() => {
+                      const preferredName = getPreferredArtistName(artist) || artist.name;
+
+                      return (
                     <div
                       key={artist.id}
                       className={`artist-result-item ${selectedArtist?.id === artist.id ? 'selected' : ''}`}
                       onClick={() => handleArtistSelect(artist)}
                     >
-                      <div className="artist-result-name">{artist.name}</div>
+                      <div className="artist-result-name">{preferredName}</div>
                       {artist['life-span'] && formatLifeSpan(artist['life-span']) && (
                         <div className="artist-result-dates">{formatLifeSpan(artist['life-span'])}</div>
                       )}
@@ -205,6 +335,8 @@ const MusicBrainzSearchModal = ({ artistName, artistRatingKey, onClose, onArtist
                         <div className="artist-result-disambiguation">{artist.disambiguation}</div>
                       )}
                     </div>
+                      );
+                    })()
                   ))}
                 </div>
               ) : (
@@ -220,8 +352,11 @@ const MusicBrainzSearchModal = ({ artistName, artistRatingKey, onClose, onArtist
               ) : artistDetails ? (
                 <div className="artist-details">
                   <div className="detail-section">
-                    <h4>{artistDetails.name}</h4>
-                    {artistDetails['sort-name'] && artistDetails['sort-name'] !== artistDetails.name && (
+                    {(() => {
+                      const preferredName = getPreferredArtistName(artistDetails) || artistDetails.name;
+                      return <h4>{preferredName}</h4>;
+                    })()}
+                    {artistDetails['sort-name'] && artistDetails['sort-name'] !== (getPreferredArtistName(artistDetails) || artistDetails.name) && (
                       <p className="sort-name">Sort Name: {artistDetails['sort-name']}</p>
                     )}
                     {artistDetails.disambiguation && (

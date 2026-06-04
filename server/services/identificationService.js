@@ -1,5 +1,6 @@
 const { PrismaClient } = require('@prisma/client');
 const MusicBrainzService = require('./musicBrainzService');
+const { getPreferredMusicBrainzArtistName } = require('../utils/musicBrainzNames');
 
 /**
  * IdentificationService
@@ -148,13 +149,14 @@ class IdentificationService {
     const candidates = [];
     for (const result of searchResults.slice(0, 10)) {
       const confidence = this.calculateArtistConfidence(artist, result);
+      const preferredName = getPreferredMusicBrainzArtistName(result) || result.name;
       
       const candidate = await this.prisma.identificationCandidate.create({
         data: {
           entityType: 'artist',
           entityKey: ratingKey,
           musicBrainzId: result.id,
-          title: result.name,
+          title: preferredName,
           artist: null,
           releaseDate: null,
           confidence,
@@ -981,27 +983,70 @@ class IdentificationService {
       return null;
     }
 
-    let existingArtist = artist.id
+    let resolvedArtist = artist;
+    const rawName = String(artist.name || '').trim();
+    const nameLooksNonLatin = /[\u0400-\u04FF\u0370-\u03FF\u0600-\u06FF\u3040-\u30FF\u4E00-\u9FFF]/.test(rawName);
+    const hasAliasesInPayload = Array.isArray(artist.aliases) && artist.aliases.length > 0;
+
+    // Relationship payloads often contain a non-canonical Latin alias and no alias list.
+    // Pull full artist details in those cases so locale/primary alias ranking can run.
+    if (artist.id && (nameLooksNonLatin || !hasAliasesInPayload)) {
+      try {
+        const fullArtist = await this.musicBrainz.getArtist(artist.id);
+        if (fullArtist?.name) {
+          resolvedArtist = {
+            ...artist,
+            ...fullArtist,
+            id: artist.id || fullArtist.id
+          };
+        }
+      } catch (error) {
+        console.warn(`MusicBrainz artist detail lookup failed for ${artist.id}`, error.message);
+      }
+    }
+
+    const preferredName = getPreferredMusicBrainzArtistName(resolvedArtist) || resolvedArtist.name || artist.name;
+    const preferredSortName = resolvedArtist['sort-name'] || resolvedArtist['sortName'] || resolvedArtist.sortName || null;
+
+    let existingArtist = resolvedArtist.id
       ? await this.prisma.plexArtist.findFirst({
-          where: { musicBrainzId: artist.id }
+          where: { musicBrainzId: resolvedArtist.id }
         })
       : null;
 
     if (!existingArtist) {
       existingArtist = await this.prisma.plexArtist.findFirst({
-        where: { title: artist.name }
+        where: {
+          OR: [
+            { title: preferredName },
+            { title: artist.name },
+            preferredSortName ? { title: preferredSortName } : null
+          ].filter(Boolean)
+        }
       });
     }
 
     const artistData = {
-      title: artist.name,
-      titleSort: artist['sort-name'] || artist['sortName'] || artist.sortName || null,
-      musicBrainzId: artist.id || null,
-      musicBrainzCountry: artist.country || null,
+      title: preferredName,
+      titleSort: preferredSortName || preferredName,
+      musicBrainzId: resolvedArtist.id || null,
+      musicBrainzCountry: resolvedArtist.country || null,
       identificationStatus: 'identified',
       identificationConfidence: 1.0,
       lastIdentificationAttempt: new Date()
     };
+
+    if (Array.isArray(resolvedArtist.aliases) && resolvedArtist.aliases.length > 0) {
+      artistData.musicBrainzAliases = JSON.stringify(
+        resolvedArtist.aliases.map((alias) => ({
+          name: alias.name,
+          sortName: alias['sort-name'] || null,
+          locale: alias.locale || null,
+          type: alias.type || null,
+          primary: typeof alias.primary === 'boolean' ? alias.primary : null
+        }))
+      );
+    }
 
     if (existingArtist) {
       return await this.prisma.plexArtist.update({
@@ -1010,7 +1055,8 @@ class IdentificationService {
       });
     }
 
-    const syntheticKey = artist.id ? `mb-artist:${artist.id}` : `mb-artist:${artist.name.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`;
+    const syntheticKeySource = preferredName || resolvedArtist.name || artist.name;
+    const syntheticKey = resolvedArtist.id ? `mb-artist:${resolvedArtist.id}` : `mb-artist:${syntheticKeySource.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`;
 
     return await this.prisma.plexArtist.create({
       data: {
@@ -1139,6 +1185,9 @@ class IdentificationService {
    * @private
    */
   async applyArtistMetadata(ratingKey, metadata) {
+    const preferredName = getPreferredMusicBrainzArtistName(metadata) || metadata.name;
+    const preferredSortName = metadata['sort-name'] || metadata['sortName'] || metadata.sortName || preferredName;
+
     const updateData = {
       musicBrainzId: metadata.id,
       identificationStatus: 'identified',
@@ -1146,12 +1195,16 @@ class IdentificationService {
       lastIdentificationAttempt: new Date()
     };
 
+    if (preferredName) {
+      updateData.title = preferredName;
+    }
+
     // Extract relevant MusicBrainz fields that exist in schema
     if (metadata.country) {
       updateData.musicBrainzCountry = metadata.country;
     }
-    if (metadata['sort-name']) {
-      updateData.titleSort = metadata['sort-name'];
+    if (preferredSortName) {
+      updateData.titleSort = preferredSortName;
     }
     if (metadata['life-span']?.begin) {
       updateData.musicBrainzBeginDate = metadata['life-span'].begin;
@@ -1176,7 +1229,6 @@ class IdentificationService {
     if (Array.isArray(metadata.relations) && metadata.relations.length > 0) {
       updateData.musicBrainzLinks = JSON.stringify(
         metadata.relations.map(relation => ({
-          type: relation.type || null,
           url: relation.url?.resource || null
         })).filter(relation => relation.url)
       );

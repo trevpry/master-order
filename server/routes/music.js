@@ -8,6 +8,7 @@ const fs = require('fs').promises;
 const { validateRequiredFields } = require('../middleware/validation');
 const { sendBadRequest, sendSuccess, sendServerError, asyncHandler } = require('../utils/responses');
 const ArtistMergeService = require('../services/artistMergeService');
+const { getPreferredMusicBrainzArtistName } = require('../utils/musicBrainzNames');
 
 const prisma = require('../prismaClient'); // Use shared singleton instance
 const plexDb = new PlexDatabaseService();
@@ -1622,6 +1623,25 @@ router.get('/artists/:ratingKey', asyncHandler(async (req, res) => {
       const rightIndex = Number.isInteger(right.index) ? right.index : Number.MAX_SAFE_INTEGER;
       return leftIndex - rightIndex;
     });
+
+  artist.tracksWithoutAlbum = await prisma.plexTrack.findMany({
+    where: {
+      grandparentRatingKey: artist.ratingKey,
+      removed: false,
+      OR: [
+        { parentRatingKey: null },
+        { parentRatingKey: '' }
+      ]
+    },
+    include: {
+      work: true
+    },
+    orderBy: [
+      { title: 'asc' },
+      { index: 'asc' }
+    ]
+  });
+
   artist.works = [...workMap.values()]
     .sort((left, right) => (left.title || '').localeCompare(right.title || ''));
   
@@ -1692,10 +1712,16 @@ router.put('/artists/:ratingKey/musicbrainz', asyncHandler(async (req, res) => {
 
   validateRequiredFields(req.body, ['name', 'musicBrainzId']);
 
+  const normalizedName = getPreferredMusicBrainzArtistName({
+    name,
+    'sort-name': sortName || null,
+    aliases: Array.isArray(aliases) ? aliases : []
+  }) || name;
+
   // Prepare the update data
   const updateData = {
-    title: name,
-    titleSort: sortName || name,
+    title: normalizedName,
+    titleSort: sortName || normalizedName,
     summary: disambiguation || null,
     musicBrainzId,
     musicBrainzCountry: country || null,
@@ -2704,6 +2730,43 @@ router.get('/tracks/album/:albumRatingKey', asyncHandler(async (req, res) => {
   const { albumRatingKey } = req.params;
   const tracks = await plexDb.getTracksByAlbum(albumRatingKey);
   res.json(tracks);
+}));
+
+// Disconnect a track from its album
+router.post('/tracks/:ratingKey/disconnect-album', asyncHandler(async (req, res) => {
+  const { ratingKey } = req.params;
+
+  const track = await prisma.plexTrack.findUnique({
+    where: { ratingKey }
+  });
+
+  if (!track) {
+    return sendBadRequest(res, 'Track not found');
+  }
+
+  if (!track.parentRatingKey) {
+    return sendBadRequest(res, 'Track is not linked to an album');
+  }
+
+  const updatedTrack = await prisma.plexTrack.update({
+    where: { ratingKey },
+    data: {
+      parentRatingKey: null
+    },
+    include: {
+      work: true,
+      album: {
+        include: {
+          artist: true
+        }
+      }
+    }
+  });
+
+  sendSuccess(res, {
+    message: 'Track disconnected from album',
+    track: updatedTrack
+  });
 }));
 
 // Get tracks by artist
