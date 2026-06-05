@@ -35,6 +35,117 @@ const WORK_INCLUDE = {
   }
 };
 
+const collectLinkedWorkIdsForTracks = async (tx, trackKeys) => {
+  const uniqueTrackKeys = [...new Set(
+    (trackKeys || [])
+      .map((trackKey) => String(trackKey || '').trim())
+      .filter(Boolean)
+  )];
+
+  if (uniqueTrackKeys.length === 0) {
+    return [];
+  }
+
+  const existingLinks = await tx.workPartTrack.findMany({
+    where: {
+      trackKey: {
+        in: uniqueTrackKeys
+      }
+    },
+    select: {
+      workPart: {
+        select: {
+          workId: true
+        }
+      }
+    }
+  });
+
+  return [...new Set(
+    existingLinks
+      .map((link) => link.workPart?.workId)
+      .filter((workId) => Number.isInteger(workId))
+  )];
+};
+
+const deleteNowEmptyWorks = async (tx, candidateWorkIds, keepWorkIds = []) => {
+  const keepSet = new Set(
+    (keepWorkIds || [])
+      .map((workId) => parseInt(workId, 10))
+      .filter((workId) => Number.isInteger(workId) && workId > 0)
+  );
+
+  const normalizedCandidates = [...new Set(
+    (candidateWorkIds || [])
+      .map((workId) => parseInt(workId, 10))
+      .filter((workId) => Number.isInteger(workId) && workId > 0 && !keepSet.has(workId))
+  )];
+
+  if (normalizedCandidates.length === 0) {
+    return [];
+  }
+
+  const workPartCounts = await tx.workPart.findMany({
+    where: {
+      workId: {
+        in: normalizedCandidates
+      }
+    },
+    select: {
+      workId: true,
+      _count: {
+        select: {
+          tracks: true
+        }
+      }
+    }
+  });
+
+  const partTrackCountsByWorkId = new Map();
+  for (const entry of workPartCounts) {
+    const workId = entry.workId;
+    const currentCount = partTrackCountsByWorkId.get(workId) || 0;
+    partTrackCountsByWorkId.set(workId, currentCount + (entry._count?.tracks || 0));
+  }
+
+  const directTrackCounts = await tx.plexTrack.groupBy({
+    by: ['workId'],
+    where: {
+      workId: {
+        in: normalizedCandidates
+      }
+    },
+    _count: {
+      _all: true
+    }
+  });
+
+  const directTrackCountsByWorkId = new Map();
+  for (const entry of directTrackCounts) {
+    if (Number.isInteger(entry.workId)) {
+      directTrackCountsByWorkId.set(entry.workId, entry._count?._all || 0);
+    }
+  }
+
+  const workIdsToDelete = normalizedCandidates.filter((workId) => {
+    const partTrackCount = partTrackCountsByWorkId.get(workId) || 0;
+    const directTrackCount = directTrackCountsByWorkId.get(workId) || 0;
+    return partTrackCount === 0 && directTrackCount === 0;
+  });
+
+  if (workIdsToDelete.length > 0) {
+    await tx.work.deleteMany({
+      where: {
+        id: {
+          in: workIdsToDelete
+        }
+      }
+    });
+  }
+
+  return workIdsToDelete;
+};
+
 // Get all works with composer and parts
 router.get('/', asyncHandler(async (req, res) => {
   const works = await prisma.work.findMany({
@@ -539,46 +650,56 @@ router.post('/:workId/parts/:partId/tracks', asyncHandler(async (req, res) => {
     return sendBadRequest(res, 'Track not found');
   }
 
-  // Check if track is already linked
-  const existing = await prisma.workPartTrack.findUnique({
-    where: {
-      workPartId_trackKey: {
-        workPartId: parseInt(partId),
+  const parsedWorkId = parseInt(workId, 10);
+  const parsedPartId = parseInt(partId, 10);
+
+  const linkResult = await prisma.$transaction(async (tx) => {
+    const previouslyLinkedWorkIds = await collectLinkedWorkIdsForTracks(tx, [trackKey]);
+
+    // Always replace previous work links so this track belongs only to the selected work/part.
+    await tx.workPartTrack.deleteMany({
+      where: {
         trackKey
       }
-    }
-  });
+    });
 
-  if (existing) {
-    return sendBadRequest(res, 'Track is already linked to this part');
-  }
-
-  // Create association
-  const workPartTrack = await prisma.workPartTrack.create({
-    data: {
-      workPartId: parseInt(partId),
-      trackKey
-    },
-    include: {
-      track: true,
-      workPart: {
-        include: {
-          work: {
-            include: {
-              composer: true
+    const createdLink = await tx.workPartTrack.create({
+      data: {
+        workPartId: parsedPartId,
+        trackKey
+      },
+      include: {
+        track: true,
+        workPart: {
+          include: {
+            work: {
+              include: {
+                composer: true
+              }
             }
           }
         }
       }
-    }
+    });
+
+    await tx.plexTrack.update({
+      where: { ratingKey: trackKey },
+      data: { workId: parsedWorkId }
+    });
+
+    const deletedWorkIds = await deleteNowEmptyWorks(tx, previouslyLinkedWorkIds, [parsedWorkId]);
+
+    return {
+      createdLink,
+      deletedWorkIds
+    };
   });
 
-  await prisma.plexTrack.update({
-    where: { ratingKey: trackKey },
-    data: { workId: parseInt(workId) }
+  sendSuccess(res, {
+    ...linkResult.createdLink,
+    autoDeletedWorkIds: linkResult.deletedWorkIds,
+    autoDeletedWorkCount: linkResult.deletedWorkIds.length
   });
-
-  sendSuccess(res, workPartTrack);
 }));
 
 // Bulk link tracks to a work by creating one part for the selected tracks
@@ -640,6 +761,17 @@ router.post('/:workId/bulk-link-tracks', asyncHandler(async (req, res) => {
   const normalizedPartTitle = String(partTitle || '').trim() || `Part ${nextPartOrder}`;
 
   const createdPart = await prisma.$transaction(async (tx) => {
+    const previouslyLinkedWorkIds = await collectLinkedWorkIdsForTracks(tx, uniqueTrackKeys);
+
+    // Replace previous work links so selected mappings are authoritative.
+    await tx.workPartTrack.deleteMany({
+      where: {
+        trackKey: {
+          in: uniqueTrackKeys
+        }
+      }
+    });
+
     const newPart = await tx.workPart.create({
       data: {
         workId: parsedWorkId,
@@ -666,7 +798,9 @@ router.post('/:workId/bulk-link-tracks', asyncHandler(async (req, res) => {
       }
     });
 
-    return tx.workPart.findUnique({
+    const deletedWorkIds = await deleteNowEmptyWorks(tx, previouslyLinkedWorkIds, [parsedWorkId]);
+
+    const part = await tx.workPart.findUnique({
       where: { id: newPart.id },
       include: {
         work: true,
@@ -677,11 +811,18 @@ router.post('/:workId/bulk-link-tracks', asyncHandler(async (req, res) => {
         }
       }
     });
+
+    return {
+      part,
+      deletedWorkIds
+    };
   });
 
   sendSuccess(res, {
-    part: createdPart,
+    part: createdPart.part,
     linkedTrackCount: uniqueTrackKeys.length,
+    autoDeletedWorkIds: createdPart.deletedWorkIds,
+    autoDeletedWorkCount: createdPart.deletedWorkIds.length,
     message: `Linked ${uniqueTrackKeys.length} tracks to work via one new part`
   });
 }));

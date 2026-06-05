@@ -58,6 +58,7 @@ const Music = () => {
   
   const [searchQuery, setSearchQuery] = useState(searchParams.get('search') || '');
   const [selectedSection, setSelectedSection] = useState(searchParams.get('section') || 'all');
+  const [selectedArtistTypeId, setSelectedArtistTypeId] = useState(searchParams.get('artistTypeId') || 'all');
   const [playlistFilter, setPlaylistFilter] = useState(searchParams.get('playlistFilter') || '');
   
   const [extractingMetadata, setExtractingMetadata] = useState(new Set());
@@ -274,6 +275,7 @@ const Music = () => {
   useEffect(() => {
     const urlSearch = searchParams.get('search') || '';
     const urlSection = searchParams.get('section') || 'all';
+    const urlArtistTypeId = searchParams.get('artistTypeId') || 'all';
     
     if (urlSearch !== searchQuery) {
       setSearchQuery(urlSearch);
@@ -281,7 +283,20 @@ const Music = () => {
     if (urlSection !== selectedSection) {
       setSelectedSection(urlSection);
     }
+    if (urlArtistTypeId !== selectedArtistTypeId) {
+      setSelectedArtistTypeId(urlArtistTypeId);
+    }
   }, [searchParams]);
+
+  useEffect(() => {
+    if (activeView !== 'artists') {
+      return;
+    }
+
+    if (artistTypes.length === 0 && !artistTypesLoading) {
+      loadArtistTypes();
+    }
+  }, [activeView, artistTypes.length, artistTypesLoading]);
 
   // Helper function to safely parse JSON responses
   const safeJsonParse = async (response, url) => {
@@ -658,7 +673,7 @@ const Music = () => {
   };
 
   // Refresh just the artists (for filtering/searching)
-  const refreshArtists = async (sectionOverride = null) => {
+  const refreshArtists = async (sectionOverride = null, artistTypeOverride = null) => {
     try {
       // Reset pagination state for all views
       setArtistsPage(1);
@@ -673,7 +688,7 @@ const Music = () => {
       setTracks([]);
       
       // Load first page of artists with current settings
-      await loadArtists(1, true, sectionOverride);
+      await loadArtists(1, true, sectionOverride, artistTypeOverride);
     } catch (err) {
       console.error('Error refreshing artists:', err);
       setError(err.message);
@@ -821,26 +836,30 @@ const Music = () => {
     }
   };
 
-  const loadArtists = async (page = 1, replace = false, sectionOverride = null) => {
+  const loadArtists = async (page = 1, replace = false, sectionOverride = null, artistTypeOverride = null) => {
     try {
       setArtistsLoading(true);
       
       const currentSection = sectionOverride !== null ? sectionOverride : selectedSection;
+      const currentArtistTypeId = artistTypeOverride !== null ? artistTypeOverride : selectedArtistTypeId;
+      const artistTypeFilterParam = currentArtistTypeId !== 'all'
+        ? `&artistTypeId=${encodeURIComponent(currentArtistTypeId)}`
+        : '';
       
-      console.log('loadArtists called with:', { page, replace, sectionOverride, currentSection, searchQuery });
+      console.log('loadArtists called with:', { page, replace, sectionOverride, currentSection, searchQuery, currentArtistTypeId });
       
       let url;
       if (searchQuery) {
         // For search, respect the selected section
         if (currentSection !== 'all') {
-          url = `${config.apiBaseUrl}/api/music/artists/section/${currentSection}?search=${encodeURIComponent(searchQuery)}&page=${page}&limit=20`;
+          url = `${config.apiBaseUrl}/api/music/artists/section/${currentSection}?search=${encodeURIComponent(searchQuery)}&page=${page}&limit=20${artistTypeFilterParam}`;
         } else {
-          url = `${config.apiBaseUrl}/api/music/artists?search=${encodeURIComponent(searchQuery)}&page=${page}&limit=20`;
+          url = `${config.apiBaseUrl}/api/music/artists?search=${encodeURIComponent(searchQuery)}&page=${page}&limit=20${artistTypeFilterParam}`;
         }
       } else if (currentSection !== 'all') {
-        url = `${config.apiBaseUrl}/api/music/artists/section/${currentSection}?page=${page}&limit=20`;
+        url = `${config.apiBaseUrl}/api/music/artists/section/${currentSection}?page=${page}&limit=20${artistTypeFilterParam}`;
       } else {
-        url = `${config.apiBaseUrl}/api/music/artists?page=${page}&limit=20`;
+        url = `${config.apiBaseUrl}/api/music/artists?page=${page}&limit=20${artistTypeFilterParam}`;
       }
       
       const response = await fetch(url);
@@ -892,7 +911,7 @@ const Music = () => {
       
       // For search, just load artists initially
       // Albums and tracks will be loaded if user navigates to those views
-      await refreshArtists();
+      await refreshArtists(null, nextArtistTypeId);
     } catch (err) {
       console.error('Error searching music:', err);
       setError(err.message);
@@ -954,6 +973,28 @@ const Music = () => {
         console.error('Error applying playlist filter:', err);
         setError(err.message);
       }
+    }
+  };
+
+  const handleArtistTypeFilterChange = async (artistTypeId) => {
+    const nextArtistTypeId = artistTypeId || 'all';
+    setSelectedArtistTypeId(nextArtistTypeId);
+    updateUrlParams({ artistTypeId: nextArtistTypeId === 'all' ? null : nextArtistTypeId }, true);
+
+    try {
+      setLoading(true);
+
+      setSelectedArtist(null);
+      setSelectedAlbum(null);
+      setSelectedTrack(null);
+      navigateToView('artists', { artistTypeId: nextArtistTypeId === 'all' ? null : nextArtistTypeId });
+
+      await refreshArtists();
+    } catch (err) {
+      console.error('Error filtering artists by type:', err);
+      setError(err.message);
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -1922,12 +1963,37 @@ const Music = () => {
               display: 'flex', 
               gap: '0.75rem', 
               alignItems: 'center',
+              flexWrap: 'wrap',
               marginBottom: '1rem',
               padding: '0.75rem',
               backgroundColor: artistSelectionMode ? '#eff6ff' : 'transparent',
               borderRadius: '0.375rem',
               border: artistSelectionMode ? '2px solid #3b82f6' : 'none'
             }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                <span style={{ fontSize: '0.875rem', color: '#374151', fontWeight: 500 }}>Artist Type:</span>
+                <select
+                  value={selectedArtistTypeId}
+                  onChange={(event) => handleArtistTypeFilterChange(event.target.value)}
+                  style={{
+                    padding: '0.45rem 0.65rem',
+                    borderRadius: '0.375rem',
+                    border: '1px solid #d1d5db',
+                    backgroundColor: 'white',
+                    fontSize: '0.875rem',
+                    color: '#111827',
+                    minWidth: '200px'
+                  }}
+                >
+                  <option value="all">All Artist Types</option>
+                  {artistTypes.map((type) => (
+                    <option key={type.id} value={String(type.id)}>
+                      {type.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
               <button
                 onClick={() => {
                   setArtistSelectionMode(!artistSelectionMode);
@@ -2159,6 +2225,9 @@ const Music = () => {
             }}
             onSelectArtist={selectArtist}
             onSelectTrack={selectTrack}
+            onWorkDeleted={() => {
+              navigateToView('works');
+            }}
           />
         )}
 

@@ -12,6 +12,12 @@
   gap: 1rem;
 }
 
+.work-detail-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+}
+
 .btn-back {
   background: #6c757d;
   color: white;
@@ -28,6 +34,7 @@
 }
 
 .btn-edit-work,
+.btn-delete-work,
 .btn-cancel-edit,
 .btn-save-edit {
   border: none;
@@ -45,6 +52,15 @@
 
 .btn-edit-work:hover {
   background: #0b5ed7;
+}
+
+.btn-delete-work {
+  background: #dc3545;
+  color: white;
+}
+
+.btn-delete-work:hover {
+  background: #bb2d3b;
 }
 
 .btn-cancel-edit {
@@ -66,6 +82,7 @@
 }
 
 .btn-edit-work:disabled,
+.btn-delete-work:disabled,
 .btn-cancel-edit:disabled,
 .btn-save-edit:disabled {
   cursor: not-allowed;

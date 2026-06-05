@@ -2338,11 +2338,32 @@ router.delete('/custom-playlists/:id/tracks/:trackId', asyncHandler(async (req, 
 // Music Artists - All
 router.get('/artists', asyncHandler(async (req, res) => {
   const { search, page = 1, limit = 20, artistTypeId } = req.query;
-  const offset = (page - 1) * limit;
+  const pageNum = parseInt(page, 10) || 1;
+  const limitNum = parseInt(limit, 10) || 20;
+  const offset = (pageNum - 1) * limitNum;
+  const parsedArtistTypeId = artistTypeId ? parseInt(artistTypeId, 10) : null;
+
+  if (artistTypeId && !Number.isInteger(parsedArtistTypeId)) {
+    return res.status(400).json({ error: 'artistTypeId must be an integer' });
+  }
+
+  let allowedArtistKeys = null;
+  if (Number.isInteger(parsedArtistTypeId)) {
+    const artistsWithType = await prisma.artistTypeAssignment.findMany({
+      where: { artistTypeId: parsedArtistTypeId },
+      select: { artistKey: true }
+    });
+
+    allowedArtistKeys = new Set(artistsWithType.map((assignment) => assignment.artistKey));
+  }
   
   if (search) {
     // For search, get all matching artists
     let artists = await plexDb.searchArtists(search);
+
+    if (allowedArtistKeys) {
+      artists = artists.filter((artist) => allowedArtistKeys.has(artist.ratingKey));
+    }
     
     // Add play counts for each artist
     artists = await Promise.all(artists.map(async (artist) => {
@@ -2356,33 +2377,23 @@ router.get('/artists', asyncHandler(async (req, res) => {
       };
     }));
     
-    // If artistTypeId is provided, sort artists that have this type to the top
-    if (artistTypeId) {
-      const typeId = parseInt(artistTypeId);
-      
-      // Get artists that have this type assigned
-      const artistsWithType = await prisma.artistTypeAssignment.findMany({
-        where: { artistTypeId: typeId },
-        select: { artistKey: true }
-      });
-      
-      const artistKeysWithType = new Set(artistsWithType.map(a => a.artistKey));
-      
-      // Sort: artists with the type first, then others
-      artists = artists.sort((a, b) => {
-        const aHasType = artistKeysWithType.has(a.ratingKey);
-        const bHasType = artistKeysWithType.has(b.ratingKey);
-        
-        if (aHasType && !bHasType) return -1;
-        if (!aHasType && bHasType) return 1;
-        return 0;
-      });
-    }
-    
     res.json(artists);
   } else {
     // For regular requests, use pagination
-    const artists = await plexDb.getAllArtists(parseInt(limit), offset);
+    let artists;
+    let totalArtists;
+
+    if (allowedArtistKeys) {
+      const totalAvailableArtists = await plexDb.getArtistsCount();
+      const allArtists = await plexDb.getAllArtists(totalAvailableArtists, 0);
+      const filteredArtists = allArtists.filter((artist) => allowedArtistKeys.has(artist.ratingKey));
+
+      totalArtists = filteredArtists.length;
+      artists = filteredArtists.slice(offset, offset + limitNum);
+    } else {
+      artists = await plexDb.getAllArtists(limitNum, offset);
+      totalArtists = await plexDb.getArtistsCount();
+    }
     
     // Add play counts
     const artistsWithCounts = await Promise.all(artists.map(async (artist) => {
@@ -2395,14 +2406,12 @@ router.get('/artists', asyncHandler(async (req, res) => {
         totalPlayCount: playCount._sum.viewCount || 0
       };
     }));
-    
-    const totalArtists = await plexDb.getArtistsCount();
-    
+
     res.json({
       artists: artistsWithCounts,
-      page: parseInt(page),
-      limit: parseInt(limit),
-      totalPages: Math.ceil(totalArtists / limit),
+      page: pageNum,
+      limit: limitNum,
+      totalPages: Math.ceil(totalArtists / limitNum),
       totalArtists
     });
   }
@@ -2411,17 +2420,52 @@ router.get('/artists', asyncHandler(async (req, res) => {
 // Music Artists - By Section
 router.get('/artists/section/:sectionKey', asyncHandler(async (req, res) => {
   const { sectionKey } = req.params;
-  const { search, page = 1, limit = 20 } = req.query;
+  const { search, page = 1, limit = 20, artistTypeId } = req.query;
   const pageNum = parseInt(page);
   const limitNum = parseInt(limit);
   const offset = (pageNum - 1) * limitNum;
+  const parsedArtistTypeId = artistTypeId ? parseInt(artistTypeId, 10) : null;
 
-  console.log(`Artists requested for section: ${sectionKey}, page: ${pageNum}, limit: ${limitNum}, search: ${search}`);
+  if (artistTypeId && !Number.isInteger(parsedArtistTypeId)) {
+    return res.status(400).json({ error: 'artistTypeId must be an integer' });
+  }
+
+  let allowedArtistKeys = null;
+  if (Number.isInteger(parsedArtistTypeId)) {
+    const artistsWithType = await prisma.artistTypeAssignment.findMany({
+      where: { artistTypeId: parsedArtistTypeId },
+      select: { artistKey: true }
+    });
+
+    allowedArtistKeys = new Set(artistsWithType.map((assignment) => assignment.artistKey));
+  }
+
+  console.log(`Artists requested for section: ${sectionKey}, page: ${pageNum}, limit: ${limitNum}, search: ${search}, artistTypeId: ${artistTypeId}`);
 
   let artists;
   let total;
 
-  if (search) {
+  if (allowedArtistKeys) {
+    if (search) {
+      const totalMatchingArtists = await plexDb.searchArtistsBySectionCount(sectionKey, search);
+      const allMatchingArtists = totalMatchingArtists > 0
+        ? await plexDb.searchArtistsBySection(sectionKey, search, totalMatchingArtists, 0)
+        : [];
+
+      const filteredArtists = allMatchingArtists.filter((artist) => allowedArtistKeys.has(artist.ratingKey));
+      total = filteredArtists.length;
+      artists = filteredArtists.slice(offset, offset + limitNum);
+    } else {
+      const totalSectionArtists = await plexDb.getArtistsBySectionCount(sectionKey);
+      const allSectionArtists = totalSectionArtists > 0
+        ? await plexDb.getArtistsBySection(sectionKey, totalSectionArtists, 0)
+        : [];
+
+      const filteredArtists = allSectionArtists.filter((artist) => allowedArtistKeys.has(artist.ratingKey));
+      total = filteredArtists.length;
+      artists = filteredArtists.slice(offset, offset + limitNum);
+    }
+  } else if (search) {
     artists = await plexDb.searchArtistsBySection(sectionKey, search, limitNum, offset);
     total = await plexDb.searchArtistsBySectionCount(sectionKey, search);
   } else {

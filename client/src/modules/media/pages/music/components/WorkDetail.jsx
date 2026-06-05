@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import config from '../../../../../config';
 import './WorkDetail.css';
 
-const WorkDetail = ({ workId, onGoBack, onSelectArtist, onSelectTrack }) => {
+const WorkDetail = ({ workId, onGoBack, onSelectArtist, onSelectTrack, onWorkDeleted }) => {
   const [work, setWork] = useState(null);
   const [artistTypes, setArtistTypes] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -18,6 +18,7 @@ const WorkDetail = ({ workId, onGoBack, onSelectArtist, onSelectTrack }) => {
   const [editPartTitle, setEditPartTitle] = useState('');
   const [editPartOrder, setEditPartOrder] = useState('');
   const [savingPartId, setSavingPartId] = useState(null);
+  const [deletingWork, setDeletingWork] = useState(false);
 
   useEffect(() => {
     loadWorkDetails();
@@ -224,6 +225,39 @@ const WorkDetail = ({ workId, onGoBack, onSelectArtist, onSelectTrack }) => {
     }
   };
 
+  const handleDeleteWork = async () => {
+    const confirmed = window.confirm(
+      `Delete work "${work?.title || 'this work'}"? This removes its parts and part-track links. Linked tracks and albums will be unlinked from the work.`
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
+    try {
+      setDeletingWork(true);
+      const response = await fetch(`${config.apiBaseUrl}/api/works/${workId}`, {
+        method: 'DELETE',
+      });
+
+      const result = await response.json();
+      if (!response.ok) {
+        throw new Error(result.error || 'Failed to delete work');
+      }
+
+      if (onWorkDeleted) {
+        onWorkDeleted(result.data || result);
+      } else if (onGoBack) {
+        onGoBack();
+      }
+    } catch (err) {
+      console.error('Error deleting work:', err);
+      alert(`Error deleting work: ${err.message}`);
+    } finally {
+      setDeletingWork(false);
+    }
+  };
+
   const handleRemoveArtistType = async (partId, artistTypeId) => {
     try {
       const response = await fetch(
@@ -282,11 +316,20 @@ const WorkDetail = ({ workId, onGoBack, onSelectArtist, onSelectTrack }) => {
         <button className="btn-back" onClick={onGoBack}>
           ← Back
         </button>
-        {!isEditing && (
-          <button className="btn-edit-work" onClick={openEditMode}>
-            Edit Work
+        <div className="work-detail-header-actions">
+          {!isEditing && (
+            <button className="btn-edit-work" onClick={openEditMode}>
+              Edit Work
+            </button>
+          )}
+          <button
+            className="btn-delete-work"
+            onClick={handleDeleteWork}
+            disabled={deletingWork || savingWork || !!savingPartId}
+          >
+            {deletingWork ? 'Deleting...' : 'Delete Work'}
           </button>
-        )}
+        </div>
       </div>
 
       <div className="work-detail-content">

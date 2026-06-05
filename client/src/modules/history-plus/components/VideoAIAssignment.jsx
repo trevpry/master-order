@@ -47,7 +47,14 @@ const VideoAIAssignment = ({
       });
 
       if (!response.ok) {
-        throw new Error(`Failed to generate prompt: ${response.statusText}`);
+        let message = `Failed to generate prompt: ${response.statusText}`;
+        try {
+          const errorPayload = await response.json();
+          message = errorPayload?.error || errorPayload?.message || errorPayload?.details || message;
+        } catch (parseError) {
+          // Keep default status-based message when response body is not JSON.
+        }
+        throw new Error(message);
       }
 
       const result = await response.json();

@@ -864,10 +864,6 @@ router.post('/ai/categorize-video/:videoId', asyncHandler(async (req, res) => {
     const videoPromptTemplate = settings?.videoAiPromptTemplate || null;
     const sharedEventDecisionPromptTemplate = settings?.sharedEventDecisionPromptTemplate || null;
 
-    if (!categories || categories.length === 0) {
-      return sendBadRequest(res, 'No categories available for AI analysis');
-    }
-
     // If preview mode, return the prompt data instead of calling AI
     if (preview === 'true') {
       const promptData = {
@@ -878,7 +874,9 @@ router.post('/ai/categorize-video/:videoId', asyncHandler(async (req, res) => {
           title: event.title,
           startDate: event.startDate,
           endDate: event.endDate,
-          category: event.category
+          category: event.category,
+          details: event.details || '',
+          description: event.description || event.details || ''
         })),
         categories: (categories || []).map(cat => ({
           name: cat.name,
@@ -896,6 +894,10 @@ router.post('/ai/categorize-video/:videoId', asyncHandler(async (req, res) => {
       };
 
       return sendSuccess(res, promptData);
+    }
+
+    if (!categories || categories.length === 0) {
+      return sendBadRequest(res, 'No categories available for AI analysis');
     }
 
     // Use AI to analyze the video and suggest event assignment or new event creation
