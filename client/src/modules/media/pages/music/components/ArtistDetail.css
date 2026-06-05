@@ -48,6 +48,12 @@
   transform: translateY(-1px);
 }
 
+.musicbrainz-button:disabled {
+  opacity: 0.7;
+  cursor: not-allowed;
+  transform: none;
+}
+
 .artist-info-section {
   display: flex;
   gap: 2rem;
@@ -287,6 +293,10 @@
 .artist-works-merge-confirm:disabled {
   opacity: 0.65;
   cursor: not-allowed;
+}
+
+.artist-merge-modal {
+  max-width: 680px;
 }
 
 .linked-meta-line {

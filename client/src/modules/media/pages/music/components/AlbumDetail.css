@@ -272,7 +272,7 @@
 
 .album-detail .tracks-header {
   display: grid;
-  grid-template-columns: 50px 50px 1fr 120px 80px 100px 100px 200px;
+  grid-template-columns: 50px 88px 1fr 120px 80px 100px 100px 200px;
   gap: 10px;
   padding: 10px 15px;
   background: #2a2a2a;
@@ -285,7 +285,7 @@
 
 .album-detail .track-row {
   display: grid;
-  grid-template-columns: 50px 50px 1fr 120px 80px 100px 100px 200px;
+  grid-template-columns: 50px 88px 1fr 120px 80px 100px 100px 200px;
   gap: 10px;
   padding: 10px 15px;
   background: #242424;
@@ -361,7 +361,8 @@
 .album-detail .track-number {
   text-align: center;
   color: #888;
-  font-size: 14px;
+  font-size: 13px;
+  white-space: nowrap;
 }
 
 .album-detail .track-title {
@@ -421,6 +422,20 @@
   cursor: not-allowed;
 }
 
+.discogs-match-header {
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #9ca3af;
+  padding: 2px 4px;
+}
+
+.discogs-match-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
 .album-detail .track-inline-btn-danger {
   border-color: #ef4444;
   background: rgba(239, 68, 68, 0.16);
@@ -469,6 +484,32 @@
   gap: 0.4rem;
   max-height: 180px;
   overflow-y: auto;
+}
+
+.track-link-modal-results.discogs-match-results {
+  gap: 0.5rem;
+}
+
+.discogs-match-row {
+  display: grid;
+  grid-template-columns: minmax(260px, 1fr) minmax(260px, 1fr);
+  gap: 0.5rem;
+  align-items: start;
+}
+
+.discogs-match-row-header {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: #1f2937;
+  padding: 4px 6px;
+  border-radius: 8px;
+}
+
+@media (max-width: 680px) {
+  .discogs-match-row {
+    grid-template-columns: 1fr;
+  }
 }
 
 .track-link-modal-result {

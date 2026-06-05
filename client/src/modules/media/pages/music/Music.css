@@ -500,6 +500,37 @@
   margin: 0.25rem 0 0 0;
 }
 
+.artist-card-actions {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 1rem;
+  flex-wrap: wrap;
+}
+
+.artist-card-action-button {
+  border: 1px solid #cbd5e1;
+  background: #f8fafc;
+  color: #334155;
+  border-radius: 999px;
+  padding: 0.45rem 0.8rem;
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.artist-card-action-button:hover {
+  background: #eef2ff;
+  border-color: #818cf8;
+  color: #1e3a8a;
+}
+
+.artist-card-delete-button:hover {
+  background: #fef2f2;
+  border-color: #fca5a5;
+  color: #991b1b;
+}
+
 .artist-summary {
   color: #666;
   font-size: 0.9rem;
@@ -1020,7 +1051,7 @@
 
 .tracks-header {
   display: grid;
-  grid-template-columns: 40px 30px 1fr 120px 80px 80px 70px 120px;
+  grid-template-columns: 40px 88px 1fr 120px 80px 80px 70px 120px;
   gap: 0.75rem;
   padding: 0.75rem 1rem;
   background: #f8f9fa;
@@ -1034,7 +1065,7 @@
 
 .track-row {
   display: grid;
-  grid-template-columns: 40px 30px 1fr 120px 80px 80px 70px 120px;
+  grid-template-columns: 40px 88px 1fr 120px 80px 80px 70px 120px;
   gap: 0.75rem;
   padding: 0.75rem 1rem;
   border-bottom: 1px solid #f1f3f4;
@@ -1054,7 +1085,8 @@
   color: #666;
   text-align: center;
   font-weight: 500;
-  font-size: 0.9rem;
+  font-size: 0.82rem;
+  white-space: nowrap;
 }
 
 .track-title {

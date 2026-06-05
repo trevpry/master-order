@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import config from '../../../../../config';
 import TracksPlaylistPlayer from './TracksPlaylistPlayer';
 import StarRating from '../../../../../components/StarRating';
@@ -40,6 +40,8 @@ const AlbumDetail = ({
   const [isMergingWorks, setIsMergingWorks] = useState(false);
   const [showLinkWorkModal, setShowLinkWorkModal] = useState(false);
   const [trackToLink, setTrackToLink] = useState(null);
+  const [bulkTrackLinkSelectionMode, setBulkTrackLinkSelectionMode] = useState(false);
+  const [selectedTrackKeysToLink, setSelectedTrackKeysToLink] = useState(new Set());
   const [composerSearch, setComposerSearch] = useState('');
   const [composerResults, setComposerResults] = useState([]);
   const [searchingComposer, setSearchingComposer] = useState(false);
@@ -48,9 +50,17 @@ const AlbumDetail = ({
   const [workSearch, setWorkSearch] = useState('');
   const [selectedWork, setSelectedWork] = useState(null);
   const [selectedPart, setSelectedPart] = useState(null);
+  const [bulkPartTitle, setBulkPartTitle] = useState('');
   const [linkingTrack, setLinkingTrack] = useState(false);
   const [disconnectingTrackKey, setDisconnectingTrackKey] = useState(null);
   const [disconnectingWorkTrackKey, setDisconnectingWorkTrackKey] = useState(null);
+  const [discogsUrl, setDiscogsUrl] = useState('');
+  const [importingDiscogs, setImportingDiscogs] = useState(false);
+  const [discogsPreview, setDiscogsPreview] = useState(null);
+  const [showDiscogsPreviewModal, setShowDiscogsPreviewModal] = useState(false);
+  const [discogsTrackMatches, setDiscogsTrackMatches] = useState([]);
+  const [discogsLinkAllToAlbumWork, setDiscogsLinkAllToAlbumWork] = useState(false);
+  const [discogsExcludedCreditKeys, setDiscogsExcludedCreditKeys] = useState(new Set());
   
   // Sync local state when prop changes
   useEffect(() => {
@@ -191,12 +201,299 @@ const AlbumDetail = ({
     }
   };
 
-  const buildTrackGroups = (trackList) => {
-    const sortedTracks = [...(trackList || [])].sort((left, right) => {
-      const leftIndex = Number.isInteger(left.index) ? left.index : Number.MAX_SAFE_INTEGER;
-      const rightIndex = Number.isInteger(right.index) ? right.index : Number.MAX_SAFE_INTEGER;
-      return leftIndex - rightIndex;
+  const handleImportFromDiscogs = async () => {
+    const normalizedUrl = String(discogsUrl || '').trim();
+    if (!normalizedUrl) {
+      alert('Enter a Discogs release URL first.');
+      return;
+    }
+
+    try {
+      setImportingDiscogs(true);
+      const response = await fetch(`${config.apiBaseUrl}/api/music/albums/${albumData.ratingKey}/discogs-import`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ url: normalizedUrl, apply: false })
+      });
+
+      const result = await response.json();
+      if (!response.ok) {
+        throw new Error(result.error || 'Failed to import Discogs metadata');
+      }
+
+      setDiscogsPreview(result?.data || null);
+      setDiscogsTrackMatches(result?.data?.mapping?.defaultTrackMappings || []);
+      setDiscogsLinkAllToAlbumWork(false);
+      setDiscogsExcludedCreditKeys(new Set());
+      setShowDiscogsPreviewModal(true);
+    } catch (error) {
+      console.error('Error importing Discogs metadata:', error);
+      alert(`Discogs import failed: ${error.message}`);
+    } finally {
+      setImportingDiscogs(false);
+    }
+  };
+
+  const closeDiscogsPreviewModal = () => {
+    setShowDiscogsPreviewModal(false);
+    setDiscogsPreview(null);
+    setDiscogsTrackMatches([]);
+    setDiscogsLinkAllToAlbumWork(false);
+    setDiscogsExcludedCreditKeys(new Set());
+  };
+
+  const toggleDiscogsExcludedCredit = (creditKey) => {
+    const normalizedKey = String(creditKey || '').trim();
+    if (!normalizedKey) {
+      return;
+    }
+
+    setDiscogsExcludedCreditKeys((prev) => {
+      const next = new Set(prev);
+      if (next.has(normalizedKey)) {
+        next.delete(normalizedKey);
+      } else {
+        next.add(normalizedKey);
+      }
+      return next;
     });
+  };
+
+  const updateDiscogsTrackMatch = (discogsOrdinal, localTrackKey) => {
+    setDiscogsTrackMatches((prev) => {
+      const next = Array.isArray(prev) ? [...prev] : [];
+      const idx = next.findIndex((entry) => entry.discogsOrdinal === discogsOrdinal);
+      const payload = {
+        discogsOrdinal,
+        localTrackKey: localTrackKey || null,
+      };
+
+      if (idx >= 0) {
+        next[idx] = payload;
+      } else {
+        next.push(payload);
+      }
+
+      return next;
+    });
+  };
+
+  const handleAcceptDiscogsImport = async () => {
+    const normalizedUrl = String(discogsUrl || '').trim();
+    if (!normalizedUrl) {
+      alert('Discogs URL is required to continue.');
+      return;
+    }
+
+    const albumWorkTitle = String(discogsPreview?.album?.discogsTitle || albumData?.title || '').trim();
+    const trackMappingsPayload = (Array.isArray(discogsTrackMatches) ? discogsTrackMatches : []).map((mapping) => {
+      const nextMapping = {
+        discogsOrdinal: mapping?.discogsOrdinal,
+        localTrackKey: mapping?.localTrackKey || null,
+      };
+
+      if (discogsLinkAllToAlbumWork && albumWorkTitle) {
+        nextMapping.workTitleHint = albumWorkTitle;
+      }
+
+      return nextMapping;
+    });
+
+    try {
+      setImportingDiscogs(true);
+      const response = await fetch(`${config.apiBaseUrl}/api/music/albums/${albumData.ratingKey}/discogs-import`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          url: normalizedUrl,
+          apply: true,
+          trackMappings: trackMappingsPayload,
+          excludedCreditKeys: [...discogsExcludedCreditKeys],
+        })
+      });
+
+      const result = await response.json();
+      if (!response.ok) {
+        throw new Error(result.error || 'Failed to apply Discogs import');
+      }
+
+      await refreshAlbumAndTracks();
+      closeDiscogsPreviewModal();
+
+      const discogsMeta = result?.data?.discogs;
+      if (discogsMeta) {
+        alert(
+          `Discogs import complete. Updated ${discogsMeta.mappedTrackCount || 0} track(s)`
+          + ` and linked ${discogsMeta.linkedWorkTrackCount || 0} track(s) into works.`
+        );
+      }
+    } catch (error) {
+      console.error('Error applying Discogs metadata:', error);
+      alert(`Discogs import failed: ${error.message}`);
+    } finally {
+      setImportingDiscogs(false);
+    }
+  };
+
+  const formatMilliseconds = (value) => {
+    const ms = Number(value);
+    if (!Number.isFinite(ms) || ms <= 0) {
+      return null;
+    }
+
+    const totalSeconds = Math.floor(ms / 1000);
+    const minutes = Math.floor(totalSeconds / 60);
+    const seconds = totalSeconds % 60;
+    return `${minutes}:${String(seconds).padStart(2, '0')}`;
+  };
+
+  const discogsImportArtistsPreview = useMemo(() => {
+    const selectedOrdinals = new Set(
+      (Array.isArray(discogsTrackMatches) ? discogsTrackMatches : [])
+        .filter((mapping) => mapping?.localTrackKey)
+        .map((mapping) => Number.parseInt(mapping?.discogsOrdinal, 10))
+        .filter((ordinal) => Number.isInteger(ordinal))
+    );
+    const creditOptions = (Array.isArray(discogsPreview?.discogs?.creditOptions) ? discogsPreview.discogs.creditOptions : [])
+      .filter((credit) => {
+        if (credit?.source === 'album') {
+          return true;
+        }
+
+        const ordinal = Number.parseInt(credit?.discogsOrdinal, 10);
+        return Number.isInteger(ordinal) && selectedOrdinals.has(ordinal);
+      })
+      .map((credit) => {
+        const sourceLabel = credit?.source === 'album'
+          ? 'Album'
+          : `Track #${Number.isInteger(credit?.discogsOrdinal) ? credit.discogsOrdinal : '?'}`;
+
+        return {
+          creditKey: String(credit?.creditKey || '').trim(),
+          artistName: String(credit?.artistName || '').trim(),
+          artistTypeName: String(credit?.artistTypeName || 'Performer').trim() || 'Performer',
+          source: credit?.source === 'album' ? 'album' : 'track',
+          sourceLabel,
+          discogsOrdinal: Number.isInteger(credit?.discogsOrdinal) ? credit.discogsOrdinal : null,
+          discogsTrackTitle: String(credit?.discogsTrackTitle || '').trim() || null,
+          matchedExisting: Boolean(credit?.matchedExisting),
+          willCreateArtist: Boolean(credit?.willCreateArtist),
+          matchedArtist: credit?.matchedArtist || null,
+          matchKind: credit?.matchKind || null,
+          excluded: discogsExcludedCreditKeys.has(String(credit?.creditKey || '').trim()),
+        };
+      })
+      .sort((left, right) => {
+        if (left.source !== right.source) {
+          return left.source.localeCompare(right.source);
+        }
+
+        if (left.source === 'track' || right.source === 'track') {
+          const ordinalSort = (left.discogsOrdinal || 0) - (right.discogsOrdinal || 0);
+          if (ordinalSort !== 0) {
+            return ordinalSort;
+          }
+        }
+
+        const nameSort = left.artistName.localeCompare(right.artistName);
+        if (nameSort !== 0) {
+          return nameSort;
+        }
+        return left.artistTypeName.localeCompare(right.artistTypeName);
+      });
+
+    const includedCreditCount = creditOptions.filter((credit) => !credit.excluded).length;
+    const matchedExistingCount = creditOptions.filter((credit) => !credit.excluded && credit.matchedExisting).length;
+    const newArtistCount = creditOptions.filter((credit) => !credit.excluded && !credit.matchedExisting).length;
+
+    return {
+      selectedTrackCount: selectedOrdinals.size,
+      creditOptions,
+      includedCreditCount,
+      matchedExistingCount,
+      newArtistCount,
+    };
+  }, [discogsPreview, discogsTrackMatches, discogsExcludedCreditKeys]);
+
+  const inferDiscNumberFromTrack = (track) => {
+    const extractedDisc = Number.isInteger(track?.discNumber) ? track.discNumber : null;
+    if (extractedDisc) {
+      return extractedDisc;
+    }
+
+    const directDisc = Number.isInteger(track?.parentIndex) ? track.parentIndex : null;
+    if (directDisc) {
+      return directDisc;
+    }
+
+    const filePath = String(track?.file || '').trim();
+    if (!filePath) {
+      return null;
+    }
+
+    const folderDiscMatch = filePath.match(/[\\/](?:disc|cd)\s*(\d{1,2})[\\/]/i);
+    if (folderDiscMatch) {
+      const parsed = parseInt(folderDiscMatch[1], 10);
+      if (!Number.isNaN(parsed)) {
+        return parsed;
+      }
+    }
+
+    const filename = filePath.split(/[\\/]/).pop() || '';
+    const filenameDiscMatch = filename.match(/^(\d{1,2})\s*[-._]\s*\d{1,3}\b/);
+    if (filenameDiscMatch) {
+      const parsed = parseInt(filenameDiscMatch[1], 10);
+      if (!Number.isNaN(parsed)) {
+        return parsed;
+      }
+    }
+
+    return null;
+  };
+
+  const formatTrackNumberLabel = (track, fallbackIndex) => {
+    const trackNumber = Number.isInteger(track?.trackNumber)
+      ? track.trackNumber
+      : (Number.isInteger(track?.index) ? track.index : fallbackIndex);
+    const discNumber = Number.isInteger(track?.discNumber) ? track.discNumber : null;
+
+    if (discNumber && trackNumber) {
+      return `D${discNumber}-T${trackNumber}`;
+    }
+
+    return trackNumber || fallbackIndex;
+  };
+
+  const sortAlbumTracks = (left, right) => {
+    const leftDisc = Number.isInteger(left?.discNumber) ? left.discNumber : Number.MAX_SAFE_INTEGER;
+    const rightDisc = Number.isInteger(right?.discNumber) ? right.discNumber : Number.MAX_SAFE_INTEGER;
+
+    if (leftDisc !== rightDisc) {
+      return leftDisc - rightDisc;
+    }
+
+    const leftTrack = Number.isInteger(left?.trackNumber)
+      ? left.trackNumber
+      : (Number.isInteger(left?.index) ? left.index : Number.MAX_SAFE_INTEGER);
+    const rightTrack = Number.isInteger(right?.trackNumber)
+      ? right.trackNumber
+      : (Number.isInteger(right?.index) ? right.index : Number.MAX_SAFE_INTEGER);
+
+    if (leftTrack !== rightTrack) {
+      return leftTrack - rightTrack;
+    }
+
+    const leftIndex = Number.isInteger(left?.index) ? left.index : Number.MAX_SAFE_INTEGER;
+    const rightIndex = Number.isInteger(right?.index) ? right.index : Number.MAX_SAFE_INTEGER;
+    return leftIndex - rightIndex;
+  };
+
+  const buildTrackGroups = (trackList) => {
+    const sortedTracks = [...(trackList || [])].sort(sortAlbumTracks);
 
     const groups = [];
     const groupMap = new Map();
@@ -359,6 +656,28 @@ const AlbumDetail = ({
     setWorkSearch('');
     setSelectedWork(null);
     setSelectedPart(null);
+    setBulkPartTitle('');
+    setLinkingTrack(false);
+  };
+
+  const openBulkLinkWorkModal = () => {
+    const selectedKeys = [...selectedTrackKeysToLink];
+    if (selectedKeys.length === 0) {
+      alert('Select one or more tracks to bulk link.');
+      return;
+    }
+
+    setTrackToLink(null);
+    setShowLinkWorkModal(true);
+    setComposerSearch('');
+    setComposerResults([]);
+    setSearchingComposer(false);
+    setSelectedComposer(null);
+    setComposerWorks([]);
+    setWorkSearch('');
+    setSelectedWork(null);
+    setSelectedPart(null);
+    setBulkPartTitle(`${albumData?.title || album?.title || 'Album'} - Selected Tracks`);
     setLinkingTrack(false);
   };
 
@@ -372,6 +691,41 @@ const AlbumDetail = ({
     setWorkSearch('');
     setSelectedWork(null);
     setSelectedPart(null);
+    setBulkPartTitle('');
+  };
+
+  const toggleTrackForBulkLink = (trackKey) => {
+    setSelectedTrackKeysToLink((prev) => {
+      const next = new Set(prev);
+      if (next.has(trackKey)) {
+        next.delete(trackKey);
+      } else {
+        next.add(trackKey);
+      }
+      return next;
+    });
+  };
+
+  const toggleBulkTrackLinkSelectionMode = () => {
+    setBulkTrackLinkSelectionMode((prev) => {
+      const next = !prev;
+      if (!next) {
+        setSelectedTrackKeysToLink(new Set());
+      }
+      return next;
+    });
+  };
+
+  const handleSelectAllTracksForBulkLink = () => {
+    const allTrackKeys = (tracks || [])
+      .map((track) => String(track?.ratingKey || '').trim())
+      .filter(Boolean);
+
+    setSelectedTrackKeysToLink(new Set(allTrackKeys));
+  };
+
+  const handleClearSelectedTracksForBulkLink = () => {
+    setSelectedTrackKeysToLink(new Set());
   };
 
   const handleSelectComposer = async (composer) => {
@@ -407,6 +761,41 @@ const AlbumDetail = ({
     } catch (error) {
       console.error('Error linking track to work:', error);
       alert(`Error linking track to work: ${error.message}`);
+    } finally {
+      setLinkingTrack(false);
+    }
+  };
+
+  const handleBulkLinkTracksToWork = async () => {
+    const selectedTrackKeys = [...selectedTrackKeysToLink];
+    if (!selectedWork || selectedTrackKeys.length === 0) return;
+
+    try {
+      setLinkingTrack(true);
+      const response = await fetch(
+        `${config.apiBaseUrl}/api/works/${selectedWork.id}/bulk-link-tracks`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            trackKeys: selectedTrackKeys,
+            partTitle: bulkPartTitle
+          })
+        }
+      );
+
+      const result = await response.json();
+      if (!response.ok) {
+        throw new Error(result.error || 'Failed to bulk link tracks to work');
+      }
+
+      await refreshAlbumAndTracks();
+      setBulkTrackLinkSelectionMode(false);
+      setSelectedTrackKeysToLink(new Set());
+      closeLinkWorkModal();
+    } catch (error) {
+      console.error('Error bulk linking tracks to work:', error);
+      alert(`Error bulk linking tracks to work: ${error.message}`);
     } finally {
       setLinkingTrack(false);
     }
@@ -491,7 +880,30 @@ const AlbumDetail = ({
         <button className="back-button" onClick={onGoBack}>
           ← {backLabel}
         </button>
-        <div style={{ display: 'flex', gap: '0.5rem' }}>
+        <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
+          <input
+            type="url"
+            value={discogsUrl}
+            onChange={(event) => setDiscogsUrl(event.target.value)}
+            placeholder="https://www.discogs.com/release/..."
+            style={{
+              minWidth: '260px',
+              padding: '0.45rem 0.6rem',
+              borderRadius: '0.375rem',
+              border: '1px solid #4b5563',
+              backgroundColor: '#111827',
+              color: '#f9fafb'
+            }}
+          />
+          <button
+            className="musicbrainz-search-btn"
+            onClick={handleImportFromDiscogs}
+            disabled={importingDiscogs}
+            title="Import album, track, and work metadata from a Discogs release URL"
+            style={{ backgroundColor: '#0f766e', opacity: importingDiscogs ? 0.7 : 1 }}
+          >
+            {importingDiscogs ? '⏳ Importing Discogs...' : '🧾 Import Discogs URL'}
+          </button>
           <button 
             className="musicbrainz-search-btn"
             onClick={() => setShowIdentifyModal(true)}
@@ -796,7 +1208,46 @@ const AlbumDetail = ({
 
       {/* Tracks List */}
       <div className="album-tracks">
-        <h2>Tracks</h2>
+        <div className="album-works-header">
+          <h2>Tracks</h2>
+          <div style={{ display: 'flex', gap: '0.5rem' }}>
+            <button
+              type="button"
+              className="album-works-select-btn"
+              onClick={toggleBulkTrackLinkSelectionMode}
+            >
+              {bulkTrackLinkSelectionMode ? 'Cancel Track Selection' : 'Select Tracks To Link'}
+            </button>
+            {bulkTrackLinkSelectionMode && (
+              <>
+                <button
+                  type="button"
+                  className="album-works-select-btn"
+                  onClick={handleSelectAllTracksForBulkLink}
+                  disabled={!tracks || tracks.length === 0}
+                >
+                  Select All
+                </button>
+                <button
+                  type="button"
+                  className="album-works-select-btn"
+                  onClick={handleClearSelectedTracksForBulkLink}
+                  disabled={selectedTrackKeysToLink.size === 0}
+                >
+                  Clear All
+                </button>
+                <button
+                  type="button"
+                  className="album-works-merge-confirm"
+                  onClick={openBulkLinkWorkModal}
+                  disabled={selectedTrackKeysToLink.size === 0}
+                >
+                  Link Selected ({selectedTrackKeysToLink.size})
+                </button>
+              </>
+            )}
+          </div>
+        </div>
         {!tracks || tracks.length === 0 ? (
           <div className="empty-state">
             <p>No tracks found for this album.</p>
@@ -804,6 +1255,7 @@ const AlbumDetail = ({
         ) : (
           <div className="tracks-table">
             <div className="tracks-header">
+              {bulkTrackLinkSelectionMode && <span className="track-controls">✓</span>}
               <span className="track-controls">▶</span>
               <span className="track-number">#</span>
               <span className="track-title">Title</span>
@@ -825,6 +1277,16 @@ const AlbumDetail = ({
                     key={track.ratingKey} 
                     className={`track-row ${currentTrack?.ratingKey === track.ratingKey ? 'playing' : ''}`}
                   >
+                    {bulkTrackLinkSelectionMode && (
+                      <div className="track-controls">
+                        <input
+                          type="checkbox"
+                          checked={selectedTrackKeysToLink.has(track.ratingKey)}
+                          onChange={() => toggleTrackForBulkLink(track.ratingKey)}
+                          aria-label={`Select ${track.title || 'track'} for bulk work link`}
+                        />
+                      </div>
+                    )}
                     <button 
                       className={`track-play-button ${currentTrack?.ratingKey === track.ratingKey && isPlaying ? 'playing' : ''}`}
                       onClick={() => onPlayTrack(track)}
@@ -832,7 +1294,7 @@ const AlbumDetail = ({
                     >
                       {currentTrack?.ratingKey === track.ratingKey && isPlaying ? '⏸' : '▶'}
                     </button>
-                    <span className="track-number">{track.index || index + 1}</span>
+                    <span className="track-number">{formatTrackNumberLabel(track, index + 1)}</span>
                     <div className="track-title">
                       <div 
                         className="track-name track-name-link"
@@ -1027,13 +1489,183 @@ const AlbumDetail = ({
         }}
       />
 
+      {showDiscogsPreviewModal && (
+        <div className="modal-overlay" onClick={closeDiscogsPreviewModal}>
+          <div className="modal-content" onClick={(event) => event.stopPropagation()}>
+            <h2>Discogs Match Preview</h2>
+            <p className="track-link-modal-subtitle">
+              {discogsPreview?.album?.title || albumData.title}
+              {' → '}
+              {discogsPreview?.album?.discogsTitle || albumData.title}
+            </p>
+
+            <div className="track-link-modal-step">
+              <h4>Summary</h4>
+              <div className="track-link-modal-hint">
+                Source: {discogsPreview?.discogs?.sourceKind || 'release'} #{discogsPreview?.discogs?.releaseId || 'unknown'}
+              </div>
+              <div className="track-link-modal-hint">
+                Mapping {discogsPreview?.mapping?.mappedTrackCount || 0} local track(s) from {discogsPreview?.mapping?.localTrackCount || 0} local / {discogsPreview?.discogs?.sourceTrackCount || 0} Discogs tracks.
+              </div>
+              <label className="track-link-modal-hint" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginTop: '0.5rem', cursor: 'pointer' }}>
+                <input
+                  type="checkbox"
+                  checked={discogsLinkAllToAlbumWork}
+                  onChange={(event) => setDiscogsLinkAllToAlbumWork(event.target.checked)}
+                  disabled={importingDiscogs}
+                />
+                Link all imported tracks to a single work titled "{(discogsPreview?.album?.discogsTitle || albumData?.title || 'Album Title').trim() || 'Album Title'}"
+              </label>
+            </div>
+
+            <div className="track-link-modal-step">
+              <h4>Artists to Import</h4>
+              {discogsImportArtistsPreview.creditOptions.length === 0 ? (
+                <div className="track-link-modal-hint">No artist credits will be imported with the current mapping.</div>
+              ) : (
+                <>
+                  <div className="track-link-modal-hint" style={{ marginBottom: '0.45rem' }}>
+                    {discogsImportArtistsPreview.includedCreditCount} of {discogsImportArtistsPreview.creditOptions.length} credit(s) selected from album credits and {discogsImportArtistsPreview.selectedTrackCount} mapped track(s).
+                  </div>
+                  <div className="track-link-modal-hint" style={{ marginBottom: '0.45rem' }}>
+                    Included: {discogsImportArtistsPreview.matchedExistingCount} match existing artist(s), {discogsImportArtistsPreview.newArtistCount} will create new artist(s).
+                  </div>
+                  <div className="track-link-modal-results" style={{ maxHeight: '220px' }}>
+                    {discogsImportArtistsPreview.creditOptions.map((credit) => {
+                      return (
+                        <label key={credit.creditKey} className="track-link-modal-result" style={{ cursor: 'pointer', display: 'block' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                            <input
+                              type="checkbox"
+                              checked={!credit.excluded}
+                              onChange={() => toggleDiscogsExcludedCredit(credit.creditKey)}
+                              disabled={importingDiscogs}
+                            />
+                            <strong>{credit.artistName}</strong> - {credit.artistTypeName}
+                          </div>
+                          <div className="track-link-modal-hint">
+                            {credit.sourceLabel}
+                            {credit.discogsTrackTitle ? ` · ${credit.discogsTrackTitle}` : ''}
+                          </div>
+                          <div className="track-link-modal-hint" style={{ marginTop: '0.2rem' }}>
+                            {credit.matchedExisting
+                              ? `Matched existing artist${credit.matchKind === 'fuzzy' ? ' (fuzzy)' : ''}: ${credit.matchedArtist?.title || credit.artistName}`
+                              : 'New artist will be created'}
+                          </div>
+                        </label>
+                      );
+                    })}
+                  </div>
+                </>
+              )}
+            </div>
+
+            <div className="track-link-modal-step">
+              <h4>Track Matches</h4>
+              {(discogsPreview?.mapping?.discogsTracks || []).length === 0 ? (
+                <div className="track-link-modal-hint">No track mappings found.</div>
+              ) : (
+                <div className="track-link-modal-results discogs-match-results" style={{ maxHeight: '360px' }}>
+                  <div className="discogs-match-row discogs-match-row-header">
+                    <div className="discogs-match-header">Local Track</div>
+                    <div className="discogs-match-header">Discogs Track</div>
+                  </div>
+                  {discogsPreview.mapping.discogsTracks.map((discogsTrack) => {
+                    const selectedMapping = (discogsTrackMatches || []).find((entry) => entry.discogsOrdinal === discogsTrack.discogsOrdinal);
+                    const selectedLocalTrackKey = selectedMapping?.localTrackKey || '';
+                    const selectedLocalTrack = (discogsPreview?.mapping?.localTracks || []).find((track) => track.ratingKey === selectedLocalTrackKey) || null;
+                    const discogsDurationLabel = formatMilliseconds(discogsTrack.discogsTrackDurationMs);
+                    const localDurationLabel = formatMilliseconds(selectedLocalTrack?.duration);
+
+                    return (
+                      <div key={`discogs-track-row-${discogsTrack.discogsOrdinal}`} className="discogs-match-row">
+                        <div className="track-link-modal-result discogs-match-cell" style={{ cursor: 'default' }}>
+                          <div className="track-link-modal-hint">Pick local track</div>
+                          <select
+                            className="track-link-modal-input"
+                            value={selectedLocalTrackKey}
+                            onChange={(event) => updateDiscogsTrackMatch(discogsTrack.discogsOrdinal, event.target.value)}
+                          >
+                            <option value="">Do not import this track</option>
+                            {(discogsPreview?.mapping?.localTracks || []).map((localTrack) => (
+                              <option key={localTrack.ratingKey} value={localTrack.ratingKey}>
+                                {Number.isInteger(localTrack.discNumber) && Number.isInteger(localTrack.trackNumber)
+                                  ? `D${localTrack.discNumber}-T${localTrack.trackNumber}. `
+                                  : (Number.isInteger(localTrack.trackNumber)
+                                    ? `T${localTrack.trackNumber}. `
+                                    : (Number.isInteger(localTrack.index) ? `${localTrack.index}. ` : ''))}
+                                {localTrack.title || 'Untitled'}
+                              </option>
+                            ))}
+                          </select>
+                          {selectedLocalTrack && (
+                            <div className="track-link-modal-hint">
+                              {Number.isInteger(selectedLocalTrack.index) ? `#${selectedLocalTrack.index}` : 'Unnumbered'}
+                              {localDurationLabel ? ` · ${localDurationLabel}` : ''}
+                            </div>
+                          )}
+                        </div>
+                        <div className="track-link-modal-result discogs-match-cell" style={{ cursor: 'default' }}>
+                          <strong>{discogsTrack.discogsTrackIndex}. {discogsTrack.discogsTrackTitle || 'Untitled'}</strong>
+                          <div className="track-link-modal-hint">
+                            Discogs #{discogsTrack.discogsOrdinal}
+                            {discogsDurationLabel ? ` · ${discogsDurationLabel}` : ''}
+                          </div>
+                        </div>
+                      </div>
+                    );})}
+                </div>
+              )}
+            </div>
+
+            {(discogsPreview?.mapping?.proposedWorks || []).length > 0 && (
+              <div className="track-link-modal-step">
+                <h4>Proposed Works</h4>
+                <div className="track-link-modal-results">
+                  {discogsPreview.mapping.proposedWorks.map((work) => (
+                    <div key={work.title} className="track-link-modal-result" style={{ cursor: 'default' }}>
+                      {work.title} ({work.trackCount} tracks)
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            <div className="track-link-modal-actions">
+              <button
+                type="button"
+                className="track-link-modal-btn-cancel"
+                onClick={closeDiscogsPreviewModal}
+                disabled={importingDiscogs}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="track-link-modal-btn-confirm"
+                onClick={handleAcceptDiscogsImport}
+                disabled={importingDiscogs}
+              >
+                {importingDiscogs ? 'Importing...' : 'Accept and Import'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {showLinkWorkModal && (
         <div className="modal-overlay" onClick={closeLinkWorkModal}>
           <div className="modal-content" onClick={(event) => event.stopPropagation()}>
-            <h2>Link Track to Work</h2>
-            <p className="track-link-modal-subtitle">
-              Track: {trackToLink?.title || 'Unknown Track'}
-            </p>
+            <h2>{trackToLink ? 'Link Track to Work' : 'Bulk Link Tracks to Work'}</h2>
+            {trackToLink ? (
+              <p className="track-link-modal-subtitle">
+                Track: {trackToLink?.title || 'Unknown Track'}
+              </p>
+            ) : (
+              <p className="track-link-modal-subtitle">
+                Tracks selected: {selectedTrackKeysToLink.size}
+              </p>
+            )}
 
             <div className="track-link-modal-step">
               <h4>1. Filter by Composer</h4>
@@ -1103,7 +1735,7 @@ const AlbumDetail = ({
               </div>
             )}
 
-            {selectedWork && (
+            {selectedWork && trackToLink && (
               <div className="track-link-modal-step">
                 <h4>3. Select Part</h4>
                 {selectedWork.parts?.length ? (
@@ -1125,6 +1757,22 @@ const AlbumDetail = ({
               </div>
             )}
 
+            {selectedWork && !trackToLink && (
+              <div className="track-link-modal-step">
+                <h4>3. New Part Title</h4>
+                <input
+                  type="text"
+                  value={bulkPartTitle}
+                  onChange={(event) => setBulkPartTitle(event.target.value)}
+                  placeholder="Part title for selected tracks"
+                  className="track-link-modal-input"
+                />
+                <div className="track-link-modal-hint">
+                  A single new part will be created in this work and all selected tracks will be linked to it.
+                </div>
+              </div>
+            )}
+
             <div className="track-link-modal-actions">
               <button
                 type="button"
@@ -1136,10 +1784,10 @@ const AlbumDetail = ({
               <button
                 type="button"
                 className="track-link-modal-btn-confirm"
-                onClick={handleLinkTrackToWork}
-                disabled={!selectedWork || !selectedPart || linkingTrack}
+                onClick={trackToLink ? handleLinkTrackToWork : handleBulkLinkTracksToWork}
+                disabled={trackToLink ? (!selectedWork || !selectedPart || linkingTrack) : (!selectedWork || selectedTrackKeysToLink.size === 0 || linkingTrack)}
               >
-                {linkingTrack ? 'Linking...' : 'Link Track'}
+                {linkingTrack ? 'Linking...' : (trackToLink ? 'Link Track' : 'Link Selected Tracks')}
               </button>
             </div>
           </div>

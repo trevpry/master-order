@@ -189,11 +189,6 @@ router.post('/merge', asyncHandler(async (req, res) => {
         }
       }
 
-      await tx.plexAlbum.updateMany({
-        where: { workId: sourceWork.id },
-        data: { workId: destinationWorkId }
-      });
-
       await tx.work.delete({
         where: { id: sourceWork.id }
       });
@@ -584,6 +579,111 @@ router.post('/:workId/parts/:partId/tracks', asyncHandler(async (req, res) => {
   });
 
   sendSuccess(res, workPartTrack);
+}));
+
+// Bulk link tracks to a work by creating one part for the selected tracks
+router.post('/:workId/bulk-link-tracks', asyncHandler(async (req, res) => {
+  const { workId } = req.params;
+  const { trackKeys, partTitle } = req.body;
+
+  if (!Array.isArray(trackKeys) || trackKeys.length === 0) {
+    return sendBadRequest(res, 'trackKeys array is required');
+  }
+
+  const parsedWorkId = parseInt(workId, 10);
+  if (!Number.isInteger(parsedWorkId) || parsedWorkId <= 0) {
+    return sendBadRequest(res, 'Invalid work ID');
+  }
+
+  const uniqueTrackKeys = [...new Set(
+    trackKeys
+      .map((trackKey) => String(trackKey || '').trim())
+      .filter(Boolean)
+  )];
+
+  if (uniqueTrackKeys.length === 0) {
+    return sendBadRequest(res, 'At least one valid track key is required');
+  }
+
+  const work = await prisma.work.findUnique({
+    where: { id: parsedWorkId },
+    include: {
+      parts: {
+        select: { order: true }
+      }
+    }
+  });
+
+  if (!work) {
+    return sendBadRequest(res, 'Work not found');
+  }
+
+  const tracks = await prisma.plexTrack.findMany({
+    where: {
+      ratingKey: {
+        in: uniqueTrackKeys
+      }
+    },
+    select: {
+      ratingKey: true
+    }
+  });
+
+  if (tracks.length !== uniqueTrackKeys.length) {
+    return sendBadRequest(res, 'One or more tracks were not found');
+  }
+
+  const nextPartOrder = work.parts.length > 0
+    ? Math.max(...work.parts.map((part) => part.order || 0)) + 1
+    : 1;
+
+  const normalizedPartTitle = String(partTitle || '').trim() || `Part ${nextPartOrder}`;
+
+  const createdPart = await prisma.$transaction(async (tx) => {
+    const newPart = await tx.workPart.create({
+      data: {
+        workId: parsedWorkId,
+        title: normalizedPartTitle,
+        order: nextPartOrder
+      }
+    });
+
+    await tx.workPartTrack.createMany({
+      data: uniqueTrackKeys.map((trackKey) => ({
+        workPartId: newPart.id,
+        trackKey
+      }))
+    });
+
+    await tx.plexTrack.updateMany({
+      where: {
+        ratingKey: {
+          in: uniqueTrackKeys
+        }
+      },
+      data: {
+        workId: parsedWorkId
+      }
+    });
+
+    return tx.workPart.findUnique({
+      where: { id: newPart.id },
+      include: {
+        work: true,
+        tracks: {
+          include: {
+            track: true
+          }
+        }
+      }
+    });
+  });
+
+  sendSuccess(res, {
+    part: createdPart,
+    linkedTrackCount: uniqueTrackKeys.length,
+    message: `Linked ${uniqueTrackKeys.length} tracks to work via one new part`
+  });
 }));
 
 // Remove track from work part

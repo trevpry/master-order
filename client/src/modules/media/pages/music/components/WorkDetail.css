@@ -6,6 +6,10 @@
 
 .work-detail-header {
   margin-bottom: 2rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
 }
 
 .btn-back {
@@ -21,6 +25,51 @@
 
 .btn-back:hover {
   background: #5a6268;
+}
+
+.btn-edit-work,
+.btn-cancel-edit,
+.btn-save-edit {
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  padding: 0.5rem 1rem;
+  font-size: 1rem;
+  transition: background 0.2s, opacity 0.2s;
+}
+
+.btn-edit-work {
+  background: #0d6efd;
+  color: white;
+}
+
+.btn-edit-work:hover {
+  background: #0b5ed7;
+}
+
+.btn-cancel-edit {
+  background: #6c757d;
+  color: white;
+}
+
+.btn-cancel-edit:hover {
+  background: #5a6268;
+}
+
+.btn-save-edit {
+  background: #198754;
+  color: white;
+}
+
+.btn-save-edit:hover {
+  background: #157347;
+}
+
+.btn-edit-work:disabled,
+.btn-cancel-edit:disabled,
+.btn-save-edit:disabled {
+  cursor: not-allowed;
+  opacity: 0.7;
 }
 
 .work-detail-loading,
@@ -40,6 +89,87 @@
   border-radius: 12px;
   padding: 2rem;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+.work-edit-panel {
+  margin-bottom: 1.5rem;
+  padding: 1rem;
+  border: 1px solid #cfe2ff;
+  border-radius: 10px;
+  background: #f8fbff;
+}
+
+.work-edit-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+}
+
+.work-edit-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.work-edit-label {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: #495057;
+}
+
+.work-edit-input {
+  width: 100%;
+  border: 1px solid #ced4da;
+  border-radius: 6px;
+  padding: 0.6rem 0.75rem;
+  font-size: 1rem;
+  background: white;
+}
+
+.work-edit-input:focus {
+  outline: none;
+  border-color: #0d6efd;
+  box-shadow: 0 0 0 3px rgba(13, 110, 253, 0.12);
+}
+
+.work-edit-hint {
+  margin-top: 0.75rem;
+  color: #6c757d;
+  font-size: 0.95rem;
+}
+
+.work-edit-results {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+  max-height: 240px;
+  overflow-y: auto;
+}
+
+.work-edit-result {
+  text-align: left;
+  padding: 0.6rem 0.75rem;
+  border: 1px solid #dee2e6;
+  border-radius: 6px;
+  background: white;
+  cursor: pointer;
+}
+
+.work-edit-result:hover {
+  border-color: #0d6efd;
+}
+
+.work-edit-result.selected {
+  border-color: #0d6efd;
+  background: rgba(13, 110, 253, 0.08);
+}
+
+.work-edit-actions {
+  display: flex;
+  gap: 0.75rem;
+  justify-content: flex-end;
+  margin-top: 1rem;
 }
 
 .work-header-section {
@@ -212,6 +342,47 @@
   font-size: 0.9rem;
   font-weight: normal;
   margin-left: auto;
+}
+
+.part-edit-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  margin: 0.25rem 0 1rem;
+}
+
+.btn-edit-part {
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  padding: 0.4rem 0.85rem;
+  font-size: 0.9rem;
+  color: white;
+  background: #0d6efd;
+  transition: background 0.2s, opacity 0.2s;
+}
+
+.btn-edit-part:hover {
+  background: #0b5ed7;
+}
+
+.part-edit-panel {
+  margin: 0.5rem 0 1rem;
+  padding: 0.9rem;
+  border: 1px solid #cfe2ff;
+  border-radius: 8px;
+  background: #f8fbff;
+}
+
+.part-edit-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
+.part-edit-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
 }
 
 .part-artist-types-section {
@@ -429,6 +600,23 @@
 
   .work-title {
     font-size: 1.8rem;
+  }
+
+  .work-detail-header {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .work-edit-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .part-edit-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .work-edit-actions {
+    flex-direction: column;
   }
 
   .composer-artwork img {

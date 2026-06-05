@@ -1,4 +1,5 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
+import axios from 'axios';
 import config from '../../../../../config';
 import ArtistTypesManager from './ArtistTypesManager';
 import MusicBrainzSearchModal from '../../../../../components/music/MusicBrainzSearchModal';
@@ -17,6 +18,7 @@ const ArtistDetail = ({
   onSelectTrack,
   onMergeWorks,
   onArtistUpdate,
+  onArtistDeleted,
   onExtractArtistMetadata,
   isExtractingMetadata = false
 }) => {
@@ -36,11 +38,22 @@ const ArtistDetail = ({
   const [mergeTargetWorkId, setMergeTargetWorkId] = useState('');
   const [mergeTitle, setMergeTitle] = useState('');
   const [isMergingWorks, setIsMergingWorks] = useState(false);
+  const [showMergeArtistModal, setShowMergeArtistModal] = useState(false);
+  const [mergeArtistSearch, setMergeArtistSearch] = useState('');
+  const [mergeArtistResults, setMergeArtistResults] = useState([]);
+  const [selectedMergeTargetArtist, setSelectedMergeTargetArtist] = useState(null);
+  const [searchingMergeArtist, setSearchingMergeArtist] = useState(false);
+  const [isMergingArtist, setIsMergingArtist] = useState(false);
+  const [isDeletingArtist, setIsDeletingArtist] = useState(false);
+  const mergeArtistSearchRequestId = useRef(0);
 
   const linkedAlbums = artist?.linkedAlbums || [];
   const linkedTracks = artist?.linkedTracks || [];
   const tracksWithoutAlbum = artist?.tracksWithoutAlbum || [];
   const works = artist?.works || [];
+  const visibleLinkedAlbums = linkedAlbums.filter(
+    (linkedAlbum) => !(albums || []).some((albumEntry) => albumEntry.ratingKey === linkedAlbum.ratingKey)
+  );
 
   useEffect(() => {
     setArtistData(artist);
@@ -50,6 +63,13 @@ const ArtistDetail = ({
     setMergeTargetWorkId('');
     setMergeTitle('');
     setIsMergingWorks(false);
+    setShowMergeArtistModal(false);
+    setMergeArtistSearch('');
+    setMergeArtistResults([]);
+    setSelectedMergeTargetArtist(null);
+    setSearchingMergeArtist(false);
+    setIsMergingArtist(false);
+    setIsDeletingArtist(false);
   }, [artist]);
 
   useEffect(() => {
@@ -102,6 +122,136 @@ const ArtistDetail = ({
       setSaveError(error.message);
     } finally {
       setIsSaving(false);
+    }
+  };
+
+  const searchMergeArtists = async (query) => {
+    const trimmedQuery = String(query || '').trim();
+    if (trimmedQuery.length < 2) {
+      setMergeArtistResults([]);
+      return;
+    }
+
+    const requestId = ++mergeArtistSearchRequestId.current;
+
+    try {
+      setSearchingMergeArtist(true);
+      const response = await axios.get(`${config.apiBaseUrl}/api/music/artists`, {
+        params: {
+          search: trimmedQuery,
+          limit: 10,
+        },
+      });
+
+      if (requestId !== mergeArtistSearchRequestId.current) {
+        return;
+      }
+
+      const result = response.data;
+      const results = (Array.isArray(result) ? result : result?.artists || []).filter((candidate) => candidate.ratingKey !== artist.ratingKey);
+      setMergeArtistResults(results);
+    } catch (error) {
+      console.error('Error searching artists for merge:', error);
+      if (requestId === mergeArtistSearchRequestId.current) {
+        setMergeArtistResults([]);
+      }
+    } finally {
+      if (requestId === mergeArtistSearchRequestId.current) {
+        setSearchingMergeArtist(false);
+      }
+    }
+  };
+
+  const openMergeArtistModal = () => {
+    setShowMergeArtistModal(true);
+    setMergeArtistSearch('');
+    setMergeArtistResults([]);
+    setSelectedMergeTargetArtist(null);
+  };
+
+  const closeMergeArtistModal = () => {
+    setShowMergeArtistModal(false);
+    setMergeArtistSearch('');
+    setMergeArtistResults([]);
+    setSelectedMergeTargetArtist(null);
+  };
+
+  const handleMergeArtist = async () => {
+    if (!selectedMergeTargetArtist?.ratingKey) {
+      alert('Select an artist to merge into.');
+      return;
+    }
+
+    const confirmed = window.confirm(
+      `Merge "${artist.title}" into "${selectedMergeTargetArtist.title}"? This will move albums, works, and artist relationships, then remove the source artist.`
+    );
+    if (!confirmed) {
+      return;
+    }
+
+    try {
+      setIsMergingArtist(true);
+      const response = await fetch(`${config.apiBaseUrl}/api/music/artists/merge`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          mainArtistKey: selectedMergeTargetArtist.ratingKey,
+          mergeArtistKeys: [artist.ratingKey],
+        }),
+      });
+
+      const result = await response.json();
+      if (!response.ok) {
+        throw new Error(result.error || 'Failed to merge artist');
+      }
+
+      if (onArtistUpdate) {
+        onArtistUpdate(result.mainArtist);
+      }
+
+      closeMergeArtistModal();
+      if (onGoBack) {
+        onGoBack();
+      }
+    } catch (error) {
+      console.error('Error merging artist:', error);
+      alert(`Error merging artist: ${error.message}`);
+    } finally {
+      setIsMergingArtist(false);
+    }
+  };
+
+  const handleDeleteArtist = async () => {
+    const confirmed = window.confirm(
+      `Delete "${artist.title}"? This will hide the artist from the app, but existing album/work references will remain in place.`
+    );
+    if (!confirmed) {
+      return;
+    }
+
+    try {
+      setIsDeletingArtist(true);
+      const response = await fetch(`${config.apiBaseUrl}/api/music/artists/${artist.ratingKey}`, {
+        method: 'DELETE',
+      });
+
+      const result = await response.json();
+      if (!response.ok) {
+        throw new Error(result.error || 'Failed to delete artist');
+      }
+
+      if (onArtistDeleted) {
+        onArtistDeleted(artist.ratingKey);
+      } else if (onGoBack) {
+        onGoBack();
+      }
+    } catch (error) {
+      console.error('Error deleting artist:', error);
+      alert(`Error deleting artist: ${error.message}`);
+    } finally {
+      setIsDeletingArtist(false);
     }
   };
 
@@ -185,6 +335,23 @@ const ArtistDetail = ({
           ← Back to Artists
         </button>
         <div style={{ display: 'flex', gap: '0.5rem' }}>
+          <button
+            className="musicbrainz-button"
+            onClick={openMergeArtistModal}
+            title="Merge this artist into another artist"
+            style={{ backgroundColor: '#0f766e' }}
+          >
+            🔀 Merge Artist
+          </button>
+          <button
+            className="musicbrainz-button"
+            onClick={handleDeleteArtist}
+            title="Delete this artist from the app"
+            style={{ backgroundColor: '#dc2626' }}
+            disabled={isDeletingArtist}
+          >
+            {isDeletingArtist ? 'Deleting…' : '🗑️ Delete Artist'}
+          </button>
           <button
             className="musicbrainz-button"
             onClick={() => onExtractArtistMetadata && onExtractArtistMetadata(artist)}
@@ -626,11 +793,11 @@ const ArtistDetail = ({
         </div>
       )}
 
-      {linkedAlbums.length > 0 && (
+      {visibleLinkedAlbums.length > 0 && (
         <div className="artist-linked-section">
           <h2>Linked Albums</h2>
           <div className="albums-grid">
-            {linkedAlbums.map((album) => (
+            {visibleLinkedAlbums.map((album) => (
               <div
                 key={`linked-album-${album.ratingKey}`}
                 className="album-card"
@@ -739,6 +906,75 @@ const ArtistDetail = ({
           setShowIdentifyModal(false);
         }}
       />
+
+      {showMergeArtistModal && (
+        <div className="modal-overlay" onClick={closeMergeArtistModal}>
+          <div className="modal-content artist-merge-modal" onClick={(event) => event.stopPropagation()}>
+            <h2>Merge Artist</h2>
+            <p className="track-link-modal-subtitle">
+              Merge {artist.title} into another artist.
+            </p>
+
+            <div className="track-link-modal-step">
+              <h4>Select Target Artist</h4>
+              <input
+                type="text"
+                value={mergeArtistSearch}
+                onChange={(event) => {
+                  const value = event.target.value;
+                  setMergeArtistSearch(value);
+                  setSelectedMergeTargetArtist(null);
+                  searchMergeArtists(value);
+                }}
+                placeholder="Search artist..."
+                className="track-link-modal-input"
+              />
+              {searchingMergeArtist && <div className="track-link-modal-hint">Searching…</div>}
+              {mergeArtistResults.length > 0 && (
+                <div className="track-link-modal-results">
+                  {mergeArtistResults.map((candidate) => (
+                    <button
+                      key={candidate.ratingKey}
+                      type="button"
+                      className={`track-link-modal-result ${selectedMergeTargetArtist?.ratingKey === candidate.ratingKey ? 'selected' : ''}`}
+                      onClick={() => setSelectedMergeTargetArtist(candidate)}
+                    >
+                      {candidate.title}
+                    </button>
+                  ))}
+                </div>
+              )}
+              {!searchingMergeArtist && mergeArtistSearch.trim().length >= 2 && mergeArtistResults.length === 0 && (
+                <div className="track-link-modal-hint">No matching artists found.</div>
+              )}
+              {selectedMergeTargetArtist && (
+                <div className="track-link-modal-selected">
+                  Selected target: {selectedMergeTargetArtist.title}
+                </div>
+              )}
+            </div>
+
+            <div className="track-link-modal-actions">
+              <button
+                type="button"
+                className="track-link-modal-btn-cancel"
+                onClick={closeMergeArtistModal}
+                disabled={isMergingArtist}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="track-link-modal-btn-confirm"
+                onClick={handleMergeArtist}
+                disabled={isMergingArtist || !selectedMergeTargetArtist}
+              >
+                {isMergingArtist ? 'Merging…' : 'Merge Artist'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

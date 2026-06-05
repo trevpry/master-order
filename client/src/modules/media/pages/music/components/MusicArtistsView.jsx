@@ -6,6 +6,8 @@ const MusicArtistsView = ({
   artistsLoading,
   artistsHasMore,
   onSelectArtist,
+  onMergeArtist,
+  onDeleteArtist,
   onLoadMoreArtists,
   onCreateArtist,
   selectionMode = false,
@@ -84,6 +86,28 @@ const MusicArtistsView = ({
                   </p>
                 )}
               </div>
+              {(onMergeArtist || onDeleteArtist) && !selectionMode && (
+                <div className="artist-card-actions" onClick={(event) => event.stopPropagation()}>
+                  {onMergeArtist && (
+                    <button
+                      type="button"
+                      className="artist-card-action-button"
+                      onClick={() => onMergeArtist(artist)}
+                    >
+                      🔀 Merge
+                    </button>
+                  )}
+                  {onDeleteArtist && (
+                    <button
+                      type="button"
+                      className="artist-card-action-button artist-card-delete-button"
+                      onClick={() => onDeleteArtist(artist)}
+                    >
+                      🗑️ Delete
+                    </button>
+                  )}
+                </div>
+              )}
             </div>
           );
         })

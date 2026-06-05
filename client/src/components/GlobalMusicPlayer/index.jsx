@@ -448,20 +448,34 @@ const GlobalMusicPlayer = () => {
     // Handle Sonos casting
     if (isCasting && castDeviceType === 'sonos' && sonosDeviceRef) {
       try {
-        const action = isPlaying ? 'pause' : 'play';
+        const deviceId = sonosDeviceRef.uuid || sonosDeviceRef.host;
+
+        // Use Sonos transport state as the source of truth to avoid UI state drift.
+        let action = isPlaying ? 'pause' : 'play';
+        try {
+          const stateResponse = await fetch(`${config.apiBaseUrl}/api/sonos/state/${encodeURIComponent(deviceId)}`);
+          if (stateResponse.ok) {
+            const stateData = await stateResponse.json();
+            const transportState = String(stateData?.state || '').toUpperCase();
+            action = transportState === 'PLAYING' ? 'pause' : 'play';
+          }
+        } catch (stateError) {
+          console.warn('Unable to read Sonos transport state before toggle, falling back to local state:', stateError);
+        }
+
         const response = await fetch(`${config.apiBaseUrl}/api/sonos/control`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
           },
           body: JSON.stringify({
-            deviceId: sonosDeviceRef.uuid || sonosDeviceRef.host,
+            deviceId,
             action
           }),
         });
         
         if (response.ok) {
-          setIsPlaying(!isPlaying);
+          setIsPlaying(action === 'play');
           console.log(`🔊 Sonos ${action} successful`);
         } else {
           console.error(`Failed to ${action} on Sonos`);
@@ -549,6 +563,12 @@ const GlobalMusicPlayer = () => {
         if (!res.ok) return;
         const data = await res.json();
         const state = data.state; // e.g. 'PLAYING', 'STOPPED', 'PAUSED_PLAYBACK'
+
+        if (state === 'PLAYING') {
+          setIsPlaying((prev) => (prev ? prev : true));
+        } else if (state === 'PAUSED_PLAYBACK' || state === 'STOPPED' || state === 'NO_MEDIA_PRESENT') {
+          setIsPlaying((prev) => (prev ? false : prev));
+        }
 
         if (state === 'PLAYING') {
           sonosWasPlayingRef.current = true;

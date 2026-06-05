@@ -172,6 +172,12 @@ const Music = () => {
     setSearchParams(newParams); // This creates a new history entry
   };
 
+  const startArtistMergeFromCard = (artist) => {
+    setArtistSelectionMode(true);
+    setSelectedArtists(new Set([artist.ratingKey]));
+    setShowMergeArtistsModal(false);
+  };
+
   // Load artist/album data from URL parameters
   useEffect(() => {
     const loadDataFromUrl = async () => {
@@ -1975,6 +1981,7 @@ const Music = () => {
               artistsLoading={artistsLoading}
               artistsHasMore={artistsHasMore}
               onSelectArtist={selectArtist}
+              onMergeArtist={startArtistMergeFromCard}
               onLoadMoreArtists={loadMoreArtists}
               selectionMode={artistSelectionMode}
               selectedArtists={selectedArtists}
@@ -2051,6 +2058,11 @@ const Music = () => {
                   a.ratingKey === updatedArtist.ratingKey ? updatedArtist : a
                 )
               );
+            }}
+            onArtistDeleted={(deletedArtistKey) => {
+              setSelectedArtist(null);
+              setArtists((prevArtists) => prevArtists.filter((artist) => artist.ratingKey !== deletedArtistKey));
+              navigateToView('artists');
             }}
           />
         )}

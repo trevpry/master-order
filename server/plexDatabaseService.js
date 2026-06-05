@@ -1153,7 +1153,19 @@ class PlexDatabaseService {
   async getAlbumsByArtist(artistRatingKey) {
     try {
       return await this.prisma.plexAlbum.findMany({
-        where: { parentRatingKey: artistRatingKey },
+        where: {
+          removed: false,
+          OR: [
+            { parentRatingKey: artistRatingKey },
+            {
+              albumArtists: {
+                some: {
+                  artistKey: artistRatingKey
+                }
+              }
+            }
+          ]
+        },
         include: {
           librarySection: true,
           artist: true,

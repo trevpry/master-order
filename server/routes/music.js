@@ -380,6 +380,16 @@ function formatMetadataPosition(value) {
   return { no: value, of: null };
 }
 
+function parseMetadataPreferencesObject(value) {
+  if (!value) return {};
+  try {
+    const parsed = JSON.parse(value);
+    return parsed && typeof parsed === 'object' ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
 function buildAlbumExtractionUpdates(common = {}) {
   const updates = {};
 
@@ -456,6 +466,986 @@ function buildAlbumExtractionUpdates(common = {}) {
   }
 
   return updates;
+}
+
+function parseDurationToMilliseconds(value) {
+  const raw = String(value || '').trim();
+  if (!raw) return null;
+
+  const parts = raw.split(':').map((entry) => parseInt(entry, 10));
+  if (parts.some((entry) => Number.isNaN(entry))) {
+    return null;
+  }
+
+  if (parts.length === 2) {
+    const [minutes, seconds] = parts;
+    return ((minutes * 60) + seconds) * 1000;
+  }
+
+  if (parts.length === 3) {
+    const [hours, minutes, seconds] = parts;
+    return (((hours * 60) + minutes) * 60 + seconds) * 1000;
+  }
+
+  return null;
+}
+
+function normalizeTrackTitleForMatch(value) {
+  return String(value || '')
+    .toLowerCase()
+    .replace(/\([^)]*\)/g, ' ')
+    .replace(/\[[^\]]*\]/g, ' ')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function normalizeArtistNameForMatch(value) {
+  return String(value || '')
+    // Fold accented characters so François and Francois normalize the same.
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/\(\d+\)/g, ' ')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function extractPrimaryDiscogsArtistName(value) {
+  const input = String(value || '').trim();
+  if (!input) return null;
+
+  const markdownLabel = input.match(/^\[([^\]]+)\]\([^)]*\)$/);
+  const normalizedInput = markdownLabel ? markdownLabel[1] : input;
+  const cleaned = normalizedInput.replace(/\(\d+\)/g, '').trim();
+
+  // Handle Discogs-style inverted names like "Schmidt, Anne-Sophie".
+  const invertedNameMatch = cleaned.match(/^([^,]+),\s*([^,]+)$/);
+  if (invertedNameMatch) {
+    const lastName = String(invertedNameMatch[1] || '').trim();
+    const firstName = String(invertedNameMatch[2] || '').trim();
+    const lastNameTokenCount = lastName.split(/\s+/).filter(Boolean).length;
+    const firstNameTokenCount = firstName.split(/\s+/).filter(Boolean).length;
+
+    if (lastNameTokenCount === 1 && firstNameTokenCount >= 1 && firstNameTokenCount <= 3) {
+      return `${firstName} ${lastName}`.trim();
+    }
+  }
+
+  const splitBy = [' feat. ', ' ft. ', ' featuring ', ' with ', ';', ',', ' / ', ' & '];
+
+  for (const separator of splitBy) {
+    const idx = cleaned.toLowerCase().indexOf(separator.trim().toLowerCase());
+    if (idx > 0) {
+      const candidate = cleaned.slice(0, idx).trim();
+      if (candidate) return candidate;
+    }
+  }
+
+  return cleaned || null;
+}
+
+function normalizeDiscogsCreditRole(roleValue) {
+  const raw = String(roleValue || '').trim();
+  if (!raw) return 'Performer';
+
+  const primary = raw
+    .split(/[,;]+/)
+    .map((entry) => String(entry || '').trim())
+    .filter(Boolean)[0] || 'Performer';
+
+  const normalized = primary
+    .replace(/[-_]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  const lower = normalized.toLowerCase();
+  if (lower.includes('compos')) return 'Composer';
+  if (lower.includes('arrang')) return 'Arranger';
+  if (lower.includes('conduct')) return 'Conductor';
+  if (lower.includes('produc')) return 'Producer';
+  if (lower.includes('featur')) return 'Featured Artist';
+  // Prefer ensemble roles when Discogs role text contains mixed descriptors.
+  if (lower.includes('orchestra')) return 'Orchestra';
+  if (lower.includes('bass') && lower.includes('baritone')) return 'Bass-Baritone';
+  if (lower.includes('mezzo') && lower.includes('soprano')) return 'Mezzo-Soprano';
+  if (lower.includes('coloratura') && lower.includes('soprano')) return 'Coloratura Soprano';
+  if (lower.includes('soprano')) return 'Soprano';
+  if (lower.includes('mezzo')) return 'Mezzo-Soprano';
+  if (lower.includes('contralto') || lower.includes('alto')) return 'Contralto';
+  if (lower.includes('countertenor')) return 'Countertenor';
+  if (lower.includes('tenor')) return 'Tenor';
+  if (lower.includes('baritone')) return 'Baritone';
+  if (lower.includes('bass')) return 'Bass';
+  if (lower.includes('vocal') || lower.includes('soprano') || lower.includes('tenor') || lower.includes('baritone')) return 'Vocalist';
+
+  return normalized.slice(0, 80) || 'Performer';
+}
+
+function splitDiscogsCreditNames(rawValue) {
+  const input = String(rawValue || '').replace(/\r/g, '\n').trim();
+  if (!input) return [];
+
+  const semicolonSplit = input
+    .split(/[;\n]+/)
+    .map((entry) => String(entry || '').trim())
+    .filter(Boolean);
+
+  const results = [];
+  for (const segment of semicolonSplit) {
+    const slashSplit = segment
+      .split(/\s+\/\s+/)
+      .map((entry) => String(entry || '').trim())
+      .filter(Boolean);
+
+    for (const slashSegment of slashSplit) {
+      const commaParts = slashSegment
+        .split(',')
+        .map((entry) => String(entry || '').trim())
+        .filter(Boolean);
+
+      const keepCommaJoinedName = (
+        commaParts.length === 2
+        && commaParts[0].split(/\s+/).filter(Boolean).length === 1
+        && commaParts[1].split(/\s+/).filter(Boolean).length <= 2
+      );
+
+      // Split comma-delimited lists, but keep "Last, First"-style names intact.
+      if (
+        commaParts.length > 1
+        && !keepCommaJoinedName
+      ) {
+        results.push(...commaParts);
+      } else {
+        results.push(slashSegment);
+      }
+    }
+  }
+
+  return [...new Set(results.map((entry) => String(entry || '').trim()).filter(Boolean))];
+}
+
+function parseDiscogsRoleScopedCredits(rawValue) {
+  const input = String(rawValue || '').replace(/\r/g, '\n').trim();
+  if (!input || !input.includes(':')) {
+    return [];
+  }
+
+  const scopedCredits = [];
+  const pattern = /([^:\n]{2,80}):\s*([\s\S]*?)(?=(?:\n[^:\n]{2,80}:)|$)/g;
+  let match = pattern.exec(input);
+  while (match) {
+    const roleLabel = String(match[1] || '').trim();
+    const scopedArtists = splitDiscogsCreditNames(match[2] || '');
+    if (roleLabel && scopedArtists.length > 0) {
+      for (const artistName of scopedArtists) {
+        scopedCredits.push({
+          artistName,
+          artistTypeName: normalizeDiscogsCreditRole(roleLabel),
+        });
+      }
+    }
+
+    match = pattern.exec(input);
+  }
+
+  return scopedCredits;
+}
+
+function isLikelyDiscogsRoleLabel(roleLabel) {
+  const label = String(roleLabel || '').trim().toLowerCase();
+  if (!label) return false;
+
+  const roleHints = [
+    'vocal', 'soprano', 'mezzo', 'alto', 'contralto', 'countertenor', 'tenor', 'baritone', 'bass',
+    'compos', 'conduct', 'arrang', 'orchestra', 'chorus', 'choir', 'libretto', 'producer',
+    'featured', 'performer', 'soloist', 'instrument', 'piano', 'violin', 'viola', 'cello',
+    'flute', 'clarinet', 'oboe', 'horn', 'trumpet', 'trombone', 'tuba', 'organ', 'harp',
+    'guitar', 'drum', 'percussion'
+  ];
+
+  return roleHints.some((hint) => label.includes(hint));
+}
+
+function shouldSkipDiscogsCreditRole(roleValue) {
+  const role = String(roleValue || '').trim().toLowerCase();
+  if (!role) return false;
+
+  if (role.includes('engineer')) return true;
+  if (role.includes('producer')) return true;
+  if (role.includes('technician')) return true;
+  if (role.includes('booklet') && role.includes('editor')) return true;
+  if (role.includes('leader')) return true;
+  if (role.includes('liner') && role.includes('notes')) return true;
+  if (role.includes('photograph')) return true;
+  if (role.includes('leader') && role.includes('orchestra')) return true;
+
+  return false;
+}
+
+function mapDiscogsExtraArtistsToCredits(extraArtists) {
+  const entries = Array.isArray(extraArtists) ? extraArtists : [];
+  const deduped = new Map();
+
+  for (const entry of entries) {
+    const explicitArtistName = extractPrimaryDiscogsArtistName(entry?.anv || entry?.name);
+    const rawRoleText = String(entry?.role || '').trim();
+    const looksLikeScopedRoleBlock = rawRoleText.includes(':') && (/\n/.test(rawRoleText) || /;/.test(rawRoleText));
+
+    const roleScopedFromRole = (!explicitArtistName && looksLikeScopedRoleBlock)
+      ? parseDiscogsRoleScopedCredits(rawRoleText)
+      : [];
+
+    const filteredScopedCredits = roleScopedFromRole
+      .filter((scopedCredit) => isLikelyDiscogsRoleLabel(scopedCredit?.artistTypeName));
+
+    // Restrict scoped parsing to explicit role text. Parsing names as scoped role blocks
+    // can misinterpret artist names that contain punctuation and produce bogus credits.
+    const scopedCredits = [...filteredScopedCredits];
+    if (scopedCredits.length > 0) {
+      for (const scopedCredit of scopedCredits) {
+        if (shouldSkipDiscogsCreditRole(scopedCredit.artistTypeName)) {
+          continue;
+        }
+
+        const normalizedArtistName = extractPrimaryDiscogsArtistName(scopedCredit.artistName);
+        if (!normalizedArtistName) {
+          continue;
+        }
+
+        const normalizedRole = normalizeDiscogsCreditRole(scopedCredit.artistTypeName);
+        const key = `${normalizeArtistNameForMatch(normalizedArtistName)}::${normalizedRole.toLowerCase()}`;
+        if (!deduped.has(key)) {
+          deduped.set(key, {
+            artistName: normalizedArtistName,
+            artistTypeName: normalizedRole,
+          });
+        }
+      }
+      continue;
+    }
+
+    const rawName = entry?.anv || entry?.name || null;
+    const artistNames = splitDiscogsCreditNames(rawName);
+    const fallbackArtistName = artistNames.length > 0
+      ? null
+      : extractPrimaryDiscogsArtistName(rawName);
+
+    const normalizedArtistNames = artistNames
+      .map((nameValue) => extractPrimaryDiscogsArtistName(nameValue))
+      .filter(Boolean);
+
+    if (fallbackArtistName) {
+      normalizedArtistNames.push(fallbackArtistName);
+    }
+
+    if (normalizedArtistNames.length === 0) {
+      continue;
+    }
+
+    const rawRoleValue = String(entry?.role || '').trim();
+    const parsedRoles = rawRoleValue
+      ? rawRoleValue.split(/[,;]+/).map((value) => String(value || '').trim()).filter(Boolean)
+      : [];
+
+    const roles = parsedRoles
+      .filter((value) => !shouldSkipDiscogsCreditRole(value))
+      .map((value) => normalizeDiscogsCreditRole(value))
+      .filter(Boolean);
+
+    const roleList = parsedRoles.length > 0 ? roles : ['Performer'];
+    if (roleList.length === 0) {
+      continue;
+    }
+
+    for (const artistName of normalizedArtistNames) {
+      for (const artistTypeName of roleList) {
+        const key = `${normalizeArtistNameForMatch(artistName)}::${artistTypeName.toLowerCase()}`;
+        if (!deduped.has(key)) {
+          deduped.set(key, {
+            artistName,
+            artistTypeName,
+          });
+        }
+      }
+    }
+  }
+
+  return [...deduped.values()];
+}
+
+function scoreArtistNameSimilarity(leftName, rightName) {
+  const left = normalizeArtistNameForMatch(leftName);
+  const right = normalizeArtistNameForMatch(rightName);
+
+  const hasEnsembleHint = (value) => {
+    const normalizedValue = String(value || '').toLowerCase();
+    return [
+      'orchestra', 'orchestre', 'orchester', 'philharmonic', 'symphony', 'choir', 'chorus',
+      'chorale', 'ensemble', 'consort', 'quartet', 'quintet', 'sextet', 'trio', 'duo',
+      'band', 'players', 'collective', 'sinfonia', 'camerata'
+    ].some((hint) => normalizedValue.includes(hint));
+  };
+
+  if (!left || !right) return 0;
+  if (left === right) return 100;
+
+  const leftIsEnsemble = hasEnsembleHint(leftName);
+  const rightIsEnsemble = hasEnsembleHint(rightName);
+  if ((left.includes(right) || right.includes(left)) && leftIsEnsemble === rightIsEnsemble) {
+    return 90;
+  }
+
+  const leftSet = new Set(left.split(' ').filter(Boolean));
+  const rightSet = new Set(right.split(' ').filter(Boolean));
+  const intersection = [...leftSet].filter((token) => rightSet.has(token)).length;
+  const union = new Set([...leftSet, ...rightSet]).size || 1;
+  return Math.round((intersection / union) * 100);
+}
+
+function findBestExistingArtistMatch(candidateName, existingArtists) {
+  if (!candidateName || !Array.isArray(existingArtists) || existingArtists.length === 0) {
+    return null;
+  }
+
+  let bestArtist = null;
+  let bestScore = -1;
+
+  for (const artist of existingArtists) {
+    const score = scoreArtistNameSimilarity(candidateName, artist.title);
+    if (score > bestScore) {
+      bestScore = score;
+      bestArtist = artist;
+    }
+  }
+
+  if (bestScore < 85) {
+    return null;
+  }
+
+  return bestArtist;
+}
+
+function tokenizeTrackTitleForMatch(value) {
+  return normalizeTrackTitleForMatch(value)
+    .split(' ')
+    .map((token) => token.trim())
+    .filter(Boolean);
+}
+
+function scoreTrackTitleMatch(localTitle, discogsTitle) {
+  const localNorm = normalizeTrackTitleForMatch(localTitle);
+  const discogsNorm = normalizeTrackTitleForMatch(discogsTitle);
+
+  if (!localNorm || !discogsNorm) return 0;
+  if (localNorm === discogsNorm) return 100;
+
+  let score = 0;
+  if (localNorm.includes(discogsNorm) || discogsNorm.includes(localNorm)) {
+    score += 60;
+  }
+
+  const localTokens = tokenizeTrackTitleForMatch(localTitle);
+  const discogsTokens = tokenizeTrackTitleForMatch(discogsTitle);
+  const localSet = new Set(localTokens);
+  const discogsSet = new Set(discogsTokens);
+
+  const intersection = [...localSet].filter((token) => discogsSet.has(token)).length;
+  const union = new Set([...localSet, ...discogsSet]).size || 1;
+  const jaccard = intersection / union;
+  score += Math.round(jaccard * 60);
+
+  return Math.min(score, 100);
+}
+
+function scoreTrackDurationMatch(localDurationMs, discogsDurationMs) {
+  const localDuration = Number.isInteger(localDurationMs) ? localDurationMs : null;
+  const discogsDuration = Number.isInteger(discogsDurationMs) ? discogsDurationMs : null;
+
+  if (!localDuration || !discogsDuration) return 0;
+
+  const diffSeconds = Math.abs(localDuration - discogsDuration) / 1000;
+  if (diffSeconds <= 3) return 30;
+  if (diffSeconds <= 8) return 24;
+  if (diffSeconds <= 15) return 16;
+  if (diffSeconds <= 30) return 8;
+  if (diffSeconds <= 60) return 2;
+  return -8;
+}
+
+async function attachDiscNumbersForAlbumDisplay(tracks) {
+  const trackList = Array.isArray(tracks) ? tracks : [];
+  if (trackList.length === 0) {
+    return [];
+  }
+
+  const { parseFile } = await import('music-metadata');
+  const enrichedTracks = [];
+
+  for (const track of trackList) {
+    const persistedPreferences = parseMetadataPreferencesObject(track?.metadataPreferences);
+    const persistedDisc = parseInt(persistedPreferences?.__fileExtraction?.discNumber, 10);
+
+    const position = extractLocalTrackDiscTrackNumbers(track);
+    let discNumber = !Number.isNaN(persistedDisc)
+      ? persistedDisc
+      : (Number.isInteger(position.discNumber) ? position.discNumber : null);
+
+    if (!discNumber) {
+      try {
+        let localPath = null;
+
+        if (track?.file) {
+          localPath = await resolveExistingMusicFilePath(track.file);
+        }
+
+        if (!localPath && track?.key) {
+          const ensured = await ensureTrackFilePath(track);
+          localPath = ensured?.localPath || null;
+        }
+
+        if (localPath) {
+          const metadata = await parseFile(localPath, { duration: false });
+          const discPosition = formatMetadataPosition(metadata?.common?.disk);
+          const parsedDiscNumber = parseInt(discPosition?.no, 10);
+          if (!Number.isNaN(parsedDiscNumber)) {
+            discNumber = parsedDiscNumber;
+          }
+        }
+      } catch {
+        // Ignore metadata read failures for display-only enrichment.
+      }
+    }
+
+    enrichedTracks.push({
+      ...track,
+      discNumber,
+      trackNumber: Number.isInteger(position.trackNumber) ? position.trackNumber : null,
+    });
+  }
+
+  // Backfill missing disc numbers from neighboring known values to keep UI consistent.
+  const sorted = [...enrichedTracks].sort((left, right) => {
+    const leftIndex = Number.isInteger(left?.index) ? left.index : Number.MAX_SAFE_INTEGER;
+    const rightIndex = Number.isInteger(right?.index) ? right.index : Number.MAX_SAFE_INTEGER;
+    return leftIndex - rightIndex;
+  });
+
+  for (let i = 0; i < sorted.length; i += 1) {
+    if (Number.isInteger(sorted[i].discNumber)) {
+      continue;
+    }
+
+    let previousDisc = null;
+    for (let j = i - 1; j >= 0; j -= 1) {
+      if (Number.isInteger(sorted[j].discNumber)) {
+        previousDisc = sorted[j].discNumber;
+        break;
+      }
+    }
+
+    let nextDisc = null;
+    for (let j = i + 1; j < sorted.length; j += 1) {
+      if (Number.isInteger(sorted[j].discNumber)) {
+        nextDisc = sorted[j].discNumber;
+        break;
+      }
+    }
+
+    if (Number.isInteger(previousDisc)) {
+      sorted[i].discNumber = previousDisc;
+    } else if (Number.isInteger(nextDisc)) {
+      sorted[i].discNumber = nextDisc;
+    }
+  }
+
+  return enrichedTracks;
+}
+
+function extractLocalTrackDiscTrackNumbers(localTrack) {
+  const persistedPreferences = parseMetadataPreferencesObject(localTrack?.metadataPreferences);
+  const extractedDisc = parseInt(persistedPreferences?.__fileExtraction?.discNumber, 10);
+  const extractedTrack = parseInt(persistedPreferences?.__fileExtraction?.trackNumber, 10);
+
+  let trackNumber = !Number.isNaN(extractedTrack)
+    ? extractedTrack
+    : (Number.isInteger(localTrack?.index) ? localTrack.index : null);
+
+  let discNumber = !Number.isNaN(extractedDisc)
+    ? extractedDisc
+    : (Number.isInteger(localTrack?.parentIndex) ? localTrack.parentIndex : null);
+
+  return { discNumber, trackNumber };
+}
+
+function scoreTrackPositionFallback(localTrack, discogsTrack) {
+  const localPosition = extractLocalTrackDiscTrackNumbers(localTrack);
+  const discogsTrackNumber = Number.isInteger(discogsTrack?.discogsTrackIndex) ? discogsTrack.discogsTrackIndex : null;
+  const discogsDiscNumber = Number.isInteger(discogsTrack?.discogsAlbumNumber) ? discogsTrack.discogsAlbumNumber : null;
+  const localTrackNumber = Number.isInteger(localPosition.trackNumber) ? localPosition.trackNumber : null;
+  const localDiscNumber = Number.isInteger(localPosition.discNumber) ? localPosition.discNumber : null;
+
+  if (!discogsTrackNumber || !localTrackNumber) {
+    return 0;
+  }
+
+  let score = 0;
+  if (discogsTrackNumber === localTrackNumber) {
+    score += (discogsDiscNumber && localDiscNumber) ? 26 : 22;
+
+    if (discogsDiscNumber && localDiscNumber) {
+      score += discogsDiscNumber === localDiscNumber ? 22 : -18;
+    }
+
+    return score;
+  }
+
+  const trackDiff = Math.abs(discogsTrackNumber - localTrackNumber);
+  score -= Math.min(trackDiff * 6, 24);
+
+  if (discogsDiscNumber && localDiscNumber) {
+    score += discogsDiscNumber === localDiscNumber ? -6 : -18;
+  }
+
+  return score;
+}
+
+function buildDefaultDiscogsTrackMappings(localTracks, normalizedDiscogsTracks) {
+  const candidates = [];
+
+  normalizedDiscogsTracks.forEach((discogsTrack) => {
+    localTracks.forEach((localTrack) => {
+      const localPosition = extractLocalTrackDiscTrackNumbers(localTrack);
+      const titleScore = scoreTrackTitleMatch(localTrack.title, discogsTrack.discogsTrackTitle);
+      const durationScore = scoreTrackDurationMatch(localTrack.duration, discogsTrack.discogsTrackDurationMs);
+      const positionScore = scoreTrackPositionFallback(localTrack, discogsTrack);
+      const localTrackNumber = Number.isInteger(localPosition.trackNumber) ? localPosition.trackNumber : null;
+      const positionPenalty = Number.isInteger(localTrackNumber)
+        && Number.isInteger(discogsTrack.discogsTrackIndex)
+        && localTrackNumber !== discogsTrack.discogsTrackIndex
+        ? Math.min(Math.abs(localTrackNumber - discogsTrack.discogsTrackIndex), 8)
+        : 0;
+
+      const totalScore = titleScore + durationScore + positionScore - positionPenalty;
+      candidates.push({
+        discogsOrdinal: discogsTrack.discogsOrdinal,
+        localTrackKey: localTrack.ratingKey,
+        score: totalScore,
+        titleScore,
+        durationScore,
+        positionScore,
+      });
+    });
+  });
+
+  candidates.sort((left, right) => right.score - left.score);
+
+  const usedDiscogs = new Set();
+  const usedLocal = new Set();
+  const chosen = new Map();
+
+  for (const candidate of candidates) {
+    if (usedDiscogs.has(candidate.discogsOrdinal) || usedLocal.has(candidate.localTrackKey)) {
+      continue;
+    }
+
+    const strongTitle = candidate.titleScore >= 45;
+    const titleAndDuration = candidate.titleScore >= 25 && candidate.durationScore >= 8;
+    const strongOverall = candidate.score >= 55;
+    const strongPosition = candidate.positionScore >= 34;
+    if (!strongTitle && !titleAndDuration && !strongOverall && !strongPosition) {
+      continue;
+    }
+
+    usedDiscogs.add(candidate.discogsOrdinal);
+    usedLocal.add(candidate.localTrackKey);
+    chosen.set(candidate.discogsOrdinal, candidate.localTrackKey);
+  }
+
+  return normalizedDiscogsTracks.map((discogsTrack) => ({
+    discogsOrdinal: discogsTrack.discogsOrdinal,
+    localTrackKey: chosen.get(discogsTrack.discogsOrdinal) || null,
+  }));
+}
+
+function parseDiscogsUrl(urlValue) {
+  try {
+    const parsed = new URL(String(urlValue || '').trim());
+    const normalizedHost = parsed.hostname.toLowerCase();
+    if (!normalizedHost.endsWith('discogs.com')) {
+      return null;
+    }
+
+    const segments = parsed.pathname.split('/').filter(Boolean);
+    const typeIdx = segments.findIndex((entry) => {
+      const value = entry.toLowerCase();
+      return value === 'release' || value === 'releases' || value === 'master' || value === 'masters';
+    });
+
+    if (typeIdx < 0 || !segments[typeIdx + 1]) {
+      return null;
+    }
+
+    const releaseSegment = segments[typeIdx + 1];
+    const match = releaseSegment.match(/(\d+)/);
+    const id = match?.[1] || null;
+    if (!id) {
+      return null;
+    }
+
+    const kindSegment = segments[typeIdx].toLowerCase();
+    const kind = kindSegment.startsWith('master') ? 'master' : 'release';
+
+    const normalizedPath = `/${kind}/${id}`;
+    const normalizedUrl = `${parsed.protocol}//${parsed.host}${normalizedPath}`;
+
+    return {
+      id,
+      kind,
+      normalizedUrl,
+      originalUrl: parsed.toString(),
+    };
+  } catch {
+    return null;
+  }
+}
+
+function normalizeDiscogsTrackPosition(position, fallbackIndex) {
+  const parsed = parseDiscogsTrackPositionMetadata(position, fallbackIndex);
+  return Number.isInteger(parsed.trackNumber) ? parsed.trackNumber : fallbackIndex;
+}
+
+function parseDiscogsTrackPositionMetadata(position, fallbackIndex) {
+  const value = String(position || '').trim();
+  if (!value) {
+    return {
+      rawPosition: null,
+      albumNumber: null,
+      trackNumber: Number.isInteger(fallbackIndex) ? fallbackIndex : 1,
+      sequenceNumber: Number.isInteger(fallbackIndex) ? fallbackIndex : 1,
+    };
+  }
+
+  const discTrackMatch = value.match(/^(?:(?:disc|cd|d)\s*)?(\d{1,2})\s*[-.:/]\s*(?:t\s*)?(\d{1,3})(?:[a-z])?$/i);
+  if (discTrackMatch) {
+    const disc = parseInt(discTrackMatch[1], 10);
+    const track = parseInt(discTrackMatch[2], 10);
+    return {
+      rawPosition: value,
+      albumNumber: Number.isNaN(disc) ? null : disc,
+      trackNumber: Number.isNaN(track) ? null : track,
+      sequenceNumber: (!Number.isNaN(disc) && !Number.isNaN(track)) ? ((disc * 1000) + track) : (Number.isInteger(fallbackIndex) ? fallbackIndex : 1),
+    };
+  }
+
+  const sideTrackMatch = value.match(/^([A-Z])(\d{1,3})$/i);
+  if (sideTrackMatch) {
+    const sideLetter = sideTrackMatch[1].toUpperCase();
+    const sideIndex = sideLetter.charCodeAt(0) - 64;
+    const track = parseInt(sideTrackMatch[2], 10);
+    const albumNumber = sideIndex > 0 ? Math.ceil(sideIndex / 2) : null;
+
+    return {
+      rawPosition: value,
+      albumNumber,
+      trackNumber: Number.isNaN(track) ? null : track,
+      sequenceNumber: (albumNumber && !Number.isNaN(track)) ? ((albumNumber * 1000) + track) : (Number.isInteger(fallbackIndex) ? fallbackIndex : 1),
+    };
+  }
+
+  const directNumeric = parseInt(value, 10);
+  if (!Number.isNaN(directNumeric)) {
+    return {
+      rawPosition: value,
+      albumNumber: null,
+      trackNumber: directNumeric,
+      sequenceNumber: directNumeric,
+    };
+  }
+
+  // Handles values where only trailing numeric track number is present.
+  const trailingNumeric = value.match(/(\d+)$/)?.[1];
+  const parsedTrailing = trailingNumeric ? parseInt(trailingNumeric, 10) : NaN;
+  if (!Number.isNaN(parsedTrailing)) {
+    return {
+      rawPosition: value,
+      albumNumber: null,
+      trackNumber: parsedTrailing,
+      sequenceNumber: Number.isInteger(fallbackIndex) ? fallbackIndex : parsedTrailing,
+    };
+  }
+
+  return {
+    rawPosition: value,
+    albumNumber: null,
+    trackNumber: Number.isInteger(fallbackIndex) ? fallbackIndex : 1,
+    sequenceNumber: Number.isInteger(fallbackIndex) ? fallbackIndex : 1,
+  };
+}
+
+function extractWorkTitleFromTrackName(trackTitle) {
+  const title = String(trackTitle || '').trim();
+  if (!title) return null;
+
+  const separators = [': ', ' - '];
+  for (const separator of separators) {
+    const idx = title.indexOf(separator);
+    if (idx > 2) {
+      const candidate = title.slice(0, idx).trim();
+      if (candidate.length >= 3) {
+        return candidate;
+      }
+    }
+  }
+
+  return null;
+}
+
+function normalizeWorkTitleForMatch(value) {
+  return String(value || '')
+    .toLowerCase()
+    .replace(/\([^)]*\)/g, ' ')
+    .replace(/\[[^\]]*\]/g, ' ')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function scoreWorkTitleSimilarity(leftTitle, rightTitle) {
+  const left = normalizeWorkTitleForMatch(leftTitle);
+  const right = normalizeWorkTitleForMatch(rightTitle);
+
+  if (!left || !right) return 0;
+  if (left === right) return 100;
+
+  let score = 0;
+  if (left.includes(right) || right.includes(left)) {
+    score += 55;
+  }
+
+  const leftTokens = left.split(' ').filter(Boolean);
+  const rightTokens = right.split(' ').filter(Boolean);
+  const leftSet = new Set(leftTokens);
+  const rightSet = new Set(rightTokens);
+
+  const intersection = [...leftSet].filter((token) => rightSet.has(token)).length;
+  const union = new Set([...leftSet, ...rightSet]).size || 1;
+  score += Math.round((intersection / union) * 45);
+
+  return Math.min(score, 100);
+}
+
+function findBestExistingWorkMatch(candidateTitle, existingWorks) {
+  if (!candidateTitle || !Array.isArray(existingWorks) || existingWorks.length === 0) {
+    return null;
+  }
+
+  let bestWork = null;
+  let bestScore = -1;
+
+  for (const work of existingWorks) {
+    const similarity = scoreWorkTitleSimilarity(candidateTitle, work.title);
+    if (similarity > bestScore) {
+      bestScore = similarity;
+      bestWork = work;
+    }
+  }
+
+  if (bestScore < 70) {
+    return null;
+  }
+
+  return bestWork;
+}
+
+async function ensureRouteWorkPartRecord(workId, title, order) {
+  const existing = await prisma.workPart.findFirst({
+    where: {
+      workId,
+      title
+    }
+  });
+
+  if (existing) {
+    return prisma.workPart.update({
+      where: { id: existing.id },
+      data: {
+        order: Number.isInteger(order) ? order : existing.order
+      }
+    });
+  }
+
+  return prisma.workPart.create({
+    data: {
+      workId,
+      title,
+      order: Number.isInteger(order) ? order : 1
+    }
+  });
+}
+
+function deriveDiscogsPartTitle(workTitleHint, discogsTrackTitle) {
+  const fullTitle = String(discogsTrackTitle || '').trim();
+  const workTitle = String(workTitleHint || '').trim();
+
+  if (!workTitle || !fullTitle) {
+    return fullTitle || workTitle || null;
+  }
+
+  const prefixPatterns = [
+    `${workTitle}: `,
+    `${workTitle} - `,
+    `${workTitle} — `,
+  ];
+
+  const matchedPrefix = prefixPatterns.find((prefix) => fullTitle.startsWith(prefix));
+  if (!matchedPrefix) {
+    return fullTitle;
+  }
+
+  const stripped = fullTitle.slice(matchedPrefix.length).trim();
+  return stripped || fullTitle;
+}
+
+function selectDiscogsReleaseFromJsonLd(jsonLdValue) {
+  const candidates = Array.isArray(jsonLdValue) ? jsonLdValue : [jsonLdValue];
+  return candidates.find((entry) => {
+    const typeValue = entry?.['@type'];
+    const typeList = Array.isArray(typeValue) ? typeValue : [typeValue];
+    return typeList.some((type) => String(type || '').toLowerCase().includes('musicalbum'));
+  }) || null;
+}
+
+async function fetchDiscogsApiJson(kind, id) {
+  const endpoint = kind === 'master'
+    ? `https://api.discogs.com/masters/${id}`
+    : `https://api.discogs.com/releases/${id}`;
+
+  const headers = {
+    'User-Agent': 'EddieLifeManagement/1.0.0 (+https://github.com/eddie-life)',
+    'Accept': 'application/json'
+  };
+
+  const discogsToken = String(process.env.DISCOGS_TOKEN || '').trim();
+  if (discogsToken) {
+    headers.Authorization = `Discogs token=${discogsToken}`;
+  }
+
+  const response = await fetch(endpoint, { headers });
+  if (!response.ok) {
+    throw new Error(`Discogs API request failed (${response.status})`);
+  }
+
+  return response.json();
+}
+
+function flattenDiscogsTrackEntries(tracklist, parentTitle = null, parentCredits = []) {
+  const rows = Array.isArray(tracklist) ? tracklist : [];
+  const flattened = [];
+
+  for (const row of rows) {
+    const rowTitle = String(row?.title || '').trim();
+    const rowType = String(row?.type_ || '').toLowerCase();
+    const subTracks = Array.isArray(row?.sub_tracks) ? row.sub_tracks : [];
+    const rowCredits = mapDiscogsExtraArtistsToCredits(row?.extraartists);
+    const combinedCredits = [...parentCredits, ...rowCredits];
+
+    if (subTracks.length > 0) {
+      const nested = flattenDiscogsTrackEntries(subTracks, rowTitle || parentTitle || null, combinedCredits);
+      flattened.push(...nested);
+      continue;
+    }
+
+    // Skip structural rows that are not concrete tracks.
+    if ((rowType === 'heading' || rowType === 'index') && !row?.position && !row?.duration) {
+      continue;
+    }
+
+    if (!rowTitle) {
+      continue;
+    }
+
+    flattened.push({
+      title: parentTitle ? `${parentTitle}: ${rowTitle}` : rowTitle,
+      position: row?.position || null,
+      duration: row?.duration || null,
+      credits: combinedCredits,
+    });
+  }
+
+  return flattened;
+}
+
+function mapDiscogsApiTracklist(tracklist) {
+  const flattened = flattenDiscogsTrackEntries(tracklist);
+
+  return flattened
+    .map((track, index) => {
+      const positionMeta = parseDiscogsTrackPositionMetadata(track?.position, index + 1);
+      return {
+        title: String(track?.title || '').trim(),
+        position: positionMeta.sequenceNumber,
+        rawPosition: positionMeta.rawPosition,
+        discNumber: positionMeta.albumNumber,
+        trackNumber: positionMeta.trackNumber,
+        durationMs: parseDurationToMilliseconds(track?.duration),
+        rawDuration: track?.duration || null,
+        credits: Array.isArray(track?.credits) ? track.credits : [],
+      };
+    })
+    .filter((track) => track.title);
+}
+
+function mapDiscogsApiResourceToReleaseShape(resource, discogsTarget) {
+  const title = String(resource?.title || '').trim() || null;
+  const artistName = resource?.artists_sort
+    || resource?.artists?.[0]?.name
+    || null;
+  const labelName = resource?.labels?.[0]?.name || null;
+
+  const datePublished = resource?.released
+    || (resource?.year ? String(resource.year) : null)
+    || null;
+
+  return {
+    releaseId: discogsTarget.id,
+    sourceKind: discogsTarget.kind,
+    sourceUrl: discogsTarget.originalUrl,
+    title,
+    datePublished,
+    byArtist: artistName ? String(artistName).trim() : null,
+    label: labelName ? String(labelName).trim() : null,
+    credits: mapDiscogsExtraArtistsToCredits(resource?.extraartists),
+    tracks: mapDiscogsApiTracklist(resource?.tracklist),
+  };
+}
+
+async function scrapeDiscogsReleaseFromUrl(discogsUrl) {
+  const discogsTarget = parseDiscogsUrl(discogsUrl);
+  if (!discogsTarget) {
+    throw new Error('Invalid Discogs release URL');
+  }
+
+  const apiResource = await fetchDiscogsApiJson(discogsTarget.kind, discogsTarget.id);
+
+  let resourceForMapping = apiResource;
+  if (discogsTarget.kind === 'master' && apiResource?.main_release) {
+    try {
+      resourceForMapping = await fetchDiscogsApiJson('release', String(apiResource.main_release));
+    } catch (releaseFetchError) {
+      console.warn('Discogs main_release lookup failed, using master payload only:', releaseFetchError.message);
+      resourceForMapping = apiResource;
+    }
+  }
+
+  const mapped = mapDiscogsApiResourceToReleaseShape(resourceForMapping, discogsTarget);
+
+  if (!mapped.title || mapped.tracks.length === 0) {
+    throw new Error('Discogs API returned incomplete album metadata');
+  }
+
+  return mapped;
 }
 
 function mergeCollectionValues(primaryCollections, duplicateCollections) {
@@ -641,7 +1631,10 @@ async function extractAlbumFileMetadataByRatingKey(ratingKey) {
     musicBrainzLabel: album.musicBrainzLabel || null,
     musicBrainzBarcode: album.musicBrainzBarcode || null,
     musicBrainzAsin: album.musicBrainzAsin || null,
+    metadataPreferences: album.metadataPreferences || null,
   };
+
+  const albumPreferences = parseMetadataPreferencesObject(album.metadataPreferences);
 
   for (const track of tracks) {
     const result = {
@@ -796,8 +1789,12 @@ async function extractAlbumFileMetadataByRatingKey(ratingKey) {
       });
 
       const trackUpdates = {};
+      const parsedTrackNumber = parseInt(trackPosition.no, 10);
+      const parsedTrackTotal = parseInt(trackPosition.of, 10);
+      const parsedDiscNumber = parseInt(discPosition.no, 10);
+      const parsedDiscTotal = parseInt(discPosition.of, 10);
+
       if (trackPosition.no !== null && trackPosition.no !== undefined) {
-        const parsedTrackNumber = parseInt(trackPosition.no, 10);
         if (!Number.isNaN(parsedTrackNumber)) {
           trackUpdates.index = parsedTrackNumber;
         }
@@ -811,6 +1808,20 @@ async function extractAlbumFileMetadataByRatingKey(ratingKey) {
           trackUpdates.musicBrainzTrackId = recordingId;
         }
       }
+
+      const trackPreferences = parseMetadataPreferencesObject(track.metadataPreferences);
+      trackPreferences.__fileExtraction = {
+        extractedAt: new Date().toISOString(),
+        trackNumber: Number.isNaN(parsedTrackNumber) ? null : parsedTrackNumber,
+        trackTotal: Number.isNaN(parsedTrackTotal) ? null : parsedTrackTotal,
+        discNumber: Number.isNaN(parsedDiscNumber) ? null : parsedDiscNumber,
+        discTotal: Number.isNaN(parsedDiscTotal) ? null : parsedDiscTotal,
+        filePath: localPath,
+        plexPath: plexPath || null,
+        common: result.common,
+        formatInfo: result.formatInfo,
+      };
+      trackUpdates.metadataPreferences = JSON.stringify(trackPreferences);
 
       if (Object.keys(trackUpdates).length > 0) {
         try {
@@ -845,9 +1856,21 @@ async function extractAlbumFileMetadataByRatingKey(ratingKey) {
             continue;
           }
 
-          if (!albumMetadataState[key]) {
+          if (albumMetadataState[key] !== value) {
             albumPatch[key] = value;
           }
+        }
+
+        albumPreferences.__fileExtraction = {
+          extractedAt: new Date().toISOString(),
+          sourceTrackRatingKey: track.ratingKey,
+          sourceTrackTitle: track.title,
+          extractedAlbumUpdates,
+          common: result.common,
+        };
+        const nextAlbumMetadataPreferences = JSON.stringify(albumPreferences);
+        if (albumMetadataState.metadataPreferences !== nextAlbumMetadataPreferences) {
+          albumPatch.metadataPreferences = nextAlbumMetadataPreferences;
         }
 
         if (Object.keys(albumPatch).length > 0) {
@@ -1506,6 +2529,20 @@ router.get('/artists/:ratingKey', asyncHandler(async (req, res) => {
     }
 
     linkedTrackMap.set(assignment.track.ratingKey, existing);
+
+    if (assignment.track.album) {
+      const existingAlbum = linkedAlbumMap.get(assignment.track.album.ratingKey) || {
+        ...assignment.track.album,
+        linkedArtistTypes: []
+      };
+
+      const linkedArtistTypeName = assignment.artistType?.name || null;
+      if (linkedArtistTypeName && !existingAlbum.linkedArtistTypes.includes(linkedArtistTypeName)) {
+        existingAlbum.linkedArtistTypes.push(linkedArtistTypeName);
+      }
+
+      linkedAlbumMap.set(assignment.track.album.ratingKey, existingAlbum);
+    }
   }
 
   const workMap = new Map();
@@ -1696,6 +2733,31 @@ router.put('/artists/:ratingKey', asyncHandler(async (req, res) => {
   }
 }));
 
+// Delete Artist - soft delete by hiding the artist from app views
+router.delete('/artists/:ratingKey', asyncHandler(async (req, res) => {
+  const { ratingKey } = req.params;
+
+  const existingArtist = await plexDb.prisma.plexArtist.findUnique({
+    where: { ratingKey }
+  });
+
+  if (!existingArtist) {
+    return sendBadRequest(res, 'Artist not found');
+  }
+
+  const deletedArtist = await plexDb.prisma.plexArtist.update({
+    where: { ratingKey },
+    data: {
+      removed: true,
+    }
+  });
+
+  sendSuccess(res, {
+    artist: deletedArtist,
+    message: 'Artist deleted successfully'
+  });
+}));
+
 // Update artist with MusicBrainz metadata
 router.put('/artists/:ratingKey/musicbrainz', asyncHandler(async (req, res) => {
   const { ratingKey } = req.params;
@@ -1783,6 +2845,833 @@ router.put('/albums/:ratingKey/musicbrainz', asyncHandler(async (req, res) => {
   sendSuccess(res, {
     album: updatedAlbum,
     message: 'Album updated with MusicBrainz metadata'
+  });
+}));
+
+// Import album/track/work metadata from a Discogs release URL
+router.post('/albums/:ratingKey/discogs-import', asyncHandler(async (req, res) => {
+  const { ratingKey } = req.params;
+  const {
+    url,
+    apply: applyRequested = false,
+    trackMappings: requestedTrackMappings = [],
+    excludedCreditKeys: requestedExcludedCreditKeys = [],
+  } = req.body;
+
+  validateRequiredFields(req.body, ['url']);
+
+  const album = await prisma.plexAlbum.findUnique({
+    where: { ratingKey },
+    include: {
+      artist: true,
+      tracks: {
+        where: {
+          removed: false
+        },
+        orderBy: [
+          { index: 'asc' },
+          { ratingKey: 'asc' }
+        ]
+      }
+    }
+  });
+
+  if (!album) {
+    return sendBadRequest(res, 'Album not found');
+  }
+
+  const discogsRelease = await scrapeDiscogsReleaseFromUrl(url);
+  if (!discogsRelease.tracks.length) {
+    return sendBadRequest(res, 'Discogs release contains no track list');
+  }
+
+  const shouldApply = applyRequested === true;
+  const excludedCreditKeys = new Set(
+    (Array.isArray(requestedExcludedCreditKeys) ? requestedExcludedCreditKeys : [])
+      .map((entry) => String(entry || '').trim())
+      .filter(Boolean)
+  );
+
+  const releaseDate = discogsRelease.datePublished ? new Date(discogsRelease.datePublished) : null;
+  const validReleaseDate = releaseDate && !Number.isNaN(releaseDate.getTime()) ? releaseDate : null;
+
+  const albumPatch = {
+    title: discogsRelease.title || album.title,
+    musicBrainzLabel: discogsRelease.label || album.musicBrainzLabel || null,
+    originallyAvailableAt: validReleaseDate || album.originallyAvailableAt || null,
+    year: validReleaseDate ? validReleaseDate.getUTCFullYear() : album.year,
+  };
+
+  const discogsArtistName = extractPrimaryDiscogsArtistName(discogsRelease.byArtist);
+  const existingArtists = await prisma.plexArtist.findMany({
+    where: { removed: false },
+    select: {
+      ratingKey: true,
+      title: true,
+    }
+  });
+
+  const artistLookupByNormalizedName = new Map(
+    existingArtists.map((entry) => [normalizeArtistNameForMatch(entry.title), entry])
+  );
+
+  const createdArtistKeys = new Set();
+  const matchedExistingArtistKeys = new Set();
+
+  const resolveOrCreateDiscogsArtist = async (candidateName) => {
+    const normalizedCandidate = normalizeArtistNameForMatch(candidateName);
+    if (!normalizedCandidate) return null;
+
+    let artist = artistLookupByNormalizedName.get(normalizedCandidate) || null;
+    let created = false;
+    let matchedExisting = false;
+
+    if (!artist) {
+      artist = findBestExistingArtistMatch(candidateName, existingArtists);
+      if (artist) {
+        matchedExisting = true;
+      }
+    } else {
+      matchedExisting = true;
+    }
+
+    if (!artist && shouldApply) {
+      const artistRatingKey = `discogs_artist_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+      const artistKey = `/library/metadata/${artistRatingKey}`;
+
+      artist = await prisma.plexArtist.create({
+        data: {
+          ratingKey: artistRatingKey,
+          key: artistKey,
+          title: candidateName,
+          titleSort: candidateName,
+          librarySectionID: album.librarySectionID || null,
+        },
+        select: {
+          ratingKey: true,
+          title: true,
+        }
+      });
+
+      created = true;
+      existingArtists.push(artist);
+    }
+
+    if (!artist) {
+      return null;
+    }
+
+    artistLookupByNormalizedName.set(normalizedCandidate, artist);
+
+    if (created) {
+      createdArtistKeys.add(artist.ratingKey);
+    } else if (matchedExisting) {
+      matchedExistingArtistKeys.add(artist.ratingKey);
+    }
+
+    return { artist, created, matchedExisting };
+  };
+
+  let resolvedArtist = null;
+  let createdArtist = false;
+  let matchedExistingArtist = false;
+
+  if (discogsArtistName) {
+    const resolved = await resolveOrCreateDiscogsArtist(discogsArtistName);
+    resolvedArtist = resolved?.artist || null;
+    createdArtist = Boolean(resolved?.created);
+    matchedExistingArtist = Boolean(resolved?.matchedExisting);
+  }
+
+  if (resolvedArtist) {
+    albumPatch.parentRatingKey = resolvedArtist.ratingKey;
+    albumPatch.albumArtist = resolvedArtist.title;
+  }
+
+  const localTracks = [...album.tracks];
+  const discogsTracks = [...discogsRelease.tracks].sort((left, right) => left.position - right.position);
+
+  const normalizedDiscogsTracks = discogsTracks.map((track, index) => ({
+    discogsOrdinal: index + 1,
+    discogsTrackTitle: track.title,
+    discogsTrackIndex: Number.isInteger(track.trackNumber)
+      ? track.trackNumber
+      : (Number.isInteger(track.position) ? track.position : index + 1),
+    discogsAlbumNumber: Number.isInteger(track.discNumber) ? track.discNumber : null,
+    discogsPositionRaw: String(track.rawPosition || '').trim() || null,
+    discogsTrackDurationMs: Number.isInteger(track.durationMs) && track.durationMs > 0 ? track.durationMs : null,
+    workTitleHint: extractWorkTitleFromTrackName(track.title),
+    trackCredits: Array.isArray(track.credits) ? track.credits : [],
+  }));
+
+  const previewDefaultTrackMappings = buildDefaultDiscogsTrackMappings(localTracks, normalizedDiscogsTracks);
+
+  const localTrackByKey = new Map(localTracks.map((track) => [track.ratingKey, track]));
+  const discogsTrackByOrdinal = new Map(normalizedDiscogsTracks.map((track) => [track.discogsOrdinal, track]));
+
+  const normalizedRequestedMappings = (Array.isArray(requestedTrackMappings) ? requestedTrackMappings : [])
+    .map((mapping) => ({
+      discogsOrdinal: parseInt(mapping?.discogsOrdinal, 10),
+      localTrackKey: String(mapping?.localTrackKey || '').trim() || null,
+      workTitleHint: String(mapping?.workTitleHint || '').trim() || null,
+    }))
+    .filter((mapping) => Number.isInteger(mapping.discogsOrdinal));
+
+  const mappingsSource = normalizedRequestedMappings.length > 0
+    ? normalizedRequestedMappings
+    : previewDefaultTrackMappings;
+
+  const usedLocalTrackKeys = new Set();
+  const trackMappings = [];
+
+  for (const mapping of mappingsSource) {
+    const discogsTrack = discogsTrackByOrdinal.get(mapping.discogsOrdinal);
+    if (!discogsTrack || !mapping.localTrackKey) {
+      continue;
+    }
+
+    if (usedLocalTrackKeys.has(mapping.localTrackKey)) {
+      continue;
+    }
+
+    const localTrack = localTrackByKey.get(mapping.localTrackKey);
+    if (!localTrack) {
+      continue;
+    }
+
+    usedLocalTrackKeys.add(mapping.localTrackKey);
+
+    trackMappings.push({
+      discogsOrdinal: discogsTrack.discogsOrdinal,
+      localTrackKey: localTrack.ratingKey,
+      localTrackTitle: localTrack.title,
+      localTrackIndex: localTrack.index,
+      discogsTrackTitle: discogsTrack.discogsTrackTitle,
+      discogsTrackIndex: discogsTrack.discogsTrackIndex,
+      discogsTrackDurationMs: discogsTrack.discogsTrackDurationMs,
+      workTitleHint: String(mapping.workTitleHint || discogsTrack.workTitleHint || '').trim() || null,
+    });
+  }
+
+  const mappedTrackCount = trackMappings.length;
+
+  const normalizePreviewCredit = (credit, source) => {
+    const artistName = extractPrimaryDiscogsArtistName(credit?.artistName);
+    if (!artistName) {
+      return null;
+    }
+
+    const artistTypeName = normalizeDiscogsCreditRole(credit?.artistTypeName || 'Performer');
+    return {
+      artistName,
+      artistTypeName,
+      source,
+    };
+  };
+
+  const buildDiscogsCreditImportKey = ({ artistName, artistTypeName, source, discogsOrdinal = null }) => {
+    const normalizedArtistName = normalizeArtistNameForMatch(artistName);
+    const normalizedArtistTypeName = String(artistTypeName || '').trim().toLowerCase();
+    const normalizedSource = source === 'track' ? 'track' : 'album';
+    if (!normalizedArtistName || !normalizedArtistTypeName) {
+      return null;
+    }
+
+    if (normalizedSource === 'track') {
+      const trackOrdinal = Number.isInteger(discogsOrdinal) ? discogsOrdinal : 0;
+      return `${normalizedSource}:${trackOrdinal}:${normalizedArtistName}:${normalizedArtistTypeName}`;
+    }
+
+    return `${normalizedSource}:${normalizedArtistName}:${normalizedArtistTypeName}`;
+  };
+
+  const resolvePreviewArtistMatch = (candidateName) => {
+    const normalizedCandidate = normalizeArtistNameForMatch(candidateName);
+    if (!normalizedCandidate) {
+      return {
+        matchedExisting: false,
+        willCreateArtist: false,
+        matchedArtist: null,
+        matchKind: null,
+      };
+    }
+
+    const exactArtist = artistLookupByNormalizedName.get(normalizedCandidate) || null;
+    if (exactArtist) {
+      return {
+        matchedExisting: true,
+        willCreateArtist: false,
+        matchedArtist: {
+          ratingKey: exactArtist.ratingKey,
+          title: exactArtist.title,
+        },
+        matchKind: 'exact',
+      };
+    }
+
+    const fuzzyArtist = findBestExistingArtistMatch(candidateName, existingArtists);
+    if (fuzzyArtist) {
+      return {
+        matchedExisting: true,
+        willCreateArtist: false,
+        matchedArtist: {
+          ratingKey: fuzzyArtist.ratingKey,
+          title: fuzzyArtist.title,
+        },
+        matchKind: 'fuzzy',
+      };
+    }
+
+    return {
+      matchedExisting: false,
+      willCreateArtist: true,
+      matchedArtist: null,
+      matchKind: null,
+    };
+  };
+
+  const previewArtistMatchLookup = new Map();
+  const addPreviewArtistMatch = (candidateName) => {
+    const normalizedCandidate = normalizeArtistNameForMatch(candidateName);
+    if (!normalizedCandidate || previewArtistMatchLookup.has(normalizedCandidate)) {
+      return;
+    }
+
+    const resolved = resolvePreviewArtistMatch(candidateName);
+    previewArtistMatchLookup.set(normalizedCandidate, {
+      artistName: String(candidateName || '').trim(),
+      ...resolved,
+    });
+  };
+
+  const uniquePreviewCreditsMap = new Map();
+  const previewCreditOptions = [];
+  const previewCreditOptionKeys = new Set();
+  const addPreviewCredit = (credit, source) => {
+    const normalized = normalizePreviewCredit(credit, source);
+    if (!normalized) {
+      return;
+    }
+
+    const key = `${normalizeArtistNameForMatch(normalized.artistName)}::${String(normalized.artistTypeName || '').toLowerCase()}`;
+    const existing = uniquePreviewCreditsMap.get(key);
+    if (!existing) {
+      uniquePreviewCreditsMap.set(key, {
+        artistName: normalized.artistName,
+        artistTypeName: normalized.artistTypeName,
+        sources: new Set([normalized.source]),
+        discogsOrdinals: new Set(),
+      });
+      return;
+    }
+
+    existing.sources.add(normalized.source);
+  };
+
+  const addPreviewCreditOption = (credit, source, discogsOrdinal = null, discogsTrackTitle = null) => {
+    const normalized = normalizePreviewCredit(credit, source);
+    if (!normalized) {
+      return;
+    }
+
+    const creditKey = buildDiscogsCreditImportKey({
+      artistName: normalized.artistName,
+      artistTypeName: normalized.artistTypeName,
+      source,
+      discogsOrdinal,
+    });
+
+    if (!creditKey || previewCreditOptionKeys.has(creditKey)) {
+      return;
+    }
+
+    previewCreditOptionKeys.add(creditKey);
+    previewCreditOptions.push({
+      creditKey,
+      source,
+      discogsOrdinal: Number.isInteger(discogsOrdinal) ? discogsOrdinal : null,
+      discogsTrackTitle: String(discogsTrackTitle || '').trim() || null,
+      artistName: normalized.artistName,
+      artistTypeName: normalized.artistTypeName,
+      ...resolvePreviewArtistMatch(normalized.artistName),
+    });
+  };
+
+  const previewAlbumCredits = [
+    ...(Array.isArray(discogsRelease.credits) ? discogsRelease.credits : []),
+    ...(discogsArtistName ? [{ artistName: discogsArtistName, artistTypeName: 'Primary Artist' }] : []),
+  ]
+    .map((credit) => normalizePreviewCredit(credit, 'album'))
+    .filter(Boolean);
+
+  for (const credit of previewAlbumCredits) {
+    addPreviewCredit(credit, 'album');
+    addPreviewArtistMatch(credit.artistName);
+    addPreviewCreditOption(credit, 'album', null, null);
+  }
+
+  const previewMappedDiscogsOrdinals = new Set(
+    trackMappings
+      .filter((mapping) => mapping?.localTrackKey)
+      .map((mapping) => mapping.discogsOrdinal)
+      .filter((discogsOrdinal) => Number.isInteger(discogsOrdinal))
+  );
+
+  for (const discogsTrack of normalizedDiscogsTracks) {
+    if (!previewMappedDiscogsOrdinals.has(discogsTrack.discogsOrdinal)) {
+      continue;
+    }
+
+    const trackCredits = Array.isArray(discogsTrack.trackCredits) ? discogsTrack.trackCredits : [];
+    for (const credit of trackCredits) {
+      const normalized = normalizePreviewCredit(credit, 'track');
+      if (!normalized) {
+        continue;
+      }
+
+      addPreviewArtistMatch(normalized.artistName);
+      addPreviewCreditOption(normalized, 'track', discogsTrack.discogsOrdinal, discogsTrack.discogsTrackTitle);
+
+      const key = `${normalizeArtistNameForMatch(normalized.artistName)}::${String(normalized.artistTypeName || '').toLowerCase()}`;
+      const existing = uniquePreviewCreditsMap.get(key);
+      if (!existing) {
+        uniquePreviewCreditsMap.set(key, {
+          artistName: normalized.artistName,
+          artistTypeName: normalized.artistTypeName,
+          sources: new Set(['track']),
+          discogsOrdinals: new Set([discogsTrack.discogsOrdinal]),
+        });
+      } else {
+        existing.sources.add('track');
+        existing.discogsOrdinals.add(discogsTrack.discogsOrdinal);
+      }
+    }
+  }
+
+  const previewImportArtists = [...uniquePreviewCreditsMap.values()]
+    .map((entry) => {
+      const previewMatch = resolvePreviewArtistMatch(entry.artistName);
+      return {
+        artistName: entry.artistName,
+        artistTypeName: entry.artistTypeName,
+        sources: [...entry.sources].sort(),
+        trackCount: entry.discogsOrdinals.size,
+        discogsOrdinals: [...entry.discogsOrdinals].sort((left, right) => left - right),
+        ...previewMatch,
+      };
+    })
+    .sort((left, right) => {
+      const nameSort = left.artistName.localeCompare(right.artistName);
+      if (nameSort !== 0) {
+        return nameSort;
+      }
+      return left.artistTypeName.localeCompare(right.artistTypeName);
+    });
+
+  previewCreditOptions.sort((left, right) => {
+    const sourceSort = String(left.source || '').localeCompare(String(right.source || ''));
+    if (sourceSort !== 0) {
+      return sourceSort;
+    }
+
+    if (left.source === 'track' || right.source === 'track') {
+      const ordinalSort = (left.discogsOrdinal || 0) - (right.discogsOrdinal || 0);
+      if (ordinalSort !== 0) {
+        return ordinalSort;
+      }
+    }
+
+    const nameSort = String(left.artistName || '').localeCompare(String(right.artistName || ''));
+    if (nameSort !== 0) {
+      return nameSort;
+    }
+
+    return String(left.artistTypeName || '').localeCompare(String(right.artistTypeName || ''));
+  });
+
+  const previewWorkMap = new Map();
+  for (const mapping of trackMappings) {
+    const resolvedWorkTitle = String(mapping.workTitleHint || mapping.discogsTrackTitle || '').trim();
+    if (!resolvedWorkTitle) continue;
+
+    if (!previewWorkMap.has(resolvedWorkTitle)) {
+      previewWorkMap.set(resolvedWorkTitle, []);
+    }
+    previewWorkMap.get(resolvedWorkTitle).push(mapping.localTrackKey);
+  }
+
+  const previewWorks = [...previewWorkMap.entries()].map(([title, trackKeys]) => ({
+    title,
+    trackCount: trackKeys.length
+  }));
+
+  if (!shouldApply) {
+    return sendSuccess(res, {
+      preview: true,
+      album: {
+        ratingKey: album.ratingKey,
+        title: album.title,
+        discogsTitle: discogsRelease.title || album.title,
+        discogsArtist: discogsRelease.byArtist || null,
+      },
+      discogs: {
+        releaseId: discogsRelease.releaseId,
+        sourceKind: discogsRelease.sourceKind,
+        sourceUrl: discogsRelease.sourceUrl,
+        sourceTrackCount: discogsRelease.tracks.length,
+        releaseCreditCount: Array.isArray(discogsRelease.credits) ? discogsRelease.credits.length : 0,
+        trackCreditCount: normalizedDiscogsTracks.reduce((sum, track) => sum + (Array.isArray(track.trackCredits) ? track.trackCredits.length : 0), 0),
+        releaseCredits: previewAlbumCredits,
+        importArtists: {
+          totalUniqueCount: previewImportArtists.length,
+          artists: previewImportArtists,
+        },
+        creditOptions: previewCreditOptions,
+        artistMatchLookup: [...previewArtistMatchLookup.values()],
+        artistName: discogsArtistName,
+        matchedArtist: matchedExistingArtist ? {
+          ratingKey: resolvedArtist?.ratingKey,
+          title: resolvedArtist?.title,
+        } : null,
+        willCreateArtist: !matchedExistingArtist && Boolean(discogsArtistName),
+      },
+      mapping: {
+        mappedTrackCount,
+        localTrackCount: localTracks.length,
+        localTracks: localTracks.map((track) => ({
+          ...extractLocalTrackDiscTrackNumbers(track),
+          ratingKey: track.ratingKey,
+          title: track.title,
+          index: track.index,
+          parentIndex: track.parentIndex,
+          file: track.file,
+          duration: track.duration,
+        })),
+        discogsTracks: normalizedDiscogsTracks,
+        defaultTrackMappings: previewDefaultTrackMappings,
+        trackMappings,
+        proposedWorks: previewWorks,
+      },
+      message: 'Discogs import preview ready'
+    });
+  }
+
+  await prisma.plexAlbum.update({
+    where: { ratingKey },
+    data: albumPatch
+  });
+
+  if (resolvedArtist) {
+    await prisma.plexTrack.updateMany({
+      where: {
+        parentRatingKey: ratingKey
+      },
+      data: {
+        grandparentRatingKey: resolvedArtist.ratingKey,
+      }
+    });
+  }
+
+  const mappedTracks = [];
+  for (const mapping of trackMappings) {
+    const localTrack = localTracks.find((entry) => entry.ratingKey === mapping.localTrackKey);
+    if (!localTrack) continue;
+
+    const trackPatch = {
+      title: mapping.discogsTrackTitle,
+      index: mapping.discogsTrackIndex,
+    };
+
+    if (resolvedArtist) {
+      trackPatch.grandparentRatingKey = resolvedArtist.ratingKey;
+    }
+
+    if (Number.isInteger(mapping.discogsTrackDurationMs) && mapping.discogsTrackDurationMs > 0) {
+      trackPatch.duration = mapping.discogsTrackDurationMs;
+    }
+
+    const updatedTrack = await prisma.plexTrack.update({
+      where: { ratingKey: localTrack.ratingKey },
+      data: trackPatch
+    });
+
+    mappedTracks.push(updatedTrack);
+  }
+
+  let createdArtistTypeCount = 0;
+  let linkedAlbumCreditCount = 0;
+  let linkedTrackCreditCount = 0;
+
+  const artistTypes = await prisma.artistType.findMany({
+    select: {
+      id: true,
+      name: true,
+    }
+  });
+
+  const artistTypeByNormalizedName = new Map(
+    artistTypes.map((entry) => [String(entry.name || '').trim().toLowerCase(), entry])
+  );
+
+  const resolveOrCreateArtistType = async (name) => {
+    const normalizedName = String(name || '').trim().toLowerCase();
+    if (!normalizedName) return null;
+
+    let artistType = artistTypeByNormalizedName.get(normalizedName) || null;
+    if (!artistType) {
+      artistType = await prisma.artistType.create({
+        data: {
+          name,
+        },
+        select: {
+          id: true,
+          name: true,
+        }
+      });
+
+      artistTypeByNormalizedName.set(normalizedName, artistType);
+      createdArtistTypeCount += 1;
+    }
+
+    return artistType;
+  };
+
+  const albumCredits = [
+    ...(Array.isArray(discogsRelease.credits) ? discogsRelease.credits : []),
+    ...(discogsArtistName ? [{ artistName: discogsArtistName, artistTypeName: 'Primary Artist' }] : []),
+  ]
+    .map((credit) => normalizePreviewCredit(credit, 'album'))
+    .filter(Boolean);
+
+  for (const credit of albumCredits) {
+    const creditKey = buildDiscogsCreditImportKey({
+      artistName: credit.artistName,
+      artistTypeName: credit.artistTypeName,
+      source: 'album',
+    });
+    if (creditKey && excludedCreditKeys.has(creditKey)) {
+      continue;
+    }
+
+    const artistResolution = await resolveOrCreateDiscogsArtist(credit.artistName);
+    const artistType = await resolveOrCreateArtistType(credit.artistTypeName || 'Performer');
+    if (!artistResolution?.artist || !artistType) {
+      continue;
+    }
+
+    await prisma.albumArtist.upsert({
+      where: {
+        albumKey_artistKey_artistTypeId: {
+          albumKey: ratingKey,
+          artistKey: artistResolution.artist.ratingKey,
+          artistTypeId: artistType.id,
+        }
+      },
+      update: {},
+      create: {
+        albumKey: ratingKey,
+        artistKey: artistResolution.artist.ratingKey,
+        artistTypeId: artistType.id,
+      }
+    });
+
+    linkedAlbumCreditCount += 1;
+  }
+
+  for (const mapping of trackMappings) {
+    const discogsTrack = discogsTrackByOrdinal.get(mapping.discogsOrdinal);
+    const trackCredits = Array.isArray(discogsTrack?.trackCredits) ? discogsTrack.trackCredits : [];
+
+    for (const credit of trackCredits) {
+      const normalizedCredit = normalizePreviewCredit(credit, 'track');
+      if (!normalizedCredit) {
+        continue;
+      }
+
+      const creditKey = buildDiscogsCreditImportKey({
+        artistName: normalizedCredit.artistName,
+        artistTypeName: normalizedCredit.artistTypeName,
+        source: 'track',
+        discogsOrdinal: discogsTrack?.discogsOrdinal,
+      });
+      if (creditKey && excludedCreditKeys.has(creditKey)) {
+        continue;
+      }
+
+      const artistResolution = await resolveOrCreateDiscogsArtist(normalizedCredit.artistName);
+      const artistType = await resolveOrCreateArtistType(normalizedCredit.artistTypeName || 'Performer');
+      if (!artistResolution?.artist || !artistType) {
+        continue;
+      }
+
+      await prisma.trackArtist.upsert({
+        where: {
+          trackKey_artistKey_artistTypeId: {
+            trackKey: mapping.localTrackKey,
+            artistKey: artistResolution.artist.ratingKey,
+            artistTypeId: artistType.id,
+          }
+        },
+        update: {},
+        create: {
+          trackKey: mapping.localTrackKey,
+          artistKey: artistResolution.artist.ratingKey,
+          artistTypeId: artistType.id,
+        }
+      });
+
+      linkedTrackCreditCount += 1;
+    }
+  }
+
+  const workGroups = new Map();
+  for (const mapping of trackMappings) {
+    const resolvedWorkTitle = String(mapping.workTitleHint || mapping.discogsTrackTitle || '').trim();
+    if (!resolvedWorkTitle) continue;
+
+    const resolvedPartTitle = deriveDiscogsPartTitle(mapping.workTitleHint, mapping.discogsTrackTitle)
+      || resolvedWorkTitle;
+    const resolvedPartOrder = Number.isInteger(mapping.discogsTrackIndex)
+      ? mapping.discogsTrackIndex
+      : (Number.isInteger(mapping.localTrackIndex) ? mapping.localTrackIndex : 1);
+
+    if (!workGroups.has(resolvedWorkTitle)) {
+      workGroups.set(resolvedWorkTitle, []);
+    }
+
+    workGroups.get(resolvedWorkTitle).push({
+      localTrackKey: mapping.localTrackKey,
+      partTitle: resolvedPartTitle,
+      partOrder: resolvedPartOrder,
+    });
+  }
+
+  const composerKey = album.parentRatingKey || album.artist?.ratingKey || null;
+  let createdWorkCount = 0;
+  let matchedExistingWorkCount = 0;
+  let linkedWorkTrackCount = 0;
+
+  if (composerKey) {
+    const existingComposerWorks = await prisma.work.findMany({
+      where: { composerKey },
+      select: {
+        id: true,
+        title: true,
+      }
+    });
+
+    for (const [workTitle, groupedTrackEntries] of workGroups.entries()) {
+      const uniqueEntriesMap = new Map();
+      for (const entry of groupedTrackEntries) {
+        if (!entry?.localTrackKey) continue;
+        if (!uniqueEntriesMap.has(entry.localTrackKey)) {
+          uniqueEntriesMap.set(entry.localTrackKey, entry);
+        }
+      }
+
+      const uniqueTrackEntries = [...uniqueEntriesMap.values()];
+      const uniqueTrackKeys = uniqueTrackEntries.map((entry) => entry.localTrackKey);
+
+      if (uniqueTrackKeys.length === 0) {
+        continue;
+      }
+
+      // Replace prior work links for these tracks so imported work mapping wins.
+      await prisma.workPartTrack.deleteMany({
+        where: {
+          trackKey: {
+            in: uniqueTrackKeys
+          }
+        }
+      });
+
+      let work = findBestExistingWorkMatch(workTitle, existingComposerWorks);
+
+      if (work) {
+        matchedExistingWorkCount += 1;
+      }
+
+      if (!work) {
+        work = await prisma.work.findFirst({
+          where: {
+            title: workTitle,
+            composerKey
+          }
+        });
+      }
+
+      if (!work) {
+        work = await prisma.work.create({
+          data: {
+            title: workTitle,
+            composerKey
+          }
+        });
+        createdWorkCount += 1;
+        existingComposerWorks.push({ id: work.id, title: work.title });
+      }
+
+      for (const trackEntry of uniqueTrackEntries) {
+        const workPart = await ensureRouteWorkPartRecord(
+          work.id,
+          trackEntry.partTitle || workTitle,
+          Number.isInteger(trackEntry.partOrder) ? trackEntry.partOrder : 1
+        );
+
+        await prisma.workPartTrack.upsert({
+          where: {
+            workPartId_trackKey: {
+              workPartId: workPart.id,
+              trackKey: trackEntry.localTrackKey,
+            }
+          },
+          update: {},
+          create: {
+            workPartId: workPart.id,
+            trackKey: trackEntry.localTrackKey,
+          }
+        });
+      }
+
+      await prisma.plexTrack.updateMany({
+        where: {
+          ratingKey: {
+            in: uniqueTrackKeys
+          }
+        },
+        data: {
+          workId: work.id
+        }
+      });
+
+      linkedWorkTrackCount += uniqueTrackKeys.length;
+    }
+  }
+
+  const refreshedAlbum = await prisma.plexAlbum.findUnique({
+    where: { ratingKey }
+  });
+
+  sendSuccess(res, {
+    album: refreshedAlbum,
+    discogs: {
+      releaseId: discogsRelease.releaseId,
+      mappedTrackCount,
+      sourceTrackCount: discogsRelease.tracks.length,
+      artistName: discogsArtistName,
+      artistRatingKey: resolvedArtist?.ratingKey || null,
+      artistMatchedExisting: matchedExistingArtist,
+      artistCreated: createdArtist,
+      createdCreditArtistCount: createdArtistKeys.size,
+      matchedCreditArtistCount: matchedExistingArtistKeys.size,
+      createdArtistTypeCount,
+      linkedAlbumCreditCount,
+      linkedTrackCreditCount,
+      createdWorkCount,
+      matchedExistingWorkCount,
+      linkedWorkTrackCount,
+    },
+    message: 'Discogs metadata imported successfully'
   });
 }));
 
@@ -2729,7 +4618,8 @@ router.get('/tracks/section/:sectionKey', asyncHandler(async (req, res) => {
 router.get('/tracks/album/:albumRatingKey', asyncHandler(async (req, res) => {
   const { albumRatingKey } = req.params;
   const tracks = await plexDb.getTracksByAlbum(albumRatingKey);
-  res.json(tracks);
+  const tracksWithDiscNumbers = await attachDiscNumbersForAlbumDisplay(tracks);
+  res.json(tracksWithDiscNumbers);
 }));
 
 // Disconnect a track from its album

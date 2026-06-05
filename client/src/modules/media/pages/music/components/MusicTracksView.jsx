@@ -26,6 +26,19 @@ const MusicTracksView = ({
   formatFileSize
 }) => {
   const [tracks, setTracks] = useState(propTracks);
+
+  const formatTrackNumberLabel = (track, fallbackIndex) => {
+    const trackNumber = Number.isInteger(track?.trackNumber)
+      ? track.trackNumber
+      : (Number.isInteger(track?.index) ? track.index : fallbackIndex);
+    const discNumber = Number.isInteger(track?.discNumber) ? track.discNumber : null;
+
+    if (discNumber && trackNumber) {
+      return `D${discNumber}-T${trackNumber}`;
+    }
+
+    return trackNumber || fallbackIndex;
+  };
   
   useEffect(() => {
     setTracks(propTracks);
@@ -169,7 +182,7 @@ const MusicTracksView = ({
               <span className="track-size">Size</span>
               <span className="track-playlist">Playlist</span>
             </div>
-            {tracks.map(track => (
+            {tracks.map((track, index) => (
               <div key={track.ratingKey} className={`track-row ${currentTrack?.ratingKey === track.ratingKey ? 'playing' : ''}`}>
                 <button 
                   className={`track-play-button ${currentTrack?.ratingKey === track.ratingKey && isPlaying ? 'playing' : ''}`}
@@ -178,7 +191,7 @@ const MusicTracksView = ({
                 >
                   {currentTrack?.ratingKey === track.ratingKey && isPlaying ? '⏸' : '▶'}
                 </button>
-                <span className="track-number">{track.index}</span>
+                <span className="track-number">{formatTrackNumberLabel(track, index + 1)}</span>
                 <div className="track-title">
                   <button 
                     className="track-title-link"
