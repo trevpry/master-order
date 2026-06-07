@@ -52,6 +52,19 @@ class HistoryPlusService {
     return year * 10000 + month * 100 + day;
   }
 
+  isUnifiedCompletionCompleted(completions) {
+    if (!Array.isArray(completions) || completions.length === 0) {
+      return false;
+    }
+
+    const defaultCompletion = completions.find(completion => completion?.userId === "default");
+    if (defaultCompletion) {
+      return !!defaultCompletion.isCompleted;
+    }
+
+    return !!completions[0]?.isCompleted;
+  }
+
   // ==========================================
   // HISTORICAL EVENTS
   // ==========================================
@@ -1749,12 +1762,20 @@ class HistoryPlusService {
             include: {
               book: {
                 include: {
-                  bookCompletions: true,
+                  bookCompletions: {
+                    where: { userId: "default" }
+                  },
                   chapters: {
                     include: {
-                      chapterCompletions: true,
+                      chapterCompletions: {
+                        where: { userId: "default" }
+                      },
                       sections: {
-                        include: { sectionCompletions: true }
+                        include: {
+                          sectionCompletions: {
+                            where: { userId: "default" }
+                          }
+                        }
                       }
                     }
                   }
@@ -1764,26 +1785,40 @@ class HistoryPlusService {
           },
           bookChapters: {
             include: {
-              chapterCompletions: true,
+              chapterCompletions: {
+                where: { userId: "default" }
+              },
               sections: {
-                include: { sectionCompletions: true }
+                include: {
+                  sectionCompletions: {
+                    where: { userId: "default" }
+                  }
+                }
               },
               book: {
                 include: {
-                  bookCompletions: true
+                  bookCompletions: {
+                    where: { userId: "default" }
+                  }
                 }
               }
             }
           },
           bookSections: {
             include: {
-              sectionCompletions: true,
+              sectionCompletions: {
+                where: { userId: "default" }
+              },
               chapter: {
                 include: {
-                  chapterCompletions: true,
+                  chapterCompletions: {
+                    where: { userId: "default" }
+                  },
                   book: {
                     include: {
-                      bookCompletions: true
+                      bookCompletions: {
+                        where: { userId: "default" }
+                      }
                     }
                   }
                 }
@@ -1903,6 +1938,8 @@ class HistoryPlusService {
    */
   async checkEventHasUnwatchedContent(event) {
     try {
+      const isCompleted = completions => this.isUnifiedCompletionCompleted(completions);
+
       // Check for any unwatched videos
       const unwatchedVideos = (event.videos || []).filter(video => {
         const watchRecord = video.user_video_watches;
@@ -1913,25 +1950,25 @@ class HistoryPlusService {
       
       // Check for any unread unified books (via bookLinks)
       const unreadUnifiedBooks = (event.bookLinks || []).filter(bookLink =>
-        !bookLink.book.bookCompletions?.[0]?.isCompleted
+        !isCompleted(bookLink.book.bookCompletions)
       );
       
       // Check for any unread unified chapters (directly linked to event)
       const unreadUnifiedChapters = (event.bookChapters || []).filter(chapter =>
-        !chapter.chapterCompletions?.[0]?.isCompleted
+        !isCompleted(chapter.chapterCompletions)
       );
       
       // Check for any unread unified sections (directly linked to event)
       const unreadUnifiedSections = (event.bookSections || []).filter(section =>
-        !section.sectionCompletions?.[0]?.isCompleted
+        !isCompleted(section.sectionCompletions)
       );
       
       // Check sections nested under event-linked chapters (sections without their own eventId)
       let unreadNestedUnifiedSections = 0;
       for (const chapter of (event.bookChapters || [])) {
-        if (chapter.chapterCompletions?.[0]?.isCompleted) continue;
+        if (isCompleted(chapter.chapterCompletions)) continue;
         for (const section of (chapter.sections || [])) {
-          if (!section.sectionCompletions?.[0]?.isCompleted) {
+          if (!isCompleted(section.sectionCompletions)) {
             unreadNestedUnifiedSections++;
           }
         }
@@ -1941,11 +1978,11 @@ class HistoryPlusService {
       let unreadNestedUnifiedBookContent = 0;
       for (const bookLink of (event.bookLinks || [])) {
         for (const chapter of (bookLink.book.chapters || [])) {
-          if (!chapter.chapterCompletions?.[0]?.isCompleted) {
+          if (!isCompleted(chapter.chapterCompletions)) {
             unreadNestedUnifiedBookContent++;
           }
           for (const section of (chapter.sections || [])) {
-            if (!section.sectionCompletions?.[0]?.isCompleted) {
+            if (!isCompleted(section.sectionCompletions)) {
               unreadNestedUnifiedBookContent++;
             }
           }
@@ -2085,6 +2122,7 @@ class HistoryPlusService {
   async hasUnreviewedContent(event) {
     console.log(`  🔍 Checking event "${event.title}" for unreviewed content:`);
     console.log(`    📺 Videos: ${event.videos?.length || 0}, 📚 Book Links: ${event.bookLinks?.length || 0}, 📖 Chapters: ${event.bookChapters?.length || 0}, 📄 Sections: ${event.bookSections?.length || 0}`);
+    const isCompleted = completions => this.isUnifiedCompletionCompleted(completions);
     
     // Check videos
     for (const video of event.videos || []) {
@@ -2106,28 +2144,28 @@ class HistoryPlusService {
     // Check books via bookLinks
     for (const bookLink of event.bookLinks || []) {
       const book = bookLink.book;
-      const isCompleted = book.bookCompletions && book.bookCompletions.length > 0 && book.bookCompletions[0].isCompleted;
-      console.log(`    📚 Book "${book.title}": ${!isCompleted ? 'UNREVIEWED' : 'reviewed'}`);
-      if (!isCompleted) {
+      const bookCompleted = isCompleted(book.bookCompletions);
+      console.log(`    📚 Book "${book.title}": ${!bookCompleted ? 'UNREVIEWED' : 'reviewed'}`);
+      if (!bookCompleted) {
         return true;
       }
     }
 
     // Check chapters (skip if parent book is already read)
     for (const chapter of event.bookChapters || []) {
-      const isCompleted = chapter.chapterCompletions && chapter.chapterCompletions.length > 0 && chapter.chapterCompletions[0].isCompleted;
-      const parentBookRead = chapter.book?.bookCompletions?.[0]?.isCompleted;
-      console.log(`    📖 Chapter "${chapter.title}": ${!isCompleted && !parentBookRead ? 'UNREVIEWED' : 'reviewed'}`);
-      if (!isCompleted && !parentBookRead) {
+      const chapterCompleted = isCompleted(chapter.chapterCompletions);
+      const parentBookRead = isCompleted(chapter.book?.bookCompletions);
+      console.log(`    📖 Chapter "${chapter.title}": ${!chapterCompleted && !parentBookRead ? 'UNREVIEWED' : 'reviewed'}`);
+      if (!chapterCompleted && !parentBookRead) {
         return true;
       }
     }
 
     // Check sections directly linked to the event
     for (const section of event.bookSections || []) {
-      const isCompleted = section.sectionCompletions && section.sectionCompletions.length > 0 && section.sectionCompletions[0].isCompleted;
-      console.log(`    📄 Section "${section.title}": ${!isCompleted ? 'UNREVIEWED' : 'reviewed'}`);
-      if (!isCompleted) {
+      const sectionCompleted = isCompleted(section.sectionCompletions);
+      console.log(`    📄 Section "${section.title}": ${!sectionCompleted ? 'UNREVIEWED' : 'reviewed'}`);
+      if (!sectionCompleted) {
         return true;
       }
     }
@@ -2143,6 +2181,7 @@ class HistoryPlusService {
   async getRandomContentFromEvent(event, allowedTypes = null) {
     try {
       let availableContent = [];
+      const isCompleted = completions => this.isUnifiedCompletionCompleted(completions);
       const getOrderedSequenceGroupKey = (item) => {
         if (item.type === 'chapter' || item.type === 'section') {
           const bookId = item.content?.bookId || item.content?.book?.id || item.bookId || item.content?.chapter?.bookId || null;
@@ -2265,7 +2304,7 @@ class HistoryPlusService {
       // Books (via bookLinks)
       event.bookLinks?.forEach(bookLink => {
         const book = bookLink.book;
-        const isRead = book.bookCompletions?.[0]?.isCompleted;
+        const isRead = isCompleted(book.bookCompletions);
         if (!isRead) {
           availableContent.push({
             type: 'book',
@@ -2285,7 +2324,7 @@ class HistoryPlusService {
 
         // Always add unread chapters/sections nested under this book, even if the book itself is already completed.
         for (const chapter of (book.chapters || [])) {
-          if (!chapter.chapterCompletions?.[0]?.isCompleted && !addedChapterIds.has(chapter.id)) {
+          if (!isCompleted(chapter.chapterCompletions) && !addedChapterIds.has(chapter.id)) {
             addedChapterIds.add(chapter.id);
             availableContent.push({
               type: 'chapter',
@@ -2308,7 +2347,7 @@ class HistoryPlusService {
             });
           }
           for (const section of (chapter.sections || [])) {
-            if (!section.sectionCompletions?.[0]?.isCompleted && !addedSectionIds.has(section.id)) {
+            if (!isCompleted(section.sectionCompletions) && !addedSectionIds.has(section.id)) {
               addedSectionIds.add(section.id);
               availableContent.push({
                 type: 'section',
@@ -2341,8 +2380,8 @@ class HistoryPlusService {
 
       // Chapters directly linked to events
       event.bookChapters?.forEach(chapter => {
-        const isRead = chapter.chapterCompletions?.[0]?.isCompleted;
-        const parentBookRead = chapter.book?.bookCompletions?.[0]?.isCompleted;
+        const isRead = isCompleted(chapter.chapterCompletions);
+        const parentBookRead = isCompleted(chapter.book?.bookCompletions);
         if (!isRead && !parentBookRead && !addedChapterIds.has(chapter.id)) {
           addedChapterIds.add(chapter.id);
           const parentBook = chapter.book;
@@ -2373,7 +2412,7 @@ class HistoryPlusService {
         if (!isRead) {
           const parentBook = chapter.book;
           for (const section of (chapter.sections || [])) {
-            if (!section.sectionCompletions?.[0]?.isCompleted && !addedSectionIds.has(section.id)) {
+            if (!isCompleted(section.sectionCompletions) && !addedSectionIds.has(section.id)) {
               addedSectionIds.add(section.id);
               availableContent.push({
                 type: 'section',
@@ -2406,7 +2445,7 @@ class HistoryPlusService {
 
       // Sections directly linked to events
       event.bookSections?.forEach(section => {
-        const isRead = section.sectionCompletions?.[0]?.isCompleted;
+        const isRead = isCompleted(section.sectionCompletions);
         if (!isRead && !addedSectionIds.has(section.id)) {
           addedSectionIds.add(section.id);
           const parentChapter = section.chapter;
