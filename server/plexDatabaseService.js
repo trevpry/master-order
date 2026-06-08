@@ -258,7 +258,7 @@ class PlexDatabaseService {
       
       const whereCondition = {
         title: {
-          contains: searchTitle
+          equals: searchTitle.trim()
         }
       };
       
@@ -597,7 +597,7 @@ class PlexDatabaseService {
       
       const whereCondition = {
         title: {
-          contains: searchTitle
+          equals: searchTitle.trim()
         }
       };
       
@@ -647,7 +647,7 @@ class PlexDatabaseService {
         season: {
           show: {
             title: {
-              contains: searchTitle
+              equals: searchTitle.trim()
             }
           }
         }

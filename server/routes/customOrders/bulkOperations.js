@@ -369,12 +369,13 @@ function createBulkOperationsRoutes(prisma, services) {
           
           if (mediaType === 'episode' && finalSeriesTitle) {
             // Search for the TV series
-            const searchResults = await tvdbService.searchTVSeries(finalSeriesTitle);
+            const searchResults = await tvdbService.searchSeries(finalSeriesTitle);
             if (searchResults && searchResults.length > 0) {
               const seriesData = searchResults[0];
               
               // Get detailed series information
-              const seriesDetails = await tvdbService.getTVSeriesDetails(seriesData.tvdb_id);
+              const seriesId = seriesData.tvdb_id || seriesData.id;
+              const seriesDetails = seriesId ? await tvdbService.getSeriesDetails(seriesId) : null;
               if (seriesDetails && seriesDetails.seasons) {
                 const targetSeason = seriesDetails.seasons.find(s => s.number === parseInt(finalSeasonNumber));
                 if (targetSeason && targetSeason.episodes) {
