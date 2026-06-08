@@ -267,35 +267,28 @@ class ListItemMatcherService {
     });
     if (show) return show;
 
-    const shows = await prisma.plexTVShow.findMany({
-      where: { removed: false },
+    // Strict fallback: exact case-insensitive title equality only.
+    show = await prisma.plexTVShow.findFirst({
+      where: {
+        removed: false,
+        ...(year ? { year: parseInt(year) } : {})
+      },
       select: { id: true, ratingKey: true, title: true, year: true, thumb: true }
     });
 
-    let bestMatch = null;
-    let bestScore = 0;
-
-    for (const s of shows) {
-      const sTitle = s.title.toLowerCase().trim();
-      let score = 0;
-
-      if (sTitle === normalizedTitle) {
-        score = 1.0;
-      } else if (sTitle.includes(normalizedTitle) || normalizedTitle.includes(sTitle)) {
-        score = 0.7;
-      }
-
-      if (score > 0 && year && s.year === parseInt(year)) {
-        score += 0.2;
-      }
-
-      if (score > bestScore) {
-        bestScore = score;
-        bestMatch = s;
-      }
+    if (show && (show.title || '').toLowerCase().trim() === normalizedTitle) {
+      return show;
     }
 
-    return bestScore >= 0.7 ? bestMatch : null;
+    const exactCaseInsensitive = await prisma.plexTVShow.findMany({
+      where: {
+        removed: false,
+        ...(year ? { year: parseInt(year) } : {})
+      },
+      select: { id: true, ratingKey: true, title: true, year: true, thumb: true }
+    });
+
+    return exactCaseInsensitive.find(s => (s.title || '').toLowerCase().trim() === normalizedTitle) || null;
   }
 
   /**
@@ -345,7 +338,7 @@ class ListItemMatcherService {
 
       for (const ep of candidates) {
         const showTitle = (ep.season?.show?.title || '').toLowerCase().trim();
-        if (showTitle === normalizedTitle || showTitle.includes(normalizedTitle) || normalizedTitle.includes(showTitle)) {
+        if (showTitle === normalizedTitle) {
           return ep;
         }
       }

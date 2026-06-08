@@ -40,17 +40,21 @@ class ListScraperService {
             return candidateSeries === normalizedSeries;
           });
 
-          const plexEpisode = exactSeriesMatch || matches[0];
-          resolved.plexKey = plexEpisode.ratingKey || resolved.plexKey || null;
-          resolved.title = plexEpisode.title || resolved.title;
-          resolved.seriesTitle = plexEpisode.showTitle || plexEpisode.grandparentTitle || plexEpisode.season?.show?.title || resolved.seriesTitle;
-          resolved.seasonNumber = Number.isInteger(plexEpisode.seasonIndex) ? plexEpisode.seasonIndex : seasonNumber;
-          resolved.episodeNumber = Number.isInteger(plexEpisode.index) ? plexEpisode.index : episodeNumber;
-          resolved.originalArtworkUrl = resolved.originalArtworkUrl || plexEpisode.thumb || plexEpisode.season?.show?.thumb || null;
-          resolved.plexShowFound = true;
-          resolved.isFromTvdbOnly = false;
+          if (exactSeriesMatch) {
+            const plexEpisode = exactSeriesMatch;
+            resolved.plexKey = plexEpisode.ratingKey || resolved.plexKey || null;
+            resolved.title = plexEpisode.title || resolved.title;
+            resolved.seriesTitle = plexEpisode.showTitle || plexEpisode.grandparentTitle || plexEpisode.season?.show?.title || resolved.seriesTitle;
+            resolved.seasonNumber = Number.isInteger(plexEpisode.seasonIndex) ? plexEpisode.seasonIndex : seasonNumber;
+            resolved.episodeNumber = Number.isInteger(plexEpisode.index) ? plexEpisode.index : episodeNumber;
+            resolved.originalArtworkUrl = resolved.originalArtworkUrl || plexEpisode.thumb || plexEpisode.season?.show?.thumb || null;
+            resolved.plexShowFound = true;
+            resolved.isFromTvdbOnly = false;
 
-          console.log(`[ListSync] Resolved episode to Plex metadata: ${resolved.seriesTitle} S${resolved.seasonNumber}E${resolved.episodeNumber} -> ${resolved.title} (${resolved.plexKey})`);
+            console.log(`[ListSync] Resolved episode to Plex metadata: ${resolved.seriesTitle} S${resolved.seasonNumber}E${resolved.episodeNumber} -> ${resolved.title} (${resolved.plexKey})`);
+          } else {
+            console.log(`[ListSync] Plex episode candidates found but exact series mismatch for "${resolved.seriesTitle}" S${seasonNumber}E${episodeNumber}`);
+          }
         }
       } catch (error) {
         console.warn(`[ListSync] Failed episode Plex resolution for "${resolved.seriesTitle}" S${seasonNumber}E${episodeNumber}:`, error.message);

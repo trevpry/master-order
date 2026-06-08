@@ -113,14 +113,18 @@ function createBulkOperationsRoutes(prisma, services) {
               return candidateSeries === normalizedSeries;
             });
 
-            const plexEpisode = exactMatch || matches[0];
-            finalPlexKey = plexEpisode.ratingKey || finalPlexKey;
-            finalTitle = plexEpisode.title || finalTitle;
-            finalSeriesTitle = plexEpisode.showTitle || plexEpisode.grandparentTitle || finalSeriesTitle;
-            finalSeasonNumber = Number.isInteger(plexEpisode.seasonIndex) ? plexEpisode.seasonIndex : finalSeasonNumber;
-            finalEpisodeNumber = Number.isInteger(plexEpisode.index) ? plexEpisode.index : finalEpisodeNumber;
+            if (exactMatch) {
+              const plexEpisode = exactMatch;
+              finalPlexKey = plexEpisode.ratingKey || finalPlexKey;
+              finalTitle = plexEpisode.title || finalTitle;
+              finalSeriesTitle = plexEpisode.showTitle || plexEpisode.grandparentTitle || finalSeriesTitle;
+              finalSeasonNumber = Number.isInteger(plexEpisode.seasonIndex) ? plexEpisode.seasonIndex : finalSeasonNumber;
+              finalEpisodeNumber = Number.isInteger(plexEpisode.index) ? plexEpisode.index : finalEpisodeNumber;
 
-            console.log(`Resolved bulk episode to Plex metadata: ${finalSeriesTitle} S${finalSeasonNumber}E${finalEpisodeNumber} -> ${finalTitle} (${finalPlexKey})`);
+              console.log(`Resolved bulk episode to Plex metadata: ${finalSeriesTitle} S${finalSeasonNumber}E${finalEpisodeNumber} -> ${finalTitle} (${finalPlexKey})`);
+            } else {
+              console.log(`Plex episode candidates found but series mismatch for ${finalSeriesTitle} S${finalSeasonNumber}E${finalEpisodeNumber}; storing unresolved placeholder`);
+            }
           } else {
             console.log(`No Plex match found for bulk episode ${finalSeriesTitle} S${finalSeasonNumber}E${finalEpisodeNumber}; storing as unresolved placeholder`);
           }

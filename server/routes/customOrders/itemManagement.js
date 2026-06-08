@@ -316,33 +316,47 @@ function createItemManagementRoutes(prisma, services) {
                   .toLowerCase()
                   .trim() === normalizedLookupTitle
               );
-              const plexEpisode = exactMatch || matches[0];
+              if (exactMatch) {
+                const plexEpisode = exactMatch;
 
-              updateData.title = plexEpisode.title || updateData.title;
-              updateData.plexKey = plexEpisode.ratingKey || updateData.plexKey;
+                updateData.title = plexEpisode.title || updateData.title;
+                updateData.plexKey = plexEpisode.ratingKey || updateData.plexKey;
 
-              // Force artwork refresh to match the new Plex episode mapping.
-              updateData.localArtworkPath = null;
-              updateData.originalArtworkUrl = null;
-              updateData.artworkLastCached = null;
-              updateData.artworkMimeType = null;
+                // Force artwork refresh to match the new Plex episode mapping.
+                updateData.localArtworkPath = null;
+                updateData.originalArtworkUrl = null;
+                updateData.artworkLastCached = null;
+                updateData.artworkMimeType = null;
 
-              episodeResolutionDebug = {
-                requested: {
-                  seriesTitle: lookupSeriesTitle,
-                  seasonNumber: lookupSeasonNumber,
-                  episodeNumber: lookupEpisodeNumber
-                },
-                resolved: {
-                  title: plexEpisode.title || null,
-                  plexKey: plexEpisode.ratingKey || null,
-                  thumb: plexEpisode.thumb || null,
-                  showTitle: plexEpisode.showTitle || plexEpisode.grandparentTitle || null
-                },
-                matched: true
-              };
+                episodeResolutionDebug = {
+                  requested: {
+                    seriesTitle: lookupSeriesTitle,
+                    seasonNumber: lookupSeasonNumber,
+                    episodeNumber: lookupEpisodeNumber
+                  },
+                  resolved: {
+                    title: plexEpisode.title || null,
+                    plexKey: plexEpisode.ratingKey || null,
+                    thumb: plexEpisode.thumb || null,
+                    showTitle: plexEpisode.showTitle || plexEpisode.grandparentTitle || null
+                  },
+                  matched: true
+                };
 
-              console.log(`Resolved episode to Plex metadata: ${lookupSeriesTitle} S${lookupSeasonNumber}E${lookupEpisodeNumber} -> ${plexEpisode.title} (${plexEpisode.ratingKey})`);
+                console.log(`Resolved episode to Plex metadata: ${lookupSeriesTitle} S${lookupSeasonNumber}E${lookupEpisodeNumber} -> ${plexEpisode.title} (${plexEpisode.ratingKey})`);
+              } else {
+                episodeResolutionDebug = {
+                  requested: {
+                    seriesTitle: lookupSeriesTitle,
+                    seasonNumber: lookupSeasonNumber,
+                    episodeNumber: lookupEpisodeNumber
+                  },
+                  resolved: null,
+                  matched: false,
+                  reason: 'exact-series-mismatch'
+                };
+                console.warn(`Plex episode candidates found but series did not match exactly for ${lookupSeriesTitle} S${lookupSeasonNumber}E${lookupEpisodeNumber}; keeping existing title/plexKey`);
+              }
             } else {
               episodeResolutionDebug = {
                 requested: {
