@@ -5,6 +5,9 @@
  */
 
 const express = require('express');
+const PlexDatabaseService = require('../../plexDatabaseService');
+
+const plexDb = new PlexDatabaseService();
 
 /**
  * Create item management routes for custom orders
@@ -89,6 +92,12 @@ function createItemManagementRoutes(prisma, services) {
         isWatched, 
         title,
         seriesTitle, // For episodes
+        seasonNumber,
+        episodeNumber,
+        // Legacy aliases from older clients/edit flows
+        series,
+        season,
+        episode,
         // Book/reading progress fields - now handled by unified system
         bookPercentRead, bookCurrentPage,
         // Comic/story progress fields
@@ -140,7 +149,18 @@ function createItemManagementRoutes(prisma, services) {
         storyCoverUrl !== undefined
       );
 
+      // Check if this is an episode re-selection (series/season/episode updates)
+      const isEpisodeReselect = (
+        seriesTitle !== undefined ||
+        seasonNumber !== undefined ||
+        episodeNumber !== undefined ||
+        series !== undefined ||
+        season !== undefined ||
+        episode !== undefined
+      );
+
       const updateData = {};
+      let episodeResolutionDebug = null;
       if (sortOrder !== undefined) updateData.sortOrder = sortOrder;
       if (isWatched !== undefined) updateData.isWatched = isWatched;
       
@@ -251,7 +271,93 @@ function createItemManagementRoutes(prisma, services) {
       
       // Handle general data updates
       if (title !== undefined) updateData.title = title;
-      if (seriesTitle !== undefined) updateData.seriesTitle = seriesTitle;
+      const resolvedSeriesTitle = seriesTitle !== undefined ? seriesTitle : series;
+      const resolvedSeasonNumber = seasonNumber !== undefined ? seasonNumber : season;
+      const resolvedEpisodeNumber = episodeNumber !== undefined ? episodeNumber : episode;
+
+      if (resolvedSeriesTitle !== undefined) updateData.seriesTitle = resolvedSeriesTitle;
+      if (resolvedSeasonNumber !== undefined) {
+        updateData.seasonNumber = resolvedSeasonNumber === null || resolvedSeasonNumber === '' ? null : parseInt(resolvedSeasonNumber);
+      }
+      if (resolvedEpisodeNumber !== undefined) {
+        updateData.episodeNumber = resolvedEpisodeNumber === null || resolvedEpisodeNumber === '' ? null : parseInt(resolvedEpisodeNumber);
+      }
+
+      // For episode edits, resolve to actual Plex metadata so title/plexKey/artwork stay in sync.
+      if (isEpisodeReselect) {
+        const currentItem = await prisma.customOrderItem.findUnique({
+          where: { id: parseInt(itemId) },
+          select: {
+            id: true,
+            mediaType: true,
+            seriesTitle: true,
+            seasonNumber: true,
+            episodeNumber: true
+          }
+        });
+
+        if (currentItem?.mediaType === 'episode') {
+          const lookupSeriesTitle = resolvedSeriesTitle !== undefined
+            ? resolvedSeriesTitle
+            : currentItem.seriesTitle;
+          const lookupSeasonNumber = resolvedSeasonNumber !== undefined
+            ? parseInt(resolvedSeasonNumber)
+            : currentItem.seasonNumber;
+          const lookupEpisodeNumber = resolvedEpisodeNumber !== undefined
+            ? parseInt(resolvedEpisodeNumber)
+            : currentItem.episodeNumber;
+
+          if (lookupSeriesTitle && Number.isInteger(lookupSeasonNumber) && Number.isInteger(lookupEpisodeNumber)) {
+            const matches = await plexDb.searchTVEpisodes(lookupSeriesTitle, lookupSeasonNumber, lookupEpisodeNumber);
+            if (matches && matches.length > 0) {
+              const normalizedLookupTitle = lookupSeriesTitle.toLowerCase().trim();
+              const exactMatch = matches.find(match =>
+                (match.showTitle || match.grandparentTitle || '')
+                  .toLowerCase()
+                  .trim() === normalizedLookupTitle
+              );
+              const plexEpisode = exactMatch || matches[0];
+
+              updateData.title = plexEpisode.title || updateData.title;
+              updateData.plexKey = plexEpisode.ratingKey || updateData.plexKey;
+
+              // Force artwork refresh to match the new Plex episode mapping.
+              updateData.localArtworkPath = null;
+              updateData.originalArtworkUrl = null;
+              updateData.artworkLastCached = null;
+              updateData.artworkMimeType = null;
+
+              episodeResolutionDebug = {
+                requested: {
+                  seriesTitle: lookupSeriesTitle,
+                  seasonNumber: lookupSeasonNumber,
+                  episodeNumber: lookupEpisodeNumber
+                },
+                resolved: {
+                  title: plexEpisode.title || null,
+                  plexKey: plexEpisode.ratingKey || null,
+                  thumb: plexEpisode.thumb || null,
+                  showTitle: plexEpisode.showTitle || plexEpisode.grandparentTitle || null
+                },
+                matched: true
+              };
+
+              console.log(`Resolved episode to Plex metadata: ${lookupSeriesTitle} S${lookupSeasonNumber}E${lookupEpisodeNumber} -> ${plexEpisode.title} (${plexEpisode.ratingKey})`);
+            } else {
+              episodeResolutionDebug = {
+                requested: {
+                  seriesTitle: lookupSeriesTitle,
+                  seasonNumber: lookupSeasonNumber,
+                  episodeNumber: lookupEpisodeNumber
+                },
+                resolved: null,
+                matched: false
+              };
+              console.warn(`No Plex episode match found for ${lookupSeriesTitle} S${lookupSeasonNumber}E${lookupEpisodeNumber}; keeping existing title/plexKey`);
+            }
+          }
+        }
+      }
       
       // Handle book data updates for re-select functionality
       if (isBookReselect) {
@@ -424,6 +530,12 @@ function createItemManagementRoutes(prisma, services) {
       // If this is a short story re-selection, clear existing cached artwork
       if (isStoryReselect && artworkCache) {
         console.log(`Re-selecting short story for item ${itemId}, clearing cached artwork...`);
+        await artworkCache.cleanupArtwork(parseInt(itemId));
+      }
+
+      // If this is an episode re-selection, clear existing cached artwork
+      if (isEpisodeReselect && artworkCache) {
+        console.log(`Re-selecting episode for item ${itemId}, clearing cached artwork...`);
         await artworkCache.cleanupArtwork(parseInt(itemId));
       }
       
@@ -612,8 +724,24 @@ function createItemManagementRoutes(prisma, services) {
           console.warn(`Failed to cache artwork for re-selected short story ${item.id}:`, error.message);
         }
       }
+
+      // If this is an episode re-selection, cache new artwork synchronously
+      if (isEpisodeReselect && artworkCache) {
+        console.log(`Re-caching artwork for re-selected episode: ${item.seriesTitle} S${item.seasonNumber}E${item.episodeNumber}`);
+        try {
+          await artworkCache.ensureArtworkCached(item);
+          console.log(`Successfully cached artwork for re-selected episode ${item.id}`);
+        } catch (error) {
+          console.warn(`Failed to cache artwork for re-selected episode ${item.id}:`, error.message);
+        }
+      }
       
-      res.json(item);
+      const responsePayload = { ...item };
+      if (episodeResolutionDebug) {
+        responsePayload.episodeResolutionDebug = episodeResolutionDebug;
+      }
+
+      res.json(responsePayload);
     } catch (error) {
       console.error('Error updating custom order item:', error);
       res.status(500).json({ error: 'Failed to update custom order item' });

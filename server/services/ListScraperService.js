@@ -2,12 +2,98 @@ const cheerio = require('cheerio');
 const crypto = require('crypto');
 // Use shared Prisma client to avoid SQLite connection contention
 const { getParser } = require('./parsers/ParserRegistry');
+const PlexDatabaseService = require('../plexDatabaseService');
 
 const prisma = require('../prismaClient');
 
 class ListScraperService {
   constructor() {
     this.name = 'ListScraperService';
+    this.plexDb = new PlexDatabaseService();
+  }
+
+  /**
+   * Resolve list-sync movie/episode data to canonical Plex metadata when possible.
+   * This is a final safety net before duplicate checks and DB writes.
+   */
+  async resolvePlexMetadata(itemData) {
+    if (!itemData || (itemData.mediaType !== 'movie' && itemData.mediaType !== 'episode')) {
+      return itemData;
+    }
+
+    const resolved = { ...itemData };
+
+    if (resolved.mediaType === 'episode') {
+      const seasonNumber = resolved.seasonNumber != null ? parseInt(resolved.seasonNumber) : null;
+      const episodeNumber = resolved.episodeNumber != null ? parseInt(resolved.episodeNumber) : null;
+
+      if (!resolved.seriesTitle || !Number.isInteger(seasonNumber) || !Number.isInteger(episodeNumber)) {
+        return resolved;
+      }
+
+      try {
+        const matches = await this.plexDb.searchTVEpisodes(resolved.seriesTitle, seasonNumber, episodeNumber);
+        if (matches && matches.length > 0) {
+          const normalizedSeries = resolved.seriesTitle.toLowerCase().trim();
+          const exactSeriesMatch = matches.find(match => {
+            const candidateSeries = (match.showTitle || match.grandparentTitle || match.season?.show?.title || '').toLowerCase().trim();
+            return candidateSeries === normalizedSeries;
+          });
+
+          const plexEpisode = exactSeriesMatch || matches[0];
+          resolved.plexKey = plexEpisode.ratingKey || resolved.plexKey || null;
+          resolved.title = plexEpisode.title || resolved.title;
+          resolved.seriesTitle = plexEpisode.showTitle || plexEpisode.grandparentTitle || plexEpisode.season?.show?.title || resolved.seriesTitle;
+          resolved.seasonNumber = Number.isInteger(plexEpisode.seasonIndex) ? plexEpisode.seasonIndex : seasonNumber;
+          resolved.episodeNumber = Number.isInteger(plexEpisode.index) ? plexEpisode.index : episodeNumber;
+          resolved.originalArtworkUrl = resolved.originalArtworkUrl || plexEpisode.thumb || plexEpisode.season?.show?.thumb || null;
+          resolved.plexShowFound = true;
+          resolved.isFromTvdbOnly = false;
+
+          console.log(`[ListSync] Resolved episode to Plex metadata: ${resolved.seriesTitle} S${resolved.seasonNumber}E${resolved.episodeNumber} -> ${resolved.title} (${resolved.plexKey})`);
+        }
+      } catch (error) {
+        console.warn(`[ListSync] Failed episode Plex resolution for "${resolved.seriesTitle}" S${seasonNumber}E${episodeNumber}:`, error.message);
+      }
+
+      return resolved;
+    }
+
+    // Movie resolution
+    try {
+      if (resolved.plexKey) {
+        const movieByKey = await this.plexDb.getMovieByRatingKey(resolved.plexKey);
+        if (movieByKey) {
+          resolved.title = movieByKey.title || resolved.title;
+          resolved.originalArtworkUrl = resolved.originalArtworkUrl || movieByKey.thumb || null;
+          resolved.tvdbYear = resolved.tvdbYear || movieByKey.year || null;
+          resolved.isFromTvdbOnly = false;
+          return resolved;
+        }
+      }
+
+      if (resolved.title) {
+        const candidateYear = resolved.tvdbYear != null ? parseInt(resolved.tvdbYear) : null;
+        const matches = await this.plexDb.searchMovies(resolved.title, candidateYear);
+        if (matches && matches.length > 0) {
+          const normalizedTitle = resolved.title.toLowerCase().trim();
+          const exactTitleMatch = matches.find(match => (match.title || '').toLowerCase().trim() === normalizedTitle);
+          const plexMovie = exactTitleMatch || matches[0];
+
+          resolved.plexKey = plexMovie.ratingKey || resolved.plexKey || null;
+          resolved.title = plexMovie.title || resolved.title;
+          resolved.originalArtworkUrl = resolved.originalArtworkUrl || plexMovie.thumb || null;
+          resolved.tvdbYear = resolved.tvdbYear || plexMovie.year || null;
+          resolved.isFromTvdbOnly = false;
+
+          console.log(`[ListSync] Resolved movie to Plex metadata: ${resolved.title} (${resolved.plexKey})`);
+        }
+      }
+    } catch (error) {
+      console.warn(`[ListSync] Failed movie Plex resolution for "${resolved.title}":`, error.message);
+    }
+
+    return resolved;
   }
 
   /**
@@ -166,47 +252,49 @@ class ListScraperService {
    * @returns {Object} - Created CustomOrderItem
    */
   async addItemToOrder(customOrderId, itemData, sortOrder) {
+    const resolvedItem = await this.resolvePlexMetadata(itemData);
+
     return await prisma.customOrderItem.create({
       data: {
         customOrderId,
-        mediaType: itemData.mediaType || 'movie',
-        plexKey: itemData.plexKey || null,
-        title: itemData.title,
-        seasonNumber: itemData.seasonNumber || null,
-        episodeNumber: itemData.episodeNumber || null,
-        seriesTitle: itemData.seriesTitle || null,
+        mediaType: resolvedItem.mediaType || 'movie',
+        plexKey: resolvedItem.plexKey || null,
+        title: resolvedItem.title,
+        seasonNumber: resolvedItem.seasonNumber != null ? parseInt(resolvedItem.seasonNumber) : null,
+        episodeNumber: resolvedItem.episodeNumber != null ? parseInt(resolvedItem.episodeNumber) : null,
+        seriesTitle: resolvedItem.seriesTitle || null,
         sortOrder,
         // Comic fields
-        comicSeries: itemData.comicSeries || null,
-        comicYear: itemData.comicYear || null,
-        comicIssue: itemData.comicIssue || null,
-        comicPublisher: itemData.comicPublisher || null,
-        comicVineId: itemData.comicVineId || null,
-        comicVineDetailsJson: itemData.comicVineDetailsJson || null,
-        comicVineSeriesId: itemData.comicVineSeriesId || null,
-        comicVineIssueId: itemData.comicVineIssueId || null,
-        comicIssueName: itemData.comicIssueName || null,
-        comicDescription: itemData.comicDescription || null,
-        comicCoverDate: itemData.comicCoverDate || null,
-        comicStoreDate: itemData.comicStoreDate || null,
-        comicCreators: itemData.comicCreators || null,
-        comicCharacters: itemData.comicCharacters || null,
-        comicStoryArcs: itemData.comicStoryArcs || null,
+        comicSeries: resolvedItem.comicSeries || null,
+        comicYear: resolvedItem.comicYear || null,
+        comicIssue: resolvedItem.comicIssue || null,
+        comicPublisher: resolvedItem.comicPublisher || null,
+        comicVineId: resolvedItem.comicVineId || null,
+        comicVineDetailsJson: resolvedItem.comicVineDetailsJson || null,
+        comicVineSeriesId: resolvedItem.comicVineSeriesId || null,
+        comicVineIssueId: resolvedItem.comicVineIssueId || null,
+        comicIssueName: resolvedItem.comicIssueName || null,
+        comicDescription: resolvedItem.comicDescription || null,
+        comicCoverDate: resolvedItem.comicCoverDate || null,
+        comicStoreDate: resolvedItem.comicStoreDate || null,
+        comicCreators: resolvedItem.comicCreators || null,
+        comicCharacters: resolvedItem.comicCharacters || null,
+        comicStoryArcs: resolvedItem.comicStoryArcs || null,
         // Artwork
-        originalArtworkUrl: itemData.originalArtworkUrl || null,
+        originalArtworkUrl: resolvedItem.originalArtworkUrl || null,
         // TV/movie metadata
-        tvdbId: itemData.tvdbId || null,
-        tvdbYear: itemData.tvdbYear || null,
-        tvdbOverview: itemData.tvdbOverview || null,
-        tvdbArtworkUrl: itemData.tvdbArtworkUrl || null,
+        tvdbId: resolvedItem.tvdbId || null,
+        tvdbYear: resolvedItem.tvdbYear || null,
+        tvdbOverview: resolvedItem.tvdbOverview || null,
+        tvdbArtworkUrl: resolvedItem.tvdbArtworkUrl || null,
         // Web video
-        webTitle: itemData.webTitle || null,
-        webUrl: itemData.webUrl || null,
-        webDescription: itemData.webDescription || null,
+        webTitle: resolvedItem.webTitle || null,
+        webUrl: resolvedItem.webUrl || null,
+        webDescription: resolvedItem.webDescription || null,
         // Other
-        bookId: itemData.bookId || null,
-        gameId: itemData.gameId || null,
-        isFromTvdbOnly: itemData.isFromTvdbOnly || false
+        bookId: resolvedItem.bookId || null,
+        gameId: resolvedItem.gameId || null,
+        isFromTvdbOnly: resolvedItem.isFromTvdbOnly || false
       }
     });
   }
@@ -257,7 +345,8 @@ class ListScraperService {
           continue;
         }
 
-        const enriched = await matcherService.matchItem(item);
+        const matched = await matcherService.matchItem(item);
+        const enriched = await this.resolvePlexMetadata(matched);
 
         // Not-in-Plex check — stop immediately, track the item, skip remaining
         if ((enriched.mediaType === 'movie' || enriched.mediaType === 'episode') && !enriched.plexKey && !enriched.plexShowFound) {
@@ -472,7 +561,8 @@ class ListScraperService {
 
       for (const item of itemsToProcess) {
         try {
-          const enriched = await matcherService.matchItem(item);
+          const matched = await matcherService.matchItem(item);
+          const enriched = await this.resolvePlexMetadata(matched);
 
           // Not-in-Plex check — stop immediately
           if ((enriched.mediaType === 'movie' || enriched.mediaType === 'episode') && !enriched.plexKey && !enriched.plexShowFound) {

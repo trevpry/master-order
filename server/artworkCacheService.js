@@ -173,6 +173,96 @@ class ArtworkCacheService {
     return extensionMap[extension] || 'image/jpeg';
   }
 
+  async resolveEpisodeArtworkKeys(item, fullItem) {
+    try {
+      // First try direct episode lookup by Plex rating key.
+      if (fullItem?.plexKey) {
+        const episode = await prisma.plexEpisode.findUnique({
+          where: { ratingKey: fullItem.plexKey },
+          select: {
+            seasonRatingKey: true,
+            parentRatingKey: true,
+            grandparentRatingKey: true
+          }
+        });
+
+        if (episode) {
+          return {
+            seasonRatingKey: episode.seasonRatingKey || episode.parentRatingKey || null,
+            showRatingKey: episode.grandparentRatingKey || null
+          };
+        }
+      }
+
+      const parsedSeasonNumber = Number(item?.seasonNumber);
+
+      // Fallback: locate season by series title + season number.
+      if (item?.seriesTitle && Number.isInteger(parsedSeasonNumber)) {
+        const season = await prisma.plexSeason.findFirst({
+          where: {
+            removed: false,
+            index: parsedSeasonNumber,
+            OR: [
+              {
+                parentTitle: {
+                  contains: item.seriesTitle
+                }
+              },
+              {
+                show: {
+                  title: {
+                    contains: item.seriesTitle
+                  },
+                  removed: false
+                }
+              }
+            ]
+          },
+          select: {
+            ratingKey: true,
+            showRatingKey: true
+          }
+        });
+
+        if (season) {
+          return {
+            seasonRatingKey: season.ratingKey || null,
+            showRatingKey: season.showRatingKey || null
+          };
+        }
+      }
+
+      // Last fallback: locate show-level artwork by title only.
+      if (item?.seriesTitle) {
+        const show = await prisma.plexTVShow.findFirst({
+          where: {
+            removed: false,
+            title: {
+              contains: item.seriesTitle
+            }
+          },
+          select: {
+            ratingKey: true
+          }
+        });
+
+        if (show?.ratingKey) {
+          return {
+            seasonRatingKey: null,
+            showRatingKey: show.ratingKey
+          };
+        }
+      }
+    } catch (error) {
+      console.warn(`Failed resolving Plex season/show artwork keys for item ${item?.id}: ${error.message}`);
+    }
+
+    return {
+      seasonRatingKey: null,
+      showRatingKey: null
+    };
+  }
+
   /**
    * Download and cache artwork from URL
    */
@@ -397,9 +487,22 @@ class ArtworkCacheService {
                 console.warn(`Failed to get TVDB artwork for ${item.seriesTitle}: ${error.message}`);
               }
             }
-            
-            // Fallback to Plex episode artwork (typically lower quality)
-            return `${settings.plexUrl}/library/metadata/${fullItem.plexKey}/thumb?X-Plex-Token=${settings.plexToken}`;
+
+            // Second preference: Plex season artwork.
+            const { seasonRatingKey, showRatingKey } = await this.resolveEpisodeArtworkKeys(item, fullItem);
+            if (seasonRatingKey) {
+              console.log(`Using Plex season artwork for ${item.seriesTitle} Season ${item.seasonNumber}`);
+              return `${settings.plexUrl}/library/metadata/${seasonRatingKey}/thumb?X-Plex-Token=${settings.plexToken}`;
+            }
+
+            // Final fallback: show artwork (still avoids episode art as requested).
+            if (showRatingKey) {
+              console.log(`Using Plex show artwork fallback for ${item.seriesTitle}`);
+              return `${settings.plexUrl}/library/metadata/${showRatingKey}/thumb?X-Plex-Token=${settings.plexToken}`;
+            }
+
+            console.warn(`No season/show artwork keys found for episode item ${item.id}`);
+            return null;
           } else {
             // For movies, use Plex movie artwork
             return `${settings.plexUrl}/library/metadata/${fullItem.plexKey}/thumb?X-Plex-Token=${settings.plexToken}`;

@@ -62,6 +62,7 @@ function CustomOrders() {
   const [editingOrder, setEditingOrder] = useState(null);  const [editingItem, setEditingItem] = useState(null);
   const [viewingOrderItems, setViewingOrderItems] = useState(null);
   const [showEpisodeForm, setShowEpisodeForm] = useState(false);
+  const [isEpisodeReplaceMode, setIsEpisodeReplaceMode] = useState(false);
   const [episodeFormData, setEpisodeFormData] = useState({
     series: '',
     season: '',
@@ -558,15 +559,16 @@ function CustomOrders() {
   };
 
   const handleEditItem = (item) => {
+    setIsEpisodeReplaceMode(false);
     setEditingItem(item);
     
     // Set appropriate form data based on item type
     switch (item.mediaType) {
       case 'episode':
         setEpisodeFormData({
-          series: item.series || '',
-          season: item.season || '',
-          episode: item.episode || ''
+          series: item.seriesTitle || item.series || '',
+          season: item.seasonNumber ?? item.season ?? '',
+          episode: item.episodeNumber ?? item.episode ?? ''
         });
         setShowEpisodeForm(true);
         break;
@@ -612,6 +614,17 @@ function CustomOrders() {
     }
   };
 
+  const handleReplaceEpisode = (item) => {
+    setIsEpisodeReplaceMode(true);
+    setEditingItem(item);
+    setEpisodeFormData({
+      series: item.seriesTitle || item.series || '',
+      season: item.seasonNumber ?? item.season ?? '',
+      episode: item.episodeNumber ?? item.episode ?? ''
+    });
+    setShowEpisodeForm(true);
+  };
+
   const handleUpdateItem = async (updatedItemData) => {
     if (!editingItem || !viewingOrderItems) return;
 
@@ -627,6 +640,7 @@ function CustomOrders() {
       if (response.ok) {
         setMessage('Item updated successfully');
         setEditingItem(null);
+        setIsEpisodeReplaceMode(false);
           // Close the appropriate form
         setShowEpisodeForm(false);
         setShowBookForm(false);
@@ -652,6 +666,145 @@ function CustomOrders() {
     } catch (error) {
       console.error('Error updating item:', error);
       setMessage('Error updating item');
+    }
+  };
+
+  const applySequentialSortOrder = async (orderId, orderedItems) => {
+    const updatePromises = orderedItems.map((item, index) =>
+      fetch(`${config.apiBaseUrl}/api/custom-orders/${orderId}/items/${item.id}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          sortOrder: index + 1,
+        }),
+      })
+    );
+
+    await Promise.all(updatePromises);
+  };
+
+  const handleEditEpisodeTitle = async (item) => {
+    const currentTitle = item.title || '';
+    const updatedTitle = window.prompt('Edit episode title:', currentTitle);
+
+    if (updatedTitle === null) {
+      return;
+    }
+
+    const trimmedTitle = updatedTitle.trim();
+    if (!trimmedTitle || trimmedTitle === currentTitle) {
+      return;
+    }
+
+    try {
+      const response = await fetch(`${config.apiBaseUrl}/api/custom-orders/${viewingOrderItems.id}/items/${item.id}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          title: trimmedTitle,
+        }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        setMessage(`Error updating episode title: ${errorData.error}`);
+        return;
+      }
+
+      const updatedOrder = await fetch(`${config.apiBaseUrl}/api/custom-orders/${viewingOrderItems.id}`);
+      const updatedOrderData = await updatedOrder.json();
+      setViewingOrderItems(updatedOrderData);
+      setMessage('Episode title updated successfully');
+    } catch (error) {
+      console.error('Error updating episode title:', error);
+      setMessage('Error updating episode title');
+    }
+  };
+
+  const handleReplaceEpisodeInPlace = async (targetEpisode) => {
+    if (!viewingOrderItems || !editingItem) {
+      return;
+    }
+
+    const orderId = viewingOrderItems.id;
+    const originalItemId = editingItem.id;
+    const sortedCurrentItems = [...(viewingOrderItems.items || [])].sort((a, b) => a.sortOrder - b.sortOrder);
+    const originalIndex = sortedCurrentItems.findIndex(item => item.id === originalItemId);
+
+    if (originalIndex === -1) {
+      setMessage('Unable to determine original episode position for replacement');
+      return;
+    }
+
+    try {
+      const addSuccess = await handleAddMediaToOrder(orderId, targetEpisode, true);
+      if (!addSuccess) {
+        setMessage('Replacement failed: could not add new episode');
+        return;
+      }
+
+      const withNewResponse = await fetch(`${config.apiBaseUrl}/api/custom-orders/${orderId}`);
+      const withNewData = await withNewResponse.json();
+
+      const targetSeries = targetEpisode.grandparentTitle || targetEpisode.seriesTitle || null;
+      const targetSeason = targetEpisode.parentIndex ?? targetEpisode.seasonNumber;
+      const targetEpisodeNumber = targetEpisode.index ?? targetEpisode.episodeNumber;
+
+      const replacementCandidates = (withNewData.items || []).filter(item =>
+        item.id !== originalItemId &&
+        item.mediaType === 'episode' &&
+        item.seriesTitle === targetSeries &&
+        item.seasonNumber === targetSeason &&
+        item.episodeNumber === targetEpisodeNumber
+      );
+
+      const replacementItem = replacementCandidates.sort((a, b) => b.id - a.id)[0];
+      if (!replacementItem) {
+        setMessage('Replacement failed: could not locate new episode after add');
+        return;
+      }
+
+      const removeResponse = await fetch(`${config.apiBaseUrl}/api/custom-orders/${orderId}/items/${originalItemId}`, {
+        method: 'DELETE',
+      });
+
+      if (!removeResponse.ok) {
+        setMessage('Replacement failed: added new episode but could not remove old one');
+        return;
+      }
+
+      const afterDeleteResponse = await fetch(`${config.apiBaseUrl}/api/custom-orders/${orderId}`);
+      const afterDeleteData = await afterDeleteResponse.json();
+      const sortedAfterDeleteItems = [...(afterDeleteData.items || [])].sort((a, b) => a.sortOrder - b.sortOrder);
+
+      const currentReplacementIndex = sortedAfterDeleteItems.findIndex(item => item.id === replacementItem.id);
+      if (currentReplacementIndex === -1) {
+        setMessage('Replacement failed: replacement episode missing after delete');
+        return;
+      }
+
+      const reorderedItems = [...sortedAfterDeleteItems];
+      const [movedReplacement] = reorderedItems.splice(currentReplacementIndex, 1);
+      reorderedItems.splice(Math.max(0, Math.min(originalIndex, reorderedItems.length)), 0, movedReplacement);
+
+      await applySequentialSortOrder(orderId, reorderedItems);
+
+      const finalOrderResponse = await fetch(`${config.apiBaseUrl}/api/custom-orders/${orderId}`);
+      const finalOrderData = await finalOrderResponse.json();
+      setViewingOrderItems(finalOrderData);
+
+      setMessage('Episode replaced successfully');
+      setShowEpisodeForm(false);
+      setEditingItem(null);
+      setIsEpisodeReplaceMode(false);
+      setEpisodeFormData({ series: '', season: '', episode: '' });
+    } catch (error) {
+      console.error('Error replacing episode in place:', error);
+      setMessage('Error replacing episode');
     }
   };
 
@@ -1271,10 +1424,40 @@ function CustomOrders() {
     try {
       // If we're editing an item, update it directly without searching
       if (editingItem) {
+        if (isEpisodeReplaceMode) {
+          const searchQuery = `${episodeFormData.series.trim()}`;
+          const response = await fetch(`${config.apiBaseUrl}/api/search?query=${encodeURIComponent(searchQuery)}&type=tv`);
+
+          if (!response.ok) {
+            setMessage('Error searching for replacement episode');
+            return;
+          }
+
+          const results = await response.json();
+          const targetEpisode = results.find(item => {
+            if (item.type !== 'episode') return false;
+            if (item.parentIndex !== parseInt(episodeFormData.season)) return false;
+            if (item.index !== parseInt(episodeFormData.episode)) return false;
+
+            const seriesInput = episodeFormData.series.toLowerCase().trim();
+            const seriesTitle = item.grandparentTitle.toLowerCase();
+            return seriesTitle.includes(seriesInput) || seriesInput.includes(seriesTitle);
+          });
+
+          if (!targetEpisode) {
+            setMessage(`Replacement episode not found: ${episodeFormData.series} S${episodeFormData.season}E${episodeFormData.episode}`);
+            return;
+          }
+
+          await handleReplaceEpisodeInPlace(targetEpisode);
+          return;
+        }
+
         const updatedItemData = {
-          series: episodeFormData.series.trim(),
-          season: parseInt(episodeFormData.season),
-          episode: parseInt(episodeFormData.episode)
+          seriesTitle: episodeFormData.series.trim(),
+          seasonNumber: parseInt(episodeFormData.season),
+          episodeNumber: parseInt(episodeFormData.episode),
+          isWatched: false
         };
         await handleUpdateItem(updatedItemData);
         return;
@@ -3757,13 +3940,32 @@ const handleSearchComics = async (e) => {
                       </>
                     ) : (
                       <>
-                        <Button
-                          onClick={() => handleEditItem(item)}
-                          className="secondary"
-                          size="small"
-                        >
-                          Edit Item
-                        </Button>
+                        {item.mediaType === 'episode' ? (
+                          <Button
+                            onClick={() => handleEditEpisodeTitle(item)}
+                            className="secondary"
+                            size="small"
+                          >
+                            Edit
+                          </Button>
+                        ) : (
+                          <Button
+                            onClick={() => handleEditItem(item)}
+                            className="secondary"
+                            size="small"
+                          >
+                            Edit Item
+                          </Button>
+                        )}
+                        {item.mediaType === 'episode' && (
+                          <Button
+                            onClick={() => handleReplaceEpisode(item)}
+                            className="secondary"
+                            size="small"
+                          >
+                            Replace
+                          </Button>
+                        )}
                         <Button
                           onClick={() => handleRemoveItem(viewingOrderItems.id, item.id, item.title)}
                           className="danger"
@@ -3898,12 +4100,14 @@ const handleSearchComics = async (e) => {
       <EpisodeFormModal
         show={showEpisodeForm}
         editingItem={editingItem}
+        isReplaceMode={isEpisodeReplaceMode}
         episodeFormData={episodeFormData}
         setEpisodeFormData={setEpisodeFormData}
         episodeSearchLoading={episodeSearchLoading}
         onClose={() => {
           setShowEpisodeForm(false);
           setEditingItem(null);
+          setIsEpisodeReplaceMode(false);
         }}
         onSubmit={handleSearchTVEpisode}
       />      {/* Bulk Import Modal */}

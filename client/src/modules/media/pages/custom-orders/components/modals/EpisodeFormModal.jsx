@@ -4,6 +4,7 @@ import Button from '../../../../../../shared/components/Button';
 const EpisodeFormModal = ({
   show,
   editingItem,
+  isReplaceMode,
   episodeFormData,
   setEpisodeFormData,
   episodeSearchLoading,
@@ -26,7 +27,7 @@ const EpisodeFormModal = ({
     <div className="modal-overlay">
       <div className="modal-content">
         <div className="modal-header">
-          <h3>{editingItem ? 'Edit TV Episode' : 'Add TV Episode'}</h3>
+          <h3>{editingItem ? (isReplaceMode ? 'Replace TV Episode' : 'Edit TV Episode') : 'Add TV Episode'}</h3>
           <Button
             onClick={handleClose}
             className="secondary"
@@ -93,8 +94,8 @@ const EpisodeFormModal = ({
               className="primary"
             >
               {episodeSearchLoading 
-                ? (editingItem ? 'Updating...' : 'Searching...') 
-                : (editingItem ? 'Update Episode' : 'Add Episode')
+                ? (editingItem ? (isReplaceMode ? 'Replacing...' : 'Updating...') : 'Searching...') 
+                : (editingItem ? (isReplaceMode ? 'Replace Episode' : 'Update Episode') : 'Add Episode')
               }
             </Button>
             

@@ -5,6 +5,7 @@
 
 const express = require('express');
 const { extractComicVineMetadata } = require('./utilities/metadataExtractor');
+const PlexDatabaseService = require('../../plexDatabaseService');
 
 /**
  * Create bulk operations routes for custom orders
@@ -15,6 +16,7 @@ const { extractComicVineMetadata } = require('./utilities/metadataExtractor');
 function createBulkOperationsRoutes(prisma, services) {
   const router = express.Router();
   const { artworkCache, bookService } = services;
+  const plexDb = new PlexDatabaseService();
   
   // Import validation and response utilities
   const { validateCustomOrderItem, validateMediaTypeAndTitle } = require('../../middleware/validation');
@@ -88,6 +90,45 @@ function createBulkOperationsRoutes(prisma, services) {
       }
     }
 
+      // Resolve episode imports to real Plex episode metadata when possible.
+      // This prevents placeholder-only episodes from being stored during bulk imports.
+      let finalPlexKey = plexKey || null;
+      let finalTitle = title;
+      let finalSeriesTitle = seriesTitle || null;
+      let finalSeasonNumber = seasonNumber !== undefined ? parseInt(seasonNumber) : null;
+      let finalEpisodeNumber = episodeNumber !== undefined ? parseInt(episodeNumber) : null;
+
+      if (
+        mediaType === 'episode' &&
+        finalSeriesTitle &&
+        Number.isInteger(finalSeasonNumber) &&
+        Number.isInteger(finalEpisodeNumber)
+      ) {
+        try {
+          const matches = await plexDb.searchTVEpisodes(finalSeriesTitle, finalSeasonNumber, finalEpisodeNumber);
+          if (matches && matches.length > 0) {
+            const normalizedSeries = finalSeriesTitle.toLowerCase().trim();
+            const exactMatch = matches.find(match => {
+              const candidateSeries = (match.showTitle || match.grandparentTitle || '').toLowerCase().trim();
+              return candidateSeries === normalizedSeries;
+            });
+
+            const plexEpisode = exactMatch || matches[0];
+            finalPlexKey = plexEpisode.ratingKey || finalPlexKey;
+            finalTitle = plexEpisode.title || finalTitle;
+            finalSeriesTitle = plexEpisode.showTitle || plexEpisode.grandparentTitle || finalSeriesTitle;
+            finalSeasonNumber = Number.isInteger(plexEpisode.seasonIndex) ? plexEpisode.seasonIndex : finalSeasonNumber;
+            finalEpisodeNumber = Number.isInteger(plexEpisode.index) ? plexEpisode.index : finalEpisodeNumber;
+
+            console.log(`Resolved bulk episode to Plex metadata: ${finalSeriesTitle} S${finalSeasonNumber}E${finalEpisodeNumber} -> ${finalTitle} (${finalPlexKey})`);
+          } else {
+            console.log(`No Plex match found for bulk episode ${finalSeriesTitle} S${finalSeasonNumber}E${finalEpisodeNumber}; storing as unresolved placeholder`);
+          }
+        } catch (plexLookupError) {
+          console.warn(`Failed Plex episode resolution for ${finalSeriesTitle} S${finalSeasonNumber}E${finalEpisodeNumber}:`, plexLookupError.message);
+        }
+      }
+
       // Check for duplicate items
       let existingItem;
       
@@ -159,11 +200,11 @@ function createBulkOperationsRoutes(prisma, services) {
           where: {
             customOrderId: parseInt(id),
             mediaType: mediaType,
-            plexKey: plexKey || null,
-            title: title,
-            seriesTitle: seriesTitle || null,
-            seasonNumber: seasonNumber !== undefined ? parseInt(seasonNumber) : null,
-            episodeNumber: episodeNumber !== undefined ? parseInt(episodeNumber) : null
+            plexKey: mediaType === 'episode' ? finalPlexKey : (plexKey || null),
+            title: mediaType === 'episode' ? finalTitle : title,
+            seriesTitle: mediaType === 'episode' ? finalSeriesTitle : (seriesTitle || null),
+            seasonNumber: mediaType === 'episode' ? finalSeasonNumber : (seasonNumber !== undefined ? parseInt(seasonNumber) : null),
+            episodeNumber: mediaType === 'episode' ? finalEpisodeNumber : (episodeNumber !== undefined ? parseInt(episodeNumber) : null)
           }
         });
       }
@@ -172,7 +213,7 @@ function createBulkOperationsRoutes(prisma, services) {
         return res.status(409).json({
           error: 'This item is already in the custom order',
           existingItem: {
-            title: existingItem.title || title || 'This item',
+            title: existingItem.title || (mediaType === 'episode' ? finalTitle : title) || 'This item',
             mediaType: existingItem.mediaType || mediaType
           }
         });
@@ -206,11 +247,11 @@ function createBulkOperationsRoutes(prisma, services) {
         data: {
           customOrderId: parseInt(id),
           mediaType,
-          plexKey: plexKey || null,
-          title,
-          seasonNumber: seasonNumber !== undefined ? parseInt(seasonNumber) : null,
-          episodeNumber: episodeNumber !== undefined ? parseInt(episodeNumber) : null,
-          seriesTitle: seriesTitle || null,
+          plexKey: mediaType === 'episode' ? finalPlexKey : (plexKey || null),
+          title: mediaType === 'episode' ? finalTitle : title,
+          seasonNumber: mediaType === 'episode' ? finalSeasonNumber : (seasonNumber !== undefined ? parseInt(seasonNumber) : null),
+          episodeNumber: mediaType === 'episode' ? finalEpisodeNumber : (episodeNumber !== undefined ? parseInt(episodeNumber) : null),
+          seriesTitle: mediaType === 'episode' ? finalSeriesTitle : (seriesTitle || null),
           sortOrder: nextSortOrder,
           // Comic fields (merge provided fields with extracted ComicVine metadata)
           comicSeries: comicSeries || null,
@@ -322,18 +363,18 @@ function createBulkOperationsRoutes(prisma, services) {
         try {
           const tvdbService = require('../../tvdbService');
           
-          if (mediaType === 'episode' && seriesTitle) {
+          if (mediaType === 'episode' && finalSeriesTitle) {
             // Search for the TV series
-            const searchResults = await tvdbService.searchTVSeries(seriesTitle);
+            const searchResults = await tvdbService.searchTVSeries(finalSeriesTitle);
             if (searchResults && searchResults.length > 0) {
               const seriesData = searchResults[0];
               
               // Get detailed series information
               const seriesDetails = await tvdbService.getTVSeriesDetails(seriesData.tvdb_id);
               if (seriesDetails && seriesDetails.seasons) {
-                const targetSeason = seriesDetails.seasons.find(s => s.number === parseInt(seasonNumber));
+                const targetSeason = seriesDetails.seasons.find(s => s.number === parseInt(finalSeasonNumber));
                 if (targetSeason && targetSeason.episodes) {
-                  const targetEpisode = targetSeason.episodes.find(e => e.number === parseInt(episodeNumber));
+                  const targetEpisode = targetSeason.episodes.find(e => e.number === parseInt(finalEpisodeNumber));
                   if (targetEpisode) {
                     // Update the item with TVDB details
                     await prisma.customOrderItem.update({
