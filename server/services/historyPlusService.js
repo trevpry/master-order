@@ -32,7 +32,7 @@ class HistoryPlusService {
       const day = parseInt(parts[2], 10) || 1;
 
       if (Number.isNaN(year)) return null;
-      return -(year * 10000 + month * 100 + day);
+      return -(year * 10000) + month * 100 + day;
     }
 
     const firstDashIndex = dateString.indexOf('-');

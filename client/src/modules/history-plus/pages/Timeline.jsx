@@ -81,8 +81,9 @@ const Timeline = () => {
       const month = parseInt(parts[1]) || 1;
       const day = parseInt(parts[2]) || 1;
       
-      // For BCE, convert to negative number for sorting (higher BCE numbers = earlier in time)
-      return -(year * 10000 + month * 100 + day);
+      // For BCE, preserve month/day ordering within the same year while keeping
+      // older years earlier in the timeline.
+      return -(year * 10000) + month * 100 + day;
     } else {
       // Handle CE dates (positive years: "YYYY...-MM-DD")
       const firstDashIndex = dateString.indexOf('-');
