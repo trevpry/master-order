@@ -6,7 +6,7 @@ import {
   getExistingEventsCsvReferenceText,
   sanitizeDownloadName
 } from '../utils/existingEventsCsv';
-import { normalizeHistoryPlusAiImportData } from '../utils/aiImportNormalization';
+import { normalizeHistoryPlusAiImportData, parseHistoryPlusAiImportJson } from '../utils/aiImportNormalization';
 
 const CourseAIAssignment = ({ 
   course, 
@@ -254,7 +254,7 @@ const CourseAIAssignment = ({
 
     try {
       console.log('📥 Attempting to parse imported JSON...');
-      const parsedData = JSON.parse(jsonInput);
+      const parsedData = parseHistoryPlusAiImportJson(jsonInput);
       console.log('✅ JSON parsed successfully:', parsedData);
       
       // Validate the structure

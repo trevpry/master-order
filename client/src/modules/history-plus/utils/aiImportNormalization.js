@@ -43,3 +43,70 @@ export const normalizeHistoryPlusAiImportData = (payload) => {
 
   return normalizedPayload;
 };
+
+const repairUnescapedQuotesForKeys = (rawText, keys = []) => {
+  if (typeof rawText !== 'string' || !rawText.trim()) {
+    return rawText;
+  }
+
+  let text = rawText;
+
+  const getNextNonWhitespaceChar = (value, index) => {
+    let i = index;
+    while (i < value.length && /\s/.test(value[i])) {
+      i += 1;
+    }
+    return i < value.length ? value[i] : null;
+  };
+
+  for (const key of keys) {
+    const keyPattern = new RegExp(`\\"${key}\\"\\s*:\\s*\\"`, 'g');
+    let match;
+
+    while ((match = keyPattern.exec(text)) !== null) {
+      const valueStart = match.index + match[0].length;
+      let i = valueStart;
+
+      while (i < text.length) {
+        const ch = text[i];
+
+        if (ch === '\\') {
+          i += 2;
+          continue;
+        }
+
+        if (ch === '"') {
+          const nextChar = getNextNonWhitespaceChar(text, i + 1);
+          const isTerminator = nextChar === ',' || nextChar === '}' || nextChar === ']';
+
+          if (isTerminator) {
+            break;
+          }
+
+          // Unescaped quote inside string content; normalize to single quote.
+          text = `${text.slice(0, i)}'${text.slice(i + 1)}`;
+          keyPattern.lastIndex = i + 1;
+          i += 1;
+          continue;
+        }
+
+        i += 1;
+      }
+    }
+  }
+
+  return text;
+};
+
+export const parseHistoryPlusAiImportJson = (rawText) => {
+  if (typeof rawText !== 'string' || !rawText.trim()) {
+    throw new Error('Please enter valid JSON data');
+  }
+
+  try {
+    return JSON.parse(rawText);
+  } catch (initialParseError) {
+    const repaired = repairUnescapedQuotesForKeys(rawText, ['details', 'description']);
+    return JSON.parse(repaired);
+  }
+};

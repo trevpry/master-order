@@ -6,7 +6,7 @@ import {
   getExistingEventsCsvFileName,
   getExistingEventsCsvReferenceText
 } from '../utils/existingEventsCsv';
-import { normalizeHistoryPlusAiImportData } from '../utils/aiImportNormalization';
+import { normalizeHistoryPlusAiImportData, parseHistoryPlusAiImportJson } from '../utils/aiImportNormalization';
 
 const VideoAIAssignment = ({ 
   video, 
@@ -230,7 +230,7 @@ const VideoAIAssignment = ({
     }
 
     try {
-      const parsedJson = JSON.parse(jsonInput.trim());
+      const parsedJson = parseHistoryPlusAiImportJson(jsonInput.trim());
       
       // Handle both formats: direct Gemini response or wrapped in suggestion object
       let normalizedResponse;
