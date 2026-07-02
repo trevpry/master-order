@@ -6,6 +6,7 @@ import {
   getExistingEventsCsvReferenceText,
   sanitizeDownloadName
 } from '../utils/existingEventsCsv';
+import { normalizeHistoryPlusAiImportData } from '../utils/aiImportNormalization';
 
 const CourseAIAssignment = ({ 
   course, 
@@ -267,9 +268,11 @@ const CourseAIAssignment = ({
         setError('No suggestions found in the imported JSON.');
         return;
       }
+
+      const normalizedData = normalizeHistoryPlusAiImportData(parsedData);
       
       console.log(`✅ Found ${parsedData.suggestions.length} suggestions`);
-      setAiResponse(parsedData);
+      setAiResponse(normalizedData);
       setShowJsonImport(false);
       setShowAIResult(true);
       setError(null);

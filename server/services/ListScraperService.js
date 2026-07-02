@@ -3,6 +3,7 @@ const crypto = require('crypto');
 // Use shared Prisma client to avoid SQLite connection contention
 const { getParser } = require('./parsers/ParserRegistry');
 const PlexDatabaseService = require('../plexDatabaseService');
+const { normalizeTitleForExactMatch } = require('../utils/titleMatching');
 
 const prisma = require('../prismaClient');
 
@@ -34,9 +35,9 @@ class ListScraperService {
       try {
         const matches = await this.plexDb.searchTVEpisodes(resolved.seriesTitle, seasonNumber, episodeNumber);
         if (matches && matches.length > 0) {
-          const normalizedSeries = resolved.seriesTitle.toLowerCase().trim();
+          const normalizedSeries = normalizeTitleForExactMatch(resolved.seriesTitle);
           const exactSeriesMatch = matches.find(match => {
-            const candidateSeries = (match.showTitle || match.grandparentTitle || match.season?.show?.title || '').toLowerCase().trim();
+            const candidateSeries = normalizeTitleForExactMatch(match.showTitle || match.grandparentTitle || match.season?.show?.title || '');
             return candidateSeries === normalizedSeries;
           });
 
@@ -80,17 +81,21 @@ class ListScraperService {
         const candidateYear = resolved.tvdbYear != null ? parseInt(resolved.tvdbYear) : null;
         const matches = await this.plexDb.searchMovies(resolved.title, candidateYear);
         if (matches && matches.length > 0) {
-          const normalizedTitle = resolved.title.toLowerCase().trim();
-          const exactTitleMatch = matches.find(match => (match.title || '').toLowerCase().trim() === normalizedTitle);
-          const plexMovie = exactTitleMatch || matches[0];
+          const normalizedTitle = normalizeTitleForExactMatch(resolved.title);
+          const exactTitleMatch = matches.find(match => normalizeTitleForExactMatch(match.title || '') === normalizedTitle);
 
-          resolved.plexKey = plexMovie.ratingKey || resolved.plexKey || null;
-          resolved.title = plexMovie.title || resolved.title;
-          resolved.originalArtworkUrl = resolved.originalArtworkUrl || plexMovie.thumb || null;
-          resolved.tvdbYear = resolved.tvdbYear || plexMovie.year || null;
-          resolved.isFromTvdbOnly = false;
+          if (exactTitleMatch) {
+            const plexMovie = exactTitleMatch;
+            resolved.plexKey = plexMovie.ratingKey || resolved.plexKey || null;
+            resolved.title = plexMovie.title || resolved.title;
+            resolved.originalArtworkUrl = resolved.originalArtworkUrl || plexMovie.thumb || null;
+            resolved.tvdbYear = resolved.tvdbYear || plexMovie.year || null;
+            resolved.isFromTvdbOnly = false;
 
-          console.log(`[ListSync] Resolved movie to Plex metadata: ${resolved.title} (${resolved.plexKey})`);
+            console.log(`[ListSync] Resolved movie to Plex metadata: ${resolved.title} (${resolved.plexKey})`);
+          } else {
+            console.log(`[ListSync] Plex movie candidates found but exact title mismatch for "${resolved.title}"; skipping Plex resolution`);
+          }
         }
       }
     } catch (error) {

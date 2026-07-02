@@ -51,10 +51,13 @@ const SonosCastButton = ({ currentTrack, isPlaying, onCastStateChange }) => {
       if (matchedDevice) {
         setSelectedDevice(matchedDevice);
         setIsConnected(true);
+        if (onCastStateChange) {
+          onCastStateChange(true, matchedDevice.name, 'sonos', matchedDevice);
+        }
         console.log('🔊 Restored previously selected device:', matchedDevice.name);
       }
     }
-  }, [devices]);
+  }, [devices, selectedDevice, onCastStateChange]);
 
   // Handle device selection
   const handleDeviceSelect = (device) => {

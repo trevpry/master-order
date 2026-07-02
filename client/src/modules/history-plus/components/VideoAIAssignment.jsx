@@ -6,6 +6,7 @@ import {
   getExistingEventsCsvFileName,
   getExistingEventsCsvReferenceText
 } from '../utils/existingEventsCsv';
+import { normalizeHistoryPlusAiImportData } from '../utils/aiImportNormalization';
 
 const VideoAIAssignment = ({ 
   video, 
@@ -251,6 +252,8 @@ const VideoAIAssignment = ({
       } else {
         throw new Error('Invalid JSON format: missing action field');
       }
+
+      normalizedResponse = normalizeHistoryPlusAiImportData(normalizedResponse);
       
       // Set the AI response as if it came from the API
       setAiResponse(normalizedResponse);

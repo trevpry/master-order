@@ -57,6 +57,8 @@ async function discoverSonosDevices() {
               // Extract AVTransport control URL from device description
               const avtMatch = xml.match(/<serviceType>urn:schemas-upnp-org:service:AVTransport:1<\/serviceType>[\s\S]*?<controlURL>([^<]+)<\/controlURL>/);
               const avTransportControl = avtMatch?.[1];
+              const renderingMatch = xml.match(/<serviceType>urn:schemas-upnp-org:service:RenderingControl:1<\/serviceType>[\s\S]*?<controlURL>([^<]+)<\/controlURL>/);
+              const renderingControl = renderingMatch?.[1];
               
               if (roomName && uuid && avTransportControl) {
                 // Extract base URL (protocol + host + port only, no path)
@@ -71,7 +73,8 @@ async function discoverSonosDevices() {
                   host: rinfo.address,
                   baseUrl,
                   location,
-                  avTransportControl: baseUrl + avTransportControl
+                  avTransportControl: baseUrl + avTransportControl,
+                  renderingControl: renderingControl ? baseUrl + renderingControl : null
                 });
                 console.log('🔊 Found SONOS device:', roomName, 'Control URL:', baseUrl + avTransportControl);
               }
@@ -349,8 +352,9 @@ router.post('/volume', async (req, res) => {
       return res.status(400).json({ error: 'Device missing base URL' });
     }
     
-    // RenderingControl service uses a different control URL
-    const renderingControlUrl = `${device.baseUrl}/MediaRenderer/RenderingControl/Control`;
+    // Prefer the discovered RenderingControl URL for this device.
+    // Fallback keeps compatibility with older cached entries.
+    const renderingControlUrl = device.renderingControl || `${device.baseUrl}/MediaRenderer/RenderingControl/Control`;
     
     console.log('🔊 Setting SONOS volume:', { device: device.name, volume: volumeValue });
     

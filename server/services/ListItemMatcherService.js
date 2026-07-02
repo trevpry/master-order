@@ -2,6 +2,7 @@ const prisma = require('../prismaClient');
 const cheerio = require('cheerio');
 const openLibraryService = require('../openLibraryService');
 const BookService = require('./BookService');
+const { normalizeTitleForExactMatch } = require('../utils/titleMatching');
 
 class ListItemMatcherService {
   constructor(tvdbService = null) {
@@ -203,7 +204,7 @@ class ListItemMatcherService {
    * Match against local Plex movie library
    */
   async searchPlexMovie(title, year) {
-    const normalizedTitle = title.toLowerCase().trim();
+    const normalizedTitle = normalizeTitleForExactMatch(title);
 
     // Exact match first
     let movie = await prisma.plexMovie.findFirst({
@@ -215,45 +216,33 @@ class ListItemMatcherService {
     });
     if (movie) return movie;
 
-    // Case-insensitive search
+    // Case-insensitive exact-title search only (no substring/fuzzy matches)
     const movies = await prisma.plexMovie.findMany({
       where: { removed: false },
       select: { id: true, ratingKey: true, title: true, year: true, thumb: true }
     });
 
-    // Score matches
-    let bestMatch = null;
-    let bestScore = 0;
-
     for (const m of movies) {
-      const mTitle = m.title.toLowerCase().trim();
-      let score = 0;
-
-      if (mTitle === normalizedTitle) {
-        score = 1.0;
-      } else if (mTitle.includes(normalizedTitle) || normalizedTitle.includes(mTitle)) {
-        score = 0.7;
+      const mTitle = normalizeTitleForExactMatch(m.title);
+      if (mTitle !== normalizedTitle) {
+        continue;
       }
 
-      // Year boost
-      if (score > 0 && year && m.year === parseInt(year)) {
-        score += 0.2;
+      if (year && m.year !== parseInt(year)) {
+        continue;
       }
 
-      if (score > bestScore) {
-        bestScore = score;
-        bestMatch = m;
-      }
+      return m;
     }
 
-    return bestScore >= 0.7 ? bestMatch : null;
+    return null;
   }
 
   /**
    * Match against local Plex TV show library
    */
   async searchPlexTVShow(title, year) {
-    const normalizedTitle = title.toLowerCase().trim();
+    const normalizedTitle = normalizeTitleForExactMatch(title);
 
     const totalShows = await prisma.plexTVShow.count({ where: { removed: false } });
     console.log(`[ListSync] searchPlexTVShow: searching "${title}" among ${totalShows} active shows`);
@@ -276,7 +265,7 @@ class ListItemMatcherService {
       select: { id: true, ratingKey: true, title: true, year: true, thumb: true }
     });
 
-    if (show && (show.title || '').toLowerCase().trim() === normalizedTitle) {
+    if (show && normalizeTitleForExactMatch(show.title) === normalizedTitle) {
       return show;
     }
 
@@ -288,7 +277,7 @@ class ListItemMatcherService {
       select: { id: true, ratingKey: true, title: true, year: true, thumb: true }
     });
 
-    return exactCaseInsensitive.find(s => (s.title || '').toLowerCase().trim() === normalizedTitle) || null;
+    return exactCaseInsensitive.find(s => normalizeTitleForExactMatch(s.title) === normalizedTitle) || null;
   }
 
   /**
@@ -296,7 +285,7 @@ class ListItemMatcherService {
    */
   async searchPlexEpisode(seriesTitle, seasonNumber, episodeNumber) {
     try {
-      const normalizedTitle = seriesTitle.toLowerCase().trim();
+      const normalizedTitle = normalizeTitleForExactMatch(seriesTitle);
 
       // Try exact title match first
       let episode = await prisma.plexEpisode.findFirst({
@@ -319,7 +308,7 @@ class ListItemMatcherService {
       });
       if (episode) return episode;
 
-      // Fuzzy: search all episodes with matching season/episode numbers and score by show title
+      // Strict fallback: search all episodes with matching season/episode numbers and keep exact normalized show-title matches only.
       const candidates = await prisma.plexEpisode.findMany({
         where: {
           seasonIndex: parseInt(seasonNumber),
@@ -337,7 +326,7 @@ class ListItemMatcherService {
       });
 
       for (const ep of candidates) {
-        const showTitle = (ep.season?.show?.title || '').toLowerCase().trim();
+        const showTitle = normalizeTitleForExactMatch(ep.season?.show?.title || '');
         if (showTitle === normalizedTitle) {
           return ep;
         }
@@ -671,35 +660,24 @@ class ListItemMatcherService {
   pickBestTvdbMatch(results, searchTitle, searchYear) {
     if (!results || results.length === 0) return null;
 
-    const normalized = searchTitle.toLowerCase().trim();
+    const normalized = normalizeTitleForExactMatch(searchTitle);
 
-    let best = null;
-    let bestScore = 0;
+    const exactMatches = results.filter((r) => {
+      const name = normalizeTitleForExactMatch(r.name || '');
+      return name === normalized;
+    });
 
-    for (const r of results) {
-      const name = (r.name || '').toLowerCase().trim();
-      let score = 0;
-
-      if (name === normalized) {
-        score = 1.0;
-      } else if (name.includes(normalized) || normalized.includes(name)) {
-        score = 0.6;
-      } else {
-        continue;
-      }
-
-      if (searchYear && r.year === searchYear) {
-        score += 0.3;
-      }
-
-      if (score > bestScore) {
-        bestScore = score;
-        best = r;
-      }
+    if (exactMatches.length === 0) {
+      return null;
     }
 
-    // If no strong match, return the first result
-    return best || results[0];
+    if (!searchYear) {
+      return exactMatches[0];
+    }
+
+    const searchYearInt = parseInt(searchYear);
+    const yearExact = exactMatches.find((r) => parseInt(r.year) === searchYearInt);
+    return yearExact || exactMatches[0];
   }
 
   /**
