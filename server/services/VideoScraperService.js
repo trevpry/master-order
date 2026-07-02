@@ -163,6 +163,31 @@ class VideoScraperService {
   }
 
   /**
+   * Extract canonical YouTube video ID from common URL formats.
+   */
+  extractYouTubeVideoId(url) {
+    if (!url || typeof url !== 'string') {
+      return null;
+    }
+
+    const patterns = [
+      /(?:youtu\.be\/)([a-zA-Z0-9_-]{11})(?:[?&].*)?/,
+      /(?:youtube\.com\/watch\?.*v=)([a-zA-Z0-9_-]{11})(?:[&].*)?/,
+      /(?:youtube\.com\/embed\/)([a-zA-Z0-9_-]{11})(?:[?&].*)?/,
+      /(?:youtube\.com\/shorts\/)([a-zA-Z0-9_-]{11})(?:[?&].*)?/
+    ];
+
+    for (const pattern of patterns) {
+      const match = url.match(pattern);
+      if (match && match[1]) {
+        return match[1];
+      }
+    }
+
+    return null;
+  }
+
+  /**
    * SAFE database sequence diagnostic - READ-ONLY analysis of sequence state
    * This addresses production-specific unique constraint errors on the id field
    * GUARANTEED ZERO DATA LOSS - only reads, never modifies data
@@ -1418,6 +1443,37 @@ class VideoScraperService {
       let videosSkipped = 0;
       let errors = 0;
 
+      // Build an in-memory index of existing YouTube videos so deleted videos do not get re-added
+      // even when URL format differs (youtu.be vs youtube.com/watch, etc.).
+      const existingYoutubeVideos = await this.prisma.historyVideo.findMany({
+        where: {
+          OR: [
+            { url: { contains: 'youtube.com' } },
+            { url: { contains: 'youtu.be' } }
+          ]
+        },
+        select: {
+          id: true,
+          url: true,
+          deleted: true
+        }
+      });
+
+      const existingNormalizedUrls = new Set();
+      const existingByVideoId = new Map();
+
+      for (const existing of existingYoutubeVideos) {
+        const normalized = this.normalizeYouTubeURL(existing.url);
+        if (normalized) {
+          existingNormalizedUrls.add(normalized);
+        }
+
+        const existingVideoId = this.extractYouTubeVideoId(existing.url);
+        if (existingVideoId && !existingByVideoId.has(existingVideoId)) {
+          existingByVideoId.set(existingVideoId, existing);
+        }
+      }
+
       // Process each video URL
       for (let i = 0; i < videoUrls.length; i++) {
         const videoUrl = videoUrls[i];
@@ -1425,11 +1481,12 @@ class VideoScraperService {
         try {
           // Normalize the video URL to prevent duplicates with different URL formats
           const normalizedVideoUrl = this.normalizeYouTubeURL(videoUrl);
+          const scrapedVideoId = this.extractYouTubeVideoId(normalizedVideoUrl || videoUrl);
           
-          // Check if video already exists in database using normalized URL
-          const existingVideo = await this.prisma.historyVideo.findUnique({
-            where: { url: normalizedVideoUrl }
-          });
+          // Skip when URL or video ID already exists (including soft-deleted records).
+          const existingVideo = existingNormalizedUrls.has(normalizedVideoUrl)
+            ? true
+            : (scrapedVideoId && existingByVideoId.has(scrapedVideoId));
 
           if (existingVideo) {
             console.log(`⏭️ Video already exists (normalized): ${normalizedVideoUrl}`);
@@ -1479,6 +1536,11 @@ class VideoScraperService {
                 channelId: channel ? channel.id : null
               }
             });
+
+            existingNormalizedUrls.add(normalizedVideoUrl);
+            if (scrapedVideoId && !existingByVideoId.has(scrapedVideoId)) {
+              existingByVideoId.set(scrapedVideoId, { url: normalizedVideoUrl, deleted: false });
+            }
             videosAdded++;
           } catch (createError) {
             // Handle unique constraint errors (likely database sequence corruption)
