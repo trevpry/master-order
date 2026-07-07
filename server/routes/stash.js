@@ -9084,6 +9084,8 @@ router.get('/clips', asyncHandler(async (req, res) => {
   const limit = parseInt(req.query.limit) || parseInt(req.query.perPage) || 20;
   const search = req.query.search || '';
   const watchStatus = req.query.watched; // 'true', 'false', or undefined for all
+  const ratingFilter = req.query.rating; // '1'..'5' or 'unrated'
+  const includeHigherRatings = req.query.includeHigherRatings === 'true';
   const tags = req.query.tags; // comma-separated tag IDs
   const sortBy = req.query.sortBy || 'createdAt';
   const sortDirection = (req.query.sortDirection || 'desc').toLowerCase(); // Ensure lowercase for Prisma
@@ -9106,10 +9108,24 @@ router.get('/clips', asyncHandler(async (req, res) => {
   if (watchStatus !== undefined) {
     where.watched = watchStatus === 'true';
   }
+
+  // Add clip star rating filter
+  if (ratingFilter !== undefined && ratingFilter !== '') {
+    if (ratingFilter === 'unrated') {
+      where.rating = null;
+    } else {
+      const parsedRating = parseInt(ratingFilter, 10);
+      if (!isNaN(parsedRating) && parsedRating >= 1 && parsedRating <= 5) {
+        where.rating = includeHigherRatings
+          ? { gte: parsedRating }
+          : parsedRating;
+      }
+    }
+  }
   
   // Add tag filter
   if (tags) {
-    const tagIds = tags.split(',').map(id => id.trim()).filter(id => id && !isNaN(parseInt(id)));
+    const tagIds = tags.split(',').map(id => id.trim()).filter(Boolean);
     if (tagIds.length > 0) {
       where.tags = {
         some: {
@@ -9151,6 +9167,7 @@ router.get('/clips', asyncHandler(async (req, res) => {
         select: {
           id: true,
           title: true,
+          path: true,
           duration: true,
           performers: {
             select: {
@@ -9196,42 +9213,216 @@ router.get('/clips', asyncHandler(async (req, res) => {
 // NOTE: This route MUST come before /clips/:id to avoid matching "next" as an ID parameter
 router.get('/clips/next', asyncHandler(async (req, res) => {
   console.log('🎲 Getting next clip for continuous playback...');
-  
-  // Get a random scene with some randomness factors
-  const totalScenes = await prisma.stashScene.count();
-  
-  if (totalScenes === 0) {
-    return sendBadRequest(res, 'No scenes found in database');
-  }
-  
-  // Generate random offset to get different scene each time
-  const randomOffset = Math.floor(Math.random() * totalScenes);
-  
-  const selectedScene = await prisma.stashScene.findFirst({
-    skip: randomOffset,
-    include: {
-      performers: {
-        include: {
-          performer: {
-            select: {
-              name: true
+
+  const search = req.query.search || '';
+  const watchStatus = req.query.watched; // 'true', 'false', or undefined
+  const ratingFilter = req.query.rating; // '1'..'5' or 'unrated'
+  const includeHigherRatings = req.query.includeHigherRatings === 'true';
+  const tags = req.query.tags; // comma-separated tag IDs
+  const hasClipFilters = Boolean(search || watchStatus !== undefined || ratingFilter || tags);
+
+  const clipDetailInclude = {
+    scene: {
+      select: {
+        id: true,
+        title: true,
+        path: true,
+        duration: true,
+        studio: true,
+        performers: {
+          include: {
+            performer: {
+              select: {
+                id: true,
+                name: true,
+                image: true,
+                disambiguation: true,
+                favorite: true,
+                url: true
+              }
+            }
+          }
+        },
+        tags: {
+          include: {
+            tag: {
+              include: {
+                parentTags: {
+                  include: {
+                    parentTag: {
+                      select: {
+                        id: true,
+                        name: true
+                      }
+                    }
+                  }
+                },
+                childTags: {
+                  include: {
+                    childTag: {
+                      select: {
+                        id: true,
+                        name: true
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        studioObject: {
+          select: {
+            id: true,
+            name: true,
+            url: true,
+            image: true
+          }
+        }
+      }
+    },
+    tags: {
+      include: {
+        tag: {
+          include: {
+            parentTags: {
+              include: {
+                parentTag: {
+                  select: {
+                    id: true,
+                    name: true
+                  }
+                }
+              }
+            },
+            childTags: {
+              include: {
+                childTag: {
+                  select: {
+                    id: true,
+                    name: true
+                  }
+                }
+              }
             }
           }
         }
       }
     }
-  });
-  
-  if (!selectedScene) {
-    return sendBadRequest(res, 'No scene found');
+  };
+
+  let selectedClip;
+  let selectedScene = null;
+
+  if (hasClipFilters) {
+    const filteredWhere = {};
+
+    if (search) {
+      filteredWhere.scene = {
+        title: {
+          contains: search
+        }
+      };
+    }
+
+    if (watchStatus !== undefined) {
+      filteredWhere.watched = watchStatus === 'true';
+    }
+
+    if (ratingFilter !== undefined && ratingFilter !== '') {
+      if (ratingFilter === 'unrated') {
+        filteredWhere.rating = null;
+      } else {
+        const parsedRating = parseInt(ratingFilter, 10);
+        if (!isNaN(parsedRating) && parsedRating >= 1 && parsedRating <= 5) {
+          filteredWhere.rating = includeHigherRatings
+            ? { gte: parsedRating }
+            : parsedRating;
+        }
+      }
+    }
+
+    if (tags) {
+      const tagIds = tags.split(',').map(id => id.trim()).filter(Boolean);
+      if (tagIds.length > 0) {
+        filteredWhere.tags = {
+          some: {
+            tagId: {
+              in: tagIds
+            }
+          }
+        };
+      }
+    }
+
+    const filteredClips = await prisma.stashClip.findMany({
+      where: filteredWhere,
+      select: {
+        id: true,
+        watched: true
+      }
+    });
+
+    if (filteredClips.length === 0) {
+      return sendBadRequest(res, 'No clips match the current filters');
+    }
+
+    let clipPool = filteredClips;
+    if (watchStatus === undefined) {
+      const unwatchedClips = filteredClips.filter((clip) => !clip.watched);
+      if (unwatchedClips.length > 0) {
+        clipPool = unwatchedClips;
+      }
+    }
+
+    const randomClip = clipPool[Math.floor(Math.random() * clipPool.length)];
+    selectedClip = await prisma.stashClip.findUnique({
+      where: { id: randomClip.id },
+      include: clipDetailInclude
+    });
+
+    if (!selectedClip) {
+      return sendBadRequest(res, 'Failed to load filtered clip details');
+    }
+
+    selectedScene = selectedClip.scene || null;
+    console.log(`🎯 Selected filtered clip ${selectedClip.clipIndex + 1} from scene: ${selectedClip.scene?.title || selectedClip.sceneId}`);
   }
   
-  console.log(`🎬 Selected scene: ${selectedScene.title} (${selectedScene.performers.map(p => p.performer.name).join(', ')})`);
+  if (!selectedClip) {
+    // Get a random scene with some randomness factors
+    const totalScenes = await prisma.stashScene.count();
+    
+    if (totalScenes === 0) {
+      return sendBadRequest(res, 'No scenes found in database');
+    }
+    
+    // Generate random offset to get different scene each time
+    const randomOffset = Math.floor(Math.random() * totalScenes);
+    
+    selectedScene = await prisma.stashScene.findFirst({
+      skip: randomOffset,
+      include: {
+        performers: {
+          include: {
+            performer: {
+              select: {
+                name: true
+              }
+            }
+          }
+        }
+      }
+    });
+    
+    if (!selectedScene) {
+      return sendBadRequest(res, 'No scene found');
+    }
+    
+    console.log(`🎬 Selected scene: ${selectedScene.title} (${selectedScene.performers.map(p => p.performer.name).join(', ')})`);
   
-  let selectedClip;
-  
-  // Check if scene has existing clips
-  const existingClips = await prisma.stashClip.findMany({
+    // Check if scene has existing clips
+    const existingClips = await prisma.stashClip.findMany({
     where: { sceneId: selectedScene.id },
     include: {
       scene: {
@@ -9296,7 +9487,7 @@ router.get('/clips/next', asyncHandler(async (req, res) => {
     }
   });
   
-  if (existingClips.length > 0) {
+    if (existingClips.length > 0) {
     // Filter for unwatched clips
     const unwatchedClips = existingClips.filter(clip => !clip.watched);
     
@@ -9321,7 +9512,7 @@ router.get('/clips/next', asyncHandler(async (req, res) => {
       selectedClip.watched = false;
       console.log(`♻️ Reset ${existingClips.length} clips for scene: ${selectedScene.title}, selected clip ${selectedClip.clipIndex + 1}`);
     }
-  } else {
+    } else {
     // Scene has no clips - generate them
     const clipDuration = 60; // 1 minute clips
     
@@ -9335,10 +9526,25 @@ router.get('/clips/next', asyncHandler(async (req, res) => {
       });
     }
     
-    // Bulk create clips
-    await prisma.stashClip.createMany({
-      data: clipsToCreate
-    });
+    // SQLite in this environment does not support createMany skipDuplicates, so create clips idempotently via upsert.
+    for (const clipData of clipsToCreate) {
+      await retryDatabaseOperation(async () => {
+        await prisma.stashClip.upsert({
+          where: {
+            sceneId_clipIndex: {
+              sceneId: clipData.sceneId,
+              clipIndex: clipData.clipIndex
+            }
+          },
+          update: {
+            startTime: clipData.startTime,
+            endTime: clipData.endTime,
+            duration: clipData.duration
+          },
+          create: clipData
+        });
+      }, 5, 500);
+    }
     
     console.log('✨ Created clips for scene:', {
       sceneId: selectedScene.id,
@@ -9350,7 +9556,7 @@ router.get('/clips/next', asyncHandler(async (req, res) => {
     const randomClipIndex = Math.floor(Math.random() * clipsToCreate.length);
     console.log('🎲 Selecting random clip with index:', randomClipIndex);
     
-    selectedClip = await prisma.stashClip.findFirst({
+      selectedClip = await prisma.stashClip.findFirst({
       where: { 
         sceneId: selectedScene.id,
         clipIndex: randomClipIndex
@@ -9446,7 +9652,8 @@ router.get('/clips/next', asyncHandler(async (req, res) => {
       }
     });
     
-    console.log(`✅ Generated ${clipsToCreate.length} optimized clips for scene: ${selectedScene.title}, selected clip ${randomClipIndex + 1}`);
+      console.log(`✅ Generated ${clipsToCreate.length} optimized clips for scene: ${selectedScene.title}, selected clip ${randomClipIndex + 1}`);
+    }
   }
   
   // Verify we have a valid clip

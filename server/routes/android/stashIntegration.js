@@ -7,6 +7,28 @@ const express = require('express');
 const fetch = require('node-fetch');
 const { getAndroidApiBaseUrl, createAndroidResponse, createAndroidErrorResponse } = require('./utilities/androidHelpers');
 
+const CLIP_FILTER_QUERY_KEYS = ['search', 'watched', 'rating', 'includeHigherRatings', 'tags'];
+
+function buildClipFilterQueryString(query = {}) {
+  const params = new URLSearchParams();
+
+  CLIP_FILTER_QUERY_KEYS.forEach((key) => {
+    const value = query[key];
+    if (value === undefined || value === null) {
+      return;
+    }
+
+    const normalized = String(value).trim();
+    if (!normalized) {
+      return;
+    }
+
+    params.set(key, normalized);
+  });
+
+  return params.toString();
+}
+
 /**
  * Create Stash integration routes for Android app
  * @param {PrismaClient} prisma - Database client instance
@@ -15,6 +37,76 @@ const { getAndroidApiBaseUrl, createAndroidResponse, createAndroidErrorResponse 
  */
 function createStashIntegrationRoutes(prisma, io) {
   const router = express.Router();
+
+  // Get clip filter options for Android UI parity with web clips page
+  router.get('/stash/clips/filter-options', async (req, res) => {
+    console.log('📱 Android app requesting Stash clip filter options...');
+
+    try {
+      const baseUrl = getAndroidApiBaseUrl();
+      const tagsResponse = await fetch(`${baseUrl}/api/stash/clips/tags`);
+
+      if (!tagsResponse.ok) {
+        const errorText = await tagsResponse.text();
+        console.error('❌ Failed to fetch clip tag filter options:', errorText);
+        return res.status(500).json(createAndroidErrorResponse(
+          'STASH_CLIP_FILTER_OPTIONS_ERROR',
+          'FAILED_TO_FETCH_CLIP_TAGS',
+          errorText
+        ));
+      }
+
+      const tagsData = await tagsResponse.json();
+      const tags = tagsData?.success ? (tagsData.data || []) : [];
+
+      return res.json(createAndroidResponse('STASH_CLIP_FILTER_OPTIONS', {
+        search: {
+          enabled: true,
+          queryParam: 'search'
+        },
+        watched: {
+          queryParam: 'watched',
+          options: [
+            { value: 'all', label: 'All clips' },
+            { value: 'true', label: 'Played' },
+            { value: 'false', label: 'Unplayed' }
+          ]
+        },
+        rating: {
+          queryParam: 'rating',
+          options: [
+            { value: 'all', label: 'All ratings' },
+            { value: '5', label: '5 stars' },
+            { value: '4', label: '4 stars' },
+            { value: '3', label: '3 stars' },
+            { value: '2', label: '2 stars' },
+            { value: '1', label: '1 star' },
+            { value: 'unrated', label: 'Unrated' }
+          ],
+          includeHigherRatings: {
+            queryParam: 'includeHigherRatings',
+            supported: true
+          }
+        },
+        tags: {
+          queryParam: 'tags',
+          format: 'comma-separated tag IDs',
+          options: tags.map((tag) => ({
+            id: tag.id,
+            name: tag.name,
+            favorite: Boolean(tag.favorite)
+          }))
+        }
+      }));
+    } catch (error) {
+      console.error('❌ Error returning Android clip filter options:', error);
+      return res.status(500).json(createAndroidErrorResponse(
+        'STASH_CLIP_FILTER_OPTIONS_ERROR',
+        'INTERNAL_ERROR',
+        error.message
+      ));
+    }
+  });
 
   // Get Random Stash Images
   router.get('/stash/images', async (req, res) => {
@@ -140,7 +232,10 @@ function createStashIntegrationRoutes(prisma, io) {
     
     try {
       const baseUrl = getAndroidApiBaseUrl();
-      const fetchUrl = `${baseUrl}/api/stash/clips/next`;
+      const filterQueryString = buildClipFilterQueryString(req.query);
+      const fetchUrl = filterQueryString
+        ? `${baseUrl}/api/stash/clips/next?${filterQueryString}`
+        : `${baseUrl}/api/stash/clips/next`;
       
       console.log('🌐 Fetching clip from URL:', fetchUrl);
       
@@ -372,6 +467,35 @@ function createStashIntegrationRoutes(prisma, io) {
       res.status(500).json(createAndroidErrorResponse(
         'STASH_CONTENT_ERROR',
         'Failed to get next Stash content',
+        error.message
+      ));
+    }
+  });
+
+  // Get next Stash clip from filtered pool (same filters as web clips page)
+  router.get('/stash/next/filtered', async (req, res) => {
+    console.log('📱 Android app requesting filtered next Stash clip...');
+
+    const filterQueryString = buildClipFilterQueryString(req.query);
+    if (!filterQueryString) {
+      return res.status(400).json(createAndroidErrorResponse(
+        'STASH_FILTERED_CLIP_ERROR',
+        'FILTERS_REQUIRED',
+        'Provide at least one filter: search, watched, rating, includeHigherRatings, or tags'
+      ));
+    }
+
+    try {
+      const baseUrl = getAndroidApiBaseUrl();
+      // Reuse the existing Android PLAY_CLIP response by delegating to /stash/next with same filters
+      const delegatedResponse = await fetch(`${baseUrl}/api/android/stash/next?${filterQueryString}`);
+      const delegatedJson = await delegatedResponse.json();
+      return res.status(delegatedResponse.status).json(delegatedJson);
+    } catch (error) {
+      console.error('❌ Error in Android filtered Stash next endpoint:', error);
+      return res.status(500).json(createAndroidErrorResponse(
+        'STASH_FILTERED_CLIP_ERROR',
+        'INTERNAL_ERROR',
         error.message
       ));
     }

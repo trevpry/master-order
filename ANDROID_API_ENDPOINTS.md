@@ -286,6 +286,117 @@ If full scene metadata cannot be loaded (e.g., transient DB issue) the `scene` f
 
 ---
 
+### Android Stash Clip Filters And Filtered Clip Play
+
+These endpoints provide Android parity with the web Clips page filter model.
+
+#### Filter Query Parameters
+
+The following optional query params are supported by Android clip playback endpoints:
+
+- `search`: Scene title text search
+- `watched`: `true` or `false`
+- `rating`: `1`..`5` or `unrated`
+- `includeHigherRatings`: `true` (used with numeric `rating`)
+- `tags`: Comma-separated tag IDs (example: `tag-a,tag-b`)
+
+#### Get Clip Filter Options
+
+**Endpoint**: `GET /api/android/stash/clips/filter-options`
+
+**Description**: Returns the supported clip filter schema and available clip tag options for Android UI rendering.
+
+**Success Response**:
+```json
+{
+  "type": "STASH_CLIP_FILTER_OPTIONS",
+  "data": {
+    "search": {
+      "enabled": true,
+      "queryParam": "search"
+    },
+    "watched": {
+      "queryParam": "watched",
+      "options": [
+        { "value": "all", "label": "All clips" },
+        { "value": "true", "label": "Played" },
+        { "value": "false", "label": "Unplayed" }
+      ]
+    },
+    "rating": {
+      "queryParam": "rating",
+      "options": [
+        { "value": "all", "label": "All ratings" },
+        { "value": "5", "label": "5 stars" },
+        { "value": "4", "label": "4 stars" },
+        { "value": "3", "label": "3 stars" },
+        { "value": "2", "label": "2 stars" },
+        { "value": "1", "label": "1 star" },
+        { "value": "unrated", "label": "Unrated" }
+      ],
+      "includeHigherRatings": {
+        "queryParam": "includeHigherRatings",
+        "supported": true
+      }
+    },
+    "tags": {
+      "queryParam": "tags",
+      "format": "comma-separated tag IDs",
+      "options": [
+        { "id": "tag-uuid-1", "name": "Action", "favorite": false }
+      ]
+    }
+  }
+}
+```
+
+#### Get Next Clip (Now Supports Filters)
+
+**Endpoint**: `GET /api/android/stash/next`
+
+**Description**: Existing Android clip-play endpoint. Now accepts the same optional filter query params listed above and plays from the filtered pool when provided.
+
+**Example**:
+```bash
+curl "http://localhost:3001/api/android/stash/next?watched=false&rating=4&includeHigherRatings=true&tags=tag-uuid-1"
+```
+
+**Response Type**: `PLAY_CLIP` (same structure as existing clip playback response).
+
+#### Get Next Clip (Filters Required)
+
+**Endpoint**: `GET /api/android/stash/next/filtered`
+
+**Description**: Dedicated filtered clip-play endpoint. Requires at least one filter query parameter.
+
+**Validation**:
+- Returns `400` when no filter params are provided.
+
+**Example**:
+```bash
+curl "http://localhost:3001/api/android/stash/next/filtered?search=studio%20title&watched=false&rating=unrated"
+```
+
+**Response Type**: `PLAY_CLIP`
+
+**Error Example (No Filters)**:
+```json
+{
+  "type": "STASH_FILTERED_CLIP_ERROR",
+  "data": {
+    "success": false,
+    "error": "FILTERS_REQUIRED",
+    "message": "Provide at least one filter: search, watched, rating, includeHigherRatings, or tags"
+  }
+}
+```
+
+Notes:
+- `GET /api/android/stash/next/filtered` uses the same clip selection logic as `GET /api/android/stash/next` with filters applied.
+- Clip selection remains randomized within the matching filtered pool.
+
+---
+
 ### Stash Tag Hierarchy & Management (Android Only)
 
 Provides hierarchical tag data plus basic create/delete operations for Stash tags.

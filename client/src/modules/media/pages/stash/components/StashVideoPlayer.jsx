@@ -28,13 +28,30 @@ const StashVideoPlayer = ({
   setAutoSkipRetries,
   connectionStatus,
   mixedMode,
-  MAX_AUTO_SKIP_RETRIES
+  MAX_AUTO_SKIP_RETRIES,
+  clipsNextQueryString = ''
 }) => {
   // State for pause overlay
   const [showPauseOverlay, setShowPauseOverlay] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const [expandedPauseTags, setExpandedPauseTags] = useState(new Set());
   const [showClipTagManager, setShowClipTagManager] = useState(false);
+
+  const nextClipUrl = `${config.apiBaseUrl}/api/stash/clips/next${clipsNextQueryString ? `?${clipsNextQueryString}` : ''}`;
+
+  const applyNextClipToPlayer = (result) => {
+    const sceneForPlayback = {
+      ...result.clip.scene,
+      streamUrl: result.playbackInfo?.streamUrl || result.clip.scene?.streamUrl
+    };
+
+    setVideoPlayer({
+      isOpen: true,
+      clip: result.clip,
+      scene: sceneForPlayback,
+      playbackInfo: result.playbackInfo
+    });
+  };
   
   // Helper function to check if a tag is already on the clip
   const isTagOnClip = (tagId) => {
@@ -236,7 +253,7 @@ const StashVideoPlayer = ({
       }
       
       console.log('🔄 Manually fetching next clip from API...');
-      const response = await fetch(`${config.apiBaseUrl}/api/stash/clips/next`);
+      const response = await fetch(nextClipUrl);
       const result = await response.json();
       
       console.log('📡 Manual API Response status:', response.status);
@@ -258,12 +275,7 @@ const StashVideoPlayer = ({
           console.log('🎯 Manually loaded next clip:', result.clip.scene.title);
           
           // Update video player with new clip
-          setVideoPlayer({
-            isOpen: true,
-            clip: result.clip,
-            scene: result.clip.scene,
-            playbackInfo: result.playbackInfo
-          });
+          applyNextClipToPlayer(result);
         } else {
           console.error('❌ Invalid manual clip data received:', result);
           alert('❌ Invalid clip data received');
@@ -312,7 +324,7 @@ const StashVideoPlayer = ({
       // Automatically load next clip
       try {
         console.log('🔄 TimeUpdate: fetching next clip from API...');
-        const response = await fetch(`${config.apiBaseUrl}/api/stash/clips/next`);
+        const response = await fetch(nextClipUrl);
         const result = await response.json();
         
         if (response.ok) {
@@ -320,12 +332,7 @@ const StashVideoPlayer = ({
             console.log('🎯 TimeUpdate: Auto-loaded next clip:', result.clip.scene.title);
             
             // Update video player with new clip
-            setVideoPlayer({
-              isOpen: true,
-              clip: result.clip,
-              scene: result.clip.scene,
-              playbackInfo: result.playbackInfo
-            });
+            applyNextClipToPlayer(result);
           } else {
             console.error('❌ Invalid timeUpdate clip data received:', result);
             setVideoPlayer({ isOpen: false, clip: null, scene: null, playbackInfo: null });
@@ -400,7 +407,7 @@ const StashVideoPlayer = ({
     setAutoSkipRetries(prev => prev + 1); // Increment retry counter
     
     try {
-      const response = await fetch(`${config.apiBaseUrl}/api/stash/clips/next`);
+      const response = await fetch(nextClipUrl);
       const result = await response.json();
       
       if (response.ok) {
@@ -422,12 +429,7 @@ const StashVideoPlayer = ({
           console.log('🎯 Auto-skipped to next clip:', result.clip.scene.title);
           
           // Update video player with new clip (don't mark previous as watched)
-          setVideoPlayer({
-            isOpen: true,
-            clip: result.clip,
-            scene: result.clip.scene,
-            playbackInfo: result.playbackInfo
-          });
+          applyNextClipToPlayer(result);
         } else {
           console.error('❌ No more clips available for auto-skip');
           alert('❌ No more playable clips available');
@@ -582,7 +584,7 @@ const StashVideoPlayer = ({
                     }
                     
                     try {
-                      const response = await fetch(`${config.apiBaseUrl}/api/stash/clips/next`);
+                      const response = await fetch(nextClipUrl);
                       const result = await response.json();
                       
                       if (response.ok && result.clip && result.clip.scene) {
@@ -599,12 +601,7 @@ const StashVideoPlayer = ({
                         console.log('🎯 Auto-loaded next clip via backup timer:', result.clip.scene.title);
                         
                         // Update video player with new clip
-                        setVideoPlayer({
-                          isOpen: true,
-                          clip: result.clip,
-                          scene: result.clip.scene,
-                          playbackInfo: result.playbackInfo
-                        });
+                        applyNextClipToPlayer(result);
                       } else {
                         console.error('❌ Invalid clip data received:', result);
                         setVideoPlayer({ isOpen: false, clip: null, scene: null, playbackInfo: null });
@@ -657,7 +654,7 @@ const StashVideoPlayer = ({
                     }
                     
                     try {
-                      const response = await fetch(`${config.apiBaseUrl}/api/stash/clips/next`);
+                      const response = await fetch(nextClipUrl);
                       const result = await response.json();
                       
                       if (response.ok && result.clip && result.clip.scene) {
@@ -674,12 +671,7 @@ const StashVideoPlayer = ({
                         console.log('🎯 Auto-loaded next clip via resume timer:', result.clip.scene.title);
                         
                         // Update video player with new clip
-                        setVideoPlayer({
-                          isOpen: true,
-                          clip: result.clip,
-                          scene: result.clip.scene,
-                          playbackInfo: result.playbackInfo
-                        });
+                        applyNextClipToPlayer(result);
                       } else {
                         console.error('❌ Invalid clip data received:', result);
                         setVideoPlayer({ isOpen: false, clip: null, scene: null, playbackInfo: null });
@@ -710,7 +702,7 @@ const StashVideoPlayer = ({
               
               // Automatically load next clip
               try {
-                const response = await fetch(`${config.apiBaseUrl}/api/stash/clips/next`);
+                const response = await fetch(nextClipUrl);
                 const result = await response.json();
                 
                 if (response.ok && result.clip && result.clip.scene) {
@@ -727,12 +719,7 @@ const StashVideoPlayer = ({
                   console.log('🎯 OnEnded: Auto-loaded next clip:', result.clip.scene.title);
                   
                   // Update video player with new clip
-                  setVideoPlayer({
-                    isOpen: true,
-                    clip: result.clip,
-                    scene: result.clip.scene,
-                    playbackInfo: result.playbackInfo
-                  });
+                  applyNextClipToPlayer(result);
                 } else {
                   console.error('❌ No more clips available');
                   setVideoPlayer({ isOpen: false, clip: null, scene: null, playbackInfo: null });

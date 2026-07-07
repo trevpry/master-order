@@ -5440,6 +5440,78 @@ span.clip-tag-badge,
   margin-bottom: 0.5rem;
 }
 
+.clips-page .search-section {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+}
+
+.clips-page .clip-filter-select {
+  padding: 0.5rem 0.75rem;
+  border: 1px solid #d1d5db;
+  border-radius: 0.375rem;
+  background: #ffffff;
+  color: #111827;
+}
+
+.clips-page .clip-filter-checkbox-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  color: #1f2937;
+  font-size: 0.875rem;
+  font-weight: 500;
+}
+
+.clips-page .clip-filter-checkbox {
+  width: 1rem;
+  height: 1rem;
+}
+
+.clips-page .tag-filter-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.clips-page .tag-filter-toggle-btn {
+  background: transparent;
+  border: none;
+  padding: 0;
+  margin: 0;
+  color: #1f2937;
+  font-size: 1rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.clips-page .tag-filter-toggle-btn:hover {
+  color: #111827;
+}
+
+.clips-page .tag-filter-empty {
+  margin: 0;
+  color: #6b7280;
+  font-size: 0.875rem;
+}
+
+.clips-page .tag-filter-item {
+  background: #f3f4f6;
+  color: #1f2937;
+  border: 1px solid #d1d5db;
+  padding: 0.35rem 0.65rem;
+  border-radius: 9999px;
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+
+.clips-page .tag-filter-item.active {
+  background: #dbeafe;
+  color: #1d4ed8;
+  border-color: #93c5fd;
+}
+
 .clips-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));

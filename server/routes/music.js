@@ -1980,20 +1980,21 @@ async function buildPicardTagPayload({ entityType, entityKey, entityTitle, track
 // Helper function to get tracks filtered by unplayed albums/artists/works
 // sectionKey: the Plex sectionKey string (e.g. "6"), or null for all sections
 async function getUnplayedFilteredTracks(sectionKey, unplayedAlbums, unplayedArtists, unplayedWorks) {
+  const noLowStarFilter = {
+    OR: [
+      { userRating: null },
+      { userRating: { gte: 3 } }
+    ]
+  };
+
   const allTracks = await prisma.plexTrack.findMany({
     where: sectionKey ? { 
       librarySection: { sectionKey: sectionKey },
       removed: false,
-      OR: [
-        { userRating: null },
-        { userRating: { gte: 5 } }
-      ]
+      ...noLowStarFilter
     } : { 
       removed: false,
-      OR: [
-        { userRating: null },
-        { userRating: { gte: 5 } }
-      ]
+      ...noLowStarFilter
     },
     include: {
       album: {
@@ -2104,6 +2105,10 @@ async function expandToCompleteWorks(tracks) {
           where: {
             parentRatingKey: albumRatingKey,
             removed: false,
+            OR: [
+              { userRating: null },
+              { userRating: { gte: 3 } }
+            ],
             workPartTracks: {
               some: {
                 workPart: {
@@ -4736,7 +4741,7 @@ router.get('/tracks/random', asyncHandler(async (req, res) => {
           {
             OR: [
               { userRating: null },
-              { userRating: { gte: 5 } }
+              { userRating: { gte: 3 } }
             ]
           }
         ]
@@ -4764,7 +4769,7 @@ router.get('/tracks/random', asyncHandler(async (req, res) => {
       removed: false,
       OR: [
         { userRating: null },
-        { userRating: { gte: 5 } }
+        { userRating: { gte: 3 } }
       ]
     };
 
@@ -4773,7 +4778,7 @@ router.get('/tracks/random', asyncHandler(async (req, res) => {
         {
           OR: [
             { userRating: null },
-            { userRating: { gte: 5 } }
+            { userRating: { gte: 3 } }
           ]
         },
         {
@@ -4843,18 +4848,24 @@ router.get('/tracks/random', asyncHandler(async (req, res) => {
   // Build where clause (exclude tracks rated below 5 stars)
   const whereClause = {
     removed: false,
-    OR: [
-      { userRating: null },
-      { userRating: { gte: 5 } }
+    AND: [
+      {
+        OR: [
+          { userRating: null },
+          { userRating: { gte: 3 } }
+        ]
+      }
     ]
   };
 
   // Add unplayed filter if requested
   if (unplayed === 'true') {
-    whereClause.OR = [
-      { viewCount: null },
-      { viewCount: 0 }
-    ];
+    whereClause.AND.push({
+      OR: [
+        { viewCount: null },
+        { viewCount: 0 }
+      ]
+    });
   }
 
   // Add rating filter if requested
@@ -4930,7 +4941,7 @@ router.get('/tracks/random/section/:sectionKey', asyncHandler(async (req, res) =
           {
             OR: [
               { userRating: null },
-              { userRating: { gte: 5 } }
+              { userRating: { gte: 3 } }
             ]
           }
         ]
@@ -4959,7 +4970,7 @@ router.get('/tracks/random/section/:sectionKey', asyncHandler(async (req, res) =
       removed: false,
       OR: [
         { userRating: null },
-        { userRating: { gte: 5 } }
+        { userRating: { gte: 3 } }
       ]
     };
 
@@ -4968,7 +4979,7 @@ router.get('/tracks/random/section/:sectionKey', asyncHandler(async (req, res) =
         {
           OR: [
             { userRating: null },
-            { userRating: { gte: 5 } }
+            { userRating: { gte: 3 } }
           ]
         },
         {
@@ -5048,18 +5059,24 @@ router.get('/tracks/random/section/:sectionKey', asyncHandler(async (req, res) =
   const whereClause = {
     librarySection: { sectionKey: sectionKey },
     removed: false,
-    OR: [
-      { userRating: null },
-      { userRating: { gte: 5 } }
+    AND: [
+      {
+        OR: [
+          { userRating: null },
+          { userRating: { gte: 3 } }
+        ]
+      }
     ]
   };
 
   // Add unplayed filter if requested
   if (unplayed === 'true') {
-    whereClause.OR = [
-      { viewCount: null },
-      { viewCount: 0 }
-    ];
+    whereClause.AND.push({
+      OR: [
+        { viewCount: null },
+        { viewCount: 0 }
+      ]
+    });
   }
 
   // Add rating filter if requested
