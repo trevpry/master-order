@@ -1306,8 +1306,42 @@ model StashTag {
   
   // Tag aliases
   aliases       StashTagAlias[]
+  workflowNode  ClipTaggingWorkflowNode?
 
   @@map("StashTag")
+}
+
+model ClipTaggingWorkflowNode {
+  id        Int      @id @default(autoincrement())
+  tagId     String   @unique
+  column    Int      @default(0)
+  positionX Float    @default(0)
+  positionY Float    @default(0)
+  tag       StashTag @relation(fields: [tagId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("ClipTaggingWorkflowNode")
+}
+
+model ClipTaggingWorkflowConnection {
+  id          Int      @id @default(autoincrement())
+  sourceTagId String
+  targetTagId String
+  createdAt   DateTime @default(now())
+
+  @@unique([sourceTagId, targetTagId])
+  @@map("ClipTaggingWorkflowConnection")
+}
+
+model ClipTaggingWorkflowColumnName {
+  id        Int      @id @default(autoincrement())
+  column    Int      @unique
+  name      String   @default("")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("ClipTaggingWorkflowColumnName")
 }
 
 model StashTagAlias {

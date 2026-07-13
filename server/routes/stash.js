@@ -12459,140 +12459,175 @@ router.put('/tags/:id/clip-tagging', asyncHandler(async (req, res) => {
   });
 }));
 
-// GET /api/stash/clip-tagging-workflow - Get clip tagging workflow configuration
+// GET /api/stash/clip-tagging-workflow - Load workflow nodes and connections from DB
 router.get('/clip-tagging-workflow', asyncHandler(async (req, res) => {
-  console.log('🎯 [Get Clip Tagging Workflow] Request received');
-  
-  try {
-    // Try to load from a configuration file
-    const fs = require('fs');
-    const path = require('path');
-    const configPath = path.join(__dirname, '../data/clip-tagging-workflow.json');
-    
-    if (fs.existsSync(configPath)) {
-      const configData = fs.readFileSync(configPath, 'utf8');
-      const config = JSON.parse(configData);
-      console.log('   - Loaded workflow configuration from file');
-      return sendSuccess(res, config);
-    } else {
-      // No config exists - create default workflow based on hard-coded flow
-      console.log('   - No workflow configuration found, creating default');
-      
-      // Load tags to build initial workflow
-      const workflowTagNames = [
-        'Performer Count',  // Step 1
-        'Performer Race',   // Step 2
-        'Sex Acts',         // Step 3
-        'Masturbation',     // Conditional after Sex Acts
-        'Oral Sex',         // Conditional after Sex Acts
-        'Anal Sex',         // Conditional after Sex Acts
-        'Performer Positions', // After Oral/Anal
-        'Cum Shot'          // Final step
-      ];
-      
-      // Find these tags in database (look for parent tags that match these names)
-      const tags = await prisma.stashTag.findMany({
-        where: {
-          name: { in: workflowTagNames },
-          includeInClipTagging: true
-        },
-        orderBy: { name: 'asc' }
-      });
-      
-      // Build default connections based on hard-coded flow logic
-      const connections = {};
-      
-      // Find tag IDs for connections
-      const sexActsTag = tags.find(t => t.name === 'Sex Acts');
-      const masturbationTag = tags.find(t => t.name === 'Masturbation');
-      const oralSexTag = tags.find(t => t.name === 'Oral Sex');
-      const analSexTag = tags.find(t => t.name === 'Anal Sex');
-      const performerPositionsTag = tags.find(t => t.name === 'Performer Positions');
-      const cumShotTag = tags.find(t => t.name === 'Cum Shot');
-      
-      // Sex Acts → Masturbation, Oral Sex, Anal Sex
-      if (sexActsTag && (masturbationTag || oralSexTag || analSexTag)) {
-        connections[sexActsTag.id] = [
-          masturbationTag?.id,
-          oralSexTag?.id,
-          analSexTag?.id
-        ].filter(Boolean);
-      }
-      
-      // Oral Sex → Performer Positions
-      if (oralSexTag && performerPositionsTag) {
-        connections[oralSexTag.id] = [performerPositionsTag.id];
-      }
-      
-      // Anal Sex → Performer Positions
-      if (analSexTag && performerPositionsTag) {
-        connections[analSexTag.id] = [performerPositionsTag.id];
-      }
-      
-      // Performer Positions → Cum Shot
-      if (performerPositionsTag && cumShotTag) {
-        connections[performerPositionsTag.id] = [cumShotTag.id];
-      }
-      
-      const defaultConfig = {
-        tags: tags,
-        connections: connections
-      };
-      
-      console.log(`   - Created default workflow with ${tags.length} tags and ${Object.keys(connections).length} connections`);
-      return sendSuccess(res, defaultConfig);
-    }
-  } catch (err) {
-    console.error('   - Error loading workflow configuration:', err);
-    return sendSuccess(res, {
-      tags: [],
-      connections: {}
-    });
-  }
+  const nodes = await prisma.clipTaggingWorkflowNode.findMany({
+    include: { tag: { select: { id: true, name: true, image: true } } }
+  });
+
+  const connections = await prisma.clipTaggingWorkflowConnection.findMany();
+
+  return sendSuccess(res, { nodes, connections });
 }));
 
-// POST /api/stash/clip-tagging-workflow - Save clip tagging workflow configuration
-router.post('/clip-tagging-workflow', asyncHandler(async (req, res) => {
-  const { tags, connections } = req.body;
-  
-  console.log('🎯 [Save Clip Tagging Workflow] Request received');
-  console.log(`   - Tags: ${tags?.length || 0}`);
-  console.log(`   - Connections: ${Object.keys(connections || {}).length}`);
-  
-  // Validate inputs
-  if (!Array.isArray(tags)) {
-    return sendBadRequest(res, 'tags must be an array');
-  }
-  
-  if (typeof connections !== 'object' || connections === null) {
-    return sendBadRequest(res, 'connections must be an object');
-  }
-  
-  try {
-    const fs = require('fs');
-    const path = require('path');
-    
-    // Ensure data directory exists
-    const dataDir = path.join(__dirname, '../data');
-    if (!fs.existsSync(dataDir)) {
-      fs.mkdirSync(dataDir, { recursive: true });
+// POST /api/stash/clip-tagging-workflow/seed - Seed canvas with overlay default flow
+router.post('/clip-tagging-workflow/seed', asyncHandler(async (req, res) => {
+  // Step names in overlay order and their pixel positions (left→right flow, 240px gap)
+  const STEPS = [
+    { name: 'Performer Count',   x: 60,   y: 400 },
+    { name: 'Performer Race',    x: 300,  y: 400 },
+    { name: 'Sex Acts',          x: 540,  y: 400 },
+    { name: 'Masturbation',      x: 780,  y: 250 },
+    { name: 'Oral Sex',          x: 1020, y: 250 },
+    { name: 'Performer Oral',    x: 1260, y: 250 },
+    { name: 'Performer Rimming', x: 1500, y: 150 },
+    { name: 'Anal Sex',          x: 1740, y: 350 },
+    { name: 'Performer Positions', x: 1980, y: 350 },
+    { name: 'Cum Shot',          x: 2220, y: 400 },
+  ];
+
+  const CONNECTIONS = [
+    ['Performer Count',    'Performer Race'],
+    ['Performer Race',     'Sex Acts'],
+    ['Sex Acts',           'Masturbation'],
+    ['Sex Acts',           'Oral Sex'],
+    ['Sex Acts',           'Anal Sex'],
+    ['Sex Acts',           'Cum Shot'],
+    ['Masturbation',       'Oral Sex'],
+    ['Masturbation',       'Anal Sex'],
+    ['Masturbation',       'Cum Shot'],
+    ['Oral Sex',           'Performer Oral'],
+    ['Performer Oral',     'Performer Rimming'],
+    ['Performer Oral',     'Anal Sex'],
+    ['Performer Oral',     'Cum Shot'],
+    ['Performer Rimming',  'Anal Sex'],
+    ['Performer Rimming',  'Cum Shot'],
+    ['Anal Sex',           'Performer Positions'],
+    ['Performer Positions','Cum Shot'],
+  ];
+
+  const stepNames = STEPS.map((s) => s.name);
+  const tags = await prisma.stashTag.findMany({ where: { name: { in: stepNames } } });
+  const byName = Object.fromEntries(tags.map((t) => [t.name, t]));
+
+  await prisma.$transaction(async (tx) => {
+    await tx.clipTaggingWorkflowConnection.deleteMany();
+    await tx.clipTaggingWorkflowNode.deleteMany();
+
+    for (const step of STEPS) {
+      const tag = byName[step.name];
+      if (!tag) continue;
+      await tx.clipTaggingWorkflowNode.create({
+        data: { tagId: tag.id, positionX: step.x, positionY: step.y }
+      });
     }
-    
-    const configPath = path.join(dataDir, 'clip-tagging-workflow.json');
-    const configData = JSON.stringify({ tags, connections }, null, 2);
-    
-    fs.writeFileSync(configPath, configData, 'utf8');
-    console.log('   - Saved workflow configuration to file');
-    
-    return sendSuccess(res, {
-      tags,
-      connections,
-      message: 'Workflow configuration saved successfully'
-    });
-  } catch (err) {
-    console.error('   - Error saving workflow configuration:', err);
-    return sendError(res, 'Failed to save workflow configuration');
+
+    for (const [srcName, tgtName] of CONNECTIONS) {
+      const src = byName[srcName];
+      const tgt = byName[tgtName];
+      if (!src || !tgt) continue;
+      await tx.clipTaggingWorkflowConnection.create({
+        data: { sourceTagId: src.id, targetTagId: tgt.id }
+      });
+    }
+  });
+
+  const nodes = await prisma.clipTaggingWorkflowNode.findMany({
+    include: { tag: { select: { id: true, name: true, image: true } } }
+  });
+  const connections = await prisma.clipTaggingWorkflowConnection.findMany();
+
+  const missing = stepNames.filter((n) => !byName[n]);
+  return sendSuccess(res, { nodes, connections, missing });
+}));
+
+// POST /api/stash/clip-tagging-workflow - Save workflow nodes and connections to DB
+router.post('/clip-tagging-workflow', asyncHandler(async (req, res) => {
+  const { nodes, connections } = req.body;
+  console.log('📝 Received workflow save request:', { nodesCount: nodes?.length, connectionsCount: connections?.length, connections });
+
+  if (!Array.isArray(nodes) || !Array.isArray(connections)) {
+    return sendBadRequest(res, 'nodes and connections must be arrays');
   }
+
+  await prisma.$transaction(async (tx) => {
+    // Rebuild nodes: upsert each, delete any that were removed
+    const incomingTagIds = nodes.map((n) => n.tagId);
+    console.log('🔄 Incoming tag IDs:', incomingTagIds);
+
+    await tx.clipTaggingWorkflowNode.deleteMany({
+      where: { tagId: { notIn: incomingTagIds } }
+    });
+
+    for (const node of nodes) {
+      await tx.clipTaggingWorkflowNode.upsert({
+        where: { tagId: node.tagId },
+        create: { tagId: node.tagId, column: node.column ?? 0, positionX: node.positionX, positionY: node.positionY },
+        update: { column: node.column ?? 0, positionX: node.positionX, positionY: node.positionY }
+      });
+    }
+
+    // Rebuild connections: delete all, re-insert
+    console.log('🗑️ Deleting all existing connections');
+    await tx.clipTaggingWorkflowConnection.deleteMany();
+    if (connections.length > 0) {
+      console.log('💾 Inserting connections:', connections);
+      await tx.clipTaggingWorkflowConnection.createMany({
+        data: connections.map((c) => ({
+          sourceTagId: c.sourceTagId,
+          targetTagId: c.targetTagId
+        }))
+      });
+    }
+  });
+
+  const savedNodes = await prisma.clipTaggingWorkflowNode.findMany({
+    include: { tag: { select: { id: true, name: true, image: true } } }
+  });
+  const savedConnections = await prisma.clipTaggingWorkflowConnection.findMany();
+  console.log('✅ Saved connections:', savedConnections);
+
+  return sendSuccess(res, { nodes: savedNodes, connections: savedConnections });
+}));
+
+// GET /api/stash/clip-tagging-workflow/column-names - Get all column names
+router.get('/clip-tagging-workflow/column-names', asyncHandler(async (req, res) => {
+  const columnNames = await prisma.clipTaggingWorkflowColumnName.findMany({
+    orderBy: { column: 'asc' }
+  });
+  return sendSuccess(res, { columnNames });
+}));
+
+// POST /api/stash/clip-tagging-workflow/column-names - Save column names
+router.post('/clip-tagging-workflow/column-names', asyncHandler(async (req, res) => {
+  const { columnNames } = req.body;
+
+  if (!Array.isArray(columnNames)) {
+    return sendBadRequest(res, 'columnNames must be an array');
+  }
+
+  await prisma.$transaction(async (tx) => {
+    // Delete old column names
+    await tx.clipTaggingWorkflowColumnName.deleteMany();
+
+    // Insert new ones
+    for (const colName of columnNames) {
+      if (colName.name.trim()) { // Only save non-empty names
+        await tx.clipTaggingWorkflowColumnName.create({
+          data: {
+            column: colName.column,
+            name: colName.name
+          }
+        });
+      }
+    }
+  });
+
+  const saved = await prisma.clipTaggingWorkflowColumnName.findMany({
+    orderBy: { column: 'asc' }
+  });
+
+  return sendSuccess(res, { columnNames: saved });
 }));
 
 // POST /api/stash/tags/merge - Merge multiple tags into one

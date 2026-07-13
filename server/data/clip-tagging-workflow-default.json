@@ -5,13 +5,20 @@
     { "id": "sexActs", "name": "Sex Acts" },
     { "id": "masturbation", "name": "Masturbation" },
     { "id": "oralSex", "name": "Oral Sex" },
+    { "id": "performerOral", "name": "Performer Oral" },
+    { "id": "performerRimming", "name": "Performer Rimming" },
     { "id": "analSex", "name": "Anal Sex" },
     { "id": "performerPositions", "name": "Performer Positions" },
     { "id": "cumShot", "name": "Cum Shot" }
   ],
   "connections": {
-    "sexActs": ["masturbation", "oralSex", "analSex"],
-    "oralSex": ["performerPositions"],
+    "performerCount": ["performerRace"],
+    "performerRace": ["sexActs"],
+    "sexActs": ["masturbation", "oralSex", "analSex", "cumShot"],
+    "masturbation": ["oralSex", "analSex", "cumShot"],
+    "oralSex": ["performerOral"],
+    "performerOral": ["performerRimming", "analSex", "cumShot"],
+    "performerRimming": ["analSex", "cumShot"],
     "analSex": ["performerPositions"],
     "performerPositions": ["cumShot"]
   }

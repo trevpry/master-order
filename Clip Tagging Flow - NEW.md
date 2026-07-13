@@ -112,3 +112,25 @@ Performer Count (parent)
 - **Visual Feedback**: Clear indication of selected vs existing tags
 - **Efficient Selection**: Multi-select reduces repetitive actions
 - **Context Aware**: Shows which tags already exist on clip
+
+---
+
+## Start Tagging Workflow Order (Overlay)
+
+The clip overlay also includes a separate full-screen workflow launched by **Start Tagging**. Its current step order is:
+
+1. `Performer Count`
+2. `Performer Race`
+3. `Sex Acts`
+4. Conditional: `Masturbation` (if selected in Sex Acts)
+5. Conditional: `Oral Sex` (if selected and performer count is not Solo)
+6. Conditional: `Performer Oral` (after Oral Sex)
+7. Conditional: `Performer Rimming` (if Rimming selected in Sex Acts and not Solo)
+8. Conditional: `Anal Sex` (if selected and performer count is not Solo)
+9. Conditional: `Performer Positions` (after Anal Sex)
+10. `Cum Shot` (final)
+
+Notes:
+- Each `Next` applies current-step tags to both scene and clip.
+- For multi-select steps, tags already on the parent scene are auto-selected.
+- Workflow closes and resets after `Cum Shot`.
