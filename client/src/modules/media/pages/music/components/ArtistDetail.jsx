@@ -51,6 +51,49 @@ const ArtistDetail = ({
   const linkedTracks = artist?.linkedTracks || [];
   const tracksWithoutAlbum = artist?.tracksWithoutAlbum || [];
   const works = artist?.works || [];
+  const [isPlayingAll, setIsPlayingAll] = useState(false);
+
+  const handlePlayAll = async () => {
+    if (isPlayingAll) return;
+    setIsPlayingAll(true);
+    try {
+      const response = await fetch(`${config.apiBaseUrl}/api/music/tracks/artist/${artist.ratingKey}`);
+      if (!response.ok) throw new Error('Failed to load tracks');
+      const data = await response.json();
+      const allTracks = Array.isArray(data.tracks) ? data.tracks : (Array.isArray(data) ? data : []);
+      if (!allTracks.length) return;
+      const playlist = {
+        id: `tracks-playlist-artist-${artist.ratingKey}`,
+        title: `All tracks by ${artist.title}`,
+        tracks: allTracks.map(track => ({
+          id: track.ratingKey,
+          ratingKey: track.ratingKey,
+          title: track.title,
+          artist: track.originalTitle || track.grandparentTitle || artist.title,
+          album: track.parentTitle || track.album?.title || 'Unknown Album',
+          duration: track.duration,
+          thumb: track.thumb,
+          art: track.art,
+          parentThumb: track.album?.thumb || track.parentThumb,
+          grandparentThumb: track.album?.artist?.thumb || artist.thumb,
+          userRating: track.userRating,
+          rating: track.rating,
+          type: 'plex',
+          grandparentRatingKey: track.grandparentRatingKey || track.album?.artist?.ratingKey,
+          parentRatingKey: track.parentRatingKey || track.album?.ratingKey,
+          grandparentTitle: track.grandparentTitle || artist.title,
+          parentTitle: track.parentTitle || track.album?.title,
+        }))
+      };
+      window.dispatchEvent(new CustomEvent('startMusicPlayback', {
+        detail: { playlist, shuffle: false, sessionId: `artist-session-${Date.now()}` }
+      }));
+    } catch (err) {
+      console.error('Error playing all artist tracks:', err);
+    } finally {
+      setIsPlayingAll(false);
+    }
+  };
   const visibleLinkedAlbums = linkedAlbums.filter(
     (linkedAlbum) => !(albums || []).some((albumEntry) => albumEntry.ratingKey === linkedAlbum.ratingKey)
   );
@@ -383,6 +426,15 @@ const ArtistDetail = ({
             title="Search MusicBrainz for metadata"
           >
             🎵 MusicBrainz Search
+          </button>
+          <button
+            className="musicbrainz-button"
+            onClick={handlePlayAll}
+            disabled={isPlayingAll}
+            title="Play all tracks by this artist"
+            style={{ backgroundColor: '#16a34a' }}
+          >
+            {isPlayingAll ? '⏳ Loading...' : '▶ Play All'}
           </button>
         </div>
       </div>

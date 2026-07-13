@@ -144,6 +144,8 @@ class SubOrderService {
       const subOrder = await prisma.customOrder.findUnique({
         where: { id: subOrderId },
         include: {
+          plexPlaylist: true,
+          customPlaylist: true,
           items: {
             where: { 
               isWatched: false,

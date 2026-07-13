@@ -20,6 +20,38 @@ const WorkDetail = ({ workId, onGoBack, onSelectArtist, onSelectTrack, onWorkDel
   const [savingPartId, setSavingPartId] = useState(null);
   const [deletingWork, setDeletingWork] = useState(false);
 
+  const handlePlayAll = () => {
+    if (!work) return;
+    const allTracks = work.parts.flatMap(part => (part.tracks || []).map(({ track }) => track));
+    if (!allTracks.length) return;
+    const playlist = {
+      id: `tracks-playlist-work-${work.id}`,
+      title: work.title,
+      tracks: allTracks.map(track => ({
+        id: track.ratingKey,
+        ratingKey: track.ratingKey,
+        title: track.title,
+        artist: track.grandparentTitle || track.album?.artist?.title || 'Unknown Artist',
+        album: track.parentTitle || track.album?.title || 'Unknown Album',
+        duration: track.duration,
+        thumb: track.thumb,
+        art: track.art,
+        parentThumb: track.album?.thumb || track.parentThumb,
+        grandparentThumb: track.album?.artist?.thumb || track.grandparentThumb,
+        userRating: track.userRating,
+        rating: track.rating,
+        type: 'plex',
+        grandparentRatingKey: track.grandparentRatingKey || track.album?.artist?.ratingKey,
+        parentRatingKey: track.parentRatingKey || track.album?.ratingKey,
+        grandparentTitle: track.grandparentTitle || track.album?.artist?.title,
+        parentTitle: track.parentTitle || track.album?.title,
+      }))
+    };
+    window.dispatchEvent(new CustomEvent('startMusicPlayback', {
+      detail: { playlist, shuffle: false, sessionId: `work-session-${Date.now()}` }
+    }));
+  };
+
   useEffect(() => {
     loadWorkDetails();
     loadArtistTypes();
@@ -317,6 +349,16 @@ const WorkDetail = ({ workId, onGoBack, onSelectArtist, onSelectTrack, onWorkDel
           ← Back
         </button>
         <div className="work-detail-header-actions">
+          {work && work.parts?.reduce((s, p) => s + (p.tracks?.length || 0), 0) > 0 && (
+            <button
+              className="btn-edit-work"
+              onClick={handlePlayAll}
+              style={{ backgroundColor: '#16a34a', color: 'white', border: 'none' }}
+              title="Play all recordings in this work"
+            >
+              ▶ Play All
+            </button>
+          )}
           {!isEditing && (
             <button className="btn-edit-work" onClick={openEditMode}>
               Edit Work

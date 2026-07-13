@@ -287,7 +287,7 @@ function Dashboard() {
   const sessions = data?.plexSessions || [];
   const playingSessions = sessions.filter(s => s.state === 'playing');
   const pausedSessions = sessions.filter(s => s.state !== 'playing');
-  const dashboardMusic = appMusic || data?.androidMusic || null;
+  const dashboardMusic = appMusic || data?.androidMusic || data?.plexMusicSession || null;
   const dashboardMusicArt = musicArtworkUrl(dashboardMusic);
 
   const openMusicRatingModal = () => {
@@ -449,14 +449,14 @@ function Dashboard() {
                 <div style={{ fontSize: '0.82rem', color: '#64748b', marginTop: '0.2rem' }}>{[dashboardMusic.artist, dashboardMusic.album].filter(Boolean).join(' · ')}</div>
               )}
               <div style={{ fontSize: '0.78rem', color: '#94a3b8', marginTop: '0.15rem' }}>
-                {dashboardMusic.isPlaying ? '▶ Playing' : '⏸ Paused'} in {dashboardMusic.source === 'android_app' ? (dashboardMusic.appName || 'Android App') : 'Music Player'}
+                {dashboardMusic.isPlaying ? '▶ Playing' : '⏸ Paused'} in {dashboardMusic.source === 'android_app' ? (dashboardMusic.appName || 'Android App') : dashboardMusic.source === 'plex_app' ? (dashboardMusic.appName || 'Plex') : 'Music Player'}
               </div>
               <div style={{ fontSize: '0.74rem', color: '#3b82f6', marginTop: '0.1rem' }}>
                 Click to rate this track
               </div>
-              {dashboardMusic.source === 'android_app' && dashboardMusic.updatedAt && (
+              {(dashboardMusic.source === 'android_app' || dashboardMusic.source === 'plex_app') && dashboardMusic.updatedAt && (
                 <div style={{ fontSize: '0.74rem', color: '#94a3b8', marginTop: '0.1rem' }}>
-                  Android update: {timeAgo(dashboardMusic.updatedAt)}
+                  {dashboardMusic.source === 'plex_app' ? 'Plex' : 'Android'} update: {timeAgo(dashboardMusic.updatedAt)}
                 </div>
               )}
             </div>
@@ -530,7 +530,7 @@ function Dashboard() {
                 <div style={{ color: '#64748b', fontSize: '0.9rem' }}>{[dashboardMusic.artist, dashboardMusic.album].filter(Boolean).join(' · ')}</div>
               )}
               <div style={{ color: '#94a3b8', fontSize: '0.8rem', marginTop: '0.2rem' }}>
-                Source: {dashboardMusic.source === 'android_app' ? (dashboardMusic.appName || 'Android App') : 'Music Player'}
+                Source: {dashboardMusic.source === 'android_app' ? (dashboardMusic.appName || 'Android App') : dashboardMusic.source === 'plex_app' ? (dashboardMusic.appName || 'Plex') : 'Music Player'}
               </div>
               </div>
             </div>

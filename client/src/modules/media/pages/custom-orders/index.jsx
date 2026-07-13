@@ -43,6 +43,7 @@ import EpisodeFormModal from './components/modals/EpisodeFormModal';
 import BulkImportFormModal from './components/modals/BulkImportFormModal';
 import DetailedBookFormModal from './components/modals/DetailedBookFormModal';
 import GameFormModal from './components/modals/GameFormModal';
+import SubOrderFormModal from './components/modals/SubOrderFormModal';
 import ListSyncsPanel from './components/modals/ListSyncsPanel';
 import LinkListSyncModal from './components/modals/LinkListSyncModal';
 
@@ -129,6 +130,9 @@ function CustomOrders() {
   const [gameSearchQuery, setGameSearchQuery] = useState('');
   const [gameSearchResults, setGameSearchResults] = useState([]);
   const [gameSearchLoading, setGameSearchLoading] = useState(false);
+  
+  // Sub-Order Form state
+  const [showSubOrderForm, setShowSubOrderForm] = useState(false);
   
   // List syncs state
   const [showListSyncsPanel, setShowListSyncsPanel] = useState(false);
@@ -1348,6 +1352,8 @@ function CustomOrders() {
         if (mediaItem.webvideoUrl) {
           requestBody.webUrl = mediaItem.webvideoUrl;
         }
+      } else if (mediaType === 'suborder') {
+        requestBody.referencedCustomOrderId = mediaItem.referencedCustomOrderId;
       } else if (mediaType === 'episode') {
         // Handle episodes (both Plex and non-Plex)
         if (mediaItem.ratingKey) {
@@ -3633,6 +3639,7 @@ const handleSearchComics = async (e) => {
             setShowShortStoryForm={setShowShortStoryForm}
             setShowWebVideoForm={setShowWebVideoForm}
             setShowGameForm={setShowGameForm}
+            setShowSubOrderForm={setShowSubOrderForm}
             setShowBulkImportModal={setShowBulkImportModal}
             setShowCmroBulkImportModal={setShowCmroBulkImportModal}
             setMovieFormData={setMovieFormData}
@@ -4205,6 +4212,24 @@ const handleSearchComics = async (e) => {
           setEditingItem(null);
         }}
         onSubmit={handleAddWebVideo}
+      />
+
+      {/* Sub-Order Form Modal */}
+      <SubOrderFormModal
+        show={showSubOrderForm}
+        currentOrderId={viewingOrderItems?.id}
+        customOrders={customOrders}
+        onClose={() => setShowSubOrderForm(false)}
+        onSelectOrder={async (order) => {
+          const success = await handleAddMediaToOrder(viewingOrderItems.id, {
+            mediaType: 'suborder',
+            title: order.name,
+            referencedCustomOrderId: order.id
+          });
+          if (success !== false) {
+            setShowSubOrderForm(false);
+          }
+        }}
       />
 
       {/* Video Game Form Modal */}

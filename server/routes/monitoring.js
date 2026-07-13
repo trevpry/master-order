@@ -27,6 +27,7 @@ router.get('/', asyncHandler(async (req, res) => {
     plexSessions: [],
     plexSessionsError: null,
     androidMusic: null,
+    plexMusicSession: null,
     lastPlexItem: null,
     lastMusicTrack: null,
     lastStashScene: null,
@@ -81,6 +82,9 @@ router.get('/', asyncHandler(async (req, res) => {
       index: s.index || null,               // episode
       year: s.year || null,
       thumb: s.thumb || s.parentThumb || s.grandparentThumb || null,
+      parentThumb: s.parentThumb || null,
+      grandparentThumb: s.grandparentThumb || null,
+      art: s.art || null,
       duration: s.duration || null,
       viewOffset: s.viewOffset || null,
       state: s.Player?.state || 'unknown',
@@ -89,6 +93,35 @@ router.get('/', asyncHandler(async (req, res) => {
       sessionKey: s.sessionKey || null,
       user: s.User?.title || null,
     }));
+
+    // ── Active Plex music session (track playing in any Plex client) ─────────
+    // Prefer a playing session; fall back to any paused music session.
+    const musicSessions = sessionList.filter(s => s.type === 'track');
+    const activeMusicSession =
+      musicSessions.find(s => s.Player?.state === 'playing') ||
+      musicSessions.find(s => s.Player?.state === 'paused');
+
+    if (activeMusicSession) {
+      const s = activeMusicSession;
+      results.plexMusicSession = {
+        title: s.title,
+        artist: s.grandparentTitle || null,
+        album: s.parentTitle || null,
+        ratingKey: s.ratingKey || null,
+        userRating: s.userRating ?? null,
+        artworkUrl: null,
+        thumb: s.thumb || null,
+        parentThumb: s.parentThumb || null,
+        grandparentThumb: s.grandparentThumb || null,
+        art: s.art || null,
+        isPlaying: s.Player?.state === 'playing',
+        positionMs: s.viewOffset ?? null,
+        durationMs: s.duration ?? null,
+        source: 'plex_app',
+        appName: s.Player?.title || s.Player?.device || 'Plex',
+        updatedAt: new Date().toISOString(),
+      };
+    }
   } catch (err) {
     results.plexSessionsError = err.message;
   }

@@ -904,6 +904,43 @@ const AlbumDetail = ({
           >
             {importingDiscogs ? '⏳ Importing Discogs...' : '🧾 Import Discogs URL'}
           </button>
+          <button
+            className="musicbrainz-search-btn"
+            onClick={() => {
+              if (!tracks || !tracks.length) return;
+              const playlist = {
+                id: `tracks-playlist-album-${album.ratingKey}`,
+                title: albumData.title,
+                tracks: tracks.map(track => ({
+                  id: track.ratingKey,
+                  ratingKey: track.ratingKey,
+                  title: track.title,
+                  artist: track.originalTitle || albumData.parentTitle || albumData.artist?.title || 'Unknown Artist',
+                  album: track.parentTitle || albumData.title || 'Unknown Album',
+                  duration: track.duration,
+                  thumb: track.thumb,
+                  art: track.art,
+                  parentThumb: albumData.thumb || track.parentThumb,
+                  grandparentThumb: albumData.artist?.thumb || track.grandparentThumb,
+                  userRating: track.userRating,
+                  rating: track.rating,
+                  type: 'plex',
+                  grandparentRatingKey: track.grandparentRatingKey || albumData.artist?.ratingKey,
+                  parentRatingKey: track.parentRatingKey || albumData.ratingKey,
+                  grandparentTitle: track.grandparentTitle || albumData.parentTitle || albumData.artist?.title,
+                  parentTitle: track.parentTitle || albumData.title,
+                }))
+              };
+              window.dispatchEvent(new CustomEvent('startMusicPlayback', {
+                detail: { playlist, shuffle: false, sessionId: `album-session-${Date.now()}` }
+              }));
+            }}
+            disabled={!tracks || !tracks.length}
+            title="Play all tracks in this album"
+            style={{ backgroundColor: '#16a34a' }}
+          >
+            ▶ Play All
+          </button>
           <button 
             className="musicbrainz-search-btn"
             onClick={() => setShowIdentifyModal(true)}

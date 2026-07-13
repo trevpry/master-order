@@ -63,6 +63,8 @@ function createBulkOperationsRoutes(prisma, services) {
       gameId,
       // Reference fields
       bookId,
+      // Suborder fields
+      referencedCustomOrderId,
       // Artwork fields
       originalArtworkUrl
     } = req.body;
@@ -80,9 +82,21 @@ function createBulkOperationsRoutes(prisma, services) {
       if (!plexKey && !title) {
         return sendBadRequest(res, 'For movies: either plexKey (for existing Plex movies) OR title (for movies not yet in Plex) is required');
       }
-    } else if (mediaType === 'comic' || mediaType === 'book' || mediaType === 'shortstory' || mediaType === 'webvideo' || mediaType === 'game') {
-      // Comics, books, short stories, web videos, and games don't require plexKey
+    } else if (mediaType === 'comic' || mediaType === 'book' || mediaType === 'shortstory' || mediaType === 'webvideo' || mediaType === 'game' || mediaType === 'suborder') {
+      // Comics, books, short stories, web videos, games, and suborders don't require plexKey
       console.log(`Processing ${mediaType} without plexKey requirement`);
+      if (mediaType === 'suborder') {
+        if (!referencedCustomOrderId) {
+          return sendBadRequest(res, 'referencedCustomOrderId is required for suborder items');
+        }
+        if (parseInt(referencedCustomOrderId) === parseInt(id)) {
+          return sendBadRequest(res, 'Cannot add an order as a sub-order of itself');
+        }
+        const referencedOrder = await prisma.customOrder.findUnique({ where: { id: parseInt(referencedCustomOrderId) } });
+        if (!referencedOrder) {
+          return sendBadRequest(res, 'Referenced order not found');
+        }
+      }
     } else {
       // For other media types, plexKey is still required
       if (!plexKey) {
@@ -199,6 +213,14 @@ function createBulkOperationsRoutes(prisma, services) {
             gameId: gameId ? parseInt(gameId) : null
           }
         });
+      } else if (mediaType === 'suborder') {
+        existingItem = await prisma.customOrderItem.findFirst({
+          where: {
+            customOrderId: parseInt(id),
+            mediaType: 'suborder',
+            referencedCustomOrderId: parseInt(referencedCustomOrderId)
+          }
+        });
       } else {
         existingItem = await prisma.customOrderItem.findFirst({
           where: {
@@ -266,7 +288,7 @@ function createBulkOperationsRoutes(prisma, services) {
           customTitle: customTitle || null,
           comicVineId: comicVineId || null,  // Store as string (URL), not integer
           comicVineDetailsJson: comicVineDetailsJson || null,
-          originalArtworkUrl: originalArtworkUrl || comicCoverUrl || comicVineMetadata.comicCoverUrl || storyCoverUrl || null,
+          originalArtworkUrl: originalArtworkUrl || comicCoverUrl || comicVineMetadata.comicCoverUrl || storyCoverUrl || bookCoverUrl || null,
           // ComicVine extracted metadata
           comicVineSeriesId: comicVineMetadata.comicVineSeriesId || null,
           comicVineIssueId: comicVineMetadata.comicVineIssueId || null,
@@ -290,7 +312,9 @@ function createBulkOperationsRoutes(prisma, services) {
           webDescription: webDescription || null,
           // Book and Game references
           bookId: bookId ? parseInt(bookId) : null,
-          gameId: gameId ? parseInt(gameId) : null
+          gameId: gameId ? parseInt(gameId) : null,
+          // Suborder reference
+          referencedCustomOrderId: mediaType === 'suborder' && referencedCustomOrderId ? parseInt(referencedCustomOrderId) : null
         }
       });
 

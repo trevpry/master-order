@@ -47,10 +47,19 @@ async function checkIfTvdbItemExistsInPlex(customOrderItem) {
 // Get all active custom orders
 async function getActiveCustomOrders() {
   try {
+    // Find all order IDs that are referenced as suborder entries in other orders' item lists.
+    // These should only be traversed through their parent order, not selected directly.
+    const subOrderEntries = await prisma.customOrderItem.findMany({
+      where: { mediaType: 'suborder', referencedCustomOrderId: { not: null } },
+      select: { referencedCustomOrderId: true }
+    });
+    const embeddedOrderIds = subOrderEntries.map(e => e.referencedCustomOrderId);
+
     const customOrders = await prisma.customOrder.findMany({
       where: { 
         isActive: true,
-        parentOrderId: null // Only get top-level orders (not sub-orders)
+        parentOrderId: null, // Only get top-level orders (not hierarchy sub-orders)
+        ...(embeddedOrderIds.length > 0 ? { id: { notIn: embeddedOrderIds } } : {}) // Exclude orders embedded as entries in other orders
       },
       include: {
         items: {
@@ -63,6 +72,8 @@ async function getActiveCustomOrders() {
         subOrders: {
           where: { isActive: true },
           include: {
+            plexPlaylist: true,
+            customPlaylist: true,
             items: {
               where: { isWatched: false },
               orderBy: { sortOrder: 'asc' },
@@ -683,14 +694,19 @@ async function getNextCustomOrder(req = null, mediaTypeLimiters = null) {
     fullMediaDetails.customOrderItemId = nextItem.id;
     
     // Add playlist information if available
-    if (finalSourceOrder.plexPlaylist) {
-      fullMediaDetails.playlistName = finalSourceOrder.plexPlaylist.title;
+    // For sub-order items: prefer the sub-order's own playlist, fall back to parent order's playlist
+    const playlistSourceOrder = isFromSubOrder
+      ? (finalSourceOrder.plexPlaylist || finalSourceOrder.customPlaylist ? finalSourceOrder : (finalParentOrder || finalSourceOrder))
+      : finalSourceOrder;
+
+    if (playlistSourceOrder.plexPlaylist) {
+      fullMediaDetails.playlistName = playlistSourceOrder.plexPlaylist.title;
       fullMediaDetails.playlistType = 'plex';
-      fullMediaDetails.playlistId = finalSourceOrder.plexPlaylist.ratingKey;
-    } else if (finalSourceOrder.customPlaylist) {
-      fullMediaDetails.playlistName = finalSourceOrder.customPlaylist.title;
+      fullMediaDetails.playlistId = playlistSourceOrder.plexPlaylist.ratingKey;
+    } else if (playlistSourceOrder.customPlaylist) {
+      fullMediaDetails.playlistName = playlistSourceOrder.customPlaylist.title;
       fullMediaDetails.playlistType = 'custom';
-      fullMediaDetails.playlistId = finalSourceOrder.customPlaylist.id;
+      fullMediaDetails.playlistId = playlistSourceOrder.customPlaylist.id;
     }
     
     // Add background gallery information if available

@@ -14,6 +14,7 @@ const OrderHeader = ({
   setShowShortStoryForm,
   setShowWebVideoForm,
   setShowGameForm,
+  setShowSubOrderForm,
   setShowBulkImportModal,
   setShowCmroBulkImportModal,
   setMovieFormData,
@@ -121,6 +122,12 @@ const OrderHeader = ({
           className="secondary"
         >
           🎮 Add Video Game
+        </Button>
+        <Button
+          onClick={() => setShowSubOrderForm(true)}
+          className="secondary"
+        >
+          📁 Add Order
         </Button>
         <Button
           onClick={() => {

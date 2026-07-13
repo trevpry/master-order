@@ -192,15 +192,22 @@ function createOrderManagementRoutes(prisma, services) {
   router.get('/:id', async (req, res) => {
     try {
       const { id } = req.params;
+      const itemInclude = {
+        storyContainedInBook: true,
+        containedStories: true,
+        referencedCustomOrder: true, // Include referenced custom order for sub-order items
+        book: { // Include unified book data for cover and details
+          include: {
+            bookCompletions: true
+          }
+        }
+      };
+
       const customOrder = await prisma.customOrder.findUnique({
         where: { id: parseInt(id) },
         include: {
           items: {
-            include: {
-              storyContainedInBook: true,
-              containedStories: true,
-              referencedCustomOrder: true // Include referenced custom order for sub-order items
-            },
+            include: itemInclude,
             orderBy: { sortOrder: 'asc' }
           },
           plexPlaylist: true,
@@ -226,11 +233,7 @@ function createOrderManagementRoutes(prisma, services) {
           where: { id: parseInt(id) },
           include: {
             items: {
-              include: {
-                storyContainedInBook: true,
-                containedStories: true,
-                referencedCustomOrder: true
-              },
+              include: itemInclude,
               orderBy: { sortOrder: 'asc' }
             },
             backgroundGallery: true
