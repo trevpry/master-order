@@ -12,7 +12,8 @@ const ComicFormModal = ({
   comicSearchLoading,
   onClose,
   onSubmit,
-  onSelectComic
+  onSelectComic,
+  onSelectAllComics
 }) => {
   if (!show) return null;
 
@@ -122,6 +123,7 @@ const ComicFormModal = ({
           comicFormData={comicFormData}
           onSelectComic={onSelectComic}
           reselectingItem={reselectingItem}
+          onSelectAllComics={onSelectAllComics}
         />
       </div>
     </div>

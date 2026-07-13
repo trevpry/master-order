@@ -1,6 +1,7 @@
 const AlienVsPredatorTimelineParser = require('./AlienVsPredatorTimelineParser');
 const CssSelectorParser = require('./CssSelectorParser');
 const DcuTimelineParser = require('./DcuTimelineParser');
+const MarvelComicsParser = require('./MarvelComicsParser');
 const McuTimelineParser = require('./McuTimelineParser');
 const StarWarsTimelineParser = require('./StarWarsTimelineParser');
 
@@ -12,6 +13,7 @@ const parsers = {
   'avp-timeline': new AlienVsPredatorTimelineParser(),
   'css-selectors': new CssSelectorParser(),
   'dcu-timeline': new DcuTimelineParser(),
+  'marvel-comics': new MarvelComicsParser(),
   'mcu-timeline': new McuTimelineParser(),
   'starwars-timeline': new StarWarsTimelineParser()
 };

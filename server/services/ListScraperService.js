@@ -14,6 +14,13 @@ class ListScraperService {
   }
 
   /**
+   * Sleep for N milliseconds
+   */
+  sleep(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
+  }
+
+  /**
    * Resolve list-sync movie/episode data to canonical Plex metadata when possible.
    * This is a final safety net before duplicate checks and DB writes.
    */
@@ -321,22 +328,105 @@ class ListScraperService {
     if (!config) throw new Error('List scrape config not found');
 
     const hasOrder = !!config.customOrderId;
-
-    const scrapedItems = await this.scrapeList(config);
     const results = { added: 0, skipped: 0, errors: [], notInPlex: [] };
 
-    // When headImportCount or tailImportCount is set and we're doing importAll,
-    // only import the first/last N items respectively.
-    // Everything outside the slice is tracked as skipped so future checks won't re-surface them.
+    // For CMRO parser with headImportCount, use smart pagination to count only NEW items
+    let scrapedItems = [];
+    let importableFingerprints = null;
+    
+    const isMarvelParser = config.parserType === 'marvel-comics';
     const headCount = config.headImportCount;
     const tailCount = config.tailImportCount;
-    let importableFingerprints = null;
-    if (importAll && hasOrder) {
+
+    // CMRO parser with headImportCount should always use smart pagination to handle multi-page fetching
+    if (isMarvelParser && headCount && headCount > 0) {
+      // Smart pagination: page through, counting only NEW items until target is reached
+      console.log(`[ListSync] Starting smart pagination for CMRO parser, targeting ${headCount} new items`);
+      
+      const parserConfig = config.parserConfig ? JSON.parse(config.parserConfig) : {};
+      const startPage = parserConfig.startPage || 59;
+      let currentPage = startPage;
+      let newItemsFound = 0;
+      const newFingerprints = new Set();
+
+      while (newItemsFound < headCount) {
+        // Scrape current page
+        const configForPage = {
+          ...config,
+          parserConfig: JSON.stringify({ ...parserConfig, currentPage })
+        };
+        
+        console.log(`[ListSync] Fetching page ${currentPage} (currently have ${newItemsFound}/${headCount} new items)`);
+        const pageItems = await this.scrapeList(configForPage);
+        if (pageItems.length === 0) {
+          console.log(`[ListSync] No items found on page ${currentPage}, stopping pagination`);
+          break; // No more pages
+        }
+
+        // Check each item on this page to see if it's new
+        let itemsOnPageProcessed = 0;
+        for (const item of pageItems) {
+          // Stop processing this page if we've reached the target
+          if (newItemsFound >= headCount) {
+            console.log(`[ListSync] Reached target of ${headCount} new items, stopping`);
+            break;
+          }
+
+          try {
+            const matched = await matcherService.matchItem(item);
+            
+            // Add 10-second delay after ComicVine API calls
+            if (item.mediaType === 'comic') {
+              console.log('[ListSync] Waiting 10 seconds after ComicVine API call...');
+              await this.sleep(10000);
+            }
+            
+            const enriched = await this.resolvePlexMetadata(matched);
+            const duplicate = await this.checkDuplicate(config.customOrderId, enriched);
+
+            if (!duplicate) {
+              // This is a NEW item
+              newFingerprints.add(item.fingerprint);
+              scrapedItems.push(item);
+              newItemsFound++;
+              itemsOnPageProcessed++;
+              console.log(`[ListSync] Found new item on page ${currentPage}: "${item.title}" (${newItemsFound}/${headCount})`);
+            } else {
+              console.log(`[ListSync] Item on page ${currentPage} is duplicate: "${item.title}"`);
+            }
+          } catch (error) {
+            console.error(`Error checking item "${item.title}":`, error.message);
+          }
+        }
+
+        // Only move to next page if we haven't reached the target yet
+        if (newItemsFound < headCount) {
+          console.log(`[ListSync] Page ${currentPage} processed (${itemsOnPageProcessed} items), moving to next page`);
+          currentPage++;
+        }
+      }
+
+      console.log(`[ListSync] Smart pagination complete: found ${newItemsFound} new items across ${currentPage - startPage + 1} pages`);
+      
+      // Re-assign position numbers sequentially across all collected items to preserve source order
+      scrapedItems.forEach((item, index) => {
+        item.position = index;
+      });
+      console.log(`[ListSync] Re-assigned positions to preserve source order (0 to ${scrapedItems.length - 1})`);
+      
+      importableFingerprints = newFingerprints;
+    } else if (importAll && hasOrder) {
+      // Standard flow: scrape all at once and use slice for headImportCount/tailImportCount
+      scrapedItems = await this.scrapeList(config);
+
       if (headCount && headCount > 0) {
         importableFingerprints = new Set(scrapedItems.slice(0, headCount).map(i => i.fingerprint));
       } else if (tailCount && tailCount > 0) {
         importableFingerprints = new Set(scrapedItems.slice(-tailCount).map(i => i.fingerprint));
       }
+    } else {
+      // No import requested, just scrape for preview/checking
+      scrapedItems = await this.scrapeList(config);
     }
 
     // === PHASE 1: Match all items, detect duplicates and Plex availability ===
@@ -355,6 +445,13 @@ class ListScraperService {
         }
 
         const matched = await matcherService.matchItem(item);
+        
+        // Add 10-second delay after ComicVine API calls to avoid rate limiting
+        if (item.mediaType === 'comic') {
+          console.log('[ListSync] Waiting 10 seconds after ComicVine API call to avoid rate limiting...');
+          await this.sleep(10000);
+        }
+        
         const enriched = await this.resolvePlexMetadata(matched);
 
         // Not-in-Plex check — stop immediately, track the item, skip remaining
@@ -449,12 +546,76 @@ class ListScraperService {
     if (!config || !config.isActive) return { added: 0, checked: true };
 
     try {
-      const scrapedItems = await this.scrapeList(config);
+      // For CMRO parser with headImportCount, use smart pagination
+      let scrapedItems = [];
+      const isMarvelParser = config.parserType === 'marvel-comics';
+      const headCount = config.headImportCount;
+      const tailCount = config.tailImportCount;
+      
+      if (isMarvelParser && headCount && headCount > 0) {
+        // Smart pagination: page through until we find enough NEW items
+        console.log(`[ListSync] Starting smart pagination for CMRO parser (checkForUpdates), targeting ${headCount} new items`);
+        
+        const parserConfig = config.parserConfig ? JSON.parse(config.parserConfig) : {};
+        const startPage = parserConfig.startPage || 59;
+        let currentPage = startPage;
+        let newItemsFound = 0;
+
+        while (newItemsFound < headCount) {
+          // Scrape current page
+          const configForPage = {
+            ...config,
+            parserConfig: JSON.stringify({ ...parserConfig, currentPage })
+          };
+          
+          console.log(`[ListSync] checkForUpdates fetching page ${currentPage} (currently have ${newItemsFound}/${headCount} new items)`);
+          const pageItems = await this.scrapeList(configForPage);
+          if (pageItems.length === 0) {
+            console.log(`[ListSync] No items found on page ${currentPage}, stopping pagination`);
+            break; // No more pages
+          }
+
+          // Check each item on this page to see if it's new
+          for (const item of pageItems) {
+            if (newItemsFound >= headCount) {
+              console.log(`[ListSync] Reached target of ${headCount} new items, stopping`);
+              break;
+            }
+
+            // Check if this item is already tracked
+            const existing = await prisma.listScrapedItem.findUnique({
+              where: { listScrapeConfigId_fingerprint: { listScrapeConfigId: configId, fingerprint: item.fingerprint } }
+            });
+
+            if (!existing) {
+              // This is a NEW item
+              scrapedItems.push(item);
+              newItemsFound++;
+              console.log(`[ListSync] Found new item on page ${currentPage}: "${item.title}" (${newItemsFound}/${headCount})`);
+            }
+          }
+
+          // Only move to next page if we haven't reached the target yet
+          if (newItemsFound < headCount) {
+            currentPage++;
+          }
+        }
+
+        console.log(`[ListSync] Smart pagination complete: found ${newItemsFound} new items`);
+        
+        // Re-assign position numbers sequentially across all collected items to preserve source order
+        scrapedItems.forEach((item, index) => {
+          item.position = index;
+        });
+        console.log(`[ListSync] Re-assigned positions to preserve source order (0 to ${scrapedItems.length - 1})`);
+      } else {
+        // Standard flow: scrape once
+        scrapedItems = await this.scrapeList(config);
+      }
+
       const newItems = await this.detectNewItems(configId, scrapedItems);
 
       // Build eligible fingerprint set based on head/tail limits
-      const headCount = config.headImportCount;
-      const tailCount = config.tailImportCount;
       let eligibleFingerprints = null;
       if (config.customOrderId) {
         if (headCount && headCount > 0) {
@@ -571,6 +732,13 @@ class ListScraperService {
       for (const item of itemsToProcess) {
         try {
           const matched = await matcherService.matchItem(item);
+          
+          // Add 10-second delay after ComicVine API calls to avoid rate limiting
+          if (item.mediaType === 'comic') {
+            console.log('[ListSync] Waiting 10 seconds after ComicVine API call to avoid rate limiting...');
+            await this.sleep(10000);
+          }
+          
           const enriched = await this.resolvePlexMetadata(matched);
 
           // Not-in-Plex check — stop immediately

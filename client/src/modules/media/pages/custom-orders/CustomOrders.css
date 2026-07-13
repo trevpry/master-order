@@ -1350,6 +1350,19 @@ h3.clickable-title {
   background: #ffb300;
 }
 
+.comic-result-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  flex-shrink: 0;
+  margin-left: 1rem;
+}
+
+.comic-result-actions button {
+  white-space: nowrap;
+  min-width: 150px;
+}
+
 .search-note {
   color: #6c757d;
   font-size: 0.9rem;

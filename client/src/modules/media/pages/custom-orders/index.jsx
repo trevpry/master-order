@@ -3385,7 +3385,115 @@ const handleSearchComics = async (e) => {
     } finally {
       setComicSearchLoading(false);
     }
-  };const handleSelectComic = async (selectedSeries) => {
+  };
+
+  const handleSelectAllComics = async (selectedSeries) => {
+    try {
+      if (!viewingOrderItems) {
+        setMessage('Please select a custom order first');
+        return;
+      }
+
+      console.log(`📚 Starting bulk add for all issues from ${selectedSeries.series.name}`);
+      setMessage(`⏳ Loading all issues from ${selectedSeries.series.name}...`);
+
+      // Fetch all issues from this series
+      const response = await fetch(`${config.apiBaseUrl}/api/comicvine/series/${selectedSeries.series.id}/issues`);
+
+      if (!response.ok) {
+        setMessage('Error fetching all issues from this series');
+        return;
+      }
+
+      const responseData = await response.json();
+      // The response is wrapped by sendSuccess, so we need to access data.data
+      const allIssues = responseData.data?.issues || [];
+
+      if (allIssues.length === 0) {
+        setMessage('No issues found for this series');
+        return;
+      }
+
+      console.log(`📚 Found ${allIssues.length} issues to add`);
+      setMessage(`⏳ Adding ${allIssues.length} issues to order...`);
+
+      // Add all issues sequentially
+      let successCount = 0;
+      let failCount = 0;
+
+      for (let i = 0; i < allIssues.length; i++) {
+        const issue = allIssues[i];
+        
+        try {
+          // Fetch full details for this specific issue to get comprehensive data
+          const issueDetailResponse = await fetch(
+            `${config.apiBaseUrl}/api/comicvine/search-with-issues?query=${encodeURIComponent(selectedSeries.series.name)}&issueNumber=${encodeURIComponent(issue.issue_number)}`
+          );
+
+          let issueData = null;
+          if (issueDetailResponse.ok) {
+            const detailResults = await issueDetailResponse.json();
+            if (detailResults.length > 0) {
+              issueData = detailResults[0];
+            }
+          }
+
+          // Build comic media object
+          const comicString = `${selectedSeries.series.name} (${selectedSeries.series.start_year}) #${issue.issue_number}`;
+          const comicMedia = {
+            mediaType: 'comic',
+            title: issue.name || comicString,
+            comicSeries: selectedSeries.series.name,
+            comicYear: parseInt(selectedSeries.series.start_year),
+            comicIssue: issue.issue_number,
+            comicPublisher: selectedSeries.series.publisher?.name || null,
+            customTitle: null,
+            comicVineId: selectedSeries.series.api_detail_url || null,
+            // Store comprehensive ComicVine data if available
+            comicVineDetailsJson: issueData ? JSON.stringify(issueData.comprehensiveData || issueData) : null
+          };
+
+          // Add to order (skip UI update during bulk operation)
+          const success = await handleAddMediaToOrder(viewingOrderItems.id, comicMedia, true);
+          if (success) {
+            successCount++;
+          } else {
+            failCount++;
+          }
+
+          // Show progress
+          if ((i + 1) % 5 === 0 || i === allIssues.length - 1) {
+            setMessage(`⏳ Adding issues... (${i + 1}/${allIssues.length})`);
+          }
+
+          // Small delay to avoid overwhelming the server
+          await new Promise(resolve => setTimeout(resolve, 100));
+
+        } catch (error) {
+          console.error(`Error adding issue #${issue.issue_number}:`, error);
+          failCount++;
+        }
+      }
+
+      // Close the form and refresh
+      setShowComicForm(false);
+      setComicFormData({ series: '', year: '', issue: '', title: '' });
+      setComicSearchResults([]);
+
+      // Refresh the order
+      const updatedOrder = await fetch(`${config.apiBaseUrl}/api/custom-orders/${viewingOrderItems.id}`);
+      const updatedOrderData = await updatedOrder.json();
+      setViewingOrderItems(updatedOrderData);
+      fetchCustomOrders();
+
+      setMessage(`✅ Successfully added ${successCount} issues from ${selectedSeries.series.name}${failCount > 0 ? ` (${failCount} failed)` : ''}`);
+    } catch (error) {
+      console.error('Error adding all comics:', error);
+      setMessage('Error adding all issues. Please try again.');
+    }
+  };
+
+  const handleSelectComic = async (selectedSeries) => {
     try {
       console.log('handleSelectComic called with:', selectedSeries);
       console.log('selectedSeries.coverUrl:', selectedSeries.coverUrl);
@@ -4183,6 +4291,7 @@ const handleSearchComics = async (e) => {
         }}
         onSubmit={handleSearchComics}
         onSelectComic={handleSelectComic}
+        onSelectAllComics={handleSelectAllComics}
       />
 
       {/* Short Story Search Modal */}

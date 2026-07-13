@@ -193,6 +193,8 @@ class ComicVineService {
    * @returns {Promise<Object|null>} Issue details or null
    */  
   async getIssueByNumber(volumeId, issueNumber) {
+    const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+    
     try {
       if (!(await this.isApiKeyAvailable())) {
         console.log('ComicVine API key not available');
@@ -208,55 +210,101 @@ class ComicVineService {
 
       console.log(`Searching for issue #${issueNumber} in volume ${volumeId}`);
       
-      // First, get the issue ID from the issues list endpoint
-      const listResponse = await axios.get(`${this.baseURL}/issues/`, {
-        params: {
-          api_key: this.apiKey,
-          format: 'json',
-          filter: `volume:${volumeId},issue_number:${issueNumber}`,
-          limit: 1,
-          field_list: 'id,name,issue_number'
-        },
-        headers: {
-          'User-Agent': 'MasterOrder/1.0'
-        }
-      });
+      let retryCount = 0;
+      const maxRetries = 2;
 
-      const issues = listResponse.data.results || [];
-      if (issues.length === 0) {
-        console.log(`No issue #${issueNumber} found in volume ${volumeId}`);
-        // Cache the null result to avoid repeated API calls for non-existent issues
-        this.cache.set(cacheKey, null);
-        return null;
-      }
-      
-      const issueId = issues[0].id;
-      console.log(`Found issue #${issueNumber}: ${issues[0].name || 'Untitled'} (ID: ${issueId})`);
-      
-      // Now get the full issue details using the issue detail endpoint
-      const detailResponse = await axios.get(`${this.baseURL}/issue/4000-${issueId}/`, {
-        params: {
-          api_key: this.apiKey,
-          format: 'json',
-          field_list: 'id,name,issue_number,cover_date,store_date,date_added,date_last_updated,deck,description,has_staff_review,image,site_detail_url,character_credits,character_died_in,concept_credits,location_credits,object_credits,person_credits,story_arc_credits,team_credits,first_appearance_characters,first_appearance_concepts,first_appearance_locations,first_appearance_objects,first_appearance_storyarcs,first_appearance_teams'
-        },
-        headers: {
-          'User-Agent': 'MasterOrder/1.0'
+      while (retryCount <= maxRetries) {
+        try {
+          // First, get the issue ID from the issues list endpoint
+          const listResponse = await axios.get(`${this.baseURL}/issues/`, {
+            params: {
+              api_key: this.apiKey,
+              format: 'json',
+              filter: `volume:${volumeId},issue_number:${issueNumber}`,
+              limit: 1,
+              field_list: 'id,name,issue_number'
+            },
+            headers: {
+              'User-Agent': 'MasterOrder/1.0'
+            }
+          });
+
+          // Check for rate limit error in the response
+          if (listResponse.data && listResponse.data.status_code === 107) {
+            throw { isRateLimit: true, data: listResponse.data };
+          }
+
+          const issues = listResponse.data.results || [];
+          if (issues.length === 0) {
+            console.log(`No issue #${issueNumber} found in volume ${volumeId}`);
+            // Cache the null result to avoid repeated API calls for non-existent issues
+            this.cache.set(cacheKey, null);
+            return null;
+          }
+          
+          const issueId = issues[0].id;
+          console.log(`Found issue #${issueNumber}: ${issues[0].name || 'Untitled'} (ID: ${issueId})`);
+          
+          // Now get the full issue details using the issue detail endpoint
+          const detailResponse = await axios.get(`${this.baseURL}/issue/4000-${issueId}/`, {
+            params: {
+              api_key: this.apiKey,
+              format: 'json',
+              field_list: 'id,name,issue_number,cover_date,store_date,date_added,date_last_updated,deck,description,has_staff_review,image,site_detail_url,character_credits,character_died_in,concept_credits,location_credits,object_credits,person_credits,story_arc_credits,team_credits,first_appearance_characters,first_appearance_concepts,first_appearance_locations,first_appearance_objects,first_appearance_storyarcs,first_appearance_teams'
+            },
+            headers: {
+              'User-Agent': 'MasterOrder/1.0'
+            }
+          });
+
+          // Check for rate limit error in detail response
+          if (detailResponse.data && detailResponse.data.status_code === 107) {
+            throw { isRateLimit: true, data: detailResponse.data };
+          }
+          
+          if (detailResponse.data.results) {
+            const fullIssue = detailResponse.data.results;
+            console.log(`Retrieved full details for issue #${issueNumber}${fullIssue.character_credits ? ` with ${fullIssue.character_credits.length} characters` : ''}`);
+            
+            // Cache the successful result
+            this.cache.set(cacheKey, fullIssue);
+            return fullIssue;
+          } else {
+            console.log(`Could not retrieve full details for issue #${issueNumber}`);
+            // Cache the basic issue data
+            this.cache.set(cacheKey, issues[0]);
+            return issues[0]; // Fallback to basic issue data
+          }
+          
+        } catch (error) {
+          // Check if this is a rate limit error
+          if (error.isRateLimit || (error.response?.data?.status_code === 107)) {
+            console.error(`[ComicVine] Rate limit exceeded: ${error.response?.data?.error || error.data?.error}`);
+            
+            if (retryCount === 0) {
+              console.log('[ComicVine] Waiting 1 minute before retry attempt 1...');
+              await sleep(60000); // 1 minute
+              retryCount++;
+              continue; // Retry
+            } else if (retryCount === 1) {
+              console.log('[ComicVine] Waiting 10 minutes before retry attempt 2...');
+              await sleep(600000); // 10 minutes
+              retryCount++;
+              continue; // Retry
+            } else {
+              console.error('[ComicVine] Rate limit persists after retries, giving up');
+              // Cache null result
+              this.cache.set(cacheKey, null);
+              return null;
+            }
+          }
+          
+          // Non-rate-limit error
+          console.error('ComicVine issue search failed:', error.response?.data || error.message);
+          // Cache null result to avoid repeated failed attempts
+          this.cache.set(cacheKey, null);
+          return null;
         }
-      });
-      
-      if (detailResponse.data.results) {
-        const fullIssue = detailResponse.data.results;
-        console.log(`Retrieved full details for issue #${issueNumber}${fullIssue.character_credits ? ` with ${fullIssue.character_credits.length} characters` : ''}`);
-        
-        // Cache the successful result
-        this.cache.set(cacheKey, fullIssue);
-        return fullIssue;
-      } else {
-        console.log(`Could not retrieve full details for issue #${issueNumber}`);
-        // Cache the basic issue data
-        this.cache.set(cacheKey, issues[0]);
-        return issues[0]; // Fallback to basic issue data
       }
       
     } catch (error) {

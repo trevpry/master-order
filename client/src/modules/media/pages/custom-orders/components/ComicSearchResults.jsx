@@ -1,15 +1,29 @@
-import React from 'react';
+import React, { useState } from 'react';
 import Button from '../../../../../shared/components/Button';
 
 const ComicSearchResults = ({ 
   comicSearchResults, 
   comicFormData,
   onSelectComic, 
-  reselectingItem 
+  reselectingItem,
+  onSelectAllComics
 }) => {
+  const [isLoadingAll, setIsLoadingAll] = useState({});
+
   if (comicSearchResults.length === 0) {
     return null;
   }
+
+  const handleAddAll = async (series) => {
+    setIsLoadingAll(prev => ({ ...prev, [series.series.id]: true }));
+    try {
+      if (onSelectAllComics) {
+        await onSelectAllComics(series);
+      }
+    } finally {
+      setIsLoadingAll(prev => ({ ...prev, [series.series.id]: false }));
+    }
+  };
 
   return (
     <div className="comic-search-results">
@@ -56,13 +70,26 @@ const ComicSearchResults = ({
                 )}
               </div>
             </div>
-            <Button
-              onClick={() => onSelectComic(series)}
-              className="primary"
-              size="small"
-            >
-              {reselectingItem ? 'Re-select This Comic' : 'Add This Comic'}
-            </Button>
+            <div className="comic-result-actions">
+              <Button
+                onClick={() => onSelectComic(series)}
+                className="primary"
+                size="small"
+              >
+                {reselectingItem ? 'Re-select This Comic' : 'Add This Comic'}
+              </Button>
+              {series.series.count_of_issues && !reselectingItem && (
+                <Button
+                  onClick={() => handleAddAll(series)}
+                  className="secondary"
+                  size="small"
+                  disabled={isLoadingAll[series.series.id]}
+                  title={`Add all ${series.series.count_of_issues} issues from this series`}
+                >
+                  {isLoadingAll[series.series.id] ? '⏳ Adding All...' : `Add All ${series.series.count_of_issues} Issues`}
+                </Button>
+              )}
+            </div>
           </div>
         ))}
       </div>

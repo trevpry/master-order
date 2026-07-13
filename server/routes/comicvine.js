@@ -378,6 +378,56 @@ router.post('/bulk-search-with-issues', asyncHandler(async (req, res) => {
   });
 }));
 
+// Get all issues from a comic series
+router.get('/series/:seriesId/issues', asyncHandler(async (req, res) => {
+  const { seriesId } = req.params;
+  
+  if (!seriesId) {
+    return sendBadRequest(res, 'Missing series ID');
+  }
+
+  try {
+    // Fetch all issues for this series from ComicVine
+    const apiKey = process.env.COMICVINE_API_KEY || (await require('../prismaClient').settings.findUnique({ where: { id: 1 } }).then(s => s?.comicVineApiKey));
+    
+    if (!apiKey) {
+      return sendBadRequest(res, 'ComicVine API key not configured');
+    }
+
+    console.log(`📚 Fetching all issues for series ${seriesId}`);
+
+    // Get all issues for this volume/series
+    const response = await axios.get('https://comicvine.gamespot.com/api/issues/', {
+      params: {
+        api_key: apiKey,
+        format: 'json',
+        filter: `volume:${seriesId}`,
+        sort: 'issue_number:asc',
+        limit: 200, // ComicVine default limit
+        field_list: 'id,name,issue_number,cover_date,store_date,image,api_detail_url,site_detail_url'
+      },
+      headers: {
+        'User-Agent': 'MasterOrder/1.0'
+      }
+    });
+
+    const issues = response.data.results || [];
+    console.log(`✓ Found ${issues.length} issues for series ${seriesId}`);
+
+    // Sort issues by issue number numerically
+    issues.sort((a, b) => {
+      const aNum = parseFloat(a.issue_number) || 0;
+      const bNum = parseFloat(b.issue_number) || 0;
+      return aNum - bNum;
+    });
+
+    sendSuccess(res, { issues: issues, count: issues.length });
+  } catch (error) {
+    console.error('Error fetching series issues:', error.message);
+    sendServerError(res, 'Failed to fetch series issues');
+  }
+}));
+
 // ComicVine cache statistics endpoint
 router.get('/cache-stats', asyncHandler(async (req, res) => {
   const stats = comicVineService.getCacheStats();
