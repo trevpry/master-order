@@ -10,6 +10,8 @@ class PlexSyncService {
     // Initialize with null, will be loaded from database when needed
     this.plexUrl = null;
     this.plexToken = null;
+    this.detailFetchConcurrency = Math.max(1, parseInt(process.env.PLEX_SYNC_DETAIL_CONCURRENCY || '6', 10));
+    this.childSyncConcurrency = Math.max(1, parseInt(process.env.PLEX_SYNC_CHILD_CONCURRENCY || '4', 10));
   }
 
   // Helper function to handle database timeout/connection errors
@@ -86,6 +88,71 @@ class PlexSyncService {
       const jsonData = await response.json();
       return jsonData;
     }
+  }
+
+  parsePlexTimestamp(value) {
+    const parsedValue = Number.parseInt(value, 10);
+    return Number.isFinite(parsedValue) ? parsedValue : null;
+  }
+
+  isUnixTimestampCurrent(localValue, plexValue) {
+    const localTimestamp = Number.parseInt(localValue, 10);
+    const plexTimestamp = this.parsePlexTimestamp(plexValue);
+    return Number.isFinite(localTimestamp) && Number.isFinite(plexTimestamp) && localTimestamp === plexTimestamp;
+  }
+
+  isDateTimestampCurrent(localValue, plexValue) {
+    const plexTimestamp = this.parsePlexTimestamp(plexValue);
+    if (!localValue || !Number.isFinite(plexTimestamp)) {
+      return false;
+    }
+
+    const localTimestamp = Math.floor(new Date(localValue).getTime() / 1000);
+    return Number.isFinite(localTimestamp) && localTimestamp === plexTimestamp;
+  }
+
+  async mapWithConcurrency(items, limit, worker) {
+    if (!items.length) {
+      return [];
+    }
+
+    const results = new Array(items.length);
+    let nextIndex = 0;
+
+    const runWorker = async () => {
+      while (true) {
+        const currentIndex = nextIndex;
+        nextIndex += 1;
+
+        if (currentIndex >= items.length) {
+          return;
+        }
+
+        results[currentIndex] = await worker(items[currentIndex], currentIndex);
+      }
+    };
+
+    const workerCount = Math.min(limit, items.length);
+    await Promise.all(Array.from({ length: workerCount }, () => runWorker()));
+    return results;
+  }
+
+  async fetchDetailedMetadataBatch(items, itemLabel) {
+    if (!items.length) {
+      return new Map();
+    }
+
+    const detailedEntries = await this.mapWithConcurrency(items, this.detailFetchConcurrency, async (item) => {
+      try {
+        const detailData = await this.makeRequest(`/library/metadata/${item.ratingKey}`);
+        return [item.ratingKey, detailData.MediaContainer?.Metadata?.[0] || item];
+      } catch (error) {
+        console.warn(`Failed to fetch detailed metadata for ${itemLabel} ${item.title} (${item.ratingKey}):`, error.message);
+        return [item.ratingKey, item];
+      }
+    });
+
+    return new Map(detailedEntries);
   }  async syncLibrarySections() {
     console.log('Syncing Plex library sections...');
     
@@ -143,20 +210,23 @@ class PlexSyncService {
     try {
       const data = await this.makeRequest(`/library/sections/${sectionKey}/all?type=2`);
       const shows = data.MediaContainer?.Metadata || [];
+      const existingShows = await prisma.plexTVShow.findMany({
+        where: {
+          sectionKey,
+          ratingKey: { in: shows.map(show => show.ratingKey) }
+        },
+        select: { ratingKey: true, updatedAt_plex: true }
+      });
+      const existingShowMap = new Map(existingShows.map(show => [show.ratingKey, show]));
+      const showsNeedingRefresh = shows.filter(show => !this.isUnixTimestampCurrent(existingShowMap.get(show.ratingKey)?.updatedAt_plex, show.updatedAt));
+      const detailedShowMap = await this.fetchDetailedMetadataBatch(showsNeedingRefresh, 'show');
       
       const syncedShows = [];
       
       for (const show of shows) {
-        // Fetch detailed metadata for each show to ensure we get collections and labels
-        let detailedShow = show;
-        try {
-          const detailData = await this.makeRequest(`/library/metadata/${show.ratingKey}`);
-          detailedShow = detailData.MediaContainer?.Metadata?.[0] || show;
-        } catch (error) {
-          console.warn(`Failed to fetch detailed metadata for show ${show.title} (${show.ratingKey}):`, error.message);
-          // Fall back to the basic show data from the bulk endpoint
-        }
-          const showData = {
+        const shouldRefreshShow = !this.isUnixTimestampCurrent(existingShowMap.get(show.ratingKey)?.updatedAt_plex, show.updatedAt);
+        const detailedShow = detailedShowMap.get(show.ratingKey) || show;
+        const showData = {
           ratingKey: detailedShow.ratingKey,
           title: detailedShow.title,
           year: detailedShow.year ? parseInt(detailedShow.year) : null,
@@ -180,20 +250,20 @@ class PlexSyncService {
           sectionKey: sectionKey,
           lastSyncedAt: new Date()
         };
+
+        if (shouldRefreshShow) {
           const syncedShow = await prisma.plexTVShow.upsert({
-          where: { ratingKey: detailedShow.ratingKey },
-          update: showData,
-          create: showData
-        });
-        
-        // Clear and sync complex fields
-        await this.clearComplexFields(detailedShow.ratingKey, 'show');
-        await this.syncComplexFields(detailedShow, 'show', detailedShow.ratingKey);
-        
-        syncedShows.push(syncedShow);
+            where: { ratingKey: detailedShow.ratingKey },
+            update: showData,
+            create: showData
+          });
+          await this.clearComplexFields(detailedShow.ratingKey, 'show');
+          await this.syncComplexFields(detailedShow, 'show', detailedShow.ratingKey);
+          syncedShows.push(syncedShow);
+        }
         
         // Sync seasons for this show
-        await this.syncSeasons(show.ratingKey);
+        await this.syncSeasons(show.ratingKey, detailedShow.title || show.title);
       }
       
       console.log(`Synced ${syncedShows.length} TV shows`);
@@ -202,19 +272,21 @@ class PlexSyncService {
       console.error('Error syncing TV shows:', error);
       throw error;
     }
-  }  async syncSeasons(showRatingKey) {
+  }  async syncSeasons(showRatingKey, showTitle = null) {
     try {
       const data = await this.makeRequest(`/library/metadata/${showRatingKey}/children`);
       const seasons = data.MediaContainer?.Metadata || [];
-        for (const season of seasons) {
-        // Fetch detailed metadata for each season to get all fields
-        let detailedSeason = season;
-        try {
-          const detailData = await this.makeRequest(`/library/metadata/${season.ratingKey}`);
-          detailedSeason = detailData.MediaContainer?.Metadata?.[0] || season;
-        } catch (error) {
-          console.warn(`Failed to fetch detailed metadata for season ${season.title} (${season.ratingKey}):`, error.message);
-        }
+      const existingSeasons = await prisma.plexSeason.findMany({
+        where: { ratingKey: { in: seasons.map(season => season.ratingKey) } },
+        select: { ratingKey: true, updatedAt_plex: true }
+      });
+      const existingSeasonMap = new Map(existingSeasons.map(season => [season.ratingKey, season]));
+      const seasonsNeedingRefresh = seasons.filter(season => !this.isUnixTimestampCurrent(existingSeasonMap.get(season.ratingKey)?.updatedAt_plex, season.updatedAt));
+      const detailedSeasonMap = await this.fetchDetailedMetadataBatch(seasonsNeedingRefresh, 'season');
+
+      for (const season of seasons) {
+        const shouldRefreshSeason = !this.isUnixTimestampCurrent(existingSeasonMap.get(season.ratingKey)?.updatedAt_plex, season.updatedAt);
+        const detailedSeason = detailedSeasonMap.get(season.ratingKey) || season;
 
         const seasonData = {
           ratingKey: detailedSeason.ratingKey,
@@ -244,48 +316,51 @@ class PlexSyncService {
           updatedAt_plex: detailedSeason.updatedAt ? parseInt(detailedSeason.updatedAt) : null,
           viewCount: detailedSeason.viewCount ? parseInt(detailedSeason.viewCount) : null
         };
+
+        if (shouldRefreshSeason) {
           await prisma.plexSeason.upsert({
-          where: { ratingKey: detailedSeason.ratingKey },
-          update: seasonData,
-          create: seasonData
-        });
-        
-        // Clear and sync complex fields
-        await this.clearComplexFields(detailedSeason.ratingKey, 'season');
-        await this.syncComplexFields(detailedSeason, 'season', detailedSeason.ratingKey);
+            where: { ratingKey: detailedSeason.ratingKey },
+            update: seasonData,
+            create: seasonData
+          });
+          await this.clearComplexFields(detailedSeason.ratingKey, 'season');
+          await this.syncComplexFields(detailedSeason, 'season', detailedSeason.ratingKey);
+        }
         
         // Sync episodes for this season
-        await this.syncEpisodes(detailedSeason.ratingKey, showRatingKey);
+        await this.syncEpisodes(detailedSeason.ratingKey, showRatingKey, showTitle);
       }
     } catch (error) {
       console.error(`Error syncing seasons for show ${showRatingKey}:`, error);
       throw error;
     }
   }
-  async syncEpisodes(seasonRatingKey, showRatingKey) {
+  async syncEpisodes(seasonRatingKey, showRatingKey, showTitle = null) {
     try {
       const data = await this.makeRequest(`/library/metadata/${seasonRatingKey}/children`);
       const episodes = data.MediaContainer?.Metadata || [];
-      
-      // Get show title for denormalization
-      const show = await prisma.plexTVShow.findUnique({
-        where: { ratingKey: showRatingKey }
-      });        for (const episode of episodes) {
-        // Fetch detailed metadata for each episode to get all fields
-        let detailedEpisode = episode;
-        try {
-          const detailData = await this.makeRequest(`/library/metadata/${episode.ratingKey}`);
-          detailedEpisode = detailData.MediaContainer?.Metadata?.[0] || episode;
-        } catch (error) {
-          console.warn(`Failed to fetch detailed metadata for episode ${episode.title} (${episode.ratingKey}):`, error.message);
-        }
+      const resolvedShowTitle = showTitle || (await prisma.plexTVShow.findUnique({
+        where: { ratingKey: showRatingKey },
+        select: { title: true }
+      }))?.title || 'Unknown';
+      const existingEpisodes = await prisma.plexEpisode.findMany({
+        where: { ratingKey: { in: episodes.map(episode => episode.ratingKey) } },
+        select: { ratingKey: true, updatedAt_plex: true }
+      });
+      const existingEpisodeMap = new Map(existingEpisodes.map(episode => [episode.ratingKey, episode]));
+      const episodesNeedingRefresh = episodes.filter(episode => !this.isUnixTimestampCurrent(existingEpisodeMap.get(episode.ratingKey)?.updatedAt_plex, episode.updatedAt));
+      const detailedEpisodeMap = await this.fetchDetailedMetadataBatch(episodesNeedingRefresh, 'episode');
+
+      for (const episode of episodes) {
+        const shouldRefreshEpisode = !this.isUnixTimestampCurrent(existingEpisodeMap.get(episode.ratingKey)?.updatedAt_plex, episode.updatedAt);
+        const detailedEpisode = detailedEpisodeMap.get(episode.ratingKey) || episode;
 
         const episodeData = {
           ratingKey: detailedEpisode.ratingKey,
           title: detailedEpisode.title,
           index: detailedEpisode.index ? parseInt(detailedEpisode.index) : 0,
           seasonIndex: detailedEpisode.parentIndex ? parseInt(detailedEpisode.parentIndex) : 0,
-          showTitle: show?.title || 'Unknown',
+          showTitle: resolvedShowTitle,
           seasonRatingKey: seasonRatingKey,
           viewCount: detailedEpisode.viewCount ? parseInt(detailedEpisode.viewCount) : null,
           lastViewedAt: detailedEpisode.lastViewedAt ? parseInt(detailedEpisode.lastViewedAt) : null,
@@ -316,15 +391,16 @@ class PlexSyncService {
           type: detailedEpisode.type || null,
           updatedAt_plex: detailedEpisode.updatedAt ? parseInt(detailedEpisode.updatedAt) : null
         };
+
+        if (shouldRefreshEpisode) {
           await prisma.plexEpisode.upsert({
-          where: { ratingKey: episode.ratingKey },
-          update: episodeData,
-          create: episodeData
-        });
-        
-        // Clear and sync complex fields
-        await this.clearComplexFields(detailedEpisode.ratingKey, 'episode');
-        await this.syncComplexFields(detailedEpisode, 'episode', detailedEpisode.ratingKey);
+            where: { ratingKey: episode.ratingKey },
+            update: episodeData,
+            create: episodeData
+          });
+          await this.clearComplexFields(detailedEpisode.ratingKey, 'episode');
+          await this.syncComplexFields(detailedEpisode, 'episode', detailedEpisode.ratingKey);
+        }
       }
     } catch (error) {
       console.error(`Error syncing episodes for season ${seasonRatingKey}:`, error);
@@ -336,19 +412,23 @@ class PlexSyncService {
     try {
       const data = await this.makeRequest(`/library/sections/${sectionKey}/all?type=1`);
       const movies = data.MediaContainer?.Metadata || [];
+      const existingMovies = await prisma.plexMovie.findMany({
+        where: {
+          sectionKey,
+          ratingKey: { in: movies.map(movie => movie.ratingKey) }
+        },
+        select: { ratingKey: true, updatedAt_plex: true }
+      });
+      const existingMovieMap = new Map(existingMovies.map(movie => [movie.ratingKey, movie]));
+      const moviesNeedingRefresh = movies.filter(movie => !this.isUnixTimestampCurrent(existingMovieMap.get(movie.ratingKey)?.updatedAt_plex, movie.updatedAt));
+      const detailedMovieMap = await this.fetchDetailedMetadataBatch(moviesNeedingRefresh, 'movie');
       
       const syncedMovies = [];
       
       for (const movie of movies) {
-        // Fetch detailed metadata for each movie to ensure we get collections and labels
-        let detailedMovie = movie;
-        try {
-          const detailData = await this.makeRequest(`/library/metadata/${movie.ratingKey}`);
-          detailedMovie = detailData.MediaContainer?.Metadata?.[0] || movie;
-        } catch (error) {
-          console.warn(`Failed to fetch detailed metadata for movie ${movie.title} (${movie.ratingKey}):`, error.message);
-          // Fall back to the basic movie data from the bulk endpoint
-        }        const movieData = {
+        const shouldRefreshMovie = !this.isUnixTimestampCurrent(existingMovieMap.get(movie.ratingKey)?.updatedAt_plex, movie.updatedAt);
+        const detailedMovie = detailedMovieMap.get(movie.ratingKey) || movie;
+        const movieData = {
           ratingKey: detailedMovie.ratingKey,
           title: detailedMovie.title,
           year: detailedMovie.year ? parseInt(detailedMovie.year) : null,
@@ -384,17 +464,17 @@ class PlexSyncService {
           sectionKey: sectionKey,
           lastSyncedAt: new Date()
         };
+
+        if (shouldRefreshMovie) {
           const syncedMovie = await prisma.plexMovie.upsert({
-          where: { ratingKey: detailedMovie.ratingKey },
-          update: movieData,
-          create: movieData
-        });
-        
-        // Clear and sync complex fields
-        await this.clearComplexFields(detailedMovie.ratingKey, 'movie');
-        await this.syncComplexFields(detailedMovie, 'movie', detailedMovie.ratingKey);
-        
-        syncedMovies.push(syncedMovie);
+            where: { ratingKey: detailedMovie.ratingKey },
+            update: movieData,
+            create: movieData
+          });
+          await this.clearComplexFields(detailedMovie.ratingKey, 'movie');
+          await this.syncComplexFields(detailedMovie, 'movie', detailedMovie.ratingKey);
+          syncedMovies.push(syncedMovie);
+        }
       }
       
       console.log(`Synced ${syncedMovies.length} movies`);
@@ -408,271 +488,171 @@ class PlexSyncService {
   // Helper methods to sync complex field data
   async syncComplexFields(item, itemType, ratingKey) {
     try {
-      // Sync Directors
-      if (item.Director && Array.isArray(item.Director)) {
-        for (const director of item.Director) {
-          const directorData = {
-            tag: director.tag || director.title,
-            filter: director.filter || null,
-            tagKey: director.tagKey || null,
-            thumb: director.thumb || null
-          };
-          
-          if (itemType === 'movie') {
-            directorData.movieRatingKey = ratingKey;
-          } else if (itemType === 'episode') {
-            directorData.episodeRatingKey = ratingKey;
-          }
-          
-          await prisma.plexDirector.create({
-            data: directorData
-          });
-        }
-      }
-      
-      // Sync Genres
-      if (item.Genre && Array.isArray(item.Genre)) {
-        for (const genre of item.Genre) {
-          const genreData = {
-            tag: genre.tag || genre.title,
-            filter: genre.filter || null,
-            tagKey: genre.tagKey || null,
-            thumb: genre.thumb || null
-          };
-          
-          if (itemType === 'movie') {
-            genreData.movieRatingKey = ratingKey;
-          } else if (itemType === 'show') {
-            genreData.showRatingKey = ratingKey;
-          }
-          
-          await prisma.plexGenre.create({
-            data: genreData
-          });
-        }
-      }
-      
-      // Sync Producers (Movies only)
-      if (itemType === 'movie' && item.Producer && Array.isArray(item.Producer)) {
-        for (const producer of item.Producer) {
-          await prisma.plexProducer.create({
-            data: {
-              movieRatingKey: ratingKey,
-              tag: producer.tag || producer.title,
-              filter: producer.filter || null,
-              tagKey: producer.tagKey || null,
-              thumb: producer.thumb || null
-            }
-          });
-        }
-      }
-      
-      // Sync Writers
-      if (item.Writer && Array.isArray(item.Writer)) {
-        for (const writer of item.Writer) {
-          const writerData = {
-            tag: writer.tag || writer.title,
-            filter: writer.filter || null,
-            tagKey: writer.tagKey || null,
-            thumb: writer.thumb || null
-          };
-          
-          if (itemType === 'movie') {
-            writerData.movieRatingKey = ratingKey;
-          } else if (itemType === 'episode') {
-            writerData.episodeRatingKey = ratingKey;
-          }
-          
-          await prisma.plexWriter.create({
-            data: writerData
-          });
-        }
-      }
-      
-      // Sync Cast/Roles
-      if (item.Role && Array.isArray(item.Role)) {
-        for (const role of item.Role) {
-          const roleData = {
-            tag: role.tag || role.title,
-            filter: role.filter || null,
-            tagKey: role.tagKey || null,
-            role: role.role || null,
-            thumb: role.thumb || null
-          };
-          
-          if (itemType === 'movie') {
-            roleData.movieRatingKey = ratingKey;
-          } else if (itemType === 'episode') {
-            roleData.episodeRatingKey = ratingKey;
-          }
-          
-          await prisma.plexRole.create({
-            data: roleData
-          });
-        }
-      }
-      
-      // Sync Countries (Movies only)
-      if (itemType === 'movie' && item.Country && Array.isArray(item.Country)) {
-        for (const country of item.Country) {
-          await prisma.plexCountry.create({
-            data: {
-              movieRatingKey: ratingKey,
-              tag: country.tag || country.title,
-              filter: country.filter || null,
-              tagKey: country.tagKey || null,
-              thumb: country.thumb || null
-            }
-          });
-        }
-      }
-      
-      // Sync Ratings
-      if (item.Rating && Array.isArray(item.Rating)) {
-        for (const rating of item.Rating) {
-          const ratingData = {
-            image: rating.image || null,
-            value: rating.value ? parseFloat(rating.value) : null,
-            type: rating.type || null
-          };
-          
-          if (itemType === 'movie') {
-            ratingData.movieRatingKey = ratingKey;
-          } else if (itemType === 'episode') {
-            ratingData.episodeRatingKey = ratingKey;
-          }
-          
-          await prisma.plexRating.create({
-            data: ratingData
-          });
-        }
-      }
-      
-      // Sync GUIDs
-      if (item.Guid && Array.isArray(item.Guid)) {
-        for (const guid of item.Guid) {
-          const guidData = {
-            id_value: guid.id || ''
-          };
-          
-          if (itemType === 'movie') {
-            guidData.movieRatingKey = ratingKey;
-          } else if (itemType === 'show') {
-            guidData.showRatingKey = ratingKey;
-          } else if (itemType === 'season') {
-            guidData.seasonRatingKey = ratingKey;
-          } else if (itemType === 'episode') {
-            guidData.episodeRatingKey = ratingKey;
-          }
-          
-          await prisma.plexGuid.create({
-            data: guidData
-          });
-        }
-      }
-      
-      // Sync Media
-      if (item.Media && Array.isArray(item.Media)) {
-        for (const media of item.Media) {          const mediaData = {
-            id_value: media.id ? String(media.id) : null,
-            duration: media.duration ? parseInt(media.duration) : null,
-            bitrate: media.bitrate ? parseInt(media.bitrate) : null,
-            width: media.width ? parseInt(media.width) : null,
-            height: media.height ? parseInt(media.height) : null,
-            aspectRatio: media.aspectRatio ? parseFloat(media.aspectRatio) : null,
-            audioChannels: media.audioChannels ? parseInt(media.audioChannels) : null,
-            audioCodec: media.audioCodec || null,
-            videoCodec: media.videoCodec || null,
-            videoResolution: media.videoResolution || null,
-            container: media.container || null,
-            videoFrameRate: media.videoFrameRate || null,
-            optimizedForStreaming: media.optimizedForStreaming ? Boolean(media.optimizedForStreaming) : null,
-            selected: media.selected ? Boolean(media.selected) : null
-          };
-          
-          if (itemType === 'movie') {
-            mediaData.movieRatingKey = ratingKey;
-          } else if (itemType === 'episode') {
-            mediaData.episodeRatingKey = ratingKey;
-          }
-          
-          await prisma.plexMedia.create({
-            data: mediaData
-          });
-        }
-      }
-      
-      // Sync Images
-      if (item.Image && Array.isArray(item.Image)) {
-        for (const image of item.Image) {
-          const imageData = {
-            alt: image.alt || null,
-            type: image.type || null,
-            url: image.url || null
-          };
-          
-          if (itemType === 'movie') {
-            imageData.movieRatingKey = ratingKey;
-          } else if (itemType === 'show') {
-            imageData.showRatingKey = ratingKey;
-          } else if (itemType === 'season') {
-            imageData.seasonRatingKey = ratingKey;
-          } else if (itemType === 'episode') {
-            imageData.episodeRatingKey = ratingKey;
-          }
-          
-          await prisma.plexImage.create({
-            data: imageData
-          });        }
-      }
-      
-      // Sync Labels
-      if (item.Label && Array.isArray(item.Label)) {
-        for (const label of item.Label) {
-          const labelData = {
-            tag: label.tag || label.title,
-            filter: label.filter || null,
-            tagKey: label.tagKey || null,
-            thumb: label.thumb || null
-          };
-          
-          if (itemType === 'movie') {
-            labelData.movieRatingKey = ratingKey;
-          } else if (itemType === 'show') {
-            labelData.showRatingKey = ratingKey;
-          }
-          
-          await prisma.plexLabel.create({
-            data: labelData
-          });
-        }
-      }
-      
-      // Sync UltraBlurColors
-      if (item.UltraBlurColors && Array.isArray(item.UltraBlurColors)) {
-        for (const colors of item.UltraBlurColors) {
-          const colorData = {
-            topLeft: colors.topLeft || null,
-            topRight: colors.topRight || null,
-            bottomLeft: colors.bottomLeft || null,
-            bottomRight: colors.bottomRight || null
-          };
-          
-          if (itemType === 'movie') {
-            colorData.movieRatingKey = ratingKey;
-          } else if (itemType === 'show') {
-            colorData.showRatingKey = ratingKey;
-          } else if (itemType === 'season') {
-            colorData.seasonRatingKey = ratingKey;
-          } else if (itemType === 'episode') {
-            colorData.episodeRatingKey = ratingKey;
-          }
-          
-          await prisma.plexUltraBlurColor.create({
-            data: colorData
-          });
-        }
-      }
+      const createManyOperations = [];
+
+      const directors = Array.isArray(item.Director) ? item.Director.map((director) => {
+        const directorData = {
+          tag: director.tag || director.title,
+          filter: director.filter || null,
+          tagKey: director.tagKey || null,
+          thumb: director.thumb || null
+        };
+        if (itemType === 'movie') directorData.movieRatingKey = ratingKey;
+        if (itemType === 'episode') directorData.episodeRatingKey = ratingKey;
+        return directorData;
+      }).filter(director => director.movieRatingKey || director.episodeRatingKey) : [];
+      if (directors.length) createManyOperations.push(prisma.plexDirector.createMany({ data: directors }));
+
+      const genres = Array.isArray(item.Genre) ? item.Genre.map((genre) => {
+        const genreData = {
+          tag: genre.tag || genre.title,
+          filter: genre.filter || null,
+          tagKey: genre.tagKey || null,
+          thumb: genre.thumb || null
+        };
+        if (itemType === 'movie') genreData.movieRatingKey = ratingKey;
+        if (itemType === 'show') genreData.showRatingKey = ratingKey;
+        return genreData;
+      }).filter(genre => genre.movieRatingKey || genre.showRatingKey) : [];
+      if (genres.length) createManyOperations.push(prisma.plexGenre.createMany({ data: genres }));
+
+      const producers = itemType === 'movie' && Array.isArray(item.Producer)
+        ? item.Producer.map((producer) => ({
+            movieRatingKey: ratingKey,
+            tag: producer.tag || producer.title,
+            filter: producer.filter || null,
+            tagKey: producer.tagKey || null,
+            thumb: producer.thumb || null
+          }))
+        : [];
+      if (producers.length) createManyOperations.push(prisma.plexProducer.createMany({ data: producers }));
+
+      const writers = Array.isArray(item.Writer) ? item.Writer.map((writer) => {
+        const writerData = {
+          tag: writer.tag || writer.title,
+          filter: writer.filter || null,
+          tagKey: writer.tagKey || null,
+          thumb: writer.thumb || null
+        };
+        if (itemType === 'movie') writerData.movieRatingKey = ratingKey;
+        if (itemType === 'episode') writerData.episodeRatingKey = ratingKey;
+        return writerData;
+      }).filter(writer => writer.movieRatingKey || writer.episodeRatingKey) : [];
+      if (writers.length) createManyOperations.push(prisma.plexWriter.createMany({ data: writers }));
+
+      const roles = Array.isArray(item.Role) ? item.Role.map((role) => {
+        const roleData = {
+          tag: role.tag || role.title,
+          filter: role.filter || null,
+          tagKey: role.tagKey || null,
+          role: role.role || null,
+          thumb: role.thumb || null
+        };
+        if (itemType === 'movie') roleData.movieRatingKey = ratingKey;
+        if (itemType === 'episode') roleData.episodeRatingKey = ratingKey;
+        return roleData;
+      }).filter(role => role.movieRatingKey || role.episodeRatingKey) : [];
+      if (roles.length) createManyOperations.push(prisma.plexRole.createMany({ data: roles }));
+
+      const countries = itemType === 'movie' && Array.isArray(item.Country)
+        ? item.Country.map((country) => ({
+            movieRatingKey: ratingKey,
+            tag: country.tag || country.title,
+            filter: country.filter || null,
+            tagKey: country.tagKey || null,
+            thumb: country.thumb || null
+          }))
+        : [];
+      if (countries.length) createManyOperations.push(prisma.plexCountry.createMany({ data: countries }));
+
+      const ratings = Array.isArray(item.Rating) ? item.Rating.map((rating) => {
+        const ratingData = {
+          image: rating.image || null,
+          value: rating.value ? parseFloat(rating.value) : null,
+          type: rating.type || null
+        };
+        if (itemType === 'movie') ratingData.movieRatingKey = ratingKey;
+        if (itemType === 'episode') ratingData.episodeRatingKey = ratingKey;
+        return ratingData;
+      }).filter(rating => rating.movieRatingKey || rating.episodeRatingKey) : [];
+      if (ratings.length) createManyOperations.push(prisma.plexRating.createMany({ data: ratings }));
+
+      const guids = Array.isArray(item.Guid) ? item.Guid.map((guid) => {
+        const guidData = { id_value: guid.id || '' };
+        if (itemType === 'movie') guidData.movieRatingKey = ratingKey;
+        if (itemType === 'show') guidData.showRatingKey = ratingKey;
+        if (itemType === 'season') guidData.seasonRatingKey = ratingKey;
+        if (itemType === 'episode') guidData.episodeRatingKey = ratingKey;
+        return guidData;
+      }).filter(guid => guid.movieRatingKey || guid.showRatingKey || guid.seasonRatingKey || guid.episodeRatingKey) : [];
+      if (guids.length) createManyOperations.push(prisma.plexGuid.createMany({ data: guids }));
+
+      const mediaRows = Array.isArray(item.Media) ? item.Media.map((media) => {
+        const mediaData = {
+          id_value: media.id ? String(media.id) : null,
+          duration: media.duration ? parseInt(media.duration) : null,
+          bitrate: media.bitrate ? parseInt(media.bitrate) : null,
+          width: media.width ? parseInt(media.width) : null,
+          height: media.height ? parseInt(media.height) : null,
+          aspectRatio: media.aspectRatio ? parseFloat(media.aspectRatio) : null,
+          audioChannels: media.audioChannels ? parseInt(media.audioChannels) : null,
+          audioCodec: media.audioCodec || null,
+          videoCodec: media.videoCodec || null,
+          videoResolution: media.videoResolution || null,
+          container: media.container || null,
+          videoFrameRate: media.videoFrameRate || null,
+          optimizedForStreaming: media.optimizedForStreaming ? Boolean(media.optimizedForStreaming) : null,
+          selected: media.selected ? Boolean(media.selected) : null
+        };
+        if (itemType === 'movie') mediaData.movieRatingKey = ratingKey;
+        if (itemType === 'episode') mediaData.episodeRatingKey = ratingKey;
+        return mediaData;
+      }).filter(media => media.movieRatingKey || media.episodeRatingKey) : [];
+      if (mediaRows.length) createManyOperations.push(prisma.plexMedia.createMany({ data: mediaRows }));
+
+      const images = Array.isArray(item.Image) ? item.Image.map((image) => {
+        const imageData = {
+          alt: image.alt || null,
+          type: image.type || null,
+          url: image.url || null
+        };
+        if (itemType === 'movie') imageData.movieRatingKey = ratingKey;
+        if (itemType === 'show') imageData.showRatingKey = ratingKey;
+        if (itemType === 'season') imageData.seasonRatingKey = ratingKey;
+        if (itemType === 'episode') imageData.episodeRatingKey = ratingKey;
+        return imageData;
+      }).filter(image => image.movieRatingKey || image.showRatingKey || image.seasonRatingKey || image.episodeRatingKey) : [];
+      if (images.length) createManyOperations.push(prisma.plexImage.createMany({ data: images }));
+
+      const labels = Array.isArray(item.Label) ? item.Label.map((label) => {
+        const labelData = {
+          tag: label.tag || label.title,
+          filter: label.filter || null,
+          tagKey: label.tagKey || null,
+          thumb: label.thumb || null
+        };
+        if (itemType === 'movie') labelData.movieRatingKey = ratingKey;
+        if (itemType === 'show') labelData.showRatingKey = ratingKey;
+        return labelData;
+      }).filter(label => label.movieRatingKey || label.showRatingKey) : [];
+      if (labels.length) createManyOperations.push(prisma.plexLabel.createMany({ data: labels }));
+
+      const blurColors = Array.isArray(item.UltraBlurColors) ? item.UltraBlurColors.map((colors) => {
+        const colorData = {
+          topLeft: colors.topLeft || null,
+          topRight: colors.topRight || null,
+          bottomLeft: colors.bottomLeft || null,
+          bottomRight: colors.bottomRight || null
+        };
+        if (itemType === 'movie') colorData.movieRatingKey = ratingKey;
+        if (itemType === 'show') colorData.showRatingKey = ratingKey;
+        if (itemType === 'season') colorData.seasonRatingKey = ratingKey;
+        if (itemType === 'episode') colorData.episodeRatingKey = ratingKey;
+        return colorData;
+      }).filter(color => color.movieRatingKey || color.showRatingKey || color.seasonRatingKey || color.episodeRatingKey) : [];
+      if (blurColors.length) createManyOperations.push(prisma.plexUltraBlurColor.createMany({ data: blurColors }));
+
+      await Promise.all(createManyOperations);
       
     } catch (error) {
       console.warn(`Failed to sync complex fields for ${itemType} ${ratingKey}:`, error.message);
@@ -1375,15 +1355,15 @@ class PlexSyncService {
       for (let i = 0; i < artists.length; i += artistBatchSize) {
         const batch = artists.slice(i, i + artistBatchSize);
         console.log(`   Processing artist batch ${Math.floor(i/artistBatchSize) + 1}/${Math.ceil(artists.length/artistBatchSize)} (${batch.length} artists)`);
-        
-        for (const artist of batch) {
+
+        await this.mapWithConcurrency(batch, this.childSyncConcurrency, async (artist) => {
           try {
             await this.syncAlbums(sectionKey, artist.ratingKey);
           } catch (error) {
             console.warn(`Failed to sync albums for artist ${artist.title}:`, error.message);
             // Continue with next artist on error
           }
-        }
+        });
         
         // Small delay between batches
         if (i + artistBatchSize < artists.length) {
@@ -1408,15 +1388,15 @@ class PlexSyncService {
       for (let i = 0; i < albums.length; i += albumBatchSize) {
         const batch = albums.slice(i, i + albumBatchSize);
         console.log(`   Processing album batch ${Math.floor(i/albumBatchSize) + 1}/${Math.ceil(albums.length/albumBatchSize)} (${batch.length} albums)`);
-        
-        for (const album of batch) {
+
+        await this.mapWithConcurrency(batch, this.childSyncConcurrency, async (album) => {
           try {
             await this.syncTracks(sectionKey, album.ratingKey);
           } catch (error) {
             console.warn(`Failed to sync tracks for album ${album.title}:`, error.message);
             // Continue with next album on error
           }
-        }
+        });
         
         // Small delay between batches
         if (i + albumBatchSize < albums.length) {
@@ -1448,15 +1428,17 @@ class PlexSyncService {
         return;
       }
 
+      const existingArtists = await prisma.plexArtist.findMany({
+        where: { ratingKey: { in: artists.map(artist => artist.ratingKey) } },
+        select: { ratingKey: true, updatedAt: true }
+      });
+      const existingArtistMap = new Map(existingArtists.map(artist => [artist.ratingKey, artist]));
+      const artistsNeedingRefresh = artists.filter(artist => !this.isDateTimestampCurrent(existingArtistMap.get(artist.ratingKey)?.updatedAt, artist.updatedAt));
+      const detailedArtistMap = await this.fetchDetailedMetadataBatch(artistsNeedingRefresh, 'artist');
+
       for (const artist of artists) {
-        // Fetch detailed metadata for each artist to get collections
-        let detailedArtist = artist;
-        try {
-          const detailData = await this.makeRequest(`/library/metadata/${artist.ratingKey}`);
-          detailedArtist = detailData.MediaContainer?.Metadata?.[0] || artist;
-        } catch (error) {
-          console.warn(`Failed to fetch detailed metadata for artist ${artist.title} (${artist.ratingKey}):`, error.message);
-        }
+        const shouldRefreshArtist = !this.isDateTimestampCurrent(existingArtistMap.get(artist.ratingKey)?.updatedAt, artist.updatedAt);
+        const detailedArtist = detailedArtistMap.get(artist.ratingKey) || artist;
 
         const artistData = {
           ratingKey: detailedArtist.ratingKey,
@@ -1475,30 +1457,27 @@ class PlexSyncService {
           collections: detailedArtist.Collection ? JSON.stringify(detailedArtist.Collection.map(c => c.tag || c.title)) : null
         };
 
-        try {
-          await prisma.plexArtist.upsert({
-            where: { ratingKey: detailedArtist.ratingKey },
-            update: artistData,
-            create: artistData
-          });
-        } catch (error) {
-          await this.handleDatabaseError(
-            error,
-            'artist',
-            detailedArtist.title,
-            async () => {
-              return await prisma.plexArtist.upsert({
-                where: { ratingKey: detailedArtist.ratingKey },
-                update: artistData,
-                create: artistData
-              });
-            }
-          );
-        }
-
-        // Add small delay every 10 artists to prevent overwhelming the database
-        if (artists.indexOf(artist) % 10 === 9) {
-          await new Promise(resolve => setTimeout(resolve, 100));
+        if (shouldRefreshArtist) {
+          try {
+            await prisma.plexArtist.upsert({
+              where: { ratingKey: detailedArtist.ratingKey },
+              update: artistData,
+              create: artistData
+            });
+          } catch (error) {
+            await this.handleDatabaseError(
+              error,
+              'artist',
+              detailedArtist.title,
+              async () => {
+                return await prisma.plexArtist.upsert({
+                  where: { ratingKey: detailedArtist.ratingKey },
+                  update: artistData,
+                  create: artistData
+                });
+              }
+            );
+          }
         }
       }
 
@@ -1567,15 +1546,17 @@ class PlexSyncService {
         return;
       }
 
+      const existingAlbums = await prisma.plexAlbum.findMany({
+        where: { ratingKey: { in: albums.map(album => album.ratingKey) } },
+        select: { ratingKey: true, updatedAt: true }
+      });
+      const existingAlbumMap = new Map(existingAlbums.map(album => [album.ratingKey, album]));
+      const albumsNeedingRefresh = albums.filter(album => !this.isDateTimestampCurrent(existingAlbumMap.get(album.ratingKey)?.updatedAt, album.updatedAt));
+      const detailedAlbumMap = await this.fetchDetailedMetadataBatch(albumsNeedingRefresh, 'album');
+
       for (const album of albums) {
-        // Fetch detailed metadata for each album to get collections
-        let detailedAlbum = album;
-        try {
-          const detailData = await this.makeRequest(`/library/metadata/${album.ratingKey}`);
-          detailedAlbum = detailData.MediaContainer?.Metadata?.[0] || album;
-        } catch (error) {
-          console.warn(`Failed to fetch detailed metadata for album ${album.title} (${album.ratingKey}):`, error.message);
-        }
+        const shouldRefreshAlbum = !this.isDateTimestampCurrent(existingAlbumMap.get(album.ratingKey)?.updatedAt, album.updatedAt);
+        const detailedAlbum = detailedAlbumMap.get(album.ratingKey) || album;
 
         const albumData = {
           ratingKey: detailedAlbum.ratingKey,
@@ -1598,30 +1579,27 @@ class PlexSyncService {
           collections: detailedAlbum.Collection ? JSON.stringify(detailedAlbum.Collection.map(c => c.tag || c.title)) : null
         };
 
-        try {
-          await prisma.plexAlbum.upsert({
-            where: { ratingKey: detailedAlbum.ratingKey },
-            update: albumData,
-            create: albumData
-          });
-        } catch (error) {
-          await this.handleDatabaseError(
-            error,
-            'album',
-            detailedAlbum.title,
-            async () => {
-              return await prisma.plexAlbum.upsert({
-                where: { ratingKey: detailedAlbum.ratingKey },
-                update: albumData,
-                create: albumData
-              });
-            }
-          );
-        }
-
-        // Add small delay every 5 albums to prevent database overload
-        if (albums.indexOf(album) % 5 === 4) {
-          await new Promise(resolve => setTimeout(resolve, 100));
+        if (shouldRefreshAlbum) {
+          try {
+            await prisma.plexAlbum.upsert({
+              where: { ratingKey: detailedAlbum.ratingKey },
+              update: albumData,
+              create: albumData
+            });
+          } catch (error) {
+            await this.handleDatabaseError(
+              error,
+              'album',
+              detailedAlbum.title,
+              async () => {
+                return await prisma.plexAlbum.upsert({
+                  where: { ratingKey: detailedAlbum.ratingKey },
+                  update: albumData,
+                  create: albumData
+                });
+              }
+            );
+          }
         }
       }
 
@@ -1646,22 +1624,19 @@ class PlexSyncService {
         return;
       }
 
-      let addedCount = 0;
-      let skippedCount = 0;
+      const existingTracks = await prisma.plexTrack.findMany({
+        where: { ratingKey: { in: tracks.map(track => track.ratingKey) } },
+        select: { ratingKey: true }
+      });
+      const existingTrackKeys = new Set(existingTracks.map(track => track.ratingKey));
+      const newTrackRows = [];
 
       for (const track of tracks) {
-        // Check if track already exists
-        const existingTrack = await prisma.plexTrack.findUnique({
-          where: { ratingKey: track.ratingKey }
-        });
-
-        // Only add new tracks, skip updates to preserve manual edits
-        if (existingTrack) {
-          skippedCount++;
+        if (existingTrackKeys.has(track.ratingKey)) {
           continue;
         }
 
-        const trackData = {
+        newTrackRows.push({
           ratingKey: track.ratingKey,
           key: track.key,
           parentRatingKey: track.parentRatingKey || albumRatingKey,
@@ -1680,29 +1655,20 @@ class PlexSyncService {
           addedAt: track.addedAt ? new Date(parseInt(track.addedAt) * 1000) : null,
           updatedAt: track.updatedAt ? new Date(parseInt(track.updatedAt) * 1000) : null,
           librarySectionID: section.id
-        };
+        });
+      }
 
+      if (newTrackRows.length > 0) {
         try {
-          await prisma.plexTrack.create({
-            data: trackData
-          });
-          addedCount++;
+          await prisma.plexTrack.createMany({ data: newTrackRows });
         } catch (error) {
-          await this.handleDatabaseError(error, `track ${track.title}`, async () => {
-            await prisma.plexTrack.create({
-              data: trackData
-            });
-            addedCount++;
+          await this.handleDatabaseError(error, 'track batch', albumRatingKey, async () => {
+            await prisma.plexTrack.createMany({ data: newTrackRows });
           });
-        }
-
-        // Add small delay every 20 tracks to prevent overwhelming the database
-        if (tracks.indexOf(track) % 20 === 19) {
-          await new Promise(resolve => setTimeout(resolve, 50));
         }
       }
 
-      console.log(`✅ Tracks for album ${albumRatingKey}: ${addedCount} added, ${skippedCount} skipped (already exist)`);
+      console.log(`✅ Tracks for album ${albumRatingKey}: ${newTrackRows.length} added, ${existingTrackKeys.size} skipped (already exist)`);
     } catch (error) {
       console.error('Error syncing tracks:', error);
       throw error;
@@ -1750,15 +1716,17 @@ class PlexSyncService {
         return;
       }
 
+      const existingPlaylists = await prisma.plexPlaylist.findMany({
+        where: { ratingKey: { in: musicPlaylists.map(playlist => playlist.ratingKey) } },
+        select: { ratingKey: true, updatedAt: true }
+      });
+      const existingPlaylistMap = new Map(existingPlaylists.map(playlist => [playlist.ratingKey, playlist]));
+      const playlistsNeedingRefresh = musicPlaylists.filter(playlist => !this.isDateTimestampCurrent(existingPlaylistMap.get(playlist.ratingKey)?.updatedAt, playlist.updatedAt));
+      const detailedPlaylistMap = await this.fetchDetailedMetadataBatch(playlistsNeedingRefresh, 'playlist');
+
       for (const playlist of musicPlaylists) {
-        // Fetch detailed metadata for each playlist
-        let detailedPlaylist = playlist;
-        try {
-          const detailData = await this.makeRequest(`/library/metadata/${playlist.ratingKey}`);
-          detailedPlaylist = detailData.MediaContainer?.Metadata?.[0] || playlist;
-        } catch (error) {
-          console.warn(`Failed to fetch detailed metadata for playlist ${playlist.title} (${playlist.ratingKey}):`, error.message);
-        }
+        const shouldRefreshPlaylist = !this.isDateTimestampCurrent(existingPlaylistMap.get(playlist.ratingKey)?.updatedAt, playlist.updatedAt);
+        const detailedPlaylist = detailedPlaylistMap.get(playlist.ratingKey) || playlist;
 
         const playlistData = {
           ratingKey: detailedPlaylist.ratingKey,
@@ -1779,11 +1747,13 @@ class PlexSyncService {
           librarySectionID: section.id
         };
 
-        await prisma.plexPlaylist.upsert({
-          where: { ratingKey: detailedPlaylist.ratingKey },
-          update: playlistData,
-          create: playlistData
-        });
+        if (shouldRefreshPlaylist) {
+          await prisma.plexPlaylist.upsert({
+            where: { ratingKey: detailedPlaylist.ratingKey },
+            update: playlistData,
+            create: playlistData
+          });
+        }
 
         // Sync playlist items
         await this.syncPlaylistItems(detailedPlaylist.ratingKey);
@@ -1807,24 +1777,22 @@ class PlexSyncService {
         where: { playlistRatingKey: playlistRatingKey }
       });
 
-      for (let i = 0; i < items.length; i++) {
-        const item = items[i];
-        
-        const itemData = {
+      if (items.length === 0) {
+        return;
+      }
+
+      const itemRows = items.map((item, index) => ({
           playlistRatingKey: playlistRatingKey,
           ratingKey: item.ratingKey,
-          index: i + 1, // 1-based index
+          index: index + 1,
           type: item.type || 'track',
           addedAt: item.addedAt ? new Date(parseInt(item.addedAt) * 1000) : new Date()
-        };
+        }));
 
-        try {
-          await prisma.plexPlaylistItem.create({
-            data: itemData
-          });
-        } catch (error) {
-          console.warn(`Failed to sync playlist item ${item.ratingKey} in playlist ${playlistRatingKey}:`, error.message);
-        }
+      try {
+        await prisma.plexPlaylistItem.createMany({ data: itemRows });
+      } catch (error) {
+        console.warn(`Failed to sync playlist items for playlist ${playlistRatingKey}:`, error.message);
       }
 
       console.log(`✅ Synced ${items.length} items for playlist ${playlistRatingKey}`);
