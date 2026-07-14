@@ -17,6 +17,41 @@ const OrderCard = ({
   onDeleteOrder,
   onLinkListSync
 }) => {
+  // Calculate stats including sub-order items
+  const calculateStats = () => {
+    let totalItems = 0;
+    let completedItems = 0;
+
+    (order.items || []).forEach(item => {
+      if (item.mediaType === 'suborder' && item.referencedCustomOrder) {
+        // Count items from the referenced sub-order
+        const subOrderItems = (item.referencedCustomOrder.items || []).filter(subItem => {
+          // Exclude reference books
+          if (subItem.mediaType === 'book' && subItem.containedStories && subItem.containedStories.length > 0) {
+            return false;
+          }
+          return true;
+        });
+        totalItems += subOrderItems.length;
+        completedItems += subOrderItems.filter(subItem => subItem.isWatched).length;
+      } else {
+        // Regular item
+        // Exclude reference books
+        if (item.mediaType === 'book' && item.containedStories && item.containedStories.length > 0) {
+          return;
+        }
+        totalItems += 1;
+        if (item.isWatched) {
+          completedItems += 1;
+        }
+      }
+    });
+
+    return { totalItems, completedItems };
+  };
+
+  const { totalItems, completedItems } = calculateStats();
+  
   return (
     <div className={`order-card ${order.isActive ? 'active' : 'inactive'}`}>
       <div className="order-header">
@@ -38,8 +73,8 @@ const OrderCard = ({
       </div>
 
       <div className="order-stats">
-        <Stat label="Total Items" value={order.items.length} />
-        <Stat label="Completed" value={order.items.filter(item => item.isWatched).length} />
+        <Stat label="Total Items" value={totalItems} />
+        <Stat label="Completed" value={completedItems} />
       </div>
       
       <div className="order-meta">

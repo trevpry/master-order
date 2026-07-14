@@ -29,7 +29,31 @@ function createItemManagementRoutes(prisma, services) {
         include: {
           storyContainedInBook: true,
           containedStories: true,
-          referencedCustomOrder: true,
+          referencedCustomOrder: {
+            include: {
+              items: {
+                include: {
+                  containedStories: true,
+                  storyContainedInBook: true,
+                  book: {
+                    include: {
+                      bookCompletions: true,
+                      chapters: {
+                        include: {
+                          chapterCompletions: true,
+                          sections: {
+                            include: {
+                              sectionCompletions: true
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
           customOrder: {
             include: {
               plexPlaylist: true,
@@ -175,7 +199,7 @@ function createItemManagementRoutes(prisma, services) {
           // For unified books, update BookCompletion system
           try {
             const BookCompletionService = require('../../services/BookCompletionService');
-            const bookCompletionService = new BookCompletionService();
+            const bookCompletionService = new BookCompletionService(prisma);
             
             await bookCompletionService.updateBookProgress(item.bookId, {
               percentRead: 100,
@@ -213,7 +237,7 @@ function createItemManagementRoutes(prisma, services) {
           
           try {
             const BookCompletionService = require('../../services/BookCompletionService');
-            const bookCompletionService = new BookCompletionService();
+            const bookCompletionService = new BookCompletionService(prisma);
             
             const progressData = {};
             if (bookCurrentPage !== undefined) progressData.currentPage = parseInt(bookCurrentPage);
@@ -560,7 +584,29 @@ function createItemManagementRoutes(prisma, services) {
           book: true, // Include unified book data for artwork caching
           storyContainedInBook: true,
           referencedCustomOrder: {
-            include: { items: true }
+            include: {
+              items: {
+                include: {
+                  containedStories: true,
+                  storyContainedInBook: true,
+                  book: {
+                    include: {
+                      bookCompletions: true,
+                      chapters: {
+                        include: {
+                          chapterCompletions: true,
+                          sections: {
+                            include: {
+                              sectionCompletions: true
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
           }
         }
       });

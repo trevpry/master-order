@@ -1,10 +1,12 @@
 import React from 'react';
 import Button from '../../../../../shared/components/Button';
+import { getTotalItemsWithSubOrders, getUnwatchedItemsWithSubOrders } from '../utils/itemUtils';
 
 const OrderHeader = ({
   viewingOrderItems,
   onBackToOrderList,
   handleViewOrder,
+  onGenerateAiPrompt,
   getAllNonReferenceItems,
   getUnwatchedNonReferenceItems,
   setShowMovieForm,
@@ -48,13 +50,13 @@ const OrderHeader = ({
         <div className="stat">
           <span className="stat-label">Total Items:</span>
           <span className="stat-value">
-            {viewingOrderItems?.items ? getAllNonReferenceItems(viewingOrderItems.items).length : 0}
+            {viewingOrderItems?.items ? getTotalItemsWithSubOrders(viewingOrderItems.items) : 0}
           </span>
         </div>
         <div className="stat">
           <span className="stat-label">Unwatched:</span>
           <span className="stat-value">
-            {viewingOrderItems?.items ? getUnwatchedNonReferenceItems(viewingOrderItems.items).length : 0}
+            {viewingOrderItems?.items ? getUnwatchedItemsWithSubOrders(viewingOrderItems.items) : 0}
           </span>
         </div>
       </div>
@@ -146,6 +148,12 @@ const OrderHeader = ({
           className="secondary"
         >
           CMRO Bulk Import
+        </Button>
+        <Button
+          onClick={onGenerateAiPrompt}
+          className="secondary"
+        >
+          AI Prompt
         </Button>
       </div>
     </div>

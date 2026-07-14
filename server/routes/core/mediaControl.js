@@ -287,7 +287,29 @@ function createMediaControlRoutes(prisma, services) {
         include: {
           storyContainedInBook: true,
           referencedCustomOrder: {
-            include: { items: true }
+            include: {
+              items: {
+                include: {
+                  containedStories: true,
+                  storyContainedInBook: true,
+                  book: {
+                    include: {
+                      bookCompletions: true,
+                      chapters: {
+                        include: {
+                          chapterCompletions: true,
+                          sections: {
+                            include: {
+                              sectionCompletions: true
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
           }
         }
       });

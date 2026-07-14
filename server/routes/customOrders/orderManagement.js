@@ -5,6 +5,167 @@
 
 const express = require('express');
 
+const isSubOrderArtworkDebugEnabled = process.env.DEBUG_SUBORDER_ARTWORK === '1';
+
+function hasArtworkHints(item) {
+  if (!item) {
+    return false;
+  }
+
+  return Boolean(
+    item.localArtworkPath ||
+    item.originalArtworkUrl ||
+    item.thumb ||
+    item.art ||
+    item.book?.localArtworkPath ||
+    item.book?.coverUrl ||
+    item.book?.originalArtworkUrl
+  );
+}
+
+function logSubOrderArtworkDebug(message, details = {}) {
+  if (!isSubOrderArtworkDebugEnabled) {
+    return;
+  }
+
+  console.log(`[SubOrderArtworkDebug] ${message}`, details);
+}
+
+function logOrderSubOrderThumbnailState(order) {
+  if (!isSubOrderArtworkDebugEnabled || !order?.items?.length) {
+    return;
+  }
+
+  const subOrderItems = order.items.filter(item => item.mediaType === 'suborder');
+  if (subOrderItems.length === 0) {
+    return;
+  }
+
+  subOrderItems.forEach(subOrderItem => {
+    const referenced = subOrderItem.referencedCustomOrder;
+    const referencedItems = referenced?.items || [];
+    const firstUnwatched = referencedItems.find(item => !item.isWatched) || null;
+
+    logSubOrderArtworkDebug('Sub-order thumbnail payload state', {
+      orderId: order.id,
+      orderName: order.name,
+      subOrderItemId: subOrderItem.id,
+      subOrderItemTitle: subOrderItem.title,
+      referencedCustomOrderId: subOrderItem.referencedCustomOrderId || referenced?.id || null,
+      referencedOrderName: referenced?.name || null,
+      referencedItemsCount: referencedItems.length,
+      referencedSortSnapshot: referencedItems.slice(0, 10).map(item => ({
+        id: item.id,
+        title: item.title,
+        mediaType: item.mediaType,
+        sortOrder: item.sortOrder,
+        isWatched: item.isWatched,
+        hasArtworkHints: hasArtworkHints(item)
+      })),
+      firstUnwatchedItem: firstUnwatched
+        ? {
+            id: firstUnwatched.id,
+            title: firstUnwatched.title,
+            mediaType: firstUnwatched.mediaType,
+            sortOrder: firstUnwatched.sortOrder,
+            hasArtworkHints: hasArtworkHints(firstUnwatched)
+          }
+        : null
+    });
+  });
+}
+
+function collectItemsForArtworkHydration(items, collector = []) {
+  if (!Array.isArray(items)) {
+    return collector;
+  }
+
+  for (const item of items) {
+    if (!item) {
+      continue;
+    }
+
+    collector.push(item);
+
+    if (item.mediaType === 'suborder' && item.referencedCustomOrder?.items?.length) {
+      collectItemsForArtworkHydration(item.referencedCustomOrder.items, collector);
+    }
+  }
+
+  return collector;
+}
+
+async function hydratePlexArtworkHintsForOrder(prisma, order) {
+  if (!order?.items?.length) {
+    return;
+  }
+
+  const allItems = collectItemsForArtworkHydration(order.items, []);
+  const episodeKeys = [];
+  const movieKeys = [];
+
+  for (const item of allItems) {
+    if (!item?.plexKey || item.localArtworkPath || item.originalArtworkUrl || item.thumb || item.art) {
+      continue;
+    }
+
+    if (item.mediaType === 'episode') {
+      episodeKeys.push(item.plexKey);
+    } else if (item.mediaType === 'movie') {
+      movieKeys.push(item.plexKey);
+    }
+  }
+
+  const uniqueEpisodeKeys = [...new Set(episodeKeys)];
+  const uniqueMovieKeys = [...new Set(movieKeys)];
+
+  const [episodes, movies] = await Promise.all([
+    uniqueEpisodeKeys.length > 0
+      ? prisma.plexEpisode.findMany({
+          where: { ratingKey: { in: uniqueEpisodeKeys } },
+          select: {
+            ratingKey: true,
+            thumb: true,
+            grandparentThumb: true,
+            parentThumb: true
+          }
+        })
+      : Promise.resolve([]),
+    uniqueMovieKeys.length > 0
+      ? prisma.plexMovie.findMany({
+          where: { ratingKey: { in: uniqueMovieKeys } },
+          select: {
+            ratingKey: true,
+            thumb: true,
+            art: true
+          }
+        })
+      : Promise.resolve([])
+  ]);
+
+  const episodeByKey = new Map(episodes.map(ep => [ep.ratingKey, ep]));
+  const movieByKey = new Map(movies.map(movie => [movie.ratingKey, movie]));
+
+  for (const item of allItems) {
+    if (!item?.plexKey || item.localArtworkPath || item.originalArtworkUrl || item.thumb || item.art) {
+      continue;
+    }
+
+    if (item.mediaType === 'episode') {
+      const episode = episodeByKey.get(item.plexKey);
+      if (episode) {
+        item.thumb = episode.thumb || episode.grandparentThumb || episode.parentThumb || null;
+      }
+    } else if (item.mediaType === 'movie') {
+      const movie = movieByKey.get(item.plexKey);
+      if (movie) {
+        item.thumb = movie.thumb || null;
+        item.art = movie.art || null;
+      }
+    }
+  }
+}
+
 /**
  * Create order management routes for custom orders
  * @param {PrismaClient} prisma - Database client instance
@@ -24,7 +185,33 @@ function createOrderManagementRoutes(prisma, services) {
             include: {
               storyContainedInBook: true,
               containedStories: true,
-              referencedCustomOrder: true, // Include referenced custom order for sub-order items
+              referencedCustomOrder: {
+                include: {
+                  items: {
+                    include: {
+                      containedStories: true,
+                      storyContainedInBook: true,
+                      book: {
+                        include: {
+                          bookCompletions: true,
+                          chapters: {
+                            include: {
+                              chapterCompletions: true,
+                              sections: {
+                                include: {
+                                  sectionCompletions: true
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                    ,
+                    orderBy: { sortOrder: 'asc' }
+                  }
+                }
+              }, // Include referenced custom order and its items for sub-order items
               book: { // Include unified book data
                 include: {
                   bookCompletions: true,
@@ -73,6 +260,9 @@ function createOrderManagementRoutes(prisma, services) {
       
       // Sync sub-order items for all parent orders (ensure consistency)
       for (const order of customOrders) {
+        await hydratePlexArtworkHintsForOrder(prisma, order);
+        logOrderSubOrderThumbnailState(order);
+
         if (order.subOrders.length > 0) {
           await subOrderService.syncSubOrderItems(order.id);
         }
@@ -88,7 +278,7 @@ function createOrderManagementRoutes(prisma, services) {
             try {
               // Import BookCompletionService to calculate progress
               const BookCompletionService = require('../../services/BookCompletionService');
-              const completionService = new BookCompletionService();
+              const completionService = new BookCompletionService(prisma);
               
               const progressReport = await completionService.getBookProgressReport(item.book.id);
               item.unifiedProgress = progressReport;
@@ -195,7 +385,33 @@ function createOrderManagementRoutes(prisma, services) {
       const itemInclude = {
         storyContainedInBook: true,
         containedStories: true,
-        referencedCustomOrder: true, // Include referenced custom order for sub-order items
+        referencedCustomOrder: {
+          include: {
+            items: {
+              include: {
+                containedStories: true,
+                storyContainedInBook: true,
+                book: {
+                  include: {
+                    bookCompletions: true,
+                    chapters: {
+                      include: {
+                        chapterCompletions: true,
+                        sections: {
+                          include: {
+                            sectionCompletions: true
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+              ,
+              orderBy: { sortOrder: 'asc' }
+            }
+          }
+        }, // Include referenced custom order and its items for sub-order items
         book: { // Include unified book data for cover and details
           include: {
             bookCompletions: true
@@ -239,9 +455,15 @@ function createOrderManagementRoutes(prisma, services) {
             backgroundGallery: true
           }
         });
+
+        await hydratePlexArtworkHintsForOrder(prisma, updatedOrder);
+
+        logOrderSubOrderThumbnailState(updatedOrder);
         
         res.json(updatedOrder);
       } else {
+        await hydratePlexArtworkHintsForOrder(prisma, customOrder);
+        logOrderSubOrderThumbnailState(customOrder);
         res.json(customOrder);
       }
     } catch (error) {
@@ -332,7 +554,48 @@ function createOrderManagementRoutes(prisma, services) {
             include: {
               storyContainedInBook: true,
               containedStories: true,
-              referencedCustomOrder: true // Include referenced custom order for sub-order items
+              referencedCustomOrder: {
+                include: {
+                  items: {
+                    include: {
+                      containedStories: true,
+                      storyContainedInBook: true,
+                      book: {
+                        include: {
+                          bookCompletions: true,
+                          chapters: {
+                            include: {
+                              chapterCompletions: true,
+                              sections: {
+                                include: {
+                                  sectionCompletions: true
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                    ,
+                    orderBy: { sortOrder: 'asc' }
+                  }
+                }
+              }, // Include referenced custom order for sub-order items with full item data
+              book: {
+                include: {
+                  bookCompletions: true,
+                  chapters: {
+                    include: {
+                      chapterCompletions: true,
+                      sections: {
+                        include: {
+                          sectionCompletions: true
+                        }
+                      }
+                    }
+                  }
+                }
+              }
             },
             orderBy: { sortOrder: 'asc' }
           },

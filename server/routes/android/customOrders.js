@@ -157,7 +157,31 @@ function createCustomOrdersRoutes(prisma) {
             include: {
               storyContainedInBook: true,
               containedStories: true,
-              referencedCustomOrder: true,
+              referencedCustomOrder: {
+                include: {
+                  items: {
+                    include: {
+                      containedStories: true,
+                      storyContainedInBook: true,
+                      book: {
+                        include: {
+                          bookCompletions: true,
+                          chapters: {
+                            include: {
+                              chapterCompletions: true,
+                              sections: {
+                                include: {
+                                  sectionCompletions: true
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              },
               book: {
                 include: {
                   bookCompletions: true,
@@ -263,7 +287,7 @@ function createCustomOrdersRoutes(prisma) {
           if (item.book) {
             try {
               const BookCompletionService = require('../../services/BookCompletionService');
-              const completionService = new BookCompletionService();
+              const completionService = new BookCompletionService(prisma);
               
               // Note: This is async but we'll handle it synchronously for now
               // In production, consider pre-calculating this or making the route handler fully async

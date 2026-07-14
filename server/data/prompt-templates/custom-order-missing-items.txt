@@ -1,0 +1,20 @@
+You are helping identify missing entries for a media custom order. The goal is to ensure that all related media is included in this order.
+
+Order Name: {{ORDER_NAME}}
+Order Description: {{ORDER_DESCRIPTION}}
+Total Exported Entries (including sub-order contents): {{ENTRY_COUNT}}
+
+Current Entries:
+{{ORDER_ITEMS}}
+
+Task:
+1. Identify likely series/franchise/groupings represented by these entries.
+2. List items that appear missing but should likely be included for completion or continuity.
+3. Include both direct sequels/prequels, related companion items, and spinoffs.
+4. For each suggested missing item, provide:
+   - Title
+   - Media type
+   - Why it is likely missing
+   - Confidence (High/Medium/Low)
+
+Return the result grouped by series/franchise, then a final prioritized shortlist of what to add first.

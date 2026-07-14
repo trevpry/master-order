@@ -13,6 +13,8 @@ const fs = require('fs');
 const prisma = new PrismaClient();
 const historyPlusService = new HistoryPlusService();
 const geminiService = new GeminiService();
+const PROMPT_TEMPLATE_STORAGE_DIR = path.join(__dirname, '..', 'data', 'prompt-templates');
+const CUSTOM_ORDER_PROMPT_TEMPLATE_FILE = path.join(PROMPT_TEMPLATE_STORAGE_DIR, 'custom-order-missing-items.txt');
 const DEFAULT_TIMELINE_AI_PROMPT_TEMPLATE = `You are assisting with curation for a historical timeline knowledge base.
 
 Analyze the event below and provide an improved event profile that can be reused by AI systems to better assign videos and books to this event in the future.
@@ -126,6 +128,58 @@ Rules:
 
 const DEFAULT_SHARED_EVENT_DECISION_PROMPT_TEMPLATE = geminiService.getDefaultSharedEventDecisionPromptTemplate();
 
+const DEFAULT_CUSTOM_ORDER_MISSING_ITEMS_PROMPT_TEMPLATE = `You are helping identify missing entries for a media custom order.
+
+Order Name: {{ORDER_NAME}}
+Order Description: {{ORDER_DESCRIPTION}}
+Total Exported Entries (including sub-order contents): {{ENTRY_COUNT}}
+
+Current Entries:
+{{ORDER_ITEMS}}
+
+Task:
+1. Identify likely series/franchise/groupings represented by these entries.
+2. List items that appear missing but should likely be included for completion or continuity.
+3. Include both direct sequels/prequels and strongly related companion items.
+4. For each suggested missing item, provide:
+   - Title
+   - Media type
+   - Why it is likely missing
+   - Confidence (High/Medium/Low)
+
+Return the result grouped by series/franchise, then a final prioritized shortlist of what to add first.`;
+
+const ensurePromptTemplateStorageDir = () => {
+  if (!fs.existsSync(PROMPT_TEMPLATE_STORAGE_DIR)) {
+    fs.mkdirSync(PROMPT_TEMPLATE_STORAGE_DIR, { recursive: true });
+  }
+};
+
+const readTemplateFromFile = (filePath) => {
+  try {
+    if (!fs.existsSync(filePath)) {
+      return '';
+    }
+    return fs.readFileSync(filePath, 'utf8').trim();
+  } catch (error) {
+    console.error(`Failed reading prompt template file ${filePath}:`, error.message);
+    return '';
+  }
+};
+
+const writeTemplateToFile = (filePath, value) => {
+  ensurePromptTemplateStorageDir();
+
+  if (!value) {
+    if (fs.existsSync(filePath)) {
+      fs.unlinkSync(filePath);
+    }
+    return;
+  }
+
+  fs.writeFileSync(filePath, value, 'utf8');
+};
+
 const getPromptTemplateDefinitions = () => ({
   timeline: {
     key: 'timeline',
@@ -166,6 +220,15 @@ const getPromptTemplateDefinitions = () => ({
     settingField: 'sharedEventDecisionPromptTemplate',
     defaultTemplate: DEFAULT_SHARED_EVENT_DECISION_PROMPT_TEMPLATE,
     placeholders: []
+  },
+  customOrderMissing: {
+    key: 'customOrderMissing',
+    title: 'Custom Orders Missing Items',
+    description: 'Prompt used when exporting a custom order to AI so it can suggest related/series items that may be missing.',
+    storageType: 'file',
+    filePath: CUSTOM_ORDER_PROMPT_TEMPLATE_FILE,
+    defaultTemplate: DEFAULT_CUSTOM_ORDER_MISSING_ITEMS_PROMPT_TEMPLATE,
+    placeholders: ['{{ORDER_NAME}}', '{{ORDER_DESCRIPTION}}', '{{ENTRY_COUNT}}', '{{ORDER_ITEMS}}']
   }
 });
 
@@ -374,9 +437,13 @@ router.get('/prompt-templates', asyncHandler(async (req, res) => {
   });
 
   const definitions = Object.values(getPromptTemplateDefinitions());
-  const templates = definitions.map(definition => (
-    buildPromptTemplatePayload(definition, settings?.[definition.settingField] || '')
-  ));
+  const templates = definitions.map(definition => {
+    const savedTemplate = definition.storageType === 'file'
+      ? readTemplateFromFile(definition.filePath)
+      : (settings?.[definition.settingField] || '');
+
+    return buildPromptTemplatePayload(definition, savedTemplate);
+  });
 
   sendSuccess(res, { templates });
 }));
@@ -386,6 +453,10 @@ router.get('/prompt-templates/:templateKey', asyncHandler(async (req, res) => {
   const definition = getPromptTemplateDefinition(req.params.templateKey);
   if (!definition) {
     return sendBadRequest(res, 'Unknown prompt template key');
+  }
+
+  if (definition.storageType === 'file') {
+    return sendSuccess(res, buildPromptTemplatePayload(definition, readTemplateFromFile(definition.filePath)));
   }
 
   const settings = await prisma.settings.findUnique({
@@ -411,6 +482,15 @@ router.put('/prompt-templates/:templateKey', asyncHandler(async (req, res) => {
   }
 
   const normalizedTemplate = templateInput.trim();
+
+  if (definition.storageType === 'file') {
+    writeTemplateToFile(definition.filePath, normalizedTemplate);
+
+    return sendSuccess(res, {
+      saved: true,
+      ...buildPromptTemplatePayload(definition, normalizedTemplate)
+    });
+  }
 
   await prisma.settings.upsert({
     where: { id: 1 },

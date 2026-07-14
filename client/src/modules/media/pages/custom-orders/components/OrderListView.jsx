@@ -33,7 +33,9 @@ const OrderListView = ({
   onEditOrder,
   onDeleteOrder,
   onLinkListSync,
-  onOpenListSyncs
+  onOpenListSyncs,
+  orderHierarchyFilter,
+  setOrderHierarchyFilter
 }) => {
   const handleCreateFormToggle = () => {
     setShowCreateForm(!showCreateForm);
@@ -60,6 +62,30 @@ const OrderListView = ({
     setEditingOrder(null);
     setFormData({ name: '', description: '', icon: '', playlistRatingKey: '', customPlaylistId: '', backgroundImageId: '', backgroundGalleryId: '' });
     setMessage('');
+  };
+
+  // Filter orders based on hierarchy filter
+  const getFilteredOrders = () => {
+    // Build a set of order IDs that are referenced as sub-orders in other orders
+    const subOrderIds = new Set();
+    customOrders.forEach(order => {
+      if (order.items) {
+        order.items.forEach(item => {
+          if (item.mediaType === 'suborder' && item.referencedCustomOrderId) {
+            subOrderIds.add(item.referencedCustomOrderId);
+          }
+        });
+      }
+    });
+
+    if (orderHierarchyFilter === 'parent') {
+      // Parent orders are those NOT referenced as sub-orders
+      return customOrders.filter(order => !subOrderIds.has(order.id));
+    } else if (orderHierarchyFilter === 'child') {
+      // Child/sub-orders are those referenced as sub-orders
+      return customOrders.filter(order => subOrderIds.has(order.id));
+    }
+    return customOrders;
   };
 
   const renderOrderForm = (isEditing = false) => (
@@ -279,6 +305,34 @@ const OrderListView = ({
         </Button>
       </div>
 
+      {/* Order Hierarchy Filter */}
+      <div className="order-hierarchy-filter">
+        <div className="filter-label">Filter Orders:</div>
+        <div className="filter-buttons">
+          <Button
+            onClick={() => setOrderHierarchyFilter('all')}
+            className={orderHierarchyFilter === 'all' ? 'primary' : 'secondary'}
+            size="small"
+          >
+            All Orders
+          </Button>
+          <Button
+            onClick={() => setOrderHierarchyFilter('parent')}
+            className={orderHierarchyFilter === 'parent' ? 'primary' : 'secondary'}
+            size="small"
+          >
+            👨‍👩‍👧 Parent Orders Only
+          </Button>
+          <Button
+            onClick={() => setOrderHierarchyFilter('child')}
+            className={orderHierarchyFilter === 'child' ? 'primary' : 'secondary'}
+            size="small"
+          >
+            👶 Sub-Orders Only
+          </Button>
+        </div>
+      </div>
+
       {/* Create Form */}
       {showCreateForm && renderOrderForm(false)}
 
@@ -290,19 +344,28 @@ const OrderListView = ({
         {customOrders.length === 0 ? (
           <EmptyState title="No custom orders yet. Create your first custom order to get started!" />
         ) : (
-          <div className="orders-grid">
-            {customOrders.map(order => (
-              <OrderCard
-                key={order.id}
-                order={order}
-                onViewOrder={onViewOrder}
-                onToggleActive={onToggleActive}
-                onEditOrder={onEditOrder}
-                onDeleteOrder={onDeleteOrder}
-                onLinkListSync={onLinkListSync}
+          <>
+            {getFilteredOrders().length === 0 ? (
+              <EmptyState 
+                title="No orders match the current filter."
+                subtitle="Try selecting a different filter option."
               />
-            ))}
-          </div>
+            ) : (
+              <div className="orders-grid">
+                {getFilteredOrders().map(order => (
+                  <OrderCard
+                    key={order.id}
+                    order={order}
+                    onViewOrder={onViewOrder}
+                    onToggleActive={onToggleActive}
+                    onEditOrder={onEditOrder}
+                    onDeleteOrder={onDeleteOrder}
+                    onLinkListSync={onLinkListSync}
+                  />
+                ))}
+              </div>
+            )}
+          </>
         )}
       </div>
     </>

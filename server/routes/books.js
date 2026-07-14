@@ -22,14 +22,12 @@ const { validateRequiredFields } = require('../middleware/validation');
 const BookService = require('../services/BookService');
 const BookCompletionService = require('../services/BookCompletionService');
 const BookIntegrationService = require('../services/BookIntegrationService');
+const prisma = require('../prismaClient');
 
 // Initialize services
 const bookService = new BookService();
-const completionService = new BookCompletionService();
+const completionService = new BookCompletionService(prisma);
 const integrationService = new BookIntegrationService();
-
-// Keep the existing reference book endpoint for backward compatibility
-const prisma = require('../prismaClient');
 
 // ==========================================
 // LEGACY COMPATIBILITY - REFERENCE BOOKS

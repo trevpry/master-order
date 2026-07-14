@@ -1882,3 +1882,43 @@ h3.clickable-title {
   color: #f59e0b;
   font-weight: 500;
 }
+
+/* Order Hierarchy Filter Styles */
+.order-hierarchy-filter {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  margin: 1.5rem 0;
+  padding: 1rem;
+  background: #f8f9fa;
+  border: 1px solid #e9ecef;
+  border-radius: 8px;
+}
+
+.filter-label {
+  font-weight: 600;
+  color: #495057;
+  white-space: nowrap;
+}
+
+.filter-buttons {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+@media (max-width: 768px) {
+  .order-hierarchy-filter {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .filter-buttons {
+    width: 100%;
+  }
+
+  .filter-buttons button {
+    flex: 1;
+    min-width: 120px;
+  }
+}

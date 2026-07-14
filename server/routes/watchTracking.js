@@ -94,7 +94,7 @@ router.post('/mark-custom-order-item-watched/:itemId', asyncHandler(async (req, 
     // For unified books, use BookCompletion system
     try {
       const BookCompletionService = require('../../services/bookCompletionService');
-      const bookCompletionService = new BookCompletionService();
+      const bookCompletionService = new BookCompletionService(prisma);
       
       await bookCompletionService.updateProgressFromSession(customOrderItem.bookId, {
         isCompleted: true,

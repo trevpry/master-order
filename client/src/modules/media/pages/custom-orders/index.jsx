@@ -56,6 +56,27 @@ import {
 } from './utils/itemUtils';
 import { scrollToTop, scrollToBottom } from './utils/scrollUtils';
 
+const DEFAULT_CUSTOM_ORDER_MISSING_ITEMS_PROMPT_TEMPLATE = `You are helping identify missing entries for a media custom order.
+
+Order Name: {{ORDER_NAME}}
+Order Description: {{ORDER_DESCRIPTION}}
+Total Exported Entries (including sub-order contents): {{ENTRY_COUNT}}
+
+Current Entries:
+{{ORDER_ITEMS}}
+
+Task:
+1. Identify likely series/franchise/groupings represented by these entries.
+2. List items that appear missing but should likely be included for completion or continuity.
+3. Include both direct sequels/prequels and strongly related companion items.
+4. For each suggested missing item, provide:
+   - Title
+   - Media type
+   - Why it is likely missing
+   - Confidence (High/Medium/Low)
+
+Return the result grouped by series/franchise, then a final prioritized shortlist of what to add first.`;
+
 function CustomOrders() {  
   const [customOrders, setCustomOrders] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -151,6 +172,9 @@ function CustomOrders() {
   
   // Watched items filter state
   const [showWatchedItems, setShowWatchedItems] = useState(true);
+  
+  // Order hierarchy filter state
+  const [orderHierarchyFilter, setOrderHierarchyFilter] = useState('all'); // 'all', 'parent', 'child'
   
   // Available playlists for linking
   const [availablePlaylists, setAvailablePlaylists] = useState({ plex: [], custom: [] });
@@ -3711,6 +3735,145 @@ const handleSearchComics = async (e) => {
     }
   };
 
+  const copyTextToClipboard = async (text) => {
+    if (navigator?.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text);
+      return;
+    }
+
+    const textArea = document.createElement('textarea');
+    textArea.value = text;
+    textArea.style.position = 'fixed';
+    textArea.style.opacity = '0';
+    textArea.style.pointerEvents = 'none';
+    document.body.appendChild(textArea);
+    textArea.focus();
+    textArea.select();
+    document.execCommand('copy');
+    document.body.removeChild(textArea);
+  };
+
+  const formatAiPromptItemLine = (item, sourcePath) => {
+    const parts = [];
+    const mediaType = item.mediaType || 'unknown';
+    parts.push(`[${mediaType}] ${item.title || '(untitled)'}`);
+
+    if (item.mediaType === 'episode') {
+      if (item.seriesTitle) {
+        parts.push(`Series: ${item.seriesTitle}`);
+      }
+      if (item.seasonNumber !== null && item.seasonNumber !== undefined && item.episodeNumber !== null && item.episodeNumber !== undefined) {
+        parts.push(`Episode: S${item.seasonNumber}E${item.episodeNumber}`);
+      }
+    }
+
+    if (item.mediaType === 'comic' && item.comicSeries) {
+      const issueLabel = item.comicIssue ? ` #${item.comicIssue}` : '';
+      parts.push(`Series: ${item.comicSeries}${issueLabel}`);
+    }
+
+    if (item.mediaType === 'book' && item.book?.seriesName) {
+      parts.push(`Series: ${item.book.seriesName}`);
+    }
+
+    if (item.mediaType === 'shortstory' && item.storyContainedInBook?.title) {
+      parts.push(`Contained In: ${item.storyContainedInBook.title}`);
+    }
+
+    if (item.mediaType === 'suborder' && item.referencedCustomOrder?.name) {
+      parts.push(`References: ${item.referencedCustomOrder.name}`);
+    }
+
+    parts.push(`Location: ${sourcePath}`);
+    parts.push(`Watched: ${item.isWatched ? 'yes' : 'no'}`);
+
+    return parts.join(' | ');
+  };
+
+  const collectOrderItemsForAiPrompt = (order) => {
+    if (!order?.items || !Array.isArray(order.items)) {
+      return [];
+    }
+
+    const lines = [];
+
+    const walkItems = (items, sourcePath) => {
+      for (const item of items) {
+        if (!item) {
+          continue;
+        }
+
+        if (item.mediaType === 'suborder') {
+          lines.push(formatAiPromptItemLine(item, sourcePath));
+
+          const subOrderItems = item.referencedCustomOrder?.items;
+          if (Array.isArray(subOrderItems) && subOrderItems.length > 0) {
+            const nestedPath = `${sourcePath} > Sub-order: ${item.title || item.referencedCustomOrder?.name || 'Unnamed'}`;
+            walkItems(subOrderItems, nestedPath);
+          }
+          continue;
+        }
+
+        lines.push(formatAiPromptItemLine(item, sourcePath));
+      }
+    };
+
+    walkItems(order.items, `Order: ${order.name || 'Unnamed Order'}`);
+    return lines;
+  };
+
+  const buildAiPromptForOrder = (order) => {
+    const itemLines = collectOrderItemsForAiPrompt(order);
+    const numberedItems = itemLines.map((line, index) => `${index + 1}. ${line}`);
+
+    const template = order?.aiPromptTemplate || DEFAULT_CUSTOM_ORDER_MISSING_ITEMS_PROMPT_TEMPLATE;
+    const templateValues = {
+      '{{ORDER_NAME}}': order?.name || 'Unnamed Order',
+      '{{ORDER_DESCRIPTION}}': order?.description || 'None',
+      '{{ENTRY_COUNT}}': String(numberedItems.length),
+      '{{ORDER_ITEMS}}': numberedItems.join('\n')
+    };
+
+    return Object.entries(templateValues).reduce((result, [placeholder, value]) => {
+      return result.split(placeholder).join(value);
+    }, template);
+  };
+
+  const getCustomOrderPromptTemplate = async () => {
+    try {
+      const response = await fetch(`${config.apiBaseUrl}/api/history-plus/prompt-templates/customOrderMissing`);
+      if (!response.ok) {
+        return DEFAULT_CUSTOM_ORDER_MISSING_ITEMS_PROMPT_TEMPLATE;
+      }
+
+      const payload = await response.json();
+      return payload?.data?.template || DEFAULT_CUSTOM_ORDER_MISSING_ITEMS_PROMPT_TEMPLATE;
+    } catch (error) {
+      console.warn('Failed to load custom order AI prompt template, using default template:', error);
+      return DEFAULT_CUSTOM_ORDER_MISSING_ITEMS_PROMPT_TEMPLATE;
+    }
+  };
+
+  const handleGenerateAiPrompt = async () => {
+    if (!viewingOrderItems) {
+      setMessage('No custom order is currently open');
+      return;
+    }
+
+    try {
+      const template = await getCustomOrderPromptTemplate();
+      const promptText = buildAiPromptForOrder({
+        ...viewingOrderItems,
+        aiPromptTemplate: template
+      });
+      await copyTextToClipboard(promptText);
+      setMessage(`AI prompt copied to clipboard (${collectOrderItemsForAiPrompt(viewingOrderItems).length} entries exported)`);
+    } catch (error) {
+      console.error('Error generating AI prompt:', error);
+      setMessage('Failed to copy AI prompt to clipboard');
+    }
+  };
+
   if (loading) {
     return <LoadingPage />;
   }
@@ -3738,6 +3901,7 @@ const handleSearchComics = async (e) => {
             viewingOrderItems={viewingOrderItems}
             onBackToOrderList={() => setViewingOrderItems(null)}
             handleViewOrder={handleViewOrder}
+            onGenerateAiPrompt={handleGenerateAiPrompt}
             getAllNonReferenceItems={getAllNonReferenceItems}
             getUnwatchedNonReferenceItems={getUnwatchedNonReferenceItems}
             setShowMovieForm={setShowMovieForm}
@@ -4190,6 +4354,8 @@ const handleSearchComics = async (e) => {
           onDeleteOrder={handleDeleteOrder}
           onLinkListSync={handleOpenLinkList}
           onOpenListSyncs={() => setShowListSyncsPanel(true)}
+          orderHierarchyFilter={orderHierarchyFilter}
+          setOrderHierarchyFilter={setOrderHierarchyFilter}
         />
       )}
 
