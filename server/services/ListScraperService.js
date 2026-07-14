@@ -185,6 +185,8 @@ class ListScraperService {
       include: { customOrderItem: { select: { sortOrder: true } } }
     });
 
+    // Only insert into the middle when the new item is actually bracketed by
+    // existing linked items from the same source list.
     if (prevTracked?.customOrderItem && nextTracked?.customOrderItem) {
       const prevSort = prevTracked.customOrderItem.sortOrder;
       const nextSort = nextTracked.customOrderItem.sortOrder;
@@ -203,24 +205,8 @@ class ListScraperService {
       return prevSort + 1;
     }
 
-    if (prevTracked?.customOrderItem) {
-      return prevTracked.customOrderItem.sortOrder + 1;
-    }
-
-    if (nextTracked?.customOrderItem) {
-      const nextSort = nextTracked.customOrderItem.sortOrder;
-      if (nextSort > 1) {
-        return nextSort - 1;
-      }
-      // Shift everything up
-      await prisma.customOrderItem.updateMany({
-        where: { customOrderId },
-        data: { sortOrder: { increment: 1 } }
-      });
-      return 1;
-    }
-
-    // No neighbors — place at end
+    // With only one side anchored, or no anchors at all, append to the end so
+    // existing custom-order item ordering stays stable.
     const lastItem = await prisma.customOrderItem.findFirst({
       where: { customOrderId },
       orderBy: { sortOrder: 'desc' }
