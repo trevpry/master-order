@@ -113,10 +113,16 @@ class ListScraperService {
   }
 
   /**
-   * Generate a fingerprint for deduplication
+   * Generate a stable fingerprint for deduplication.
+   * Do not include source position because list providers may renumber items.
    */
-  generateFingerprint(title, position) {
-    const normalized = `${title.toLowerCase().trim()}::${position}`;
+  generateFingerprint(item) {
+    const normalized = [
+      (item.mediaType || '').toLowerCase().trim(),
+      (item.title || '').toLowerCase().trim(),
+      (item.itemUrl || '').toLowerCase().trim(),
+      (item.itemYear || '').toString().trim()
+    ].join('::');
     return crypto.createHash('sha256').update(normalized).digest('hex').substring(0, 32);
   }
 
@@ -134,7 +140,7 @@ class ListScraperService {
     return items.map((item, index) => ({
       ...item,
       position: item.position ?? index,
-      fingerprint: this.generateFingerprint(item.title, item.position ?? index)
+      fingerprint: this.generateFingerprint(item)
     }));
   }
 
@@ -145,13 +151,65 @@ class ListScraperService {
    * @returns {Array} - New items not yet tracked
    */
   async detectNewItems(configId, scrapedItems) {
-    const existingItems = await prisma.listScrapedItem.findMany({
-      where: { listScrapeConfigId: configId },
-      select: { fingerprint: true }
+    const newItems = [];
+    for (const item of scrapedItems) {
+      const existing = await this.findOrMigrateTrackedItem(configId, item);
+      if (!existing) {
+        newItems.push(item);
+      }
+    }
+    return newItems;
+  }
+
+  /**
+   * Find an already tracked list item. First match by fingerprint, then fall back
+   * to stable identity fields and migrate fingerprint/position forward.
+   * This preserves continuity when parser position strategy changes.
+   */
+  async findOrMigrateTrackedItem(configId, item) {
+    const byFingerprint = await prisma.listScrapedItem.findUnique({
+      where: {
+        listScrapeConfigId_fingerprint: {
+          listScrapeConfigId: configId,
+          fingerprint: item.fingerprint
+        }
+      }
     });
 
-    const existingFingerprints = new Set(existingItems.map(i => i.fingerprint));
-    return scrapedItems.filter(item => !existingFingerprints.has(item.fingerprint));
+    if (byFingerprint) {
+      return byFingerprint;
+    }
+
+    const identityWhere = {
+      listScrapeConfigId: configId,
+      title: item.title,
+      mediaType: item.mediaType || null,
+      itemUrl: item.itemUrl || null
+    };
+
+    const byIdentity = await prisma.listScrapedItem.findFirst({
+      where: identityWhere,
+      orderBy: { id: 'asc' }
+    });
+
+    if (!byIdentity) {
+      return null;
+    }
+
+    await prisma.listScrapedItem.update({
+      where: { id: byIdentity.id },
+      data: {
+        fingerprint: item.fingerprint,
+        position: item.position,
+        itemYear: item.itemYear || byIdentity.itemYear,
+        itemUrl: item.itemUrl || byIdentity.itemUrl,
+        mediaType: item.mediaType || byIdentity.mediaType
+      }
+    });
+
+    console.log(`[ListSync] Migrated tracked fingerprint for "${item.title}" to position ${item.position}`);
+
+    return { ...byIdentity, fingerprint: item.fingerprint, position: item.position };
   }
 
   /**
@@ -190,6 +248,7 @@ class ListScraperService {
     if (prevTracked?.customOrderItem && nextTracked?.customOrderItem) {
       const prevSort = prevTracked.customOrderItem.sortOrder;
       const nextSort = nextTracked.customOrderItem.sortOrder;
+      console.log(`[ListSync] Insert decision for position ${position}: BETWEEN tracked items (${prevTracked.position} -> sort ${prevSort}) and (${nextTracked.position} -> sort ${nextSort})`);
       // If there's room between them, use the midpoint
       if (nextSort - prevSort > 1) {
         return Math.floor((prevSort + nextSort) / 2);
@@ -211,7 +270,100 @@ class ListScraperService {
       where: { customOrderId },
       orderBy: { sortOrder: 'desc' }
     });
+    console.log(`[ListSync] Insert decision for position ${position}: APPEND (prev anchor: ${prevTracked?.position ?? 'none'}, next anchor: ${nextTracked?.position ?? 'none'})`);
     return lastItem ? lastItem.sortOrder + 1 : 1;
+  }
+
+  /**
+   * Calculate sortOrder for a batch of new items using a stable snapshot of current
+   * linked anchors so append ordering always matches source list ordering.
+   * @param {number} configId
+   * @param {number} customOrderId
+   * @param {Array<{ item: Object }>} plannedItems
+   * @returns {Map<string, number>} fingerprint -> sortOrder
+   */
+  async planInsertSortOrders(configId, customOrderId, plannedItems) {
+    const assignments = new Map();
+    if (!plannedItems || plannedItems.length === 0) return assignments;
+
+    const sortedPlans = [...plannedItems].sort((a, b) => (a.item.position ?? 0) - (b.item.position ?? 0));
+
+    const anchors = await prisma.listScrapedItem.findMany({
+      where: {
+        listScrapeConfigId: configId,
+        customOrderItemId: { not: null },
+        wasSkipped: false
+      },
+      orderBy: { position: 'asc' },
+      include: { customOrderItem: { select: { id: true, sortOrder: true } } }
+    });
+
+    const validAnchors = anchors
+      .filter(a => a.customOrderItem)
+      .map(a => ({
+        position: a.position,
+        sortOrder: a.customOrderItem.sortOrder,
+        customOrderItemId: a.customOrderItem.id
+      }));
+
+    const lastItem = await prisma.customOrderItem.findFirst({
+      where: { customOrderId },
+      orderBy: { sortOrder: 'desc' }
+    });
+    let nextAppendSortOrder = lastItem ? lastItem.sortOrder + 1 : 1;
+
+    for (const plan of sortedPlans) {
+      const position = plan.item.position ?? 0;
+
+      let prevAnchor = null;
+      let nextAnchor = null;
+      for (let i = 0; i < validAnchors.length; i++) {
+        const anchor = validAnchors[i];
+        if (anchor.position < position) {
+          prevAnchor = anchor;
+          continue;
+        }
+        if (anchor.position > position) {
+          nextAnchor = anchor;
+          break;
+        }
+      }
+
+      if (prevAnchor && nextAnchor) {
+        const prevSort = prevAnchor.sortOrder;
+        const nextSort = nextAnchor.sortOrder;
+        console.log(`[ListSync] Batch insert decision for position ${position}: BETWEEN tracked items (${prevAnchor.position} -> sort ${prevSort}) and (${nextAnchor.position} -> sort ${nextSort})`);
+
+        if (nextSort - prevSort > 1) {
+          const midpoint = Math.floor((prevSort + nextSort) / 2);
+          assignments.set(plan.item.fingerprint, midpoint);
+        } else {
+          await prisma.customOrderItem.updateMany({
+            where: {
+              customOrderId,
+              sortOrder: { gt: prevSort }
+            },
+            data: { sortOrder: { increment: 1 } }
+          });
+
+          const insertedSort = prevSort + 1;
+          assignments.set(plan.item.fingerprint, insertedSort);
+
+          // Keep in-memory anchor map aligned with shifted DB sort orders.
+          for (const anchor of validAnchors) {
+            if (anchor.sortOrder > prevSort) {
+              anchor.sortOrder += 1;
+            }
+          }
+        }
+      } else {
+        console.log(`[ListSync] Batch insert decision for position ${position}: APPEND (prev anchor: ${prevAnchor?.position ?? 'none'}, next anchor: ${nextAnchor?.position ?? 'none'})`);
+        assignments.set(plan.item.fingerprint, nextAppendSortOrder);
+        nextAppendSortOrder += 1;
+      }
+    }
+
+    return assignments;
   }
 
   /**
@@ -219,17 +371,26 @@ class ListScraperService {
    * Takes the existing sortOrder slots held by list items, sorts them, and reassigns them
    * in list-position order — so non-list items stay in their relative slots untouched.
    */
-  async enforceListOrder(configId, customOrderId) {
-    const trackedItems = await prisma.listScrapedItem.findMany({
+  async enforceListOrder(configId, customOrderId, options = {}) {
+    const excludedIds = new Set(options.excludeCustomOrderItemIds || []);
+
+    const trackedItems = (await prisma.listScrapedItem.findMany({
       where: {
         listScrapeConfigId: configId,
         customOrderItemId: { not: null }
       },
       orderBy: { position: 'asc' },
       include: { customOrderItem: { select: { id: true, sortOrder: true } } }
-    });
+    })).filter(item => item.customOrderItem && !excludedIds.has(item.customOrderItem.id));
 
     if (trackedItems.length < 2) return;
+
+    const positions = trackedItems.map(t => t.position);
+    const uniquePositionCount = new Set(positions).size;
+    if (uniquePositionCount !== positions.length) {
+      console.warn(`[ListSync] Skipping enforceListOrder for config ${configId}: duplicate tracked positions detected (${positions.length - uniquePositionCount} duplicates).`);
+      return;
+    }
 
     // Collect current sortOrder values and sort them numerically
     const sortOrders = trackedItems.map(t => t.customOrderItem.sortOrder).sort((a, b) => a - b);
@@ -394,12 +555,6 @@ class ListScraperService {
 
       console.log(`[ListSync] Smart pagination complete: found ${newItemsFound} new items across ${currentPage - startPage + 1} pages`);
       
-      // Re-assign position numbers sequentially across all collected items to preserve source order
-      scrapedItems.forEach((item, index) => {
-        item.position = index;
-      });
-      console.log(`[ListSync] Re-assigned positions to preserve source order (0 to ${scrapedItems.length - 1})`);
-      
       importableFingerprints = newFingerprints;
     } else if (importAll && hasOrder) {
       // Standard flow: scrape all at once and use slice for headImportCount/tailImportCount
@@ -479,11 +634,17 @@ class ListScraperService {
     }
 
     // === PHASE 3: Insert new items (all anchor points are now visible) ===
+    const createdCustomOrderItemIds = [];
+    const plannedNewItems = itemPlan.filter(({ duplicate, shouldImport }) => shouldImport && !duplicate);
+    const plannedSortOrders = await this.planInsertSortOrders(configId, config.customOrderId, plannedNewItems);
+
     for (const { item, enriched, duplicate, shouldImport } of itemPlan) {
       if (!shouldImport || duplicate) continue;
       try {
-        const sortOrder = await this.calculateInsertSortOrder(configId, config.customOrderId, item.position);
+        const sortOrder = plannedSortOrders.get(item.fingerprint) ??
+          await this.calculateInsertSortOrder(configId, config.customOrderId, item.position);
         const createdItem = await this.addItemToOrder(config.customOrderId, enriched, sortOrder);
+        createdCustomOrderItemIds.push(createdItem.id);
         await prisma.listScrapedItem.upsert({
           where: { listScrapeConfigId_fingerprint: { listScrapeConfigId: configId, fingerprint: item.fingerprint } },
           update: { title: item.title, position: item.position, itemUrl: item.itemUrl, itemYear: item.itemYear, mediaType: item.mediaType, customOrderItemId: createdItem.id, wasSkipped: false },
@@ -498,7 +659,9 @@ class ListScraperService {
 
     // === PHASE 4: Enforce scraped list order on all linked items ===
     if (hasOrder && config.customOrderId) {
-      await this.enforceListOrder(configId, config.customOrderId);
+      await this.enforceListOrder(configId, config.customOrderId, {
+        excludeCustomOrderItemIds: createdCustomOrderItemIds
+      });
     }
 
     // Update config — don't mark as importedAll if we stopped early due to a not-in-Plex item
@@ -568,10 +731,8 @@ class ListScraperService {
               break;
             }
 
-            // Check if this item is already tracked
-            const existing = await prisma.listScrapedItem.findUnique({
-              where: { listScrapeConfigId_fingerprint: { listScrapeConfigId: configId, fingerprint: item.fingerprint } }
-            });
+            // Check if this item is already tracked (with legacy fingerprint migration)
+            const existing = await this.findOrMigrateTrackedItem(configId, item);
 
             if (!existing) {
               // This is a NEW item
@@ -589,11 +750,6 @@ class ListScraperService {
 
         console.log(`[ListSync] Smart pagination complete: found ${newItemsFound} new items`);
         
-        // Re-assign position numbers sequentially across all collected items to preserve source order
-        scrapedItems.forEach((item, index) => {
-          item.position = index;
-        });
-        console.log(`[ListSync] Re-assigned positions to preserve source order (0 to ${scrapedItems.length - 1})`);
       } else {
         // Standard flow: scrape once
         scrapedItems = await this.scrapeList(config);
@@ -757,11 +913,17 @@ class ListScraperService {
       }
 
       // === PHASE 3: Insert new items (all anchor points now visible) ===
+      const createdCustomOrderItemIds = [];
+      const plannedNewItems = updatePlan.filter(({ duplicate }) => !duplicate);
+      const plannedSortOrders = await this.planInsertSortOrders(configId, config.customOrderId, plannedNewItems);
+
       for (const { item, enriched, duplicate } of updatePlan) {
         if (duplicate) continue;
         try {
-          const sortOrder = await this.calculateInsertSortOrder(configId, config.customOrderId, item.position);
+          const sortOrder = plannedSortOrders.get(item.fingerprint) ??
+            await this.calculateInsertSortOrder(configId, config.customOrderId, item.position);
           const createdItem = await this.addItemToOrder(config.customOrderId, enriched, sortOrder);
+          createdCustomOrderItemIds.push(createdItem.id);
 
           await prisma.listScrapedItem.upsert({
             where: { listScrapeConfigId_fingerprint: { listScrapeConfigId: configId, fingerprint: item.fingerprint } },
@@ -776,7 +938,9 @@ class ListScraperService {
       }
 
       // === PHASE 4: Enforce scraped list order on all linked items ===
-      await this.enforceListOrder(configId, config.customOrderId);
+      await this.enforceListOrder(configId, config.customOrderId, {
+        excludeCustomOrderItemIds: createdCustomOrderItemIds
+      });
 
       console.log(`[ListSync] checkForUpdates COMPLETE — added:${results.added} notInPlex:${results.notInPlex.length} errors:${results.errors.length}`);
       if (results.notInPlex.length > 0) {

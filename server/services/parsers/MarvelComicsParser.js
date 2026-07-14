@@ -48,7 +48,10 @@ class MarvelComicsParser extends BaseListParser {
 
         // Extract order number
         const orderCell = $row.find('td.ro-td--order strong').text().trim();
-        const orderNum = parseInt(orderCell) || position;
+        const normalizedOrderCell = orderCell.replace(/[^\d]/g, '');
+        const parsedOrder = normalizedOrderCell ? parseInt(normalizedOrderCell, 10) : NaN;
+        const hasExplicitOrder = Number.isInteger(parsedOrder) && parsedOrder > 0;
+        const orderNum = hasExplicitOrder ? parsedOrder : null;
 
         // Extract title from link
         const titleLink = $row.find('td.ro-td--title a.ro-title-link');
@@ -82,7 +85,9 @@ class MarvelComicsParser extends BaseListParser {
 
         items.push({
           title,
-          position: position++,
+          // Use the source list order number when available so position stays
+          // globally stable across pagination and sync runs.
+          position: hasExplicitOrder ? orderNum : position,
           mediaType: 'comic',
           itemUrl,
           itemYear,
@@ -90,6 +95,8 @@ class MarvelComicsParser extends BaseListParser {
           releaseDate: dateCell || null,
           orderNumber: orderNum
         });
+
+        position += 1;
       });
 
       console.log(`[MarvelComicsParser] Fetched ${rows.length} items from page ${currentPage}`);
