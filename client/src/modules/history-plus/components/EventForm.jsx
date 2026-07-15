@@ -18,11 +18,6 @@ const EventForm = ({ event, categories, onSave, onCancel }) => {
     console.log('Form data updated:', formData);
   }, [formData]);
 
-  // Helper function to check if a date is BCE (negative year)
-  const isBCEDate = (dateString) => {
-    return dateString && dateString.startsWith('-');
-  };
-
   // Helper function to convert date to YYYY-MM-DD format for HTML date inputs
   const formatDateForInput = (dateString) => {
     if (!dateString) return '';
@@ -218,17 +213,17 @@ const EventForm = ({ event, categories, onSave, onCancel }) => {
                 Start Date *
               </label>
               <input
-                type={isBCEDate(formData.startDate) ? "text" : "date"}
+                type="text"
                 id="startDate"
                 name="startDate"
                 value={formData.startDate}
                 onChange={handleInputChange}
                 required
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                placeholder={isBCEDate(formData.startDate) ? "e.g., -4200000-01-01 for 4,200,000 BCE" : ""}
+                placeholder="e.g., 2024-12-31 or -4200000-01-01 for BCE"
               />
               <p className="text-xs text-gray-500 mt-1">
-                For BCE dates, use negative years (e.g., -4200000-01-01 for 4,200,000 BCE)
+                You can type exact dates directly, including BCE dates with negative years.
               </p>
             </div>
 
