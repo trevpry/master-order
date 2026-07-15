@@ -53,7 +53,7 @@ router.post('/sync', asyncHandler(async (req, res) => {
   console.log('Starting manual Plex sync...');
   const startTime = Date.now();
   
-  const results = await plexSyncService.fullSync();
+  const results = await plexSyncService.fullSync('manual');
   
   const duration = (Date.now() - startTime) / 1000;
   console.log(`Manual Plex sync completed in ${duration}s`);
@@ -64,6 +64,21 @@ router.post('/sync', asyncHandler(async (req, res) => {
     duration: duration,
     results: results
   });
+}));
+
+// GET /api/plex/sync-log - Get recent Plex sync run summaries
+router.get('/sync-log', asyncHandler(async (req, res) => {
+  const parsedLimit = Number.parseInt(req.query.limit, 10);
+  const limit = Number.isFinite(parsedLimit)
+    ? Math.min(Math.max(parsedLimit, 1), 200)
+    : 25;
+
+  const logs = await prisma.plexSyncRunLog.findMany({
+    orderBy: { createdAt: 'desc' },
+    take: limit
+  });
+
+  res.json(logs);
 }));
 
 // GET /api/plex/sync-status - Get Plex sync status

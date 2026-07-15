@@ -250,8 +250,10 @@ async function selectInitialMovie(movies) {
   
   // Apply prioritization logic
   const randomValue = Math.random() * 100;
+  console.log(`[PWCP] Gate check: roll=${randomValue.toFixed(2)} threshold=${partiallyWatchedPercent}`);
 
   if (randomValue < partiallyWatchedPercent) {
+    console.log('[PWCP] Entered Partially Watched Collections Priority branch');
     // Only for the partially watched priority branch:
     // pick a watched movie in a partially watched collection, then pick the
     // next unplayed item from that selected collection.
@@ -271,11 +273,30 @@ async function selectInitialMovie(movies) {
       .filter(entry => entry.eligibleCollections.length > 0);
 
     console.log(`🎯 Partially watched branch seed pool (watched movies in partial collections): ${watchedCollectionSeedPool.length}`);
+    if (watchedCollectionSeedPool.length > 0) {
+      const sampleSeedPreview = watchedCollectionSeedPool
+        .slice(0, 5)
+        .map(entry => `${entry.movie.title} => [${entry.eligibleCollections.join(', ')}]`)
+        .join(' | ');
+      console.log(`[PWCP] Seed preview (up to 5): ${sampleSeedPreview}`);
+    }
 
     if (watchedCollectionSeedPool.length > 0) {
-      const seedEntry = watchedCollectionSeedPool[Math.floor(Math.random() * watchedCollectionSeedPool.length)];
-      const selectedCollectionName = seedEntry.eligibleCollections[Math.floor(Math.random() * seedEntry.eligibleCollections.length)];
+      const selectedSeedIndex = Math.floor(Math.random() * watchedCollectionSeedPool.length);
+      const seedEntry = watchedCollectionSeedPool[selectedSeedIndex];
+      const selectedCollectionIndex = Math.floor(Math.random() * seedEntry.eligibleCollections.length);
+      const selectedCollectionName = seedEntry.eligibleCollections[selectedCollectionIndex];
+
+      console.log(`[PWCP] Selected seed index=${selectedSeedIndex}/${watchedCollectionSeedPool.length - 1}`);
+      console.log(`[PWCP] Selected watched seed movie: "${seedEntry.movie.title}" (${seedEntry.movie.ratingKey})`);
+      console.log(`[PWCP] Seed eligible collections (${seedEntry.eligibleCollections.length}): ${seedEntry.eligibleCollections.join(', ')}`);
+      console.log(`[PWCP] Selected collection index=${selectedCollectionIndex}/${seedEntry.eligibleCollections.length - 1} -> "${selectedCollectionName}"`);
+
       const selectedCollectionData = await getCollectionItemsByName(selectedCollectionName);
+
+      const selectedCollectionMovieCount = selectedCollectionData.items.filter(item => item.libraryType === 'movie').length;
+      const selectedCollectionTvCount = selectedCollectionData.items.filter(item => item.libraryType === 'tv').length;
+      console.log(`[PWCP] Loaded selected collection items: total=${selectedCollectionData.items.length} movies=${selectedCollectionMovieCount} tv=${selectedCollectionTvCount}`);
 
       const hasUnplayedInSelectedCollection = selectedCollectionData.items.some(item => {
         if (item.libraryType === 'movie') {
@@ -285,6 +306,14 @@ async function selectInitialMovie(movies) {
         return item.leafCount > (item.viewedLeafCount || 0);
       });
 
+      const unplayedMovieCountInSelectedCollection = selectedCollectionData.items.filter(item =>
+        item.libraryType === 'movie' && (!item.viewCount || item.viewCount === 0)
+      ).length;
+      const unplayedTvCountInSelectedCollection = selectedCollectionData.items.filter(item =>
+        item.libraryType === 'tv' && item.leafCount > (item.viewedLeafCount || 0)
+      ).length;
+      console.log(`[PWCP] Unplayed candidates in selected collection: movies=${unplayedMovieCountInSelectedCollection} tv=${unplayedTvCountInSelectedCollection}`);
+
       if (hasUnplayedInSelectedCollection) {
         const selectedFromCollection = await selectEarliestUnplayedFromCollections({
           ...seedEntry.movie,
@@ -293,6 +322,7 @@ async function selectInitialMovie(movies) {
 
         if (selectedFromCollection) {
           console.log(`🎯 Selected via partially watched priority branch from collection "${selectedCollectionName}": "${selectedFromCollection.title}"`);
+          console.log(`[PWCP] Final branch result: title="${selectedFromCollection.title}" ratingKey=${selectedFromCollection.ratingKey} libraryType=${selectedFromCollection.libraryType || 'movie'}`);
           return {
             ...selectedFromCollection,
             skipCollectionExpansion: true,
@@ -301,11 +331,13 @@ async function selectInitialMovie(movies) {
           };
         }
       } else {
-        console.log(`⚠️  Selected collection "${selectedCollectionName}" has no unplayed items, using fallback logic`);
+        console.log(`⚠️  [PWCP] Selected collection "${selectedCollectionName}" has no unplayed items, using fallback logic`);
       }
     } else {
-      console.log('⚠️  No watched seed movies available for partially watched branch, using fallback logic');
+      console.log('⚠️  [PWCP] No watched seed movies available for partially watched branch, using fallback logic');
     }
+  } else {
+    console.log('[PWCP] Branch not selected (roll exceeded threshold)');
   }
   
   if (randomValue < partiallyWatchedPercent && partiallyWatchedCollectionMap.size > 0) {
@@ -872,6 +904,7 @@ async function getNextMovie() {
     if (selectedMovie?.skipCollectionExpansion) {
       finalSelection = selectedMovie;
       console.log(`Using locked collection selection from partially watched branch: "${finalSelection.selectedCollectionName || 'unknown'}"`);
+      console.log(`[PWCP] Locked selection details: title="${finalSelection.title}" ratingKey=${finalSelection.ratingKey} viaPartiallyWatched=${Boolean(finalSelection.selectedViaPartiallyWatchedPriority)}`);
     } else {
       // Check for other collections this movie belongs to
       selectedMovie = await checkCollections(selectedMovie);

@@ -77,7 +77,7 @@ class BackgroundSyncService {
     }
   }
 
-  async performSync() {
+  async performSync(trigger = 'background') {
     if (this.syncInProgress) {
       console.log('Sync already in progress, skipping scheduled sync');
       return;
@@ -90,7 +90,7 @@ class BackgroundSyncService {
       const startTime = Date.now();
       
       // Perform the sync using existing sync service
-      const result = await this.syncService.fullSync();
+      const result = await this.syncService.fullSync(trigger);
       
       const endTime = Date.now();
       const duration = (endTime - startTime) / 1000;
@@ -127,7 +127,7 @@ class BackgroundSyncService {
       throw new Error('Sync already in progress');
     }
     
-    await this.performSync();
+    await this.performSync('background-forced');
     
     // Reschedule the next automatic sync
     await this.scheduleNextSync();

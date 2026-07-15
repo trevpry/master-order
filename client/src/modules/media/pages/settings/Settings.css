@@ -523,6 +523,34 @@ html, body {
   color: #1a1a1a;
 }
 
+.sync-tab-nav {
+  display: flex;
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+  flex-wrap: wrap;
+}
+
+.sync-tab-button {
+  border: 1px solid #cfd4dc;
+  background: #f5f7fa;
+  color: #1a1a1a;
+  border-radius: 8px;
+  padding: 0.5rem 0.9rem;
+  font-size: 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.sync-tab-button.active {
+  background: #eaf0ff;
+  border-color: #7a8fe8;
+  color: #2e46a2;
+}
+
+.sync-tab-button:hover {
+  background: #eef2f7;
+}
+
 .status-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
@@ -605,6 +633,16 @@ html, body {
   color: white;
 }
 
+.sync-button.secondary {
+  background: linear-gradient(135deg, #5c7cfa 0%, #4dabf7 100%);
+  color: white;
+}
+
+.sync-button.secondary:hover:not(:disabled) {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(92, 124, 250, 0.3);
+}
+
 .sync-button.primary:hover:not(:disabled) {
   transform: translateY(-2px);
   box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);
@@ -670,6 +708,23 @@ html, body {
   cursor: not-allowed;
   transform: none !important;
   box-shadow: none !important;
+}
+
+.sync-log-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.sync-log-entry {
+  margin: 0;
+}
+
+.sync-log-entry .status-row {
+  display: flex;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+  margin-bottom: 0.35rem;
 }
 
 /* Save section */

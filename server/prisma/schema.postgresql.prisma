@@ -67,6 +67,33 @@ model Settings {
   updatedAt                         DateTime  @updatedAt
 }
 
+model PlexSyncRunLog {
+  id                   Int      @id @default(autoincrement())
+  startedAt            DateTime
+  completedAt          DateTime
+  durationSeconds      Float
+  trigger              String   @default("manual")
+  success              Boolean  @default(true)
+  sections             Int      @default(0)
+  totalShows           Int      @default(0)
+  totalMovies          Int      @default(0)
+  totalArtists         Int      @default(0)
+  cleanupEpisodes      Int      @default(0)
+  cleanupSeasons       Int      @default(0)
+  cleanupShows         Int      @default(0)
+  cleanupMovies        Int      @default(0)
+  cleanupArtists       Int      @default(0)
+  cleanupAlbums        Int      @default(0)
+  cleanupTracks        Int      @default(0)
+  cleanupPlaylists     Int      @default(0)
+  cleanupComplexFields Int      @default(0)
+  summary              String?
+  error                String?
+  createdAt            DateTime @default(now())
+
+  @@index([createdAt])
+}
+
 model EddieSettings {
   id              Int      @id @default(autoincrement())
   timezone        String   @default("UTC")

@@ -40,6 +40,10 @@ function Settings() {
   const [backgroundSyncMessage, setBackgroundSyncMessage] = useState('');
   const [tvdbClearLoading, setTvdbClearLoading] = useState(false);
   const [tvdbClearMessage, setTvdbClearMessage] = useState('');
+  const [syncOperationsTab, setSyncOperationsTab] = useState('operations');
+  const [plexSyncRunLogs, setPlexSyncRunLogs] = useState([]);
+  const [plexSyncLogLoading, setPlexSyncLogLoading] = useState(false);
+  const [plexSyncLogMessage, setPlexSyncLogMessage] = useState('');
   
   // Stash sync states
   const [stashSyncLoading, setStashSyncLoading] = useState(false);
@@ -107,7 +111,7 @@ function Settings() {
       setLoading(true);
       
       try {        // Fetch all data in parallel for better performance
-        const [settings, syncStatus, backgroundStatus, collections, players, plexUsers] = await Promise.all([
+        const [settings, syncStatus, backgroundStatus, collections, players, plexUsers, syncLogs] = await Promise.all([
           fetchWithErrorHandling(`${config.apiBaseUrl}/api/settings`),
           fetchWithErrorHandling(`${config.apiBaseUrl}/api/plex/sync-status`),
           fetchWithErrorHandling(`${config.apiBaseUrl}/api/plex/background-sync-status`),
@@ -118,6 +122,10 @@ function Settings() {
           }),
           fetchWithErrorHandling(`${config.apiBaseUrl}/api/plex/users`).catch(error => {
             console.warn('Failed to load Plex users:', error);
+            return [];
+          }),
+          fetchWithErrorHandling(`${config.apiBaseUrl}/api/plex/sync-log?limit=25`).catch(error => {
+            console.warn('Failed to load Plex sync run logs:', error);
             return [];
           })
         ]);// Update settings
@@ -150,6 +158,7 @@ function Settings() {
         setAvailableCollections(collections);
         setAvailablePlayers(players || []);
         setAvailablePlexUsers(plexUsers || []);
+        setPlexSyncRunLogs(Array.isArray(syncLogs) ? syncLogs : []);
         
       } catch (error) {
         showMessage('Failed to load settings data. Please refresh the page.', true);
@@ -412,6 +421,7 @@ function Settings() {
       // Refresh sync status
       const status = await fetchWithErrorHandling(`${config.apiBaseUrl}/api/plex/sync-status`);
       setPlexSyncStatus(status);
+      await fetchPlexSyncRunLogs();
       
     } catch (error) {
       setPlexSyncMessage(`Sync failed: ${error.message}`);
@@ -475,6 +485,21 @@ function Settings() {
     }
   };
 
+  const fetchPlexSyncRunLogs = async () => {
+    try {
+      setPlexSyncLogLoading(true);
+      setPlexSyncLogMessage('Refreshing Plex sync log...');
+      const logs = await fetchWithErrorHandling(`${config.apiBaseUrl}/api/plex/sync-log?limit=50`);
+      setPlexSyncRunLogs(Array.isArray(logs) ? logs : []);
+      setPlexSyncLogMessage('Plex sync log refreshed');
+    } catch (error) {
+      setPlexSyncLogMessage(`Failed to refresh Plex sync log: ${error.message}`);
+    } finally {
+      setPlexSyncLogLoading(false);
+      setTimeout(() => setPlexSyncLogMessage(''), 3000);
+    }
+  };
+
   const handleStartBackgroundSync = async () => {
     try {
       await fetchWithErrorHandling(`${config.apiBaseUrl}/api/plex/background-sync/start`, {
@@ -510,6 +535,7 @@ function Settings() {
       
       setBackgroundSyncMessage('Forced background sync completed successfully');
       fetchBackgroundSyncStatus();
+      await fetchPlexSyncRunLogs();
     } catch (error) {
       setBackgroundSyncMessage(`Failed to force background sync: ${error.message}`);
     }
@@ -1251,7 +1277,26 @@ function Settings() {
               <h3>🔄 Sync Operations</h3>
               <p>Manage Plex synchronization and background processes</p>
             </div>
-            
+
+            <div className="sync-tab-nav">
+              <button
+                type="button"
+                onClick={() => setSyncOperationsTab('operations')}
+                className={`sync-tab-button ${syncOperationsTab === 'operations' ? 'active' : ''}`}
+              >
+                ⚙️ Operations
+              </button>
+              <button
+                type="button"
+                onClick={() => setSyncOperationsTab('plex-log')}
+                className={`sync-tab-button ${syncOperationsTab === 'plex-log' ? 'active' : ''}`}
+              >
+                📜 Plex Sync Log
+              </button>
+            </div>
+
+            {syncOperationsTab === 'operations' && (
+            <>
             {/* Background Sync */}
             <div className="sync-subsection">
               <h4 className="subsection-title">🔄 Background Sync</h4>
@@ -1432,6 +1477,81 @@ function Settings() {
                 </div>
               )}
             </div>
+            </>
+            )}
+
+            {syncOperationsTab === 'plex-log' && (
+              <div className="sync-subsection">
+                <div className="library-sync-row">
+                  <Button
+                    onClick={fetchPlexSyncRunLogs}
+                    disabled={plexSyncLogLoading}
+                    className="sync-button secondary compact"
+                  >
+                    {plexSyncLogLoading ? '🔄 Refreshing...' : '🔄 Refresh Log'}
+                  </Button>
+                </div>
+
+                {plexSyncLogMessage && (
+                  <div className="sync-message compact">
+                    <p>{plexSyncLogMessage}</p>
+                  </div>
+                )}
+
+                <div className="sync-log-list">
+                  {plexSyncRunLogs.length === 0 ? (
+                    <div className="sync-status-card compact">
+                      <p>No Plex sync log entries yet. Run a Plex sync to create the first entry.</p>
+                    </div>
+                  ) : (
+                    plexSyncRunLogs.map((log) => (
+                      <div key={log.id} className="sync-status-card compact sync-log-entry">
+                        <div className="status-row">
+                          <span className="status-label">Run:</span>
+                          <span className="status-value">#{log.id}</span>
+                          <span className="status-label">Trigger:</span>
+                          <span className="status-value">{log.trigger}</span>
+                          <span className="status-label">Status:</span>
+                          <span className={`status-value ${log.success ? 'running' : 'stopped'}`}>
+                            {log.success ? 'Success' : 'Failed'}
+                          </span>
+                        </div>
+                        <div className="status-row">
+                          <span className="status-label">Completed:</span>
+                          <span className="status-value">{new Date(log.completedAt).toLocaleString()}</span>
+                          <span className="status-label">Duration:</span>
+                          <span className="status-value">{Number(log.durationSeconds || 0).toFixed(2)}s</span>
+                        </div>
+                        <div className="status-row">
+                          <span className="status-label">Updated:</span>
+                          <span className="status-value">
+                            Sections {log.sections || 0}, Shows {log.totalShows || 0}, Movies {log.totalMovies || 0}, Artists {log.totalArtists || 0}
+                          </span>
+                        </div>
+                        <div className="status-row">
+                          <span className="status-label">Cleanup:</span>
+                          <span className="status-value">
+                            Episodes {log.cleanupEpisodes || 0}, Seasons {log.cleanupSeasons || 0}, Shows {log.cleanupShows || 0}, Movies {log.cleanupMovies || 0}, Artists {log.cleanupArtists || 0}, Albums {log.cleanupAlbums || 0}, Tracks {log.cleanupTracks || 0}, Playlists {log.cleanupPlaylists || 0}, Complex {log.cleanupComplexFields || 0}
+                          </span>
+                        </div>
+                        {log.summary && (
+                          <div className="status-row">
+                            <span className="status-label">Summary:</span>
+                            <span className="status-value">{log.summary}</span>
+                          </div>
+                        )}
+                        {log.error && (
+                          <div className="status-row">
+                            <span className="status-label">Error:</span>
+                            <span className="status-value">{log.error}</span>
+                          </div>
+                        )}
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Messages & Actions */}

@@ -776,9 +776,10 @@ class PlexSyncService {
     }
   }
 
-  async fullSync() {
+  async fullSync(trigger = 'manual') {
     console.log('Starting full Plex library sync...');
     const startTime = Date.now();
+    const startedAt = new Date(startTime);
     
     try {
       // Step 1: Sync library sections
@@ -826,12 +827,63 @@ class PlexSyncService {
         timestamp: new Date().toISOString(),
         cleanup: cleanupResults // Include cleanup results in response
       };
+
+      const summary = `Sections: ${sections.length}, Shows updated: ${totalShows}, Movies updated: ${totalMovies}, Artists updated: ${totalArtists}, Cleanup total: ${Object.values(cleanupResults).reduce((sum, count) => sum + count, 0)}`;
+      console.log(`Plex sync update summary: ${summary}`);
+
+      try {
+        await prisma.plexSyncRunLog.create({
+          data: {
+            startedAt,
+            completedAt: new Date(endTime),
+            durationSeconds: duration,
+            trigger,
+            success: true,
+            sections: sections.length,
+            totalShows,
+            totalMovies,
+            totalArtists,
+            cleanupEpisodes: cleanupResults.episodes || 0,
+            cleanupSeasons: cleanupResults.seasons || 0,
+            cleanupShows: cleanupResults.shows || 0,
+            cleanupMovies: cleanupResults.movies || 0,
+            cleanupArtists: cleanupResults.artists || 0,
+            cleanupAlbums: cleanupResults.albums || 0,
+            cleanupTracks: cleanupResults.tracks || 0,
+            cleanupPlaylists: cleanupResults.playlists || 0,
+            cleanupComplexFields: cleanupResults.complexFields || 0,
+            summary
+          }
+        });
+      } catch (logError) {
+        console.warn('Failed to persist Plex sync run log:', logError.message);
+      }
       
       console.log('Full sync completed:', result);
       return result;
       
     } catch (error) {
       console.error('Full sync failed:', error);
+
+      const endTime = Date.now();
+      const duration = (endTime - startTime) / 1000;
+
+      try {
+        await prisma.plexSyncRunLog.create({
+          data: {
+            startedAt,
+            completedAt: new Date(endTime),
+            durationSeconds: duration,
+            trigger,
+            success: false,
+            summary: 'Sync failed before completion',
+            error: error.message
+          }
+        });
+      } catch (logError) {
+        console.warn('Failed to persist failed Plex sync run log:', logError.message);
+      }
+
       throw error;
     }
   }
