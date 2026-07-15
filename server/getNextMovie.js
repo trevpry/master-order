@@ -250,6 +250,63 @@ async function selectInitialMovie(movies) {
   
   // Apply prioritization logic
   const randomValue = Math.random() * 100;
+
+  if (randomValue < partiallyWatchedPercent) {
+    // Only for the partially watched priority branch:
+    // pick a watched movie in a partially watched collection, then pick the
+    // next unplayed item from that selected collection.
+    const watchedCollectionSeedPool = finalMoviesToProcess
+      .filter(movie => movie.viewCount && movie.viewCount > 0)
+      .map(movie => {
+        const collections = plexDb.parseCollections(movie.collections || '');
+        const eligibleCollections = collections.filter(collection =>
+          watchAnalysis.partiallyWatchedCollections.has(collection)
+        );
+
+        return {
+          movie,
+          eligibleCollections
+        };
+      })
+      .filter(entry => entry.eligibleCollections.length > 0);
+
+    console.log(`🎯 Partially watched branch seed pool (watched movies in partial collections): ${watchedCollectionSeedPool.length}`);
+
+    if (watchedCollectionSeedPool.length > 0) {
+      const seedEntry = watchedCollectionSeedPool[Math.floor(Math.random() * watchedCollectionSeedPool.length)];
+      const selectedCollectionName = seedEntry.eligibleCollections[Math.floor(Math.random() * seedEntry.eligibleCollections.length)];
+      const selectedCollectionData = await getCollectionItemsByName(selectedCollectionName);
+
+      const hasUnplayedInSelectedCollection = selectedCollectionData.items.some(item => {
+        if (item.libraryType === 'movie') {
+          return !item.viewCount || item.viewCount === 0;
+        }
+
+        return item.leafCount > (item.viewedLeafCount || 0);
+      });
+
+      if (hasUnplayedInSelectedCollection) {
+        const selectedFromCollection = await selectEarliestUnplayedFromCollections({
+          ...seedEntry.movie,
+          otherCollections: [selectedCollectionData]
+        });
+
+        if (selectedFromCollection) {
+          console.log(`🎯 Selected via partially watched priority branch from collection "${selectedCollectionName}": "${selectedFromCollection.title}"`);
+          return {
+            ...selectedFromCollection,
+            skipCollectionExpansion: true,
+            selectedViaPartiallyWatchedPriority: true,
+            selectedCollectionName
+          };
+        }
+      } else {
+        console.log(`⚠️  Selected collection "${selectedCollectionName}" has no unplayed items, using fallback logic`);
+      }
+    } else {
+      console.log('⚠️  No watched seed movies available for partially watched branch, using fallback logic');
+    }
+  }
   
   if (randomValue < partiallyWatchedPercent && partiallyWatchedCollectionMap.size > 0) {
     // Select a partially watched collection first, then select a movie from that collection.
@@ -380,6 +437,50 @@ async function analyzeCollectionWatchStatus(movies) {
     fullyUnwatchedCollections,
     moviesByCollection
   };
+}
+
+async function getCollectionItemsByName(collectionName) {
+  const collectionData = {
+    title: collectionName,
+    id: collectionName,
+    ratingKey: collectionName,
+    items: []
+  };
+
+  const searchVariants = [
+    collectionName,
+    collectionName.replace(/ Collection$/, '')
+  ].filter((value, index, array) => array.indexOf(value) === index);
+
+  for (const searchTerm of searchVariants) {
+    try {
+      const tvSeries = await plexDb.getTVShowsByCollection(searchTerm);
+      const existingKeys = new Set(collectionData.items.map(item => item.ratingKey));
+      const newItems = tvSeries.filter(item => !existingKeys.has(item.ratingKey));
+      collectionData.items.push(...newItems.map(item => ({
+        ...item,
+        libraryType: 'tv'
+      })));
+    } catch (error) {
+      console.warn(`Failed to search TV shows for collection "${searchTerm}":`, error.message);
+    }
+  }
+
+  for (const searchTerm of searchVariants) {
+    try {
+      const movies = await plexDb.getMoviesByCollection(searchTerm);
+      const existingKeys = new Set(collectionData.items.map(item => item.ratingKey));
+      const newItems = movies.filter(item => !existingKeys.has(item.ratingKey));
+      collectionData.items.push(...newItems.map(item => ({
+        ...item,
+        libraryType: 'movie'
+      })));
+    } catch (error) {
+      console.warn(`Failed to search movies for collection "${searchTerm}":`, error.message);
+    }
+  }
+
+  return collectionData;
 }
 
 async function selectEarliestUnplayedFromCollections(selectedMovie) {
@@ -766,13 +867,19 @@ async function getNextMovie() {
     }
     
     console.log('Initially selected movie for collection check:', selectedMovie?.title || 'Unknown');
-    
-    // Check for other collections this movie belongs to
-    selectedMovie = await checkCollections(selectedMovie);
-    console.log('Found collections for:', selectedMovie?.title || 'Unknown');
-    
-    // Now select the earliest unplayed item from all collections
-    const finalSelection = await selectEarliestUnplayedFromCollections(selectedMovie);
+
+    let finalSelection;
+    if (selectedMovie?.skipCollectionExpansion) {
+      finalSelection = selectedMovie;
+      console.log(`Using locked collection selection from partially watched branch: "${finalSelection.selectedCollectionName || 'unknown'}"`);
+    } else {
+      // Check for other collections this movie belongs to
+      selectedMovie = await checkCollections(selectedMovie);
+      console.log('Found collections for:', selectedMovie?.title || 'Unknown');
+
+      // Now select the earliest unplayed item from all collections
+      finalSelection = await selectEarliestUnplayedFromCollections(selectedMovie);
+    }
     console.log('Final selection (earliest unplayed):', finalSelection?.title || 'Unknown');
     
     if (finalSelection && finalSelection.ratingKey) {
