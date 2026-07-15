@@ -95,6 +95,42 @@ class PlexSyncService {
     return Number.isFinite(parsedValue) ? parsedValue : null;
   }
 
+  normalizeCollectionValue(collectionValue) {
+    if (!collectionValue) {
+      return null;
+    }
+
+    let collectionArray = [];
+
+    if (Array.isArray(collectionValue)) {
+      collectionArray = collectionValue;
+    } else if (typeof collectionValue === 'string') {
+      try {
+        const parsed = JSON.parse(collectionValue);
+        collectionArray = Array.isArray(parsed) ? parsed : [];
+      } catch (_error) {
+        collectionArray = [];
+      }
+    }
+
+    const normalized = collectionArray
+      .map((entry) => {
+        if (typeof entry === 'string') {
+          return entry.trim();
+        }
+
+        if (entry && typeof entry === 'object') {
+          return String(entry.tag || entry.title || '').trim();
+        }
+
+        return '';
+      })
+      .filter(Boolean)
+      .sort((a, b) => a.localeCompare(b));
+
+    return normalized.length ? JSON.stringify(normalized) : null;
+  }
+
   isUnixTimestampCurrent(localValue, plexValue) {
     const localTimestamp = Number.parseInt(localValue, 10);
     const plexTimestamp = this.parsePlexTimestamp(plexValue);
@@ -215,7 +251,7 @@ class PlexSyncService {
           sectionKey,
           ratingKey: { in: shows.map(show => show.ratingKey) }
         },
-        select: { ratingKey: true, updatedAt_plex: true }
+        select: { ratingKey: true, updatedAt_plex: true, collections: true }
       });
       const existingShowMap = new Map(existingShows.map(show => [show.ratingKey, show]));
       const showsNeedingRefresh = shows.filter(show => !this.isUnixTimestampCurrent(existingShowMap.get(show.ratingKey)?.updatedAt_plex, show.updatedAt));
@@ -251,6 +287,13 @@ class PlexSyncService {
           lastSyncedAt: new Date()
         };
 
+        const summaryHasCollections = Object.prototype.hasOwnProperty.call(show, 'Collection');
+        const summaryCollections = summaryHasCollections
+          ? this.normalizeCollectionValue(show.Collection)
+          : null;
+        const existingCollections = this.normalizeCollectionValue(existingShowMap.get(show.ratingKey)?.collections);
+        const shouldRefreshCollectionsOnly = !shouldRefreshShow && summaryHasCollections && summaryCollections !== existingCollections;
+
         if (shouldRefreshShow) {
           const syncedShow = await prisma.plexTVShow.upsert({
             where: { ratingKey: detailedShow.ratingKey },
@@ -260,6 +303,15 @@ class PlexSyncService {
           await this.clearComplexFields(detailedShow.ratingKey, 'show');
           await this.syncComplexFields(detailedShow, 'show', detailedShow.ratingKey);
           syncedShows.push(syncedShow);
+        } else if (shouldRefreshCollectionsOnly) {
+          await prisma.plexTVShow.update({
+            where: { ratingKey: show.ratingKey },
+            data: {
+              collections: summaryCollections,
+              lastSyncedAt: new Date()
+            }
+          });
+          console.log(`📚 Updated collections for TV show: ${show.title}`);
         }
         
         // Sync seasons for this show
@@ -417,7 +469,7 @@ class PlexSyncService {
           sectionKey,
           ratingKey: { in: movies.map(movie => movie.ratingKey) }
         },
-        select: { ratingKey: true, updatedAt_plex: true }
+        select: { ratingKey: true, updatedAt_plex: true, collections: true }
       });
       const existingMovieMap = new Map(existingMovies.map(movie => [movie.ratingKey, movie]));
       const moviesNeedingRefresh = movies.filter(movie => !this.isUnixTimestampCurrent(existingMovieMap.get(movie.ratingKey)?.updatedAt_plex, movie.updatedAt));
@@ -465,6 +517,13 @@ class PlexSyncService {
           lastSyncedAt: new Date()
         };
 
+        const summaryHasCollections = Object.prototype.hasOwnProperty.call(movie, 'Collection');
+        const summaryCollections = summaryHasCollections
+          ? this.normalizeCollectionValue(movie.Collection)
+          : null;
+        const existingCollections = this.normalizeCollectionValue(existingMovieMap.get(movie.ratingKey)?.collections);
+        const shouldRefreshCollectionsOnly = !shouldRefreshMovie && summaryHasCollections && summaryCollections !== existingCollections;
+
         if (shouldRefreshMovie) {
           const syncedMovie = await prisma.plexMovie.upsert({
             where: { ratingKey: detailedMovie.ratingKey },
@@ -474,6 +533,15 @@ class PlexSyncService {
           await this.clearComplexFields(detailedMovie.ratingKey, 'movie');
           await this.syncComplexFields(detailedMovie, 'movie', detailedMovie.ratingKey);
           syncedMovies.push(syncedMovie);
+        } else if (shouldRefreshCollectionsOnly) {
+          await prisma.plexMovie.update({
+            where: { ratingKey: movie.ratingKey },
+            data: {
+              collections: summaryCollections,
+              lastSyncedAt: new Date()
+            }
+          });
+          console.log(`📚 Updated collections for movie: ${movie.title}`);
         }
       }
       

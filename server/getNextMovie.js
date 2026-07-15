@@ -202,7 +202,8 @@ async function selectInitialMovie(movies) {
     console.log('⚠️  All unwatched movies have TV series in their collections, proceeding with all unwatched movies');
   }
     // Categorize unwatched movies by collection watch status
-  const partiallyWatchedCollectionMovies = [];
+    const partiallyWatchedCollectionMovies = [];
+    const partiallyWatchedCollectionMap = new Map();
   const fullyUnwatchedCollectionMovies = [];
   const noCollectionMovies = [];
   
@@ -213,13 +214,28 @@ async function selectInitialMovie(movies) {
       // Movie doesn't belong to any collection
       noCollectionMovies.push(movie);
     } else {
-      // Check if any of the movie's collections are partially watched
-      const hasPartiallyWatchedCollection = collections.some(collection => 
+      // Track which partially watched collections this movie belongs to.
+      const matchingPartiallyWatchedCollections = collections.filter(collection =>
         watchAnalysis.partiallyWatchedCollections.has(collection)
       );
+      const hasPartiallyWatchedCollection = matchingPartiallyWatchedCollections.length > 0;
       
       if (hasPartiallyWatchedCollection) {
         partiallyWatchedCollectionMovies.push(movie);
+
+        // Build collection -> movies map so selection can rotate across collections
+        // instead of being dominated by collections with more unwatched titles.
+        for (const collectionName of matchingPartiallyWatchedCollections) {
+          if (!partiallyWatchedCollectionMap.has(collectionName)) {
+            partiallyWatchedCollectionMap.set(collectionName, []);
+          }
+
+          const moviesInCollection = partiallyWatchedCollectionMap.get(collectionName);
+          const alreadyIncluded = moviesInCollection.some(existing => existing.ratingKey === movie.ratingKey);
+          if (!alreadyIncluded) {
+            moviesInCollection.push(movie);
+          }
+        }
       } else {
         fullyUnwatchedCollectionMovies.push(movie);
       }
@@ -228,17 +244,35 @@ async function selectInitialMovie(movies) {
   
   console.log(`🔢 Categorized movies:`);
   console.log(`   - Partially watched collections: ${partiallyWatchedCollectionMovies.length}`);
+  console.log(`   - Eligible partially watched collection groups: ${partiallyWatchedCollectionMap.size}`);
   console.log(`   - Fully unwatched collections: ${fullyUnwatchedCollectionMovies.length}`);
   console.log(`   - No collections: ${noCollectionMovies.length}`);
   
   // Apply prioritization logic
   const randomValue = Math.random() * 100;
   
-  if (randomValue < partiallyWatchedPercent && partiallyWatchedCollectionMovies.length > 0) {
-    // Select from partially watched collections
-    const selectedMovie = partiallyWatchedCollectionMovies[Math.floor(Math.random() * partiallyWatchedCollectionMovies.length)];
-    console.log(`🎯 Selected from partially watched collection: "${selectedMovie.title}"`);
-    return selectedMovie;
+  if (randomValue < partiallyWatchedPercent && partiallyWatchedCollectionMap.size > 0) {
+    // Select a partially watched collection first, then select a movie from that collection.
+    // This keeps collection-level behavior aligned with the setting intent.
+    const eligibleCollections = Array.from(partiallyWatchedCollectionMap.entries())
+      .filter(([, collectionMovies]) => collectionMovies.length > 0);
+
+    if (eligibleCollections.length > 0) {
+      const [selectedCollectionName, moviesInSelectedCollection] =
+        eligibleCollections[Math.floor(Math.random() * eligibleCollections.length)];
+      const selectedMovie =
+        moviesInSelectedCollection[Math.floor(Math.random() * moviesInSelectedCollection.length)];
+
+      console.log(`🎯 Selected from partially watched collection "${selectedCollectionName}": "${selectedMovie.title}" (${moviesInSelectedCollection.length} unwatched option(s) in collection)`);
+      return selectedMovie;
+    }
+
+    // Safety fallback if map is unexpectedly empty after filtering.
+    if (partiallyWatchedCollectionMovies.length > 0) {
+      const selectedMovie = partiallyWatchedCollectionMovies[Math.floor(Math.random() * partiallyWatchedCollectionMovies.length)];
+      console.log(`🎯 Selected from partially watched collection fallback: "${selectedMovie.title}"`);
+      return selectedMovie;
+    }
   } else {
     // Select from the remaining pool (fully unwatched collections + no collections)
     const remainingMovies = [...fullyUnwatchedCollectionMovies, ...noCollectionMovies];
