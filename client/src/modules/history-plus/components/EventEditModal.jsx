@@ -180,11 +180,12 @@ const EventEditModal = ({
             <div className="form-group">
               <label htmlFor="startDate">Start Date *</label>
               <input
-                type="date"
+                type="text"
                 id="startDate"
                 name="startDate"
                 value={formData.startDate}
                 onChange={handleInputChange}
+                placeholder="e.g., 2024-12-31 or -1200-01-01 or -1200"
                 required
                 disabled={isLoading}
               />
