@@ -1,0 +1,201 @@
+.tv-browser-main {
+  max-width: 1300px;
+  margin: 0 auto;
+  padding: 1.25rem;
+}
+
+.tv-browser-header h1 {
+  margin: 0;
+}
+
+.tv-browser-header p {
+  margin-top: 0.5rem;
+  color: #5f6b7a;
+}
+
+.tv-browser-filters {
+  margin-top: 1rem;
+  display: grid;
+  grid-template-columns: 2fr 1fr 1fr auto;
+  gap: 0.75rem;
+}
+
+.tv-filter-input,
+.tv-filter-select {
+  border: 1px solid #d5dce3;
+  border-radius: 8px;
+  padding: 0.6rem 0.75rem;
+  background: #fff;
+}
+
+.tv-refresh-button {
+  border: 1px solid #8aa0d9;
+  background: #eef3ff;
+  color: #2a4ea1;
+  border-radius: 8px;
+  padding: 0.6rem 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.tv-browser-summary {
+  margin-top: 0.75rem;
+  color: #3f4b5a;
+  font-size: 0.95rem;
+}
+
+.tv-browser-error {
+  margin-top: 1rem;
+  background: #fff0f0;
+  border: 1px solid #f2bcbc;
+  color: #9b1d1d;
+  border-radius: 8px;
+  padding: 0.75rem;
+}
+
+.tv-browser-loading,
+.tv-browser-empty {
+  margin-top: 1rem;
+  background: #f8fafc;
+  border: 1px solid #dce4ee;
+  border-radius: 8px;
+  padding: 1rem;
+}
+
+.tv-series-list {
+  margin-top: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.9rem;
+}
+
+.tv-show-card,
+.tv-season-card {
+  border: 1px solid #dce4ee;
+  border-radius: 10px;
+  background: #fff;
+}
+
+.tv-show-header,
+.tv-season-header {
+  width: 100%;
+  border: none;
+  background: transparent;
+  padding: 0.8rem 0.9rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  cursor: pointer;
+  text-align: left;
+}
+
+.tv-show-title-wrap {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.tv-show-title,
+.tv-season-title {
+  margin: 0;
+}
+
+.tv-expander {
+  width: 1.2rem;
+  display: inline-flex;
+  justify-content: center;
+  color: #6a7787;
+  font-weight: 700;
+}
+
+.tv-show-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.65rem;
+  color: #5b6878;
+  font-size: 0.88rem;
+}
+
+.tv-status {
+  border-radius: 999px;
+  padding: 0.2rem 0.5rem;
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.tv-status-watched {
+  background: #dcfce7;
+  color: #186534;
+}
+
+.tv-status-in-progress {
+  background: #fef3c7;
+  color: #8b5f00;
+}
+
+.tv-status-unwatched {
+  background: #e2e8f0;
+  color: #334155;
+}
+
+.tv-show-collections {
+  padding: 0 0.9rem 0.8rem;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.tv-collection-pill {
+  border: 1px solid #d1d9f1;
+  background: #f2f5ff;
+  color: #3a56a7;
+  border-radius: 999px;
+  padding: 0.18rem 0.5rem;
+  font-size: 0.77rem;
+}
+
+.tv-collection-empty {
+  color: #7a8697;
+  font-size: 0.82rem;
+}
+
+.tv-season-list {
+  padding: 0 0.8rem 0.8rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.tv-episode-table-wrap {
+  padding: 0 0.8rem 0.8rem;
+}
+
+.tv-episode-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.88rem;
+}
+
+.tv-episode-table th,
+.tv-episode-table td {
+  border-top: 1px solid #e6ebf1;
+  padding: 0.45rem;
+}
+
+.tv-episode-table th {
+  background: #f8fafc;
+  font-weight: 700;
+}
+
+@media (max-width: 900px) {
+  .tv-browser-filters {
+    grid-template-columns: 1fr;
+  }
+
+  .tv-show-header,
+  .tv-season-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.35rem;
+  }
+}

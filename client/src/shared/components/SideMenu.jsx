@@ -203,6 +203,20 @@ const SideMenu = ({ isMobile, closeMobileMenu }) => {
       isSubmenu: true
     },
     {
+      path: '/media/tv-browser',
+      icon: '📺',
+      label: 'TV Browser',
+      description: 'Series, seasons, episodes',
+      isSubmenu: true
+    },
+    {
+      path: '/media/movie-browser',
+      icon: '🎞️',
+      label: 'Movie Browser',
+      description: 'Movies and collections',
+      isSubmenu: true
+    },
+    {
       path: '/media/backgrounds',
       icon: '🖼️',
       label: 'Backgrounds',

@@ -35,6 +35,8 @@ import Music from './modules/media/pages/music/index';
 import Backgrounds from './modules/media/pages/backgrounds/index';
 import Books from './pages/Books'; // Unified Books component
 import VideoGames from './pages/VideoGames'; // Video Games component
+import TvBrowser from './modules/media/pages/tv-browser/index';
+import MovieBrowser from './modules/media/pages/movie-browser/index';
 
 // Eddie Module Components (placeholders for now)
 import TasksHome from './modules/tasks/pages/TasksHome';
@@ -90,6 +92,8 @@ function App() {
           <Route path="/media/stash/performer/:id" element={<PerformerDetail />} />
           <Route path="/media/stash/performers/:id" element={<PerformerDetail />} />
           <Route path="/media/music" element={<Music />} />
+          <Route path="/media/tv-browser" element={<TvBrowser />} />
+          <Route path="/media/movie-browser" element={<MovieBrowser />} />
           <Route path="/media/backgrounds" element={<Backgrounds />} />
           <Route path="/media/books" element={<Books />} />
           <Route path="/media/games" element={<VideoGames />} />

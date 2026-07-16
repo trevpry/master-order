@@ -173,6 +173,238 @@ router.get('/collections', asyncHandler(async (req, res) => {
   res.json(formattedCollections);
 }));
 
+// GET /api/plex/tv-browser - Hierarchical TV browser data (series -> seasons -> episodes)
+router.get('/tv-browser', asyncHandler(async (req, res) => {
+  const searchQuery = (req.query.q || '').toString().trim().toLowerCase();
+  const collectionFilter = (req.query.collection || '').toString().trim().toLowerCase();
+  const statusFilter = (req.query.status || 'all').toString().trim().toLowerCase();
+
+  const shows = await prisma.plexTVShow.findMany({
+    where: { removed: false },
+    include: {
+      seasons: {
+        where: { removed: false },
+        include: {
+          episodes: {
+            where: { removed: false },
+            orderBy: { index: 'asc' }
+          }
+        },
+        orderBy: { index: 'asc' }
+      },
+      section: true
+    },
+    orderBy: { title: 'asc' }
+  });
+
+  const parseCollections = (collectionsJson) => {
+    if (!collectionsJson) return [];
+    try {
+      const parsed = JSON.parse(collectionsJson);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch (_error) {
+      return [];
+    }
+  };
+
+  const getEpisodeStatus = (episode) => (
+    episode.viewCount && episode.viewCount > 0 ? 'watched' : 'unwatched'
+  );
+
+  const computeAggregateStatus = (watchedCount, totalCount) => {
+    if (totalCount === 0) return 'unwatched';
+    if (watchedCount === 0) return 'unwatched';
+    if (watchedCount >= totalCount) return 'watched';
+    return 'in-progress';
+  };
+
+  const mappedShows = shows.map((show) => {
+    const collections = parseCollections(show.collections);
+
+    const mappedSeasons = show.seasons.map((season) => {
+      const mappedEpisodes = season.episodes.map((episode) => ({
+        ratingKey: episode.ratingKey,
+        title: episode.title,
+        seasonNumber: season.index,
+        episodeNumber: episode.index,
+        originallyAvailableAt: episode.originallyAvailableAt,
+        viewCount: episode.viewCount || 0,
+        playStatus: getEpisodeStatus(episode)
+      }));
+
+      const watchedEpisodeCount = mappedEpisodes.filter((episode) => episode.playStatus === 'watched').length;
+      const totalEpisodeCount = mappedEpisodes.length;
+
+      return {
+        ratingKey: season.ratingKey,
+        title: season.title,
+        seasonNumber: season.index,
+        totalEpisodeCount,
+        watchedEpisodeCount,
+        playStatus: computeAggregateStatus(watchedEpisodeCount, totalEpisodeCount),
+        episodes: mappedEpisodes
+      };
+    });
+
+    const totalEpisodeCount = mappedSeasons.reduce((sum, season) => sum + season.totalEpisodeCount, 0);
+    const watchedEpisodeCount = mappedSeasons.reduce((sum, season) => sum + season.watchedEpisodeCount, 0);
+    const fallbackPlayStatus = computeAggregateStatus(watchedEpisodeCount, totalEpisodeCount);
+
+    const leafCount = show.leafCount || totalEpisodeCount;
+    const viewedLeafCount = show.viewedLeafCount || watchedEpisodeCount;
+    const derivedPlayStatus = computeAggregateStatus(viewedLeafCount, leafCount);
+
+    return {
+      ratingKey: show.ratingKey,
+      title: show.title,
+      year: show.year,
+      sectionTitle: show.section?.title || null,
+      collections,
+      leafCount,
+      viewedLeafCount,
+      playStatus: leafCount > 0 ? derivedPlayStatus : fallbackPlayStatus,
+      seasons: mappedSeasons
+    };
+  });
+
+  const filteredShows = mappedShows.filter((show) => {
+    if (searchQuery) {
+      const seasonMatch = show.seasons.some((season) => season.title.toLowerCase().includes(searchQuery));
+      const episodeMatch = show.seasons.some((season) =>
+        season.episodes.some((episode) => episode.title.toLowerCase().includes(searchQuery))
+      );
+
+      const showMatches =
+        show.title.toLowerCase().includes(searchQuery) ||
+        (show.year && String(show.year).includes(searchQuery)) ||
+        seasonMatch ||
+        episodeMatch;
+
+      if (!showMatches) {
+        return false;
+      }
+    }
+
+    if (collectionFilter) {
+      const hasCollection = show.collections.some((collectionName) =>
+        collectionName.toLowerCase() === collectionFilter
+      );
+
+      if (!hasCollection) {
+        return false;
+      }
+    }
+
+    if (statusFilter !== 'all' && show.playStatus !== statusFilter) {
+      return false;
+    }
+
+    return true;
+  });
+
+  const allCollections = Array.from(new Set(
+    mappedShows.flatMap((show) => show.collections)
+  )).sort((a, b) => a.localeCompare(b));
+
+  res.json({
+    filters: {
+      q: searchQuery,
+      collection: collectionFilter,
+      status: statusFilter
+    },
+    totalShows: filteredShows.length,
+    allCollections,
+    shows: filteredShows
+  });
+}));
+
+// GET /api/plex/movie-browser - Movie browser data (movies -> collections -> play status)
+router.get('/movie-browser', asyncHandler(async (req, res) => {
+  const searchQuery = (req.query.q || '').toString().trim().toLowerCase();
+  const collectionFilter = (req.query.collection || '').toString().trim().toLowerCase();
+  const statusFilter = (req.query.status || 'all').toString().trim().toLowerCase();
+
+  const movies = await prisma.plexMovie.findMany({
+    where: { removed: false },
+    include: {
+      section: true
+    },
+    orderBy: { title: 'asc' }
+  });
+
+  const parseCollections = (collectionsJson) => {
+    if (!collectionsJson) return [];
+    try {
+      const parsed = JSON.parse(collectionsJson);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch (_error) {
+      return [];
+    }
+  };
+
+  const getMovieStatus = (movie) => (
+    movie.viewCount && movie.viewCount > 0 ? 'watched' : 'unwatched'
+  );
+
+  const mappedMovies = movies.map((movie) => ({
+    ratingKey: movie.ratingKey,
+    title: movie.title,
+    year: movie.year,
+    sectionTitle: movie.section?.title || null,
+    originallyAvailableAt: movie.originallyAvailableAt,
+    collections: parseCollections(movie.collections),
+    viewCount: movie.viewCount || 0,
+    lastViewedAt: movie.lastViewedAt,
+    playStatus: getMovieStatus(movie)
+  }));
+
+  const filteredMovies = mappedMovies.filter((movie) => {
+    if (searchQuery) {
+      const movieMatches =
+        movie.title.toLowerCase().includes(searchQuery) ||
+        (movie.year && String(movie.year).includes(searchQuery)) ||
+        (movie.sectionTitle && movie.sectionTitle.toLowerCase().includes(searchQuery));
+
+      if (!movieMatches) {
+        return false;
+      }
+    }
+
+    if (collectionFilter) {
+      const hasCollection = movie.collections.some((collectionName) =>
+        collectionName.toLowerCase() === collectionFilter
+      );
+
+      if (!hasCollection) {
+        return false;
+      }
+    }
+
+    if (statusFilter !== 'all' && movie.playStatus !== statusFilter) {
+      return false;
+    }
+
+    return true;
+  });
+
+  const allCollections = Array.from(new Set(
+    mappedMovies.flatMap((movie) => movie.collections)
+  )).sort((a, b) => a.localeCompare(b));
+
+  res.json({
+    filters: {
+      q: searchQuery,
+      collection: collectionFilter,
+      status: statusFilter
+    },
+    totalMovies: filteredMovies.length,
+    watchedMovies: filteredMovies.filter((movie) => movie.playStatus === 'watched').length,
+    unwatchedMovies: filteredMovies.filter((movie) => movie.playStatus === 'unwatched').length,
+    allCollections,
+    movies: filteredMovies
+  });
+}));
+
 // GET /api/plex/players - Get Plex players
 router.get('/players', asyncHandler(async (req, res) => {
   if (!plexPlayerService) {

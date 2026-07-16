@@ -95,6 +95,11 @@ class PlexSyncService {
     return Number.isFinite(parsedValue) ? parsedValue : null;
   }
 
+  getNullableInt(value) {
+    const parsedValue = this.parsePlexTimestamp(value);
+    return Number.isFinite(parsedValue) ? parsedValue : null;
+  }
+
   normalizeCollectionValue(collectionValue) {
     if (!collectionValue) {
       return null;
@@ -240,7 +245,7 @@ class PlexSyncService {
       console.error('Error syncing library sections:', error);
       throw error;
     }
-  }async syncTVShows(sectionKey) {
+  }async syncTVShows(sectionKey, watchStatusReconciled = null) {
     console.log(`Syncing TV shows for section ${sectionKey}...`);
     
     try {
@@ -251,7 +256,14 @@ class PlexSyncService {
           sectionKey,
           ratingKey: { in: shows.map(show => show.ratingKey) }
         },
-        select: { ratingKey: true, updatedAt_plex: true, collections: true }
+        select: {
+          ratingKey: true,
+          updatedAt_plex: true,
+          collections: true,
+          viewedLeafCount: true,
+          viewCount: true,
+          lastViewedAt: true
+        }
       });
       const existingShowMap = new Map(existingShows.map(show => [show.ratingKey, show]));
       const showsNeedingRefresh = shows.filter(show => !this.isUnixTimestampCurrent(existingShowMap.get(show.ratingKey)?.updatedAt_plex, show.updatedAt));
@@ -294,6 +306,16 @@ class PlexSyncService {
         const existingCollections = this.normalizeCollectionValue(existingShowMap.get(show.ratingKey)?.collections);
         const shouldRefreshCollectionsOnly = !shouldRefreshShow && summaryHasCollections && summaryCollections !== existingCollections;
 
+        const summaryViewedLeafCount = this.getNullableInt(show.viewedLeafCount);
+        const summaryViewCount = this.getNullableInt(show.viewCount);
+        const summaryLastViewedAt = this.getNullableInt(show.lastViewedAt);
+        const existingShow = existingShowMap.get(show.ratingKey);
+        const shouldRefreshWatchOnly = !shouldRefreshShow && (
+          (existingShow?.viewedLeafCount ?? null) !== summaryViewedLeafCount ||
+          (existingShow?.viewCount ?? null) !== summaryViewCount ||
+          (existingShow?.lastViewedAt ?? null) !== summaryLastViewedAt
+        );
+
         if (shouldRefreshShow) {
           const syncedShow = await prisma.plexTVShow.upsert({
             where: { ratingKey: detailedShow.ratingKey },
@@ -312,10 +334,25 @@ class PlexSyncService {
             }
           });
           console.log(`📚 Updated collections for TV show: ${show.title}`);
+        } else if (shouldRefreshWatchOnly) {
+          await prisma.plexTVShow.update({
+            where: { ratingKey: show.ratingKey },
+            data: {
+              viewedLeafCount: summaryViewedLeafCount,
+              viewCount: summaryViewCount,
+              lastViewedAt: summaryLastViewedAt,
+              lastSyncedAt: new Date()
+            }
+          });
+          console.log(`👁️ Updated watch status for TV show: ${show.title}`);
+          if (watchStatusReconciled) {
+            watchStatusReconciled.shows += 1;
+            watchStatusReconciled.total += 1;
+          }
         }
         
         // Sync seasons for this show
-        await this.syncSeasons(show.ratingKey, detailedShow.title || show.title);
+        await this.syncSeasons(show.ratingKey, detailedShow.title || show.title, watchStatusReconciled);
       }
       
       console.log(`Synced ${syncedShows.length} TV shows`);
@@ -324,13 +361,19 @@ class PlexSyncService {
       console.error('Error syncing TV shows:', error);
       throw error;
     }
-  }  async syncSeasons(showRatingKey, showTitle = null) {
+  }  async syncSeasons(showRatingKey, showTitle = null, watchStatusReconciled = null) {
     try {
       const data = await this.makeRequest(`/library/metadata/${showRatingKey}/children`);
       const seasons = data.MediaContainer?.Metadata || [];
       const existingSeasons = await prisma.plexSeason.findMany({
         where: { ratingKey: { in: seasons.map(season => season.ratingKey) } },
-        select: { ratingKey: true, updatedAt_plex: true }
+        select: {
+          ratingKey: true,
+          updatedAt_plex: true,
+          viewedLeafCount: true,
+          viewCount: true,
+          lastViewedAt: true
+        }
       });
       const existingSeasonMap = new Map(existingSeasons.map(season => [season.ratingKey, season]));
       const seasonsNeedingRefresh = seasons.filter(season => !this.isUnixTimestampCurrent(existingSeasonMap.get(season.ratingKey)?.updatedAt_plex, season.updatedAt));
@@ -369,6 +412,16 @@ class PlexSyncService {
           viewCount: detailedSeason.viewCount ? parseInt(detailedSeason.viewCount) : null
         };
 
+        const summaryViewedLeafCount = this.getNullableInt(season.viewedLeafCount);
+        const summaryViewCount = this.getNullableInt(season.viewCount);
+        const summaryLastViewedAt = this.getNullableInt(season.lastViewedAt);
+        const existingSeason = existingSeasonMap.get(season.ratingKey);
+        const shouldRefreshWatchOnly = !shouldRefreshSeason && (
+          (existingSeason?.viewedLeafCount ?? null) !== summaryViewedLeafCount ||
+          (existingSeason?.viewCount ?? null) !== summaryViewCount ||
+          (existingSeason?.lastViewedAt ?? null) !== summaryLastViewedAt
+        );
+
         if (shouldRefreshSeason) {
           await prisma.plexSeason.upsert({
             where: { ratingKey: detailedSeason.ratingKey },
@@ -377,17 +430,31 @@ class PlexSyncService {
           });
           await this.clearComplexFields(detailedSeason.ratingKey, 'season');
           await this.syncComplexFields(detailedSeason, 'season', detailedSeason.ratingKey);
+        } else if (shouldRefreshWatchOnly) {
+          await prisma.plexSeason.update({
+            where: { ratingKey: season.ratingKey },
+            data: {
+              viewedLeafCount: summaryViewedLeafCount,
+              viewCount: summaryViewCount,
+              lastViewedAt: summaryLastViewedAt
+            }
+          });
+          console.log(`👁️ Updated watch status for season: ${detailedSeason.title}`);
+          if (watchStatusReconciled) {
+            watchStatusReconciled.seasons += 1;
+            watchStatusReconciled.total += 1;
+          }
         }
         
         // Sync episodes for this season
-        await this.syncEpisodes(detailedSeason.ratingKey, showRatingKey, showTitle);
+        await this.syncEpisodes(detailedSeason.ratingKey, showRatingKey, showTitle, watchStatusReconciled);
       }
     } catch (error) {
       console.error(`Error syncing seasons for show ${showRatingKey}:`, error);
       throw error;
     }
   }
-  async syncEpisodes(seasonRatingKey, showRatingKey, showTitle = null) {
+  async syncEpisodes(seasonRatingKey, showRatingKey, showTitle = null, watchStatusReconciled = null) {
     try {
       const data = await this.makeRequest(`/library/metadata/${seasonRatingKey}/children`);
       const episodes = data.MediaContainer?.Metadata || [];
@@ -397,7 +464,12 @@ class PlexSyncService {
       }))?.title || 'Unknown';
       const existingEpisodes = await prisma.plexEpisode.findMany({
         where: { ratingKey: { in: episodes.map(episode => episode.ratingKey) } },
-        select: { ratingKey: true, updatedAt_plex: true }
+        select: {
+          ratingKey: true,
+          updatedAt_plex: true,
+          viewCount: true,
+          lastViewedAt: true
+        }
       });
       const existingEpisodeMap = new Map(existingEpisodes.map(episode => [episode.ratingKey, episode]));
       const episodesNeedingRefresh = episodes.filter(episode => !this.isUnixTimestampCurrent(existingEpisodeMap.get(episode.ratingKey)?.updatedAt_plex, episode.updatedAt));
@@ -444,6 +516,14 @@ class PlexSyncService {
           updatedAt_plex: detailedEpisode.updatedAt ? parseInt(detailedEpisode.updatedAt) : null
         };
 
+        const summaryViewCount = this.getNullableInt(episode.viewCount);
+        const summaryLastViewedAt = this.getNullableInt(episode.lastViewedAt);
+        const existingEpisode = existingEpisodeMap.get(episode.ratingKey);
+        const shouldRefreshWatchOnly = !shouldRefreshEpisode && (
+          (existingEpisode?.viewCount ?? null) !== summaryViewCount ||
+          (existingEpisode?.lastViewedAt ?? null) !== summaryLastViewedAt
+        );
+
         if (shouldRefreshEpisode) {
           await prisma.plexEpisode.upsert({
             where: { ratingKey: episode.ratingKey },
@@ -452,13 +532,26 @@ class PlexSyncService {
           });
           await this.clearComplexFields(detailedEpisode.ratingKey, 'episode');
           await this.syncComplexFields(detailedEpisode, 'episode', detailedEpisode.ratingKey);
+        } else if (shouldRefreshWatchOnly) {
+          await prisma.plexEpisode.update({
+            where: { ratingKey: episode.ratingKey },
+            data: {
+              viewCount: summaryViewCount,
+              lastViewedAt: summaryLastViewedAt
+            }
+          });
+          console.log(`👁️ Updated watch status for episode: ${resolvedShowTitle} S${episode.parentIndex || 0}E${episode.index || 0} - ${episode.title}`);
+          if (watchStatusReconciled) {
+            watchStatusReconciled.episodes += 1;
+            watchStatusReconciled.total += 1;
+          }
         }
       }
     } catch (error) {
       console.error(`Error syncing episodes for season ${seasonRatingKey}:`, error);
       throw error;
     }
-  }  async syncMovies(sectionKey) {
+  }  async syncMovies(sectionKey, watchStatusReconciled = null) {
     console.log(`Syncing movies for section ${sectionKey}...`);
     
     try {
@@ -469,7 +562,13 @@ class PlexSyncService {
           sectionKey,
           ratingKey: { in: movies.map(movie => movie.ratingKey) }
         },
-        select: { ratingKey: true, updatedAt_plex: true, collections: true }
+        select: {
+          ratingKey: true,
+          updatedAt_plex: true,
+          collections: true,
+          viewCount: true,
+          lastViewedAt: true
+        }
       });
       const existingMovieMap = new Map(existingMovies.map(movie => [movie.ratingKey, movie]));
       const moviesNeedingRefresh = movies.filter(movie => !this.isUnixTimestampCurrent(existingMovieMap.get(movie.ratingKey)?.updatedAt_plex, movie.updatedAt));
@@ -524,6 +623,14 @@ class PlexSyncService {
         const existingCollections = this.normalizeCollectionValue(existingMovieMap.get(movie.ratingKey)?.collections);
         const shouldRefreshCollectionsOnly = !shouldRefreshMovie && summaryHasCollections && summaryCollections !== existingCollections;
 
+        const summaryViewCount = this.getNullableInt(movie.viewCount);
+        const summaryLastViewedAt = this.getNullableInt(movie.lastViewedAt);
+        const existingMovie = existingMovieMap.get(movie.ratingKey);
+        const shouldRefreshWatchOnly = !shouldRefreshMovie && (
+          (existingMovie?.viewCount ?? null) !== summaryViewCount ||
+          (existingMovie?.lastViewedAt ?? null) !== summaryLastViewedAt
+        );
+
         if (shouldRefreshMovie) {
           const syncedMovie = await prisma.plexMovie.upsert({
             where: { ratingKey: detailedMovie.ratingKey },
@@ -542,6 +649,20 @@ class PlexSyncService {
             }
           });
           console.log(`📚 Updated collections for movie: ${movie.title}`);
+        } else if (shouldRefreshWatchOnly) {
+          await prisma.plexMovie.update({
+            where: { ratingKey: movie.ratingKey },
+            data: {
+              viewCount: summaryViewCount,
+              lastViewedAt: summaryLastViewedAt,
+              lastSyncedAt: new Date()
+            }
+          });
+          console.log(`👁️ Updated watch status for movie: ${movie.title}`);
+          if (watchStatusReconciled) {
+            watchStatusReconciled.movies += 1;
+            watchStatusReconciled.total += 1;
+          }
         }
       }
       
@@ -788,14 +909,21 @@ class PlexSyncService {
       let totalShows = 0;
       let totalMovies = 0;
       let totalArtists = 0;
+      const watchStatusReconciled = {
+        shows: 0,
+        seasons: 0,
+        episodes: 0,
+        movies: 0,
+        total: 0
+      };
       
       // Step 2: Sync content for each section
       for (const section of sections) {
         if (section.type === 'show') {
-          const shows = await this.syncTVShows(section.sectionKey);
+          const shows = await this.syncTVShows(section.sectionKey, watchStatusReconciled);
           totalShows += shows.length;
         } else if (section.type === 'movie') {
-          const movies = await this.syncMovies(section.sectionKey);
+          const movies = await this.syncMovies(section.sectionKey, watchStatusReconciled);
           totalMovies += movies.length;
         } else if (section.type === 'artist') {
           await this.syncMusic(section.sectionKey);
@@ -823,13 +951,15 @@ class PlexSyncService {
         totalShows,
         totalMovies,
         totalArtists,
+        watchStatusReconciled,
         duration: `${duration}s`,
         timestamp: new Date().toISOString(),
         cleanup: cleanupResults // Include cleanup results in response
       };
 
-      const summary = `Sections: ${sections.length}, Shows updated: ${totalShows}, Movies updated: ${totalMovies}, Artists updated: ${totalArtists}, Cleanup total: ${Object.values(cleanupResults).reduce((sum, count) => sum + count, 0)}`;
+      const summary = `Sections: ${sections.length}, Shows updated: ${totalShows}, Movies updated: ${totalMovies}, Artists updated: ${totalArtists}, Cleanup total: ${Object.values(cleanupResults).reduce((sum, count) => sum + count, 0)}, Watch status reconciled: total ${watchStatusReconciled.total} (shows ${watchStatusReconciled.shows}, seasons ${watchStatusReconciled.seasons}, episodes ${watchStatusReconciled.episodes}, movies ${watchStatusReconciled.movies})`;
       console.log(`Plex sync update summary: ${summary}`);
+      console.log(`👁️ Watch status reconciliation summary: shows=${watchStatusReconciled.shows}, seasons=${watchStatusReconciled.seasons}, episodes=${watchStatusReconciled.episodes}, movies=${watchStatusReconciled.movies}, total=${watchStatusReconciled.total}`);
 
       try {
         await prisma.plexSyncRunLog.create({
@@ -1250,23 +1380,21 @@ class PlexSyncService {
 
   async markRemovedPlaylists(validPlaylistIds) {
     const localPlaylists = await prisma.plexPlaylist.findMany({
-      select: { ratingKey: true },
-      where: { removed: false }
+      select: { ratingKey: true }
     });
 
     let marked = 0;
     for (const playlist of localPlaylists) {
       if (!validPlaylistIds.has(playlist.ratingKey)) {
-        await prisma.plexPlaylist.update({ 
+        await prisma.plexPlaylist.delete({
           where: { ratingKey: playlist.ratingKey },
-          data: { removed: true }
         });
         marked++;
       }
     }
 
     if (marked > 0) {
-      console.log(`� Marked ${marked} playlists as removed`);
+      console.log(`🗑️ Deleted ${marked} playlists that no longer exist in Plex`);
     }
     return marked;
   }
