@@ -14,6 +14,15 @@ const errorHandler = (err, req, res, next) => {
     query: req.query
   });
 
+  // Errors that explicitly set an HTTP status (e.g. streamingService's
+  // 400/404/503 errors) take precedence over the generic checks below.
+  if (err.statusCode) {
+    return res.status(err.statusCode).json({
+      success: false,
+      error: err.message
+    });
+  }
+
   // Prisma errors
   if (err.name === 'PrismaClientValidationError') {
     return res.status(400).json({

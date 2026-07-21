@@ -23,6 +23,7 @@ const plexRoutes = require('./routes/plex');
 const radarrRoutes = require('./routes/radarr');
 const sonarrRoutes = require('./routes/sonarr');
 const mediaProbeRoutes = require('./routes/mediaProbe');
+const streamRoutes = require('./routes/stream');
 const createStashRouter = require('./routes/stash');
 const groupsRoutes = require('./routes/groups');
 const comicvineRoutes = require('./routes/comicvine');
@@ -304,6 +305,7 @@ app.use('/api/plex', plexRoutes);
 app.use('/api/radarr', radarrRoutes);
 app.use('/api/sonarr', sonarrRoutes);
 app.use('/api/media-probe', mediaProbeRoutes);
+app.use('/api/stream', streamRoutes);
 
 // Stash Integration API routes
 const stashRoutes = createStashRouter({ 
@@ -687,6 +689,13 @@ async function shutdown() {
   await backgroundSync.stop();
   await radarrBackgroundSync.stop();
   await sonarrBackgroundSync.stop();
+
+  // Stop any active direct-play/HLS transcode sessions (kills ffmpeg processes)
+  try {
+    require('./services/streamingService').stopAllSessions();
+  } catch (error) {
+    console.error('Failed to stop streaming sessions during shutdown:', error);
+  }
 
   await prisma.$disconnect();
   console.log('Prisma client disconnected.');
