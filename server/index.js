@@ -20,6 +20,8 @@ const healthRoutes = require('./routes/health');
 const databaseHealthRoutes = require('./routes/databaseHealth');
 const monitoringRoutes = require('./routes/monitoring');
 const plexRoutes = require('./routes/plex');
+const radarrRoutes = require('./routes/radarr');
+const sonarrRoutes = require('./routes/sonarr');
 const createStashRouter = require('./routes/stash');
 const groupsRoutes = require('./routes/groups');
 const comicvineRoutes = require('./routes/comicvine');
@@ -56,6 +58,9 @@ const PlexDatabaseService = require('./plexDatabaseService');
 const PlexSyncService = require('./plexSyncService'); // Added import
 const BackgroundSyncService = require('./backgroundSyncService'); // Added import
 const StashBackgroundSyncService = require('./stashBackgroundSyncService'); // Added import
+const RadarrSyncService = require('./services/radarrSyncService');
+const SonarrSyncService = require('./services/sonarrSyncService');
+const LibraryBackgroundSyncService = require('./services/libraryBackgroundSyncService');
 const ArtworkCacheService = require('./artworkCacheService'); // Added import
 const subOrderService = require('./subOrderService'); // Added import
 const WatchLogService = require('./watchLogService'); // Added import
@@ -73,6 +78,16 @@ const plexDb = new PlexDatabaseService();
 const plexSync = new PlexSyncService(); // Initialize the sync service
 const backgroundSync = new BackgroundSyncService(); // Initialize background sync service
 const stashBackgroundSync = new StashBackgroundSyncService(); // Initialize Stash background sync service
+const radarrBackgroundSync = new LibraryBackgroundSyncService({
+  providerName: 'radarr',
+  syncService: new RadarrSyncService(),
+  intervalSettingsKey: 'radarrSyncInterval',
+}); // Movie library population (see SONARR_RADARR_DIRECT_PLAY_MIGRATION_PLAN.md)
+const sonarrBackgroundSync = new LibraryBackgroundSyncService({
+  providerName: 'sonarr',
+  syncService: new SonarrSyncService(),
+  intervalSettingsKey: 'sonarrSyncInterval',
+}); // TV library population (see SONARR_RADARR_DIRECT_PLAY_MIGRATION_PLAN.md)
 const artworkCache = new ArtworkCacheService(); // Initialize artwork cache service
 const watchLogService = new WatchLogService(prisma); // Initialize watch log service
 const statisticsService = new StatisticsService(prisma, watchLogService);
@@ -283,6 +298,10 @@ app.use('/api/database-health', databaseHealthRoutes);
 
 // Plex Integration API routes
 app.use('/api/plex', plexRoutes);
+
+// Radarr/Sonarr Integration API routes (see SONARR_RADARR_DIRECT_PLAY_MIGRATION_PLAN.md)
+app.use('/api/radarr', radarrRoutes);
+app.use('/api/sonarr', sonarrRoutes);
 
 // Stash Integration API routes
 const stashRoutes = createStashRouter({ 
@@ -664,7 +683,9 @@ async function shutdown() {
   
   // Stop background sync service
   await backgroundSync.stop();
-  
+  await radarrBackgroundSync.stop();
+  await sonarrBackgroundSync.stop();
+
   await prisma.$disconnect();
   console.log('Prisma client disconnected.');
   process.exit(0);
@@ -763,6 +784,18 @@ server.listen(PORT, '0.0.0.0', async () => {
     await stashBackgroundSync.start();
   } catch (error) {
     console.error('Failed to start Stash background sync service:', error);
+  }
+
+  // Start Radarr/Sonarr background sync services (no-op if not configured yet)
+  try {
+    await radarrBackgroundSync.start();
+  } catch (error) {
+    console.error('Failed to start Radarr background sync service:', error);
+  }
+  try {
+    await sonarrBackgroundSync.start();
+  } catch (error) {
+    console.error('Failed to start Sonarr background sync service:', error);
   }
   
   // Start weather scheduler service

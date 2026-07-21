@@ -30,6 +30,13 @@ model Settings {
   christmasFilterEnabled            Boolean   @default(false)
   plexSyncInterval                  Int       @default(12)
   stashSyncInterval                 Int       @default(24)
+  libraryProvider                    String    @default("plex") // "plex" | "arr" - see SONARR_RADARR_DIRECT_PLAY_MIGRATION_PLAN.md
+  radarrUrl                          String?
+  radarrApiKey                       String?
+  radarrSyncInterval                 Int       @default(12)
+  sonarrUrl                          String?
+  sonarrApiKey                       String?
+  sonarrSyncInterval                 Int       @default(12)
   komgaUrl                          String?
   komgaApiKey                       String?
   stashUrl                          String?
@@ -92,6 +99,146 @@ model PlexSyncRunLog {
   createdAt            DateTime @default(now())
 
   @@index([createdAt])
+}
+
+// =====================================================================
+// Radarr/Sonarr-backed library models (see SONARR_RADARR_DIRECT_PLAY_MIGRATION_PLAN.md)
+// Kept independent of the Plex* models so both systems can run in
+// parallel during migration and rollback stays safe.
+// =====================================================================
+
+model Movie {
+  id               Int       @id @default(autoincrement())
+  radarrId         Int       @unique
+  tmdbId           Int?
+  imdbId           String?
+  title            String
+  sortTitle        String?
+  year             Int?
+  overview         String?
+  runtime          Int?
+  studio           String?
+  genres           String? // JSON array
+  collectionTitle  String?
+  collectionTmdbId Int?
+  posterUrl        String?
+  fanartUrl        String?
+  localArtworkPath String?
+  path             String
+  relativePath     String?
+  filePath         String? // resolved local container path (post path-translation)
+  fileSize         BigInt?
+  sceneName        String?
+  videoCodec       String?
+  audioCodec       String?
+  resolution       String?
+  container        String?
+  hasFile          Boolean   @default(false)
+  monitored        Boolean   @default(true)
+  addedAt          DateTime?
+  radarrUpdatedAt  DateTime?
+  removed          Boolean   @default(false)
+  lastSyncedAt     DateTime  @default(now())
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  @@index([tmdbId])
+  @@index([title])
+}
+
+model Show {
+  id               Int       @id @default(autoincrement())
+  sonarrId         Int       @unique
+  tvdbId           Int?
+  imdbId           String?
+  title            String
+  sortTitle        String?
+  year             Int?
+  overview         String?
+  network          String?
+  genres           String? // JSON array
+  status           String?
+  posterUrl        String?
+  fanartUrl        String?
+  localArtworkPath String?
+  path             String
+  monitored        Boolean   @default(true)
+  addedAt          DateTime?
+  sonarrUpdatedAt  DateTime?
+  removed          Boolean   @default(false)
+  lastSyncedAt     DateTime  @default(now())
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  seasons          Season[]
+
+  @@index([tvdbId])
+  @@index([title])
+}
+
+model Season {
+  id           Int      @id @default(autoincrement())
+  showId       Int
+  seasonNumber Int
+  monitored    Boolean  @default(true)
+  posterUrl    String?
+  removed      Boolean  @default(false)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  show     Show      @relation(fields: [showId], references: [id])
+  episodes Episode[]
+
+  @@unique([showId, seasonNumber])
+}
+
+model Episode {
+  id              Int       @id @default(autoincrement())
+  sonarrEpisodeId Int       @unique
+  seasonId        Int
+  episodeNumber   Int
+  title           String?
+  overview        String?
+  airDate         DateTime?
+  runtime         Int?
+  path            String? // Sonarr episodeFile.path
+  relativePath    String?
+  filePath        String? // resolved local container path (post path-translation)
+  fileSize        BigInt?
+  videoCodec      String?
+  audioCodec      String?
+  resolution      String?
+  container       String?
+  hasFile         Boolean   @default(false)
+  monitored       Boolean   @default(true)
+  removed         Boolean   @default(false)
+  lastSyncedAt    DateTime  @default(now())
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  season Season @relation(fields: [seasonId], references: [id])
+
+  @@index([seasonId, episodeNumber])
+}
+
+model LibrarySyncRunLog {
+  id              Int      @id @default(autoincrement())
+  provider        String // "radarr" | "sonarr"
+  startedAt       DateTime
+  completedAt     DateTime
+  durationSeconds Float
+  trigger         String   @default("manual")
+  success         Boolean  @default(true)
+  totalItems      Int      @default(0)
+  added           Int      @default(0)
+  updated         Int      @default(0)
+  removed         Int      @default(0)
+  summary         String?
+  error           String?
+  createdAt       DateTime @default(now())
+
+  @@index([createdAt])
+  @@index([provider])
 }
 
 model EddieSettings {
