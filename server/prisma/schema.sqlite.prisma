@@ -154,6 +154,8 @@ model Movie {
   probedAt           DateTime?
   probeError         String?
 
+  watchProgress      WatchProgress[]
+
   @@index([tmdbId])
   @@index([title])
 }
@@ -241,8 +243,26 @@ model Episode {
   probeError         String?
 
   season Season @relation(fields: [seasonId], references: [id])
+  watchProgress WatchProgress[]
 
   @@index([seasonId, episodeNumber])
+}
+
+model WatchProgress {
+  id              Int       @id @default(autoincrement())
+  mediaType       String // "movie" | "episode"
+  movieId         Int?      @unique
+  episodeId       Int?      @unique
+  positionSeconds Int       @default(0)
+  durationSeconds Int?
+  completed       Boolean   @default(false)
+  updatedAt       DateTime  @updatedAt
+  createdAt       DateTime  @default(now())
+
+  movie   Movie?   @relation(fields: [movieId], references: [id])
+  episode Episode? @relation(fields: [episodeId], references: [id])
+
+  @@index([completed])
 }
 
 model LibrarySyncRunLog {

@@ -54,6 +54,28 @@ Currently, no authentication is required for these endpoints. They are designed 
 }
 ```
 
+Example arr-backed `PLAY_TV_EPISODE` (see the Radarr/Sonarr note below the Movie Response
+section for full details - `mediaId` here is the Episode id, not the Show id):
+```json
+{
+  "type": "PLAY_TV_EPISODE",
+  "data": {
+    "ratingKey": "episode-4",
+    "episodeRatingKey": "episode-4",
+    "seriesRatingKey": "show-4",
+    "plexId": null,
+    "libraryProvider": "arr",
+    "mediaId": 4,
+    "title": "Series Name",
+    "episodeTitle": "Episode Title",
+    "thumb": "https://image.tmdb.org/t/p/original/show-poster.jpg",
+    "art": "https://image.tmdb.org/t/p/original/show-fanart.jpg",
+    "artworkUrl": "https://image.tmdb.org/t/p/original/show-poster.jpg",
+    "streamUrl": "http://localhost:3001/api/stream/episode/4/direct"
+  }
+}
+```
+
 **Movie Response**:
 ```json
 {
@@ -72,6 +94,46 @@ Currently, no authentication is required for these endpoints. They are designed 
     "artworkUrl": "http://localhost:3000/api/artwork/movie-artwork.jpg",
     "streamUrl": "http://plex-server:32400/video/:/transcode/...",
     "otherCollections": [...]
+  }
+}
+```
+
+#### Radarr/Sonarr-backed content (`libraryProvider: "arr"`)
+
+When the server's movie/TV libraries are populated by Radarr/Sonarr instead of Plex
+(see `SONARR_RADARR_DIRECT_PLAY_MIGRATION_PLAN.md`), `PLAY_MOVIE` and `PLAY_TV_EPISODE`
+responses include two additional fields and behave differently:
+
+- `libraryProvider`: `"plex"` (default) or `"arr"`.
+- `mediaId`: the numeric Movie/Episode database id to use with the streaming/watch-progress
+  endpoints below. `null` for Plex-backed content (use `ratingKey`/`plexId` instead).
+- `plexId` is always `null` when `libraryProvider` is `"arr"` - there is no Plex client to
+  cast to, so **the app must not attempt any Plex play/cast flow for this item**. Instead:
+  1. Play `streamUrl` directly in the app's own video player (ExoPlayer/Media3) - it already
+     points at `GET /api/stream/{movie|episode}/{mediaId}/direct` and supports HTTP Range
+     requests for seeking.
+  2. If the player reports it can't decode the file directly (unsupported codec/container),
+     fall back to `GET /api/stream/{movie|episode}/{mediaId}/hls/master.m3u8`, which starts
+     an on-demand remux/transcode session and returns a standard HLS playlist.
+  3. While playing, periodically (e.g. every 10s) report position with
+     `POST /api/watch-progress/heartbeat` and call
+     `POST /api/watch-progress/{movie|episode}/{mediaId}/complete` when finished, instead of
+     the Plex "mark as watched" webhook flow used for `libraryProvider: "plex"` content.
+
+Example arr-backed `PLAY_MOVIE`:
+```json
+{
+  "type": "PLAY_MOVIE",
+  "data": {
+    "ratingKey": "movie-6",
+    "plexId": null,
+    "libraryProvider": "arr",
+    "mediaId": 6,
+    "title": "Movie Title",
+    "thumb": "https://image.tmdb.org/t/p/original/poster.jpg",
+    "art": "https://image.tmdb.org/t/p/original/fanart.jpg",
+    "artworkUrl": "https://image.tmdb.org/t/p/original/poster.jpg",
+    "streamUrl": "http://localhost:3001/api/stream/movie/6/direct"
   }
 }
 ```
@@ -107,6 +169,48 @@ Currently, no authentication is required for these endpoints. They are designed 
   }
 }
 ```
+
+---
+
+### Direct-Play / Transcode Streaming (Radarr/Sonarr-backed content only)
+
+These endpoints serve movie/episode files directly from disk (or transcode them
+on demand) - they're only relevant when a `PLAY_MOVIE`/`PLAY_TV_EPISODE` response
+has `libraryProvider: "arr"`. See `SONARR_RADARR_DIRECT_PLAY_MIGRATION_PLAN.md`
+(Phase 3) for the full server-side design.
+
+- **`GET /api/stream/{mediaType}/{mediaId}/info`** - `mediaType` is `movie` or `episode`.
+  Returns probed technical metadata and a `recommendedMode` (`direct`|`remux`|`transcode`):
+  ```json
+  {
+    "recommendedMode": "direct",
+    "reason": "Container .mp4, video h264, audio aac are natively playable",
+    "durationSeconds": 5413.2,
+    "videoCodec": "h264",
+    "audioCodec": "aac",
+    "resolution": "1920x1080",
+    "audioTracks": [{ "index": 1, "codec": "aac", "channels": 2, "language": "eng" }],
+    "subtitleTracks": []
+  }
+  ```
+- **`GET /api/stream/{mediaType}/{mediaId}/direct`** - streams the original file with
+  full HTTP `Range` support (206 Partial Content). This is what `streamUrl` in the
+  up-next response points to; prefer playing this directly whenever the player supports it.
+- **`GET /api/stream/{mediaType}/{mediaId}/hls/master.m3u8`** - starts (or reuses) an
+  on-demand HLS session and returns a playlist; use only as a fallback when direct play
+  fails. Segments referenced in the playlist are served from
+  `GET /api/stream/session/{sessionId}/{segment}.ts`.
+- **`DELETE /api/stream/session/{sessionId}`** - stop an HLS session early (e.g. user
+  backed out of playback) to free up transcoding capacity.
+
+### Watch Progress (Radarr/Sonarr-backed content only)
+
+- **`GET /api/watch-progress/{mediaType}/{mediaId}`** - current resume position.
+- **`POST /api/watch-progress/heartbeat`** - call periodically during playback:
+  ```json
+  { "mediaType": "movie", "id": 6, "positionSeconds": 120, "durationSeconds": 5400 }
+  ```
+- **`POST /api/watch-progress/{mediaType}/{mediaId}/complete`** - mark fully watched.
 
 ---
 

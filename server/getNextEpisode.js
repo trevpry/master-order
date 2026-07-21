@@ -6,6 +6,7 @@ const prisma = require('./prismaClient'); // Use the shared Prisma client
 const tvdbService = require('./tvdbCachedService');
 const PlexDatabaseService = require('./plexDatabaseService');
 const HistoryPlusService = require('./services/historyPlusService');
+const { getNextEpisodeFromLibrary } = require('./services/libraryUpNextService');
 
 // Initialize Database Service
 const plexDb = new PlexDatabaseService(prisma);
@@ -1097,6 +1098,15 @@ async function getNextEpisode() {
           mediaTypeLimiters
         };
       }
+    }
+
+    // See SONARR_RADARR_DIRECT_PLAY_MIGRATION_PLAN.md (Phase 4): when the
+    // library is populated by Sonarr instead of Plex, delegate to the
+    // simpler Arr-backed selection before any Plex-specific TV logic runs.
+    const librarySettings = await prisma.settings.findUnique({ where: { id: 1 } });
+    if (librarySettings?.libraryProvider === 'arr') {
+      console.log('📺 libraryProvider=arr — using Radarr/Sonarr-backed TV selection');
+      return await getNextEpisodeFromLibrary();
     }
       // TV General — apply balance preferences to influence which TV show is picked
     if (preferNewRelease > 0) {

@@ -4,6 +4,7 @@ if (process.env.NODE_ENV !== 'production') {
 }
 const prisma = require('./prismaClient'); // Use the shared Prisma client
 const PlexDatabaseService = require('./plexDatabaseService');
+const { getNextMovieFromLibrary } = require('./services/libraryUpNextService');
 
 // Initialize Database Service
 const plexDb = new PlexDatabaseService(); // prisma is now handled within PlexDatabaseService constructor
@@ -879,6 +880,15 @@ async function filterMoviesNotInCustomOrders(movies) {
 
 async function getNextMovie() {
   try {
+    // See SONARR_RADARR_DIRECT_PLAY_MIGRATION_PLAN.md (Phase 4): when the
+    // library is populated by Radarr instead of Plex, delegate to the
+    // simpler Arr-backed selection before any Plex-specific logic runs.
+    const librarySettings = await prisma.settings.findUnique({ where: { id: 1 } });
+    if (librarySettings?.libraryProvider === 'arr') {
+      console.log('🎬 libraryProvider=arr — using Radarr-backed movie selection');
+      return await getNextMovieFromLibrary();
+    }
+
     console.log('Starting movie selection process...');
     
     // Get collection name from settings (same as TV show logic)

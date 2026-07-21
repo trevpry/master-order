@@ -69,11 +69,18 @@ function createContentDiscoveryRoutes() {
 function formatAndroidResponse(upNextData, baseUrl) {
   if (upNextData.orderType === 'MOVIES_GENERAL') {
     const artworkUrl = getAndroidArtworkUrl(upNextData, baseUrl);
+    // See SONARR_RADARR_DIRECT_PLAY_MIGRATION_PLAN.md (Phase 5): arr-backed
+    // movies (libraryUpNextService.js) have no real Plex ratingKey/plexId -
+    // the app should rely on `streamUrl` (and `mediaId` + `/api/stream/...`
+    // for HLS fallback) directly instead of any Plex cast/play-plex flow.
+    const isArrBacked = upNextData.libraryProvider === 'arr';
     return {
       type: 'PLAY_MOVIE',
       data: {
         ratingKey: upNextData.ratingKey,
-        plexId: upNextData.ratingKey,
+        plexId: isArrBacked ? null : upNextData.ratingKey,
+        libraryProvider: upNextData.libraryProvider || 'plex',
+        mediaId: isArrBacked ? upNextData.id : null,
         title: upNextData.title,
         year: upNextData.year,
         duration: upNextData.duration || 0,
@@ -271,6 +278,14 @@ function formatAndroidHistoryPlusResponse(upNextData, baseUrl) {
 function formatAndroidTVResponse(upNextData, baseUrl) {
   const artworkUrl = getAndroidArtworkUrl(upNextData, baseUrl);
 
+  // See SONARR_RADARR_DIRECT_PLAY_MIGRATION_PLAN.md (Phase 5): arr-backed
+  // episodes (libraryUpNextService.js) use synthetic string ids like
+  // "episode-3"/"show-3" - there's no real Plex ratingKey/plexId, and the
+  // thumb/art fields are already-resolved Radarr/TMDB poster/fanart URLs
+  // (not Plex relative paths), so none of the Plex-specific rewriting below
+  // applies to them.
+  const isArrBacked = upNextData.libraryProvider === 'arr';
+
   let episodeRatingKey = upNextData.ratingKey;
   let seriesRatingKey = upNextData.ratingKey;
 
@@ -285,7 +300,7 @@ function formatAndroidTVResponse(upNextData, baseUrl) {
   let episodeThumb = upNextData.thumb || '';
   let episodeArt = upNextData.art || '';
 
-  if (episodeRatingKey && episodeRatingKey !== seriesRatingKey) {
+  if (!isArrBacked && episodeRatingKey && episodeRatingKey !== seriesRatingKey) {
     const thumbMatch = upNextData.thumb?.match(/\/(\d+)$/);
     const artMatch = upNextData.art?.match(/\/(\d+)$/);
     const thumbTimestamp = thumbMatch ? thumbMatch[1] : Date.now();
@@ -301,7 +316,9 @@ function formatAndroidTVResponse(upNextData, baseUrl) {
       ratingKey: episodeRatingKey,
       episodeRatingKey: episodeRatingKey,
       seriesRatingKey: seriesRatingKey,
-      plexId: episodeRatingKey,
+      plexId: isArrBacked ? null : episodeRatingKey,
+      libraryProvider: upNextData.libraryProvider || 'plex',
+      mediaId: isArrBacked ? upNextData.episodeId : null,
       title: upNextData.title,
       episodeTitle: upNextData.episodeTitle || upNextData.nextEpisodeTitle || null,
       summary: upNextData.summary || '',

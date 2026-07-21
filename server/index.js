@@ -24,6 +24,8 @@ const radarrRoutes = require('./routes/radarr');
 const sonarrRoutes = require('./routes/sonarr');
 const mediaProbeRoutes = require('./routes/mediaProbe');
 const streamRoutes = require('./routes/stream');
+const libraryRoutes = require('./routes/library');
+const watchProgressRoutes = require('./routes/watchProgress');
 const createStashRouter = require('./routes/stash');
 const groupsRoutes = require('./routes/groups');
 const comicvineRoutes = require('./routes/comicvine');
@@ -306,6 +308,8 @@ app.use('/api/radarr', radarrRoutes);
 app.use('/api/sonarr', sonarrRoutes);
 app.use('/api/media-probe', mediaProbeRoutes);
 app.use('/api/stream', streamRoutes);
+app.use('/api/library', libraryRoutes);
+app.use('/api/watch-progress', watchProgressRoutes);
 
 // Stash Integration API routes
 const stashRoutes = createStashRouter({ 
