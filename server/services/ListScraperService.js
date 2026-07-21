@@ -3,6 +3,7 @@ const crypto = require('crypto');
 // Use shared Prisma client to avoid SQLite connection contention
 const { getParser } = require('./parsers/ParserRegistry');
 const PlexDatabaseService = require('../plexDatabaseService');
+const settingsService = require('../settingsService');
 const { normalizeTitleForExactMatch } = require('../utils/titleMatching');
 
 const prisma = require('../prismaClient');
@@ -21,8 +22,8 @@ class ListScraperService {
   }
 
   /**
-   * Resolve list-sync movie/episode data to canonical Plex metadata when possible.
-   * This is a final safety net before duplicate checks and DB writes.
+   * Resolve list-sync movie/episode data to canonical library metadata (ARR/Plex)
+   * when possible. This is a final safety net before duplicate checks and DB writes.
    */
   async resolvePlexMetadata(itemData) {
     if (!itemData || (itemData.mediaType !== 'movie' && itemData.mediaType !== 'episode')) {
@@ -30,7 +31,52 @@ class ListScraperService {
     }
 
     const resolved = { ...itemData };
+    const provider = await this.getLibraryProvider();
 
+    if (provider === 'arr') {
+      if (resolved.mediaType === 'episode') {
+        const arrEpisode = await this.resolveArrEpisode(resolved);
+        if (arrEpisode) {
+          resolved.sourceProvider = 'arr';
+          resolved.episodeId = arrEpisode.id;
+          resolved.plexKey = null;
+          resolved.title = arrEpisode.title || resolved.title;
+          resolved.seriesTitle = arrEpisode.season?.show?.title || resolved.seriesTitle;
+          resolved.seasonNumber = arrEpisode.season?.seasonNumber ?? resolved.seasonNumber;
+          resolved.episodeNumber = arrEpisode.episodeNumber ?? resolved.episodeNumber;
+          resolved.originalArtworkUrl = resolved.originalArtworkUrl || arrEpisode.season?.show?.posterUrl || arrEpisode.season?.show?.fanartUrl || null;
+          resolved.plexShowFound = true;
+          resolved.isFromTvdbOnly = false;
+          return resolved;
+        }
+
+        const arrShow = await this.resolveArrShow(resolved.seriesTitle, resolved.tvdbYear);
+        if (arrShow) {
+          resolved.sourceProvider = 'arr';
+          resolved.plexShowFound = true;
+          resolved.isFromTvdbOnly = false;
+          resolved.seriesTitle = arrShow.title;
+          resolved.originalArtworkUrl = resolved.originalArtworkUrl || arrShow.posterUrl || arrShow.fanartUrl || null;
+        }
+
+        return resolved;
+      }
+
+      const arrMovie = await this.resolveArrMovie(resolved);
+      if (arrMovie) {
+        resolved.sourceProvider = 'arr';
+        resolved.movieId = arrMovie.id;
+        resolved.plexKey = null;
+        resolved.title = arrMovie.title || resolved.title;
+        resolved.tvdbYear = resolved.tvdbYear || arrMovie.year || null;
+        resolved.originalArtworkUrl = resolved.originalArtworkUrl || arrMovie.posterUrl || arrMovie.fanartUrl || null;
+        resolved.isFromTvdbOnly = false;
+      }
+
+      return resolved;
+    }
+
+    // Provider is Plex.
     if (resolved.mediaType === 'episode') {
       const seasonNumber = resolved.seasonNumber != null ? parseInt(resolved.seasonNumber) : null;
       const episodeNumber = resolved.episodeNumber != null ? parseInt(resolved.episodeNumber) : null;
@@ -50,6 +96,7 @@ class ListScraperService {
 
           if (exactSeriesMatch) {
             const plexEpisode = exactSeriesMatch;
+            resolved.sourceProvider = 'plex';
             resolved.plexKey = plexEpisode.ratingKey || resolved.plexKey || null;
             resolved.title = plexEpisode.title || resolved.title;
             resolved.seriesTitle = plexEpisode.showTitle || plexEpisode.grandparentTitle || plexEpisode.season?.show?.title || resolved.seriesTitle;
@@ -76,6 +123,7 @@ class ListScraperService {
       if (resolved.plexKey) {
         const movieByKey = await this.plexDb.getMovieByRatingKey(resolved.plexKey);
         if (movieByKey) {
+          resolved.sourceProvider = 'plex';
           resolved.title = movieByKey.title || resolved.title;
           resolved.originalArtworkUrl = resolved.originalArtworkUrl || movieByKey.thumb || null;
           resolved.tvdbYear = resolved.tvdbYear || movieByKey.year || null;
@@ -93,6 +141,7 @@ class ListScraperService {
 
           if (exactTitleMatch) {
             const plexMovie = exactTitleMatch;
+            resolved.sourceProvider = 'plex';
             resolved.plexKey = plexMovie.ratingKey || resolved.plexKey || null;
             resolved.title = plexMovie.title || resolved.title;
             resolved.originalArtworkUrl = resolved.originalArtworkUrl || plexMovie.thumb || null;
@@ -421,7 +470,10 @@ class ListScraperService {
       data: {
         customOrderId,
         mediaType: resolvedItem.mediaType || 'movie',
+        sourceProvider: resolvedItem.sourceProvider || (resolvedItem.movieId || resolvedItem.episodeId ? 'arr' : (resolvedItem.plexKey ? 'plex' : null)),
         plexKey: resolvedItem.plexKey || null,
+        movieId: resolvedItem.movieId ? parseInt(resolvedItem.movieId) : null,
+        episodeId: resolvedItem.episodeId ? parseInt(resolvedItem.episodeId) : null,
         title: resolvedItem.title,
         seasonNumber: resolvedItem.seasonNumber != null ? parseInt(resolvedItem.seasonNumber) : null,
         episodeNumber: resolvedItem.episodeNumber != null ? parseInt(resolvedItem.episodeNumber) : null,
@@ -475,7 +527,7 @@ class ListScraperService {
     if (!config) throw new Error('List scrape config not found');
 
     const hasOrder = !!config.customOrderId;
-    const results = { added: 0, skipped: 0, errors: [], notInPlex: [] };
+    const results = { added: 0, skipped: 0, errors: [], notInPlex: [], notInLibrary: [] };
 
     // For CMRO parser with headImportCount, use smart pagination to count only NEW items
     let scrapedItems = [];
@@ -595,9 +647,16 @@ class ListScraperService {
         
         const enriched = await this.resolvePlexMetadata(matched);
 
-        // Not-in-Plex check — stop immediately, track the item, skip remaining
-        if ((enriched.mediaType === 'movie' || enriched.mediaType === 'episode') && !enriched.plexKey && !enriched.plexShowFound) {
-          results.notInPlex.push({ title: item.title, mediaType: enriched.mediaType });
+        // Unresolved library item check — stop immediately, track the item, skip remaining.
+        if (this.isUnresolvedLibraryItem(enriched)) {
+          const unresolved = {
+            title: item.title,
+            mediaType: enriched.mediaType,
+            sourceProvider: enriched.sourceProvider || null,
+            reason: 'no_library_match'
+          };
+          results.notInPlex.push(unresolved);
+          results.notInLibrary.push(unresolved);
           await prisma.listScrapedItem.upsert({
             where: { listScrapeConfigId_fingerprint: { listScrapeConfigId: configId, fingerprint: item.fingerprint } },
             update: { title: item.title, position: item.position, itemUrl: item.itemUrl, itemYear: item.itemYear, mediaType: item.mediaType, wasSkipped: true, notInPlex: true },
@@ -664,11 +723,11 @@ class ListScraperService {
       });
     }
 
-    // Update config — don't mark as importedAll if we stopped early due to a not-in-Plex item
+    // Update config — don't mark as importedAll if we stopped early due to an unresolved library item.
     const stoppedEarly = results.notInPlex.length > 0;
-    console.log(`[ListSync] initialImport COMPLETE — added:${results.added} skipped:${results.skipped} notInPlex:${results.notInPlex.length} errors:${results.errors.length}`);
+    console.log(`[ListSync] initialImport COMPLETE — added:${results.added} skipped:${results.skipped} unresolved:${results.notInPlex.length} errors:${results.errors.length}`);
     if (results.notInPlex.length > 0) {
-      console.log(`[ListSync] ⛔ NOT IN PLEX:`, JSON.stringify(results.notInPlex));
+      console.log(`[ListSync] ⛔ UNRESOLVED LIBRARY ITEMS:`, JSON.stringify(results.notInPlex));
     }
     await prisma.listScrapeConfig.update({
       where: { id: configId },
@@ -679,6 +738,8 @@ class ListScraperService {
         lastError: null
       }
     });
+
+    results.unresolvedSummary = this.summarizeUnresolved(results.notInLibrary.length > 0 ? results.notInLibrary : results.notInPlex);
 
     return results;
   }
@@ -781,7 +842,8 @@ class ListScraperService {
       const orphanedFingerprints = new Set(orphanedTracked.map(i => i.fingerprint));
       const orphanedItems = scrapedItems.filter(i => orphanedFingerprints.has(i.fingerprint));
 
-      // Re-check items previously skipped because they weren't in Plex — they may have been added since
+      // Re-check items previously skipped because they weren't resolved to a library item —
+      // they may have been added since.
       const previouslyNotInPlex = await prisma.listScrapedItem.findMany({
         where: {
           listScrapeConfigId: configId,
@@ -842,7 +904,7 @@ class ListScraperService {
       // Sort by list position so we process items in order — if we hit a not-in-Plex item,
       // we stop BEFORE processing any items that come after it
       itemsToProcess.sort((a, b) => (a.position ?? 0) - (b.position ?? 0));
-      const results = { added: 0, newItemsFound: itemsToProcess.length, errors: [], notInPlex: [] };
+      const results = { added: 0, newItemsFound: itemsToProcess.length, errors: [], notInPlex: [], notInLibrary: [] };
 
       // If not linked to an order, just track new items
       if (!config.customOrderId) {
@@ -883,9 +945,16 @@ class ListScraperService {
           
           const enriched = await this.resolvePlexMetadata(matched);
 
-          // Not-in-Plex check — stop immediately
-          if ((enriched.mediaType === 'movie' || enriched.mediaType === 'episode') && !enriched.plexKey && !enriched.plexShowFound) {
-            results.notInPlex.push({ title: item.title, mediaType: enriched.mediaType });
+          // Unresolved library item check — stop immediately.
+          if (this.isUnresolvedLibraryItem(enriched)) {
+            const unresolved = {
+              title: item.title,
+              mediaType: enriched.mediaType,
+              sourceProvider: enriched.sourceProvider || null,
+              reason: 'no_library_match'
+            };
+            results.notInPlex.push(unresolved);
+            results.notInLibrary.push(unresolved);
             await prisma.listScrapedItem.upsert({
               where: { listScrapeConfigId_fingerprint: { listScrapeConfigId: configId, fingerprint: item.fingerprint } },
               update: { title: item.title, position: item.position, itemUrl: item.itemUrl, itemYear: item.itemYear, mediaType: item.mediaType, wasSkipped: true, notInPlex: true },
@@ -942,9 +1011,9 @@ class ListScraperService {
         excludeCustomOrderItemIds: createdCustomOrderItemIds
       });
 
-      console.log(`[ListSync] checkForUpdates COMPLETE — added:${results.added} notInPlex:${results.notInPlex.length} errors:${results.errors.length}`);
+      console.log(`[ListSync] checkForUpdates COMPLETE — added:${results.added} unresolved:${results.notInPlex.length} errors:${results.errors.length}`);
       if (results.notInPlex.length > 0) {
-        console.log(`[ListSync] ⛔ NOT IN PLEX:`, JSON.stringify(results.notInPlex));
+        console.log(`[ListSync] ⛔ UNRESOLVED LIBRARY ITEMS:`, JSON.stringify(results.notInPlex));
       }
 
       await prisma.listScrapeConfig.update({
@@ -955,6 +1024,8 @@ class ListScraperService {
           lastError: null
         }
       });
+
+      results.unresolvedSummary = this.summarizeUnresolved(results.notInLibrary.length > 0 ? results.notInLibrary : results.notInPlex);
 
       return results;
     } catch (error) {
@@ -977,35 +1048,406 @@ class ListScraperService {
   /**
    * Check if an enriched item already exists in the custom order
    */
+  async getLibraryProvider() {
+    try {
+      const settings = await settingsService.getSettings();
+      return settings?.libraryProvider === 'arr' ? 'arr' : 'plex';
+    } catch (error) {
+      console.warn('[ListSync] Failed to read libraryProvider setting, defaulting to plex:', error.message);
+      return 'plex';
+    }
+  }
+
+  async resolveArrMovie(itemData) {
+    if (itemData.movieId) {
+      const byId = await prisma.movie.findUnique({
+        where: { id: parseInt(itemData.movieId) },
+        select: { id: true, title: true, year: true, posterUrl: true, fanartUrl: true, removed: true }
+      });
+      if (byId && !byId.removed) {
+        return byId;
+      }
+    }
+
+    if (!itemData.title) {
+      return null;
+    }
+
+    const normalizedTitle = normalizeTitleForExactMatch(itemData.title);
+    const matches = await prisma.movie.findMany({
+      where: {
+        removed: false,
+        ...(itemData.tvdbYear != null ? { year: parseInt(itemData.tvdbYear) } : {})
+      },
+      select: { id: true, title: true, year: true, posterUrl: true, fanartUrl: true }
+    });
+
+    return matches.find((movie) => normalizeTitleForExactMatch(movie.title || '') === normalizedTitle) || null;
+  }
+
+  async resolveArrShow(seriesTitle, year) {
+    if (!seriesTitle) {
+      return null;
+    }
+
+    const normalizedSeries = normalizeTitleForExactMatch(seriesTitle);
+    const matches = await prisma.show.findMany({
+      where: {
+        removed: false,
+        ...(year != null ? { year: parseInt(year) } : {})
+      },
+      select: { id: true, title: true, year: true, posterUrl: true, fanartUrl: true }
+    });
+
+    return matches.find((show) => normalizeTitleForExactMatch(show.title || '') === normalizedSeries) || null;
+  }
+
+  async resolveArrEpisode(itemData) {
+    if (itemData.episodeId) {
+      const byId = await prisma.episode.findUnique({
+        where: { id: parseInt(itemData.episodeId) },
+        include: {
+          season: {
+            include: { show: true }
+          }
+        }
+      });
+      if (byId && !byId.removed && !byId.season?.removed && !byId.season?.show?.removed) {
+        return byId;
+      }
+    }
+
+    const seasonNumber = itemData.seasonNumber != null ? parseInt(itemData.seasonNumber) : null;
+    const episodeNumber = itemData.episodeNumber != null ? parseInt(itemData.episodeNumber) : null;
+    if (!itemData.seriesTitle || !Number.isInteger(seasonNumber) || !Number.isInteger(episodeNumber)) {
+      return null;
+    }
+
+    const normalizedSeries = normalizeTitleForExactMatch(itemData.seriesTitle);
+    const candidates = await prisma.episode.findMany({
+      where: {
+        removed: false,
+        season: {
+          seasonNumber,
+          removed: false,
+          show: { removed: false }
+        },
+        episodeNumber
+      },
+      include: {
+        season: {
+          include: { show: true }
+        }
+      }
+    });
+
+    return candidates.find((episode) => {
+      const candidateSeries = normalizeTitleForExactMatch(episode.season?.show?.title || '');
+      return candidateSeries === normalizedSeries;
+    }) || null;
+  }
+
+  isUnresolvedLibraryItem(enrichedItem) {
+    if (!enrichedItem || (enrichedItem.mediaType !== 'movie' && enrichedItem.mediaType !== 'episode')) {
+      return false;
+    }
+
+    if (enrichedItem.mediaType === 'movie') {
+      return !enrichedItem.plexKey && !enrichedItem.movieId;
+    }
+
+    return !enrichedItem.plexKey && !enrichedItem.episodeId && !enrichedItem.plexShowFound;
+  }
+
+  summarizeUnresolved(unresolvedItems = []) {
+    const summary = {
+      total: unresolvedItems.length,
+      byProvider: {},
+      byReason: {},
+      byProviderAndReason: {},
+    };
+
+    for (const item of unresolvedItems) {
+      const provider = item?.sourceProvider || 'unknown';
+      const reason = item?.reason || 'unspecified';
+
+      summary.byProvider[provider] = (summary.byProvider[provider] || 0) + 1;
+      summary.byReason[reason] = (summary.byReason[reason] || 0) + 1;
+
+      if (!summary.byProviderAndReason[provider]) {
+        summary.byProviderAndReason[provider] = {};
+      }
+      summary.byProviderAndReason[provider][reason] = (summary.byProviderAndReason[provider][reason] || 0) + 1;
+    }
+
+    return summary;
+  }
+
+  async reprocessUnresolved(configId, matcherService, options = {}) {
+    const {
+      dryRun = true,
+      limit = 200,
+      includeAlreadyLinked = false,
+    } = options;
+
+    const config = await prisma.listScrapeConfig.findUnique({ where: { id: configId } });
+    if (!config) {
+      throw new Error('List scrape config not found');
+    }
+
+    const unresolvedItems = await prisma.listScrapedItem.findMany({
+      where: {
+        listScrapeConfigId: configId,
+        notInPlex: true,
+        ...(includeAlreadyLinked ? {} : { customOrderItemId: null }),
+      },
+      orderBy: { position: 'asc' },
+      take: Math.max(1, Math.min(limit, 5000)),
+    });
+
+    const result = {
+      configId,
+      dryRun,
+      scanned: unresolvedItems.length,
+      nowResolvable: 0,
+      linkedToExisting: 0,
+      created: 0,
+      clearedWithoutOrder: 0,
+      stillUnresolved: 0,
+      errors: 0,
+      unresolvedSummary: null,
+      details: [],
+    };
+
+    for (const tracked of unresolvedItems) {
+      try {
+        const matched = await matcherService.matchItem({
+          title: tracked.title,
+          mediaType: tracked.mediaType,
+          itemUrl: tracked.itemUrl,
+          itemYear: tracked.itemYear,
+          position: tracked.position,
+        });
+
+        const enriched = await this.resolvePlexMetadata(matched);
+        const unresolved = this.isUnresolvedLibraryItem(enriched);
+
+        if (unresolved) {
+          result.stillUnresolved += 1;
+          result.details.push({
+            listScrapedItemId: tracked.id,
+            title: tracked.title,
+            mediaType: tracked.mediaType,
+            outcome: 'still_unresolved',
+            sourceProvider: enriched.sourceProvider || null,
+          });
+          continue;
+        }
+
+        result.nowResolvable += 1;
+
+        if (!config.customOrderId) {
+          result.clearedWithoutOrder += 1;
+          if (!dryRun) {
+            await prisma.listScrapedItem.update({
+              where: { id: tracked.id },
+              data: {
+                notInPlex: false,
+                wasSkipped: true,
+              },
+            });
+          }
+
+          result.details.push({
+            listScrapedItemId: tracked.id,
+            title: tracked.title,
+            mediaType: tracked.mediaType,
+            outcome: dryRun ? 'would_clear_unresolved' : 'cleared_unresolved',
+            sourceProvider: enriched.sourceProvider || null,
+          });
+          continue;
+        }
+
+        const duplicate = await this.checkDuplicate(config.customOrderId, enriched);
+        if (duplicate) {
+          result.linkedToExisting += 1;
+          if (!dryRun) {
+            await prisma.listScrapedItem.update({
+              where: { id: tracked.id },
+              data: {
+                customOrderItemId: duplicate.id,
+                wasSkipped: false,
+                notInPlex: false,
+              },
+            });
+          }
+
+          result.details.push({
+            listScrapedItemId: tracked.id,
+            title: tracked.title,
+            mediaType: tracked.mediaType,
+            outcome: dryRun ? 'would_link_duplicate' : 'linked_duplicate',
+            customOrderItemId: duplicate.id,
+            sourceProvider: enriched.sourceProvider || null,
+          });
+          continue;
+        }
+
+        const sortOrder = await this.calculateInsertSortOrder(configId, config.customOrderId, tracked.position);
+        let createdItemId = null;
+        if (!dryRun) {
+          const createdItem = await this.addItemToOrder(config.customOrderId, enriched, sortOrder);
+          createdItemId = createdItem.id;
+
+          await prisma.listScrapedItem.update({
+            where: { id: tracked.id },
+            data: {
+              customOrderItemId: createdItem.id,
+              wasSkipped: false,
+              notInPlex: false,
+            },
+          });
+        }
+
+        result.created += 1;
+        result.details.push({
+          listScrapedItemId: tracked.id,
+          title: tracked.title,
+          mediaType: tracked.mediaType,
+          outcome: dryRun ? 'would_create_item' : 'created_item',
+          customOrderItemId: createdItemId,
+          sourceProvider: enriched.sourceProvider || null,
+        });
+      } catch (error) {
+        result.errors += 1;
+        result.details.push({
+          listScrapedItemId: tracked.id,
+          title: tracked.title,
+          mediaType: tracked.mediaType,
+          outcome: 'error',
+          error: error.message,
+        });
+      }
+    }
+
+    const remainingUnresolved = result.details
+      .filter((entry) => entry.outcome === 'still_unresolved')
+      .map((entry) => ({ sourceProvider: entry.sourceProvider, reason: 'no_library_match' }));
+    result.unresolvedSummary = this.summarizeUnresolved(remainingUnresolved);
+
+    return result;
+  }
+
+  normalizeMaybeNumber(value) {
+    if (value === null || value === undefined || value === '') {
+      return null;
+    }
+
+    const parsed = parseInt(value, 10);
+    return Number.isInteger(parsed) ? parsed : null;
+  }
+
   async checkDuplicate(customOrderId, enrichedItem) {
     const mediaType = enrichedItem.mediaType;
 
     if (mediaType === 'movie') {
+      if (enrichedItem.movieId) {
+        return await prisma.customOrderItem.findFirst({
+          where: { customOrderId, movieId: parseInt(enrichedItem.movieId) }
+        });
+      }
+
       if (enrichedItem.plexKey) {
         return await prisma.customOrderItem.findFirst({
           where: { customOrderId, plexKey: enrichedItem.plexKey }
         });
       }
-      return await prisma.customOrderItem.findFirst({
-        where: { customOrderId, mediaType: 'movie', title: enrichedItem.title }
-      });
+
+      if (enrichedItem.title) {
+        const normalizedTitle = normalizeTitleForExactMatch(enrichedItem.title);
+        const year = this.normalizeMaybeNumber(enrichedItem.tvdbYear);
+        const movieCandidates = await prisma.customOrderItem.findMany({
+          where: {
+            customOrderId,
+            mediaType: 'movie',
+          },
+          select: {
+            id: true,
+            title: true,
+            tvdbYear: true,
+            sourceProvider: true,
+          }
+        });
+
+        const exactTitleMatches = movieCandidates.filter((candidate) =>
+          normalizeTitleForExactMatch(candidate.title || '') === normalizedTitle
+        );
+
+        if (year != null) {
+          const yearMatches = exactTitleMatches.filter((candidate) => this.normalizeMaybeNumber(candidate.tvdbYear) === year);
+          if (yearMatches.length > 0) {
+            if (enrichedItem.sourceProvider === 'arr') {
+              return yearMatches.find((candidate) => candidate.sourceProvider === 'arr') || yearMatches[0];
+            }
+            return yearMatches[0];
+          }
+        }
+
+        if (exactTitleMatches.length > 0) {
+          if (enrichedItem.sourceProvider === 'arr') {
+            return exactTitleMatches.find((candidate) => candidate.sourceProvider === 'arr') || exactTitleMatches[0];
+          }
+          return exactTitleMatches[0];
+        }
+      }
+
+      return null;
     }
 
     if (mediaType === 'episode') {
+      if (enrichedItem.episodeId) {
+        return await prisma.customOrderItem.findFirst({
+          where: { customOrderId, episodeId: parseInt(enrichedItem.episodeId) }
+        });
+      }
+
       if (enrichedItem.plexKey) {
         return await prisma.customOrderItem.findFirst({
           where: { customOrderId, plexKey: enrichedItem.plexKey }
         });
       }
-      return await prisma.customOrderItem.findFirst({
-        where: {
-          customOrderId,
-          mediaType: 'episode',
-          seriesTitle: enrichedItem.seriesTitle,
-          seasonNumber: enrichedItem.seasonNumber,
-          episodeNumber: enrichedItem.episodeNumber
+
+      const seasonNumber = this.normalizeMaybeNumber(enrichedItem.seasonNumber);
+      const episodeNumber = this.normalizeMaybeNumber(enrichedItem.episodeNumber);
+      if (enrichedItem.seriesTitle && seasonNumber != null && episodeNumber != null) {
+        const normalizedSeries = normalizeTitleForExactMatch(enrichedItem.seriesTitle);
+        const episodeCandidates = await prisma.customOrderItem.findMany({
+          where: {
+            customOrderId,
+            mediaType: 'episode',
+            seasonNumber,
+            episodeNumber,
+          },
+          select: {
+            id: true,
+            seriesTitle: true,
+            sourceProvider: true,
+          }
+        });
+
+        const exactSeriesMatches = episodeCandidates.filter((candidate) =>
+          normalizeTitleForExactMatch(candidate.seriesTitle || '') === normalizedSeries
+        );
+
+        if (exactSeriesMatches.length > 0) {
+          if (enrichedItem.sourceProvider === 'arr') {
+            return exactSeriesMatches.find((candidate) => candidate.sourceProvider === 'arr') || exactSeriesMatches[0];
+          }
+          return exactSeriesMatches[0];
         }
-      });
+      }
+
+      return null;
     }
 
     if (mediaType === 'comic') {

@@ -61,6 +61,10 @@ function createBulkOperationsRoutes(prisma, services) {
       // Game fields
       gameTitle,
       gameId,
+      // ARR linkage fields
+      movieId,
+      episodeId,
+      sourceProvider,
       // Reference fields
       bookId,
       // Suborder fields
@@ -111,6 +115,9 @@ function createBulkOperationsRoutes(prisma, services) {
       let finalSeriesTitle = seriesTitle || null;
       let finalSeasonNumber = seasonNumber !== undefined ? parseInt(seasonNumber) : null;
       let finalEpisodeNumber = episodeNumber !== undefined ? parseInt(episodeNumber) : null;
+      let finalMovieId = movieId !== undefined && movieId !== null && movieId !== '' ? parseInt(movieId) : null;
+      let finalEpisodeId = episodeId !== undefined && episodeId !== null && episodeId !== '' ? parseInt(episodeId) : null;
+      let finalSourceProvider = sourceProvider || (finalMovieId || finalEpisodeId ? 'arr' : (finalPlexKey ? 'plex' : null));
 
       if (
         mediaType === 'episode' &&
@@ -144,6 +151,55 @@ function createBulkOperationsRoutes(prisma, services) {
           }
         } catch (plexLookupError) {
           console.warn(`Failed Plex episode resolution for ${finalSeriesTitle} S${finalSeasonNumber}E${finalEpisodeNumber}:`, plexLookupError.message);
+        }
+      }
+
+      if (mediaType === 'episode' && !finalPlexKey && !finalEpisodeId && finalSeriesTitle && Number.isInteger(finalSeasonNumber) && Number.isInteger(finalEpisodeNumber)) {
+        const arrEpisodeMatches = await prisma.episode.findMany({
+          where: {
+            removed: false,
+            season: {
+              seasonNumber: finalSeasonNumber,
+              removed: false,
+              show: {
+                removed: false,
+                title: { equals: finalSeriesTitle, mode: 'insensitive' }
+              }
+            },
+            episodeNumber: finalEpisodeNumber
+          },
+          include: {
+            season: {
+              include: { show: true }
+            }
+          }
+        });
+
+        if (arrEpisodeMatches.length > 0) {
+          const arrEpisode = arrEpisodeMatches[0];
+          finalEpisodeId = arrEpisode.id;
+          finalTitle = arrEpisode.title || finalTitle;
+          finalSeriesTitle = arrEpisode.season?.show?.title || finalSeriesTitle;
+          finalSourceProvider = 'arr';
+          console.log(`Resolved bulk episode to ARR metadata: ${finalSeriesTitle} S${finalSeasonNumber}E${finalEpisodeNumber} -> ${finalTitle} (episodeId=${finalEpisodeId})`);
+        }
+      }
+
+      if (mediaType === 'movie' && !finalPlexKey && !finalMovieId && finalTitle) {
+        const arrMovieMatches = await prisma.movie.findMany({
+          where: {
+            removed: false,
+            title: { equals: finalTitle, mode: 'insensitive' }
+          },
+          orderBy: { id: 'desc' }
+        });
+
+        if (arrMovieMatches.length > 0) {
+          const arrMovie = arrMovieMatches[0];
+          finalMovieId = arrMovie.id;
+          finalTitle = arrMovie.title || finalTitle;
+          finalSourceProvider = 'arr';
+          console.log(`Resolved bulk movie to ARR metadata: ${finalTitle} (movieId=${finalMovieId})`);
         }
       }
 
@@ -221,6 +277,22 @@ function createBulkOperationsRoutes(prisma, services) {
             referencedCustomOrderId: parseInt(referencedCustomOrderId)
           }
         });
+      } else if (mediaType === 'movie' && finalMovieId) {
+        existingItem = await prisma.customOrderItem.findFirst({
+          where: {
+            customOrderId: parseInt(id),
+            mediaType: 'movie',
+            movieId: finalMovieId
+          }
+        });
+      } else if (mediaType === 'episode' && finalEpisodeId) {
+        existingItem = await prisma.customOrderItem.findFirst({
+          where: {
+            customOrderId: parseInt(id),
+            mediaType: 'episode',
+            episodeId: finalEpisodeId
+          }
+        });
       } else {
         existingItem = await prisma.customOrderItem.findFirst({
           where: {
@@ -273,8 +345,11 @@ function createBulkOperationsRoutes(prisma, services) {
         data: {
           customOrderId: parseInt(id),
           mediaType,
+          sourceProvider: finalSourceProvider,
           plexKey: mediaType === 'episode' ? finalPlexKey : (plexKey || null),
-          title: mediaType === 'episode' ? finalTitle : title,
+          movieId: mediaType === 'movie' ? finalMovieId : null,
+          episodeId: mediaType === 'episode' ? finalEpisodeId : null,
+          title: (mediaType === 'episode' || mediaType === 'movie') ? finalTitle : title,
           seasonNumber: mediaType === 'episode' ? finalSeasonNumber : (seasonNumber !== undefined ? parseInt(seasonNumber) : null),
           episodeNumber: mediaType === 'episode' ? finalEpisodeNumber : (episodeNumber !== undefined ? parseInt(episodeNumber) : null),
           seriesTitle: mediaType === 'episode' ? finalSeriesTitle : (seriesTitle || null),

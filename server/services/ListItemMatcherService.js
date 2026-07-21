@@ -2,6 +2,7 @@ const prisma = require('../prismaClient');
 const cheerio = require('cheerio');
 const openLibraryService = require('../openLibraryService');
 const BookService = require('./BookService');
+const settingsService = require('../settingsService');
 const { normalizeTitleForExactMatch } = require('../utils/titleMatching');
 
 class ListItemMatcherService {
@@ -66,15 +67,33 @@ class ListItemMatcherService {
   }
 
   /**
-   * Match against Plex movies, then fall back to TVDB
+   * Match against the active library provider (ARR/Plex), then fall back to TVDB.
    */
   async matchMovie(title, year, itemUrl) {
-    // Try Plex first
+    const provider = await this.getLibraryProvider();
+
+    if (provider === 'arr') {
+      const arrMovie = await this.searchArrMovie(title, year);
+      if (arrMovie) {
+        return {
+          mediaType: 'movie',
+          title: arrMovie.title,
+          sourceProvider: 'arr',
+          movieId: arrMovie.id,
+          plexKey: null,
+          originalArtworkUrl: arrMovie.posterUrl || arrMovie.fanartUrl || null,
+          tvdbYear: arrMovie.year || null,
+          isFromTvdbOnly: false
+        };
+      }
+    }
+
     const plexMovie = await this.searchPlexMovie(title, year);
     if (plexMovie) {
       return {
         mediaType: 'movie',
         title: plexMovie.title,
+        sourceProvider: 'plex',
         plexKey: plexMovie.ratingKey,
         originalArtworkUrl: plexMovie.thumb || null,
         tvdbYear: plexMovie.year || null
@@ -117,16 +136,53 @@ class ListItemMatcherService {
   }
 
   /**
-   * Match against Plex TV shows/episodes, then fall back to TVDB
+   * Match against the active library provider (ARR/Plex), then fall back to TVDB.
    */
   async matchEpisode(title, year, itemUrl, scrapedItem = {}) {
+    const provider = await this.getLibraryProvider();
     const seriesTitle = scrapedItem.seriesTitle || title;
     const seasonNumber = scrapedItem.seasonNumber;
     const episodeNumber = scrapedItem.episodeNumber;
 
     console.log(`[ListSync] matchEpisode: seriesTitle="${seriesTitle}" S${seasonNumber}E${episodeNumber} year=${year}`);
 
-    // If we have season/episode numbers, try to find the specific episode in Plex
+    if (provider === 'arr') {
+      if (seasonNumber != null && episodeNumber != null) {
+        const arrEpisode = await this.searchArrEpisode(seriesTitle, seasonNumber, episodeNumber);
+        if (arrEpisode) {
+          return {
+            mediaType: 'episode',
+            title: arrEpisode.title || scrapedItem.title || title,
+            sourceProvider: 'arr',
+            episodeId: arrEpisode.id,
+            seriesTitle: arrEpisode.season?.show?.title || seriesTitle,
+            seasonNumber: arrEpisode.season?.seasonNumber ?? seasonNumber,
+            episodeNumber: arrEpisode.episodeNumber ?? episodeNumber,
+            plexKey: null,
+            originalArtworkUrl: arrEpisode.season?.show?.posterUrl || arrEpisode.season?.show?.fanartUrl || null,
+            isFromTvdbOnly: false
+          };
+        }
+      }
+
+      const arrShow = await this.searchArrShow(seriesTitle, year);
+      if (arrShow) {
+        return {
+          mediaType: 'episode',
+          title: scrapedItem.title || title,
+          sourceProvider: 'arr',
+          seriesTitle: arrShow.title,
+          seasonNumber: seasonNumber ?? null,
+          episodeNumber: episodeNumber ?? null,
+          plexKey: null,
+          plexShowFound: true,
+          originalArtworkUrl: arrShow.posterUrl || arrShow.fanartUrl || null,
+          isFromTvdbOnly: false
+        };
+      }
+    }
+
+    // If we have season/episode numbers, try to find the specific episode in Plex.
     if (seasonNumber != null && episodeNumber != null) {
       const plexEpisode = await this.searchPlexEpisode(seriesTitle, seasonNumber, episodeNumber);
       if (plexEpisode) {
@@ -134,6 +190,7 @@ class ListItemMatcherService {
         return {
           mediaType: 'episode',
           title: plexEpisode.title,
+          sourceProvider: 'plex',
           seriesTitle: plexEpisode.grandparentTitle || plexEpisode.season?.show?.title || seriesTitle,
           seasonNumber: plexEpisode.seasonIndex ?? seasonNumber,
           episodeNumber: plexEpisode.index ?? episodeNumber,
@@ -152,6 +209,7 @@ class ListItemMatcherService {
       return {
         mediaType: 'episode',
         title: scrapedItem.title || plexShow.title,
+        sourceProvider: 'plex',
         seriesTitle: plexShow.title,
         seasonNumber: seasonNumber ?? null,
         episodeNumber: episodeNumber ?? null,
@@ -198,6 +256,82 @@ class ListItemMatcherService {
       plexKey: null,
       isFromTvdbOnly: true
     };
+  }
+
+  async getLibraryProvider() {
+    try {
+      const settings = await settingsService.getSettings();
+      return settings?.libraryProvider === 'arr' ? 'arr' : 'plex';
+    } catch (error) {
+      console.warn('[ListSync] Failed to read libraryProvider setting, defaulting to plex:', error.message);
+      return 'plex';
+    }
+  }
+
+  async searchArrMovie(title, year) {
+    const normalizedTitle = normalizeTitleForExactMatch(title);
+    const movies = await prisma.movie.findMany({
+      where: {
+        removed: false,
+        ...(year ? { year: parseInt(year) } : {})
+      },
+      select: {
+        id: true,
+        title: true,
+        year: true,
+        posterUrl: true,
+        fanartUrl: true
+      }
+    });
+
+    return movies.find((movie) => normalizeTitleForExactMatch(movie.title || '') === normalizedTitle) || null;
+  }
+
+  async searchArrShow(title, year) {
+    const normalizedTitle = normalizeTitleForExactMatch(title);
+    const shows = await prisma.show.findMany({
+      where: {
+        removed: false,
+        ...(year ? { year: parseInt(year) } : {})
+      },
+      select: {
+        id: true,
+        title: true,
+        year: true,
+        posterUrl: true,
+        fanartUrl: true
+      }
+    });
+
+    return shows.find((show) => normalizeTitleForExactMatch(show.title || '') === normalizedTitle) || null;
+  }
+
+  async searchArrEpisode(seriesTitle, seasonNumber, episodeNumber) {
+    const normalizedSeriesTitle = normalizeTitleForExactMatch(seriesTitle);
+    const episodes = await prisma.episode.findMany({
+      where: {
+        removed: false,
+        hasFile: true,
+        episodeNumber: parseInt(episodeNumber),
+        season: {
+          seasonNumber: parseInt(seasonNumber),
+          removed: false,
+          show: { removed: false }
+        }
+      },
+      include: {
+        season: {
+          include: {
+            show: true
+          }
+        }
+      }
+    });
+
+    return episodes.find((episode) => {
+      const candidateTitle = normalizeTitleForExactMatch(episode.season?.show?.title || '');
+      return candidateTitle === normalizedSeriesTitle;
+    }) || null;
   }
 
   /**

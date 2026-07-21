@@ -393,6 +393,56 @@ function createItemManagementRoutes(prisma, services) {
               };
               console.warn(`No Plex episode match found for ${lookupSeriesTitle} S${lookupSeasonNumber}E${lookupEpisodeNumber}; keeping existing title/plexKey`);
             }
+
+            if (!updateData.plexKey) {
+              const arrEpisode = await prisma.episode.findFirst({
+                where: {
+                  removed: false,
+                  season: {
+                    seasonNumber: lookupSeasonNumber,
+                    removed: false,
+                    show: {
+                      removed: false,
+                      title: { equals: lookupSeriesTitle, mode: 'insensitive' }
+                    }
+                  },
+                  episodeNumber: lookupEpisodeNumber
+                },
+                include: {
+                  season: {
+                    include: { show: true }
+                  }
+                }
+              });
+
+              if (arrEpisode) {
+                updateData.title = arrEpisode.title || updateData.title;
+                updateData.episodeId = arrEpisode.id;
+                updateData.sourceProvider = 'arr';
+                updateData.plexKey = null;
+
+                // Force artwork refresh to match the new ARR episode mapping.
+                updateData.localArtworkPath = null;
+                updateData.originalArtworkUrl = null;
+                updateData.artworkLastCached = null;
+                updateData.artworkMimeType = null;
+
+                episodeResolutionDebug = {
+                  requested: {
+                    seriesTitle: lookupSeriesTitle,
+                    seasonNumber: lookupSeasonNumber,
+                    episodeNumber: lookupEpisodeNumber
+                  },
+                  resolved: {
+                    title: arrEpisode.title || null,
+                    episodeId: arrEpisode.id,
+                    showTitle: arrEpisode.season?.show?.title || null
+                  },
+                  matched: true,
+                  provider: 'arr'
+                };
+              }
+            }
           }
         }
       }

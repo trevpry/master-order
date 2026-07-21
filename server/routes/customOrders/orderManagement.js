@@ -95,7 +95,7 @@ function collectItemsForArtworkHydration(items, collector = []) {
   return collector;
 }
 
-async function hydratePlexArtworkHintsForOrder(prisma, order) {
+async function hydrateLibraryArtworkHintsForOrder(prisma, order) {
   if (!order?.items?.length) {
     return;
   }
@@ -103,9 +103,25 @@ async function hydratePlexArtworkHintsForOrder(prisma, order) {
   const allItems = collectItemsForArtworkHydration(order.items, []);
   const episodeKeys = [];
   const movieKeys = [];
+  const arrMovieIds = [];
+  const arrEpisodeIds = [];
 
   for (const item of allItems) {
-    if (!item?.plexKey || item.localArtworkPath || item.originalArtworkUrl || item.thumb || item.art) {
+    if (item?.localArtworkPath || item?.originalArtworkUrl || item?.thumb || item?.art) {
+      continue;
+    }
+
+    if (item.episodeId && item.mediaType === 'episode') {
+      arrEpisodeIds.push(item.episodeId);
+      continue;
+    }
+
+    if (item.movieId && item.mediaType === 'movie') {
+      arrMovieIds.push(item.movieId);
+      continue;
+    }
+
+    if (!item?.plexKey) {
       continue;
     }
 
@@ -118,8 +134,10 @@ async function hydratePlexArtworkHintsForOrder(prisma, order) {
 
   const uniqueEpisodeKeys = [...new Set(episodeKeys)];
   const uniqueMovieKeys = [...new Set(movieKeys)];
+  const uniqueArrMovieIds = [...new Set(arrMovieIds)];
+  const uniqueArrEpisodeIds = [...new Set(arrEpisodeIds)];
 
-  const [episodes, movies] = await Promise.all([
+  const [episodes, movies, arrMovies, arrEpisodes] = await Promise.all([
     uniqueEpisodeKeys.length > 0
       ? prisma.plexEpisode.findMany({
           where: { ratingKey: { in: uniqueEpisodeKeys } },
@@ -141,13 +159,65 @@ async function hydratePlexArtworkHintsForOrder(prisma, order) {
           }
         })
       : Promise.resolve([])
+    ,
+    uniqueArrMovieIds.length > 0
+      ? prisma.movie.findMany({
+          where: { id: { in: uniqueArrMovieIds } },
+          select: {
+            id: true,
+            posterUrl: true,
+            fanartUrl: true
+          }
+        })
+      : Promise.resolve([]),
+    uniqueArrEpisodeIds.length > 0
+      ? prisma.episode.findMany({
+          where: { id: { in: uniqueArrEpisodeIds } },
+          include: {
+            season: {
+              include: {
+                show: {
+                  select: {
+                    posterUrl: true,
+                    fanartUrl: true
+                  }
+                }
+              }
+            }
+          }
+        })
+      : Promise.resolve([])
   ]);
 
   const episodeByKey = new Map(episodes.map(ep => [ep.ratingKey, ep]));
   const movieByKey = new Map(movies.map(movie => [movie.ratingKey, movie]));
+  const arrMovieById = new Map(arrMovies.map(movie => [movie.id, movie]));
+  const arrEpisodeById = new Map(arrEpisodes.map(episode => [episode.id, episode]));
 
   for (const item of allItems) {
-    if (!item?.plexKey || item.localArtworkPath || item.originalArtworkUrl || item.thumb || item.art) {
+    if (item?.localArtworkPath || item?.originalArtworkUrl || item?.thumb || item?.art) {
+      continue;
+    }
+
+    if (item.mediaType === 'episode' && item.episodeId) {
+      const episode = arrEpisodeById.get(item.episodeId);
+      if (episode) {
+        item.thumb = episode.season?.show?.posterUrl || null;
+        item.art = episode.season?.show?.fanartUrl || null;
+      }
+      continue;
+    }
+
+    if (item.mediaType === 'movie' && item.movieId) {
+      const movie = arrMovieById.get(item.movieId);
+      if (movie) {
+        item.thumb = movie.posterUrl || null;
+        item.art = movie.fanartUrl || null;
+      }
+      continue;
+    }
+
+    if (!item?.plexKey) {
       continue;
     }
 
@@ -260,7 +330,7 @@ function createOrderManagementRoutes(prisma, services) {
       
       // Sync sub-order items for all parent orders (ensure consistency)
       for (const order of customOrders) {
-        await hydratePlexArtworkHintsForOrder(prisma, order);
+        await hydrateLibraryArtworkHintsForOrder(prisma, order);
         logOrderSubOrderThumbnailState(order);
 
         if (order.subOrders.length > 0) {
@@ -456,13 +526,13 @@ function createOrderManagementRoutes(prisma, services) {
           }
         });
 
-        await hydratePlexArtworkHintsForOrder(prisma, updatedOrder);
+        await hydrateLibraryArtworkHintsForOrder(prisma, updatedOrder);
 
         logOrderSubOrderThumbnailState(updatedOrder);
         
         res.json(updatedOrder);
       } else {
-        await hydratePlexArtworkHintsForOrder(prisma, customOrder);
+        await hydrateLibraryArtworkHintsForOrder(prisma, customOrder);
         logOrderSubOrderThumbnailState(customOrder);
         res.json(customOrder);
       }

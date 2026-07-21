@@ -155,6 +155,7 @@ model Movie {
   probeError         String?
 
   watchProgress      WatchProgress[]
+  customOrderItems   CustomOrderItem[]
 
   @@index([tmdbId])
   @@index([title])
@@ -171,6 +172,7 @@ model Show {
   overview         String?
   network          String?
   genres           String? // JSON array
+  collections      String? // JSON array of Sonarr tag labels used as collection groups
   status           String?
   posterUrl        String?
   fanartUrl        String?
@@ -244,6 +246,7 @@ model Episode {
 
   season Season @relation(fields: [seasonId], references: [id])
   watchProgress WatchProgress[]
+  customOrderItems CustomOrderItem[]
 
   @@index([seasonId, episodeNumber])
 }
@@ -331,7 +334,10 @@ model CustomOrderItem {
   id                      Int               @id @default(autoincrement())
   customOrderId           Int
   mediaType               String
+  sourceProvider          String? // "plex" | "arr" | null for non-library content
   plexKey                 String?
+  movieId                 Int?
+  episodeId               Int?
   title                   String
   seasonNumber            Int?
   episodeNumber           Int?
@@ -403,8 +409,13 @@ model CustomOrderItem {
   containedStories        CustomOrderItem[] @relation("StoryInBook")
   book                    Book?             @relation(fields: [bookId], references: [id])
   game                    VideoGame?        @relation(fields: [gameId], references: [id])
+  movie                   Movie?            @relation(fields: [movieId], references: [id])
+  episode                 Episode?          @relation(fields: [episodeId], references: [id])
   watchLogs               WatchLog[]
   listScrapedItems        ListScrapedItem[]
+
+  @@index([movieId])
+  @@index([episodeId])
 }
 
 model PlexLibrarySection {

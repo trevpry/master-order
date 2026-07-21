@@ -151,9 +151,11 @@ Example arr-backed `PLAY_MOVIE`:
     "duration": 2400,
     "localArtworkPath": "/path/to/artwork.jpg",
     "artworkUrl": "http://localhost:3000/api/artwork/artwork-filename.jpg",
-    "streamUrl": "http://plex-server:32400/video/:/transcode/...",
-    "ratingKey": "54321",
-    "plexId": "54321",
+    "streamUrl": "http://localhost:3001/api/stream/episode/42/direct",
+    "ratingKey": "episode-42",
+    "plexId": null,
+    "libraryProvider": "arr",
+    "mediaId": 42,
     "webUrl": "https://example.com/video-url",
     "customOrderId": 456,
     "customOrderItemId": 789,
@@ -169,6 +171,13 @@ Example arr-backed `PLAY_MOVIE`:
   }
 }
 ```
+
+Notes:
+- For Plex-backed custom order items: `libraryProvider` is `plex` (or omitted), `plexId`
+  contains the Plex rating key, and playback may use Plex URLs.
+- For ARR-backed custom order movie/episode items: `libraryProvider` is `arr`, `mediaId`
+  is the local `Movie.id`/`Episode.id`, `plexId` is `null`, and `streamUrl` points to
+  `/api/stream/{movie|episode}/{mediaId}/direct`.
 
 ---
 

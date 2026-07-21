@@ -397,7 +397,67 @@ async function fetchMediaDetailsFromPlex(plexKey, mediaType, customOrderItem, ba
       return mockMetadata;
     }
     
-    // For movies and episodes, fetch from database instead of Plex API
+    // ARR-linked custom order items can be served directly via the local stream service.
+    if (mediaType === 'movie' && customOrderItem.movieId) {
+      const movie = await prisma.movie.findUnique({ where: { id: customOrderItem.movieId } });
+      if (movie) {
+        return {
+          ratingKey: `movie-${movie.id}`,
+          title: movie.title,
+          type: 'movie',
+          year: movie.year,
+          summary: movie.overview || '',
+          thumb: movie.posterUrl || null,
+          art: movie.fanartUrl || null,
+          duration: Math.round(((movie.durationSeconds ?? (movie.runtime ? movie.runtime * 60 : 0)) || 0) * 1000),
+          orderType: 'CUSTOM_ORDER',
+          customOrderMediaType: mediaType,
+          libraryProvider: 'arr',
+          mediaId: movie.id,
+          streamUrl: `${baseUrl}/api/stream/movie/${movie.id}/direct`
+        };
+      }
+    }
+
+    if (mediaType === 'episode' && customOrderItem.episodeId) {
+      const episode = await prisma.episode.findUnique({
+        where: { id: customOrderItem.episodeId },
+        include: {
+          season: {
+            include: { show: true }
+          }
+        }
+      });
+
+      if (episode?.season?.show) {
+        const show = episode.season.show;
+        return {
+          ratingKey: `episode-${episode.id}`,
+          episodeRatingKey: `episode-${episode.id}`,
+          title: show.title,
+          type: 'episode',
+          episodeTitle: episode.title || customOrderItem.title,
+          summary: show.overview || '',
+          episodeSummary: episode.overview || '',
+          thumb: show.posterUrl || null,
+          art: show.fanartUrl || null,
+          grandparentTitle: show.title,
+          seasonNumber: episode.season.seasonNumber,
+          episodeNumber: episode.episodeNumber,
+          currentSeason: episode.season.seasonNumber,
+          currentEpisode: episode.episodeNumber,
+          nextEpisodeTitle: episode.title || customOrderItem.title,
+          duration: Math.round(((episode.durationSeconds ?? (episode.runtime ? episode.runtime * 60 : 0)) || 0) * 1000),
+          orderType: 'CUSTOM_ORDER',
+          customOrderMediaType: mediaType,
+          libraryProvider: 'arr',
+          mediaId: episode.id,
+          streamUrl: `${baseUrl}/api/stream/episode/${episode.id}/direct`
+        };
+      }
+    }
+
+    // For Plex-backed movies and episodes, fetch metadata from the local Plex mirror.
     const metadata = await plexDb.getItemMetadata(plexKey, mediaType);
     
     if (!metadata) {
@@ -425,6 +485,40 @@ async function markCustomOrderItemAsWatched(itemIdentifier) {
       // Numeric ID - use directly
       actualItemId = parseInt(itemIdentifier);
     } else {
+      const arrMovieMatch = String(itemIdentifier).match(/^movie-(\d+)$/);
+      const arrEpisodeMatch = String(itemIdentifier).match(/^episode-(\d+)$/);
+
+      if (arrMovieMatch) {
+        const movieId = parseInt(arrMovieMatch[1]);
+        const item = await prisma.customOrderItem.findFirst({
+          where: {
+            mediaType: 'movie',
+            movieId,
+            isWatched: false
+          },
+          orderBy: { updatedAt: 'desc' }
+        });
+
+        if (item) {
+          actualItemId = item.id;
+        }
+      } else if (arrEpisodeMatch) {
+        const episodeId = parseInt(arrEpisodeMatch[1]);
+        const item = await prisma.customOrderItem.findFirst({
+          where: {
+            mediaType: 'episode',
+            episodeId,
+            isWatched: false
+          },
+          orderBy: { updatedAt: 'desc' }
+        });
+
+        if (item) {
+          actualItemId = item.id;
+        }
+      }
+
+      if (!actualItemId) {
       // Non-numeric identifier - look up by plexKey
       const item = await prisma.customOrderItem.findFirst({
         where: { plexKey: String(itemIdentifier) }
@@ -437,6 +531,7 @@ async function markCustomOrderItemAsWatched(itemIdentifier) {
       
       actualItemId = item.id;
       console.log(`🔍 Resolved non-numeric itemId '${itemIdentifier}' to database ID ${actualItemId}`);
+      }
     }
     
     await prisma.customOrderItem.update({
@@ -722,7 +817,7 @@ async function getNextCustomOrder(req = null, mediaTypeLimiters = null) {
       fullMediaDetails.parentCustomOrderIcon = finalParentOrder.icon;
       fullMediaDetails.isFromSubOrder = true;
     }// If this is a TV episode, enhance with TVDB artwork and episode details
-    if (nextItem.mediaType === 'episode' || fullMediaDetails.type === 'episode') {
+    if ((nextItem.mediaType === 'episode' || fullMediaDetails.type === 'episode') && fullMediaDetails.libraryProvider !== 'arr') {
       console.log(`Enhancing TV episode "${fullMediaDetails.title}" from series "${fullMediaDetails.grandparentTitle}" with TVDB data`);
       
       // For TV episodes, we need to get the series information to enhance with TVDB

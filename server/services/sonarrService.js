@@ -84,6 +84,11 @@ class SonarrService {
     return this.makeRequest('/api/v3/series');
   }
 
+  /** Returns Sonarr tag definitions so series tag IDs can be mapped to names. */
+  async getTags() {
+    return this.makeRequest('/api/v3/tag');
+  }
+
   async getSeriesById(sonarrSeriesId) {
     return this.makeRequest(`/api/v3/series/${sonarrSeriesId}`);
   }

@@ -19,8 +19,14 @@ class SonarrSyncService {
     return this.sonarrService.testConnection();
   }
 
-  mapShowToRow(sonarrSeries) {
+  mapShowToRow(sonarrSeries, tagNameById = new Map()) {
     const images = Array.isArray(sonarrSeries.images) ? sonarrSeries.images : [];
+    const seriesTagIds = Array.isArray(sonarrSeries.tags) ? sonarrSeries.tags : [];
+    const collectionLabels = [...new Set(
+      seriesTagIds
+        .map((tagId) => tagNameById.get(tagId))
+        .filter((name) => typeof name === 'string' && name.trim() !== '')
+    )];
 
     return {
       sonarrId: sonarrSeries.id,
@@ -32,6 +38,7 @@ class SonarrSyncService {
       overview: sonarrSeries.overview ?? null,
       network: sonarrSeries.network ?? null,
       genres: Array.isArray(sonarrSeries.genres) ? JSON.stringify(sonarrSeries.genres) : null,
+      collections: collectionLabels.length > 0 ? JSON.stringify(collectionLabels) : null,
       status: sonarrSeries.status ?? null,
       posterUrl: images.find((img) => img.coverType === 'poster')?.remoteUrl ?? null,
       fanartUrl: images.find((img) => img.coverType === 'fanart')?.remoteUrl ?? null,
@@ -158,6 +165,18 @@ class SonarrSyncService {
 
     try {
       const seriesList = await this.sonarrService.getSeries();
+      let tagNameById = new Map();
+      try {
+        const tags = await this.sonarrService.getTags();
+        tagNameById = new Map(
+          (tags || [])
+            .filter((tag) => tag && tag.id != null && typeof tag.label === 'string')
+            .map((tag) => [tag.id, tag.label])
+        );
+      } catch (tagError) {
+        console.warn('Failed to fetch Sonarr tags for TV collections mapping:', tagError.message);
+      }
+
       const totalItems = seriesList.length;
 
       let added = 0;
@@ -166,7 +185,7 @@ class SonarrSyncService {
 
       for (const sonarrSeries of seriesList) {
         seenSonarrIds.push(sonarrSeries.id);
-        const data = this.mapShowToRow(sonarrSeries);
+        const data = this.mapShowToRow(sonarrSeries, tagNameById);
 
         const existingShow = await prisma.show.findUnique({ where: { sonarrId: sonarrSeries.id } });
         const show = await prisma.show.upsert({

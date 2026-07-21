@@ -218,6 +218,29 @@ router.post('/configs/:id/check', asyncHandler(async (req, res) => {
   sendSuccess(res, results);
 }));
 
+// POST /api/list-scraping/configs/:id/reprocess-unresolved
+// Re-run matcher + provider resolution on unresolved tracked entries.
+// Defaults to dry-run mode unless dryRun=false is explicitly passed.
+router.post('/configs/:id/reprocess-unresolved', asyncHandler(async (req, res) => {
+  const configId = parseInt(req.params.id);
+  const config = await prisma.listScrapeConfig.findUnique({ where: { id: configId } });
+  if (!config) return sendNotFound(res, 'Config not found');
+
+  const dryRun = req.body?.dryRun !== false;
+  const parsedLimit = Number.parseInt(req.body?.limit, 10);
+  const limit = Number.isFinite(parsedLimit) ? parsedLimit : 200;
+  const includeAlreadyLinked = req.body?.includeAlreadyLinked === true;
+
+  const matcherService = new ListItemMatcherService(tvdbService);
+  const results = await scraperService.reprocessUnresolved(configId, matcherService, {
+    dryRun,
+    limit,
+    includeAlreadyLinked,
+  });
+
+  sendSuccess(res, results, dryRun ? 'Unresolved reprocess dry-run completed' : 'Unresolved reprocess completed');
+}));
+
 // GET /api/list-scraping/configs/:id/history - Get scraped items history
 router.get('/configs/:id/history', asyncHandler(async (req, res) => {
   const config = await prisma.listScrapeConfig.findUnique({ where: { id: parseInt(req.params.id) } });
@@ -232,6 +255,161 @@ router.get('/configs/:id/history', asyncHandler(async (req, res) => {
   });
 
   sendSuccess(res, { configId: config.id, items });
+}));
+
+// GET /api/list-scraping/configs/:id/diagnostics - Diagnose unresolved/list-link issues
+router.get('/configs/:id/diagnostics', asyncHandler(async (req, res) => {
+  const configId = parseInt(req.params.id);
+  const parsedLimit = parseInt(req.query.limit, 10);
+  const limit = Number.isFinite(parsedLimit) ? Math.min(Math.max(parsedLimit, 1), 500) : 100;
+
+  const config = await prisma.listScrapeConfig.findUnique({
+    where: { id: configId },
+    include: { customOrder: { select: { id: true, name: true } } }
+  });
+
+  if (!config) {
+    return sendNotFound(res, 'Config not found');
+  }
+
+  const [
+    totalTracked,
+    linkedTracked,
+    skippedTracked,
+    unresolvedTracked,
+    orphanedTracked,
+    unresolvedSamples,
+  ] = await Promise.all([
+    prisma.listScrapedItem.count({ where: { listScrapeConfigId: configId } }),
+    prisma.listScrapedItem.count({
+      where: {
+        listScrapeConfigId: configId,
+        customOrderItemId: { not: null }
+      }
+    }),
+    prisma.listScrapedItem.count({
+      where: {
+        listScrapeConfigId: configId,
+        wasSkipped: true
+      }
+    }),
+    prisma.listScrapedItem.count({
+      where: {
+        listScrapeConfigId: configId,
+        notInPlex: true,
+        customOrderItemId: null
+      }
+    }),
+    prisma.listScrapedItem.count({
+      where: {
+        listScrapeConfigId: configId,
+        customOrderItemId: null,
+        wasSkipped: false,
+        notInPlex: false
+      }
+    }),
+    prisma.listScrapedItem.findMany({
+      where: {
+        listScrapeConfigId: configId,
+        notInPlex: true,
+        customOrderItemId: null,
+        mediaType: { in: ['movie', 'episode'] }
+      },
+      orderBy: { position: 'asc' },
+      take: limit,
+      select: {
+        id: true,
+        title: true,
+        mediaType: true,
+        position: true,
+        itemUrl: true,
+        itemYear: true
+      }
+    })
+  ]);
+
+  const matcherService = new ListItemMatcherService(tvdbService);
+  const providerReasonCounts = {};
+  const diagnostics = [];
+
+  const incrementProviderReason = (provider, reason) => {
+    if (!providerReasonCounts[provider]) {
+      providerReasonCounts[provider] = {};
+    }
+    if (!providerReasonCounts[provider][reason]) {
+      providerReasonCounts[provider][reason] = 0;
+    }
+    providerReasonCounts[provider][reason] += 1;
+  };
+
+  for (const sample of unresolvedSamples) {
+    try {
+      const matched = await matcherService.matchItem({
+        title: sample.title,
+        mediaType: sample.mediaType,
+        itemUrl: sample.itemUrl,
+        itemYear: sample.itemYear
+      });
+
+      const enriched = await scraperService.resolvePlexMetadata(matched);
+
+      let provider = enriched.sourceProvider || 'unresolved';
+      if (enriched.movieId || enriched.episodeId) {
+        provider = 'arr';
+      } else if (enriched.plexKey || enriched.plexShowFound) {
+        provider = 'plex';
+      }
+
+      const nowResolvable = !scraperService.isUnresolvedLibraryItem(enriched);
+      const reason = nowResolvable
+        ? 'now_resolvable'
+        : (enriched.isFromTvdbOnly ? 'metadata_only_no_library_match' : 'no_library_match');
+
+      incrementProviderReason(provider, reason);
+      diagnostics.push({
+        id: sample.id,
+        title: sample.title,
+        mediaType: sample.mediaType,
+        position: sample.position,
+        provider,
+        reason,
+        movieId: enriched.movieId || null,
+        episodeId: enriched.episodeId || null,
+        plexKey: enriched.plexKey || null
+      });
+    } catch (error) {
+      incrementProviderReason('error', 'matcher_failed');
+      diagnostics.push({
+        id: sample.id,
+        title: sample.title,
+        mediaType: sample.mediaType,
+        position: sample.position,
+        provider: 'error',
+        reason: 'matcher_failed',
+        error: error.message
+      });
+    }
+  }
+
+  sendSuccess(res, {
+    config: {
+      id: config.id,
+      name: config.name,
+      customOrder: config.customOrder || null,
+      isActive: config.isActive,
+      parserType: config.parserType
+    },
+    counts: {
+      totalTracked,
+      linkedTracked,
+      skippedTracked,
+      unresolvedTracked,
+      orphanedTracked
+    },
+    providerReasonCounts,
+    unresolvedSamplesAnalyzed: diagnostics.length,
+    diagnostics
+  });
 }));
 
 // ─── Legacy order-based routes (backward compat) ───────────────────────

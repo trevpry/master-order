@@ -454,6 +454,44 @@ class ArtworkCacheService {
       
       case 'movie':
       case 'episode':
+        if (item.movieId || item.episodeId) {
+          try {
+            if (item.mediaType === 'movie' && item.movieId) {
+              const movie = await prisma.movie.findUnique({
+                where: { id: item.movieId },
+                select: { posterUrl: true, fanartUrl: true }
+              });
+
+              if (movie?.posterUrl || movie?.fanartUrl) {
+                return movie.posterUrl || movie.fanartUrl;
+              }
+            }
+
+            if (item.mediaType === 'episode' && item.episodeId) {
+              const episode = await prisma.episode.findUnique({
+                where: { id: item.episodeId },
+                include: {
+                  season: {
+                    include: {
+                      show: {
+                        select: { posterUrl: true, fanartUrl: true }
+                      }
+                    }
+                  }
+                }
+              });
+
+              const poster = episode?.season?.show?.posterUrl;
+              const fanart = episode?.season?.show?.fanartUrl;
+              if (poster || fanart) {
+                return poster || fanart;
+              }
+            }
+          } catch (arrArtworkError) {
+            console.warn(`Failed ARR artwork lookup for item ${item.id}:`, arrArtworkError.message);
+          }
+        }
+
         // For Plex items, construct the Plex artwork URL using settings
         try {
           const settings = await settingsService.getSettings();

@@ -110,6 +110,7 @@ function formatAndroidResponse(upNextData, baseUrl) {
 
 function formatAndroidCustomOrderResponse(upNextData, baseUrl) {
   const artworkUrl = getAndroidArtworkUrl(upNextData, baseUrl);
+  const isArrBacked = upNextData.libraryProvider === 'arr';
 
   // For episodes in custom orders, make sure we use the episode rating key
   let episodeRatingKey = upNextData.ratingKey;
@@ -129,7 +130,9 @@ function formatAndroidCustomOrderResponse(upNextData, baseUrl) {
     artworkUrl: artworkUrl || '',
     streamUrl: upNextData.streamUrl || '',
     ratingKey: episodeRatingKey || null,
-    plexId: episodeRatingKey || null,
+    plexId: isArrBacked ? null : (episodeRatingKey || null),
+    libraryProvider: upNextData.libraryProvider || 'plex',
+    mediaId: isArrBacked ? (upNextData.mediaId || null) : null,
     webUrl: upNextData.webUrl || null,
     customOrderId: upNextData.customOrderId || null,
     customOrderItemId: upNextData.customOrderItemId || null,

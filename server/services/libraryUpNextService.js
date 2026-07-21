@@ -1,4 +1,5 @@
 const prisma = require('../prismaClient');
+const settingsService = require('../settingsService');
 
 /**
  * "Up Next" selection for the Radarr/Sonarr-backed library, used when
@@ -28,6 +29,73 @@ function pickRandom(array) {
   return array[Math.floor(Math.random() * array.length)];
 }
 
+function parseJsonArraySetting(rawValue) {
+  if (!rawValue || typeof rawValue !== 'string') {
+    return [];
+  }
+
+  try {
+    const parsed = JSON.parse(rawValue);
+    return Array.isArray(parsed) ? parsed.filter((item) => typeof item === 'string') : [];
+  } catch (error) {
+    return [];
+  }
+}
+
+async function getArrMovieSelectionSettings() {
+  try {
+    const settings = await settingsService.getSettings();
+    return {
+      partiallyWatchedCollectionPercent: Number.isFinite(settings?.partiallyWatchedCollectionPercent)
+        ? settings.partiallyWatchedCollectionPercent
+        : 75,
+      ignoredMovieCollections: parseJsonArraySetting(settings?.ignoredMovieCollections),
+    };
+  } catch (error) {
+    return {
+      partiallyWatchedCollectionPercent: 75,
+      ignoredMovieCollections: [],
+    };
+  }
+}
+
+async function getArrTvSelectionSettings() {
+  try {
+    const settings = await settingsService.getSettings();
+    return {
+      collectionName: settings?.collectionName ? String(settings.collectionName).trim() : '',
+      ignoredTVCollections: parseJsonArraySetting(settings?.ignoredTVCollections),
+    };
+  } catch (error) {
+    return {
+      collectionName: '',
+      ignoredTVCollections: [],
+    };
+  }
+}
+
+function normalizeCollectionName(value) {
+  return (value || '').trim().toLowerCase();
+}
+
+function parseShowCollections(value) {
+  if (!value || typeof value !== 'string') {
+    return [];
+  }
+
+  try {
+    const parsed = JSON.parse(value);
+    if (!Array.isArray(parsed)) {
+      return [];
+    }
+    return parsed
+      .map((entry) => String(entry || '').trim())
+      .filter((entry) => entry.length > 0);
+  } catch (error) {
+    return [];
+  }
+}
+
 async function getCompletedMovieIds() {
   const rows = await prisma.watchProgress.findMany({
     where: { mediaType: 'movie', completed: true },
@@ -46,14 +114,67 @@ async function getCompletedEpisodeIds() {
 
 async function getNextMovieFromLibrary() {
   const movies = await prisma.movie.findMany({ where: { removed: false, hasFile: true } });
+  const { partiallyWatchedCollectionPercent, ignoredMovieCollections } = await getArrMovieSelectionSettings();
 
   if (movies.length === 0) {
     return { message: 'No movies found in library', orderType: 'MOVIES_GENERAL' };
   }
 
+  const ignoredSet = new Set(ignoredMovieCollections.map(normalizeCollectionName));
+  const filteredMovies = ignoredSet.size > 0
+    ? movies.filter((movie) => !ignoredSet.has(normalizeCollectionName(movie.collectionTitle)))
+    : movies;
+
+  const selectionMovies = filteredMovies.length > 0 ? filteredMovies : movies;
+
   const completedIds = await getCompletedMovieIds();
-  const unwatched = movies.filter((movie) => !completedIds.has(movie.id));
-  const pool = unwatched.length > 0 ? unwatched : movies;
+  const unwatched = selectionMovies.filter((movie) => !completedIds.has(movie.id));
+  let pool = unwatched.length > 0 ? unwatched : selectionMovies;
+
+  if (unwatched.length > 0) {
+    const collectionBuckets = new Map();
+
+    for (const movie of selectionMovies) {
+      const collectionName = (movie.collectionTitle || '').trim();
+      if (!collectionName) {
+        continue;
+      }
+
+      if (!collectionBuckets.has(collectionName)) {
+        collectionBuckets.set(collectionName, { watched: [], unwatched: [] });
+      }
+
+      const bucket = collectionBuckets.get(collectionName);
+      if (completedIds.has(movie.id)) {
+        bucket.watched.push(movie);
+      } else {
+        bucket.unwatched.push(movie);
+      }
+    }
+
+    const partiallyWatchedCollections = new Set(
+      [...collectionBuckets.entries()]
+        .filter(([, value]) => value.watched.length > 0 && value.unwatched.length > 0)
+        .map(([name]) => name)
+    );
+
+    const partiallyWatchedCollectionMovies = unwatched.filter((movie) =>
+      movie.collectionTitle && partiallyWatchedCollections.has(movie.collectionTitle)
+    );
+    const otherUnwatchedMovies = unwatched.filter((movie) =>
+      !movie.collectionTitle || !partiallyWatchedCollections.has(movie.collectionTitle)
+    );
+
+    if (partiallyWatchedCollectionMovies.length > 0) {
+      const shouldUsePartial = Math.random() * 100 < partiallyWatchedCollectionPercent;
+      if (shouldUsePartial) {
+        pool = partiallyWatchedCollectionMovies;
+      } else if (otherUnwatchedMovies.length > 0) {
+        pool = otherUnwatchedMovies;
+      }
+    }
+  }
+
   const movie = pickRandom(pool);
 
   const durationMs = Math.round(((movie.durationSeconds ?? (movie.runtime ? movie.runtime * 60 : 0)) || 0) * 1000);
@@ -74,10 +195,13 @@ async function getNextMovieFromLibrary() {
     streamUrl: `${getAppBaseUrl()}/api/stream/movie/${movie.id}/direct`,
     type: 'movie',
     orderType: 'MOVIES_GENERAL',
+    otherCollections: movie.collectionTitle ? [movie.collectionTitle] : [],
   };
 }
 
 async function getNextEpisodeFromLibrary() {
+  const { collectionName, ignoredTVCollections } = await getArrTvSelectionSettings();
+
   const shows = await prisma.show.findMany({
     where: { removed: false },
     include: {
@@ -91,10 +215,32 @@ async function getNextEpisodeFromLibrary() {
     },
   });
 
+  const ignoredSet = new Set(ignoredTVCollections.map(normalizeCollectionName));
+  const normalizedSelectedCollection = normalizeCollectionName(collectionName);
+
+  const filteredShows = shows.filter((show) => {
+    const showCollections = parseShowCollections(show.collections);
+
+    if (ignoredSet.size > 0) {
+      const hasIgnoredCollection = showCollections.some((collection) => ignoredSet.has(normalizeCollectionName(collection)));
+      if (hasIgnoredCollection) {
+        return false;
+      }
+    }
+
+    if (normalizedSelectedCollection) {
+      return showCollections.some((collection) => normalizeCollectionName(collection) === normalizedSelectedCollection);
+    }
+
+    return true;
+  });
+
+  const sourceShows = filteredShows.length > 0 ? filteredShows : shows;
+
   const completedEpisodeIds = await getCompletedEpisodeIds();
 
   const candidates = [];
-  for (const show of shows) {
+  for (const show of sourceShows) {
     for (const season of show.seasons) {
       const nextEpisode = season.episodes.find((episode) => !completedEpisodeIds.has(episode.id));
       if (nextEpisode) {
@@ -110,7 +256,7 @@ async function getNextEpisodeFromLibrary() {
   } else {
     // Everything's been watched - recycle by picking any show/season/episode with a file.
     const rewatchCandidates = [];
-    for (const show of shows) {
+    for (const show of sourceShows) {
       for (const season of show.seasons) {
         if (season.episodes.length > 0) {
           rewatchCandidates.push({ show, season, episode: season.episodes[0] });
@@ -155,6 +301,7 @@ async function getNextEpisodeFromLibrary() {
     streamUrl: `${getAppBaseUrl()}/api/stream/episode/${episode.id}/direct`,
     type: 'episode',
     orderType: 'TV_GENERAL',
+    otherCollections: parseShowCollections(show.collections),
   };
 }
 
