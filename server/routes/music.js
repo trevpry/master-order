@@ -4036,108 +4036,15 @@ router.get('/albums/not-in-playlist/:playlistId', asyncHandler(async (req, res) 
 }));
 
 // Extract File Metadata from Album
-function getConfiguredPathMappings() {
-  const numberedMappings = [];
-  for (let i = 1; i <= 50; i += 1) {
-    const configuredPlexPath = process.env[`PLEX_PATH_${i}`];
-    const configuredLocalPath = process.env[`LOCAL_PATH_${i}`];
-
-    if (!configuredPlexPath || !configuredLocalPath) {
-      continue;
-    }
-
-    numberedMappings.push({
-      plexPath: configuredPlexPath.trim(),
-      localPath: configuredLocalPath.trim(),
-    });
-  }
-
-  // Legacy fallback mappings kept for backward compatibility
-  const legacyMappings = [
-    { plexPath: '/xmas', localPath: process.env.XMAS_PATH },
-    { plexPath: '/classical', localPath: process.env.CLASSICAL_PATH }
-  ];
-
-  return [...numberedMappings, ...legacyMappings]
-    .filter((mapping) => mapping.plexPath && mapping.localPath)
-    // Prefer longest Plex prefix first so nested mappings resolve correctly
-    .sort((left, right) => right.plexPath.length - left.plexPath.length);
-}
-
-function mapUnraidMediaPathToHost(filePath) {
-  if (!filePath) {
-    return null;
-  }
-
-  const normalizedPath = filePath.replace(/\\/g, '/');
-  const unraidMediaPrefix = '/mnt/user/Media';
-  if (!normalizedPath.toLowerCase().startsWith(unraidMediaPrefix.toLowerCase())) {
-    return null;
-  }
-
-  const relativePath = normalizedPath.substring(unraidMediaPrefix.length).replace(/^\//, '');
-  if (process.platform === 'win32') {
-    const unraidServerName = process.env.UNRAID_SERVER_NAME || 'tower';
-    const uncRoot = `\\\\${unraidServerName}\\Media`;
-    return relativePath ? path.join(uncRoot, relativePath) : uncRoot;
-  }
-
-  const shareRoot = process.env.UNRAID_SHARE_ROOT || '/mnt/user';
-  return path.join(shareRoot, 'Media', relativePath);
-}
-
-function mapPlexPathToLocalDetailed(plexPath) {
-  if (!plexPath) {
-    return {
-      localPath: null,
-      mappingMatched: false,
-      matchedPlexPath: null,
-      matchedLocalPath: null,
-    };
-  }
-
-  const pathMappings = getConfiguredPathMappings();
-  
-  // Try each mapping
-  for (const mapping of pathMappings) {
-    if (plexPath.toLowerCase().startsWith(mapping.plexPath.toLowerCase())) {
-      const relativePath = plexPath.substring(mapping.plexPath.length);
-      const localPath = mapping.localPath + relativePath.replace(/\//g, path.sep);
-      console.log(`Mapped Plex path: ${plexPath} -> ${localPath}`);
-      return {
-        localPath,
-        mappingMatched: true,
-        matchedPlexPath: mapping.plexPath,
-        matchedLocalPath: mapping.localPath,
-      };
-    }
-  }
-
-  const translatedUnraidPath = mapUnraidMediaPathToHost(plexPath);
-  if (translatedUnraidPath) {
-    console.log(`Translated Unraid media path: ${plexPath} -> ${translatedUnraidPath}`);
-    return {
-      localPath: translatedUnraidPath,
-      mappingMatched: true,
-      matchedPlexPath: '/mnt/user/Media',
-      matchedLocalPath: translatedUnraidPath,
-    };
-  }
-  
-  // If no mapping found, return original path (useful for Docker where paths match)
-  console.log(`No path mapping found for: ${plexPath}, using as-is`);
-  return {
-    localPath: plexPath,
-    mappingMatched: false,
-    matchedPlexPath: null,
-    matchedLocalPath: null,
-  };
-}
-
-// Helper function to map Plex path to local filesystem path
-function mapPlexPathToLocal(plexPath) {
-  return mapPlexPathToLocalDetailed(plexPath).localPath;
-}
+// Path-mapping logic lives in server/utils/libraryPathMapper.js so it can be
+// shared with the Radarr/Sonarr sync + streaming services. Local wrapper
+// names are kept for backward compatibility with existing call sites below.
+const {
+  getConfiguredPathMappings,
+  mapUnraidMediaPathToHost,
+  mapPlexPathToLocalDetailed,
+  mapPlexPathToLocal,
+} = require('../utils/libraryPathMapper');
 
 function getUnraidMusicFallbackCandidates(plexPath) {
   if (!plexPath || !plexPath.startsWith('/')) {

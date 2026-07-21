@@ -71,6 +71,15 @@ services:
       # - PLEX_TOKEN=your-plex-token
       # - TVDB_API_KEY=your-tvdb-api-key
       # - COMICVINE_API_KEY=your-comicvine-api-key
+      # Radarr/Sonarr integration (see SONARR_RADARR_DIRECT_PLAY_MIGRATION_PLAN.md)
+      # - RADARR_URL=http://your-radarr-server:7878
+      # - RADARR_API_KEY=your-radarr-api-key
+      # - SONARR_URL=http://your-sonarr-server:8989
+      # - SONARR_API_KEY=your-sonarr-api-key
+      # - LIBRARY_PROVIDER=plex
+      # Direct-play / on-demand transcoding
+      # - TRANSCODE_TMP_DIR=/app/data/transcode
+      # - HW_ACCEL=none
       # Gemini AI API Key for AI categorization features
       - "GEMINI_API_KEY=AIzaSyAdXnyNUU6VYg8_ERsb9N5MxyowhAMJlFU"
     healthcheck:
