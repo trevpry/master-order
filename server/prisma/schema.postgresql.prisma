@@ -142,6 +142,18 @@ model Movie {
   createdAt        DateTime  @default(now())
   updatedAt        DateTime  @updatedAt
 
+  // ffprobe-derived technical metadata (see mediaProbeService.js, Phase 2)
+  durationSeconds    Float?
+  videoWidth         Int?
+  videoHeight        Int?
+  frameRate          Float?
+  audioChannels      Int?
+  audioLanguage      String?
+  audioTracksJson    String? // JSON array of {index, codec, channels, language, title}
+  subtitleTracksJson String? // JSON array of {index, codec, language, title, forced}
+  probedAt           DateTime?
+  probeError         String?
+
   @@index([tmdbId])
   @@index([title])
 }
@@ -215,6 +227,18 @@ model Episode {
   lastSyncedAt    DateTime  @default(now())
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
+
+  // ffprobe-derived technical metadata (see mediaProbeService.js, Phase 2)
+  durationSeconds    Float?
+  videoWidth         Int?
+  videoHeight        Int?
+  frameRate          Float?
+  audioChannels      Int?
+  audioLanguage      String?
+  audioTracksJson    String? // JSON array of {index, codec, channels, language, title}
+  subtitleTracksJson String? // JSON array of {index, codec, language, title, forced}
+  probedAt           DateTime?
+  probeError         String?
 
   season Season @relation(fields: [seasonId], references: [id])
 

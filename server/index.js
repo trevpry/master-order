@@ -22,6 +22,7 @@ const monitoringRoutes = require('./routes/monitoring');
 const plexRoutes = require('./routes/plex');
 const radarrRoutes = require('./routes/radarr');
 const sonarrRoutes = require('./routes/sonarr');
+const mediaProbeRoutes = require('./routes/mediaProbe');
 const createStashRouter = require('./routes/stash');
 const groupsRoutes = require('./routes/groups');
 const comicvineRoutes = require('./routes/comicvine');
@@ -302,6 +303,7 @@ app.use('/api/plex', plexRoutes);
 // Radarr/Sonarr Integration API routes (see SONARR_RADARR_DIRECT_PLAY_MIGRATION_PLAN.md)
 app.use('/api/radarr', radarrRoutes);
 app.use('/api/sonarr', sonarrRoutes);
+app.use('/api/media-probe', mediaProbeRoutes);
 
 // Stash Integration API routes
 const stashRoutes = createStashRouter({ 

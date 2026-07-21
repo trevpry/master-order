@@ -1,6 +1,9 @@
 const RadarrService = require('./radarrService');
+const MediaProbeService = require('./mediaProbeService');
 const prisma = require('../prismaClient');
 const { mapRemotePathToLocal } = require('../utils/libraryPathMapper');
+
+const mediaProbeService = new MediaProbeService();
 
 /**
  * Mirrors PlexSyncService's shape (fullSync/testConnection) but populates
@@ -126,6 +129,12 @@ class RadarrSyncService {
         updated,
         removed: removedResult.count,
         summary,
+      });
+
+      // Probe newly-discovered files for technical metadata (Phase 2). Fire-and-forget
+      // so a large backfill doesn't block the sync response; already-probed rows are skipped.
+      mediaProbeService.probeAllUnprobed().catch((probeError) => {
+        console.warn('Post-sync media probe run failed:', probeError.message);
       });
 
       return result;
