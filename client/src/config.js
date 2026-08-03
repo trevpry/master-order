@@ -15,7 +15,7 @@ const config = {
     // Force server IP for mobile devices if they're somehow getting localhost
     if (navigator.userAgent.includes('Mobile')) {
       console.warn('🔧 MOBILE OVERRIDE: Forcing server IP instead of localhost');
-      return 'http://192.168.1.114:3001';
+      return 'http://192.168.1.119:3001';
     }
     
     return detectedUrl;

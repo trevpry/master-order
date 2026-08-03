@@ -26,7 +26,7 @@ CONTAINER_PORT="3001"
 BACKUP_DIR="$REPO_PATH/database-backups"
 
 # PostgreSQL Configuration
-POSTGRES_HOST="192.168.1.114"
+POSTGRES_HOST="192.168.1.119"
 POSTGRES_PORT="5432"
 POSTGRES_DB="master_order"
 POSTGRES_USER="master_order_user"
@@ -668,10 +668,10 @@ docker run -d \
     -e "PLEX_PATH_7=/pop_music" \
     -e "LOCAL_PATH_7=/pop_music" \
     -e "BACKGROUND_UNC_PATH_MAPPINGS=${BACKGROUND_UNC_PATH_MAPPINGS}" \
-    -e "EXTERNAL_IP=192.168.1.114" \
+    -e "EXTERNAL_IP=192.168.1.119" \
     -e "STASH_URL=http://stash.internal:9999" \
     -e "STASH_URL_FALLBACK_1=http://192.168.1.154:9999" \
-    -e "STASH_URL_FALLBACK_2=http://192.168.1.114:9999" \
+    -e "STASH_URL_FALLBACK_2=http://192.168.1.119:9999" \
     -e "STASH_URL_FALLBACK_3=http://localhost:9999" \
     -e "STASH_URL_FALLBACK_4=http://host.docker.internal:9999" \
     $IMAGE_NAME
