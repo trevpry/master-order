@@ -66,6 +66,23 @@ async function initializeStashSyncService() {
 }
 
 /**
+ * Reload any initialized sync services after settings changes.
+ */
+async function reloadStashSyncServices() {
+  if (!stashSyncService && !stashSyncServiceOptimized) {
+    await initializeStashSyncService();
+  }
+
+  if (stashSyncService?.reloadConfig) {
+    await stashSyncService.reloadConfig();
+  }
+
+  if (stashSyncServiceOptimized?.reloadConfig) {
+    await stashSyncServiceOptimized.reloadConfig();
+  }
+}
+
+/**
  * Utility function for generating optimized clips
  */
 function generateOptimizedClips(sceneId, sceneDuration, clipDuration = 60) {
@@ -153,5 +170,6 @@ module.exports = {
   getActiveStashService,
   getSyncServiceType,
   initializeStashSyncService,
+  reloadStashSyncServices,
   generateOptimizedClips
 };

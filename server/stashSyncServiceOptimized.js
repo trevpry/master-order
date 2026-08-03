@@ -142,6 +142,17 @@ class StashSyncServiceOptimized {
     }
   }
 
+  /**
+   * Force reload configuration from database
+   * Call this after updating Stash settings
+   */
+  async reloadConfig() {
+    this.stashUrl = null;
+    this.stashApiKey = null;
+    await this.ensureConfigLoaded();
+    console.log('🔄 StashSyncServiceOptimized configuration reloaded');
+  }
+
   async testConnection() {
     try {
       await this.ensureConfigLoaded();

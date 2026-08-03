@@ -1,6 +1,8 @@
 const express = require('express');
 const router = express.Router();
 const prisma = require('../prismaClient'); // Use shared singleton instance
+const stashService = require('../stashService');
+const { reloadStashSyncServices } = require('./stash/shared');
 const { sendNotFound, sendSuccess, sendServerError, asyncHandler, logError } = require('../utils/responses');
 
 /**
@@ -103,12 +105,12 @@ router.post('/', asyncHandler(async (req, res) => {
     create: { id: 1, ...processedData }
   });
 
-  // If Stash URL was updated, reload StashSyncService configuration
-  if (settingsData.stashUrl) {
+  // Reload cached Stash clients after Stash settings change so the app does not keep using stale URLs.
+  if (Object.prototype.hasOwnProperty.call(settingsData, 'stashUrl') || Object.prototype.hasOwnProperty.call(settingsData, 'stashApiKey')) {
     try {
-      // Clear the cached configuration in any active sync services
-      // This will be picked up on next request
-      console.log('🔄 Stash URL updated, configuration will reload on next use');
+      stashService.configure(settings.stashUrl || null, settings.stashApiKey || null);
+      await reloadStashSyncServices();
+      console.log('🔄 Reloaded Stash service configuration after settings update');
     } catch (error) {
       console.warn('Could not reload Stash sync service config:', error.message);
     }
