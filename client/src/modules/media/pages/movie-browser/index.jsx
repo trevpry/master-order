@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import config from '../../../../config';
+import StashVideoPlayer from '../stash/components/StashVideoPlayer';
 import './MovieBrowser.css';
 
 const statusLabel = {
@@ -8,6 +9,7 @@ const statusLabel = {
 };
 
 function MovieBrowser() {
+  const [libraryProvider, setLibraryProvider] = useState('plex');
   const [data, setData] = useState({
     movies: [],
     allCollections: [],
@@ -17,6 +19,9 @@ function MovieBrowser() {
   });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [playing, setPlaying] = useState(false);
+  const [browserVideoPlayer, setBrowserVideoPlayer] = useState(null);
+  const [activePlaybackItem, setActivePlaybackItem] = useState(null);
   const [search, setSearch] = useState('');
   const [collection, setCollection] = useState('');
   const [status, setStatus] = useState('all');
@@ -76,7 +81,14 @@ function MovieBrowser() {
       setLoading(true);
       setError('');
 
-      const url = `${config.apiBaseUrl}/api/plex/movie-browser${queryString ? `?${queryString}` : ''}`;
+      const settingsResponse = await fetch(`${config.apiBaseUrl}/api/settings`);
+      const settings = settingsResponse.ok ? await settingsResponse.json() : {};
+      const provider = settings?.libraryProvider === 'arr' ? 'arr' : 'plex';
+      setLibraryProvider(provider);
+
+      const url = provider === 'arr'
+        ? `${config.apiBaseUrl}/api/library/movies${queryString ? `?${queryString}` : ''}`
+        : `${config.apiBaseUrl}/api/plex/movie-browser${queryString ? `?${queryString}` : ''}`;
       const response = await fetch(url);
       const json = await response.json();
 
@@ -101,6 +113,118 @@ function MovieBrowser() {
   useEffect(() => {
     fetchBrowserData();
   }, [queryString]);
+
+  const getArtworkUrl = (movie) => {
+    if (movie?.posterUrl) {
+      return movie.posterUrl;
+    }
+
+    if (movie?.localArtworkPath) {
+      const filename = movie.localArtworkPath.includes('\\') || movie.localArtworkPath.includes('/')
+        ? movie.localArtworkPath.split(/[\\/]/).pop()
+        : movie.localArtworkPath;
+      return `${config.apiBaseUrl}/api/artwork/${filename}`;
+    }
+
+    return null;
+  };
+
+  const reportBrowserPlaybackProgress = async ({ currentTime, duration }) => {
+    if (!activePlaybackItem || activePlaybackItem.libraryProvider !== 'arr' || !activePlaybackItem.mediaId) {
+      return;
+    }
+
+    await fetch(`${config.apiBaseUrl}/api/watch-progress/heartbeat`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        mediaType: 'movie',
+        id: activePlaybackItem.mediaId,
+        positionSeconds: Math.floor(currentTime),
+        durationSeconds: Number.isFinite(duration) ? Math.floor(duration) : undefined,
+      }),
+    });
+  };
+
+  const handleBrowserPlaybackComplete = async (completedVideo) => {
+    const item = activePlaybackItem || completedVideo;
+    setActivePlaybackItem(null);
+
+    if (!item || item.libraryProvider !== 'arr' || !item.mediaId) {
+      return;
+    }
+
+    try {
+      await fetch(`${config.apiBaseUrl}/api/watch-progress/movie/${item.mediaId}/complete`, {
+        method: 'POST',
+      });
+
+      await fetch(`${config.apiBaseUrl}/api/mark-media-watched`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          mediaType: 'movie',
+          mediaId: item.mediaId,
+          ratingKey: item.ratingKey,
+          libraryProvider: 'arr',
+        }),
+      });
+    } catch (playbackError) {
+      console.error('Failed to complete movie playback state:', playbackError);
+    } finally {
+      fetchBrowserData();
+    }
+  };
+
+  const openBrowserPlayer = async (movie) => {
+    if (!movie?.streamUrl || movie.libraryProvider !== 'arr' || !movie.mediaId) {
+      return;
+    }
+
+    setPlaying(true);
+    setError('');
+
+    try {
+      const [infoResponse, progressResponse] = await Promise.all([
+        fetch(`${config.apiBaseUrl}/api/stream/movie/${movie.mediaId}/info`),
+        fetch(`${config.apiBaseUrl}/api/watch-progress/movie/${movie.mediaId}`),
+      ]);
+
+      let preferredMode = 'direct';
+      let startPositionSeconds = 0;
+
+      if (infoResponse.ok) {
+        const info = await infoResponse.json();
+        preferredMode = info.recommendedMode === 'direct' ? 'direct' : 'hls';
+      }
+
+      if (progressResponse.ok) {
+        const progress = await progressResponse.json();
+        startPositionSeconds = progress.positionSeconds || 0;
+      }
+
+      setActivePlaybackItem(movie);
+      setBrowserVideoPlayer({
+        isOpen: true,
+        title: movie.title,
+        subtitle: movie.year ? `${movie.year}` : '',
+        posterUrl: getArtworkUrl(movie),
+        directUrl: movie.streamUrl,
+        hlsUrl: `${config.apiBaseUrl}/api/stream/movie/${movie.mediaId}/hls/master.m3u8`,
+        preferredMode,
+        startPositionSeconds,
+        autoplay: true,
+        mediaId: movie.mediaId,
+        libraryProvider: movie.libraryProvider,
+        ratingKey: movie.ratingKey,
+      });
+    } catch (playError) {
+      console.error('Failed to open browser playback for movie:', playError);
+      setError('Failed to open browser playback');
+    } finally {
+      setPlaying(false);
+    }
+  };
 
   const toggleGroup = (groupName) => {
     setExpandedGroups((prev) => ({
@@ -173,7 +297,7 @@ function MovieBrowser() {
       )}
 
       <div className="movie-browser-summary">
-        Showing {data.totalMovies} movies · {data.watchedMovies} watched · {data.unwatchedMovies} unwatched
+        Showing {data.totalMovies} movies · {data.watchedMovies} watched · {data.unwatchedMovies} unwatched · Source: {libraryProvider.toUpperCase()}
       </div>
 
       {viewMode === 'grouped' && !loading && groupedMovies.length > 0 && (
@@ -208,6 +332,7 @@ function MovieBrowser() {
                 <th>Collections</th>
                 <th>Section</th>
                 <th>Play Status</th>
+                <th>Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -232,6 +357,20 @@ function MovieBrowser() {
                     <span className={`movie-status movie-status-${movie.playStatus}`}>
                       {statusLabel[movie.playStatus] || movie.playStatus}
                     </span>
+                  </td>
+                  <td>
+                    {movie.streamUrl && movie.libraryProvider === 'arr' ? (
+                      <button
+                        type="button"
+                        className="movie-play-button"
+                        onClick={() => openBrowserPlayer(movie)}
+                        disabled={playing}
+                      >
+                        {playing ? 'Opening...' : 'Play'}
+                      </button>
+                    ) : (
+                      <span className="movie-action-empty">-</span>
+                    )}
                   </td>
                 </tr>
               ))}
@@ -275,6 +414,7 @@ function MovieBrowser() {
                           <th>Release Date</th>
                           <th>Section</th>
                           <th>Play Status</th>
+                          <th>Actions</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -289,6 +429,20 @@ function MovieBrowser() {
                                 {statusLabel[movie.playStatus] || movie.playStatus}
                               </span>
                             </td>
+                            <td>
+                              {movie.streamUrl && movie.libraryProvider === 'arr' ? (
+                                <button
+                                  type="button"
+                                  className="movie-play-button"
+                                  onClick={() => openBrowserPlayer(movie)}
+                                  disabled={playing}
+                                >
+                                  {playing ? 'Opening...' : 'Play'}
+                                </button>
+                              ) : (
+                                <span className="movie-action-empty">-</span>
+                              )}
+                            </td>
                           </tr>
                         ))}
                       </tbody>
@@ -300,6 +454,13 @@ function MovieBrowser() {
           })}
         </div>
       )}
+
+      <StashVideoPlayer
+        genericVideo={browserVideoPlayer}
+        setGenericVideo={setBrowserVideoPlayer}
+        onGenericProgress={reportBrowserPlaybackProgress}
+        onGenericComplete={handleBrowserPlaybackComplete}
+      />
     </main>
   );
 }

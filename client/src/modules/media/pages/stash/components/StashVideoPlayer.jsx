@@ -1,8 +1,8 @@
-import React, { useState } from 'react';
-import { formatDuration } from '../../../../../utils/timeUtils';
+import React, { useEffect, useRef, useState } from 'react';
+import Hls from 'hls.js';
+import '../../Stash.css';
 import { 
   getSceneDisplayTitle, 
-  getSceneImageUrl, 
   isVideoFormatSupported, 
   getSceneFileName, 
   getSceneTags,
@@ -15,7 +15,330 @@ import {
 import config from '../../../../../config.js';
 import ClipTagManager from './ClipTagManager';
 
-const StashVideoPlayer = ({
+function GenericVideoPlayer({ genericVideo, setGenericVideo, onGenericProgress, onGenericComplete }) {
+  const videoRef = useRef(null);
+  const containerRef = useRef(null);
+  const hlsRef = useRef(null);
+  const triedFallbackRef = useRef(false);
+  const hasSeekedRef = useRef(false);
+  const lastProgressSentAtRef = useRef(0);
+
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const [controlsVisible, setControlsVisible] = useState(true);
+  const [controlsTimeoutId, setControlsTimeoutId] = useState(null);
+  const [activeSourceMode, setActiveSourceMode] = useState('direct');
+  const [playerError, setPlayerError] = useState('');
+
+  const closePlayer = () => {
+    if (controlsTimeoutId) {
+      clearTimeout(controlsTimeoutId);
+      setControlsTimeoutId(null);
+    }
+
+    if (document.fullscreenElement) {
+      document.exitFullscreen().catch(() => {});
+    }
+
+    setGenericVideo(null);
+    setControlsVisible(true);
+    setPlayerError('');
+  };
+
+  const destroyHls = () => {
+    if (hlsRef.current) {
+      hlsRef.current.destroy();
+      hlsRef.current = null;
+    }
+  };
+
+  const attachDirectSource = () => {
+    const video = videoRef.current;
+    if (!video || !genericVideo?.directUrl) {
+      return false;
+    }
+
+    destroyHls();
+    video.src = genericVideo.directUrl;
+    video.load();
+    setActiveSourceMode('direct');
+    return true;
+  };
+
+  const attachHlsSource = () => {
+    const video = videoRef.current;
+    if (!video || !genericVideo?.hlsUrl) {
+      return false;
+    }
+
+    destroyHls();
+
+    if (video.canPlayType('application/vnd.apple.mpegurl')) {
+      video.src = genericVideo.hlsUrl;
+      video.load();
+      setActiveSourceMode('hls');
+      return true;
+    }
+
+    if (Hls.isSupported()) {
+      const hls = new Hls();
+      hlsRef.current = hls;
+      hls.loadSource(genericVideo.hlsUrl);
+      hls.attachMedia(video);
+      hls.on(Hls.Events.ERROR, (_event, data) => {
+        if (!data?.fatal) {
+          return;
+        }
+
+        if (!triedFallbackRef.current && genericVideo.directUrl) {
+          triedFallbackRef.current = true;
+          attachDirectSource();
+          return;
+        }
+
+        setPlayerError('Unable to load HLS playback for this item.');
+      });
+      setActiveSourceMode('hls');
+      return true;
+    }
+
+    return false;
+  };
+
+  useEffect(() => {
+    if (!genericVideo?.isOpen || !videoRef.current) {
+      return undefined;
+    }
+
+    const video = videoRef.current;
+    triedFallbackRef.current = false;
+    hasSeekedRef.current = false;
+    lastProgressSentAtRef.current = 0;
+    setPlayerError('');
+
+    const preferredMode = genericVideo.preferredMode || 'direct';
+    const attached = preferredMode === 'hls'
+      ? (attachHlsSource() || attachDirectSource())
+      : (attachDirectSource() || attachHlsSource());
+
+    if (!attached) {
+      setPlayerError('No playable source is available for this item.');
+    }
+
+    return () => {
+      destroyHls();
+      if (video) {
+        video.removeAttribute('src');
+        video.load();
+      }
+    };
+  }, [genericVideo]);
+
+  useEffect(() => () => {
+    destroyHls();
+    if (controlsTimeoutId) {
+      clearTimeout(controlsTimeoutId);
+    }
+  }, [controlsTimeoutId]);
+
+  const toggleFullscreen = async () => {
+    const container = containerRef.current;
+    if (!container) {
+      return;
+    }
+
+    try {
+      if (!document.fullscreenElement) {
+        await container.requestFullscreen();
+        setIsFullscreen(true);
+      } else {
+        await document.exitFullscreen();
+        setIsFullscreen(false);
+      }
+    } catch (error) {
+      console.error('Failed to toggle browser video fullscreen:', error);
+    }
+  };
+
+  const handleMouseMove = () => {
+    setControlsVisible(true);
+    if (controlsTimeoutId) {
+      clearTimeout(controlsTimeoutId);
+    }
+
+    const nextTimeout = setTimeout(() => {
+      setControlsVisible(false);
+    }, 3000);
+    setControlsTimeoutId(nextTimeout);
+  };
+
+  const handleKeyDown = (event) => {
+    const video = videoRef.current;
+    if (!video) {
+      return;
+    }
+
+    switch (event.key) {
+      case 'Escape':
+        event.preventDefault();
+        closePlayer();
+        break;
+      case ' ':
+        event.preventDefault();
+        if (video.paused) {
+          video.play().catch(() => {});
+        } else {
+          video.pause();
+        }
+        break;
+      case 'f':
+      case 'F':
+        event.preventDefault();
+        toggleFullscreen();
+        break;
+      default:
+        break;
+    }
+  };
+
+  const handleTimeUpdate = async () => {
+    const video = videoRef.current;
+    if (!video || !onGenericProgress) {
+      return;
+    }
+
+    if (video.currentTime - lastProgressSentAtRef.current < 10) {
+      return;
+    }
+
+    lastProgressSentAtRef.current = video.currentTime;
+
+    try {
+      await onGenericProgress({
+        currentTime: video.currentTime,
+        duration: video.duration,
+      });
+    } catch (error) {
+      console.error('Failed to report browser playback progress:', error);
+    }
+  };
+
+  const handleEnded = async () => {
+    const currentVideo = genericVideo;
+    closePlayer();
+
+    if (!onGenericComplete) {
+      return;
+    }
+
+    try {
+      await onGenericComplete(currentVideo);
+    } catch (error) {
+      console.error('Failed to complete browser playback:', error);
+    }
+  };
+
+  const handleVideoError = () => {
+    if (!triedFallbackRef.current && activeSourceMode === 'direct' && genericVideo?.hlsUrl) {
+      triedFallbackRef.current = true;
+      const switched = attachHlsSource();
+      if (switched) {
+        return;
+      }
+    }
+
+    if (!triedFallbackRef.current && activeSourceMode === 'hls' && genericVideo?.directUrl) {
+      triedFallbackRef.current = true;
+      const switched = attachDirectSource();
+      if (switched) {
+        return;
+      }
+    }
+
+    setPlayerError('This browser could not play the selected source.');
+  };
+
+  if (!genericVideo?.isOpen) {
+    return null;
+  }
+
+  return (
+    <div
+      className={`video-player-overlay ${isFullscreen ? 'fullscreen' : ''}`}
+      onMouseMove={handleMouseMove}
+      onKeyDown={handleKeyDown}
+      tabIndex={0}
+      onClick={(event) => {
+        if (event.target === event.currentTarget) {
+          closePlayer();
+        }
+      }}
+    >
+      <div
+        ref={containerRef}
+        className="video-player-container"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <div className={`video-player-header ${controlsVisible ? 'visible' : 'hidden'}`}>
+          <div className="video-info">
+            <h3>{genericVideo.title || 'Browser Playback'}</h3>
+            {genericVideo.subtitle ? <p>{genericVideo.subtitle}</p> : null}
+            <p className="keyboard-shortcuts">
+              ESC: Close • Space: Play/Pause • F: Fullscreen • Source: {activeSourceMode.toUpperCase()}
+            </p>
+          </div>
+          <div className="video-player-controls">
+            <button
+              className="control-btn fullscreen-btn"
+              onClick={toggleFullscreen}
+              title={isFullscreen ? 'Exit Fullscreen (F)' : 'Enter Fullscreen (F)'}
+            >
+              {isFullscreen ? '🗗' : '🗖'}
+            </button>
+            <button className="control-btn close-btn" onClick={closePlayer} title="Close Player (ESC)">
+              ✕
+            </button>
+          </div>
+        </div>
+
+        <video
+          ref={videoRef}
+          className="clip-video-player"
+          controls
+          autoPlay={genericVideo.autoplay !== false}
+          playsInline
+          preload="metadata"
+          poster={genericVideo.posterUrl || undefined}
+          onLoadedMetadata={(event) => {
+            if (!hasSeekedRef.current && Number.isFinite(genericVideo.startPositionSeconds) && genericVideo.startPositionSeconds > 0) {
+              hasSeekedRef.current = true;
+              event.currentTarget.currentTime = genericVideo.startPositionSeconds;
+            }
+          }}
+          onTimeUpdate={handleTimeUpdate}
+          onEnded={handleEnded}
+          onError={handleVideoError}
+        >
+          Your browser does not support the video tag.
+        </video>
+
+        {playerError ? (
+          <div className="pause-overlay">
+            <div className="pause-overlay-content">
+              <div className="pause-icon">⚠️</div>
+              <h2>Playback Error</h2>
+              <p className="scene-title">{playerError}</p>
+              <button className="delete-scene-btn" onClick={closePlayer}>
+                Close
+              </button>
+            </div>
+          </div>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+const StashClipVideoPlayer = ({
   videoPlayer,
   setVideoPlayer,
   videoPlayerFullscreen,
@@ -29,7 +352,7 @@ const StashVideoPlayer = ({
   connectionStatus,
   mixedMode,
   MAX_AUTO_SKIP_RETRIES,
-  clipsNextQueryString = ''
+  clipsNextQueryString = '',
 }) => {
   // State for pause overlay
   const [showPauseOverlay, setShowPauseOverlay] = useState(false);
@@ -303,7 +626,6 @@ const StashVideoPlayer = ({
     
     // Calculate if we've watched the full clip
     const currentTime = e.target.currentTime;
-    const clipStartTime = videoPlayer.playbackInfo.startTime;
     const clipEndTime = videoPlayer.playbackInfo.endTime;
     
     // Check if we've reached the end of the clip (within 1 second tolerance)
@@ -450,7 +772,7 @@ const StashVideoPlayer = ({
     }
   };
 
-  if (!videoPlayer.isOpen) {
+  if (!videoPlayer?.isOpen) {
     return null;
   }
 
@@ -954,6 +1276,61 @@ const StashVideoPlayer = ({
         }}
       />
     </div>
+  );
+};
+
+const StashVideoPlayer = ({
+  videoPlayer = null,
+  setVideoPlayer = () => {},
+  videoPlayerFullscreen = false,
+  setVideoPlayerFullscreen = () => {},
+  videoPlayerControlsVisible = true,
+  setVideoPlayerControlsVisible = () => {},
+  videoPlayerControlsTimeout = null,
+  setVideoPlayerControlsTimeout = () => {},
+  autoSkipRetries = 0,
+  setAutoSkipRetries = () => {},
+  connectionStatus = {},
+  mixedMode,
+  MAX_AUTO_SKIP_RETRIES,
+  clipsNextQueryString = '',
+  genericVideo = null,
+  setGenericVideo = () => {},
+  onGenericProgress = null,
+  onGenericComplete = null,
+}) => {
+  if (genericVideo?.isOpen) {
+    return (
+      <GenericVideoPlayer
+        genericVideo={genericVideo}
+        setGenericVideo={setGenericVideo}
+        onGenericProgress={onGenericProgress}
+        onGenericComplete={onGenericComplete}
+      />
+    );
+  }
+
+  return (
+    <StashClipVideoPlayer
+      videoPlayer={videoPlayer}
+      setVideoPlayer={setVideoPlayer}
+      videoPlayerFullscreen={videoPlayerFullscreen}
+      setVideoPlayerFullscreen={setVideoPlayerFullscreen}
+      videoPlayerControlsVisible={videoPlayerControlsVisible}
+      setVideoPlayerControlsVisible={setVideoPlayerControlsVisible}
+      videoPlayerControlsTimeout={videoPlayerControlsTimeout}
+      setVideoPlayerControlsTimeout={setVideoPlayerControlsTimeout}
+      autoSkipRetries={autoSkipRetries}
+      setAutoSkipRetries={setAutoSkipRetries}
+      connectionStatus={connectionStatus}
+      mixedMode={mixedMode}
+      MAX_AUTO_SKIP_RETRIES={MAX_AUTO_SKIP_RETRIES}
+      clipsNextQueryString={clipsNextQueryString}
+      genericVideo={genericVideo}
+      setGenericVideo={setGenericVideo}
+      onGenericProgress={onGenericProgress}
+      onGenericComplete={onGenericComplete}
+    />
   );
 };
 

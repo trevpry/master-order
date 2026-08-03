@@ -187,6 +187,25 @@
   font-weight: 700;
 }
 
+.tv-play-button {
+  border: 1px solid #c7d3ea;
+  background: #f7f9ff;
+  color: #1f3f86;
+  border-radius: 8px;
+  padding: 0.35rem 0.7rem;
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.tv-play-button:disabled {
+  opacity: 0.6;
+  cursor: progress;
+}
+
+.tv-action-empty {
+  color: #7a8697;
+}
+
 @media (max-width: 900px) {
   .tv-browser-filters {
     grid-template-columns: 1fr;

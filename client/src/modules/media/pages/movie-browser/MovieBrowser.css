@@ -190,6 +190,25 @@
   color: #334155;
 }
 
+.movie-play-button {
+  border: 1px solid #c7d3ea;
+  background: #f7f9ff;
+  color: #1f3f86;
+  border-radius: 8px;
+  padding: 0.35rem 0.7rem;
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.movie-play-button:disabled {
+  opacity: 0.6;
+  cursor: progress;
+}
+
+.movie-action-empty {
+  color: #7a8697;
+}
+
 @media (max-width: 900px) {
   .movie-browser-filters {
     grid-template-columns: 1fr;

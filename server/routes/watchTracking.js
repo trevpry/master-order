@@ -149,10 +149,108 @@ router.post('/mark-custom-order-item-watched/:itemId', asyncHandler(async (req, 
 // Mark a general TV episode or movie as watched (for TV_GENERAL and MOVIES_GENERAL orders)
 router.post('/mark-media-watched', async (req, res) => {
   try {
-    const { mediaType, ratingKey, episodeRatingKey } = req.body;
+    const { mediaType, ratingKey, episodeRatingKey, libraryProvider, mediaId } = req.body;
     
-    if (!mediaType || (!ratingKey && !episodeRatingKey)) {
-      return res.status(400).json({ error: 'Media type and ratingKey (or episodeRatingKey for episodes) are required' });
+    if (!mediaType || (!ratingKey && !episodeRatingKey && !mediaId)) {
+      return res.status(400).json({ error: 'Media type and ratingKey (or episodeRatingKey/mediaId) are required' });
+    }
+
+    const resolvedArrMediaId = Number.isInteger(Number(mediaId))
+      ? parseInt(mediaId, 10)
+      : (() => {
+          const candidate = mediaType === 'episode' ? (episodeRatingKey || ratingKey) : ratingKey;
+          const match = typeof candidate === 'string'
+            ? candidate.match(mediaType === 'episode' ? /^episode-(\d+)$/ : /^movie-(\d+)$/)
+            : null;
+          return match ? parseInt(match[1], 10) : null;
+        })();
+
+    if (libraryProvider === 'arr' || resolvedArrMediaId) {
+      try {
+        let watchLogParams = null;
+
+        if (mediaType === 'episode') {
+          const episode = await prisma.episode.findUnique({
+            where: { id: resolvedArrMediaId },
+            include: {
+              season: {
+                include: {
+                  show: true
+                }
+              }
+            }
+          });
+
+          if (!episode || episode.removed || episode.season?.removed || episode.season?.show?.removed) {
+            return res.status(404).json({ error: 'Episode not found' });
+          }
+
+          await prisma.watchProgress.upsert({
+            where: { episodeId: resolvedArrMediaId },
+            create: {
+              mediaType: 'episode',
+              episodeId: resolvedArrMediaId,
+              completed: true,
+              positionSeconds: 0,
+              durationSeconds: episode.durationSeconds ? Math.round(episode.durationSeconds) : undefined,
+            },
+            update: {
+              completed: true,
+              positionSeconds: 0,
+              durationSeconds: episode.durationSeconds ? Math.round(episode.durationSeconds) : undefined,
+            }
+          });
+
+          watchLogParams = {
+            mediaType: 'tv',
+            title: episode.title,
+            seriesTitle: episode.season?.show?.title || null,
+            seasonNumber: episode.season?.seasonNumber || null,
+            episodeNumber: episode.episodeNumber || null,
+            duration: episode.durationSeconds ? Math.round(episode.durationSeconds / 60) : (episode.runtime || null),
+            activityType: 'watch',
+            isCompleted: true
+          };
+        } else if (mediaType === 'movie') {
+          const movie = await prisma.movie.findUnique({ where: { id: resolvedArrMediaId } });
+
+          if (!movie || movie.removed) {
+            return res.status(404).json({ error: 'Movie not found' });
+          }
+
+          await prisma.watchProgress.upsert({
+            where: { movieId: resolvedArrMediaId },
+            create: {
+              mediaType: 'movie',
+              movieId: resolvedArrMediaId,
+              completed: true,
+              positionSeconds: 0,
+              durationSeconds: movie.durationSeconds ? Math.round(movie.durationSeconds) : undefined,
+            },
+            update: {
+              completed: true,
+              positionSeconds: 0,
+              durationSeconds: movie.durationSeconds ? Math.round(movie.durationSeconds) : undefined,
+            }
+          });
+
+          watchLogParams = {
+            mediaType: 'movie',
+            title: movie.title,
+            duration: movie.durationSeconds ? Math.round(movie.durationSeconds / 60) : (movie.runtime || null),
+            activityType: 'watch',
+            isCompleted: true
+          };
+        } else {
+          return res.status(400).json({ error: 'Unsupported media type. Only episode and movie are supported.' });
+        }
+
+        await watchLogService.logWatched(watchLogParams);
+        return res.json({ success: true, message: `${mediaType} marked as watched and logged for statistics` });
+      } catch (error) {
+        console.error(`Error marking ARR ${mediaType} as watched:`, error);
+        return res.status(500).json({ error: `Failed to mark ${mediaType} as watched in database` });
+      }
     }
 
     try {

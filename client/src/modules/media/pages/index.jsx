@@ -9,6 +9,7 @@ import '../../../shared/components/MobileImageFix.css'
 import './settings/Settings.css'
 import toast, { Toaster } from 'react-hot-toast';
 import readingSessionService from '../../../services/readingSessionService.js';
+import StashVideoPlayer from './stash/components/StashVideoPlayer';
 
 function MediaHome() {
   const [selectedMedia, setSelectedMedia] = useState(null);
@@ -17,6 +18,7 @@ function MediaHome() {
   const [markingWatched, setMarkingWatched] = useState(false);
   const [playingOnPlex, setPlayingOnPlex] = useState(false);
   const [findingNewSeries, setFindingNewSeries] = useState(false);
+  const [browserVideoPlayer, setBrowserVideoPlayer] = useState(null);
   
   // Reading session state
   const [readingSession, setReadingSession] = useState(null);
@@ -552,7 +554,9 @@ function MediaHome() {
           body: JSON.stringify({
             mediaType: mediaType,
             ratingKey: ratingKey,
-            episodeRatingKey: selectedMedia.episodeRatingKey
+            episodeRatingKey: selectedMedia.episodeRatingKey,
+            libraryProvider: selectedMedia.libraryProvider || 'plex',
+            mediaId: selectedMedia.mediaId || null
           }),
         });
       } else if (selectedMedia.orderType === 'HISTORY_PLUS') {
@@ -628,14 +632,52 @@ function MediaHome() {
     }
   };
 
-  const playOnPlex = async () => {
+  const reportBrowserPlaybackProgress = async ({ currentTime, duration }) => {
+    if (!selectedMedia || selectedMedia.libraryProvider !== 'arr' || !selectedMedia.mediaId || !['episode', 'movie'].includes(selectedMedia.type)) {
+      return;
+    }
+
+    await fetch(`${config.apiBaseUrl}/api/watch-progress/heartbeat`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        mediaType: selectedMedia.type,
+        id: selectedMedia.mediaId,
+        positionSeconds: Math.floor(currentTime),
+        durationSeconds: Number.isFinite(duration) ? Math.floor(duration) : undefined,
+      }),
+    });
+  };
+
+  const handleBrowserPlaybackComplete = async () => {
     if (!selectedMedia) {
       return;
     }
 
-    // Only support TV shows and movies for now
+    if (selectedMedia.libraryProvider === 'arr' && selectedMedia.mediaId && ['episode', 'movie'].includes(selectedMedia.type)) {
+      try {
+        await fetch(`${config.apiBaseUrl}/api/watch-progress/${selectedMedia.type}/${selectedMedia.mediaId}/complete`, {
+          method: 'POST',
+        });
+      } catch (error) {
+        console.error('Failed to complete ARR watch progress:', error);
+      }
+    }
+
+    if (selectedMedia.customOrderItemId || selectedMedia.orderType === 'TV_GENERAL' || selectedMedia.orderType === 'MOVIES_GENERAL') {
+      await markAsWatched();
+    }
+  };
+
+  const openBrowserPlayer = async () => {
+    if (!selectedMedia) {
+      return;
+    }
+
     if (!['episode', 'movie'].includes(selectedMedia.type)) {
-      setError('Plex playback is only supported for TV shows and movies');
+      setError('Browser playback is only supported for TV shows and movies');
       return;
     }
 
@@ -643,15 +685,61 @@ function MediaHome() {
     setError('');
 
     try {
-      // Get the rating key for playback
-      const ratingKey = selectedMedia.episodeRatingKey || selectedMedia.ratingKey;
+      if (selectedMedia.streamUrl && (selectedMedia.libraryProvider === 'arr' || selectedMedia.mediaId)) {
+        const mediaType = selectedMedia.type === 'episode' ? 'episode' : 'movie';
+        const mediaId = selectedMedia.mediaId;
+        const directUrl = selectedMedia.streamUrl || (mediaId ? `${config.apiBaseUrl}/api/stream/${mediaType}/${mediaId}/direct` : null);
+        let hlsUrl = mediaId ? `${config.apiBaseUrl}/api/stream/${mediaType}/${mediaId}/hls/master.m3u8` : null;
+        let preferredMode = 'direct';
+        let startPositionSeconds = 0;
 
+        if (mediaId) {
+          try {
+            const [infoResponse, progressResponse] = await Promise.all([
+              fetch(`${config.apiBaseUrl}/api/stream/${mediaType}/${mediaId}/info`),
+              fetch(`${config.apiBaseUrl}/api/watch-progress/${mediaType}/${mediaId}`),
+            ]);
+
+            if (infoResponse.ok) {
+              const info = await infoResponse.json();
+              preferredMode = info.recommendedMode === 'direct' ? 'direct' : 'hls';
+            }
+
+            if (progressResponse.ok) {
+              const progress = await progressResponse.json();
+              startPositionSeconds = progress.positionSeconds || 0;
+            }
+          } catch (streamInfoError) {
+            console.warn('Failed to load browser playback metadata:', streamInfoError);
+          }
+        } else {
+          hlsUrl = null;
+        }
+
+        setBrowserVideoPlayer({
+          isOpen: true,
+          title: selectedMedia.type === 'episode'
+            ? (selectedMedia.episodeTitle || selectedMedia.title)
+            : selectedMedia.title,
+          subtitle: selectedMedia.type === 'episode'
+            ? `${selectedMedia.seriesTitle || selectedMedia.title}${selectedMedia.seasonNumber ? ` • S${selectedMedia.seasonNumber}E${selectedMedia.episodeNumber}` : ''}`
+            : (selectedMedia.year ? `${selectedMedia.year}` : ''),
+          posterUrl: getArtworkUrl(selectedMedia),
+          directUrl,
+          hlsUrl,
+          preferredMode,
+          startPositionSeconds,
+          autoplay: true,
+        });
+        return;
+      }
+
+      const ratingKey = selectedMedia.episodeRatingKey || selectedMedia.ratingKey;
       if (!ratingKey) {
         setError('Unable to play: missing media identifier');
         return;
       }
 
-      // Send immediate webhook notification to Node-RED via backend
       try {
         console.log('Sending webhook notification with ratingKey:', ratingKey);
         const webhookResponse = await fetch(`${config.apiBaseUrl}/api/webhook/notify`, {
@@ -716,7 +804,7 @@ function MediaHome() {
       }
     } catch (error) {
       console.error('Error starting playback:', error);
-      setError('Error starting playback on Plex');
+      setError('Error starting playback');
     } finally {
       setPlayingOnPlex(false);
     }
@@ -1207,7 +1295,7 @@ function MediaHome() {
 
                 {['episode', 'movie'].includes(selectedMedia.type) && (
                   <Button
-                    onClick={playOnPlex}
+                    onClick={openBrowserPlayer}
                     disabled={playingOnPlex}
                     style={{
                       backgroundColor: '#e5a00d',
@@ -1215,7 +1303,7 @@ function MediaHome() {
                       minWidth: '40px',
                       padding: '8px 12px'
                     }}
-                    title="Play this episode/movie on your selected Plex device"
+                    title={selectedMedia.streamUrl ? 'Play this episode/movie directly in your browser' : 'Play this episode/movie on your selected Plex device'}
                   >
                     {playingOnPlex ? '⏳' : '🎬'}
                   </Button>
@@ -1598,6 +1686,13 @@ function MediaHome() {
           )}
         </div>
       </div>
+
+      <StashVideoPlayer
+        genericVideo={browserVideoPlayer}
+        setGenericVideo={setBrowserVideoPlayer}
+        onGenericProgress={reportBrowserPlaybackProgress}
+        onGenericComplete={handleBrowserPlaybackComplete}
+      />
 
       {/* Reading Progress Modal */}
       {showReadingProgressModal && (
