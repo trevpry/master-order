@@ -36,6 +36,7 @@ export default function SceneDetail() {
   const [scrapeUrl, setScrapeUrl] = useState('');
   const [aebnSceneNumber, setAebnSceneNumber] = useState(''); // Scene number for AEBN direct scraping
   const [isScraping, setIsScraping] = useState(false);
+  const [scrapeAllStatus, setScrapeAllStatus] = useState(null); // null = hidden, string = shown
   const [scrapeData, setScrapeData] = useState(null);
   const [showScrapeReviewModal, setShowScrapeReviewModal] = useState(false);
   const [selectedMultiSourceResults, setSelectedMultiSourceResults] = useState([]);
@@ -1735,6 +1736,7 @@ export default function SceneDetail() {
   const handleScrapeAll = async () => {
     try {
       setIsScraping(true);
+      setScrapeAllStatus('Contacting stash-box sources…');
 
       const response = await fetch(`${config.apiBaseUrl}/api/stash/scenes/${id}/scrape-all`, {
         method: 'POST',
@@ -1742,6 +1744,8 @@ export default function SceneDetail() {
           'Content-Type': 'application/json'
         }
       });
+
+      setScrapeAllStatus('Processing results…');
 
       const result = await response.json();
       if (result.success) {
@@ -1765,12 +1769,15 @@ export default function SceneDetail() {
         setShowScrapeReviewModal(true);
         toast.success(result.message || 'Scrape All workflow completed');
       } else {
+        setScrapeAllStatus(null);
         toast.error(result.error || 'Failed to start Scrape All workflow');
       }
     } catch (error) {
       console.error('Error starting Scrape All workflow:', error);
+      setScrapeAllStatus(null);
       toast.error('Failed to start Scrape All workflow');
     } finally {
+      setScrapeAllStatus(null);
       setIsScraping(false);
     }
   };
@@ -2448,28 +2455,32 @@ export default function SceneDetail() {
 
       if (createResult.success) {
         const newTag = createResult.data.tag;
+        const matchedTagEntry = { id: newTag.id, name: newTag.name, originalName: tagName };
+        const removeFromUnmatched = (tags) =>
+          (tags || []).filter((t) => (typeof t === 'string' ? t : t?.name) !== tagName);
 
-        // Update scrapeData to move tag from unmatched to matched
         setScrapeData(prev => ({
           ...prev,
           matched: {
             ...prev.matched,
-            tags: [
-              ...prev.matched.tags,
-              {
-                id: newTag.id,
-                name: newTag.name,
-                originalName: tagName
-              }
-            ]
+            tags: [...(prev.matched?.tags || []), matchedTagEntry]
           },
           unmatched: {
             ...prev.unmatched,
-            tags: prev.unmatched.tags.filter(t => {
-              const tName = typeof t === 'string' ? t : t.name;
-              return tName !== tagName;
-            })
-          }
+            tags: removeFromUnmatched(prev.unmatched?.tags)
+          },
+          // Also update selectedResults so the multi-source column view reflects the change
+          selectedResults: (prev.selectedResults || []).map((sel) => ({
+            ...sel,
+            matched: {
+              ...sel.matched,
+              tags: [...(sel.matched?.tags || []), matchedTagEntry]
+            },
+            unmatched: {
+              ...sel.unmatched,
+              tags: removeFromUnmatched(sel.unmatched?.tags)
+            }
+          }))
         }));
 
         toast.success(`Tag "${tagName}" created`, {
@@ -5424,6 +5435,32 @@ export default function SceneDetail() {
         </div>
       )}
 
+      {/* Scrape All progress modal */}
+      {scrapeAllStatus && (
+        <div className="modal-overlay" style={{ zIndex: 1100 }}>
+          <div className="modal-content" style={{ maxWidth: '340px', textAlign: 'center', padding: '2rem' }}>
+            <div style={{ fontSize: '2rem', marginBottom: '1rem' }}>🧠</div>
+            <h3 style={{ margin: '0 0 0.75rem' }}>Scrape All</h3>
+            <p style={{ color: '#6b7280', marginBottom: '1.25rem', fontSize: '0.95rem' }}>{scrapeAllStatus}</p>
+            <div style={{ display: 'flex', justifyContent: 'center', gap: '6px' }}>
+              {[0, 1, 2].map((i) => (
+                <div
+                  key={i}
+                  style={{
+                    width: '10px', height: '10px', borderRadius: '50%',
+                    background: '#6366f1',
+                    animation: 'scrapeAllDot 1.2s infinite',
+                    animationDelay: `${i * 0.2}s`,
+                    opacity: 0.3
+                  }}
+                />
+              ))}
+            </div>
+            <style>{`@keyframes scrapeAllDot { 0%,80%,100%{opacity:.3;transform:scale(.8)} 40%{opacity:1;transform:scale(1)} }`}</style>
+          </div>
+        </div>
+      )}
+
       {/* Scrape Review Modal */}
       {showScrapeReviewModal && scrapeData && (
         <ScrapeAllReviewModal
@@ -5444,6 +5481,7 @@ export default function SceneDetail() {
           fieldSelections={fieldSelections}
           onFieldSelectionChange={(field, value) => setFieldSelections(prev => ({ ...prev, [field]: value }))}
           onCreateGroup={handleCreateGroup}
+          onCreateTag={handleCreateTag}
         />
       )}
 

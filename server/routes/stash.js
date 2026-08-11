@@ -4794,6 +4794,24 @@ router.post('/scenes/:id/scrape-all', asyncHandler(async (req, res) => {
     }
   });
 
+  // Collect any known GEVI URL saved on the scene so we can skip the performer search.
+  const knownGeviUrl = (() => {
+    const direct = sceneWithPerformers?.geviUrl;
+    if (direct && direct.includes('gayeroticvideoindex.com')) return direct;
+    try {
+      const episodes = sceneWithPerformers?.episodeUrls
+        ? (typeof sceneWithPerformers.episodeUrls === 'string'
+            ? JSON.parse(sceneWithPerformers.episodeUrls)
+            : sceneWithPerformers.episodeUrls)
+        : [];
+      return (Array.isArray(episodes) ? episodes : [])
+        .map((u) => (typeof u === 'string' ? u : u?.url || ''))
+        .find((u) => u && u.includes('gayeroticvideoindex.com')) || null;
+    } catch {
+      return null;
+    }
+  })();
+
   const searchTerms = collectScenePerformerSearchTerms(sceneWithPerformers);
   const performerEntries = (sceneWithPerformers?.performers || []).map((entry) => entry?.performer || entry || {});
 
@@ -4866,7 +4884,44 @@ router.post('/scenes/:id/scrape-all', asyncHandler(async (req, res) => {
       ? geviSeedPerformers
       : [];
 
-  if (effectiveGeviSearchEntries.length >= 2) {
+  if (knownGeviUrl) {
+    // Fast path: scrape the known GEVI episode URL directly.
+    try {
+      console.log(`🔎 [Scrape All] Using known GEVI URL for scene ${scene.id}: ${knownGeviUrl}`);
+      const scrapeResult = await geviScraper.scrapeScene(knownGeviUrl);
+      const fullMetadata = scrapeResult?.metadata || scrapeResult?.scraped || null;
+
+      if (fullMetadata) {
+        let matchedPerformers = { matched: [], unmatched: [] };
+        if (Array.isArray(fullMetadata.performers) && fullMetadata.performers.length > 0) {
+          matchedPerformers = await geviScraper.matchPerformers(fullMetadata.performers, prisma);
+        }
+
+        const enrichedScene = {
+          ...fullMetadata,
+          url: fullMetadata.url || knownGeviUrl,
+          image: fullMetadata.image
+            ? `/api/stash/gevi-image-proxy?url=${encodeURIComponent(fullMetadata.image)}`
+            : null,
+          matchedPerformers,
+          source: 'GEVI'
+        };
+
+        sources.push({
+          id: 'gevi-direct',
+          name: 'GEVI (saved URL)',
+          endpoint: 'gevi-direct',
+          configured: true,
+          resultCount: 1,
+          hasResults: true,
+          usedFallback: false,
+          results: [enrichedScene]
+        });
+      }
+    } catch (error) {
+      console.warn(`⚠️ [Scrape All] Failed to scrape known GEVI URL ${knownGeviUrl}:`, error.message);
+    }
+  } else if (effectiveGeviSearchEntries.length >= 2) {
     try {
       console.log(`🔎 [Scrape All] Adding GEVI performer search for scene ${scene.id}`);
       const firstEntry = effectiveGeviSearchEntries[0];
