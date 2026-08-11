@@ -4474,6 +4474,26 @@ router.delete('/groups/:id', asyncHandler(async (req, res) => {
   }
 }));
 
+// Try a performer's primary name then each alias until GEVI returns results.
+async function searchGeviPerformerWithAliases(performer) {
+  const namesToTry = [performer.name];
+  if (performer.alias) {
+    const aliases = performer.alias.split(',').map((a) => a.trim()).filter(Boolean);
+    namesToTry.push(...aliases);
+  }
+  for (const name of namesToTry) {
+    if (!name) continue;
+    const results = await geviScraper.searchPerformer(name);
+    if (results && results.length > 0) {
+      if (name !== performer.name) {
+        console.log(`   ✅ [GEVI] Found performer results using alias: "${name}"`);
+      }
+      return results;
+    }
+  }
+  return [];
+}
+
 async function searchGeviMoviesForScene(sceneWithPerformers) {
   const allPerformers = (sceneWithPerformers?.performers || [])
     .map((entry) => entry?.performer || entry || {})
@@ -4488,7 +4508,7 @@ async function searchGeviMoviesForScene(sceneWithPerformers) {
 
   let firstPerformerResults = [];
   try {
-    firstPerformerResults = await geviScraper.searchPerformer(firstPerformer.name);
+    firstPerformerResults = await searchGeviPerformerWithAliases(firstPerformer);
   } catch (error) {
     console.warn('⚠️ [Scrape All] GEVI movie search failed to find performer matches:', error.message);
     return {
@@ -4849,21 +4869,30 @@ router.post('/scenes/:id/scrape-all', asyncHandler(async (req, res) => {
   if (effectiveGeviSearchEntries.length >= 2) {
     try {
       console.log(`🔎 [Scrape All] Adding GEVI performer search for scene ${scene.id}`);
-      const geviResults = await geviScraper.searchPerformer(effectiveGeviSearchEntries[0]?.name || effectiveGeviSearchEntries[0]?.performer?.name || '');
+      const firstEntry = effectiveGeviSearchEntries[0];
+      const firstEntryObj = {
+        name: firstEntry?.name || firstEntry?.performer?.name || '',
+        alias: firstEntry?.alias || firstEntry?.performer?.alias || ''
+      };
+      const geviResults = await searchGeviPerformerWithAliases(firstEntryObj);
 
       if (geviResults && geviResults.length > 0) {
         let performerPage = null;
         let scenesByUrl = new Map();
-        const testPerformer = effectiveGeviSearchEntries[1]?.name || effectiveGeviSearchEntries[1]?.performer?.name || '';
+        const testEntry = effectiveGeviSearchEntries[1];
+        const testPerformer = {
+          name: testEntry?.name || testEntry?.performer?.name || '',
+          alias: testEntry?.alias || testEntry?.performer?.alias || ''
+        };
 
         for (const candidate of geviResults) {
-          const testScenes = await geviScraper.searchScenesWithPerformers(candidate.url, { name: testPerformer });
+          const testScenes = await geviScraper.searchScenesWithPerformers(candidate.url, testPerformer);
           if (testScenes.length > 0) {
             performerPage = candidate;
             for (const candidateScene of testScenes) {
               scenesByUrl.set(candidateScene.url, {
                 ...candidateScene,
-                matchedPerformers: [testPerformer]
+                matchedPerformers: [testPerformer.name]
               });
             }
             break;
@@ -4871,17 +4900,20 @@ router.post('/scenes/:id/scrape-all', asyncHandler(async (req, res) => {
         }
 
         if (performerPage) {
-          const remainingPerformers = effectiveGeviSearchEntries.slice(2).map((entry) => entry?.name || entry?.performer?.name || '').filter(Boolean);
-          for (const performerName of remainingPerformers) {
-            const performerScenes = await geviScraper.searchScenesWithPerformers(performerPage.url, { name: performerName });
+          const remainingPerformers = effectiveGeviSearchEntries.slice(2).map((entry) => ({
+            name: entry?.name || entry?.performer?.name || '',
+            alias: entry?.alias || entry?.performer?.alias || ''
+          })).filter((entry) => entry.name);
+          for (const performerEntry of remainingPerformers) {
+            const performerScenes = await geviScraper.searchScenesWithPerformers(performerPage.url, performerEntry);
             for (const candidateScene of performerScenes) {
               if (scenesByUrl.has(candidateScene.url)) {
                 const existing = scenesByUrl.get(candidateScene.url);
-                existing.matchedPerformers.push(performerName);
+                existing.matchedPerformers.push(performerEntry.name);
               } else {
                 scenesByUrl.set(candidateScene.url, {
                   ...candidateScene,
-                  matchedPerformers: [performerName]
+                  matchedPerformers: [performerEntry.name]
                 });
               }
             }
@@ -6087,8 +6119,8 @@ router.post('/scenes/:id/search-gevi', asyncHandler(async (req, res) => {
   console.log(`   - Scene has ${allPerformers.length} performers:`, allPerformers.map(p => p.name).join(', '));
   console.log('   - Primary search performer:', firstPerformer.name);
 
-  // Search GEVI for the first performer
-  const firstPerformerResults = await geviScraper.searchPerformer(firstPerformer.name);
+  // Search GEVI for the first performer, falling back to aliases if the primary name yields nothing
+  const firstPerformerResults = await searchGeviPerformerWithAliases(firstPerformer);
 
   if (!firstPerformerResults || firstPerformerResults.length === 0) {
     return sendServerError(res, `No results found for performer: ${firstPerformer.name}`);
@@ -6313,8 +6345,8 @@ router.post('/scenes/:id/search-gevi-movies', asyncHandler(async (req, res) => {
   console.log(`   - Scene has ${allPerformers.length} performers:`, allPerformers.map(p => p.name).join(', '));
   console.log('   - Primary search performer:', firstPerformer.name);
 
-  // Search GEVI for the first performer
-  const firstPerformerResults = await geviScraper.searchPerformer(firstPerformer.name);
+  // Search GEVI for the first performer, falling back to aliases if the primary name yields nothing
+  const firstPerformerResults = await searchGeviPerformerWithAliases(firstPerformer);
 
   if (!firstPerformerResults || firstPerformerResults.length === 0) {
     return sendServerError(res, `No results found for performer: ${firstPerformer.name}`);

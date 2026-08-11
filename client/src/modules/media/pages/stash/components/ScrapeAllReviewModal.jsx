@@ -14,6 +14,8 @@ export default function ScrapeAllReviewModal({
   onShowSelectedDetails,
   onAccept,
   onApply,
+  performerSelections,
+  onPerformerSelectionChange,
   fieldSelections,
   onFieldSelectionChange,
   onCreateTag,
@@ -29,7 +31,7 @@ export default function ScrapeAllReviewModal({
     return Boolean(performer?.name || entry?.name);
   });
   const shouldUseApplyAndNext = !hasExistingLocalPerformers && isMultiSourceReview;
-  const [performerSelections, setPerformerSelections] = useState({});
+  const [localPerformerSelections, setLocalPerformerSelections] = useState({});
   const [selectedTagSourceKeys, setSelectedTagSourceKeys] = useState([]);
   const [newTagName, setNewTagName] = useState('');
 
@@ -123,19 +125,37 @@ export default function ScrapeAllReviewModal({
       }
       if (typeof candidate === 'object') {
         if (typeof candidate.name === 'string' && candidate.name.trim()) values.push(candidate.name.trim());
-        if (typeof candidate.alias === 'string' && candidate.alias.trim()) values.push(candidate.alias.trim());
-        if (candidate.alias && typeof candidate.alias === 'object') {
-          if (typeof candidate.alias.alias === 'string' && candidate.alias.alias.trim()) values.push(candidate.alias.alias.trim());
-          if (typeof candidate.alias.name === 'string' && candidate.alias.name.trim()) values.push(candidate.alias.name.trim());
+        if (typeof candidate.title === 'string' && candidate.title.trim()) values.push(candidate.title.trim());
+        if (typeof candidate.value === 'string' && candidate.value.trim()) values.push(candidate.value.trim());
+
+        const aliasValue = candidate.alias;
+        if (typeof aliasValue === 'string' && aliasValue.trim()) values.push(aliasValue.trim());
+        if (Array.isArray(aliasValue)) {
+          aliasValue.forEach(addCandidate);
         }
-        if (typeof candidate.aliases === 'string' && candidate.aliases.trim()) {
-          candidate.aliases.split(',').map((part) => part.trim()).filter(Boolean).forEach((part) => values.push(part));
+        if (aliasValue && typeof aliasValue === 'object') {
+          addCandidate(aliasValue);
         }
-        if (Array.isArray(candidate.aliases)) {
-          candidate.aliases.forEach(addCandidate);
+
+        const aliasesValue = candidate.aliases;
+        if (typeof aliasesValue === 'string' && aliasesValue.trim()) {
+          aliasesValue.split(',').map((part) => part.trim()).filter(Boolean).forEach((part) => values.push(part));
+        }
+        if (Array.isArray(aliasesValue)) {
+          aliasesValue.forEach(addCandidate);
+        }
+        if (aliasesValue && typeof aliasesValue === 'object') {
+          addCandidate(aliasesValue);
+        }
+
+        if (Array.isArray(candidate.tags)) {
+          candidate.tags.forEach(addCandidate);
         }
         if (candidate.tag) {
           addCandidate(candidate.tag);
+        }
+        if (candidate.parentTag) {
+          addCandidate(candidate.parentTag);
         }
       }
     };
@@ -186,7 +206,7 @@ export default function ScrapeAllReviewModal({
       .map((entry) => normalizeTagEntry(entry))
       .filter((entry) => entry?.name)
       .map((entry) => {
-        const candidateValues = [entry.name, ...(entry.aliases || [])];
+        const candidateValues = Array.from(new Set([entry.name, ...(entry.aliases || []), ...collectTagTextValues(entry)].filter(Boolean)));
         const normalizedCandidates = candidateValues.map((candidate) => normalizeTagMatchValue(candidate));
         const matched = normalizedCandidates.some((candidate) => normalizedExistingNames.has(candidate));
 
@@ -330,8 +350,9 @@ export default function ScrapeAllReviewModal({
       if (!name) return;
 
       const aliases = collectAliasValues(entry);
-      const matchedEntry = typeof entry === 'object'
-        ? (entry?.matched || entry)
+      // Only treat entry.matched as a real match object; never fall back to entry itself.
+      const matchedEntry = typeof entry === 'object' && entry?.matched && typeof entry.matched === 'object'
+        ? entry.matched
         : null;
       const alternatives = [];
       if (matchedEntry?.alternatives && Array.isArray(matchedEntry.alternatives)) {
@@ -412,14 +433,15 @@ export default function ScrapeAllReviewModal({
     const nextSelectionState = {};
 
     entries.forEach((entry) => {
-      const previousSelection = performerSelections[entry.key];
+      const previousSelection = performerSelections?.[entry.key];
       const hasValidPreviousSelection = Boolean(previousSelection && entry.options.includes(previousSelection));
       nextSelectionState[entry.key] = hasValidPreviousSelection
         ? previousSelection
         : entry.defaultSelection || entry.options[0] || entry.name;
     });
 
-    setPerformerSelections(nextSelectionState);
+    setLocalPerformerSelections(nextSelectionState);
+    onPerformerSelectionChange?.(nextSelectionState);
   }, [scrapeData?.matched?.performers, scrapeData?.unmatched?.performers, scrapeData?.scraped?.performers, scrapeData?.selectedResults]);
 
   useEffect(() => {
@@ -898,22 +920,36 @@ export default function ScrapeAllReviewModal({
             {performerEntries.length > 0 ? performerEntries.map((entry) => {
               const translatedTags = parseActionCodeToTags(entry.actionCode);
               const selectionKey = `${column.key}:${entry.key}`;
-              const selectedValue = performerSelections[selectionKey] || performerSelections[entry.key] || entry.defaultSelection || entry.options[0] || '';
+              const selectedValue = performerSelections?.[selectionKey] || performerSelections?.[entry.key] || entry.defaultSelection || entry.options[0] || '';
 
               return (
                 <div key={selectionKey} style={{ display: 'flex', flexDirection: 'column', gap: '0.3rem' }}>
-                  <div style={{ fontSize: '12px', fontWeight: 600, color: '#111827' }}>
+                  <div style={{ fontSize: '12px', fontWeight: 600, color: '#111827', display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+                    <span
+                      style={{
+                        padding: '0.1rem 0.4rem',
+                        borderRadius: '999px',
+                        fontSize: '10px',
+                        fontWeight: 700,
+                        flexShrink: 0,
+                        background: entry.matched ? '#dcfce7' : '#fef3c7',
+                        color: entry.matched ? '#166534' : '#92400e'
+                      }}
+                    >
+                      {entry.matched ? 'Matched' : 'New'}
+                    </span>
                     {entry.name}
                     {entry.matchLabel ? (
-                      <span style={{ color: '#6b7280', marginLeft: '0.25rem', fontSize: '11px' }}>
-                        ({entry.matchLabel})
-                      </span>
+                      <span style={{ color: '#6b7280', fontSize: '11px' }}>({entry.matchLabel})</span>
                     ) : null}
                   </div>
                   <select
                     className="performer-alternatives-dropdown"
                     value={selectedValue}
-                    onChange={(event) => setPerformerSelections((current) => ({ ...current, [selectionKey]: event.target.value }))}
+                    onChange={(event) => {
+                      const nextValue = { ...(performerSelections || {}), [selectionKey]: event.target.value };
+                      onPerformerSelectionChange?.(nextValue);
+                    }}
                     style={{ fontSize: '12px', padding: '0.35rem 0.45rem', borderRadius: '6px', border: '1px solid #d1d5db' }}
                   >
                     <option value="">Select action...</option>
@@ -1327,20 +1363,33 @@ export default function ScrapeAllReviewModal({
             <div className="performers-list">
               {getPerformerReviewEntries().map((entry) => {
                 const translatedTags = parseActionCodeToTags(entry.actionCode);
-                const selectedValue = performerSelections[entry.key] || '';
+                const selectedValue = performerSelections?.[entry.key] || '';
 
                 return (
                   <div key={entry.key} className={`performer-item ${entry.matched ? 'matched' : ''}`}>
                     <div className="performer-input-wrapper">
-                      <span className="performer-name">
-                        {entry.matched ? '✓ ' : ''}{entry.name}
+                      <span className="performer-name" style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', flexWrap: 'wrap' }}>
+                        <span
+                          style={{
+                            padding: '0.1rem 0.45rem',
+                            borderRadius: '999px',
+                            fontSize: '10px',
+                            fontWeight: 700,
+                            flexShrink: 0,
+                            background: entry.matched ? '#dcfce7' : '#fef3c7',
+                            color: entry.matched ? '#166534' : '#92400e'
+                          }}
+                        >
+                          {entry.matched ? 'Matched' : 'New'}
+                        </span>
+                        {entry.name}
                         {entry.matchLabel ? (
-                          <span className="alias-info" style={{ color: '#6b7280', marginLeft: '0.25rem', fontSize: '0.875rem' }}>
-                            {' ('}{entry.matchLabel}{')'}
+                          <span className="alias-info" style={{ color: '#6b7280', fontSize: '0.875rem' }}>
+                            ({entry.matchLabel})
                           </span>
                         ) : null}
                         {entry.actionCode ? (
-                          <span className="action-code" style={{ color: '#10b981', marginLeft: '0.5rem', fontSize: '0.875rem' }}>
+                          <span className="action-code" style={{ color: '#10b981', fontSize: '0.875rem' }}>
                             ({entry.actionCode})
                           </span>
                         ) : null}
@@ -1348,7 +1397,10 @@ export default function ScrapeAllReviewModal({
                       <select
                         className="performer-alternatives-dropdown"
                         value={selectedValue}
-                        onChange={(event) => setPerformerSelections((current) => ({ ...current, [entry.key]: event.target.value }))}
+                        onChange={(event) => {
+                          const nextValue = { ...(performerSelections || {}), [entry.key]: event.target.value };
+                          onPerformerSelectionChange?.(nextValue);
+                        }}
                       >
                         <option value="">Select action...</option>
                         {entry.options.map((option) => (

@@ -10,6 +10,7 @@ import AddPerformerModal from './components/AddPerformerModal';
 import MergePerformersModal from '../../../../components/stash/MergePerformersModal';
 import PerformerCheckboxOverlay from '../../../../components/stash/PerformerCheckboxOverlay';
 import ScrapeAllReviewModal from './components/ScrapeAllReviewModal';
+import { buildSelectedPerformersForApply } from './utils/scrapeReviewSelectionUtils';
 import config from '../../../../config';
 
 export default function SceneDetail() {
@@ -38,6 +39,7 @@ export default function SceneDetail() {
   const [scrapeData, setScrapeData] = useState(null);
   const [showScrapeReviewModal, setShowScrapeReviewModal] = useState(false);
   const [selectedMultiSourceResults, setSelectedMultiSourceResults] = useState([]);
+  const [reviewPerformerSelections, setReviewPerformerSelections] = useState({});
   const [isSearching, setIsSearching] = useState(false);
   const [searchResults, setSearchResults] = useState(null);
   const [creatingPerformers, setCreatingPerformers] = useState(new Set()); // Track which performers are being created
@@ -1923,15 +1925,40 @@ export default function SceneDetail() {
         }
       }
       
-      // Collect matched performer IDs
-      const performerIds = scrapeData.matched.performers.map(p => p.id);
-
-      // Build action codes array matching performer IDs order
-      const actionCodes = performerIds.map(performerId => {
-        const matched = scrapeData.matched.performers.find(p => p.id === performerId);
-        const scraped = scrapeData.scraped.performers.find(sp => sp.name === matched?.originalName);
-        return scraped?.actionCode || null;
+      const selectedPerformersForApply = buildSelectedPerformersForApply({
+        matchedPerformers: scrapeData?.matched?.performers || [],
+        scrapedPerformers: scrapeData?.scraped?.performers || [],
+        performerSelections: reviewPerformerSelections
       });
+
+      // Create any performers the user marked as new before building the payload.
+      for (const entry of selectedPerformersForApply) {
+        if (entry.selectionValue !== '__ADD_NEW__' || entry.id) continue;
+        try {
+          const scrapedPerformer = (scrapeData?.scraped?.performers || []).find(
+            (sp) => String(sp?.name || '').trim().toLowerCase() === String(entry.originalName || entry.name).trim().toLowerCase()
+          );
+          const createRes = await fetch(`${config.apiBaseUrl}/api/stash/performers/create`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name: entry.originalName || entry.name, url: scrapedPerformer?.url || null, aliases: [] })
+          });
+          const createResult = await createRes.json();
+          if (createResult.success) {
+            entry.id = createResult.data.performer.id;
+            console.log(`✅ Created new performer "${entry.name}" → ${entry.id}`);
+          } else {
+            console.warn(`⚠️ Failed to create performer "${entry.name}":`, createResult.error);
+          }
+        } catch (err) {
+          console.error(`❌ Error creating performer "${entry.name}":`, err);
+        }
+      }
+
+      // Keep performerIds and actionCodes aligned — filter both together.
+      const pairedPerformers = selectedPerformersForApply.filter((entry) => entry.id);
+      const performerIds = pairedPerformers.map((entry) => entry.id);
+      const actionCodes = pairedPerformers.map((entry) => entry.actionCode || null);
 
       // Determine studio ID if matched
       const studioId = scrapeData.matched.studio ? scrapeData.matched.studio.id : null;
@@ -5412,6 +5439,8 @@ export default function SceneDetail() {
           onShowSelectedDetails={handleShowSelectedMultiSourceResults}
           onAccept={handleAcceptScrape}
           onApply={handleApplyAndNext}
+          performerSelections={reviewPerformerSelections}
+          onPerformerSelectionChange={setReviewPerformerSelections}
           fieldSelections={fieldSelections}
           onFieldSelectionChange={(field, value) => setFieldSelections(prev => ({ ...prev, [field]: value }))}
           onCreateGroup={handleCreateGroup}
