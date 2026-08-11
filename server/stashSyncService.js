@@ -104,58 +104,97 @@ class StashSyncService {
     if (this.stashApiKey) {
       headers['ApiKey'] = this.stashApiKey;
     }
+
+    const maxRetries = 4;
+    const baseDelayMs = 1500;
+    let lastError = null;
     
-    console.log('🌐 [makeGraphQLRequest] Preparing GraphQL request:');
-    console.log('   - URL:', graphqlUrl);
-    console.log('   - Has API Key:', !!this.stashApiKey);
-    console.log('   - Variables:', JSON.stringify(variables, null, 2));
-    console.log('   - Query:', query.substring(0, 100) + '...');
-    
-    try {
-      console.log('   - Sending HTTP POST request...');
-      const response = await fetch(graphqlUrl, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify(requestBody)
-      });
-      
-      console.log('   - Response received:');
-      console.log('     - Status:', response.status, response.statusText);
-      console.log('     - Content-Type:', response.headers.get('content-type'));
-      
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.error('❌ [makeGraphQLRequest] HTTP error:', errorText);
-        throw new Error(`Stash GraphQL request failed: ${response.status} ${response.statusText}. Response: ${errorText}`);
+    for (let attempt = 1; attempt <= maxRetries + 1; attempt++) {
+      try {
+        console.log('🌐 [makeGraphQLRequest] Preparing GraphQL request:');
+        console.log('   - URL:', graphqlUrl);
+        console.log('   - Has API Key:', !!this.stashApiKey);
+        console.log('   - Variables:', JSON.stringify(variables, null, 2));
+        console.log('   - Query:', query.substring(0, 100) + '...');
+        console.log(`   - Attempt ${attempt}/${maxRetries + 1}`);
+        console.log('   - Sending HTTP POST request...');
+        const response = await fetch(graphqlUrl, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify(requestBody)
+        });
+        
+        console.log('   - Response received:');
+        console.log('     - Status:', response.status, response.statusText);
+        console.log('     - Content-Type:', response.headers.get('content-type'));
+        
+        if (!response.ok) {
+          const errorText = await response.text();
+          console.error('❌ [makeGraphQLRequest] HTTP error:', errorText);
+          throw new Error(`Stash GraphQL request failed: ${response.status} ${response.statusText}. Response: ${errorText}`);
+        }
+        
+        const contentType = response.headers.get('content-type');
+        if (!contentType || !contentType.includes('application/json')) {
+          const responseText = await response.text();
+          console.error('❌ [makeGraphQLRequest] Non-JSON response:', responseText.substring(0, 200));
+          throw new Error(`Expected JSON response from Stash GraphQL endpoint, but got ${contentType}. Response: ${responseText.substring(0, 200)}...`);
+        }
+        
+        const jsonData = await response.json();
+        console.log('   - JSON parsed successfully');
+        
+        if (jsonData.errors) {
+          console.error('❌ [makeGraphQLRequest] GraphQL errors:', JSON.stringify(jsonData.errors, null, 2));
+          throw new Error(`Stash GraphQL error: ${JSON.stringify(jsonData.errors)}`);
+        }
+        
+        console.log('✅ [makeGraphQLRequest] Request successful, returning data');
+        return jsonData.data;
+      } catch (error) {
+        lastError = error;
+        console.error('❌ [makeGraphQLRequest] Exception:', error.message);
+        console.error('   - Error code:', error.code);
+        console.error('   - Error type:', error.name);
+
+        const isRetryable = this.isRetryableGraphQLError(error);
+        if (!isRetryable || attempt > maxRetries) {
+          if (error.code === 'ECONNREFUSED' || error.code === 'ENOTFOUND') {
+            throw new Error(`Cannot connect to Stash server at ${graphqlUrl}. Please verify the Stash URL is correct and the server is running.`);
+          }
+          throw error;
+        }
+
+        const delayMs = baseDelayMs * Math.pow(2, attempt - 1);
+        console.warn(`⚠️ [makeGraphQLRequest] Retryable error, retrying in ${delayMs}ms (attempt ${attempt + 1}/${maxRetries + 1})...`);
+        await this.sleep(delayMs);
       }
-      
-      const contentType = response.headers.get('content-type');
-      if (!contentType || !contentType.includes('application/json')) {
-        const responseText = await response.text();
-        console.error('❌ [makeGraphQLRequest] Non-JSON response:', responseText.substring(0, 200));
-        throw new Error(`Expected JSON response from Stash GraphQL endpoint, but got ${contentType}. Response: ${responseText.substring(0, 200)}...`);
-      }
-      
-      const jsonData = await response.json();
-      console.log('   - JSON parsed successfully');
-      
-      if (jsonData.errors) {
-        console.error('❌ [makeGraphQLRequest] GraphQL errors:', JSON.stringify(jsonData.errors, null, 2));
-        throw new Error(`Stash GraphQL error: ${JSON.stringify(jsonData.errors)}`);
-      }
-      
-      console.log('✅ [makeGraphQLRequest] Request successful, returning data');
-      return jsonData.data;
-    } catch (error) {
-      console.error('❌ [makeGraphQLRequest] Exception:', error.message);
-      console.error('   - Error code:', error.code);
-      console.error('   - Error type:', error.name);
-      
-      if (error.code === 'ECONNREFUSED' || error.code === 'ENOTFOUND') {
-        throw new Error(`Cannot connect to Stash server at ${graphqlUrl}. Please verify the Stash URL is correct and the server is running.`);
-      }
-      throw error;
     }
+
+    throw lastError;
+  }
+
+  isRetryableGraphQLError(error) {
+    const message = (error?.message || '').toLowerCase();
+    const code = error?.code;
+
+    return (
+      code === 'ECONNRESET' ||
+      code === 'ETIMEDOUT' ||
+      code === 'EPIPE' ||
+      code === 'ECONNABORTED' ||
+      code === 'ECONNREFUSED' ||
+      error?.name === 'FetchError' ||
+      message.includes('socket hang up') ||
+      message.includes('reset by peer') ||
+      message.includes('econnreset') ||
+      message.includes('timed out') ||
+      message.includes('network request failed')
+    );
+  }
+
+  sleep(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
   }
 
   async syncScenes(page = 1, perPage = 250) {
@@ -3020,19 +3059,45 @@ class StashSyncService {
 
     const variables = { source, input };
 
-    try {
-      const result = await this.makeGraphQLRequest(query, variables);
-      
-      if (result?.scrapeSingleScene) {
-        console.log(`✅ [scrapeSingleScene] Found ${result.scrapeSingleScene.length} results`);
-        return result.scrapeSingleScene;
+    const maxRetries = 4;
+    let lastError = null;
+
+    for (let attempt = 1; attempt <= maxRetries + 1; attempt++) {
+      try {
+        const result = await this.makeGraphQLRequest(query, variables);
+        const scrapedScenes = result?.scrapeSingleScene;
+
+        if (Array.isArray(scrapedScenes)) {
+          if (scrapedScenes.length > 0) {
+            console.log(`✅ [scrapeSingleScene] Found ${scrapedScenes.length} results on attempt ${attempt}`);
+            return scrapedScenes;
+          }
+
+          console.warn(`⚠️ [scrapeSingleScene] Received no scraped scenes from Stash box on attempt ${attempt}; returning empty result.`);
+          return [];
+        }
+
+        if (scrapedScenes) {
+          return Array.isArray(scrapedScenes) ? scrapedScenes : [scrapedScenes];
+        }
+
+        return [];
+      } catch (error) {
+        lastError = error;
+        console.error(`❌ [scrapeSingleScene] Error scraping scene on attempt ${attempt}:`, error);
+
+        const isRetryable = this.isRetryableGraphQLError(error);
+        if (!isRetryable || attempt > maxRetries) {
+          throw error;
+        }
+
+        const delayMs = 1500 * Math.pow(2, attempt - 1);
+        console.warn(`⏳ [scrapeSingleScene] Retrying in ${delayMs}ms...`);
+        await this.sleep(delayMs);
       }
-      
-      return [];
-    } catch (error) {
-      console.error('❌ [scrapeSingleScene] Error scraping scene:', error);
-      throw error;
     }
+
+    throw lastError || new Error('Failed to scrape scene');
   }
 
   async scrapeSinglePerformer(source, input, filterMaleOnly = false) {

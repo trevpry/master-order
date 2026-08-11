@@ -9,7 +9,6 @@ import PerformerSwapModal from './components/PerformerSwapModal';
 import AddPerformerModal from './components/AddPerformerModal';
 import MergePerformersModal from '../../../../components/stash/MergePerformersModal';
 import PerformerCheckboxOverlay from '../../../../components/stash/PerformerCheckboxOverlay';
-import ScrapeAllReviewModal from './components/ScrapeAllReviewModal';
 import config from '../../../../config';
 
 export default function SceneDetail() {
@@ -37,7 +36,6 @@ export default function SceneDetail() {
   const [isScraping, setIsScraping] = useState(false);
   const [scrapeData, setScrapeData] = useState(null);
   const [showScrapeReviewModal, setShowScrapeReviewModal] = useState(false);
-  const [selectedMultiSourceResults, setSelectedMultiSourceResults] = useState([]);
   const [isSearching, setIsSearching] = useState(false);
   const [searchResults, setSearchResults] = useState(null);
   const [creatingPerformers, setCreatingPerformers] = useState(new Set()); // Track which performers are being created
@@ -50,8 +48,7 @@ export default function SceneDetail() {
     date: 'scraped',
     details: 'scraped',
     image: 'scraped',
-    url: 'scraped',
-    tags: 'scraped'
+    url: 'scraped'
   }); // Track which version of each field to use
   const [hoveringPerformer, setHoveringPerformer] = useState(null); // Track which performer is being hovered
   const [showGeviUrlModal, setShowGeviUrlModal] = useState(false);
@@ -64,9 +61,6 @@ export default function SceneDetail() {
   const [parseStudio, setParseStudio] = useState(true);
   const [parseTitle, setParseTitle] = useState(true);
   const [parsePerformers, setParsePerformers] = useState(true);
-  const [parseSpaceSeparators, setParseSpaceSeparators] = useState('_');
-  const [parsePerformerSeparators, setParsePerformerSeparators] = useState('__');
-  const [activeParseTab, setActiveParseTab] = useState('fields');
   const [stashUrl, setStashUrl] = useState(null);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
@@ -117,68 +111,20 @@ export default function SceneDetail() {
   // Cast → performer matching state per result item
   const [castPerformerResults, setCastPerformerResults] = useState({});
 
-  const parseSeparatorInput = (value) => {
-    if (Array.isArray(value)) {
-      return value.map((entry) => String(entry).trim()).filter(Boolean);
-    }
-
-    if (typeof value === 'string') {
-      return value
-        .split(/\r?\n|,/)
-        .map((entry) => entry.trim())
-        .filter(Boolean);
-    }
-
-    return [];
-  };
-
-  const persistParserSettings = async (spaceSeparators, performerSeparators) => {
-    try {
-      await fetch(`${config.apiBaseUrl}/api/settings`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          filenameParserSpaceSeparators: parseSeparatorInput(spaceSeparators),
-          filenameParserPerformerSeparators: parseSeparatorInput(performerSeparators)
-        })
-      });
-    } catch (error) {
-      console.warn('Could not persist parser separator settings:', error.message);
-    }
-  };
-
-  // Fetch Stash URL and persisted parser settings from settings
+  // Fetch Stash URL from settings
   useEffect(() => {
-    const fetchSettings = async () => {
+    const fetchStashUrl = async () => {
       try {
         const res = await fetch(`${config.apiBaseUrl}/api/settings`);
         const settings = await res.json();
         if (settings?.stashUrl) {
           setStashUrl(settings.stashUrl);
         }
-
-        const persistedSpaceSeparators = Array.isArray(settings?.filenameParserSpaceSeparators)
-          ? settings.filenameParserSpaceSeparators
-          : typeof settings?.filenameParserSpaceSeparators === 'string'
-            ? settings.filenameParserSpaceSeparators.split(/\r?\n|,/).map((entry) => entry.trim()).filter(Boolean)
-            : [];
-        const persistedPerformerSeparators = Array.isArray(settings?.filenameParserPerformerSeparators)
-          ? settings.filenameParserPerformerSeparators
-          : typeof settings?.filenameParserPerformerSeparators === 'string'
-            ? settings.filenameParserPerformerSeparators.split(/\r?\n|,/).map((entry) => entry.trim()).filter(Boolean)
-            : [];
-
-        if (persistedSpaceSeparators.length > 0) {
-          setParseSpaceSeparators(persistedSpaceSeparators.join('\n'));
-        }
-        if (persistedPerformerSeparators.length > 0) {
-          setParsePerformerSeparators(persistedPerformerSeparators.join('\n'));
-        }
       } catch (error) {
-        console.error('Error fetching settings:', error);
+        console.error('Error fetching Stash URL:', error);
       }
     };
-    fetchSettings();
+    fetchStashUrl();
   }, []);
 
   useEffect(() => {
@@ -634,10 +580,6 @@ export default function SceneDetail() {
     setIsParsing(true);
 
     try {
-      const effectiveSpaceSeparators = parseSeparatorInput(parseSpaceSeparators);
-      const effectivePerformerSeparators = parseSeparatorInput(parsePerformerSeparators);
-      await persistParserSettings(effectiveSpaceSeparators, effectivePerformerSeparators);
-
       // Extract filename from path if not using custom filename
       if (!customFilename) {
         const pathParts = data.path.split(/[\\/]/);
@@ -657,9 +599,7 @@ export default function SceneDetail() {
           customFilename: customFilename || undefined,
           parseStudio: parseStudio,
           parseTitle: parseTitle,
-          parsePerformers: parsePerformers,
-          spaceSeparators: effectiveSpaceSeparators,
-          performerSeparators: effectivePerformerSeparators
+          parsePerformers: parsePerformers
         })
       });
 
@@ -1454,68 +1394,10 @@ export default function SceneDetail() {
     }
   };
 
-  const handleBackToScrapeResults = () => {
-    setScrapeData(prev => {
-      if (!prev?.multiSourceResults) {
-        return prev;
-      }
-
-      return {
-        ...prev,
-        reviewView: 'list',
-        scraped: null,
-        matched: null,
-        unmatched: null,
-        sourceUrl: null,
-        source: prev.source
-      };
-    });
-  };
-
-  const handleToggleMultiSourceSelection = (sourceResult, sceneResult, sourceKey) => {
-    const key = sourceKey || sourceResult?.endpoint || sourceResult?.id || sourceResult?.name || 'source';
-    const sourceName = sourceResult?.name || sourceResult?.endpoint || sourceResult?.id || 'Source';
-    const resultKey = [
-      sceneResult?.id,
-      sceneResult?.url,
-      sceneResult?.title,
-      sceneResult?.date,
-      typeof sceneResult?.studio === 'object' ? sceneResult?.studio?.name : sceneResult?.studio,
-      sceneResult?.image
-    ].filter(Boolean).join('::') || JSON.stringify(sceneResult || {});
-
-    setSelectedMultiSourceResults(prev => {
-      const existingIndex = prev.findIndex(entry => entry.sourceKey === key);
-      const candidate = {
-        sourceKey: key,
-        sourceName,
-        resultKey,
-        result: sceneResult
-      };
-
-      if (existingIndex >= 0) {
-        const current = prev[existingIndex];
-        const isSameSelection = current?.resultKey === resultKey;
-        if (isSameSelection) {
-          return prev.filter((_, index) => index !== existingIndex);
-        }
-
-        const updated = [...prev];
-        updated[existingIndex] = candidate;
-        return updated;
-      }
-
-      return [...prev, candidate];
-    });
-  };
-
   const handleSelectStashBoxResult = async (sceneResult) => {
-    if (isScraping) return;
-
     try {
       setIsScraping(true);
-      setShowScrapeReviewModal(false);
-      setSearchResults(prev => prev ? { ...prev, isProcessingSelection: true } : null);
+      setSearchResults(null); // Clear search results
       
       console.log(`📦 Processing stash-box result:`, sceneResult.title);
       
@@ -1525,8 +1407,7 @@ export default function SceneDetail() {
           'Content-Type': 'application/json'
         },
         body: JSON.stringify({
-          scraped: sceneResult,
-          skipGeviFollowUp: true
+          scraped: sceneResult
         })
       });
 
@@ -1535,16 +1416,13 @@ export default function SceneDetail() {
       if (result.success) {
         const { scraped, matched, unmatched, sourceUrl, source } = result.data;
         
-        setSearchResults(null);
-        setScrapeData(prev => ({
-          ...(prev || {}),
-          scraped,
-          matched,
+        setScrapeData({ 
+          scraped, 
+          matched, 
           unmatched,
           sourceUrl: sourceUrl,
-          source: source,
-          reviewView: 'detail'
-        }));
+          source: source
+        });
         
         setFieldSelections({
           title: 'scraped',
@@ -1552,8 +1430,7 @@ export default function SceneDetail() {
           url: 'scraped',
           date: 'scraped',
           studio: 'scraped',
-          image: 'scraped',
-          tags: 'scraped'
+          image: 'scraped'
         });
         
         setShowScrapeReviewModal(true);
@@ -1563,211 +1440,6 @@ export default function SceneDetail() {
     } catch (error) {
       console.error('Error processing stash-box result:', error);
       alert('Failed to process stash-box result');
-    } finally {
-      setIsScraping(false);
-    }
-  };
-
-  const normalizeScraperResultForReview = (sourceResult = {}) => {
-    const baseCandidate = sourceResult?.scraped || sourceResult?.metadata || sourceResult?.result || sourceResult || {};
-    const rawResult = baseCandidate?.scraped || baseCandidate?.metadata || baseCandidate || {};
-
-    const normalized = {
-      ...baseCandidate,
-      ...rawResult,
-      title: rawResult.title || rawResult.name || baseCandidate?.title || baseCandidate?.name || sourceResult?.title || sourceResult?.name || '',
-      studio: typeof rawResult.studio === 'string'
-        ? rawResult.studio
-        : rawResult.studio?.name || rawResult.studio?.title || baseCandidate?.studio?.name || baseCandidate?.studio?.title || sourceResult?.studio?.name || sourceResult?.studio?.title || '',
-      date: rawResult.date || rawResult.releaseDate || rawResult.released || rawResult.release_date || baseCandidate?.date || baseCandidate?.releaseDate || baseCandidate?.released || baseCandidate?.release_date || sourceResult?.date || sourceResult?.releaseDate || sourceResult?.released || sourceResult?.release_date || '',
-      details: rawResult.details || rawResult.synopsis || rawResult.description || rawResult.summary || baseCandidate?.details || baseCandidate?.synopsis || baseCandidate?.description || baseCandidate?.summary || sourceResult?.details || sourceResult?.synopsis || sourceResult?.description || sourceResult?.summary || '',
-      image: rawResult.image || rawResult.originalImage || rawResult.displayImage || baseCandidate?.image || baseCandidate?.originalImage || baseCandidate?.displayImage || sourceResult?.image || sourceResult?.originalImage || sourceResult?.displayImage || '',
-      url: rawResult.url || rawResult.sourceUrl || rawResult.urls?.[0] || baseCandidate?.url || baseCandidate?.sourceUrl || baseCandidate?.urls?.[0] || sourceResult?.url || sourceResult?.sourceUrl || sourceResult?.urls?.[0] || '',
-      performers: rawResult.performers || rawResult.cast || baseCandidate?.performers || baseCandidate?.cast || sourceResult?.performers || sourceResult?.cast || [],
-      tags: rawResult.tags || baseCandidate?.tags || sourceResult?.tags || [],
-      episodeUrls: Array.isArray(rawResult.episodeUrls)
-        ? rawResult.episodeUrls
-        : Array.isArray(rawResult.urls)
-          ? rawResult.urls
-          : Array.isArray(baseCandidate?.episodeUrls)
-            ? baseCandidate.episodeUrls
-            : Array.isArray(baseCandidate?.urls)
-              ? baseCandidate.urls
-              : Array.isArray(sourceResult?.episodeUrls)
-                ? sourceResult.episodeUrls
-                : Array.isArray(sourceResult?.urls)
-                  ? sourceResult.urls
-                  : [],
-      urls: Array.isArray(rawResult.urls)
-        ? rawResult.urls
-        : rawResult.url
-          ? [rawResult.url]
-          : Array.isArray(baseCandidate?.urls)
-            ? baseCandidate.urls
-            : baseCandidate?.url
-              ? [baseCandidate.url]
-              : Array.isArray(sourceResult?.urls)
-                ? sourceResult.urls
-                : sourceResult?.url
-                  ? [sourceResult.url]
-                  : []
-    };
-
-    return normalized;
-  };
-
-  const handleShowSelectedMultiSourceResults = async () => {
-    if (!selectedMultiSourceResults.length) {
-      toast.error('Select at least one scene to continue');
-      return;
-    }
-
-    try {
-      setIsScraping(true);
-
-      const detailResults = [];
-      for (const selection of selectedMultiSourceResults) {
-        const sceneResult = selection.result;
-        if (!sceneResult) continue;
-
-        const normalizedScraped = normalizeScraperResultForReview(sceneResult);
-        console.log(`[Multi-Source Review] Processing selection "${selection.sourceName || selection.sourceKey}" for tag matching`, {
-          title: normalizedScraped.title,
-          tags: normalizedScraped.tags,
-          source: normalizedScraped.source || selection.sourceName || 'multi-selection'
-        });
-
-        let processedResult = {
-          sourceName: selection.sourceName,
-          sourceKey: selection.sourceKey,
-          scraped: normalizedScraped,
-          matched: {
-            performers: sceneResult?.matchedPerformers?.matched || sceneResult?.matched?.performers || [],
-            tags: [],
-            studio: null,
-            groups: []
-          },
-          unmatched: {
-            performers: sceneResult?.matchedPerformers?.unmatched || sceneResult?.unmatched?.performers || [],
-            tags: []
-          },
-          sourceUrl: normalizedScraped.url || '',
-          source: normalizedScraped.source || selection.sourceName || 'multi-selection',
-          result: sceneResult
-        };
-
-        try {
-          const response = await fetch(`${config.apiBaseUrl}/api/stash/scenes/${id}/scrape-stashbox-result`, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({
-              scraped: normalizedScraped,
-              skipGeviFollowUp: true
-            })
-          });
-
-          const result = await response.json();
-          if (result.success) {
-            const serverData = result.data || {};
-            processedResult = {
-              ...processedResult,
-              scraped: serverData.scraped || normalizedScraped,
-              matched: {
-                performers: serverData.matched?.performers || processedResult.matched.performers || [],
-                tags: serverData.matched?.tags || [],
-                studio: serverData.matched?.studio || null,
-                groups: serverData.matched?.groups || []
-              },
-              unmatched: {
-                performers: serverData.unmatched?.performers || processedResult.unmatched.performers || [],
-                tags: serverData.unmatched?.tags || []
-              },
-              sourceUrl: serverData.sourceUrl || normalizedScraped.url || '',
-              source: serverData.source || normalizedScraped.source || selection.sourceName || 'multi-selection'
-            };
-
-            console.log(`[Multi-Source Review] Processed selection "${selection.sourceName || selection.sourceKey}"`, {
-              matchedTags: processedResult.matched.tags.map((tag) => tag?.name || tag),
-              unmatchedTags: processedResult.unmatched.tags.map((tag) => (typeof tag === 'string' ? tag : tag?.name))
-            });
-          } else {
-            console.warn(`[Multi-Source Review] Failed to process selection "${selection.sourceName || selection.sourceKey}"`, result.error || 'Unknown error');
-          }
-        } catch (error) {
-          console.error(`[Multi-Source Review] Error processing selection "${selection.sourceName || selection.sourceKey}"`, error);
-        }
-
-        detailResults.push(processedResult);
-      }
-
-      setScrapeData(prev => ({
-        ...(prev || {}),
-        reviewView: 'selected-detail',
-        selectedResults: detailResults,
-        scraped: detailResults[0]?.scraped || null,
-        matched: detailResults[0]?.matched || null,
-        unmatched: detailResults[0]?.unmatched || null,
-        sourceUrl: detailResults[0]?.sourceUrl || null,
-        source: detailResults[0]?.source || prev?.source || 'multi-selection'
-      }));
-
-      setFieldSelections({
-        title: 'scraped',
-        details: 'scraped',
-        url: 'scraped',
-        date: 'scraped',
-        studio: 'scraped',
-        image: 'scraped',
-        tags: 'scraped'
-      });
-    } catch (error) {
-      console.error('Error loading selected multi-source results:', error);
-      toast.error('Failed to load selected results');
-    } finally {
-      setIsScraping(false);
-    }
-  };
-
-  const handleScrapeAll = async () => {
-    try {
-      setIsScraping(true);
-
-      const response = await fetch(`${config.apiBaseUrl}/api/stash/scenes/${id}/scrape-all`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        }
-      });
-
-      const result = await response.json();
-      if (result.success) {
-        const sources = result.data?.sources || [];
-
-        setScrapeData({
-          multiSourceResults: sources,
-          source: 'stash-box-multi',
-          reviewView: 'list'
-        });
-        setSelectedMultiSourceResults([]);
-        setFieldSelections({
-          title: 'scraped',
-          details: 'scraped',
-          url: 'scraped',
-          date: 'scraped',
-          studio: 'scraped',
-          image: 'scraped',
-          tags: 'scraped'
-        });
-        setShowScrapeReviewModal(true);
-        toast.success(result.message || 'Scrape All workflow completed');
-      } else {
-        toast.error(result.error || 'Failed to start Scrape All workflow');
-      }
-    } catch (error) {
-      console.error('Error starting Scrape All workflow:', error);
-      toast.error('Failed to start Scrape All workflow');
     } finally {
       setIsScraping(false);
     }
@@ -1862,8 +1534,7 @@ export default function SceneDetail() {
           date: 'scraped',
           details: 'scraped',
           image: 'scraped',
-          url: 'scraped',
-          tags: 'scraped'
+          url: 'scraped'
         });
         
         setShowScrapeModal(false);
@@ -1890,9 +1561,7 @@ export default function SceneDetail() {
     }
   };
 
-  const handleAcceptScrape = async (options = {}) => {
-    const { onSuccess } = options;
-
+  const handleAcceptScrape = async () => {
     try {
       // Update performer URLs for matched performers if scraped URL is available
       for (const matchedPerformer of scrapeData.matched.performers) {
@@ -1947,67 +1616,6 @@ export default function SceneDetail() {
       console.log('🎬 [Scene Update] Scene Numbers:', sceneNumbers);
       console.log('🎬 [Scene Update] Matched Groups:', scrapeData.matched.groups);
 
-      const getFieldSelectionValue = (fieldName) => {
-        const selectedValue = fieldSelections?.[fieldName] || 'scraped';
-
-        if (fieldName === 'tags' && Array.isArray(selectedValue)) {
-          return selectedValue;
-        }
-
-        if (selectedValue === 'scraped') {
-          const candidate = scrapeData?.scraped || {};
-          switch (fieldName) {
-            case 'title': return candidate.title || '';
-            case 'studio': return typeof candidate.studio === 'string' ? candidate.studio : candidate.studio?.name || '';
-            case 'details': return candidate.details || '';
-            case 'date': return candidate.date || '';
-            case 'url': return candidate.url || '';
-            case 'image': return candidate.originalImage || candidate.image || null;
-            case 'performers': return Array.isArray(candidate.performers) ? candidate.performers : [];
-            case 'groups': return Array.isArray(candidate.groups) ? candidate.groups : [];
-            case 'episodeUrls': return Array.isArray(candidate.episodeUrls) ? candidate.episodeUrls : (Array.isArray(candidate.urls) ? candidate.urls : []);
-            case 'tags': return Array.isArray(candidate.tags) ? candidate.tags : [];
-            default: return null;
-          }
-        }
-
-        if (selectedValue === 'existing') {
-          switch (fieldName) {
-            case 'title': return data.title || '';
-            case 'studio': return data.studio?.name || data.studio || '';
-            case 'details': return data.details || '';
-            case 'date': return data.date || '';
-            case 'url': return data.url || data.urls?.[0] || '';
-            case 'image': return null;
-            case 'performers': return data.performers || [];
-            case 'groups': return data.groups || [];
-            case 'episodeUrls': return Array.isArray(data.episodeUrls) ? data.episodeUrls : (Array.isArray(data.urls) ? data.urls : []);
-            case 'tags': return Array.isArray(data.tags) ? data.tags : [];
-            default: return null;
-          }
-        }
-
-        const selectedResult = (scrapeData?.selectedResults || []).find((entry) => {
-          return (entry?.sourceKey || entry?.sourceName || '') === selectedValue;
-        });
-
-        const candidate = selectedResult?.scraped || selectedResult?.result || selectedResult || {};
-
-        switch (fieldName) {
-          case 'title': return candidate.title || candidate.name || '';
-          case 'studio': return typeof candidate.studio === 'string' ? candidate.studio : candidate.studio?.name || '';
-          case 'details': return candidate.details || candidate.synopsis || candidate.description || candidate.summary || '';
-          case 'date': return candidate.date || candidate.releaseDate || candidate.released || candidate.release_date || '';
-          case 'url': return candidate.url || candidate.sourceUrl || candidate.urls?.[0] || '';
-          case 'image': return candidate.originalImage || candidate.image || candidate.displayImage || null;
-          case 'performers': return Array.isArray(candidate.performers) ? candidate.performers : [];
-          case 'groups': return Array.isArray(candidate.groups) ? candidate.groups : [];
-          case 'episodeUrls': return Array.isArray(candidate.episodeUrls) ? candidate.episodeUrls : (Array.isArray(candidate.urls) ? candidate.urls : []);
-          case 'tags': return Array.isArray(candidate.tags) ? candidate.tags : [];
-          default: return null;
-        }
-      };
-
       // Build update payload based on field selections
       const updatePayload = {
         performerIds: performerIds,
@@ -2018,37 +1626,34 @@ export default function SceneDetail() {
       };
 
       // Add fields based on user selection
-      const selectedTitle = getFieldSelectionValue('title');
-      if (selectedTitle !== null) {
-        updatePayload.title = selectedTitle;
+      if (fieldSelections.title === 'scraped') {
+        updatePayload.title = scrapeData.scraped.title;
+      } else if (fieldSelections.title === 'existing') {
+        updatePayload.title = data.title;
       }
 
-      const selectedStudio = getFieldSelectionValue('studio');
-      if (selectedStudio !== null && selectedStudio !== '') {
-        updatePayload.studio = selectedStudio;
-        updatePayload.studioId = fieldSelections.studio === 'existing' ? (data.studio?.id || null) : studioId;
+      if (fieldSelections.studio === 'scraped') {
+        updatePayload.studio = scrapeData.scraped.studio;
+        updatePayload.studioId = studioId;
       } else if (fieldSelections.studio === 'existing') {
         updatePayload.studio = data.studio?.name || null;
         updatePayload.studioId = data.studio?.id || null;
       }
 
-      const selectedDetails = getFieldSelectionValue('details');
-      if (selectedDetails !== null && selectedDetails !== '') {
-        updatePayload.details = selectedDetails;
+      if (fieldSelections.details === 'scraped' && scrapeData.scraped.details) {
+        updatePayload.details = scrapeData.scraped.details;
       } else if (fieldSelections.details === 'existing') {
         updatePayload.details = data.details;
       }
 
-      const selectedDate = getFieldSelectionValue('date');
-      if (selectedDate !== null && selectedDate !== '') {
-        updatePayload.date = selectedDate;
+      if (fieldSelections.date === 'scraped' && scrapeData.scraped.date) {
+        updatePayload.date = scrapeData.scraped.date;
       } else if (fieldSelections.date === 'existing') {
         updatePayload.date = data.date;
       }
 
-      const selectedUrl = getFieldSelectionValue('url');
-      if (selectedUrl) {
-        updatePayload.url = selectedUrl;
+      if (fieldSelections.url === 'scraped' && scrapeData.scraped.url) {
+        updatePayload.url = scrapeData.scraped.url;
         // Only update geviUrl if the scraper source is GEVI
         // This prevents non-GEVI scrapers from overwriting the GEVI URL
         if (scrapeData.source && scrapeData.source.toLowerCase().includes('gevi')) {
@@ -2062,14 +1667,18 @@ export default function SceneDetail() {
         const allScrapedUrls = [];
         
         // Add main URL if it exists
-        if (selectedUrl) {
-          allScrapedUrls.push(selectedUrl);
+        if (scrapeData.scraped.url) {
+          allScrapedUrls.push(scrapeData.scraped.url);
         }
         
         // Add urls array if it exists (stash-box returns this)
-        const selectedUrlCollection = getFieldSelectionValue('episodeUrls');
-        if (Array.isArray(selectedUrlCollection) && selectedUrlCollection.length > 0) {
-          allScrapedUrls.push(...selectedUrlCollection);
+        if (scrapeData.scraped.urls && Array.isArray(scrapeData.scraped.urls)) {
+          allScrapedUrls.push(...scrapeData.scraped.urls);
+        }
+        
+        // Add episodeUrls if they exist
+        if (scrapeData.scraped.episodeUrls && Array.isArray(scrapeData.scraped.episodeUrls)) {
+          allScrapedUrls.push(...scrapeData.scraped.episodeUrls);
         }
         
         // Remove duplicates
@@ -2081,94 +1690,14 @@ export default function SceneDetail() {
         console.log('   - All URLs to add:', updatePayload.episodeUrls);
         console.log('   - Total URLs to add:', updatePayload.episodeUrls.length);
       } else if (fieldSelections.url === 'existing') {
-        // Keep existing URLs - don't send url fields
+        // Keep existing URLs - don't send url field
         console.log('📎 [URL Update] Keeping existing URLs (not sending url fields)');
       }
 
-      const selectedImage = getFieldSelectionValue('image');
-      if (selectedImage && fieldSelections.image !== 'existing') {
-        updatePayload.coverImage = selectedImage;
-      }
-
-      const selectedTags = getFieldSelectionValue('tags');
-      const selectedTagNames = (Array.isArray(selectedTags) ? selectedTags : [])
-        .map((tag) => typeof tag === 'string' ? tag : (tag?.name || tag?.tag?.name || ''))
-        .map((name) => String(name || '').trim())
-        .filter(Boolean);
-
-      if (fieldSelections.tags === 'existing') {
-        console.log('🏷️ [TAG UPDATE] Keeping existing scene tags');
-      } else if (selectedTagNames.length > 0) {
-        const normalizeTagLookupValue = (value) => String(value || '')
-          .trim()
-          .toLowerCase()
-          .replace(/[^a-z0-9]+/g, ' ')
-          .replace(/\s+/g, ' ')
-          .trim();
-        const collectTagLookupCandidates = (tagEntry) => {
-          if (!tagEntry) return [];
-
-          const candidates = [];
-          const addCandidate = (candidate) => {
-            if (!candidate) return;
-            if (Array.isArray(candidate)) {
-              candidate.forEach(addCandidate);
-              return;
-            }
-            if (typeof candidate === 'string') {
-              const trimmed = candidate.trim();
-              if (trimmed) candidates.push(trimmed);
-              return;
-            }
-            if (typeof candidate === 'object') {
-              if (typeof candidate.name === 'string' && candidate.name.trim()) candidates.push(candidate.name.trim());
-              if (typeof candidate.alias === 'string' && candidate.alias.trim()) candidates.push(candidate.alias.trim());
-              if (candidate.alias && typeof candidate.alias === 'object') {
-                if (typeof candidate.alias.name === 'string' && candidate.alias.name.trim()) candidates.push(candidate.alias.name.trim());
-                if (typeof candidate.alias.alias === 'string' && candidate.alias.alias.trim()) candidates.push(candidate.alias.alias.trim());
-              }
-              if (typeof candidate.aliases === 'string' && candidate.aliases.trim()) {
-                candidate.aliases.split(',').map((part) => part.trim()).filter(Boolean).forEach((part) => candidates.push(part));
-              }
-              if (Array.isArray(candidate.aliases)) {
-                candidate.aliases.forEach(addCandidate);
-              }
-              if (candidate.tag) {
-                addCandidate(candidate.tag);
-              }
-            }
-          };
-
-          addCandidate(tagEntry);
-
-          return Array.from(new Set(candidates.filter(Boolean)));
-        };
-
-        const matchedTagLookup = new Map(
-          [
-            ...(data?.tags || []),
-            ...(scrapeData?.matched?.tags || [])
-          ]
-            .filter((tag) => tag?.id)
-            .flatMap((tag) => collectTagLookupCandidates(tag).map((candidate) => [normalizeTagLookupValue(candidate), tag.id]))
-        );
-
-        const resolvedTagIds = [];
-        selectedTagNames.forEach((tagName) => {
-          const tagId = matchedTagLookup.get(normalizeTagLookupValue(tagName));
-          if (tagId) {
-            resolvedTagIds.push(tagId);
-          }
-        });
-
-        if (resolvedTagIds.length > 0) {
-          updatePayload.tagIds = Array.from(new Set(resolvedTagIds));
-          console.log('🏷️ [TAG UPDATE] Selected tag IDs for apply:', updatePayload.tagIds);
-        } else {
-          console.log('🏷️ [TAG UPDATE] No matching local tag IDs found for selected tags');
-        }
-      } else {
-        console.log('🏷️ [TAG UPDATE] No selected tags to apply');
+      if (fieldSelections.image === 'scraped' && scrapeData.scraped.originalImage) {
+        updatePayload.coverImage = scrapeData.scraped.originalImage || scrapeData.scraped.image;
+      } else if (fieldSelections.image === 'existing') {
+        // Keep existing image - don't send coverImage field
       }
 
       // Update scene with scraped values (including image, action codes, tags, groups, and GEVI URL)
@@ -2184,12 +1713,7 @@ export default function SceneDetail() {
       const result = await response.json();
       if (result.success) {
         setShowScrapeReviewModal(false);
-
-        if (typeof onSuccess === 'function') {
-          await onSuccess();
-        } else {
-          window.location.reload();
-        }
+        window.location.reload();
       } else {
         alert(`Failed to update scene: ${result.error || 'Unknown error'}`);
       }
@@ -2197,26 +1721,6 @@ export default function SceneDetail() {
       console.error('Error updating scene:', error);
       alert('Failed to update scene');
     }
-  };
-
-  const handleApplyAndNext = async () => {
-    const hasExistingPerformers = Array.isArray(data?.performers) && data.performers.some((entry) => {
-      const performer = entry?.performer || entry;
-      return Boolean(performer?.name || entry?.name);
-    });
-
-    const shouldApplyAndNext = !hasExistingPerformers && Array.isArray(scrapeData?.multiSourceResults) && scrapeData.multiSourceResults.length > 0;
-
-    if (!shouldApplyAndNext) {
-      await handleAcceptScrape();
-      return;
-    }
-
-    await handleAcceptScrape({
-      onSuccess: async () => {
-        await handleScrapeAll();
-      }
-    });
   };
 
   const handleCreatePerformerFromParse = async (performerName) => {
@@ -2687,38 +2191,29 @@ export default function SceneDetail() {
         const newGroup = createResult.data.group;
 
         // Update scrapeData to move group from unmatched to matched
-        setScrapeData(prev => {
-          const current = prev || {};
-          const matchedGroups = Array.isArray(current.matched?.groups) ? current.matched.groups : [];
-          const unmatchedGroups = Array.isArray(current.unmatched?.groups) ? current.unmatched.groups : [];
-
-          return {
-            ...current,
-            matched: {
-              ...(current.matched || {}),
-              groups: [
-                ...matchedGroups,
-                {
-                  id: newGroup.id,
-                  name: newGroup.name,
-                  studio: newGroup.studio?.name || studioName,
-                  date: newGroup.date,
-                  matchedVia: 'created',
-                  alternatives: [],
-                  originalName: group.name,
-                  url: group.url
-                }
-              ]
-            },
-            unmatched: {
-              ...(current.unmatched || {}),
-              groups: unmatchedGroups.filter((entry) => {
-                const entryName = typeof entry === 'string' ? entry : entry?.name;
-                return entryName !== group.name;
-              })
-            }
-          };
-        });
+        setScrapeData(prev => ({
+          ...prev,
+          matched: {
+            ...prev.matched,
+            groups: [
+              ...(prev.matched.groups || []),
+              {
+                id: newGroup.id,
+                name: newGroup.name,
+                studio: newGroup.studio?.name || studioName,
+                date: newGroup.date,
+                matchedVia: 'created',
+                alternatives: [],
+                originalName: group.name,
+                url: group.url
+              }
+            ]
+          },
+          unmatched: {
+            ...prev.unmatched,
+            groups: prev.unmatched.groups.filter(g => g.name !== group.name)
+          }
+        }));
 
         toast.success(`Group "${movie.name || group.name}" created`, {
           duration: 3000,
@@ -3304,14 +2799,6 @@ export default function SceneDetail() {
                 title="Parse filename to extract studio, performers, and title"
               >
                 🔍 Parse Filename
-              </button>
-
-              <button
-                onClick={handleScrapeAll}
-                className="scrape-all-button"
-                title="Run the multi-source scrape workflow and review the best options from each source"
-              >
-                🧠 Scrape All
               </button>
 
               <button 
@@ -4503,253 +3990,204 @@ export default function SceneDetail() {
             </div>
             
             <div className="parse-results">
-              <div className="parse-tab-switcher">
-                <button
-                  type="button"
-                  className={`parse-tab ${activeParseTab === 'fields' ? 'active' : ''}`}
-                  onClick={() => setActiveParseTab('fields')}
-                >
-                  Review
-                </button>
-                <button
-                  type="button"
-                  className={`parse-tab ${activeParseTab === 'separators' ? 'active' : ''}`}
-                  onClick={() => setActiveParseTab('separators')}
-                >
-                  Separators
-                </button>
+              {/* Filename Input with Refresh Button */}
+              <div className="parse-field">
+                <label>Filename to Parse:</label>
+                <div className="filename-input-wrapper">
+                  <input
+                    type="text"
+                    value={editedFilename}
+                    onChange={(e) => setEditedFilename(e.target.value)}
+                    className="parse-input filename-input"
+                    placeholder="Edit filename and refresh to re-parse"
+                    disabled={isParsing}
+                  />
+                  <button
+                    className="btn-refresh"
+                    onClick={handleRefreshParse}
+                    disabled={isParsing}
+                    title="Re-parse with edited filename"
+                  >
+                    {isParsing ? '⏳' : '🔄'} Refresh
+                  </button>
+                </div>
               </div>
 
-              {activeParseTab === 'separators' ? (
-                <>
-                  <div className="parse-field">
-                    <label>Treat these values as spaces:</label>
-                    <textarea
-                      value={parseSpaceSeparators}
-                      onChange={(e) => setParseSpaceSeparators(e.target.value)}
-                      className="parse-input parse-separator-textarea"
-                      placeholder="Enter one separator per line or use commas"
-                    />
-                    <div className="parse-help-text">
-                      Enter one separator per line (or comma-separated) for tokens the parser should replace with spaces before matching.
-                    </div>
-                  </div>
+              {/* Title Field */}
+              <div className="parse-field">
+                <label>Title:</label>
+                <input
+                  type="text"
+                  value={editedTitle}
+                  onChange={(e) => setEditedTitle(e.target.value)}
+                  className="parse-input"
+                  placeholder="Scene title"
+                />
+              </div>
 
-                  <div className="parse-field">
-                    <label>Treat these values as performer separators:</label>
-                    <textarea
-                      value={parsePerformerSeparators}
-                      onChange={(e) => setParsePerformerSeparators(e.target.value)}
-                      className="parse-input parse-separator-textarea"
-                      placeholder="Enter one separator per line or use commas"
-                    />
-                    <div className="parse-help-text">
-                      Enter one separator per line (or comma-separated) of literal values or regex patterns prefixed with ## to treat as performer separators.
-                    </div>
-                  </div>
-                </>
-              ) : (
-                <>
-                  {/* Filename Input with Refresh Button */}
-                  <div className="parse-field">
-                    <label>Filename to Parse:</label>
-                    <div className="filename-input-wrapper">
-                      <input
-                        type="text"
-                        value={editedFilename}
-                        onChange={(e) => setEditedFilename(e.target.value)}
-                        className="parse-input filename-input"
-                        placeholder="Edit filename and refresh to re-parse"
-                        disabled={isParsing}
-                      />
-                      <button
-                        className="btn-refresh"
-                        onClick={handleRefreshParse}
-                        disabled={isParsing}
-                        title="Re-parse with edited filename"
-                      >
-                        {isParsing ? '⏳' : '🔄'} Refresh
-                      </button>
-                    </div>
-                  </div>
+              {/* Studio Field */}
+              <div className="parse-field">
+                <label>Studio:</label>
+                <div className="parse-field-with-status">
+                  <input
+                    type="text"
+                    value={editedStudio}
+                    onChange={(e) => setEditedStudio(e.target.value)}
+                    className="parse-input"
+                    placeholder="Studio name"
+                  />
+                  {parseData.matched.studio ? (
+                    <span className="match-status matched">✓ Matched: {parseData.matched.studio.name}</span>
+                  ) : parseData.unmatched.studio ? (
+                    <span className="match-status unmatched">✗ Not found in database</span>
+                  ) : null}
+                </div>
+              </div>
 
-                  {/* Title Field */}
-                  <div className="parse-field">
-                    <label>Title:</label>
-                    <input
-                      type="text"
-                      value={editedTitle}
-                      onChange={(e) => setEditedTitle(e.target.value)}
-                      className="parse-input"
-                      placeholder="Scene title"
-                    />
-                  </div>
-
-                  {/* Studio Field */}
-                  <div className="parse-field">
-                    <label>Studio:</label>
-                    <div className="parse-field-with-status">
-                      <input
-                        type="text"
-                        value={editedStudio}
-                        onChange={(e) => setEditedStudio(e.target.value)}
-                        className="parse-input"
-                        placeholder="Studio name"
-                      />
-                      {parseData.matched.studio ? (
-                        <span className="match-status matched">✓ Matched: {parseData.matched.studio.name}</span>
-                      ) : parseData.unmatched.studio ? (
-                        <span className="match-status unmatched">✗ Not found in database</span>
-                      ) : null}
-                    </div>
-                  </div>
-
-                  {/* Performers Field */}
-                  <div className="parse-field">
-                    <label>Performers:</label>
-                    <div className="performers-list">
-                      {editedPerformers.map((performer, index) => {
-                        // Check if matched by name (could be primary match or alternative)
-                        let matched = parseData.matched.performers.find(
-                          p => p.name.toLowerCase().replace(/\s+/g, '') === performer.toLowerCase().replace(/\s+/g, '')
-                        );
-                        
-                        // Check if it's an alternative of any matched performer
-                        let selectedAlternative = null;
-                        let primaryMatch = null;
-                        if (!matched) {
-                          for (const p of parseData.matched.performers) {
-                            if (p.alternatives && p.alternatives.length > 0) {
-                              const alt = p.alternatives.find(a => 
-                                a.name.toLowerCase().replace(/\s+/g, '') === performer.toLowerCase().replace(/\s+/g, '')
-                              );
-                              if (alt) {
-                                selectedAlternative = alt;
-                                primaryMatch = p;
-                                break;
-                              }
-                            }
+              {/* Performers Field */}
+              <div className="parse-field">
+                <label>Performers:</label>
+                <div className="performers-list">
+                  {editedPerformers.map((performer, index) => {
+                    // Check if matched by name (could be primary match or alternative)
+                    let matched = parseData.matched.performers.find(
+                      p => p.name.toLowerCase().replace(/\s+/g, '') === performer.toLowerCase().replace(/\s+/g, '')
+                    );
+                    
+                    // Check if it's an alternative of any matched performer
+                    let selectedAlternative = null;
+                    let primaryMatch = null;
+                    if (!matched) {
+                      for (const p of parseData.matched.performers) {
+                        if (p.alternatives && p.alternatives.length > 0) {
+                          const alt = p.alternatives.find(a => 
+                            a.name.toLowerCase().replace(/\s+/g, '') === performer.toLowerCase().replace(/\s+/g, '')
+                          );
+                          if (alt) {
+                            selectedAlternative = alt;
+                            primaryMatch = p;
+                            break;
                           }
                         }
-                        
-                        // Check if matched by alias
-                        if (!matched && !selectedAlternative) {
-                          matched = parseData.matched.performers.find(
-                            p => p.matchedAlias && p.matchedAlias.toLowerCase().replace(/\s+/g, '') === performer.toLowerCase().replace(/\s+/g, '')
-                          );
-                        }
-                        
-                        const isUnmatched = parseData.unmatched.performers.some(p => {
-                          const pName = typeof p === 'string' ? p : p.name;
-                          return pName === performer;
-                        });
-                        
-                        // Use primaryMatch for alternatives check (the original match that has alternatives)
-                        const hasAlternatives = primaryMatch 
-                          ? (primaryMatch.alternatives && primaryMatch.alternatives.length > 0)
-                          : (matched && matched.alternatives && matched.alternatives.length > 0);
-                        
-                        // Get the actual match to display (either the selected alternative or the primary match)
-                        const displayMatch = selectedAlternative || matched;
-                        
-                        return (
-                          <div key={index} className="performer-item">
-                            <div className="performer-input-wrapper">
-                              <input
-                                type="text"
-                                value={performer}
-                                onChange={(e) => {
+                      }
+                    }
+                    
+                    // Check if matched by alias
+                    if (!matched && !selectedAlternative) {
+                      matched = parseData.matched.performers.find(
+                        p => p.matchedAlias && p.matchedAlias.toLowerCase().replace(/\s+/g, '') === performer.toLowerCase().replace(/\s+/g, '')
+                      );
+                    }
+                    
+                    const isUnmatched = parseData.unmatched.performers.some(p => {
+                      const pName = typeof p === 'string' ? p : p.name;
+                      return pName === performer;
+                    });
+                    
+                    // Use primaryMatch for alternatives check (the original match that has alternatives)
+                    const hasAlternatives = primaryMatch 
+                      ? (primaryMatch.alternatives && primaryMatch.alternatives.length > 0)
+                      : (matched && matched.alternatives && matched.alternatives.length > 0);
+                    
+                    // Get the actual match to display (either the selected alternative or the primary match)
+                    const displayMatch = selectedAlternative || matched;
+                    
+                    return (
+                      <div key={index} className="performer-item">
+                        <div className="performer-input-wrapper">
+                          <input
+                            type="text"
+                            value={performer}
+                            onChange={(e) => {
+                              const newPerformers = [...editedPerformers];
+                              newPerformers[index] = e.target.value;
+                              setEditedPerformers(newPerformers);
+                              // Regenerate title with updated performers
+                              setEditedTitle(regenerateTitle(newPerformers, editedTitle));
+                            }}
+                            className="parse-input performer-input"
+                          />
+                          {hasAlternatives && (
+                            <select
+                              className="performer-alternatives-dropdown"
+                              onChange={(e) => {
+                                if (e.target.value) {
+                                  console.log(`🔄 Switching performer at index ${index} from "${performer}" to "${e.target.value}"`);
                                   const newPerformers = [...editedPerformers];
                                   newPerformers[index] = e.target.value;
                                   setEditedPerformers(newPerformers);
+                                  console.log('   Updated editedPerformers:', newPerformers);
                                   // Regenerate title with updated performers
-                                  setEditedTitle(regenerateTitle(newPerformers, editedTitle));
-                                }}
-                                className="parse-input performer-input"
-                              />
-                              {hasAlternatives && (
-                                <select
-                                  className="performer-alternatives-dropdown"
-                                  onChange={(e) => {
-                                    if (e.target.value) {
-                                      console.log(`🔄 Switching performer at index ${index} from "${performer}" to "${e.target.value}"`);
-                                      const newPerformers = [...editedPerformers];
-                                      newPerformers[index] = e.target.value;
-                                      setEditedPerformers(newPerformers);
-                                      console.log('   Updated editedPerformers:', newPerformers);
-                                      // Regenerate title with updated performers
-                                      const newTitle = regenerateTitle(newPerformers, editedTitle);
-                                      console.log('   New title:', newTitle);
-                                      setEditedTitle(newTitle);
-                                    }
-                                  }}
-                                  value=""
-                                >
-                                  <option value="">Switch to alternative...</option>
-                                  {(primaryMatch || matched).alternatives.map((alt, altIndex) => (
-                                    <option key={altIndex} value={alt.name}>
-                                      {alt.name}
-                                      {alt.disambiguation ? ` (${alt.disambiguation})` : ''}
-                                      {alt.matchedVia === 'alias' && alt.matchedAlias ? ` (via: ${alt.matchedAlias})` : ''}
-                                    </option>
-                                  ))}
-                                </select>
-                              )}
-                            </div>
-                            <div className="performer-status-actions">
-                              {displayMatch && (
-                                <span className="match-status matched">
-                                  ✓ {displayMatch.name}
-                                  {displayMatch.disambiguation && (
-                                    <span style={{ color: '#6b7280', marginLeft: '0.25rem', fontSize: '0.875rem' }}>
-                                      ({displayMatch.disambiguation})
-                                    </span>
-                                  )}
-                                  {displayMatch.matchedVia === 'alias' && displayMatch.matchedAlias && (
-                                    <span className="alias-info"> (via alias: {displayMatch.matchedAlias})</span>
-                                  )}
-                                  {selectedAlternative && (
-                                    <span className="alternatives-info" style={{ color: '#10b981', marginLeft: '0.25rem' }}>
-                                      (Alternative selected)
-                                    </span>
-                                  )}
-                                  {hasAlternatives && !selectedAlternative && (
-                                    <span className="alternatives-count"> (+{(primaryMatch || matched).alternatives.length} more)</span>
-                                  )}
+                                  const newTitle = regenerateTitle(newPerformers, editedTitle);
+                                  console.log('   New title:', newTitle);
+                                  setEditedTitle(newTitle);
+                                }
+                              }}
+                              value=""
+                            >
+                              <option value="">Switch to alternative...</option>
+                              {(primaryMatch || matched).alternatives.map((alt, altIndex) => (
+                                <option key={altIndex} value={alt.name}>
+                                  {alt.name}
+                                  {alt.disambiguation ? ` (${alt.disambiguation})` : ''}
+                                  {alt.matchedVia === 'alias' && alt.matchedAlias ? ` (via: ${alt.matchedAlias})` : ''}
+                                </option>
+                              ))}
+                            </select>
+                          )}
+                        </div>
+                        <div className="performer-status-actions">
+                          {displayMatch && (
+                            <span className="match-status matched">
+                              ✓ {displayMatch.name}
+                              {displayMatch.disambiguation && (
+                                <span style={{ color: '#6b7280', marginLeft: '0.25rem', fontSize: '0.875rem' }}>
+                                  ({displayMatch.disambiguation})
                                 </span>
                               )}
-                              {isUnmatched && (
-                                <span className="match-status unmatched">✗ Not found</span>
+                              {displayMatch.matchedVia === 'alias' && displayMatch.matchedAlias && (
+                                <span className="alias-info"> (via alias: {displayMatch.matchedAlias})</span>
                               )}
-                              <button
-                                className="btn-create-performer"
-                                onClick={() => handleCreatePerformerFromParse(performer)}
-                                disabled={creatingPerformers.has(performer)}
-                                title="Create new performer in Stash with this name"
-                              >
-                                {creatingPerformers.has(performer) ? '⏳ Creating...' : '✨ Create New'}
-                              </button>
-                            </div>
-                            <button
-                              className="remove-performer-btn"
-                              onClick={() => setEditedPerformers(editedPerformers.filter((_, i) => i !== index))}
-                              title="Remove performer"
-                            >
-                              ✕
-                            </button>
-                          </div>
-                        );
-                      })}
-                      <button
-                        className="add-performer-btn"
-                        onClick={() => setEditedPerformers([...editedPerformers, ''])}
-                      >
-                        + Add Performer
-                      </button>
-                    </div>
-                  </div>
-                </>
-              )}
+                              {selectedAlternative && (
+                                <span className="alternatives-info" style={{ color: '#10b981', marginLeft: '0.25rem' }}>
+                                  (Alternative selected)
+                                </span>
+                              )}
+                              {hasAlternatives && !selectedAlternative && (
+                                <span className="alternatives-count"> (+{(primaryMatch || matched).alternatives.length} more)</span>
+                              )}
+                            </span>
+                          )}
+                          {isUnmatched && (
+                            <span className="match-status unmatched">✗ Not found</span>
+                          )}
+                          <button
+                            className="btn-create-performer"
+                            onClick={() => handleCreatePerformerFromParse(performer)}
+                            disabled={creatingPerformers.has(performer)}
+                            title="Create new performer in Stash with this name"
+                          >
+                            {creatingPerformers.has(performer) ? '⏳ Creating...' : '✨ Create New'}
+                          </button>
+                        </div>
+                        <button
+                          className="remove-performer-btn"
+                          onClick={() => setEditedPerformers(editedPerformers.filter((_, i) => i !== index))}
+                          title="Remove performer"
+                        >
+                          ✕
+                        </button>
+                      </div>
+                    );
+                  })}
+                  <button
+                    className="add-performer-btn"
+                    onClick={() => setEditedPerformers([...editedPerformers, ''])}
+                  >
+                    + Add Performer
+                  </button>
+                </div>
+              </div>
             </div>
 
             <div className="modal-actions">
@@ -4826,19 +4264,6 @@ export default function SceneDetail() {
                   borderBottom: '2px solid #e5e7eb',
                   zIndex: 1
                 }}>
-                  {searchResults?.isProcessingSelection && (
-                    <div style={{
-                      marginBottom: '8px',
-                      padding: '8px 10px',
-                      borderRadius: '6px',
-                      backgroundColor: '#dbeafe',
-                      color: '#1d4ed8',
-                      fontSize: '13px',
-                      fontWeight: '600'
-                    }}>
-                      ⏳ Finishing the scrape and GEVI follow-up before showing review details...
-                    </div>
-                  )}
                   <h4 style={{ marginBottom: '5px', fontSize: '16px', color: '#1f2937', fontWeight: '600' }}>
                     Found {searchResults.scenes.length} {searchResults.isSceneSearch ? 
                       (searchResults.scenes.length === 1 ? 'scene' : 'scenes') : 
@@ -4895,10 +4320,6 @@ export default function SceneDetail() {
                         cursor: 'pointer' 
                       }}
                       onClick={() => {
-                        if (searchResults?.isProcessingSelection || isScraping) {
-                          return;
-                        }
-
                         // Handle stash-box results
                         if (searchResults.isStashBox) {
                           handleSelectStashBoxResult(scene);
@@ -4985,31 +4406,6 @@ export default function SceneDetail() {
                           👥 {typeof scene.performers === 'string' ? scene.performers : scene.performers.map(p => p.name).join(', ')}
                         </div>
                       )}
-                      {(() => {
-                        const breakdowns = Array.isArray(scene.scenes) ? scene.scenes : Array.isArray(scene.sceneBreakdown) ? scene.sceneBreakdown : [];
-                        if (breakdowns.length === 0) {
-                          return null;
-                        }
-
-                        return (
-                          <div style={{ fontSize: '12px', color: '#4338ca', marginBottom: '4px' }}>
-                            <div style={{ fontWeight: '600', marginBottom: '3px' }}>🎞️ Scene breakdown:</div>
-                            <div style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
-                              {breakdowns.map((movieScene, sceneIndex) => {
-                                const performerNames = (movieScene.performers || []).map((performer) => performer?.name || performer).filter(Boolean);
-                                const label = movieScene.sceneNumber ? `Scene ${movieScene.sceneNumber}` : `Scene ${sceneIndex + 1}`;
-                                return (
-                                  <div key={`${label}-${sceneIndex}`} style={{ fontSize: '11px', color: '#374151', lineHeight: 1.3 }}>
-                                    <span style={{ fontWeight: '600' }}>{label}</span>
-                                    {performerNames.length > 0 ? <> • {performerNames.join(', ')}</> : null}
-                                    {movieScene.details ? <> • {movieScene.details.length > 80 ? `${movieScene.details.slice(0, 80)}...` : movieScene.details}</> : null}
-                                  </div>
-                                );
-                              })}
-                            </div>
-                          </div>
-                        );
-                      })()}
                       {scene.date && (
                         <div style={{ fontSize: '11px', color: '#999', marginBottom: '4px' }}>
                           📅 {scene.date}
@@ -5399,23 +4795,863 @@ export default function SceneDetail() {
 
       {/* Scrape Review Modal */}
       {showScrapeReviewModal && scrapeData && (
-        <ScrapeAllReviewModal
-          isOpen={showScrapeReviewModal}
-          onClose={() => setShowScrapeReviewModal(false)}
-          sceneData={data}
-          scrapeData={scrapeData}
-          selectedMultiSourceResults={selectedMultiSourceResults}
-          onToggleSelection={handleToggleMultiSourceSelection}
-          onReviewResult={handleSelectStashBoxResult}
-          onShowSelectionView={() => setScrapeData(prev => ({ ...(prev || {}), reviewView: 'selection' }))}
-          onShowListView={() => setScrapeData(prev => ({ ...(prev || {}), reviewView: 'list' }))}
-          onShowSelectedDetails={handleShowSelectedMultiSourceResults}
-          onAccept={handleAcceptScrape}
-          onApply={handleApplyAndNext}
-          fieldSelections={fieldSelections}
-          onFieldSelectionChange={(field, value) => setFieldSelections(prev => ({ ...prev, [field]: value }))}
-          onCreateGroup={handleCreateGroup}
-        />
+        <div className="modal-overlay">
+          <div className="modal-content scrape-review-modal" onClick={(e) => e.stopPropagation()}>
+            <h3>📋 Review Scraped Metadata</h3>
+            
+            {!scrapeData.scraped ? (
+              // No results found
+              <div style={{ padding: '2rem', textAlign: 'center' }}>
+                <div style={{ fontSize: '48px', marginBottom: '1rem' }}>🔍</div>
+                <h3 style={{ color: '#666', marginBottom: '0.5rem' }}>No Results Found</h3>
+                <p style={{ color: '#999', marginBottom: '2rem' }}>
+                  No matching scenes were found in {scrapeData.source === 'stash-box' ? 'Stash-Box' : 'the scraper'}.
+                  Try adjusting your search criteria or using a different search method.
+                </p>
+                <button 
+                  className="btn-cancel" 
+                  onClick={() => setShowScrapeReviewModal(false)}
+                  style={{ margin: '0 auto' }}
+                >
+                  Close
+                </button>
+              </div>
+            ) : (
+              // Results found - show scrape data
+              <div className="scrape-results">
+                {/* Source Information */}
+                <div className="scrape-source">
+                  <span className="source-label">Scraped from:</span>
+                  {scrapeData.scraped.url ? (
+                    <a href={scrapeData.scraped.url} target="_blank" rel="noopener noreferrer" className="source-url">
+                      {scrapeData.source === 'stash-box' ? 'Stash-Box' : 'GEVI Episode'}
+                    </a>
+                  ) : (
+                    <span className="source-url">{scrapeData.source === 'stash-box' ? 'Stash-Box' : 'Unknown Source'}</span>
+                  )}
+                </div>
+
+              {/* Scene Image */}
+              {scrapeData.scraped.image && (
+                <div className="parse-field" style={{ display: 'flex', justifyContent: 'center', margin: '1rem 0' }}>
+                  <img 
+                    src={scrapeData.scraped.image} 
+                    alt={scrapeData.scraped.title || 'Scene preview'}
+                    style={{
+                      maxWidth: '100%',
+                      maxHeight: '400px',
+                      borderRadius: '8px',
+                      boxShadow: '0 4px 6px rgba(0, 0, 0, 0.1)'
+                    }}
+                    onError={(e) => {
+                      e.target.style.display = 'none';
+                      console.error('Failed to load scene image:', scrapeData.scraped.image);
+                    }}
+                    onLoad={() => {
+                      console.log('✅ Scene image loaded successfully:', scrapeData.scraped.image);
+                    }}
+                  />
+                </div>
+              )}
+              {!scrapeData.scraped.image && (
+                <div style={{ padding: '1rem', background: '#fef3c7', borderRadius: '4px', margin: '1rem 0' }}>
+                  ⚠️ No image found in scraped data
+                </div>
+              )}
+
+              {/* Image Selection */}
+              <div className="parse-field">
+                <label>Cover Image:</label>
+                <div style={{ display: 'flex', gap: '10px' }}>
+                  {/* Existing Image */}
+                  {data?.paths?.screenshot && (
+                    <div 
+                      onClick={() => setFieldSelections(prev => ({ ...prev, image: 'existing' }))}
+                      style={{
+                        flex: 1,
+                        padding: '10px',
+                        border: fieldSelections.image === 'existing' ? '2px solid #10b981' : '1px solid #d1d5db',
+                        borderRadius: '6px',
+                        cursor: 'pointer',
+                        background: fieldSelections.image === 'existing' ? '#d1fae5' : '#f9fafb',
+                        transition: 'all 0.2s'
+                      }}
+                    >
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                        <span style={{ fontSize: '12px', fontWeight: '600', color: '#6b7280' }}>EXISTING</span>
+                        {fieldSelections.image === 'existing' && <span style={{ color: '#10b981', fontSize: '18px' }}>✓</span>}
+                      </div>
+                      <img 
+                        src={`${config.stashUrl}${data.paths.screenshot}`}
+                        alt="Existing"
+                        style={{ width: '100%', borderRadius: '4px' }}
+                      />
+                    </div>
+                  )}
+                  {/* Scraped Image */}
+                  {scrapeData.scraped.image && (
+                    <div 
+                      onClick={() => setFieldSelections(prev => ({ ...prev, image: 'scraped' }))}
+                      style={{
+                        flex: 1,
+                        padding: '10px',
+                        border: fieldSelections.image === 'scraped' ? '2px solid #10b981' : '1px solid #d1d5db',
+                        borderRadius: '6px',
+                        cursor: 'pointer',
+                        background: fieldSelections.image === 'scraped' ? '#d1fae5' : '#f9fafb',
+                        transition: 'all 0.2s'
+                      }}
+                    >
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                        <span style={{ fontSize: '12px', fontWeight: '600', color: '#6b7280' }}>SCRAPED</span>
+                        {fieldSelections.image === 'scraped' && <span style={{ color: '#10b981', fontSize: '18px' }}>✓</span>}
+                      </div>
+                      <img 
+                        src={scrapeData.scraped.image}
+                        alt="Scraped"
+                        style={{ width: '100%', borderRadius: '4px' }}
+                      />
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Title Field */}
+              <div className="parse-field">
+                <label>Title:</label>
+                <div style={{ display: 'flex', gap: '10px', flexDirection: 'column' }}>
+                  {/* Existing Title */}
+                  {data?.title && (
+                    <div 
+                      onClick={() => setFieldSelections(prev => ({ ...prev, title: 'existing' }))}
+                      style={{
+                        padding: '10px',
+                        border: fieldSelections.title === 'existing' ? '2px solid #10b981' : '1px solid #d1d5db',
+                        borderRadius: '6px',
+                        cursor: 'pointer',
+                        background: fieldSelections.title === 'existing' ? '#d1fae5' : '#f9fafb',
+                        transition: 'all 0.2s'
+                      }}
+                    >
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
+                        <span style={{ fontSize: '12px', fontWeight: '600', color: '#6b7280' }}>EXISTING</span>
+                        {fieldSelections.title === 'existing' && <span style={{ color: '#10b981', fontSize: '18px' }}>✓</span>}
+                      </div>
+                      <div style={{ fontSize: '14px', color: '#111827' }}>{data.title}</div>
+                    </div>
+                  )}
+                  {/* Scraped Title */}
+                  {scrapeData.scraped.title && (
+                    <div 
+                      onClick={() => setFieldSelections(prev => ({ ...prev, title: 'scraped' }))}
+                      style={{
+                        padding: '10px',
+                        border: fieldSelections.title === 'scraped' ? '2px solid #10b981' : '1px solid #d1d5db',
+                        borderRadius: '6px',
+                        cursor: 'pointer',
+                        background: fieldSelections.title === 'scraped' ? '#d1fae5' : '#f9fafb',
+                        transition: 'all 0.2s'
+                      }}
+                    >
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
+                        <span style={{ fontSize: '12px', fontWeight: '600', color: '#6b7280' }}>SCRAPED</span>
+                        {fieldSelections.title === 'scraped' && <span style={{ color: '#10b981', fontSize: '18px' }}>✓</span>}
+                      </div>
+                      <div style={{ fontSize: '14px', color: '#111827' }}>{scrapeData.scraped.title}</div>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Studio Field */}
+              <div className="parse-field">
+                <label>Studio:</label>
+                <div style={{ display: 'flex', gap: '10px', flexDirection: 'column' }}>
+                  {/* Existing Studio */}
+                  {data?.studio?.name && (
+                    <div 
+                      onClick={() => setFieldSelections(prev => ({ ...prev, studio: 'existing' }))}
+                      style={{
+                        padding: '10px',
+                        border: fieldSelections.studio === 'existing' ? '2px solid #10b981' : '1px solid #d1d5db',
+                        borderRadius: '6px',
+                        cursor: 'pointer',
+                        background: fieldSelections.studio === 'existing' ? '#d1fae5' : '#f9fafb',
+                        transition: 'all 0.2s'
+                      }}
+                    >
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
+                        <span style={{ fontSize: '12px', fontWeight: '600', color: '#6b7280' }}>EXISTING</span>
+                        {fieldSelections.studio === 'existing' && <span style={{ color: '#10b981', fontSize: '18px' }}>✓</span>}
+                      </div>
+                      <div style={{ fontSize: '14px', color: '#111827' }}>{data.studio.name}</div>
+                    </div>
+                  )}
+                  {/* Scraped Studio */}
+                  {scrapeData.scraped.studio && (
+                    <div 
+                      onClick={() => setFieldSelections(prev => ({ ...prev, studio: 'scraped' }))}
+                      style={{
+                        padding: '10px',
+                        border: fieldSelections.studio === 'scraped' ? '2px solid #10b981' : '1px solid #d1d5db',
+                        borderRadius: '6px',
+                        cursor: 'pointer',
+                        background: fieldSelections.studio === 'scraped' ? '#d1fae5' : '#f9fafb',
+                        transition: 'all 0.2s'
+                      }}
+                    >
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
+                        <span style={{ fontSize: '12px', fontWeight: '600', color: '#6b7280' }}>SCRAPED</span>
+                        {fieldSelections.studio === 'scraped' && <span style={{ color: '#10b981', fontSize: '18px' }}>✓</span>}
+                      </div>
+                      <div style={{ fontSize: '14px', color: '#111827' }}>
+                        {typeof scrapeData.scraped.studio === 'object' ? scrapeData.scraped.studio.name : scrapeData.scraped.studio}
+                        {scrapeData.matched.studio && (
+                          <span style={{ marginLeft: '8px', fontSize: '12px', color: '#10b981' }}>✓ Matched</span>
+                        )}
+                        {!scrapeData.matched.studio && (
+                          <span style={{ marginLeft: '8px', fontSize: '12px', color: '#f59e0b' }}>⚠️ Not matched</span>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Date Field */}
+              {(data?.date || scrapeData.scraped.date) && (
+                <div className="parse-field">
+                  <label>Date:</label>
+                  <div style={{ display: 'flex', gap: '10px' }}>
+                    {data?.date && (
+                      <div 
+                        onClick={() => setFieldSelections(prev => ({ ...prev, date: 'existing' }))}
+                        style={{
+                          flex: 1,
+                          padding: '10px',
+                          border: fieldSelections.date === 'existing' ? '2px solid #10b981' : '1px solid #d1d5db',
+                          borderRadius: '6px',
+                          cursor: 'pointer',
+                          background: fieldSelections.date === 'existing' ? '#d1fae5' : '#f9fafb',
+                          transition: 'all 0.2s'
+                        }}
+                      >
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
+                          <span style={{ fontSize: '12px', fontWeight: '600', color: '#6b7280' }}>EXISTING</span>
+                          {fieldSelections.date === 'existing' && <span style={{ color: '#10b981', fontSize: '18px' }}>✓</span>}
+                        </div>
+                        <div style={{ fontSize: '14px', color: '#111827' }}>{data.date}</div>
+                      </div>
+                    )}
+                    {scrapeData.scraped.date && (
+                      <div 
+                        onClick={() => setFieldSelections(prev => ({ ...prev, date: 'scraped' }))}
+                        style={{
+                          flex: 1,
+                          padding: '10px',
+                          border: fieldSelections.date === 'scraped' ? '2px solid #10b981' : '1px solid #d1d5db',
+                          borderRadius: '6px',
+                          cursor: 'pointer',
+                          background: fieldSelections.date === 'scraped' ? '#d1fae5' : '#f9fafb',
+                          transition: 'all 0.2s'
+                        }}
+                      >
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
+                          <span style={{ fontSize: '12px', fontWeight: '600', color: '#6b7280' }}>SCRAPED</span>
+                          {fieldSelections.date === 'scraped' && <span style={{ color: '#10b981', fontSize: '18px' }}>✓</span>}
+                        </div>
+                        <div style={{ fontSize: '14px', color: '#111827' }}>{scrapeData.scraped.date}</div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* Details Field */}
+              {(data?.details || scrapeData.scraped.details) && (
+                <div className="parse-field">
+                  <label>Details:</label>
+                  <div style={{ display: 'flex', gap: '10px', flexDirection: 'column' }}>
+                    {data?.details && (
+                      <div 
+                        onClick={() => setFieldSelections(prev => ({ ...prev, details: 'existing' }))}
+                        style={{
+                          padding: '10px',
+                          border: fieldSelections.details === 'existing' ? '2px solid #10b981' : '1px solid #d1d5db',
+                          borderRadius: '6px',
+                          cursor: 'pointer',
+                          background: fieldSelections.details === 'existing' ? '#d1fae5' : '#f9fafb',
+                          transition: 'all 0.2s',
+                          maxHeight: '150px',
+                          overflow: 'auto'
+                        }}
+                      >
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
+                          <span style={{ fontSize: '12px', fontWeight: '600', color: '#6b7280' }}>EXISTING</span>
+                          {fieldSelections.details === 'existing' && <span style={{ color: '#10b981', fontSize: '18px' }}>✓</span>}
+                        </div>
+                        <div style={{ fontSize: '13px', color: '#111827', whiteSpace: 'pre-wrap' }}>{data.details}</div>
+                      </div>
+                    )}
+                    {scrapeData.scraped.details && (
+                      <div 
+                        onClick={() => setFieldSelections(prev => ({ ...prev, details: 'scraped' }))}
+                        style={{
+                          padding: '10px',
+                          border: fieldSelections.details === 'scraped' ? '2px solid #10b981' : '1px solid #d1d5db',
+                          borderRadius: '6px',
+                          cursor: 'pointer',
+                          background: fieldSelections.details === 'scraped' ? '#d1fae5' : '#f9fafb',
+                          transition: 'all 0.2s',
+                          maxHeight: '150px',
+                          overflow: 'auto'
+                        }}
+                      >
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
+                          <span style={{ fontSize: '12px', fontWeight: '600', color: '#6b7280' }}>SCRAPED</span>
+                          {fieldSelections.details === 'scraped' && <span style={{ color: '#10b981', fontSize: '18px' }}>✓</span>}
+                        </div>
+                        <div style={{ fontSize: '13px', color: '#111827', whiteSpace: 'pre-wrap' }}>{scrapeData.scraped.details}</div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* GEVI URL Field - Read-only */}
+              <div className="parse-field">
+                <label>GEVI URL:</label>
+                <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                  <input
+                    type="text"
+                    value={scrapeData.scraped.url || ''}
+                    className="parse-input"
+                    readOnly
+                    style={{ flex: 1, background: '#f3f4f6', cursor: 'default' }}
+                  />
+                  <a
+                    href={scrapeData.scraped.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    style={{
+                      padding: '8px 12px',
+                      background: '#8b5cf6',
+                      color: 'white',
+                      borderRadius: '4px',
+                      textDecoration: 'none',
+                      fontSize: '14px',
+                      whiteSpace: 'nowrap'
+                    }}
+                  >
+                    🔗 Open
+                  </a>
+                </div>
+              </div>
+
+              {/* Episode URLs */}
+              {scrapeData.scraped.episodeUrls && scrapeData.scraped.episodeUrls.length > 0 && (
+                <div className="parse-field">
+                  <label>Episode URLs ({scrapeData.scraped.episodeUrls.length}):</label>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                    {scrapeData.scraped.episodeUrls.map((episodeUrl, index) => (
+                      <div key={index} style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                        <input
+                          type="text"
+                          value={episodeUrl}
+                          className="parse-input"
+                          readOnly
+                          style={{ flex: 1, background: '#f3f4f6', cursor: 'default', fontSize: '13px' }}
+                        />
+                        <a
+                          href={episodeUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          style={{
+                            padding: '6px 10px',
+                            background: '#6366f1',
+                            color: 'white',
+                            borderRadius: '4px',
+                            textDecoration: 'none',
+                            fontSize: '12px',
+                            whiteSpace: 'nowrap'
+                          }}
+                        >
+                          🔗
+                        </a>
+                      </div>
+                    ))}
+                  </div>
+                  <div style={{ 
+                    marginTop: '8px', 
+                    padding: '8px 12px', 
+                    background: '#dbeafe', 
+                    borderRadius: '4px',
+                    fontSize: '13px',
+                    color: '#1e40af'
+                  }}>
+                    ℹ️ These URLs will be added to the scene in Stash
+                  </div>
+                </div>
+              )}
+
+              {/* Performers Field */}
+              <div className="parse-field">
+                <label>Performers:</label>
+                <div className="performers-list">
+                  {scrapeData.matched.performers.map((performer, index) => {
+                    const hasAlternatives = performer.alternatives && performer.alternatives.length > 0;
+                    
+                    // Find the corresponding scraped performer to get action code
+                    const scrapedPerformer = scrapeData.scraped.performers.find(
+                      sp => sp.name === performer.originalName
+                    );
+                    const actionCode = scrapedPerformer?.actionCode;
+                    
+                    return (
+                      <div key={index} className="performer-item matched">
+                        <div className="performer-input-wrapper">
+                          <span className="performer-name">
+                            ✓ {performer.name}
+                            {performer.disambiguation && (
+                              <span style={{ color: '#6b7280', marginLeft: '0.5rem', fontSize: '0.875rem' }}>
+                                ({performer.disambiguation})
+                              </span>
+                            )}
+                            {actionCode && <span className="action-code" style={{ color: '#10b981', marginLeft: '0.5rem', fontSize: '0.875rem' }}>({actionCode})</span>}
+                          </span>
+                          <select
+                            className="performer-alternatives-dropdown"
+                            onChange={async (e) => {
+                              const value = e.target.value;
+                              if (!value) return;
+                              
+                              if (value === '__ADD_NEW__') {
+                                // Create new performer with original GEVI name
+                                const isCreating = creatingPerformers.has(performer.originalName);
+                                if (isCreating) return;
+                                
+                                await handleCreatePerformer(performer.originalName);
+                                
+                                // Remove the incorrectly matched performer from the matched list
+                                setScrapeData(prev => ({
+                                  ...prev,
+                                  matched: {
+                                    ...prev.matched,
+                                    performers: prev.matched.performers.filter((_, i) => i !== index)
+                                  }
+                                }));
+                                
+                                // Reset the dropdown
+                                e.target.value = '';
+                              } else {
+                                // Switch to alternative performer
+                                const newMatched = [...scrapeData.matched.performers];
+                                const selectedAlt = performer.alternatives?.find(a => a.name === value);
+                                if (selectedAlt) {
+                                  newMatched[index] = {
+                                    ...selectedAlt,
+                                    originalName: performer.originalName,
+                                    alternatives: [
+                                      { ...performer, matchedAlias: performer.matchedAlias, matchedVia: performer.matchedVia },
+                                      ...performer.alternatives.filter(a => a.id !== selectedAlt.id)
+                                    ]
+                                  };
+                                  setScrapeData({
+                                    ...scrapeData,
+                                    matched: {
+                                      ...scrapeData.matched,
+                                      performers: newMatched
+                                    }
+                                  });
+                                }
+                              }
+                            }}
+                            value=""
+                          >
+                            <option value="">Select action...</option>
+                            <option value="__ADD_NEW__">
+                              ➕ Add "{performer.originalName}" as new performer
+                            </option>
+                            {hasAlternatives && <option disabled>──────────</option>}
+                            {hasAlternatives && performer.alternatives.map((alt, altIndex) => (
+                              <option key={altIndex} value={alt.name}>
+                                Switch to: {alt.name}
+                                {alt.disambiguation ? ` (${alt.disambiguation})` : ''}
+                                {alt.matchedVia === 'alias' && alt.matchedAlias ? ` (via: ${alt.matchedAlias})` : ''}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                        <span className="match-label">
+                          (Matched{performer.matchedVia === 'alias' && performer.matchedAlias ? ` via alias: ${performer.matchedAlias}` : ''})
+                          {hasAlternatives && (
+                            <span className="alternatives-count"> (+{performer.alternatives.length} more)</span>
+                          )}
+                        </span>
+                      </div>
+                    );
+                  })}
+                  {scrapeData.unmatched.performers.map((performer, index) => {
+                    // Handle both string and object formats
+                    const performerName = typeof performer === 'string' ? performer : performer.name;
+                    
+                    // Find the corresponding scraped performer to get action code
+                    const scrapedPerformer = scrapeData.scraped.performers.find(
+                      sp => sp.name === performerName
+                    );
+                    const actionCode = scrapedPerformer?.actionCode;
+                    const isCreating = creatingPerformers.has(performerName);
+                    
+                    return (
+                      <div key={index} className="performer-item unmatched">
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
+                          <div>
+                            <span className="performer-name">
+                              ✗ {performerName}
+                              {actionCode && <span className="action-code" style={{ color: '#ef4444', marginLeft: '0.5rem', fontSize: '0.875rem' }}>({actionCode})</span>}
+                            </span>
+                            <span className="match-label">(Not found)</span>
+                          </div>
+                          <button
+                            onClick={() => handleCreatePerformer(performerName)}
+                            disabled={isCreating}
+                            style={{
+                              padding: '4px 12px',
+                              fontSize: '12px',
+                              background: '#10b981',
+                              color: 'white',
+                              border: 'none',
+                              borderRadius: '4px',
+                              cursor: isCreating ? 'not-allowed' : 'pointer',
+                              whiteSpace: 'nowrap',
+                              opacity: isCreating ? 0.5 : 1
+                            }}
+                          >
+                            {isCreating ? '⏳ Creating...' : '➕ Add New'}
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Tags Field */}
+              {(scrapeData.matched.tags?.length > 0 || scrapeData.unmatched.tags?.length > 0) && (
+                <div className="parse-field">
+                  <label>Tags ({(scrapeData.matched.tags?.length || 0) + (scrapeData.unmatched.tags?.length || 0)}):</label>
+                  <div className="performers-list" style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+                    {/* Tags already on the scene */}
+                    {data?.tags?.map((tag, index) => (
+                      <div key={`existing-${index}`} style={{
+                        padding: '4px 10px',
+                        background: '#e5e7eb',
+                        color: '#374151',
+                        borderRadius: '12px',
+                        fontSize: '13px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '4px'
+                      }}>
+                        <span>📌</span>
+                        <span>{tag.name}</span>
+                        <span style={{ fontSize: '11px', color: '#6b7280' }}>(on scene)</span>
+                      </div>
+                    ))}
+                    
+                    {/* Matched tags from scrape */}
+                    {scrapeData.matched.tags?.map((tag, index) => (
+                      <div key={`matched-${index}`} style={{
+                        padding: '4px 10px',
+                        background: '#d1fae5',
+                        color: '#065f46',
+                        borderRadius: '12px',
+                        fontSize: '13px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '4px'
+                      }}>
+                        <span>✓</span>
+                        <span>{tag.name}</span>
+                      </div>
+                    ))}
+                    
+                    {/* Unmatched tags - can be created */}
+                    {scrapeData.unmatched.tags?.map((tag, index) => {
+                      const tagName = typeof tag === 'string' ? tag : tag.name;
+                      const isCreating = creatingTags.has(tagName);
+                      
+                      return (
+                        <div key={`unmatched-${index}`} style={{
+                          padding: '4px 10px',
+                          background: '#fef3c7',
+                          color: '#92400e',
+                          borderRadius: '12px',
+                          fontSize: '13px',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '6px',
+                          border: '1px dashed #f59e0b'
+                        }}>
+                          <span>✗</span>
+                          <span>{tagName}</span>
+                          <button
+                            onClick={() => handleCreateTag(tagName)}
+                            disabled={isCreating}
+                            style={{
+                              padding: '2px 8px',
+                              fontSize: '11px',
+                              background: '#10b981',
+                              color: 'white',
+                              border: 'none',
+                              borderRadius: '8px',
+                              cursor: isCreating ? 'not-allowed' : 'pointer',
+                              opacity: isCreating ? 0.5 : 1,
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: '2px'
+                            }}
+                          >
+                            {isCreating ? '⏳' : '➕'}
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                  <div style={{ 
+                    marginTop: '8px', 
+                    padding: '8px 12px', 
+                    background: '#f3f4f6', 
+                    borderRadius: '4px',
+                    fontSize: '12px',
+                    color: '#6b7280'
+                  }}>
+                    ℹ️ Tags with ✓ are in your database. Tags with ✗ are not - click ➕ to add them. Tags with 📌 are already on this scene.
+                  </div>
+                </div>
+              )}
+
+              {/* Movies/Groups Field */}
+              {(scrapeData.matched.groups?.length > 0 || scrapeData.unmatched.groups?.length > 0) && (
+                <div className="parse-field">
+                  <label>Movies/Groups:</label>
+                  <div className="performers-list">
+                    {scrapeData.matched.groups?.map((group, index) => {
+                      const hasAlternatives = group.alternatives && group.alternatives.length > 0;
+                      
+                      const isCreatingMatched = creatingGroups.has(group.name);
+                      
+                      return (
+                        <div key={index} className="performer-item matched">
+                          <div className="performer-input-wrapper">
+                            <span className="performer-name">
+                              ✓ {group.name}
+                              {group.studio && <span style={{ color: '#6b7280', marginLeft: '0.5rem', fontSize: '0.875rem' }}>({group.studio})</span>}
+                            </span>
+                            {hasAlternatives && (
+                              <select
+                                className="performer-alternatives-dropdown"
+                                onChange={(e) => {
+                                  if (e.target.value) {
+                                    // Update matched groups with selected alternative
+                                    const newMatched = [...scrapeData.matched.groups];
+                                    const selectedAlt = group.alternatives.find(a => a.name === e.target.value);
+                                    if (selectedAlt) {
+                                      newMatched[index] = {
+                                        ...selectedAlt,
+                                        originalName: group.originalName,
+                                        url: group.url,
+                                        alternatives: [
+                                          { ...group, matchedAlias: group.matchedAlias, matchedVia: group.matchedVia },
+                                          ...group.alternatives.filter(a => a.id !== selectedAlt.id)
+                                        ]
+                                      };
+                                      setScrapeData({
+                                        ...scrapeData,
+                                        matched: {
+                                          ...scrapeData.matched,
+                                          groups: newMatched
+                                        }
+                                      });
+                                    }
+                                  }
+                                }}
+                                value=""
+                              >
+                                <option value="">Switch to alternative...</option>
+                                {group.alternatives.map((alt, altIndex) => (
+                                  <option key={altIndex} value={alt.name}>
+                                    {alt.name} {alt.studio ? `(${alt.studio})` : ''} {alt.matchedVia === 'alias' && alt.matchedAlias ? `(via: ${alt.matchedAlias})` : ''}
+                                  </option>
+                                ))}
+                              </select>
+                            )}
+                          </div>
+                          <div style={{ display: 'flex', gap: '8px', alignItems: 'center', marginTop: '8px' }}>
+                            <span className="match-label">
+                              (Matched{group.matchedVia === 'alias' && group.matchedAlias ? ` via alias: ${group.matchedAlias}` : ''})
+                              {hasAlternatives && (
+                                <span className="alternatives-count"> (+{group.alternatives.length} more)</span>
+                              )}
+                            </span>
+                            <button
+                              onClick={() => {
+                                // Check if this is an AEBN scrape (source contains 'aebn' or URL contains 'aebn.com')
+                                const isAebnScrape = scrapeData?.source?.toLowerCase().includes('aebn') || 
+                                                    scrapeData?.sourceUrl?.toLowerCase().includes('aebn.com') ||
+                                                    scrapeData?.scraped?.url?.toLowerCase().includes('aebn.com');
+                                
+                                console.log('🔍 [Create Movie Button] Checking scraper type:');
+                                console.log('   - source:', scrapeData?.source);
+                                console.log('   - sourceUrl:', scrapeData?.sourceUrl);
+                                console.log('   - scraped.url:', scrapeData?.scraped?.url);
+                                console.log('   - isAebnScrape:', isAebnScrape);
+                                
+                                if (isAebnScrape) {
+                                  console.log('   ✓ Using AEBN create flow');
+                                  handleCreateNewMovieFromAebn(group);
+                                } else {
+                                  console.log('   → Using GEVI create flow');
+                                  handleCreateGroup(group);
+                                }
+                              }}
+                              disabled={isCreatingMatched}
+                              style={{
+                                padding: '4px 12px',
+                                fontSize: '12px',
+                                background: '#f59e0b',
+                                color: 'white',
+                                border: 'none',
+                                borderRadius: '4px',
+                                cursor: isCreatingMatched ? 'not-allowed' : 'pointer',
+                                whiteSpace: 'nowrap',
+                                opacity: isCreatingMatched ? 0.5 : 1
+                              }}
+                            >
+                              {isCreatingMatched ? '⏳ Creating...' : '➕ Create New Movie'}
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                    {scrapeData.unmatched.groups?.map((group, index) => {
+                      const isCreating = creatingGroups.has(group.name);
+                      
+                      return (
+                        <div key={index} className="performer-item unmatched">
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
+                            <div>
+                              <span className="performer-name">
+                                ✗ {group.name}
+                              </span>
+                              <span className="match-label">(Not found)</span>
+                            </div>
+                            <div style={{ display: 'flex', gap: '8px' }}>
+                              <button
+                                onClick={async () => {
+                                  try {
+                                    console.log('🎬 Fetching movie details from:', group.url);
+                                    const response = await fetch('/api/stash/gevi/movie', {
+                                      method: 'POST',
+                                      headers: { 'Content-Type': 'application/json' },
+                                      body: JSON.stringify({ url: group.url })
+                                    });
+                                    
+                                    if (!response.ok) {
+                                      throw new Error('Failed to fetch movie details');
+                                    }
+                                    
+                                    const result = await response.json();
+                                    console.log('✅ Movie details fetched:', result.data.movie);
+                                    
+                                    // Show movie details in an alert or modal (for now, just log)
+                                    alert(`Movie Details:\n\nTitle: ${result.data.movie.name}\nStudio: ${result.data.movie.studio || 'N/A'}\nDate: ${result.data.movie.date || 'N/A'}\nDuration: ${result.data.movie.duration || 'N/A'}\nDirector: ${result.data.movie.director || 'N/A'}\n\n(Full details in console)`);
+                                  } catch (error) {
+                                    console.error('❌ Failed to fetch movie details:', error);
+                                    alert('Failed to fetch movie details. See console for details.');
+                                  }
+                                }}
+                                disabled={isCreating}
+                                style={{
+                                  padding: '4px 12px',
+                                  fontSize: '12px',
+                                  background: '#8b5cf6',
+                                  color: 'white',
+                                  border: 'none',
+                                  borderRadius: '4px',
+                                  cursor: isCreating ? 'not-allowed' : 'pointer',
+                                  whiteSpace: 'nowrap',
+                                  opacity: isCreating ? 0.5 : 1
+                                }}
+                              >
+                                📥 Fetch Details
+                              </button>
+                              <button
+                                onClick={() => handleCreateGroup(group)}
+                                disabled={isCreating}
+                                style={{
+                                  padding: '4px 12px',
+                                  fontSize: '12px',
+                                  background: '#10b981',
+                                  color: 'white',
+                                  border: 'none',
+                                  borderRadius: '4px',
+                                  cursor: isCreating ? 'not-allowed' : 'pointer',
+                                  whiteSpace: 'nowrap',
+                                  opacity: isCreating ? 0.5 : 1
+                                }}
+                              >
+                                {isCreating ? '⏳ Creating...' : '➕ Add New'}
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {/* Date Field */}
+              {scrapeData.scraped.date && (
+                <div className="parse-field">
+                  <label>Date:</label>
+                  <input
+                    type="text"
+                    value={scrapeData.scraped.date}
+                    className="parse-input"
+                    readOnly
+                  />
+                </div>
+              )}
+
+              {/* Details Field */}
+              {scrapeData.scraped.details && (
+                <div className="parse-field">
+                  <label>Details:</label>
+                  <textarea
+                    value={scrapeData.scraped.details}
+                    className="parse-input details-textarea"
+                    rows="4"
+                    readOnly
+                  />
+                </div>
+              )}
+            </div>
+            )}
+
+            {scrapeData.scraped && (
+            <div className="modal-actions">
+              <button className="btn-accept" onClick={handleAcceptScrape}>
+                ✓ Accept & Update
+              </button>
+              <button className="btn-cancel" onClick={() => setShowScrapeReviewModal(false)}>
+                Cancel
+              </button>
+            </div>
+            )}
+          </div>
+        </div>
       )}
 
       {/* Set/Update GEVI URL Modal */}

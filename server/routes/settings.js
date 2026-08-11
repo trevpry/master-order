@@ -51,6 +51,20 @@ router.get('/', asyncHandler(async (req, res) => {
   }
 
   // Parse JSON fields if they exist
+  const parseArraySetting = (value) => {
+    if (!value) return [];
+    if (Array.isArray(value)) return value;
+    if (typeof value === 'string') {
+      try {
+        const parsed = JSON.parse(value);
+        return Array.isArray(parsed) ? parsed : [];
+      } catch (_error) {
+        return value.split(',').map(entry => entry.trim()).filter(Boolean);
+      }
+    }
+    return [];
+  };
+
   const parsedSettings = {
     ...settings,
     ignoredMovieCollections: settings.ignoredMovieCollections ? 
@@ -61,7 +75,9 @@ router.get('/', asyncHandler(async (req, res) => {
         JSON.parse(settings.ignoredTVCollections) : settings.ignoredTVCollections) : [],
     mediaTypeLimiters: settings.mediaTypeLimiters ?
       (typeof settings.mediaTypeLimiters === 'string' ?
-        JSON.parse(settings.mediaTypeLimiters) : settings.mediaTypeLimiters) : null
+        JSON.parse(settings.mediaTypeLimiters) : settings.mediaTypeLimiters) : null,
+    filenameParserSpaceSeparators: parseArraySetting(settings.filenameParserSpaceSeparators),
+    filenameParserPerformerSeparators: parseArraySetting(settings.filenameParserPerformerSeparators)
   };
 
   res.json(parsedSettings);
@@ -78,6 +94,12 @@ router.post('/', asyncHandler(async (req, res) => {
   }
   if (settingsData.ignoredTVCollections && Array.isArray(settingsData.ignoredTVCollections)) {
     processedData.ignoredTVCollections = JSON.stringify(settingsData.ignoredTVCollections);
+  }
+  if (settingsData.filenameParserSpaceSeparators && Array.isArray(settingsData.filenameParserSpaceSeparators)) {
+    processedData.filenameParserSpaceSeparators = JSON.stringify(settingsData.filenameParserSpaceSeparators);
+  }
+  if (settingsData.filenameParserPerformerSeparators && Array.isArray(settingsData.filenameParserPerformerSeparators)) {
+    processedData.filenameParserPerformerSeparators = JSON.stringify(settingsData.filenameParserPerformerSeparators);
   }
 
   // Allow explicit clear for background image storage path

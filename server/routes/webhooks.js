@@ -4,7 +4,7 @@ const multer = require('multer');
 const http = require('http');
 const WatchLogService = require('../watchLogService');
 const PlexDatabaseService = require('../plexDatabaseService');
-const { markCustomOrderItemAsWatched } = require('../getNextCustomOrder');
+const { markCustomOrderItemAsWatched, reconcileCustomOrderWatchStateFromPlex } = require('../getNextCustomOrder');
 const prisma = require('../prismaClient');
 
 // Initialize services
@@ -120,6 +120,7 @@ router.post('/', upload.single('thumb'), async (req, res) => {
 
             // Mark as watched in custom order
             await markCustomOrderItemAsWatched(customOrderItem.id);
+            await reconcileCustomOrderWatchStateFromPlex(ratingKey, customOrderItem.mediaType, true);
 
             // Create watch log entry
             let watchLogMediaType = customOrderItem.mediaType;

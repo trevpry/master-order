@@ -21,69 +21,85 @@ export const getSceneDisplayTitle = (scene) => {
   return 'Unknown Scene';
 };
 
-export const getSceneImageUrl = (scene) => {
-  if (!scene) return null;
-  
+export const getSceneImageUrl = (sceneOrImage) => {
+  if (!sceneOrImage) return null;
+
+  const normalizeImageValue = (value) => {
+    if (!value) return null;
+
+    if (typeof value !== 'string') return null;
+
+    const trimmed = value.trim();
+    if (!trimmed) return null;
+
+    if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
+      return trimmed;
+    }
+
+    if (trimmed.startsWith('/')) {
+      return `${config.apiBaseUrl}${trimmed}`;
+    }
+
+    return `${config.apiBaseUrl}/${trimmed}`;
+  };
+
+  if (typeof sceneOrImage === 'string') {
+    return normalizeImageValue(sceneOrImage);
+  }
+
   try {
-    // Check for direct image URL first (from API response)
-    if (scene.image) {
-      // If it's already a full URL, return as-is
-      if (scene.image.startsWith('http')) {
-        return scene.image;
-      }
-      // If it's a relative path, build the full URL
-      return `${config.apiBaseUrl}${scene.image}`;
+    const scene = sceneOrImage;
+
+    if (scene.image && typeof scene.image === 'string') {
+      if (scene.image.startsWith('http')) return scene.image;
+      if (scene.image.startsWith('/')) return `${config.apiBaseUrl}${scene.image}`;
+      return `${config.apiBaseUrl}/${scene.image}`;
     }
-    
-    // Check for thumb URL
-    if (scene.thumb) {
-      if (scene.thumb.startsWith('http')) {
-        return scene.thumb;
-      }
-      return `${config.apiBaseUrl}${scene.thumb}`;
+
+    if (scene.thumb && typeof scene.thumb === 'string') {
+      if (scene.thumb.startsWith('http')) return scene.thumb;
+      if (scene.thumb.startsWith('/')) return `${config.apiBaseUrl}${scene.thumb}`;
+      return `${config.apiBaseUrl}/${scene.thumb}`;
     }
-    
-    // Check for preview URL
-    if (scene.preview) {
-      if (scene.preview.startsWith('http')) {
-        return scene.preview;
-      }
-      return `${config.apiBaseUrl}${scene.preview}`;
+
+    if (scene.preview && typeof scene.preview === 'string') {
+      if (scene.preview.startsWith('http')) return scene.preview;
+      if (scene.preview.startsWith('/')) return `${config.apiBaseUrl}${scene.preview}`;
+      return `${config.apiBaseUrl}/${scene.preview}`;
     }
-    
-    // Check for paths object (legacy method)
-    if (scene.paths) {
-      if (scene.paths.screenshot) {
-        // If it's already a full URL, return as-is
-        if (scene.paths.screenshot.startsWith('http')) {
-          return scene.paths.screenshot;
-        }
-        // If it's a relative path, build the proxy URL
-        return `${config.apiBaseUrl}/api/stash/image-proxy/${scene.paths.screenshot}`;
-      }
-      if (scene.paths.image) {
-        if (scene.paths.image.startsWith('http')) {
-          return scene.paths.image;
-        }
-        return `${config.apiBaseUrl}/api/stash/image-proxy/${scene.paths.image}`;
-      }
+
+    if (scene.paths?.screenshot) {
+      if (scene.paths.screenshot.startsWith('http')) return scene.paths.screenshot;
+      if (scene.paths.screenshot.startsWith('/')) return `${config.apiBaseUrl}${scene.paths.screenshot}`;
+      return `${config.apiBaseUrl}/api/stash/image-proxy/${scene.paths.screenshot}`;
     }
-    
-    // Fallback to direct image path
+
+    if (scene.paths?.image) {
+      if (scene.paths.image.startsWith('http')) return scene.paths.image;
+      if (scene.paths.image.startsWith('/')) return `${config.apiBaseUrl}${scene.paths.image}`;
+      return `${config.apiBaseUrl}/api/stash/image-proxy/${scene.paths.image}`;
+    }
+
     if (scene.image_path) {
       return `${config.apiBaseUrl}/api/stash/image-proxy/${encodeURIComponent(scene.image_path)}`;
     }
-    
-    // Fallback to screenshot field
+
     if (scene.screenshot) {
       return `${config.apiBaseUrl}/api/stash/image-proxy/${encodeURIComponent(scene.screenshot)}`;
     }
-    
-    // Fallback to cover field
+
     if (scene.cover) {
       return `${config.apiBaseUrl}/api/stash/image-proxy/${encodeURIComponent(scene.cover)}`;
     }
-    
+
+    if (scene.coverImage) {
+      return normalizeImageValue(scene.coverImage);
+    }
+
+    if (scene.cover_image) {
+      return normalizeImageValue(scene.cover_image);
+    }
+
     return null;
   } catch (error) {
     console.error('Error generating scene image URL:', error);

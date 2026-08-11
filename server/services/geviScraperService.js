@@ -48,6 +48,39 @@ class GeviScraperService {
   }
 
   /**
+   * Extract performer links from a GEVI episode page
+   * @param {cheerio.CheerioAPI} $ - Cheerio instance
+   * @returns {Array<Object>} Array of performer objects
+   */
+  extractScenePerformersFromPage($) {
+    const section = $('div#data section').first();
+    if (!section.length) return [];
+
+    const performers = [];
+    const performerLinks = section.find('a[href*="performer"]');
+
+    performerLinks.each((_, link) => {
+      const performer = this.nameWithUrl($, $(link));
+      performer.gender = 'MALE';
+
+      const row = $(link).closest('tr');
+      if (row.length) {
+        const tds = row.find('td');
+        if (tds.length >= 3) {
+          const actionCode = $(tds[2]).text().trim();
+          if (actionCode && actionCode !== '&nbsp;') {
+            performer.actionCode = actionCode;
+          }
+        }
+      }
+
+      performers.push(performer);
+    });
+
+    return performers;
+  }
+
+  /**
    * Extract value from table-like structure
    * @param {cheerio.CheerioAPI} $ - Cheerio instance
    * @param {cheerio.Cheerio} soup - Section to search in
@@ -2165,19 +2198,27 @@ class GeviScraperService {
       console.log(`   - Will try names: ${searchNames.join(', ')}`);
       
       // Function to search for scenes with a given name
-      const searchWithName = (searchName, matchTitleOnly = false) => {
+      const searchWithName = async (searchName, matchTitleOnly = false) => {
         const foundScenes = [];
         const normalizedSearchName = searchName.toLowerCase().replace(/\s+/g, '');
         const searchNameParts = searchName.toLowerCase().split(/\s+/);
         
         // Parse all rows in the table
-        episodesTable.find('tr').each((i, row) => {
+        const rows = episodesTable.find('tr').toArray();
+        for (const row of rows) {
           const $row = $(row);
           
           // Get the image from the first column (td index 0)
           const imageCell = $row.find('td').eq(0);
+          const imageCandidates = [];
+          imageCell.find('img').each((_, img) => {
+            const $img = $(img);
+            const src = $img.attr('src') || $img.attr('data-src') || $img.attr('data-lazy-src') || null;
+            if (src) imageCandidates.push(src);
+          });
           const imageTag = imageCell.find('img').first();
-          const imageUrl = imageTag.attr('src') || imageTag.attr('data-src') || null;
+          const imageUrl = imageTag.attr('src') || imageTag.attr('data-src') || imageTag.attr('data-lazy-src') || imageCandidates[0] || null;
+          const fallbackImageUrl = imageCandidates[0] || imageTag.attr('src') || imageTag.attr('data-src') || imageTag.attr('data-lazy-src') || null;
           
           // Get the title link (3rd td, index 2)
           const titleCell = $row.find('td').eq(2);
@@ -2185,7 +2226,7 @@ class GeviScraperService {
           const title = titleLink.text().trim();
           const href = titleLink.attr('href');
           
-          if (!title || !href) return; // Skip if no title/link
+          if (!title || !href) continue; // Skip if no title/link
           
           // Get the date (4th td, index 3)
           const dateCell = $row.find('td').eq(3);
@@ -2239,15 +2280,47 @@ class GeviScraperService {
               url = `${this.baseUrl}/${href}`;
             }
             
-            // Build the full image URL
             let fullImageUrl = null;
-            if (imageUrl) {
-              if (imageUrl.startsWith('http')) {
-                fullImageUrl = imageUrl;
-              } else if (imageUrl.startsWith('/')) {
-                fullImageUrl = `${this.baseUrl}${imageUrl}`;
+            const preferredImageUrl = imageUrl || fallbackImageUrl;
+            if (preferredImageUrl) {
+              if (preferredImageUrl.startsWith('http')) {
+                fullImageUrl = preferredImageUrl;
+              } else if (preferredImageUrl.startsWith('/')) {
+                fullImageUrl = `${this.baseUrl}${preferredImageUrl}`;
               } else {
-                fullImageUrl = `${this.baseUrl}/${imageUrl}`;
+                fullImageUrl = `${this.baseUrl}/${preferredImageUrl}`;
+              }
+            }
+
+            let episodePageData = null;
+            let parsedPerformers = null;
+
+            if (!fullImageUrl && url) {
+              try {
+                episodePageData = await this.client.get(url);
+                const episodeHtml = cheerio.load(episodePageData.data);
+                const episodeImage = episodeHtml('div#data section img[src*="Episodes"]').first();
+                if (episodeImage.length) {
+                  const episodeImageSrc = episodeImage.attr('src') || episodeImage.attr('data-src') || episodeImage.attr('data-lazy-src');
+                  if (episodeImageSrc) {
+                    fullImageUrl = episodeImageSrc.startsWith('http')
+                      ? episodeImageSrc
+                      : this.absUrl(episodeImageSrc);
+                  }
+                }
+                parsedPerformers = this.extractScenePerformersFromPage(episodeHtml);
+              } catch (episodeError) {
+                console.warn(`   - Could not fetch episode image for ${url}:`, episodeError.message);
+              }
+            }
+
+            if (!parsedPerformers && url) {
+              try {
+                episodePageData = episodePageData || await this.client.get(url);
+                const episodeHtml = cheerio.load(episodePageData.data);
+                parsedPerformers = this.extractScenePerformersFromPage(episodeHtml);
+              } catch (episodeError) {
+                console.warn(`   - Could not fetch episode performers for ${url}:`, episodeError.message);
               }
             }
             
@@ -2257,10 +2330,12 @@ class GeviScraperService {
               image: fullImageUrl,
               date: date || null,
               studio: studio || null,
-              performers: costarsText || null
+              performers: parsedPerformers && parsedPerformers.length > 0
+                ? parsedPerformers
+                : (costarsText || null)
             });
           }
-        });
+        }
         
         return foundScenes;
       };
@@ -2269,7 +2344,7 @@ class GeviScraperService {
       let scenes = [];
       for (const searchName of searchNames) {
         console.log(`   - Trying name: "${searchName}" in costars`);
-        scenes = searchWithName(searchName, false); // Try costars first
+        scenes = await searchWithName(searchName, false); // Try costars first
         
         if (scenes.length > 0) {
           console.log(`   - Found ${scenes.length} matches in costars with "${searchName}"`);
@@ -2282,7 +2357,7 @@ class GeviScraperService {
         console.log(`   - No matches in costars, trying title matching...`);
         for (const searchName of searchNames) {
           console.log(`   - Trying name: "${searchName}" in titles`);
-          scenes = searchWithName(searchName, true); // Try title matching
+          scenes = await searchWithName(searchName, true); // Try title matching
           
           if (scenes.length > 0) {
             console.log(`   - Found ${scenes.length} matches in titles with "${searchName}"`);

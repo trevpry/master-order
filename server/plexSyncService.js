@@ -100,6 +100,12 @@ class PlexSyncService {
     return Number.isFinite(parsedValue) ? parsedValue : null;
   }
 
+  isPlexWatched(viewCount, lastViewedAt) {
+    const numericViewCount = this.getNullableInt(viewCount);
+    const numericLastViewedAt = this.getNullableInt(lastViewedAt);
+    return (numericViewCount ?? 0) > 0 || (numericLastViewedAt ?? 0) > 0;
+  }
+
   normalizeCollectionValue(collectionValue) {
     if (!collectionValue) {
       return null;
@@ -523,6 +529,7 @@ class PlexSyncService {
           (existingEpisode?.viewCount ?? null) !== summaryViewCount ||
           (existingEpisode?.lastViewedAt ?? null) !== summaryLastViewedAt
         );
+        const shouldReconcileCustomOrderWatchState = this.isPlexWatched(detailedEpisode.viewCount ?? episode.viewCount, detailedEpisode.lastViewedAt ?? episode.lastViewedAt);
 
         if (shouldRefreshEpisode) {
           await prisma.plexEpisode.upsert({
@@ -532,6 +539,7 @@ class PlexSyncService {
           });
           await this.clearComplexFields(detailedEpisode.ratingKey, 'episode');
           await this.syncComplexFields(detailedEpisode, 'episode', detailedEpisode.ratingKey);
+          await reconcileCustomOrderWatchStateFromPlex(detailedEpisode.ratingKey, 'episode', shouldReconcileCustomOrderWatchState);
         } else if (shouldRefreshWatchOnly) {
           await prisma.plexEpisode.update({
             where: { ratingKey: episode.ratingKey },
@@ -540,6 +548,7 @@ class PlexSyncService {
               lastViewedAt: summaryLastViewedAt
             }
           });
+          await reconcileCustomOrderWatchStateFromPlex(episode.ratingKey, 'episode', shouldReconcileCustomOrderWatchState);
           console.log(`👁️ Updated watch status for episode: ${resolvedShowTitle} S${episode.parentIndex || 0}E${episode.index || 0} - ${episode.title}`);
           if (watchStatusReconciled) {
             watchStatusReconciled.episodes += 1;
@@ -630,6 +639,7 @@ class PlexSyncService {
           (existingMovie?.viewCount ?? null) !== summaryViewCount ||
           (existingMovie?.lastViewedAt ?? null) !== summaryLastViewedAt
         );
+        const shouldReconcileCustomOrderWatchState = this.isPlexWatched(detailedMovie.viewCount ?? movie.viewCount, detailedMovie.lastViewedAt ?? movie.lastViewedAt);
 
         if (shouldRefreshMovie) {
           const syncedMovie = await prisma.plexMovie.upsert({
@@ -639,6 +649,7 @@ class PlexSyncService {
           });
           await this.clearComplexFields(detailedMovie.ratingKey, 'movie');
           await this.syncComplexFields(detailedMovie, 'movie', detailedMovie.ratingKey);
+          await reconcileCustomOrderWatchStateFromPlex(detailedMovie.ratingKey, 'movie', shouldReconcileCustomOrderWatchState);
           syncedMovies.push(syncedMovie);
         } else if (shouldRefreshCollectionsOnly) {
           await prisma.plexMovie.update({
@@ -658,6 +669,7 @@ class PlexSyncService {
               lastSyncedAt: new Date()
             }
           });
+          await reconcileCustomOrderWatchStateFromPlex(movie.ratingKey, 'movie', shouldReconcileCustomOrderWatchState);
           console.log(`👁️ Updated watch status for movie: ${movie.title}`);
           if (watchStatusReconciled) {
             watchStatusReconciled.movies += 1;

@@ -475,6 +475,44 @@ async function fetchMediaDetailsFromPlex(plexKey, mediaType, customOrderItem, ba
   }
 }
 
+// Reconcile watched state for custom order items when Plex reports that an episode/movie is watched
+async function reconcileCustomOrderWatchStateFromPlex(ratingKey, mediaType, isWatched) {
+  try {
+    if (!ratingKey || !isWatched) {
+      return { updatedCount: 0 };
+    }
+
+    const normalizedRatingKey = String(ratingKey);
+    const normalizedMediaType = mediaType === 'episode' ? 'episode' : mediaType === 'movie' ? 'movie' : null;
+
+    const matchingItems = await prisma.customOrderItem.findMany({
+      where: {
+        plexKey: normalizedRatingKey,
+        ...(normalizedMediaType ? { mediaType: normalizedMediaType } : {}),
+        isWatched: false
+      },
+      select: { id: true }
+    });
+
+    if (!matchingItems.length) {
+      return { updatedCount: 0 };
+    }
+
+    await Promise.all(matchingItems.map(item =>
+      prisma.customOrderItem.update({
+        where: { id: item.id },
+        data: { isWatched: true }
+      })
+    ));
+
+    console.log(`Reconciled ${matchingItems.length} custom order item(s) as watched for Plex ${normalizedMediaType || 'item'} ${normalizedRatingKey}`);
+    return { updatedCount: matchingItems.length };
+  } catch (error) {
+    console.error(`Error reconciling custom order watch state for Plex key ${ratingKey}:`, error);
+    return { updatedCount: 0 };
+  }
+}
+
 // Mark a custom order item as watched
 async function markCustomOrderItemAsWatched(itemIdentifier) {
   try {
@@ -857,4 +895,4 @@ async function getNextCustomOrder(req = null, mediaTypeLimiters = null) {
   }
 }
 
-module.exports = { getNextCustomOrder, markCustomOrderItemAsWatched };
+module.exports = { getNextCustomOrder, markCustomOrderItemAsWatched, reconcileCustomOrderWatchStateFromPlex };

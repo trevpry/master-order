@@ -41,6 +41,8 @@ model Settings {
   komgaApiKey                       String?
   stashUrl                          String?
   stashApiKey                       String?
+  filenameParserSpaceSeparators     String?
+  filenameParserPerformerSeparators String?
   rawgApiKey                        String?
   geminiApiKey                      String?
   backgroundImageStoragePath        String?

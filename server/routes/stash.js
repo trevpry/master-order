@@ -24,6 +24,15 @@ const PerformerSwapService = require('../services/performerSwapService');
 const PerformerMergeService = require('../services/performerMergeService');
 const ScraperRegistry = require('../services/scrapers/ScraperRegistry');
 const DuplicateDetectionService = require('../services/duplicateDetectionService');
+const StashScrapeAllService = require('../services/stashScrapeAllService');
+const {
+  normalizeScrapedPerformers,
+  normalizeScrapedTags,
+  extractGeviUrlsFromScraped,
+  shouldAttemptGeviFollowUp,
+  collectStashBoxSearchTermsFromResults,
+  buildStashBoxEndpointCandidates
+} = require('../utils/stashScrapeNormalization');
 
 // Create global scraper registry singleton (shared across all routes)
 let globalScraperRegistry = null;
@@ -1020,21 +1029,33 @@ router.get('/scenes/:id', asyncHandler(async (req, res) => {
             performer: true,
             tags: {
               include: {
-                tag: true
+                tag: {
+                  include: {
+                    aliases: true
+                  }
+                }
               }
             }
           }
         },
         tags: {
           include: {
-            tag: true
+            tag: {
+              include: {
+                aliases: true
+              }
+            }
           }
         },
         clips: {
           include: {
             tags: {
               include: {
-                tag: true
+                tag: {
+                  include: {
+                    aliases: true
+                  }
+                }
               }
             }
           }
@@ -1079,6 +1100,16 @@ router.get('/scenes/:id', asyncHandler(async (req, res) => {
       bitrate: scene.bitrate
     });
     
+    const buildTagPayload = (tag) => ({
+      id: tag.id,
+      name: tag.name,
+      description: tag.description,
+      aliases: (tag.aliases || []).map((alias) => alias.alias).filter(Boolean),
+      image: tag.image
+        ? `/api/stash/image-proxy${tag.image.replace(/^https?:\/\/[^\/]+/, '')}`
+        : null
+    });
+
     // Transform data to match expected format
     const transformedScene = {
       id: scene.id,
@@ -1156,35 +1187,17 @@ router.get('/scenes/:id', asyncHandler(async (req, res) => {
         // Include scene-specific metadata from pivot table
         notes: sp.notes,
         tags: sp.tags.map(t => ({
-          tag: {
-            id: t.tag.id,
-            name: t.tag.name,
-            description: t.tag.description
-          }
+          tag: buildTagPayload(t.tag)
         }))
       })),
-      tags: scene.tags.map(st => ({
-        id: st.tag.id,
-        name: st.tag.name,
-        description: st.tag.description,
-        image: st.tag.image 
-          ? `/api/stash/image-proxy${st.tag.image.replace(/^https?:\/\/[^\/]+/, '')}` 
-          : null
-      })),
+      tags: scene.tags.map(st => buildTagPayload(st.tag)),
       clipTags: (() => {
         // Collect all unique tags from clips
         const tagMap = new Map();
         scene.clips?.forEach(clip => {
           clip.tags?.forEach(ct => {
             if (!tagMap.has(ct.tag.id)) {
-              tagMap.set(ct.tag.id, {
-                id: ct.tag.id,
-                name: ct.tag.name,
-                description: ct.tag.description,
-                image: ct.tag.image 
-                  ? `/api/stash/image-proxy${ct.tag.image.replace(/^https?:\/\/[^\/]+/, '')}` 
-                  : null
-              });
+              tagMap.set(ct.tag.id, buildTagPayload(ct.tag));
             }
           });
         });
@@ -1218,9 +1231,84 @@ router.get('/scenes/:id', asyncHandler(async (req, res) => {
 // POST /api/stash/scenes/:id/parse-filename - Parse filename to extract metadata
 router.post('/scenes/:id/parse-filename', asyncHandler(async (req, res) => {
   const { id } = req.params;
-  const { customFilename, parseStudio = true, parseTitle = true, parsePerformers = true } = req.body;
+  const { customFilename, parseStudio = true, parseTitle = true, parsePerformers = true, spaceSeparators, performerSeparators } = req.body;
   
-  console.log(`🔍 [Parse Filename] Parse options: Studio=${parseStudio}, Title=${parseTitle}, Performers=${parsePerformers}`);
+  const normalizeSeparatorEntries = (value) => {
+    if (Array.isArray(value)) {
+      return value.map((entry) => String(entry).trim()).filter(Boolean);
+    }
+
+    if (typeof value === 'string') {
+      return value
+        .split(',')
+        .map((entry) => entry.trim())
+        .filter(Boolean);
+    }
+
+    return [];
+  };
+
+  const applyConfiguredReplacements = (inputText, separatorEntries, replacement) => {
+    let currentText = inputText;
+
+    separatorEntries.forEach((separatorEntry) => {
+      if (!separatorEntry) {
+        return;
+      }
+
+      try {
+        if (separatorEntry.startsWith('##')) {
+          const regexPattern = separatorEntry.slice(2).trim();
+          if (!regexPattern) {
+            return;
+          }
+          currentText = currentText.replace(new RegExp(regexPattern, 'g'), replacement);
+        } else {
+          const escapedSeparator = separatorEntry.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+          currentText = currentText.replace(new RegExp(escapedSeparator, 'g'), replacement);
+        }
+      } catch (error) {
+        console.warn(`Invalid filename separator pattern "${separatorEntry}":`, error.message);
+      }
+    });
+
+    return currentText;
+  };
+
+  let parsedSpaceSeparators = normalizeSeparatorEntries(spaceSeparators);
+  let parsedPerformerSeparators = normalizeSeparatorEntries(performerSeparators);
+
+  if (parsedSpaceSeparators.length === 0 || parsedPerformerSeparators.length === 0) {
+    const persistedSettings = await prisma.settings.findUnique({ where: { id: 1 } });
+    if (!parsedSpaceSeparators.length && persistedSettings?.filenameParserSpaceSeparators) {
+      parsedSpaceSeparators = normalizeSeparatorEntries(persistedSettings.filenameParserSpaceSeparators);
+    }
+    if (!parsedPerformerSeparators.length && persistedSettings?.filenameParserPerformerSeparators) {
+      parsedPerformerSeparators = normalizeSeparatorEntries(persistedSettings.filenameParserPerformerSeparators);
+    }
+  }
+
+  const effectiveSpaceSeparators = parsedSpaceSeparators.length > 0 ? parsedSpaceSeparators : ['_'];
+  const effectivePerformerSeparators = parsedPerformerSeparators.length > 0 ? parsedPerformerSeparators : ['__'];
+
+  const normalizeParsedTitle = (text) => {
+    if (typeof text !== 'string') return text;
+
+    let normalized = text;
+    normalized = normalized.replace(/_-_/g, ' - ');
+    normalized = applyConfiguredReplacements(normalized, effectiveSpaceSeparators, ' ');
+    normalized = normalized
+      .replace(/\b1080p\b/gi, '')
+      .replace(/\bHD\b/gi, '')
+      .replace(/\s*,\s*/g, ', ')
+      .replace(/\s*&\s*/g, ' & ')
+      .replace(/\s+/g, ' ')
+      .trim();
+
+    return normalized;
+  };
+
+  console.log(`🔍 [Parse Filename] Parse options: Studio=${parseStudio}, Title=${parseTitle}, Performers=${parsePerformers}, Space separators=${effectiveSpaceSeparators.join(', ')}, Performer separators=${effectivePerformerSeparators.join(', ')}`);
   
   const scene = await prisma.stashScene.findUnique({
     where: { id },
@@ -1244,12 +1332,15 @@ router.post('/scenes/:id/parse-filename', asyncHandler(async (req, res) => {
     nameWithoutExt = filename.replace(/\.[^/.]+$/, '');
   }
   
-  // Normalize filename: handle double underscores as performer separators, then replace single underscores with spaces
+  // Normalize filename: preserve the original title content before performer separators are converted
   // Important: Preserve dashes in performer names (e.g., "Q-Tip")
+  const originalTitleCandidate = nameWithoutExt;
+  nameWithoutExt = applyConfiguredReplacements(nameWithoutExt, effectivePerformerSeparators, ' & ');
+  nameWithoutExt = nameWithoutExt.replace(/_-_/g, ' - '); // Replace _-_ pattern with dash separator (structure delimiter)
+
+  nameWithoutExt = applyConfiguredReplacements(nameWithoutExt, effectiveSpaceSeparators, ' ');
+
   nameWithoutExt = nameWithoutExt
-    .replace(/__/g, ' & ')                       // Replace double underscores with ampersand separator (performer delimiter)
-    .replace(/_-_/g, ' - ')                      // Replace _-_ pattern with dash separator (structure delimiter)
-    .replace(/_/g, ' ')                          // Replace remaining single underscores with spaces
     .replace(/\b1080p\b/gi, '')                  // Remove "1080p"
     .replace(/\bHD\b/gi, '')                     // Remove "HD"
     .replace(/\s*,\s*/g, ', ')                   // Normalize commas with consistent spacing
@@ -1609,10 +1700,10 @@ router.post('/scenes/:id/parse-filename', asyncHandler(async (req, res) => {
       
       // Second part could be performers or title
       if (performers.length === 0 && parsePerformers) {
-        // Parse as performers, generate title from them
+        // Parse as performers, but keep the title tied to the parsed filename content before separator normalization
         addAllPerformerMatches(part2);
         if (parseTitle) {
-          title = performers.join(' & ');
+          title = originalTitleCandidate;
         }
       } else if (parseTitle) {
         // Not parsing performers, so second part is the title
@@ -1648,8 +1739,8 @@ router.post('/scenes/:id/parse-filename', asyncHandler(async (req, res) => {
       const foundCount = parsePerformers ? addAllPerformerMatches(nameWithoutExt) : 0;
       
       if (foundCount > 0 && parseTitle) {
-        // Found performers - generate title from them
-        title = performers.join(' & ');
+        // Found performers - keep the title tied to the parsed filename content before separator normalization
+        title = originalTitleCandidate;
       } else if (foundCount === 0) {
         // No performers found - try as studio if parsing studio is enabled
         const studioMatch = parseStudio ? findStudioInText(nameWithoutExt) : null;
@@ -1669,6 +1760,10 @@ router.post('/scenes/:id/parse-filename', asyncHandler(async (req, res) => {
   
   // Set unmatched studio if we have a studio but no match
   const unmatchedStudio = studio && !matchedStudio ? studio : null;
+
+  if (parseTitle && typeof title === 'string') {
+    title = normalizeParsedTitle(title);
+  }
   
   // Don't automatically update scene - just return parsing results
   // User will accept/edit in modal before updating
@@ -4379,6 +4474,641 @@ router.delete('/groups/:id', asyncHandler(async (req, res) => {
   }
 }));
 
+async function searchGeviMoviesForScene(sceneWithPerformers) {
+  const allPerformers = (sceneWithPerformers?.performers || [])
+    .map((entry) => entry?.performer || entry || {})
+    .filter(Boolean);
+
+  if (!allPerformers.length) {
+    return { movies: [], firstPerformer: null, secondPerformer: null, allPerformers: [] };
+  }
+
+  const hasPunctuation = (name) => /['".,;:!?\-()[\]{}]/.test(name);
+  const firstPerformer = allPerformers.find((performer) => !hasPunctuation(performer.name)) || allPerformers[0];
+
+  let firstPerformerResults = [];
+  try {
+    firstPerformerResults = await geviScraper.searchPerformer(firstPerformer.name);
+  } catch (error) {
+    console.warn('⚠️ [Scrape All] GEVI movie search failed to find performer matches:', error.message);
+    return {
+      movies: [],
+      firstPerformer: firstPerformer.name,
+      secondPerformer: allPerformers[1]?.name || null,
+      allPerformers: allPerformers.map((performer) => performer.name)
+    };
+  }
+
+  if (!firstPerformerResults || firstPerformerResults.length === 0) {
+    return {
+      movies: [],
+      firstPerformer: firstPerformer.name,
+      secondPerformer: allPerformers[1]?.name || null,
+      allPerformers: allPerformers.map((performer) => performer.name)
+    };
+  }
+
+  const allMoviesMap = new Map();
+
+  for (let matchIdx = 0; matchIdx < firstPerformerResults.length; matchIdx++) {
+    const performerPage = firstPerformerResults[matchIdx];
+    console.log(`\n   - [Movie Match ${matchIdx + 1}/${firstPerformerResults.length}] Using performer: ${performerPage.name} (${performerPage.url})`);
+
+    let browser = null;
+    try {
+      const puppeteer = require('puppeteer');
+      browser = await puppeteer.launch({
+        headless: true,
+        args: ['--no-sandbox', '--disable-setuid-sandbox']
+      });
+
+      const page = await browser.newPage();
+      await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36');
+      await page.goto('https://gayeroticvideoindex.com', { waitUntil: 'networkidle2', timeout: 30000 });
+
+      try {
+        const enterButtonClicked = await page.evaluate(() => {
+          const buttons = Array.from(document.querySelectorAll('button, a, input[type="submit"]'));
+          const enterButton = buttons.find((element) => 
+            element.textContent?.trim().toLowerCase() === 'enter' ||
+            element.value?.toLowerCase() === 'enter'
+          );
+
+          if (enterButton) {
+            enterButton.click();
+            return true;
+          }
+
+          return false;
+        });
+
+        if (enterButtonClicked) {
+          await new Promise((resolve) => setTimeout(resolve, 2000));
+        }
+      } catch (error) {
+        console.log(`   - ℹ️  Enter button not required or already dismissed:`, error.message);
+      }
+
+      await page.goto(performerPage.url, { waitUntil: 'networkidle2', timeout: 30000 });
+      await new Promise((resolve) => setTimeout(resolve, 2000));
+
+      const moviesTabClicked = await page.evaluate(() => {
+        const selectors = [
+          'button[sectionid="movies"]',
+          'button[data-sectionid="movies"]',
+          '[sectionid="movies"]',
+          'a[href="#movies"]',
+          'a[href="#moviesDT"]',
+          'button:contains("Movies")'
+        ];
+
+        for (const selector of selectors) {
+          try {
+            const element = document.querySelector(selector);
+            if (element) {
+              element.click();
+              return true;
+            }
+          } catch (e) {}
+        }
+
+        const buttons = Array.from(document.querySelectorAll('button, a'));
+        const moviesButton = buttons.find((element) => 
+          element.textContent?.trim().toLowerCase() === 'movies' ||
+          element.getAttribute('sectionid') === 'movies'
+        );
+
+        if (moviesButton) {
+          moviesButton.click();
+          return true;
+        }
+
+        return false;
+      });
+
+      if (!moviesTabClicked) {
+        console.log(`   - ⚠️  Could not find Movies tab, page may already be showing movies`);
+      }
+
+      await new Promise((resolve) => setTimeout(resolve, 2000));
+
+      const otherPerformers = allPerformers.filter((performer) => performer.id !== firstPerformer.id);
+      const moviesByPerformer = new Map();
+
+      for (let i = 0; i < otherPerformers.length; i++) {
+        const performer = otherPerformers[i];
+        console.log(`   - [${i + 1}/${otherPerformers.length}] Searching for: ${performer.name}`);
+
+        await page.evaluate(() => {
+          const searchBox = document.querySelector('#moviesDT_filter input[type="search"]');
+          if (searchBox) {
+            searchBox.value = '';
+            searchBox.dispatchEvent(new Event('input', { bubbles: true }));
+          }
+        });
+
+        await new Promise((resolve) => setTimeout(resolve, 500));
+        await page.waitForSelector('#moviesDT_filter input[type="search"]', { timeout: 10000 });
+        await page.type('#moviesDT_filter input[type="search"]', performer.name);
+        await page.keyboard.press('Enter');
+        await new Promise((resolve) => setTimeout(resolve, 3000));
+
+        const performerMovies = await page.evaluate(() => {
+          const results = [];
+          const rows = document.querySelectorAll('#moviesDT tbody tr');
+
+          rows.forEach((row) => {
+            const cells = row.querySelectorAll('td');
+            const firstCell = cells[0];
+            if (firstCell && firstCell.classList.contains('dataTables_empty')) {
+              return;
+            }
+
+            let foundLink = null;
+            let foundTitle = null;
+
+            for (let i = 0; i < cells.length; i++) {
+              const link = cells[i].querySelector('a[href*="video/"]');
+              if (link) {
+                const href = link.getAttribute('href');
+                if (href && !href.includes('company/') && !href.includes('performer/')) {
+                  foundLink = link;
+                  foundTitle = link.textContent.trim();
+                  break;
+                }
+              }
+            }
+
+            if (foundLink && foundTitle) {
+              let url = foundLink.getAttribute('href');
+              if (url && !url.startsWith('http')) {
+                url = 'https://gayeroticvideoindex.com/' + (url.startsWith('/') ? url.substring(1) : url);
+              }
+
+              if (url) {
+                results.push({ title: foundTitle, url });
+              }
+            }
+          });
+
+          return results;
+        });
+
+        performerMovies.forEach((movie) => {
+          if (!moviesByPerformer.has(movie.url)) {
+            moviesByPerformer.set(movie.url, {
+              title: movie.title,
+              url: movie.url,
+              matchedPerformers: [],
+              foundVia: performerPage.name
+            });
+          }
+          moviesByPerformer.get(movie.url).matchedPerformers.push(performer.name);
+        });
+      }
+
+      moviesByPerformer.forEach((movieData, url) => {
+        if (!allMoviesMap.has(url)) {
+          allMoviesMap.set(url, movieData);
+        } else {
+          const existing = allMoviesMap.get(url);
+          movieData.matchedPerformers.forEach((performerName) => {
+            if (!existing.matchedPerformers.includes(performerName)) {
+              existing.matchedPerformers.push(performerName);
+            }
+          });
+        }
+      });
+    } catch (error) {
+      console.error(`   - ❌ Error searching with ${performerPage.name}:`, error.message);
+    } finally {
+      if (browser) {
+        try {
+          await browser.close();
+        } catch (closeError) {
+          console.error('Error closing browser:', closeError.message);
+        }
+      }
+    }
+  }
+
+  const movies = Array.from(allMoviesMap.values()).sort((a, b) => b.matchedPerformers.length - a.matchedPerformers.length);
+
+  for (const movie of movies) {
+    let existingMovie = await prisma.stashGroup.findFirst({ where: { geviUrl: movie.url } });
+
+    if (!existingMovie) {
+      const titleBeforeColon = movie.title.split(':')[0].trim();
+      const titleBeforeParentheses = titleBeforeColon.split('(')[0].trim();
+      const cleanTitle = titleBeforeParentheses.toLowerCase().replace(/\s+/g, ' ').trim();
+
+      const allMovies = await prisma.stashGroup.findMany({ select: { id: true, name: true, geviUrl: true } });
+      existingMovie = allMovies.find((candidate) => {
+        const dbTitleBeforeColon = candidate.name.split(':')[0].trim();
+        const dbTitleBeforeParentheses = dbTitleBeforeColon.split('(')[0].trim();
+        const cleanDbTitle = dbTitleBeforeParentheses.toLowerCase().replace(/\s+/g, ' ').trim();
+        return cleanDbTitle === cleanTitle;
+      });
+    }
+
+    if (existingMovie) {
+      movie.existingMovieId = existingMovie.id;
+      movie.existingMovieName = existingMovie.name;
+    }
+  }
+
+  return {
+    movies,
+    firstPerformer: firstPerformerResults[0]?.name || firstPerformer.name,
+    secondPerformer: allPerformers[1]?.name || null,
+    allPerformers: allPerformers.map((performer) => performer.name)
+  };
+}
+
+// POST /api/stash/scenes/:id/scrape-all - Kick off the multi-source scrape workflow
+router.post('/scenes/:id/scrape-all', asyncHandler(async (req, res) => {
+  const { id } = req.params;
+
+  const scene = await prisma.stashScene.findUnique({
+    where: { id },
+    select: { id: true, title: true }
+  });
+
+  if (!scene) {
+    return sendBadRequest(res, 'Scene not found');
+  }
+
+  await initializeStashSyncService();
+
+  if (!stashSyncService) {
+    return sendServerError(res, 'Stash sync service is not available');
+  }
+
+  let stashBoxes = [];
+  try {
+    const stashBoxConfig = await stashSyncService.getConfiguration();
+    stashBoxes = stashBoxConfig?.stashBoxes || [];
+  } catch (error) {
+    console.warn('⚠️ Failed to load stash-box configuration for scrape-all:', error.message);
+  }
+
+  if (stashBoxes.length === 0) {
+    return sendSuccess(res, {
+      message: 'No stash-box sources are configured.',
+      sceneId: scene.id,
+      sources: []
+    });
+  }
+
+  const resultsBySource = {};
+  const fallbackUsage = {};
+
+  const sceneWithPerformers = await prisma.stashScene.findUnique({
+    where: { id },
+    include: {
+      performers: {
+        include: {
+          performer: true
+        }
+      }
+    }
+  });
+
+  const searchTerms = collectScenePerformerSearchTerms(sceneWithPerformers);
+  const performerEntries = (sceneWithPerformers?.performers || []).map((entry) => entry?.performer || entry || {});
+
+  for (const box of stashBoxes) {
+    const endpoint = box.endpoint;
+    if (!endpoint) {
+      continue;
+    }
+
+    try {
+      const scrapedScenes = await stashSyncService.scrapeSingleScene(
+        { scene_id: scene.id.toString() },
+        { stash_box_endpoint: endpoint }
+      );
+
+      const normalizedResults = Array.isArray(scrapedScenes) ? scrapedScenes : [];
+
+      if (normalizedResults.length === 0 && performerEntries.length > 0) {
+        console.log(`🔁 [Scrape All] Falling back to performer search for ${box.name || endpoint}`);
+        const performerQuery = buildStashBoxSingleQuery(performerEntries);
+        const searchQueries = [...new Set([buildStashBoxSearchQuery(searchTerms, searchTerms.flatMap((name) => collectStashBoxAliasTerms(name))), performerQuery].filter(Boolean))];
+
+        const filteredFallbackResults = await findMatchingStashBoxSceneResults(
+          stashSyncService,
+          searchQueries,
+          { stash_box_endpoint: endpoint },
+          performerEntries
+        );
+
+        resultsBySource[endpoint] = filteredFallbackResults;
+        fallbackUsage[endpoint] = filteredFallbackResults.length > 0 || true;
+      } else {
+        const filteredResults = normalizedResults.filter((scene) => matchesAllScenePerformers(scene, performerEntries));
+        resultsBySource[endpoint] = filteredResults;
+        fallbackUsage[endpoint] = false;
+      }
+    } catch (error) {
+      console.error(`❌ [Scrape All] Failed for ${box.name || endpoint}:`, error.message);
+      resultsBySource[endpoint] = [];
+      fallbackUsage[endpoint] = false;
+    }
+  }
+
+  const sources = StashScrapeAllService.buildScrapeAllSources(stashBoxes, resultsBySource, fallbackUsage);
+
+  let geviSeedPerformers = [];
+  let geviSeedUrls = [];
+
+  if (performerEntries.length === 0) {
+    for (const sourceResults of Object.values(resultsBySource)) {
+      for (const sceneResult of Array.isArray(sourceResults) ? sourceResults : []) {
+        const performerCandidates = collectPerformerNameCandidates(sceneResult);
+        performerCandidates.forEach((performerName) => {
+          if (!geviSeedPerformers.some((entry) => entry.name === performerName)) {
+            geviSeedPerformers.push({ name: performerName });
+          }
+        });
+
+        const geviUrl = extractGeviUrlFromValue(sceneResult);
+        if (geviUrl && !geviSeedUrls.includes(geviUrl)) {
+          geviSeedUrls.push(geviUrl);
+        }
+      }
+    }
+  }
+
+  const effectiveGeviSearchEntries = performerEntries.length >= 2
+    ? performerEntries
+    : geviSeedPerformers.length >= 2
+      ? geviSeedPerformers
+      : [];
+
+  if (effectiveGeviSearchEntries.length >= 2) {
+    try {
+      console.log(`🔎 [Scrape All] Adding GEVI performer search for scene ${scene.id}`);
+      const geviResults = await geviScraper.searchPerformer(effectiveGeviSearchEntries[0]?.name || effectiveGeviSearchEntries[0]?.performer?.name || '');
+
+      if (geviResults && geviResults.length > 0) {
+        let performerPage = null;
+        let scenesByUrl = new Map();
+        const testPerformer = effectiveGeviSearchEntries[1]?.name || effectiveGeviSearchEntries[1]?.performer?.name || '';
+
+        for (const candidate of geviResults) {
+          const testScenes = await geviScraper.searchScenesWithPerformers(candidate.url, { name: testPerformer });
+          if (testScenes.length > 0) {
+            performerPage = candidate;
+            for (const candidateScene of testScenes) {
+              scenesByUrl.set(candidateScene.url, {
+                ...candidateScene,
+                matchedPerformers: [testPerformer]
+              });
+            }
+            break;
+          }
+        }
+
+        if (performerPage) {
+          const remainingPerformers = effectiveGeviSearchEntries.slice(2).map((entry) => entry?.name || entry?.performer?.name || '').filter(Boolean);
+          for (const performerName of remainingPerformers) {
+            const performerScenes = await geviScraper.searchScenesWithPerformers(performerPage.url, { name: performerName });
+            for (const candidateScene of performerScenes) {
+              if (scenesByUrl.has(candidateScene.url)) {
+                const existing = scenesByUrl.get(candidateScene.url);
+                existing.matchedPerformers.push(performerName);
+              } else {
+                scenesByUrl.set(candidateScene.url, {
+                  ...candidateScene,
+                  matchedPerformers: [performerName]
+                });
+              }
+            }
+          }
+
+          const geviScenes = Array.from(scenesByUrl.values()).sort((a, b) => b.matchedPerformers.length - a.matchedPerformers.length);
+          const geviResultsWithImages = await Promise.all(geviScenes.map(async (geviScene) => {
+            let enrichedScene = { ...geviScene };
+
+            if (enrichedScene.url) {
+              try {
+                const fullResult = await geviScraper.scrapeScene(enrichedScene.url);
+                const fullMetadata = fullResult?.metadata || fullResult?.scraped || null;
+
+                if (fullMetadata) {
+                  let matchedPerformers = { matched: [], unmatched: [] };
+                  if (Array.isArray(fullMetadata.performers) && fullMetadata.performers.length > 0) {
+                    matchedPerformers = await geviScraper.matchPerformers(fullMetadata.performers, prisma);
+                  }
+
+                  enrichedScene = {
+                    ...enrichedScene,
+                    ...fullMetadata,
+                    title: fullMetadata.title || enrichedScene.title || '',
+                    date: fullMetadata.date || enrichedScene.date || '',
+                    details: fullMetadata.details || enrichedScene.details || '',
+                    studio: fullMetadata.studio || enrichedScene.studio || '',
+                    performers: fullMetadata.performers || enrichedScene.performers || [],
+                    image: fullMetadata.image || enrichedScene.image || null,
+                    url: fullMetadata.url || enrichedScene.url || '',
+                    episodeUrls: fullMetadata.episodeUrls || enrichedScene.episodeUrls || [],
+                    urls: fullMetadata.urls || (fullMetadata.url ? [fullMetadata.url] : enrichedScene.urls || []),
+                    matchedPerformers,
+                    source: 'GEVI'
+                  };
+                }
+              } catch (error) {
+                console.warn(`⚠️ [Scrape All] Failed to enrich GEVI scene ${enrichedScene.url}:`, error.message);
+              }
+            }
+
+            if (enrichedScene.image) {
+              return {
+                ...enrichedScene,
+                image: `/api/stash/gevi-image-proxy?url=${encodeURIComponent(enrichedScene.image)}`
+              };
+            }
+
+            return enrichedScene;
+          }));
+
+          if (geviResultsWithImages.length > 0) {
+            sources.push({
+              id: 'gevi-performer-search',
+              name: 'GEVI Performer Search',
+              endpoint: 'gevi-performer-search',
+              configured: true,
+              resultCount: geviResultsWithImages.length,
+              hasResults: geviResultsWithImages.length > 0,
+              usedFallback: false,
+              results: geviResultsWithImages
+            });
+          }
+        } else {
+          try {
+            const movieSearch = await searchGeviMoviesForScene({
+              performers: effectiveGeviSearchEntries.length > 0 ? effectiveGeviSearchEntries : sceneWithPerformers?.performers || []
+            });
+            if (movieSearch.movies && movieSearch.movies.length > 0) {
+              const geviMovieResults = (await Promise.all(movieSearch.movies.map(async (movie) => {
+                let imageUrl = null;
+                let movieDetails = null;
+
+                try {
+                  movieDetails = await geviScraper.movieFromUrl(movie.url);
+                  imageUrl = movieDetails?.front_image || movieDetails?.back_image || null;
+                } catch (error) {
+                  console.warn(`⚠️ [Scrape All] Failed to enrich GEVI movie result ${movie.url}:`, error.message);
+                }
+
+                const proxiedImage = imageUrl
+                  ? `/api/stash/gevi-image-proxy?url=${encodeURIComponent(imageUrl)}`
+                  : null;
+
+                return {
+                  id: movie.url,
+                  title: movie.title,
+                  name: movie.title,
+                  source: 'GEVI',
+                  sourceUrl: movie.url,
+                  url: movie.url,
+                  image: proxiedImage,
+                  scenes: movieDetails?.scenes || [],
+                  scraped: {
+                    title: movie.title,
+                    name: movie.title,
+                    url: movie.url,
+                    image: proxiedImage,
+                    details: movieDetails?.synopsis || null,
+                    scenes: movieDetails?.scenes || [],
+                    movies: [{
+                      ...movie,
+                      name: movie.title,
+                      url: movie.url,
+                      image: proxiedImage,
+                      front_image: imageUrl,
+                      back_image: movieDetails?.back_image || null
+                    }],
+                    performers: [],
+                    tags: [],
+                    source: 'GEVI'
+                  },
+                  matched: {
+                    performers: [],
+                    tags: [],
+                    studio: null,
+                    groups: []
+                  },
+                  unmatched: {
+                    performers: [],
+                    tags: []
+                  }
+                };
+              }))).filter((movieResult) => {
+                const breakdowns = Array.isArray(movieResult?.scenes) ? movieResult.scenes : [];
+                if (breakdowns.length === 0) {
+                  return true;
+                }
+
+                if (performerEntries.length === 0) {
+                  return true;
+                }
+
+                return breakdowns.some((scene) => matchesAllScenePerformers(scene, performerEntries));
+              });
+
+              sources.push({
+                id: 'gevi-movie-search',
+                name: 'GEVI Movie Search',
+                endpoint: 'gevi-movie-search',
+                configured: true,
+                resultCount: geviMovieResults.length,
+                hasResults: geviMovieResults.length > 0,
+                usedFallback: true,
+                results: geviMovieResults
+              });
+            }
+          } catch (error) {
+            console.warn('⚠️ [Scrape All] GEVI movie search fallback failed:', error.message);
+          }
+        }
+      }
+    } catch (error) {
+      console.warn('⚠️ [Scrape All] GEVI performer search failed:', error.message);
+    }
+  } else if (geviSeedUrls.length > 0) {
+    try {
+      console.log(`🔎 [Scrape All] Scraping GEVI directly from stash-box result URLs for scene ${scene.id}`);
+      const directGeviResults = (await Promise.all(geviSeedUrls.map(async (geviUrl) => {
+        try {
+          const scrapeResult = await geviScraper.scrapeScene(geviUrl);
+          const metadata = scrapeResult?.metadata || scrapeResult?.scraped || null;
+
+          if (!metadata) {
+            return null;
+          }
+
+          const matchedPerformers = Array.isArray(metadata.performers) && metadata.performers.length > 0
+            ? await geviScraper.matchPerformers(metadata.performers, prisma)
+            : { matched: [], unmatched: [] };
+
+          return {
+            id: geviUrl,
+            title: metadata.title || metadata.name || 'GEVI result',
+            name: metadata.title || metadata.name || 'GEVI result',
+            source: 'GEVI',
+            sourceUrl: geviUrl,
+            url: geviUrl,
+            image: metadata.image || null,
+            performers: metadata.performers || [],
+            details: metadata.details || null,
+            scraped: {
+              ...metadata,
+              source: 'GEVI'
+            },
+            matched: {
+              performers: matchedPerformers.matched || [],
+              tags: [],
+              studio: null,
+              groups: []
+            },
+            unmatched: {
+              performers: matchedPerformers.unmatched || [],
+              tags: []
+            }
+          };
+        } catch (error) {
+          console.warn(`⚠️ [Scrape All] Failed direct GEVI scrape for ${geviUrl}:`, error.message);
+          return null;
+        }
+      }))).filter(Boolean);
+
+      if (directGeviResults.length > 0) {
+        sources.push({
+          id: 'gevi-direct-url-scrape',
+          name: 'GEVI Direct URL Scrape',
+          endpoint: 'gevi-direct-url-scrape',
+          configured: true,
+          resultCount: directGeviResults.length,
+          hasResults: directGeviResults.length > 0,
+          usedFallback: true,
+          results: directGeviResults
+        });
+      }
+    } catch (error) {
+      console.warn('⚠️ [Scrape All] Direct GEVI URL scrape failed:', error.message);
+    }
+  }
+
+  sendSuccess(res, {
+    message: `Compared ${sources.length} source(s).`,
+    sceneId: scene.id,
+    sources,
+    totalResults: sources.reduce((total, source) => total + source.resultCount, 0)
+  });
+}));
+
 // POST /api/stash/scenes/:id/scrape-gevi - Scrape scene metadata from GEVI
 router.post('/scenes/:id/scrape-gevi', asyncHandler(async (req, res) => {
   const { id } = req.params;
@@ -5297,6 +6027,31 @@ async function getStashUrl() {
   return stashUrl || 'http://localhost:9999';
 }
 
+async function enrichGeviMovieWithScenes(movie) {
+  if (!movie?.url) {
+    return movie;
+  }
+
+  try {
+    const movieDetails = await geviScraper.movieFromUrl(movie.url);
+    if (movieDetails?.scenes?.length > 0) {
+      return {
+        ...movie,
+        scenes: movieDetails.scenes,
+        synopsis: movieDetails.synopsis || movie.synopsis || null,
+        front_image: movieDetails.front_image || movie.front_image || null,
+        back_image: movieDetails.back_image || movie.back_image || null,
+        studio: movieDetails.studio || movie.studio || null,
+        externalUrls: movieDetails.externalUrls || movie.externalUrls || []
+      };
+    }
+  } catch (error) {
+    console.warn(`⚠️ [GEVI] Failed to enrich movie result ${movie.url}:`, error.message);
+  }
+
+  return movie;
+}
+
 // POST /api/stash/scenes/:id/search-gevi - Search GEVI using scene performers
 router.post('/scenes/:id/search-gevi', asyncHandler(async (req, res) => {
   const { id } = req.params;
@@ -5897,6 +6652,8 @@ router.post('/scenes/:id/search-gevi-movies', asyncHandler(async (req, res) => {
   });
   console.log(`✅ Search completed across all performer matches`);
 
+  const enrichedMovies = await Promise.all(movies.map(enrichGeviMovieWithScenes));
+
   sendSuccess(res, {
     firstPerformer: {
       name: firstPerformerResults[0].name,
@@ -5904,7 +6661,7 @@ router.post('/scenes/:id/search-gevi-movies', asyncHandler(async (req, res) => {
     },
     secondPerformer: allPerformers.length > 1 ? allPerformers[1].name : null,
     allPerformers: allPerformers.map(p => p.name),
-    movies: movies
+    movies: enrichedMovies
   });
 }));
 
@@ -6158,13 +6915,15 @@ router.post('/scenes/:id/search-gevi-movies-by-title', asyncHandler(async (req, 
 
   console.log(`✅ Search completed for studio: ${scene.studioObject.name}`);
 
+  const enrichedMovies = await Promise.all(movies.map(enrichGeviMovieWithScenes));
+
   sendSuccess(res, {
     studio: {
       name: scene.studioObject.name,
       url: studioGeviUrl
     },
     searchTitle: sceneTitle,
-    movies: movies,
+    movies: enrichedMovies,
     searchMethod: 'title'
   });
 }));
@@ -6869,8 +7628,282 @@ router.get('/scenes/:id/available-scrapers', asyncHandler(async (req, res) => {
   });
 }));
 
+const collectStashBoxAliasTerms = (value) => {
+  if (!value) return [];
+
+  if (Array.isArray(value)) {
+    return value.flatMap((entry) => collectStashBoxAliasTerms(entry));
+  }
+
+  if (typeof value === 'string') {
+    return value
+      .split(',')
+      .map((term) => term.trim())
+      .filter(Boolean);
+  }
+
+  if (typeof value === 'object') {
+    return [value.name, value.alias, value.aliases]
+      .flatMap((entry) => collectStashBoxAliasTerms(entry))
+      .filter(Boolean);
+  }
+
+  return [];
+};
+
+const collectScenePerformerSearchTerms = (sceneWithPerformers = null) => {
+  const performers = sceneWithPerformers?.performers || [];
+  const terms = [];
+
+  performers.forEach((entry) => {
+    const performer = entry?.performer || entry || {};
+    const primaryName = performer.name || entry?.name || '';
+    const aliases = collectStashBoxAliasTerms(performer.alias || performer.aliases || []);
+
+    [primaryName, ...aliases]
+      .map((term) => String(term || '').trim())
+      .filter(Boolean)
+      .forEach((term) => {
+        if (!terms.includes(term)) {
+          terms.push(term);
+        }
+      });
+  });
+
+  return terms;
+};
+
+const buildStashBoxSearchQuery = (primaryTerms = [], aliasTerms = []) => {
+  const uniqueTerms = [...new Set(
+    [...primaryTerms, ...aliasTerms]
+      .map((term) => String(term || '').trim())
+      .filter(Boolean)
+  )];
+
+  return uniqueTerms.join(' ');
+};
+
+const buildStashBoxSingleQuery = (performers = []) => {
+  const terms = performers
+    .flatMap((entry) => {
+      const performer = entry?.performer || entry || {};
+      const primaryName = performer.name || entry?.name || '';
+      const aliases = collectStashBoxAliasTerms(performer.alias || performer.aliases || []);
+      return [primaryName, ...aliases];
+    })
+    .map((term) => String(term || '').trim())
+    .filter(Boolean);
+
+  return [...new Set(terms)].join(' ');
+};
+
+const normalizeStashBoxName = (value) => {
+  return String(value || '')
+    .toLowerCase()
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9]+/g, '')
+    .trim();
+};
+
+const createStashBoxNameVariants = (value) => {
+  const variants = new Set();
+  const raw = String(value || '').trim();
+  if (!raw) return variants;
+
+  const parts = raw
+    .split(/[|/;,]+/)
+    .map((part) => part.trim())
+    .filter(Boolean);
+
+  parts.forEach((part) => {
+    variants.add(part.toLowerCase());
+    variants.add(normalizeStashBoxName(part));
+  });
+
+  return variants;
+};
+
+const collectStashBoxNameVariants = (value) => {
+  const variants = new Set();
+
+  if (!value) return variants;
+
+  if (Array.isArray(value)) {
+    value.forEach((entry) => {
+      if (typeof entry === 'string') {
+        createStashBoxNameVariants(entry).forEach((variant) => variants.add(variant));
+      } else if (entry) {
+        [entry.name, entry.alias, entry.aliases].forEach((candidate) => {
+          collectStashBoxNameVariants(candidate).forEach((variant) => variants.add(variant));
+        });
+      }
+    });
+    return variants;
+  }
+
+  if (typeof value === 'string') {
+    createStashBoxNameVariants(value).forEach((variant) => variants.add(variant));
+    return variants;
+  }
+
+  if (typeof value === 'object') {
+    [value.name, value.alias, value.aliases].forEach((candidate) => {
+      collectStashBoxNameVariants(candidate).forEach((variant) => variants.add(variant));
+    });
+  }
+
+  return variants;
+};
+
+const collectPerformerNameCandidates = (value) => {
+  const collected = [];
+  const seen = new Set();
+
+  const visit = (candidate) => {
+    if (!candidate) return;
+
+    if (typeof candidate === 'string') {
+      const trimmed = candidate.trim();
+      if (trimmed && !seen.has(trimmed)) {
+        seen.add(trimmed);
+        collected.push(trimmed);
+      }
+      return;
+    }
+
+    if (Array.isArray(candidate)) {
+      candidate.forEach((entry) => visit(entry));
+      return;
+    }
+
+    if (typeof candidate === 'object') {
+      const performerData = candidate?.performer || candidate || {};
+      [performerData.name, performerData.alias, performerData.aliases, candidate?.name, candidate?.alias, candidate?.aliases]
+        .forEach((entry) => visit(entry));
+    }
+  };
+
+  visit(value);
+  return collected;
+};
+
+const extractGeviUrlFromValue = (value) => {
+  const candidates = [];
+
+  const addCandidate = (candidate) => {
+    if (!candidate) return;
+
+    if (typeof candidate === 'string') {
+      candidates.push(candidate);
+      return;
+    }
+
+    if (Array.isArray(candidate)) {
+      candidate.forEach((entry) => addCandidate(entry));
+      return;
+    }
+
+    if (typeof candidate === 'object') {
+      [candidate.geviUrl, candidate.gevi_url, candidate.url, candidate.sourceUrl, candidate.source_url, candidate.externalUrl]
+        .forEach((entry) => addCandidate(entry));
+    }
+  };
+
+  addCandidate(value);
+
+  for (const candidate of candidates) {
+    if (typeof candidate !== 'string') continue;
+    const trimmed = candidate.trim();
+    if (!trimmed) continue;
+    if (trimmed.includes('gayeroticvideoindex.com')) return trimmed;
+    if (trimmed.includes('gevi')) return trimmed;
+  }
+
+  return null;
+};
+
+const collectPerformerNameVariants = (value) => {
+  const variants = new Set();
+
+  if (!value) return variants;
+
+  if (typeof value === 'string') {
+    collectStashBoxNameVariants(value).forEach((variant) => variants.add(variant));
+    return variants;
+  }
+
+  if (Array.isArray(value)) {
+    value.forEach((entry) => {
+      collectPerformerNameVariants(entry).forEach((variant) => variants.add(variant));
+    });
+    return variants;
+  }
+
+  if (typeof value === 'object') {
+    const performerData = value?.performer || value || {};
+    [performerData.name, performerData.alias, performerData.aliases, value?.name, value?.alias, value?.aliases]
+      .forEach((candidate) => {
+        collectStashBoxNameVariants(candidate).forEach((variant) => variants.add(variant));
+      });
+  }
+
+  return variants;
+};
+
+const matchesAllScenePerformers = (scene, requiredPerformers = []) => {
+  if (!Array.isArray(scene?.performers) || scene.performers.length === 0) {
+    return requiredPerformers.length === 0;
+  }
+
+  const normalizedScenePerformers = (scene.performers || []).map((entry) => collectPerformerNameVariants(entry));
+
+  const normalizedRequired = requiredPerformers
+    .map((performer) => collectPerformerNameVariants(performer))
+    .filter((variants) => variants.size > 0);
+
+  if (normalizedRequired.length === 0) {
+    return true;
+  }
+
+  return normalizedRequired.every((requiredVariants) => {
+    return normalizedScenePerformers.some((sceneVariants) => {
+      return [...requiredVariants].some((requiredVariant) => {
+        return [...sceneVariants].some((sceneVariant) => {
+          return sceneVariant === requiredVariant || sceneVariant === normalizeStashBoxName(requiredVariant);
+        });
+      });
+    });
+  });
+};
+
+const findMatchingStashBoxSceneResults = async (stashSyncService, queries, source, performerNames = []) => {
+  for (const query of queries) {
+    if (!query) continue;
+
+    try {
+      const results = await stashSyncService.scrapeSingleScene({ query }, source);
+      const normalizedResults = Array.isArray(results) ? results : [];
+      const filteredResults = normalizedResults.filter((scene) => matchesAllScenePerformers(scene, performerNames));
+
+      if (filteredResults.length > 0) {
+        return filteredResults;
+      }
+    } catch (error) {
+      console.warn(`⚠️ Failed stash-box query "${query}":`, error.message);
+    }
+  }
+
+  return [];
+};
+
 // POST /api/stash/scenes/:id/scrape-stashbox - Scrape scene using stash-box fragment scraping
 router.post('/scenes/:id/scrape-stashbox', asyncHandler(async (req, res) => {
+  console.log('🚨 [Stash-Box Route] scrape-stashbox endpoint hit', {
+    sceneId: req.params.id,
+    body: req.body
+  });
+
   const { id } = req.params;
   const { endpoint, searchType, query } = req.body;
   
@@ -6917,20 +7950,24 @@ router.post('/scenes/:id/scrape-stashbox', asyncHandler(async (req, res) => {
       stash_box_endpoint: endpoint
     };
     
+    const sceneHasPerformers = Array.isArray(scene.performers) && scene.performers.length > 0;
+    const performerEntries = (scene.performers || []).map((entry) => entry?.performer || entry || {});
+
     let input;
+    let searchQueries = [];
     
     // Determine input based on search type
     if (searchType === 'title') {
-      // Search by title
-      const searchQuery = query || scene.title;
-      input = { query: searchQuery };
-      console.log(`📤 Searching by title: "${searchQuery}"`);
+      const performerQuery = buildStashBoxSingleQuery(performerEntries);
+      const titleQuery = query || scene.title;
+      searchQueries = [buildStashBoxSearchQuery([titleQuery], [performerQuery])];
+      input = { query: searchQueries[0] };
+      console.log(`📤 Searching by title with alias-aware query`);
     } else if (searchType === 'performers') {
-      // Search by performer names
-      const performerNames = scene.performers.map(sp => sp.performer.name);
-      const searchQuery = query || performerNames.join(' ');
-      input = { query: searchQuery };
-      console.log(`📤 Searching by performers: "${searchQuery}"`);
+      const performerQuery = buildStashBoxSingleQuery(performerEntries);
+      searchQueries = [...new Set([query, performerQuery].filter(Boolean))];
+      input = { query: searchQueries[0] };
+      console.log(`📤 Searching by performers with alias-aware query`);
     } else {
       // Default: fragment scraping using scene_id
       input = { scene_id: scene.id.toString() };
@@ -6940,10 +7977,216 @@ router.post('/scenes/:id/scrape-stashbox', asyncHandler(async (req, res) => {
         studio: scene.studioObject?.name
       });
     }
+
+    const configuredEndpoints = [];
+    let endpointCandidates = [];
+    if (!sceneHasPerformers) {
+      try {
+        const stashBoxConfig = await stashSyncService.getConfiguration();
+        configuredEndpoints.push(...(stashBoxConfig?.stashBoxes || []));
+      } catch (error) {
+        console.warn('⚠️ Failed to load configured stash-box endpoints for fallback workflow:', error.message);
+      }
+
+      endpointCandidates = buildStashBoxEndpointCandidates(endpoint, configuredEndpoints);
+      if (endpointCandidates.length === 0) {
+        endpointCandidates.push({ endpoint, name: 'selected' });
+      }
+      console.log(`📦 [Stash-Box Debug] No performers on scene; using ${endpointCandidates.length} stash-box endpoint(s) for fragment + fallback workflow`, {
+        sceneId: scene.id,
+        sceneTitle: scene.title,
+        selectedEndpoint: endpoint,
+        configuredEndpoints: configuredEndpoints.map((entry) => entry?.name || entry?.endpoint || entry),
+        endpointCandidates: endpointCandidates.map((entry) => ({ endpoint: entry.endpoint, name: entry.name }))
+      });
+    } else {
+      endpointCandidates = [{ endpoint, name: 'selected' }];
+      console.log(`📦 [Stash-Box Debug] Scene has performers; using only selected endpoint`, {
+        sceneId: scene.id,
+        sceneTitle: scene.title,
+        performerCount: performerEntries.length,
+        endpointCandidates: endpointCandidates.map((entry) => ({ endpoint: entry.endpoint, name: entry.name }))
+      });
+    }
+
+    const aggregatedResults = [];
+    const seenResultKeys = new Set();
+    const emptyEndpointCandidates = [];
+
+    const addAggregatedResult = (result, sourceName, sourceEndpoint) => {
+      if (!result || typeof result !== 'object') return;
+
+      const resultKey = [
+        result?.id,
+        result?.title,
+        result?.url,
+        result?.sourceUrl,
+        sourceEndpoint,
+        typeof result?.studio === 'object' ? result?.studio?.name : result?.studio,
+        result?.image
+      ].filter(Boolean).join('::');
+
+      if (!resultKey || seenResultKeys.has(resultKey)) return;
+      seenResultKeys.add(resultKey);
+
+      aggregatedResults.push({
+        ...result,
+        sourceName,
+        sourceEndpoint
+      });
+    };
+
+    const enrichResultWithGevi = async (result, sourceName, sourceEndpoint) => {
+      const candidateResult = {
+        ...result,
+        sourceName,
+        sourceEndpoint
+      };
+
+      if (!shouldAttemptGeviFollowUp(candidateResult)) {
+        return candidateResult;
+      }
+
+      const geviSeedPerformers = normalizeScrapedPerformers(candidateResult.performers || [])
+        .map((entry) => ({ name: entry.name }))
+        .filter((entry) => entry.name);
+      const geviSeedUrls = extractGeviUrlsFromScraped(candidateResult);
+      let geviSearchData = null;
+
+      if (geviSeedPerformers.length >= 1) {
+        try {
+          console.log(`🔎 [Stash-Box Scrape] Checking GEVI for ${geviSeedPerformers.length} performer seed(s) from ${sourceName}`);
+          const geviMovieSearch = await searchGeviMoviesForScene({ performers: geviSeedPerformers });
+          if (geviMovieSearch?.movies?.length > 0) {
+            geviSearchData = {
+              type: 'movies',
+              movies: geviMovieSearch.movies
+            };
+          }
+        } catch (error) {
+          console.warn(`⚠️ [Stash-Box Scrape] GEVI movie search failed for ${sourceName}:`, error.message);
+        }
+      }
+
+      if (!geviSearchData && geviSeedUrls.length > 0) {
+        try {
+          const geviUrl = geviSeedUrls.find((candidate) => candidate.includes('gayeroticvideoindex.com')) || geviSeedUrls[0];
+          if (geviUrl) {
+            console.log(`🔎 [Stash-Box Scrape] Scraping GEVI directly from ${sourceName}: ${geviUrl}`);
+            const scrapeResult = await geviScraper.scrapeScene(geviUrl);
+            const metadata = scrapeResult?.metadata || scrapeResult?.scraped || null;
+            if (metadata) {
+              geviSearchData = {
+                type: 'scene',
+                scene: metadata
+              };
+            }
+          }
+        } catch (error) {
+          console.warn(`⚠️ [Stash-Box Scrape] Direct GEVI scrape failed for ${sourceName}:`, error.message);
+        }
+      }
+
+      return {
+        ...candidateResult,
+        geviSearchData
+      };
+    };
+
+    const runFallbackSearch = async (sourceCandidate) => {
+      const source = {
+        stash_box_endpoint: sourceCandidate.endpoint
+      };
+      const sourceName = sourceCandidate.name || sourceCandidate.endpoint;
+      const performerSearchTerms = collectStashBoxSearchTermsFromResults(aggregatedResults);
+      const scenePerformerTerms = collectScenePerformerSearchTerms(scene);
+      const fallbackTerms = performerSearchTerms.length > 0
+        ? performerSearchTerms
+        : scenePerformerTerms.length > 0
+          ? scenePerformerTerms
+          : [query || scene.title].filter(Boolean);
+
+      if (!fallbackTerms.length) {
+        console.log(`📦 [Stash-Box Fallback] No fallback terms available for ${sourceName}`);
+        return;
+      }
+
+      const fallbackQuery = buildStashBoxSearchQuery(fallbackTerms, []);
+      if (!fallbackQuery) {
+        console.log(`📦 [Stash-Box Fallback] No fallback query built for ${sourceName}`);
+        return;
+      }
+
+      console.log(`📦 [Stash-Box Fallback] Executing performer/title search for ${sourceName}: ${fallbackQuery}`);
+      try {
+        const fallbackResults = await stashSyncService.scrapeSingleScene({ query: fallbackQuery }, source);
+        const fallbackScenes = Array.isArray(fallbackResults) ? fallbackResults : [];
+
+        for (const fallbackScene of fallbackScenes) {
+          const enrichedResult = await enrichResultWithGevi(fallbackScene, sourceName, sourceCandidate.endpoint);
+          addAggregatedResult(enrichedResult, sourceName, sourceCandidate.endpoint);
+        }
+      } catch (error) {
+        console.warn(`⚠️ [Stash-Box Fallback] Failed for ${sourceName}:`, error.message);
+      }
+    };
+
+    for (const sourceCandidate of endpointCandidates) {
+      const source = {
+        stash_box_endpoint: sourceCandidate.endpoint
+      };
+      const sourceName = sourceCandidate.name || sourceCandidate.endpoint;
+
+      let scrapedScenes = [];
+      if (searchQueries.length > 0) {
+        const fallbackResults = await findMatchingStashBoxSceneResults(stashSyncService, searchQueries, source, performerEntries);
+        scrapedScenes = Array.isArray(fallbackResults) ? fallbackResults : [];
+      } else {
+        const fallbackResults = await stashSyncService.scrapeSingleScene(input, source);
+        scrapedScenes = Array.isArray(fallbackResults) ? fallbackResults : [];
+      }
+
+      if (scrapedScenes.length > 0) {
+        for (const sceneResult of scrapedScenes) {
+          const enrichedResult = await enrichResultWithGevi(sceneResult, sourceName, sourceCandidate.endpoint);
+          addAggregatedResult(enrichedResult, sourceName, sourceCandidate.endpoint);
+        }
+        continue;
+      }
+
+      console.log(`📦 [Stash-Box Debug] Fragment scrape returned no results for ${sourceName}; queueing performer/title fallback search`, {
+        sceneId: scene.id,
+        sceneTitle: scene.title,
+        sourceName,
+        sourceEndpoint: sourceCandidate.endpoint,
+        endpointQueueLength: emptyEndpointCandidates.length + 1
+      });
+      emptyEndpointCandidates.push(sourceCandidate);
+    }
+
+    console.log(`📦 [Stash-Box Debug] Finished endpoint loop`, {
+      sceneId: scene.id,
+      sceneTitle: scene.title,
+      emptyEndpointCandidates: emptyEndpointCandidates.map((entry) => ({ endpoint: entry.endpoint, name: entry.name })),
+      aggregatedResultCount: aggregatedResults.length,
+      sceneHasPerformers
+    });
+
+    if (emptyEndpointCandidates.length > 0) {
+      console.log(`📦 [Stash-Box Fallback] Preparing performer/title search for ${emptyEndpointCandidates.length} endpoint(s)`, {
+        sceneId: scene.id,
+        sceneTitle: scene.title,
+        sceneHasPerformers,
+        aggregatedResultCount: aggregatedResults.length,
+        emptyEndpoints: emptyEndpointCandidates.map((entry) => entry.name || entry.endpoint)
+      });
+
+      for (const sourceCandidate of emptyEndpointCandidates) {
+        await runFallbackSearch(sourceCandidate);
+      }
+    }
     
-    const scrapedScenes = await stashSyncService.scrapeSingleScene(input, source);
-    
-    if (!scrapedScenes || scrapedScenes.length === 0) {
+    if (!aggregatedResults.length) {
       console.log('❌ No results found from stash-box');
       return sendSuccess(res, {
         results: [],
@@ -6951,11 +8194,11 @@ router.post('/scenes/:id/scrape-stashbox', asyncHandler(async (req, res) => {
       });
     }
     
-    console.log(`✅ Found ${scrapedScenes.length} result(s) from stash-box`);
+    console.log(`✅ Found ${aggregatedResults.length} result(s) from stash-box`);
     
     // Return all results for user selection
     sendSuccess(res, {
-      results: scrapedScenes,
+      results: aggregatedResults,
       searchType: searchType || 'scene_id',
       source: 'stash-box'
     });
@@ -6969,13 +8212,16 @@ router.post('/scenes/:id/scrape-stashbox', asyncHandler(async (req, res) => {
 // POST /api/stash/scenes/:id/scrape-stashbox-result - Process a selected stash-box result
 router.post('/scenes/:id/scrape-stashbox-result', asyncHandler(async (req, res) => {
   const { id } = req.params;
-  const { scraped } = req.body;
+  const { scraped, skipGeviFollowUp = false } = req.body;
   
   if (!scraped) {
     return sendBadRequest(res, 'Scraped scene data is required');
   }
   
   console.log(`🔍 [Stash-Box Result] Processing selected result for scene ${id}:`, scraped.title);
+
+  const normalizedPerformers = normalizeScrapedPerformers(scraped.performers || []);
+  const normalizedTags = normalizeScrapedTags(scraped.tags || []);
   
   // Match performers and tags
   const allPerformers = await prisma.stashPerformer.findMany();
@@ -6988,82 +8234,101 @@ router.post('/scenes/:id/scrape-stashbox-result', asyncHandler(async (req, res) 
   const matchedPerformers = [];
   const unmatchedPerformers = [];
   
-  if (scraped.performers) {
-    for (const scrapedPerformer of scraped.performers) {
-      const scrapedPerformerNameLower = scrapedPerformer.name.toLowerCase();
-      
-      // Check name match or alias match (case-insensitive)
-      const match = allPerformers.find(p => {
-        // Check if name matches (case-insensitive)
-        if (p.name.toLowerCase() === scrapedPerformerNameLower) {
-          return true;
-        }
-        
-        // Check if any alias matches (case-insensitive)
-        if (p.alias) {
-          const aliases = p.alias.split(',').map(a => a.trim().toLowerCase());
-          return aliases.includes(scrapedPerformerNameLower);
-        }
-        
-        return false;
-      });
-      
-      if (match) {
-        // Find alternatives (other performers with the same name, case-insensitive)
-        const alternatives = allPerformers.filter(p => 
-          p.id !== match.id && 
-          p.name.toLowerCase() === scrapedPerformerNameLower
-        ).map(p => ({
-          id: p.id,
-          name: p.name,
-          disambiguation: p.disambiguation || null,
-          matchedVia: 'name',
-          matchedAlias: null
-        }));
-        
-        // Determine how this performer was matched
-        let matchedVia = 'name';
-        let matchedAlias = null;
-        
-        if (match.name.toLowerCase() !== scrapedPerformerNameLower) {
-          matchedVia = 'alias';
-          if (match.alias) {
-            const aliases = match.alias.split(',').map(a => a.trim());
-            matchedAlias = aliases.find(a => a.toLowerCase() === scrapedPerformerNameLower) || null;
-          }
-        }
-        
-        matchedPerformers.push({
-          id: match.id,
-          name: match.name,
-          disambiguation: match.disambiguation || null,
-          originalName: scrapedPerformer.name,
-          matchedVia,
-          matchedAlias,
-          alternatives
-        });
-      } else {
-        unmatchedPerformers.push(scrapedPerformer);
+  for (const scrapedPerformer of normalizedPerformers) {
+    const scrapedPerformerNameLower = scrapedPerformer.name.toLowerCase();
+    
+    // Check name match or alias match (case-insensitive)
+    const match = allPerformers.find(p => {
+      // Check if name matches (case-insensitive)
+      if (p.name.toLowerCase() === scrapedPerformerNameLower) {
+        return true;
       }
+      
+      // Check if any alias matches (case-insensitive)
+      if (p.alias) {
+        const aliases = p.alias.split(',').map(a => a.trim().toLowerCase());
+        return aliases.includes(scrapedPerformerNameLower);
+      }
+      
+      return false;
+    });
+    
+    if (match) {
+      // Find alternatives (other performers with the same name, case-insensitive)
+      const alternatives = allPerformers.filter(p => 
+        p.id !== match.id && 
+        p.name.toLowerCase() === scrapedPerformerNameLower
+      ).map(p => ({
+        id: p.id,
+        name: p.name,
+        disambiguation: p.disambiguation || null,
+        matchedVia: 'name',
+        matchedAlias: null
+      }));
+      
+      // Determine how this performer was matched
+      let matchedVia = 'name';
+      let matchedAlias = null;
+      
+      if (match.name.toLowerCase() !== scrapedPerformerNameLower) {
+        matchedVia = 'alias';
+        if (match.alias) {
+          const aliases = match.alias.split(',').map(a => a.trim());
+          matchedAlias = aliases.find(a => a.toLowerCase() === scrapedPerformerNameLower) || null;
+        }
+      }
+      
+      matchedPerformers.push({
+        id: match.id,
+        name: match.name,
+        disambiguation: match.disambiguation || null,
+        originalName: scrapedPerformer.name,
+        matchedVia,
+        matchedAlias,
+        alternatives
+      });
+    } else {
+      unmatchedPerformers.push(scrapedPerformer);
     }
   }
   
   const matchedTags = [];
   const unmatchedTags = [];
+
+  const normalizeTagValue = (value) => String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[:\-_]/g, ' ')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
   
-  if (scraped.tags) {
-    for (const scrapedTag of scraped.tags) {
-      // Check exact name match or alias match (case-insensitive)
-      const scrapedTagLower = scrapedTag.name.toLowerCase();
-      const match = allTags.find(t => 
-        t.name.toLowerCase() === scrapedTagLower || 
-        t.aliases.some(a => a.alias.toLowerCase() === scrapedTagLower)
-      );
-      if (match) {
-        matchedTags.push(match);
-      } else {
-        unmatchedTags.push(scrapedTag);
+  for (const scrapedTagName of normalizedTags) {
+    const scrapedTagNormalized = normalizeTagValue(scrapedTagName);
+    const match = allTags.find((tag) => {
+      const tagNameNormalized = normalizeTagValue(tag.name);
+      const tagAliases = (tag.aliases || []).map((aliasEntry) => aliasEntry?.alias || aliasEntry).filter(Boolean);
+      const aliasMatches = tagAliases.map((alias) => normalizeTagValue(alias));
+
+      if (tagNameNormalized === scrapedTagNormalized) {
+        console.log(`🏷️ [TAG MATCH] Scraped tag "${scrapedTagName}" matched existing tag by title: ${tag.name}`);
+        return true;
       }
+
+      const aliasHit = aliasMatches.find((aliasNormalized) => aliasNormalized === scrapedTagNormalized);
+      if (aliasHit) {
+        console.log(`🏷️ [TAG MATCH] Scraped tag "${scrapedTagName}" matched existing tag by alias: ${tag.name} -> ${tagAliases.find((alias) => normalizeTagValue(alias) === scrapedTagNormalized)}`);
+        return true;
+      }
+
+      return false;
+    });
+
+    if (match) {
+      matchedTags.push(match);
+    } else {
+      console.log(`🏷️ [TAG MATCH] Scraped tag "${scrapedTagName}" did not match any existing tag. Available tags:`, allTags.map((tag) => ({ name: tag.name, aliases: (tag.aliases || []).map((aliasEntry) => aliasEntry?.alias || aliasEntry) })));
+      unmatchedTags.push(scrapedTagName);
     }
   }
   
@@ -7079,12 +8344,61 @@ router.post('/scenes/:id/scrape-stashbox-result', asyncHandler(async (req, res) 
       return s.aliases.some(a => a.alias.toLowerCase() === studioName);
     }) || null;
   }
+
+  const geviSeedPerformers = normalizeScrapedPerformers(scraped.performers || [])
+    .map((entry) => ({ name: entry.name }))
+    .filter((entry) => entry.name);
+  const geviSeedUrls = extractGeviUrlsFromScraped(scraped);
+
+  let geviSearchData = null;
+
+  const shouldFollowUpWithGevi = !skipGeviFollowUp && shouldAttemptGeviFollowUp(scraped);
+  if (shouldFollowUpWithGevi) {
+    if (geviSeedPerformers.length >= 1) {
+      try {
+        console.log(`🔎 [Stash-Box Result] Searching GEVI for ${geviSeedPerformers.length} performer(s) from stash-box result`);
+        const geviMovieSearch = await searchGeviMoviesForScene({ performers: geviSeedPerformers });
+        if (geviMovieSearch?.movies?.length > 0) {
+          geviSearchData = {
+            type: 'movies',
+            movies: geviMovieSearch.movies
+          };
+        }
+      } catch (error) {
+        console.warn('⚠️ [Stash-Box Result] GEVI movie search failed:', error.message);
+      }
+    }
+
+    if (!geviSearchData && geviSeedUrls.length > 0) {
+      try {
+        const geviUrl = geviSeedUrls.find((candidate) => candidate.includes('gayeroticvideoindex.com')) || geviSeedUrls[0];
+        if (geviUrl) {
+          console.log(`🔎 [Stash-Box Result] Scraping GEVI directly from URL: ${geviUrl}`);
+          const scrapeResult = await geviScraper.scrapeScene(geviUrl);
+          const metadata = scrapeResult?.metadata || scrapeResult?.scraped || null;
+          if (metadata) {
+            geviSearchData = {
+              type: 'scene',
+              scene: metadata
+            };
+          }
+        }
+      } catch (error) {
+        console.warn('⚠️ [Stash-Box Result] Direct GEVI scrape failed:', error.message);
+      }
+    }
+  } else {
+    console.log('⏭️ [Stash-Box Result] Skipping GEVI follow-up because there are no usable performer or URL seeds');
+  }
   
   console.log(`   - Matched: ${matchedPerformers.length} performers, ${matchedTags.length} tags`);
   console.log(`   - Unmatched: ${unmatchedPerformers.length} performers, ${unmatchedTags.length} tags`);
   
   sendSuccess(res, {
-    scraped,
+    scraped: {
+      ...scraped,
+      geviSearchData
+    },
     matched: {
       performers: matchedPerformers,
       tags: matchedTags,
@@ -10924,8 +12238,10 @@ router.post('/performers/:id/scrape-stashbox', asyncHandler(async (req, res) => 
     let input;
     
     if (searchType === 'query') {
-      // Search by query string (name)
-      input = { query: query || performer.name };
+      // Search by query string (name plus any aliases)
+      const performerAliases = collectStashBoxAliasTerms(performer.alias);
+      const searchQuery = buildStashBoxSearchQuery([query || performer.name], performerAliases);
+      input = { query: searchQuery };
       console.log(`   - Using query search: "${input.query}"`);
     } else {
       // Default: fragment scrape using performer ID
