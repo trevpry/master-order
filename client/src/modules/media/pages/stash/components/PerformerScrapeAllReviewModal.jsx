@@ -1,10 +1,13 @@
 import React, { useState, useRef } from 'react';
 
+// Fields where values from multiple sources can be combined rather than one-or-nothing.
+const MERGE_FIELDS = new Set(['aliases', 'tattoos', 'details', 'url']);
+
 const FIELDS = [
   { key: 'name',          label: 'Name' },
   { key: 'disambiguation',label: 'Disambiguation' },
   { key: 'aliases',       label: 'Aliases',      format: (v) => (Array.isArray(v) ? v.join(', ') : v) },
-  { key: 'gender',        label: 'Gender' },
+  { key: 'gender',        label: 'Gender',       hidden: true },
   { key: 'birthdate',     label: 'Birthdate' },
   { key: 'death_date',    label: 'Death date' },
   { key: 'country',       label: 'Country' },
@@ -14,7 +17,7 @@ const FIELDS = [
   { key: 'measurements',  label: 'Measurements' },
   { key: 'penis_length',  label: 'Penis length' },
   { key: 'circumcised',   label: 'Circumcised' },
-  { key: 'fake_tits',     label: 'Fake tits' },
+  { key: 'fake_tits',     label: 'Fake tits',    hidden: true },
   { key: 'career_length', label: 'Career length' },
   { key: 'tattoos',       label: 'Tattoos' },
   { key: 'piercings',     label: 'Piercings' },
@@ -73,8 +76,12 @@ export default function PerformerScrapeAllReviewModal({
   const [view, setView] = useState('list');
   // selectedResultPerSource: { sourceId: number | null }  null = deselected
   const [selectedResultPerSource, setSelectedResultPerSource] = useState({});
-  // fieldSelections: { fieldKey: 'existing' | sourceId }
+  // fieldSelections: { fieldKey: 'existing' | sourceId }  (single-pick fields)
   const [fieldSelections, setFieldSelections] = useState({});
+  // mergeSelections: { fieldKey: Set<sourceId> }  (multi-pick fields — merge values)
+  const [mergeSelections, setMergeSelections] = useState({});
+  // tagSelections: Set<sourceId> — which sources' matched tags to include
+  const [tagSourceSelections, setTagSourceSelections] = useState(new Set());
   // image selection: one main image URL + set of additional image URLs
   const [mainImage, setMainImage] = useState(null);
   const mainImageRef = useRef(null); // ref so handleApply always reads the latest value
@@ -127,6 +134,33 @@ export default function PerformerScrapeAllReviewModal({
       }
     }
     setFieldSelections(defaults);
+
+    // Default merge-fields: check every active source that has a value.
+    const defaultMerge = {};
+    for (const field of FIELDS) {
+      if (!MERGE_FIELDS.has(field.key)) continue;
+      const selected = new Set();
+      for (const src of activeSources) {
+        const scraped = selectedScrapedBySrc[src.id];
+        if (!scraped) continue;
+        const raw = scraped[field.key];
+        if (raw != null && raw !== '' && !(Array.isArray(raw) && raw.length === 0)) {
+          selected.add(src.id);
+        }
+      }
+      defaultMerge[field.key] = selected;
+    }
+    setMergeSelections(defaultMerge);
+
+    // Default tag sources: select all that have matched tags.
+    const defaultTagSrcs = new Set();
+    for (const src of activeSources) {
+      const scraped = selectedScrapedBySrc[src.id];
+      const matched = scraped?._matchedTags || scraped?.matched?.tags || [];
+      if (matched.length > 0) defaultTagSrcs.add(src.id);
+    }
+    setTagSourceSelections(defaultTagSrcs);
+
     setView('compare');
   };
 
@@ -182,19 +216,65 @@ export default function PerformerScrapeAllReviewModal({
     toggleAdditionalSync(url, !isAdditional);
   };
 
+  const getRawFieldValue = (field, scraped) => {
+    if (!scraped) return null;
+    if (field.key === 'image') return scraped.images?.[0] || scraped.image || null;
+    return scraped[field.key] ?? null;
+  };
+
   const handleApply = () => {
     const result = {};
     for (const field of FIELDS) {
-      const sel = getFieldSel(field.key);
-      if (sel === 'existing') {
-        result[field.key] = field.key === 'image' ? null : (performerData?.[field.key] ?? null);
+      if (MERGE_FIELDS.has(field.key)) {
+        const srcIds = mergeSelections[field.key];
+        if (!srcIds || srcIds.size === 0) {
+          // Nothing checked — keep existing
+          result[field.key] = performerData?.[field.key] ?? null;
+          continue;
+        }
+        const raws = [];
+        for (const src of activeSources) {
+          if (!srcIds.has(src.id)) continue;
+          const scraped = selectedScrapedBySrc[src.id];
+          const raw = getRawFieldValue(field, scraped);
+          if (raw != null && raw !== '') raws.push(raw);
+        }
+        if (field.key === 'aliases') {
+          // Flatten all alias arrays/strings, deduplicate
+          const all = raws.flatMap((v) => Array.isArray(v) ? v : String(v).split(',').map((s) => s.trim()).filter(Boolean));
+          result[field.key] = [...new Set(all)];
+        } else if (field.key === 'url') {
+          // Collect all URLs
+          result[field.key] = raws[0] || null;
+          result._mergedUrls = raws;
+        } else {
+          // Text fields: join with separator
+          const separator = field.key === 'details' ? '\n\n' : '\n';
+          result[field.key] = raws.join(separator) || null;
+        }
       } else {
-        const scraped = selectedScrapedBySrc[sel];
-        if (!scraped) { result[field.key] = null; continue; }
-        const raw = field.key === 'image' ? (scraped.images?.[0] || scraped.image) : scraped[field.key];
-        result[field.key] = raw ?? null;
+        const sel = getFieldSel(field.key);
+        if (sel === 'existing') {
+          result[field.key] = field.key === 'image' ? null : (performerData?.[field.key] ?? null);
+        } else {
+          const scraped = selectedScrapedBySrc[sel];
+          if (!scraped) { result[field.key] = null; continue; }
+          result[field.key] = getRawFieldValue(field, scraped) ?? null;
+        }
       }
     }
+    // Collect matched tag IDs from all checked tag sources (deduplicated).
+    const tagIdMap = new Map();
+    for (const src of activeSources) {
+      if (!tagSourceSelections.has(src.id)) continue;
+      const scraped = selectedScrapedBySrc[src.id];
+      const matched = scraped?._matchedTags || scraped?.matched?.tags || [];
+      for (const tag of matched) {
+        if (tag?.id) tagIdMap.set(tag.id, tag);
+      }
+    }
+    result._matchedTagIds = [...tagIdMap.keys()];
+
     // Always read from refs so the latest selection is used regardless of closure age
     onApply?.(result, mainImageRef.current, Array.from(additionalImagesRef.current));
   };
@@ -416,26 +496,83 @@ export default function PerformerScrapeAllReviewModal({
             {FIELDS.map((field) => {
               const existingRaw = performerData?.[field.key] ?? null;
               const existingDisplay = getDisplayText(existingRaw, field);
-              const sel = getFieldSel(field.key);
 
               const sourceColumns = activeSources
                 .map((src) => {
                   const scraped = selectedScrapedBySrc[src.id];
-                  const raw = field.key === 'image' ? (scraped?.images?.[0] || scraped?.image) : scraped?.[field.key];
+                  const raw = getRawFieldValue(field, scraped);
                   return { src, raw, display: getDisplayText(raw, field) };
-                })
-                .filter((col) => col.display !== '—' || sel === col.src.id);
+                });
 
-              // Skip field entirely if existing is empty and no source has a value
+              if (field.hidden) return null;
               if (existingDisplay === '—' && sourceColumns.every((c) => c.display === '—')) return null;
 
+              if (MERGE_FIELDS.has(field.key)) {
+                // Checkbox UI — any combination of sources can be selected and merged.
+                const checked = mergeSelections[field.key] || new Set();
+                const toggleSrc = (srcId) => setMergeSelections((prev) => {
+                  const next = new Set(prev[field.key] || []);
+                  next.has(srcId) ? next.delete(srcId) : next.add(srcId);
+                  return { ...prev, [field.key]: next };
+                });
+                const anyChecked = checked.size > 0;
+
+                return (
+                  <div key={field.key} style={{ borderBottom: '1px solid #f3f4f6', paddingBottom: '0.85rem' }}>
+                    <div style={{ fontSize: '11px', fontWeight: 700, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '.05em', marginBottom: '0.45rem', display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                      {field.label}
+                      <span style={{ fontSize: '10px', fontWeight: 400, color: '#9ca3af', textTransform: 'none', letterSpacing: 0 }}>select multiple to merge</span>
+                    </div>
+                    <div style={{ display: 'flex', gap: '0.6rem', flexWrap: 'wrap' }}>
+                      {/* Existing value (read-only preview) */}
+                      {existingDisplay !== '—' && (
+                        <div style={{ flex: 1, minWidth: '180px', padding: '0.65rem 0.75rem', borderRadius: '10px', border: '1px solid #e5e7eb', background: '#f9fafb', opacity: anyChecked ? 0.5 : 1 }}>
+                          <div style={{ fontSize: '10px', fontWeight: 700, color: '#9ca3af', marginBottom: '0.35rem', textTransform: 'uppercase', letterSpacing: '.04em' }}>Existing</div>
+                          <div style={{ fontSize: '13px', color: '#111827', whiteSpace: field.key === 'details' ? 'pre-wrap' : 'normal', wordBreak: 'break-word', maxHeight: '120px', overflowY: 'auto' }}>{existingDisplay}</div>
+                        </div>
+                      )}
+                      {/* Per-source checkboxes */}
+                      {sourceColumns.filter((c) => c.display !== '—').map(({ src, display }) => {
+                        const isChecked = checked.has(src.id);
+                        return (
+                          <div
+                            key={src.id}
+                            role="checkbox"
+                            aria-checked={isChecked}
+                            tabIndex={0}
+                            onClick={() => toggleSrc(src.id)}
+                            onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && toggleSrc(src.id)}
+                            style={{
+                              flex: 1, minWidth: '180px', padding: '0.65rem 0.75rem', borderRadius: '10px', cursor: 'pointer',
+                              border: isChecked ? '2px solid #6366f1' : '1px solid #d1d5db',
+                              background: isChecked ? '#eef2ff' : '#f9fafb',
+                              boxShadow: isChecked ? '0 2px 8px rgba(99,102,241,.15)' : 'none',
+                            }}
+                          >
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.35rem' }}>
+                              <div style={{ fontSize: '10px', fontWeight: 700, color: isChecked ? '#4338ca' : '#9ca3af', textTransform: 'uppercase', letterSpacing: '.04em' }}>{src.name}</div>
+                              <div style={{ width: '14px', height: '14px', borderRadius: '3px', border: isChecked ? '2px solid #6366f1' : '2px solid #d1d5db', background: isChecked ? '#6366f1' : '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                                {isChecked && <span style={{ color: '#fff', fontSize: '10px', lineHeight: 1 }}>✓</span>}
+                              </div>
+                            </div>
+                            <div style={{ fontSize: '13px', color: '#111827', whiteSpace: field.key === 'details' ? 'pre-wrap' : 'normal', wordBreak: 'break-word', maxHeight: '120px', overflowY: 'auto' }}>{display}</div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                );
+              }
+
+              // Standard radio-card UI for all other fields.
+              const sel = getFieldSel(field.key);
+              const filteredCols = sourceColumns.filter((col) => col.display !== '—' || sel === col.src.id);
               return (
                 <div key={field.key} style={{ borderBottom: '1px solid #f3f4f6', paddingBottom: '0.85rem' }}>
                   <div style={{ fontSize: '11px', fontWeight: 700, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '.05em', marginBottom: '0.45rem' }}>
                     {field.label}
                   </div>
                   <div style={{ display: 'flex', gap: '0.6rem', flexWrap: 'wrap' }}>
-                    {/* Existing */}
                     <ChoiceCard selected={sel === 'existing'} onClick={() => setFieldSelections((p) => ({ ...p, [field.key]: 'existing' }))} label="Existing">
                       {field.isImage && existingRaw ? (
                         <img src={existingRaw} alt="" style={{ width: '80px', height: '100px', objectFit: 'cover', borderRadius: '4px' }} />
@@ -445,9 +582,7 @@ export default function PerformerScrapeAllReviewModal({
                         </div>
                       )}
                     </ChoiceCard>
-
-                    {/* Per-source */}
-                    {sourceColumns.map(({ src, raw, display }) => (
+                    {filteredCols.map(({ src, raw, display }) => (
                       <ChoiceCard key={src.id} selected={sel === src.id} onClick={() => setFieldSelections((p) => ({ ...p, [field.key]: src.id }))} label={src.name}>
                         {field.isImage && raw ? (
                           <img src={raw} alt="" style={{ width: '80px', height: '100px', objectFit: 'cover', borderRadius: '4px' }} />
@@ -462,6 +597,48 @@ export default function PerformerScrapeAllReviewModal({
                 </div>
               );
             })}
+
+            {/* Tags — checkbox selection of which sources' matched tags to apply */}
+            {(() => {
+              const tagSources = activeSources
+                .map((src) => {
+                  const scraped = selectedScrapedBySrc[src.id];
+                  const matched = scraped?._matchedTags || scraped?.matched?.tags || [];
+                  const unmatched = scraped?._unmatchedTags || scraped?.unmatched?.tags || [];
+                  return { src, matched, unmatched };
+                })
+                .filter((s) => s.matched.length > 0 || s.unmatched.length > 0);
+              if (tagSources.length === 0) return null;
+              return (
+                <div style={{ borderBottom: '1px solid #f3f4f6', paddingBottom: '0.85rem' }}>
+                  <div style={{ fontSize: '11px', fontWeight: 700, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '.05em', marginBottom: '0.45rem', display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                    Tags
+                    <span style={{ fontSize: '10px', fontWeight: 400, color: '#9ca3af', textTransform: 'none', letterSpacing: 0 }}>select sources to include</span>
+                  </div>
+                  <div style={{ display: 'flex', gap: '0.6rem', flexWrap: 'wrap' }}>
+                    {tagSources.map(({ src, matched, unmatched }) => {
+                      const isChecked = tagSourceSelections.has(src.id);
+                      const toggleSel = () => setTagSourceSelections((prev) => { const next = new Set(prev); next.has(src.id) ? next.delete(src.id) : next.add(src.id); return next; });
+                      return (
+                        <div key={src.id} role="checkbox" aria-checked={isChecked} tabIndex={0} onClick={toggleSel} onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && toggleSel()}
+                          style={{ flex: 1, minWidth: '180px', padding: '0.65rem 0.75rem', borderRadius: '10px', cursor: 'pointer', border: isChecked ? '2px solid #6366f1' : '1px solid #d1d5db', background: isChecked ? '#eef2ff' : '#f9fafb', boxShadow: isChecked ? '0 2px 8px rgba(99,102,241,.15)' : 'none' }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.45rem' }}>
+                            <div style={{ fontSize: '10px', fontWeight: 700, color: isChecked ? '#4338ca' : '#9ca3af', textTransform: 'uppercase', letterSpacing: '.04em' }}>{src.name}</div>
+                            <div style={{ width: '14px', height: '14px', borderRadius: '3px', border: isChecked ? '2px solid #6366f1' : '2px solid #d1d5db', background: isChecked ? '#6366f1' : '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                              {isChecked && <span style={{ color: '#fff', fontSize: '10px', lineHeight: 1 }}>✓</span>}
+                            </div>
+                          </div>
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+                            {matched.map((tag) => <span key={tag.id} style={{ fontSize: '12px', padding: '0.15rem 0.4rem', borderRadius: '999px', background: '#dcfce7', color: '#166534', display: 'inline-block', width: 'fit-content' }}>✓ {tag.name}</span>)}
+                            {unmatched.map((tag, i) => <span key={i} style={{ fontSize: '12px', padding: '0.15rem 0.4rem', borderRadius: '999px', background: '#f3f4f6', color: '#6b7280', display: 'inline-block', width: 'fit-content' }}>{typeof tag === 'string' ? tag : tag?.name || String(tag)}</span>)}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })()}
           </div>
         )}
       </div>

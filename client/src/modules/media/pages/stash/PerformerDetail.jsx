@@ -810,12 +810,26 @@ export default function PerformerDetail() {
           ? fieldSelections.aliases.join(', ')
           : fieldSelections.aliases;
       }
+      // Collect all merged URLs (from multi-selected url field) as newUrls.
+      if (fieldSelections._mergedUrls && Array.isArray(fieldSelections._mergedUrls) && fieldSelections._mergedUrls.length > 0) {
+        updateData.newUrls = fieldSelections._mergedUrls;
+      }
+      // Apply matched tag IDs collected from checked tag sources.
+      if (Array.isArray(fieldSelections._matchedTagIds) && fieldSelections._matchedTagIds.length > 0) {
+        updateData.tagIds = fieldSelections._matchedTagIds;
+      }
       // Use the explicitly chosen main image; fall back to the field-selection image.
       if (mainImage) {
         updateData.image = mainImage;
       } else if (fieldSelections.image) {
         updateData.image = fieldSelections.image;
       }
+      console.warn('════ PERFORMER SCRAPE ALL IMAGE DEBUG ════');
+      console.warn('mainImage arg:', mainImage);
+      console.warn('fieldSelections.image:', fieldSelections.image);
+      console.warn('updateData.image (first 120 chars):', String(updateData.image || '').slice(0, 120));
+      console.warn('additionalImages:', additionalImages);
+      console.warn('══════════════════════════════════════════');
       const response = await fetch(`${config.apiBaseUrl}/api/stash/performers/${id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
@@ -824,20 +838,11 @@ export default function PerformerDetail() {
       const result = await response.json();
       if (!result.success) throw new Error(result.error || 'Update failed');
 
-      // Download each additional image into the performer's images in Stash
+      // Additional images: the server PUT always sets the main image, so don't
+      // send image-only PUTs here — they would overwrite the chosen main image.
+      // TODO: when the server supports appending images, re-enable this loop.
       if (additionalImages.length > 0) {
-        console.log(`📸 [Scrape All] Adding ${additionalImages.length} additional image(s) to performer`);
-        for (const imgUrl of additionalImages) {
-          try {
-            await fetch(`${config.apiBaseUrl}/api/stash/performers/${id}`, {
-              method: 'PUT',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ image: imgUrl, appendImage: true })
-            });
-          } catch (imgErr) {
-            console.warn(`⚠️ Failed to add additional image ${imgUrl}:`, imgErr.message);
-          }
-        }
+        console.log(`📸 [Scrape All] ${additionalImages.length} extra image(s) noted but not yet auto-applied (would overwrite main image)`);
       }
 
       toast.success('Performer updated from Scrape All');

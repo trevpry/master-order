@@ -7789,9 +7789,12 @@ const collectScenePerformerSearchTerms = (sceneWithPerformers = null) => {
 };
 
 const buildStashBoxSearchQuery = (primaryTerms = [], aliasTerms = []) => {
+  // Strip parenthetical disambiguations like "(us)" before querying — stash-boxes can't match them.
+  const stripDisambig = (term) => String(term || '').replace(/\s*\([^)]*\)\s*$/, '').trim();
+
   const uniqueTerms = [...new Set(
     [...primaryTerms, ...aliasTerms]
-      .map((term) => String(term || '').trim())
+      .map((term) => stripDisambig(term))
       .filter(Boolean)
   )];
 
@@ -7799,6 +7802,8 @@ const buildStashBoxSearchQuery = (primaryTerms = [], aliasTerms = []) => {
 };
 
 const buildStashBoxSingleQuery = (performers = []) => {
+  const stripDisambig = (term) => String(term || '').replace(/\s*\([^)]*\)\s*$/, '').trim();
+
   const terms = performers
     .flatMap((entry) => {
       const performer = entry?.performer || entry || {};
@@ -7806,7 +7811,7 @@ const buildStashBoxSingleQuery = (performers = []) => {
       const aliases = collectStashBoxAliasTerms(performer.alias || performer.aliases || []);
       return [primaryName, ...aliases];
     })
-    .map((term) => String(term || '').trim())
+    .map((term) => stripDisambig(term))
     .filter(Boolean);
 
   return [...new Set(terms)].join(' ');
@@ -12356,12 +12361,18 @@ router.post('/performers/:id/scrape-all', asyncHandler(async (req, res) => {
     let results = [];
     let usedFallback = false;
 
+    const is404 = (err) => /404/.test(err.message);
+
     try {
       // Try fragment scrape by performer ID first
       const fragment = await stashSyncService.scrapeSinglePerformer(source, { performer_id: id }, true);
       results = Array.isArray(fragment) ? fragment : (fragment ? [fragment] : []);
     } catch (err) {
-      console.warn(`⚠️ [Performer Scrape All] Fragment scrape failed for ${boxName || endpoint}:`, err.message);
+      if (is404(err)) {
+        console.debug(`📭 [Performer Scrape All] Performer not found on ${boxName || endpoint} (404), skipping`);
+      } else {
+        console.warn(`⚠️ [Performer Scrape All] Fragment scrape failed for ${boxName || endpoint}:`, err.message);
+      }
     }
 
     // Fall back to name + alias search
@@ -12375,7 +12386,11 @@ router.post('/performers/:id/scrape-all', asyncHandler(async (req, res) => {
           const found = await stashSyncService.scrapeSinglePerformer(source, { query: searchQuery }, false);
           if (Array.isArray(found) && found.length) { results = found; break; }
         } catch (err) {
-          console.warn(`⚠️ [Performer Scrape All] Name search failed for "${name}":`, err.message);
+          if (is404(err)) {
+            console.debug(`📭 [Performer Scrape All] Name search 404 on ${boxName || endpoint} for "${name}", skipping`);
+          } else {
+            console.warn(`⚠️ [Performer Scrape All] Name search failed for "${name}":`, err.message);
+          }
         }
       }
     }
@@ -12420,6 +12435,15 @@ router.post('/performers/:id/scrape-all', asyncHandler(async (req, res) => {
         if (performerData.image) {
           performerData.displayImage = `${performerData.image}`;
         }
+
+        let matchedTags = [];
+        let unmatchedTags = [];
+        if (performerData.tags && Array.isArray(performerData.tags) && performerData.tags.length > 0) {
+          const tagMatchResult = await geviScraper.matchTags(performerData.tags, prisma);
+          matchedTags = tagMatchResult.matched || [];
+          unmatchedTags = tagMatchResult.unmatched || [];
+        }
+
         sources.push({
           id: 'gevi',
           name: 'GEVI',
@@ -12428,7 +12452,7 @@ router.post('/performers/:id/scrape-all', asyncHandler(async (req, res) => {
           resultCount: 1,
           hasResults: true,
           usedFallback: !existingGeviUrl,
-          results: [{ ...performerData, _geviUrl: geviUrl }]
+          results: [{ ...performerData, _geviUrl: geviUrl, _matchedTags: matchedTags, _unmatchedTags: unmatchedTags }]
         });
       }
     }
