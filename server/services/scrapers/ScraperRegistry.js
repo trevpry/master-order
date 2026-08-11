@@ -29,7 +29,7 @@ class ScraperRegistry {
     // Note: Stash native scrapers are loaded async via loadStashNativeScrapers()
     // They are NOT loaded in the constructor to avoid race conditions
     
-    console.log(`📚 Scraper Registry initialized with ${this.scrapers.length} scraper(s)`);
+    console.debug(`📚 Scraper Registry initialized with ${this.scrapers.length} scraper(s)`);
   }
 
   /**
@@ -39,7 +39,7 @@ class ScraperRegistry {
     try {
       const aebnScraper = new AebnScraper();
       this.scrapers.push(aebnScraper);
-      console.log(`   ✅ Loaded code scraper: ${aebnScraper.siteName}`);
+      console.debug(`   ✅ Loaded code scraper: ${aebnScraper.siteName}`);
     } catch (error) {
       console.error(`   ❌ Failed to load AEBN scraper:`, error.message);
     }
@@ -61,7 +61,7 @@ class ScraperRegistry {
     }
 
     try {
-      console.log('🔄 Loading Stash native scrapers...');
+      console.debug('🔄 Loading Stash native scrapers...');
       
       // Load URL replacements config for Stash native scrapers
       const { loadUrlReplacementsConfig } = require('../../utils/urlReplacements');
@@ -70,7 +70,7 @@ class ScraperRegistry {
       
       const stashScrapers = await this.stashSyncService.listScrapers();
       
-      console.log(`   - Found ${stashScrapers.length} Stash scraper(s)`);
+      console.debug(`   - Found ${stashScrapers.length} Stash scraper(s)`);
       
       for (const stashScraper of stashScrapers) {
         // Only load scrapers that support scene scraping
@@ -90,13 +90,13 @@ class ScraperRegistry {
           // Apply URL replacements from config if available
           if (urlReplacementsConfig[stashScraper.id]) {
             nativeScraper.urlReplacements = urlReplacementsConfig[stashScraper.id];
-            console.log(`   🔄 Loaded ${nativeScraper.urlReplacements.length} URL replacement(s) for ${stashScraper.name}`);
+            console.debug(`   🔄 Loaded ${nativeScraper.urlReplacements.length} URL replacement(s) for ${stashScraper.name}`);
           }
           
           this.scrapers.push(nativeScraper);
           this.stashNativeScrapers.push(nativeScraper);
           
-          console.log(`   ✅ Loaded Stash native: ${stashScraper.name} (${nativeScraper.supportedUrls.length} URL patterns, supports: ${nativeScraper.supportedScrapes.join(', ')})`);
+          console.debug(`   ✅ Loaded Stash native: ${stashScraper.name} (${nativeScraper.supportedUrls.length} URL patterns, supports: ${nativeScraper.supportedScrapes.join(', ')})`);
         }
       }
       
@@ -146,7 +146,7 @@ class ScraperRegistry {
     // Find all YAML files recursively
     const yamlFiles = findYamlFiles(configsDir);
     
-    console.log(`📂 Found ${yamlFiles.length} YAML scraper config(s) in ${configsDir}`);
+    console.debug(`📂 Found ${yamlFiles.length} YAML scraper config(s) in ${configsDir}`);
     
     // Load each YAML scraper
     yamlFiles.forEach(yamlPath => {
@@ -154,7 +154,7 @@ class ScraperRegistry {
         const relativePath = path.relative(configsDir, yamlPath);
         const scraper = new YamlScraperService(yamlPath);
         this.scrapers.push(scraper);
-        console.log(`   ✅ Loaded: ${scraper.siteName} (${relativePath})`);
+        console.debug(`   ✅ Loaded: ${scraper.siteName} (${relativePath})`);
       } catch (error) {
         const relativePath = path.relative(configsDir, yamlPath);
         console.error(`   ❌ Failed to load ${relativePath}:`, error.message);

@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { useParams, Link, useNavigate, useSearchParams } from 'react-router-dom';
 import toast from 'react-hot-toast';
+import PerformerScrapeAllReviewModal from './components/PerformerScrapeAllReviewModal';
 import config from '../../../../config';
 
 // Helper function to convert cm to feet and inches
@@ -89,6 +90,11 @@ export default function PerformerDetail() {
 
   // GEVI scraping state
   const [isSearchingGevi, setIsSearchingGevi] = useState(false);
+
+  // Scrape All state
+  const [scrapeAllStatus, setScrapeAllStatus] = useState(null);
+  const [showScrapeAllModal, setShowScrapeAllModal] = useState(false);
+  const [scrapeAllSources, setScrapeAllSources] = useState([]);
 
   // Name conflict state
   const [showConflictModal, setShowConflictModal] = useState(false);
@@ -758,6 +764,92 @@ export default function PerformerDetail() {
     }
   };
 
+  const handleScrapeAll = async () => {
+    try {
+      setScrapeAllStatus('Contacting stash-box sources…');
+      const response = await fetch(`${config.apiBaseUrl}/api/stash/performers/${id}/scrape-all`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' }
+      });
+      const result = await response.json();
+      if (result.success) {
+        setScrapeAllSources(result.data?.sources || []);
+        setShowScrapeAllModal(true);
+      } else {
+        toast.error(result.error || 'Scrape All failed');
+      }
+    } catch (err) {
+      console.error('Scrape All error:', err);
+      toast.error('Failed to run Scrape All');
+    } finally {
+      setScrapeAllStatus(null);
+    }
+  };
+
+  const handleApplyScrapeAll = async (fieldSelections, mainImage, additionalImages = []) => {
+    setShowScrapeAllModal(false);
+    setIsApplyingScrape(true);
+    try {
+      const updateData = {};
+      const map = {
+        name: 'name', disambiguation: 'disambiguation', gender: 'gender',
+        birthdate: 'birthdate', death_date: 'death_date', country: 'country',
+        ethnicity: 'ethnicity', height: 'height', weight: 'weight',
+        measurements: 'measurements', fake_tits: 'fake_tits', penis_length: 'penis_length',
+        circumcised: 'circumcised', career_length: 'career_length',
+        tattoos: 'tattoos', piercings: 'piercings', details: 'details',
+        url: 'url', twitter: 'twitter', instagram: 'instagram',
+      };
+      for (const [fieldKey, updateKey] of Object.entries(map)) {
+        if (fieldSelections[fieldKey] != null && fieldSelections[fieldKey] !== '') {
+          updateData[updateKey] = fieldSelections[fieldKey];
+        }
+      }
+      if (fieldSelections.aliases != null) {
+        updateData.alias = Array.isArray(fieldSelections.aliases)
+          ? fieldSelections.aliases.join(', ')
+          : fieldSelections.aliases;
+      }
+      // Use the explicitly chosen main image; fall back to the field-selection image.
+      if (mainImage) {
+        updateData.image = mainImage;
+      } else if (fieldSelections.image) {
+        updateData.image = fieldSelections.image;
+      }
+      const response = await fetch(`${config.apiBaseUrl}/api/stash/performers/${id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(updateData)
+      });
+      const result = await response.json();
+      if (!result.success) throw new Error(result.error || 'Update failed');
+
+      // Download each additional image into the performer's images in Stash
+      if (additionalImages.length > 0) {
+        console.log(`📸 [Scrape All] Adding ${additionalImages.length} additional image(s) to performer`);
+        for (const imgUrl of additionalImages) {
+          try {
+            await fetch(`${config.apiBaseUrl}/api/stash/performers/${id}`, {
+              method: 'PUT',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ image: imgUrl, appendImage: true })
+            });
+          } catch (imgErr) {
+            console.warn(`⚠️ Failed to add additional image ${imgUrl}:`, imgErr.message);
+          }
+        }
+      }
+
+      toast.success('Performer updated from Scrape All');
+      await fetchPerformer();
+    } catch (err) {
+      console.error('Scrape All apply failed:', err);
+      toast.error(`Failed to apply: ${err.message}`);
+    } finally {
+      setIsApplyingScrape(false);
+    }
+  };
+
   // Handle GEVI search button click
   const handleGeviSearch = async () => {
     console.log('🔍 [GEVI] Starting search for performer:', data?.name);
@@ -1412,7 +1504,30 @@ export default function PerformerDetail() {
                     <span>Merge From</span>
                   </button>
                   
-                  {/* Stash-box scraper buttons */}
+                  {/* Scrape All button */}
+                  <button
+                    onClick={handleScrapeAll}
+                    disabled={!!scrapeAllStatus}
+                    title="Run Scrape All across every configured stash-box source"
+                    style={{
+                      background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
+                      border: '2px solid #10b981',
+                      color: 'white',
+                      padding: '8px 16px',
+                      borderRadius: '8px',
+                      fontSize: '13px',
+                      fontWeight: '600',
+                      cursor: scrapeAllStatus ? 'wait' : 'pointer',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '6px'
+                    }}
+                  >
+                    <span style={{ fontSize: '16px' }}>🧠</span>
+                    <span>{scrapeAllStatus ? '⏳ Scraping…' : 'Scrape All'}</span>
+                  </button>
+
+                  {/* Stash-box scraper buttons */}}
                   {availableScrapers.filter(s => s.isStashBox).map((scraper, idx) => (
                     <button
                       key={idx}
@@ -3461,6 +3576,34 @@ export default function PerformerDetail() {
             </div>
           </div>
         </div>
+      )}
+
+      {/* Scrape All progress modal */}
+      {scrapeAllStatus && (
+        <div className="modal-overlay" style={{ zIndex: 1200 }}>
+          <div className="modal-content" style={{ maxWidth: '320px', textAlign: 'center', padding: '2rem' }}>
+            <div style={{ fontSize: '2rem', marginBottom: '0.75rem' }}>🧠</div>
+            <h3 style={{ margin: '0 0 0.5rem' }}>Scrape All</h3>
+            <p style={{ color: '#6b7280', fontSize: '0.95rem', marginBottom: '1rem' }}>{scrapeAllStatus}</p>
+            <div style={{ display: 'flex', justifyContent: 'center', gap: '6px' }}>
+              {[0,1,2].map((i) => (
+                <div key={i} style={{ width: '10px', height: '10px', borderRadius: '50%', background: '#10b981', animation: 'scrapeAllDot 1.2s infinite', animationDelay: `${i * 0.2}s`, opacity: 0.3 }} />
+              ))}
+            </div>
+            <style>{`@keyframes scrapeAllDot{0%,80%,100%{opacity:.3;transform:scale(.8)}40%{opacity:1;transform:scale(1)}}`}</style>
+          </div>
+        </div>
+      )}
+
+      {/* Scrape All review modal */}
+      {showScrapeAllModal && (
+        <PerformerScrapeAllReviewModal
+          isOpen={showScrapeAllModal}
+          onClose={() => setShowScrapeAllModal(false)}
+          performerData={data}
+          sources={scrapeAllSources}
+          onApply={handleApplyScrapeAll}
+        />
       )}
 
       {/* Name Conflict Resolution Modal */}

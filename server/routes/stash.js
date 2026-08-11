@@ -4897,6 +4897,11 @@ router.post('/scenes/:id/scrape-all', asyncHandler(async (req, res) => {
           matchedPerformers = await geviScraper.matchPerformers(fullMetadata.performers, prisma);
         }
 
+        let matchedGroups = { matched: [], unmatched: [] };
+        if (Array.isArray(fullMetadata.movies) && fullMetadata.movies.length > 0) {
+          matchedGroups = await geviScraper.matchGroups(fullMetadata.movies, prisma);
+        }
+
         const enrichedScene = {
           ...fullMetadata,
           url: fullMetadata.url || knownGeviUrl,
@@ -4904,6 +4909,15 @@ router.post('/scenes/:id/scrape-all', asyncHandler(async (req, res) => {
             ? `/api/stash/gevi-image-proxy?url=${encodeURIComponent(fullMetadata.image)}`
             : null,
           matchedPerformers,
+          matched: {
+            performers: matchedPerformers.matched,
+            groups: matchedGroups.matched,
+            studio: null
+          },
+          unmatched: {
+            performers: matchedPerformers.unmatched,
+            groups: matchedGroups.unmatched
+          },
           source: 'GEVI'
         };
 
@@ -4989,6 +5003,11 @@ router.post('/scenes/:id/scrape-all', asyncHandler(async (req, res) => {
                     matchedPerformers = await geviScraper.matchPerformers(fullMetadata.performers, prisma);
                   }
 
+                  let matchedGroups = { matched: [], unmatched: [] };
+                  if (Array.isArray(fullMetadata.movies) && fullMetadata.movies.length > 0) {
+                    matchedGroups = await geviScraper.matchGroups(fullMetadata.movies, prisma);
+                  }
+
                   enrichedScene = {
                     ...enrichedScene,
                     ...fullMetadata,
@@ -5002,6 +5021,15 @@ router.post('/scenes/:id/scrape-all', asyncHandler(async (req, res) => {
                     episodeUrls: fullMetadata.episodeUrls || enrichedScene.episodeUrls || [],
                     urls: fullMetadata.urls || (fullMetadata.url ? [fullMetadata.url] : enrichedScene.urls || []),
                     matchedPerformers,
+                    matched: {
+                      performers: matchedPerformers.matched,
+                      groups: matchedGroups.matched,
+                      studio: null
+                    },
+                    unmatched: {
+                      performers: matchedPerformers.unmatched,
+                      groups: matchedGroups.unmatched
+                    },
                     source: 'GEVI'
                   };
                 }
@@ -8309,6 +8337,13 @@ router.post('/scenes/:id/scrape-stashbox-result', asyncHandler(async (req, res) 
 
   const normalizedPerformers = normalizeScrapedPerformers(scraped.performers || []);
   const normalizedTags = normalizeScrapedTags(scraped.tags || []);
+
+  // Index raw scraped performers by name so actionCode can be re-attached after normalization strips it.
+  const rawPerformerByName = new Map(
+    (scraped.performers || [])
+      .filter((p) => p && typeof p === 'object' && p.name)
+      .map((p) => [String(p.name).trim().toLowerCase(), p])
+  );
   
   // Match performers and tags
   const allPerformers = await prisma.stashPerformer.findMany();
@@ -8372,7 +8407,8 @@ router.post('/scenes/:id/scrape-stashbox-result', asyncHandler(async (req, res) 
         originalName: scrapedPerformer.name,
         matchedVia,
         matchedAlias,
-        alternatives
+        alternatives,
+        actionCode: rawPerformerByName.get(scrapedPerformer.name.toLowerCase())?.actionCode || null
       });
     } else {
       unmatchedPerformers.push(scrapedPerformer);
@@ -12285,6 +12321,126 @@ router.get('/performers/:id/available-scrapers', asyncHandler(async (req, res) =
       matchedUrl: s.matchedUrl,
       performer: s.performer
     }))
+  });
+}));
+
+// POST /api/stash/performers/:id/scrape-all - Multi-source stash-box scrape for a performer
+router.post('/performers/:id/scrape-all', asyncHandler(async (req, res) => {
+  const { id } = req.params;
+
+  const performer = await prisma.stashPerformer.findUnique({ where: { id } });
+  if (!performer) return sendBadRequest(res, 'Performer not found');
+
+  await initializeStashSyncService();
+  if (!stashSyncService) return sendServerError(res, 'Stash sync service not available');
+
+  let stashBoxes = [];
+  try {
+    const cfg = await stashSyncService.getConfiguration();
+    stashBoxes = cfg?.stashBoxes || [];
+  } catch (err) {
+    console.warn('⚠️ [Performer Scrape All] Failed to load stash-box config:', err.message);
+  }
+
+  if (!stashBoxes.length) {
+    return sendSuccess(res, { message: 'No stash-box sources configured', performerId: id, sources: [] });
+  }
+
+  const sources = [];
+
+  for (const box of stashBoxes) {
+    const { endpoint, name: boxName } = box;
+    if (!endpoint) continue;
+
+    const source = { stash_box_endpoint: endpoint };
+    let results = [];
+    let usedFallback = false;
+
+    try {
+      // Try fragment scrape by performer ID first
+      const fragment = await stashSyncService.scrapeSinglePerformer(source, { performer_id: id }, true);
+      results = Array.isArray(fragment) ? fragment : (fragment ? [fragment] : []);
+    } catch (err) {
+      console.warn(`⚠️ [Performer Scrape All] Fragment scrape failed for ${boxName || endpoint}:`, err.message);
+    }
+
+    // Fall back to name + alias search
+    if (!results.length) {
+      usedFallback = true;
+      const namesToTry = [performer.name, ...(performer.alias ? performer.alias.split(',').map((a) => a.trim()).filter(Boolean) : [])];
+      for (const name of namesToTry) {
+        try {
+          const aliasTerms = collectStashBoxAliasTerms(name);
+          const searchQuery = buildStashBoxSearchQuery([name], aliasTerms);
+          const found = await stashSyncService.scrapeSinglePerformer(source, { query: searchQuery }, false);
+          if (Array.isArray(found) && found.length) { results = found; break; }
+        } catch (err) {
+          console.warn(`⚠️ [Performer Scrape All] Name search failed for "${name}":`, err.message);
+        }
+      }
+    }
+
+    sources.push({
+      id: endpoint,
+      name: boxName || endpoint,
+      endpoint,
+      configured: true,
+      resultCount: results.length,
+      hasResults: results.length > 0,
+      usedFallback,
+      results
+    });
+  }
+
+  // GEVI: use saved URL if available, otherwise search by name + aliases
+  try {
+    let existingGeviUrl = null;
+    if (performer.urls) {
+      try {
+        const parsed = JSON.parse(performer.urls);
+        existingGeviUrl = (Array.isArray(parsed) ? parsed : [])
+          .find((u) => typeof u === 'string' && u.includes('gayeroticvideoindex.com/performer/')) || null;
+      } catch (_) { /* ignore */ }
+    }
+
+    let geviUrl = existingGeviUrl;
+    if (!geviUrl) {
+      const namesToTry = [performer.name, ...(performer.alias ? performer.alias.split(',').map((a) => a.trim()).filter(Boolean) : [])];
+      for (const name of namesToTry) {
+        const hits = await geviScraper.searchPerformer(name);
+        if (hits && hits.length > 0) { geviUrl = hits[0].url; break; }
+      }
+    }
+
+    if (geviUrl) {
+      console.log(`🔎 [Performer Scrape All] Scraping GEVI: ${geviUrl}`);
+      const scrapedRaw = await geviScraper.scrapePerformer(geviUrl);
+      const performerData = scrapedRaw?.metadata || scrapedRaw;
+      if (performerData && performerData.name) {
+        if (performerData.image) {
+          performerData.displayImage = `${performerData.image}`;
+        }
+        sources.push({
+          id: 'gevi',
+          name: 'GEVI',
+          endpoint: 'gevi',
+          configured: true,
+          resultCount: 1,
+          hasResults: true,
+          usedFallback: !existingGeviUrl,
+          results: [{ ...performerData, _geviUrl: geviUrl }]
+        });
+      }
+    }
+  } catch (err) {
+    console.warn('⚠️ [Performer Scrape All] GEVI failed:', err.message);
+  }
+
+  sendSuccess(res, {
+    message: `Compared ${sources.length} source(s).`,
+    performerId: id,
+    sources,
+    totalResults: sources.reduce((t, s) => t + s.resultCount, 0)
   });
 }));
 

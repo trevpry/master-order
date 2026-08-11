@@ -1648,7 +1648,7 @@ export default function SceneDetail() {
             performers: sceneResult?.matchedPerformers?.matched || sceneResult?.matched?.performers || [],
             tags: [],
             studio: null,
-            groups: []
+            groups: sceneResult?.matched?.groups || []
           },
           unmatched: {
             performers: sceneResult?.matchedPerformers?.unmatched || sceneResult?.unmatched?.performers || [],
@@ -1681,7 +1681,7 @@ export default function SceneDetail() {
                 performers: serverData.matched?.performers || processedResult.matched.performers || [],
                 tags: serverData.matched?.tags || [],
                 studio: serverData.matched?.studio || null,
-                groups: serverData.matched?.groups || []
+                groups: serverData.matched?.groups || processedResult.matched.groups || []
               },
               unmatched: {
                 performers: serverData.unmatched?.performers || processedResult.unmatched.performers || [],
@@ -1705,12 +1705,36 @@ export default function SceneDetail() {
         detailResults.push(processedResult);
       }
 
+      // Merge matched tags from all results so a GEVI result (no tags) first in the list
+      // doesn't wipe out tags matched by a subsequent stash-box result.
+      const allMatchedTags = detailResults.flatMap((r) => r.matched?.tags || []);
+      const deduplicatedMatchedTags = [
+        ...new Map(allMatchedTags.filter((t) => t?.id).map((t) => [t.id, t])).values()
+      ];
+
+      // Merge matched performers across all results, preferring entries that have actionCode.
+      const matchedPerformerMap = new Map();
+      for (const result of detailResults) {
+        for (const p of (result.matched?.performers || [])) {
+          if (!p?.id) continue;
+          const existing = matchedPerformerMap.get(p.id);
+          if (!existing || (!existing.actionCode && p.actionCode)) {
+            matchedPerformerMap.set(p.id, p);
+          }
+        }
+      }
+      const mergedMatchedPerformers = [...matchedPerformerMap.values()];
+
       setScrapeData(prev => ({
         ...(prev || {}),
         reviewView: 'selected-detail',
         selectedResults: detailResults,
         scraped: detailResults[0]?.scraped || null,
-        matched: detailResults[0]?.matched || null,
+        matched: {
+          ...(detailResults[0]?.matched || {}),
+          performers: mergedMatchedPerformers,
+          tags: deduplicatedMatchedTags
+        },
         unmatched: detailResults[0]?.unmatched || null,
         sourceUrl: detailResults[0]?.sourceUrl || null,
         source: detailResults[0]?.source || prev?.source || 'multi-selection'
@@ -1932,11 +1956,23 @@ export default function SceneDetail() {
         }
       }
       
+      // Merge scraped performers from all selected results so actionCode is
+      // found regardless of which result is detailResults[0].
+      const allScrapedPerformers = (scrapeData?.selectedResults || [])
+        .flatMap((r) => r?.scraped?.performers || [])
+        .concat(scrapeData?.scraped?.performers || []);
+
       const selectedPerformersForApply = buildSelectedPerformersForApply({
         matchedPerformers: scrapeData?.matched?.performers || [],
-        scrapedPerformers: scrapeData?.scraped?.performers || [],
+        scrapedPerformers: allScrapedPerformers,
         performerSelections: reviewPerformerSelections
       });
+
+      console.warn('════ ACTION CODE DEBUG ════');
+      console.warn('matched.performers:', JSON.stringify(scrapeData?.matched?.performers?.map(p => ({ name: p?.name, id: p?.id, actionCode: p?.actionCode })), null, 2));
+      console.warn('scraped.performers:', JSON.stringify((scrapeData?.scraped?.performers || []).map(p => ({ name: p?.name, actionCode: p?.actionCode })), null, 2));
+      console.warn('selectedPerformersForApply:', JSON.stringify(selectedPerformersForApply?.map(p => ({ name: p?.name, id: p?.id, actionCode: p?.actionCode })), null, 2));
+      console.warn('════════════════════════════');
 
       // Create any performers the user marked as new before building the payload.
       for (const entry of selectedPerformersForApply) {
@@ -2105,9 +2141,21 @@ export default function SceneDetail() {
         if (Array.isArray(selectedUrlCollection) && selectedUrlCollection.length > 0) {
           allScrapedUrls.push(...selectedUrlCollection);
         }
+
+        // Collect episode URLs from every selected source, not just the chosen one.
+        for (const sel of (scrapeData?.selectedResults || [])) {
+          const candidate = sel?.scraped || sel?.result || sel || {};
+          const urls = Array.isArray(candidate.episodeUrls)
+            ? candidate.episodeUrls
+            : Array.isArray(candidate.urls)
+              ? candidate.urls
+              : [];
+          urls.forEach((u) => { if (u) allScrapedUrls.push(u); });
+          if (candidate.url) allScrapedUrls.push(candidate.url);
+        }
         
         // Remove duplicates
-        updatePayload.episodeUrls = [...new Set(allScrapedUrls)];
+        updatePayload.episodeUrls = [...new Set(allScrapedUrls.filter(Boolean))];
         
         console.log('📎 [URL Update] Including URLs in payload:');
         console.log('   - Main URL:', updatePayload.url);

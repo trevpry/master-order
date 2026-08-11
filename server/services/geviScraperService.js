@@ -1562,7 +1562,8 @@ class GeviScraperService {
           matchedAlias: bestMatch.matchedVia === 'alias' ? bestMatch.matchedText : null,
           alternatives: alternatives,
           originalName: performerName,  // Store the original scraped name
-          scrapedUrl: performerUrl  // Store the scraped URL
+          scrapedUrl: performerUrl,     // Store the scraped URL
+          actionCode: typeof performer === 'object' ? (performer.actionCode || null) : null
         });
       } else {
         // No match found - include URL if available
