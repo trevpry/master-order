@@ -4,6 +4,7 @@ if (process.env.NODE_ENV !== 'production') {
 }
 const fetch = require('node-fetch');
 const prisma = require('./prismaClient'); // Use shared Prisma client
+const { reconcileCustomOrderWatchStateFromPlex } = require('./getNextCustomOrder');
 
 class PlexSyncService {
   constructor() {
@@ -909,6 +910,113 @@ class PlexSyncService {
     }
   }
 
+  // Proactively reconcile all unwatched custom order items against current Plex sync data.
+  // This handles items added to a custom order after their Plex counterpart was already watched.
+  async reconcileAllCustomOrderWatchStates() {
+    try {
+      // Phase 1: heal plexKey for items without a real Plex ratingKey by matching on metadata
+      const unkeyed = await prisma.customOrderItem.findMany({
+        where: {
+          isWatched: false,
+          mediaType: { in: ['episode', 'movie'] },
+          OR: [
+            { plexKey: null },
+            { plexKey: { startsWith: 'tvdb-' } }
+          ]
+        },
+        select: { id: true, mediaType: true, seriesTitle: true, seasonNumber: true, episodeNumber: true, title: true }
+      });
+
+      let healed = 0;
+      for (const item of unkeyed) {
+        if (item.mediaType === 'episode' && item.seriesTitle && item.seasonNumber != null && item.episodeNumber != null) {
+          const plexEp = await prisma.plexEpisode.findFirst({
+            where: {
+              showTitle: { equals: item.seriesTitle, mode: 'insensitive' },
+              seasonIndex: item.seasonNumber,
+              index: item.episodeNumber,
+              removed: false
+            },
+            select: { ratingKey: true, viewCount: true, lastViewedAt: true }
+          });
+          if (plexEp) {
+            await prisma.customOrderItem.update({
+              where: { id: item.id },
+              data: {
+                plexKey: plexEp.ratingKey,
+                ...(this.isPlexWatched(plexEp.viewCount, plexEp.lastViewedAt) ? { isWatched: true } : {})
+              }
+            });
+            healed++;
+          }
+        } else if (item.mediaType === 'movie' && item.title) {
+          const plexMovie = await prisma.plexMovie.findFirst({
+            where: { title: { equals: item.title, mode: 'insensitive' }, removed: false },
+            select: { ratingKey: true, viewCount: true, lastViewedAt: true }
+          });
+          if (plexMovie) {
+            await prisma.customOrderItem.update({
+              where: { id: item.id },
+              data: {
+                plexKey: plexMovie.ratingKey,
+                ...(this.isPlexWatched(plexMovie.viewCount, plexMovie.lastViewedAt) ? { isWatched: true } : {})
+              }
+            });
+            healed++;
+          }
+        }
+      }
+      if (healed > 0) console.log(`🔧 Healed plexKey for ${healed} custom order item(s) via metadata match`);
+
+      // Phase 2: reconcile all items that now have a real plexKey but are still unwatched
+      const unwatchedItems = await prisma.customOrderItem.findMany({
+        where: {
+          isWatched: false,
+          plexKey: { not: null },
+          mediaType: { in: ['episode', 'movie'] }
+        },
+        select: { id: true, plexKey: true, mediaType: true }
+      });
+
+      if (!unwatchedItems.length) return healed;
+
+      const episodeKeys = unwatchedItems.filter(i => i.mediaType === 'episode').map(i => i.plexKey);
+      const movieKeys = unwatchedItems.filter(i => i.mediaType === 'movie').map(i => i.plexKey);
+
+      const [watchedEpisodes, watchedMovies] = await Promise.all([
+        episodeKeys.length ? prisma.plexEpisode.findMany({
+          where: { ratingKey: { in: episodeKeys }, OR: [{ viewCount: { gt: 0 } }, { lastViewedAt: { not: null } }] },
+          select: { ratingKey: true }
+        }) : [],
+        movieKeys.length ? prisma.plexMovie.findMany({
+          where: { ratingKey: { in: movieKeys }, OR: [{ viewCount: { gt: 0 } }, { lastViewedAt: { not: null } }] },
+          select: { ratingKey: true }
+        }) : []
+      ]);
+
+      const watchedEpisodeKeys = new Set(watchedEpisodes.map(e => e.ratingKey));
+      const watchedMovieKeys = new Set(watchedMovies.map(m => m.ratingKey));
+
+      const toMark = unwatchedItems.filter(i =>
+        (i.mediaType === 'episode' && watchedEpisodeKeys.has(i.plexKey)) ||
+        (i.mediaType === 'movie' && watchedMovieKeys.has(i.plexKey))
+      );
+
+      if (toMark.length) {
+        await prisma.customOrderItem.updateMany({
+          where: { id: { in: toMark.map(i => i.id) } },
+          data: { isWatched: true }
+        });
+        console.log(`🔁 Proactive reconciliation: marked ${toMark.length} custom order item(s) as watched`);
+      }
+
+      return healed + toMark.length;
+    } catch (error) {
+      console.error('Error in reconcileAllCustomOrderWatchStates:', error);
+      return 0;
+    }
+  }
+
   async fullSync(trigger = 'manual') {
     console.log('Starting full Plex library sync...');
     const startTime = Date.now();
@@ -950,7 +1058,14 @@ class PlexSyncService {
         }
       }
 
-      // Step 3: Cleanup orphaned entities (similar to Stash sync)
+      // Step 3: Proactively reconcile custom order items whose Plex counterpart was already watched
+      console.log('🔁 Reconciling custom order watch states against Plex sync data...');
+      const proactiveReconciled = await this.reconcileAllCustomOrderWatchStates();
+      if (proactiveReconciled > 0) {
+        watchStatusReconciled.total += proactiveReconciled;
+      }
+
+      // Step 4: Cleanup orphaned entities (similar to Stash sync)
       console.log('🧹 Starting Plex cleanup of orphaned entities...');
       const cleanupResults = await this.cleanupOrphanedEntities();
       

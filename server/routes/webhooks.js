@@ -107,13 +107,61 @@ router.post('/', upload.single('thumb'), async (req, res) => {
 
       if (ratingKey) {
         try {
-          // Find custom order item with this ratingKey (plexKey)
-          const customOrderItem = await prisma.customOrderItem.findFirst({
+          // Find custom order item by plexKey (primary lookup)
+          let customOrderItem = await prisma.customOrderItem.findFirst({
             where: { plexKey: ratingKey.toString() },
-            include: {
-              customOrder: true
-            }
+            include: { customOrder: true }
           });
+
+          // Secondary lookup by Plex metadata when plexKey is missing/synthetic
+          if (!customOrderItem) {
+            if (mediaType === 'episode') {
+              const showTitle = payload.Metadata?.grandparentTitle;
+              const seasonNum = parseInt(payload.Metadata?.parentIndex);
+              const episodeNum = parseInt(payload.Metadata?.index);
+              if (showTitle && Number.isInteger(seasonNum) && Number.isInteger(episodeNum)) {
+                const fallback = await prisma.customOrderItem.findFirst({
+                  where: {
+                    mediaType: 'episode',
+                    isWatched: false,
+                    seriesTitle: { equals: showTitle, mode: 'insensitive' },
+                    seasonNumber: seasonNum,
+                    episodeNumber: episodeNum
+                  },
+                  include: { customOrder: true }
+                });
+                if (fallback) {
+                  // Heal the plexKey so future lookups skip this fallback path
+                  await prisma.customOrderItem.update({
+                    where: { id: fallback.id },
+                    data: { plexKey: ratingKey.toString() }
+                  });
+                  customOrderItem = { ...fallback, plexKey: ratingKey.toString() };
+                  console.log(`   🔧 Resolved episode via metadata fallback: ${showTitle} S${seasonNum}E${episodeNum} → plexKey healed to ${ratingKey}`);
+                }
+              }
+            } else if (mediaType === 'movie') {
+              const movieTitle = payload.Metadata?.title;
+              if (movieTitle) {
+                const fallback = await prisma.customOrderItem.findFirst({
+                  where: {
+                    mediaType: 'movie',
+                    isWatched: false,
+                    title: { equals: movieTitle, mode: 'insensitive' }
+                  },
+                  include: { customOrder: true }
+                });
+                if (fallback) {
+                  await prisma.customOrderItem.update({
+                    where: { id: fallback.id },
+                    data: { plexKey: ratingKey.toString() }
+                  });
+                  customOrderItem = { ...fallback, plexKey: ratingKey.toString() };
+                  console.log(`   🔧 Resolved movie via metadata fallback: "${movieTitle}" → plexKey healed to ${ratingKey}`);
+                }
+              }
+            }
+          }
 
           if (customOrderItem && !customOrderItem.isWatched) {
             console.log(`   📺 Found matching item in custom order: "${customOrderItem.title}"`);
@@ -189,6 +237,8 @@ router.post('/', upload.single('thumb'), async (req, res) => {
             console.log(`   ⏱️ Duration: ${watchLogData.duration} minutes`);
           } else if (customOrderItem && customOrderItem.isWatched) {
             console.log(`   ✅ Item "${customOrderItem.title}" is already marked as watched`);
+            // Still reconcile in case other custom order items with the same plexKey are unwatched
+            await reconcileCustomOrderWatchStateFromPlex(ratingKey, mediaType, true);
           } else {
             console.log(`   🔍 No matching custom order item found for ratingKey: ${ratingKey}`);
             console.log(`   📝 Creating watch log entry for non-custom order item...`);

@@ -1159,6 +1159,15 @@ class GeviScraperService {
     const matched = [];
     const unmatched = [];
 
+    const normalizeGroupTitle = (value) => {
+      const raw = String(value || '').toLowerCase();
+      return raw
+        .replace(/\([^)]*\)/g, '')
+        .replace(/\[[^\]]*\]/g, '')
+        .replace(/\{[^}]*\}/g, '')
+        .replace(/[^a-z0-9]/g, '');
+    };
+
     if (!scrapedMovies || scrapedMovies.length === 0) {
       return { matched, unmatched };
     }
@@ -1174,13 +1183,13 @@ class GeviScraperService {
       const movieName = movie.name;
       
       // Search by name (SQLite-compatible - filter in JS)
-      const normalizedName = movieName.toLowerCase().replace(/\s+/g, '');
+      const normalizedName = normalizeGroupTitle(movieName);
       
       // Find all matches with scores
       const foundMatches = [];
       
       for (const dbGroup of allGroups) {
-        const dbNormalized = dbGroup.name.toLowerCase().replace(/\s+/g, '');
+        const dbNormalized = normalizeGroupTitle(dbGroup.name);
         
         let score = 0;
         let matchedVia = 'name';
@@ -1202,7 +1211,7 @@ class GeviScraperService {
         else if (dbGroup.aliases) {
           const aliases = dbGroup.aliases.split(',').map(a => a.trim());
           for (const alias of aliases) {
-            const normalizedAlias = alias.toLowerCase().replace(/\s+/g, '');
+            const normalizedAlias = normalizeGroupTitle(alias);
             if (normalizedAlias === normalizedName || normalizedName.includes(normalizedAlias)) {
               score = normalizedAlias.length / normalizedName.length;
               matchedVia = 'alias';
@@ -1235,7 +1244,10 @@ class GeviScraperService {
           id: m.group.id,
           name: m.group.name,
           studio: m.group.studio ? m.group.studio.name : null,
+          studioId: m.group.studio?.id || null,
           date: m.group.date,
+          frontImage: m.group.frontImage || null,
+          backImage: m.group.backImage || null,
           matchedVia: m.matchedVia,
           matchedAlias: m.matchedVia === 'alias' ? m.matchedText : null
         }));
@@ -1244,7 +1256,10 @@ class GeviScraperService {
           id: bestMatch.group.id,
           name: bestMatch.group.name,
           studio: bestMatch.group.studio ? bestMatch.group.studio.name : null,
+          studioId: bestMatch.group.studio?.id || null,
           date: bestMatch.group.date,
+          frontImage: bestMatch.group.frontImage || null,
+          backImage: bestMatch.group.backImage || null,
           matchedVia: bestMatch.matchedVia,
           matchedAlias: bestMatch.matchedVia === 'alias' ? bestMatch.matchedText : null,
           alternatives: alternatives,

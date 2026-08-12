@@ -5081,6 +5081,8 @@ router.post('/scenes/:id/scrape-all', asyncHandler(async (req, res) => {
                   ? `/api/stash/gevi-image-proxy?url=${encodeURIComponent(imageUrl)}`
                   : null;
 
+                const movieGroupMatch = await geviScraper.matchGroups([{ name: movie.title, url: movie.url }], prisma);
+
                 return {
                   id: movie.url,
                   title: movie.title,
@@ -5089,12 +5091,19 @@ router.post('/scenes/:id/scrape-all', asyncHandler(async (req, res) => {
                   sourceUrl: movie.url,
                   url: movie.url,
                   image: proxiedImage,
+                  studio: movieDetails?.studio || null,
+                  date: movieDetails?.date || null,
+                  director: movieDetails?.director || null,
+                  synopsis: movieDetails?.synopsis || null,
                   scenes: movieDetails?.scenes || [],
                   scraped: {
                     title: movie.title,
                     name: movie.title,
                     url: movie.url,
                     image: proxiedImage,
+                    studio: movieDetails?.studio || null,
+                    date: movieDetails?.date || null,
+                    director: movieDetails?.director || null,
                     details: movieDetails?.synopsis || null,
                     scenes: movieDetails?.scenes || [],
                     movies: [{
@@ -5102,6 +5111,10 @@ router.post('/scenes/:id/scrape-all', asyncHandler(async (req, res) => {
                       name: movie.title,
                       url: movie.url,
                       image: proxiedImage,
+                      studio: movieDetails?.studio || null,
+                      date: movieDetails?.date || null,
+                      director: movieDetails?.director || null,
+                      synopsis: movieDetails?.synopsis || null,
                       front_image: imageUrl,
                       back_image: movieDetails?.back_image || null
                     }],
@@ -5113,11 +5126,12 @@ router.post('/scenes/:id/scrape-all', asyncHandler(async (req, res) => {
                     performers: [],
                     tags: [],
                     studio: null,
-                    groups: []
+                    groups: movieGroupMatch.matched
                   },
                   unmatched: {
                     performers: [],
-                    tags: []
+                    tags: [],
+                    groups: movieGroupMatch.unmatched
                   }
                 };
               }))).filter((movieResult) => {

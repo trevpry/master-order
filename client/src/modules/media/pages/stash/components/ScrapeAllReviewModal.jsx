@@ -16,6 +16,8 @@ export default function ScrapeAllReviewModal({
   onApply,
   performerSelections,
   onPerformerSelectionChange,
+  groupSelections,
+  onGroupSelectionChange,
   fieldSelections,
   onFieldSelectionChange,
   onCreateTag,
@@ -483,18 +485,32 @@ export default function ScrapeAllReviewModal({
     };
 
     if (isMultiSourceReview && Array.isArray(scrapeData?.selectedResults) && scrapeData.selectedResults.length > 0) {
-      return scrapeData.selectedResults.flatMap((selection) => [
-        ...addGroups(collectGroupCandidates(selection?.matched), 'matched'),
-        ...addGroups(collectGroupCandidates(selection?.unmatched), 'unmatched'),
-        ...addGroups(collectGroupCandidates(selection?.scraped), 'scraped')
-      ]);
+      return scrapeData.selectedResults.flatMap((selection) => {
+        // Prefer processed matched groups; fall back to raw result groups if processing dropped them
+        const matchedGroupCandidates =
+          collectGroupCandidates(selection?.matched).length > 0
+            ? collectGroupCandidates(selection?.matched)
+            : collectGroupCandidates(selection?.result?.matched);
+        const unmatchedGroupCandidates =
+          collectGroupCandidates(selection?.unmatched).length > 0
+            ? collectGroupCandidates(selection?.unmatched)
+            : collectGroupCandidates(selection?.result?.unmatched);
+        const fromMatched = addGroups(matchedGroupCandidates, 'matched');
+        const fromUnmatched = addGroups(unmatchedGroupCandidates, 'unmatched');
+        // Only fall back to scraped.movies when there is no explicit matched/unmatched group data
+        const fromScraped = (fromMatched.length > 0 || fromUnmatched.length > 0)
+          ? []
+          : addGroups(collectGroupCandidates(selection?.scraped), 'scraped');
+        return [...fromMatched, ...fromUnmatched, ...fromScraped];
+      });
     }
 
-    return [
-      ...addGroups(collectGroupCandidates(scrapeData?.matched), 'matched'),
-      ...addGroups(collectGroupCandidates(scrapeData?.unmatched), 'unmatched'),
-      ...addGroups(collectGroupCandidates(scrapeData?.scraped), 'scraped')
-    ];
+    const fromMatched = addGroups(collectGroupCandidates(scrapeData?.matched), 'matched');
+    const fromUnmatched = addGroups(collectGroupCandidates(scrapeData?.unmatched), 'unmatched');
+    const fromScraped = (fromMatched.length > 0 || fromUnmatched.length > 0)
+      ? []
+      : addGroups(collectGroupCandidates(scrapeData?.scraped), 'scraped');
+    return [...fromMatched, ...fromUnmatched, ...fromScraped];
   };
 
   const normalizeGroupName = (value) => String(resolveDisplayName(value) || '').trim().toLowerCase();
@@ -515,9 +531,20 @@ export default function ScrapeAllReviewModal({
 
         const normalizedName = normalizeGroupName(group);
         return {
+          id: group?.id || null,
+          originalName: group?.originalName || null,
+          matchedVia: group?.matchedVia || null,
+          studio: group?.studio || null,
+          date: group?.date || null,
+          frontImage: group?.frontImage || null,
+          backImage: group?.backImage || null,
+          alternatives: Array.isArray(group?.alternatives) ? group.alternatives : [],
           name,
           url: group?.url || group?.sourceUrl || group?.urls?.[0] || null,
-          matched: Boolean(normalizedName && existingGroupNames.has(normalizedName))
+          // honour a pre-computed matched flag when present (e.g. from DB-matched group data)
+          matched: group?.matched !== undefined
+            ? Boolean(group.matched)
+            : Boolean(normalizedName && existingGroupNames.has(normalizedName))
         };
       })
       .filter(Boolean);
@@ -599,21 +626,70 @@ export default function ScrapeAllReviewModal({
     }
 
     if (field === 'groups') {
-      const groups = Array.isArray(candidate.groups)
-        ? candidate.groups
-        : Array.isArray(candidate.movies)
-          ? candidate.movies
+      // Prefer DB-classified groups which carry the correct matched/unmatched status
+      const matchedGroups = Array.isArray(selection?.matched?.groups) && selection.matched.groups.length > 0
+        ? selection.matched.groups
+        : (Array.isArray(selection?.result?.matched?.groups) ? selection.result.matched.groups : []);
+      const unmatchedGroups = Array.isArray(selection?.unmatched?.groups) && selection.unmatched.groups.length > 0
+        ? selection.unmatched.groups
+        : (Array.isArray(selection?.result?.unmatched?.groups) ? selection.result.unmatched.groups : []);
+
+      if (matchedGroups.length > 0 || unmatchedGroups.length > 0) {
+        return [
+          ...matchedGroups.map((entry) => ({
+            id: entry?.id || null,
+            originalName: entry?.originalName || null,
+            matchedVia: entry?.matchedVia || null,
+            studio: entry?.studio || null,
+            date: entry?.date || null,
+            frontImage: entry?.frontImage || null,
+            backImage: entry?.backImage || null,
+            alternatives: Array.isArray(entry?.alternatives) ? entry.alternatives : [],
+            name: resolveDisplayName(entry),
+            url: entry?.url || entry?.sourceUrl || null,
+            matched: true
+          })).filter((g) => g.name),
+          ...unmatchedGroups.map((entry) => ({
+            id: entry?.id || null,
+            originalName: entry?.originalName || null,
+            matchedVia: entry?.matchedVia || null,
+            studio: entry?.studio || null,
+            date: entry?.date || null,
+            frontImage: entry?.frontImage || null,
+            backImage: entry?.backImage || null,
+            alternatives: Array.isArray(entry?.alternatives) ? entry.alternatives : [],
+            name: resolveDisplayName(entry),
+            url: entry?.url || entry?.sourceUrl || null,
+            matched: false
+          })).filter((g) => g.name)
+        ];
+      }
+
+      // Fallback: read from scraped data (no explicit match status)
+      const groupCandidate = selection?.scraped || selection?.result || selection || {};
+      const groups = Array.isArray(groupCandidate.groups)
+        ? groupCandidate.groups
+        : Array.isArray(groupCandidate.movies)
+          ? groupCandidate.movies
           : [];
-      return Array.isArray(groups)
-        ? groups.map((entry) => {
-            const name = resolveDisplayName(entry);
-            if (!name) return null;
-            return {
-              name,
-              url: entry?.url || entry?.sourceUrl || entry?.urls?.[0] || null
-            };
-          }).filter(Boolean)
-        : [];
+      return groups
+        .map((entry) => {
+          const name = resolveDisplayName(entry);
+          if (!name) return null;
+          return {
+            id: entry?.id || null,
+            originalName: entry?.originalName || null,
+            matchedVia: entry?.matchedVia || null,
+            studio: entry?.studio || null,
+            date: entry?.date || null,
+            frontImage: entry?.frontImage || null,
+            backImage: entry?.backImage || null,
+            alternatives: Array.isArray(entry?.alternatives) ? entry.alternatives : [],
+            name,
+            url: entry?.url || entry?.sourceUrl || entry?.urls?.[0] || null
+          };
+        })
+        .filter(Boolean);
     }
 
     if (field === 'episodeUrls') {
@@ -974,32 +1050,128 @@ export default function ScrapeAllReviewModal({
         const groups = Array.isArray(value) ? value : [];
         const groupEntries = getGroupDisplayEntries(groups, existingGroups);
         const isExistingColumn = column.key === 'existing';
+        const currentSelection = selectedResults.find((entry) => (entry.sourceKey || entry.sourceName || '') === column.key);
+        const sourceKey = currentSelection?.sourceKey || currentSelection?.sourceName || column.key;
 
         return (
           <div style={{ fontSize: '13px', color: '#111827', display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
-            {groupEntries.length > 0 ? groupEntries.map((group, index) => (
-              <div key={`${group.name}-${index}`} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.4rem' }}>
-                <div>{group.name}</div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
-                  <span style={{ padding: '0.18rem 0.45rem', borderRadius: '999px', fontSize: '11px', fontWeight: 700, background: group.matched ? '#dcfce7' : '#f3f4f6', color: group.matched ? '#166534' : '#6b7280' }}>
-                    {group.matched ? 'Matched' : 'New'}
-                  </span>
-                  {!isExistingColumn && !group.matched ? (
-                    <button
-                      type="button"
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        onCreateGroup?.({ name: group.name, url: group.url || null });
-                      }}
-                      title={`Create group "${group.name}"`}
-                      style={{ border: '1px solid #d1d5db', background: '#fff', borderRadius: '999px', width: '24px', height: '24px', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', color: '#2563eb', fontSize: '14px', fontWeight: 700 }}
+            {groupEntries.length > 0 ? groupEntries.map((group, index) => {
+              const selectionKey = `${sourceKey}::${group.originalName || group.name || index}`;
+              const candidateGroups = [
+                {
+                  id: group.id,
+                  name: group.name,
+                  studio: group.studio || null,
+                  date: group.date || null,
+                  frontImage: group.frontImage || null,
+                  backImage: group.backImage || null
+                },
+                ...(Array.isArray(group.alternatives) ? group.alternatives : [])
+              ].filter((entry) => entry?.id && entry?.name);
+
+              const selectedGroupId = (groupSelections && groupSelections[selectionKey]) || group.id;
+
+              return (
+                <div key={`${group.name}-${index}`} style={{ border: '1px solid #e5e7eb', borderRadius: '8px', padding: '0.45rem', display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.4rem' }}>
+                    <div style={{ fontWeight: 600 }}>{group.name}</div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+                      <span style={{ padding: '0.18rem 0.45rem', borderRadius: '999px', fontSize: '11px', fontWeight: 700, background: group.matched ? '#dcfce7' : '#f3f4f6', color: group.matched ? '#166534' : '#6b7280' }}>
+                        {group.matched ? 'Matched' : 'New'}
+                      </span>
+                      {!isExistingColumn && !group.matched ? (
+                        <button
+                          type="button"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            const selectionCandidate = currentSelection?.scraped || currentSelection?.result || currentSelection || {};
+                            const scrapedMovies = Array.isArray(selectionCandidate?.movies)
+                              ? selectionCandidate.movies
+                              : Array.isArray(selectionCandidate?.scraped?.movies)
+                                ? selectionCandidate.scraped.movies
+                                : [];
+                            const matchingMovie = scrapedMovies.find((movieEntry) => {
+                              const candidateName = resolveDisplayName(movieEntry);
+                              return candidateName && candidateName.toLowerCase() === String(group.name || '').toLowerCase();
+                            });
+
+                            onCreateGroup?.({
+                              name: group.name,
+                              originalName: group.originalName || group.name,
+                              sourceKey,
+                              url: group.url || selectionCandidate?.url || selectionCandidate?.sourceUrl || null,
+                              metadata: {
+                                geviUrl: group.url || selectionCandidate?.url || selectionCandidate?.sourceUrl || null,
+                                studio: group.studio || matchingMovie?.studio || selectionCandidate?.studio || null,
+                                date: group.date || matchingMovie?.date || selectionCandidate?.date || null,
+                                synopsis: selectionCandidate?.details || selectionCandidate?.synopsis || matchingMovie?.synopsis || null,
+                                director: selectionCandidate?.director || matchingMovie?.director || null,
+                                front_image: group.frontImage || matchingMovie?.front_image || null,
+                                back_image: group.backImage || matchingMovie?.back_image || null,
+                                image: matchingMovie?.image || selectionCandidate?.image || null
+                              }
+                            });
+                          }}
+                          title={`Create group "${group.name}"`}
+                          style={{ border: '1px solid #d1d5db', background: '#fff', borderRadius: '999px', width: '24px', height: '24px', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', color: '#2563eb', fontSize: '14px', fontWeight: 700 }}
+                        >
+                          +
+                        </button>
+                      ) : null}
+                    </div>
+                </div>
+
+                  {!isExistingColumn && group.matched && candidateGroups.length > 1 ? (
+                    <select
+                      value={selectedGroupId || ''}
+                      onClick={(event) => event.stopPropagation()}
+                      onChange={(event) => onGroupSelectionChange?.(selectionKey, event.target.value)}
+                      style={{ fontSize: '12px', padding: '0.35rem 0.45rem', borderRadius: '6px', border: '1px solid #d1d5db', background: '#fff' }}
                     >
-                      +
-                    </button>
+                      {candidateGroups.map((candidate) => (
+                        <option key={candidate.id} value={candidate.id}>
+                          {candidate.name}{candidate.studio ? ` - ${candidate.studio}` : ''}
+                        </option>
+                      ))}
+                    </select>
+                  ) : null}
+
+                  {!isExistingColumn && group.matched ? (
+                    <div style={{ fontSize: '11px', color: '#166534', fontWeight: 600 }}>
+                      Applying group: {(candidateGroups.find((candidate) => candidate.id === selectedGroupId) || candidateGroups[0] || group).name}
+                    </div>
+                  ) : null}
+
+                  {!isExistingColumn && group.matched && group.matchedVia === 'created' ? (
+                    <div style={{ fontSize: '11px', color: '#1d4ed8', fontWeight: 600 }}>
+                      New movie added to database
+                    </div>
+                  ) : null}
+
+                  {!isExistingColumn && group.matched && candidateGroups.length > 0 ? (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
+                      {candidateGroups.map((candidate) => {
+                        const isChosen = candidate.id === selectedGroupId;
+                        const imageUrl = candidate.frontImage || candidate.backImage || null;
+                        return (
+                          <div key={candidate.id} style={{ display: 'flex', alignItems: 'center', gap: '0.45rem', padding: '0.3rem', borderRadius: '6px', background: isChosen ? '#ecfdf5' : '#f9fafb', border: isChosen ? '1px solid #34d399' : '1px solid #e5e7eb' }}>
+                            {imageUrl ? (
+                              <img src={imageUrl} alt={candidate.name} style={{ width: '44px', height: '62px', objectFit: 'cover', borderRadius: '4px', background: '#f3f4f6', flexShrink: 0 }} />
+                            ) : (
+                              <div style={{ width: '44px', height: '62px', borderRadius: '4px', background: '#f3f4f6', color: '#9ca3af', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '10px', flexShrink: 0 }}>No art</div>
+                            )}
+                            <div style={{ minWidth: 0 }}>
+                              <div style={{ fontSize: '12px', fontWeight: 700, color: '#111827' }}>{candidate.name}</div>
+                              <div style={{ fontSize: '11px', color: '#6b7280' }}>{candidate.studio || 'Unknown studio'}</div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
                   ) : null}
                 </div>
-              </div>
-            )) : <div>No groups</div>}
+              );
+            }) : <div>No groups</div>}
           </div>
         );
       }
@@ -1751,8 +1923,18 @@ export default function ScrapeAllReviewModal({
                               </div>
                             )}
                             <div style={{ padding: '0.75rem', display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-                              <div style={{ fontSize: '14px', color: '#111827', fontWeight: '600' }}>
+                              <div style={{ fontSize: '14px', color: '#111827', fontWeight: '600', display: 'flex', alignItems: 'center', gap: '0.4rem', flexWrap: 'wrap' }}>
                                 {result.title || `Result ${resultIndex + 1}`}
+                                {sourceResult.endpoint === 'gevi-movie-search' && Array.isArray(result.matched?.groups) && result.matched.groups.length > 0 && (
+                                  <span style={{ padding: '0.15rem 0.5rem', borderRadius: '999px', fontSize: '10px', fontWeight: 700, background: '#dcfce7', color: '#166534', flexShrink: 0 }}>
+                                    ✓ IN DATABASE
+                                  </span>
+                                )}
+                                {sourceResult.endpoint === 'gevi-movie-search' && (!result.matched?.groups?.length) && Array.isArray(result.unmatched?.groups) && result.unmatched.groups.length > 0 && (
+                                  <span style={{ padding: '0.15rem 0.5rem', borderRadius: '999px', fontSize: '10px', fontWeight: 700, background: '#ffedd5', color: '#9a3412', flexShrink: 0 }}>
+                                    ✦ NEW MOVIE
+                                  </span>
+                                )}
                               </div>
                               {renderPerformers(result.performers)}
                               {(() => {

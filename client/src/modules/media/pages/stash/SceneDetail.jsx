@@ -41,6 +41,7 @@ export default function SceneDetail() {
   const [showScrapeReviewModal, setShowScrapeReviewModal] = useState(false);
   const [selectedMultiSourceResults, setSelectedMultiSourceResults] = useState([]);
   const [reviewPerformerSelections, setReviewPerformerSelections] = useState({});
+  const [reviewGroupSelections, setReviewGroupSelections] = useState({});
   const [isSearching, setIsSearching] = useState(false);
   const [searchResults, setSearchResults] = useState(null);
   const [creatingPerformers, setCreatingPerformers] = useState(new Set()); // Track which performers are being created
@@ -1652,7 +1653,8 @@ export default function SceneDetail() {
           },
           unmatched: {
             performers: sceneResult?.matchedPerformers?.unmatched || sceneResult?.unmatched?.performers || [],
-            tags: []
+            tags: [],
+            groups: sceneResult?.unmatched?.groups || []
           },
           sourceUrl: normalizedScraped.url || '',
           source: normalizedScraped.source || selection.sourceName || 'multi-selection',
@@ -1685,7 +1687,8 @@ export default function SceneDetail() {
               },
               unmatched: {
                 performers: serverData.unmatched?.performers || processedResult.unmatched.performers || [],
-                tags: serverData.unmatched?.tags || []
+                tags: serverData.unmatched?.tags || [],
+                groups: processedResult.unmatched.groups || []
               },
               sourceUrl: serverData.sourceUrl || normalizedScraped.url || '',
               source: serverData.source || normalizedScraped.source || selection.sourceName || 'multi-selection'
@@ -1749,6 +1752,7 @@ export default function SceneDetail() {
         image: 'scraped',
         tags: 'scraped'
       });
+      setReviewGroupSelections({});
     } catch (error) {
       console.error('Error loading selected multi-source results:', error);
       toast.error('Failed to load selected results');
@@ -1781,6 +1785,7 @@ export default function SceneDetail() {
           reviewView: 'list'
         });
         setSelectedMultiSourceResults([]);
+        setReviewGroupSelections({});
         setFieldSelections({
           title: 'scraped',
           details: 'scraped',
@@ -2009,14 +2014,6 @@ export default function SceneDetail() {
       // Collect matched tag IDs
       const tagIds = scrapeData.matched.tags?.map(t => t.id) || [];
 
-      // Collect matched group IDs and scene numbers
-      const groupIds = scrapeData.matched.groups?.map(g => g.id) || [];
-      const sceneNumbers = scrapeData.matched.groups?.map(g => g.sceneNumber || null) || [];
-      
-      console.log('🎬 [Scene Update] Group IDs:', groupIds);
-      console.log('🎬 [Scene Update] Scene Numbers:', sceneNumbers);
-      console.log('🎬 [Scene Update] Matched Groups:', scrapeData.matched.groups);
-
       const getFieldSelectionValue = (fieldName) => {
         const selectedValue = fieldSelections?.[fieldName] || 'scraped';
 
@@ -2034,7 +2031,26 @@ export default function SceneDetail() {
             case 'url': return candidate.url || '';
             case 'image': return candidate.originalImage || candidate.image || null;
             case 'performers': return Array.isArray(candidate.performers) ? candidate.performers : [];
-            case 'groups': return Array.isArray(candidate.groups) ? candidate.groups : [];
+            case 'groups': {
+              const matchedGroups = Array.isArray(scrapeData?.matched?.groups) && scrapeData.matched.groups.length > 0
+                ? scrapeData.matched.groups
+                : (Array.isArray(candidate.groups) ? candidate.groups : []);
+              const sourceKey = 'scraped';
+              return matchedGroups.map((group) => {
+                const selectionKey = `${sourceKey}::${group?.originalName || group?.name || ''}`;
+                const selectedGroupId = reviewGroupSelections?.[selectionKey];
+                if (!selectedGroupId || group?.id === selectedGroupId) return group;
+                const alternatives = Array.isArray(group?.alternatives) ? group.alternatives : [];
+                const selectedAlternative = alternatives.find((alt) => alt?.id === selectedGroupId);
+                if (!selectedAlternative) return group;
+                return {
+                  ...selectedAlternative,
+                  alternatives,
+                  originalName: group.originalName || group.name,
+                  matched: true
+                };
+              });
+            }
             case 'episodeUrls': return Array.isArray(candidate.episodeUrls) ? candidate.episodeUrls : (Array.isArray(candidate.urls) ? candidate.urls : []);
             case 'tags': return Array.isArray(candidate.tags) ? candidate.tags : [];
             default: return null;
@@ -2071,12 +2087,41 @@ export default function SceneDetail() {
           case 'url': return candidate.url || candidate.sourceUrl || candidate.urls?.[0] || '';
           case 'image': return candidate.originalImage || candidate.image || candidate.displayImage || null;
           case 'performers': return Array.isArray(candidate.performers) ? candidate.performers : [];
-          case 'groups': return Array.isArray(candidate.groups) ? candidate.groups : [];
+          case 'groups': {
+            const matchedGroups = Array.isArray(selectedResult?.matched?.groups) && selectedResult.matched.groups.length > 0
+              ? selectedResult.matched.groups
+              : (Array.isArray(candidate.groups) ? candidate.groups : []);
+            const sourceKey = selectedResult?.sourceKey || selectedResult?.sourceName || selectedValue;
+            return matchedGroups.map((group) => {
+              const selectionKey = `${sourceKey}::${group?.originalName || group?.name || ''}`;
+              const selectedGroupId = reviewGroupSelections?.[selectionKey];
+              if (!selectedGroupId || group?.id === selectedGroupId) return group;
+              const alternatives = Array.isArray(group?.alternatives) ? group.alternatives : [];
+              const selectedAlternative = alternatives.find((alt) => alt?.id === selectedGroupId);
+              if (!selectedAlternative) return group;
+              return {
+                ...selectedAlternative,
+                alternatives,
+                originalName: group.originalName || group.name,
+                matched: true
+              };
+            });
+          }
           case 'episodeUrls': return Array.isArray(candidate.episodeUrls) ? candidate.episodeUrls : (Array.isArray(candidate.urls) ? candidate.urls : []);
           case 'tags': return Array.isArray(candidate.tags) ? candidate.tags : [];
           default: return null;
         }
       };
+
+      const selectedGroups = getFieldSelectionValue('groups');
+      const groupsForApply = Array.isArray(selectedGroups) ? selectedGroups : [];
+      const groupsWithIds = groupsForApply.filter((group) => group && group.id);
+      const groupIds = groupsWithIds.map((group) => group.id);
+      const sceneNumbers = groupsWithIds.map((group) => group.sceneNumber || null);
+
+      console.log('🎬 [Scene Update] Groups selected for apply:', groupsForApply);
+      console.log('🎬 [Scene Update] Group IDs:', groupIds);
+      console.log('🎬 [Scene Update] Scene Numbers:', sceneNumbers);
 
       // Build update payload based on field selections
       const updatePayload = {
@@ -2299,6 +2344,14 @@ export default function SceneDetail() {
         await handleScrapeAll();
       }
     });
+  };
+
+  const handleGroupMatchSelectionChange = (selectionKey, selectedGroupId) => {
+    if (!selectionKey) return;
+    setReviewGroupSelections((prev) => ({
+      ...(prev || {}),
+      [selectionKey]: selectedGroupId
+    }));
   };
 
   const handleCreatePerformerFromParse = async (performerName) => {
@@ -2627,6 +2680,8 @@ export default function SceneDetail() {
       return;
     }
 
+    const providedMetadata = group?.metadata || {};
+
     // Check if this is an AEBN URL - use simple creation flow instead of fetching full details
     const isAebnUrl = group.url?.toLowerCase().includes('aebn.com');
     
@@ -2670,7 +2725,40 @@ export default function SceneDetail() {
             unmatched: {
               ...prev.unmatched,
               groups: prev.unmatched.groups?.filter(g => g.name !== group.name) || []
-            }
+            },
+            selectedResults: Array.isArray(prev?.selectedResults)
+              ? prev.selectedResults.map((entry) => {
+                  const entryKey = entry?.sourceKey || entry?.sourceName;
+                  if (!group.sourceKey || entryKey !== group.sourceKey) return entry;
+
+                  const existingMatched = Array.isArray(entry?.matched?.groups) ? entry.matched.groups : [];
+                  const existingUnmatched = Array.isArray(entry?.unmatched?.groups) ? entry.unmatched.groups : [];
+
+                  return {
+                    ...entry,
+                    matched: {
+                      ...(entry.matched || {}),
+                      groups: [
+                        ...existingMatched,
+                        {
+                          id: newGroupId,
+                          name: group.name,
+                          matchedVia: 'created',
+                          originalName: group.originalName || group.name,
+                          url: group.url
+                        }
+                      ]
+                    },
+                    unmatched: {
+                      ...(entry.unmatched || {}),
+                      groups: existingUnmatched.filter((g) => {
+                        const entryName = typeof g === 'string' ? g : g?.name;
+                        return entryName !== (group.originalName || group.name);
+                      })
+                    }
+                  };
+                })
+              : prev?.selectedResults
           }));
 
           toast.success(`Movie "${group.name}" created`, {
@@ -2699,21 +2787,37 @@ export default function SceneDetail() {
     setCreatingGroups(prev => new Set(prev).add(group.name));
 
     try {
-      // For non-AEBN (GEVI), fetch full movie details
-      console.log('🎬 Fetching movie details from:', group.url);
-      const movieResponse = await fetch('/api/stash/gevi/movie', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url: group.url })
-      });
+      let movie = null;
 
-      if (!movieResponse.ok) {
-        throw new Error('Failed to fetch movie details');
+      // For non-AEBN (GEVI), use provided scraped metadata when available, otherwise fetch full details
+      if (providedMetadata && (providedMetadata.geviUrl || providedMetadata.front_image || providedMetadata.back_image || providedMetadata.studio || providedMetadata.synopsis)) {
+        movie = {
+          name: group.name,
+          url: providedMetadata.geviUrl || group.url,
+          studio: providedMetadata.studio || null,
+          date: providedMetadata.date || null,
+          director: providedMetadata.director || null,
+          synopsis: providedMetadata.synopsis || null,
+          front_image: providedMetadata.front_image || providedMetadata.image || null,
+          back_image: providedMetadata.back_image || null
+        };
+        console.log('✅ Using provided scraped movie metadata for group creation:', movie);
+      } else {
+        console.log('🎬 Fetching movie details from:', group.url);
+        const movieResponse = await fetch('/api/stash/gevi/movie', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ url: group.url })
+        });
+
+        if (!movieResponse.ok) {
+          throw new Error('Failed to fetch movie details');
+        }
+
+        const movieResult = await movieResponse.json();
+        movie = movieResult.data.movie;
+        console.log('✅ Movie details fetched:', movie);
       }
-
-      const movieResult = await movieResponse.json();
-      const movie = movieResult.data.movie;
-      console.log('✅ Movie details fetched:', movie);
 
       // Extract studio name if it's an object
       let studioName = null;
@@ -2726,9 +2830,33 @@ export default function SceneDetail() {
         }
       }
 
-      // Try to match studio to existing studio in database
+      // Try to match studio to existing studio in database via current matched studio first
       if (studioName && scrapeData.matched.studio) {
-        studioId = scrapeData.matched.studio.id;
+        const matchedStudioName = String(scrapeData.matched.studio.name || '').trim().toLowerCase();
+        if (matchedStudioName && matchedStudioName === String(studioName).trim().toLowerCase()) {
+          studioId = scrapeData.matched.studio.id;
+        }
+      }
+
+      // If no studioId yet but we have a studio name, create the studio and use it
+      if (!studioId && studioName) {
+        try {
+          const studioResponse = await fetch(`${config.apiBaseUrl}/api/stash/studios/create`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+              name: studioName
+            })
+          });
+          const studioResult = await studioResponse.json();
+          if (studioResult.success) {
+            studioId = studioResult.data?.studio?.id || null;
+          }
+        } catch (studioCreateError) {
+          console.warn('⚠️ Could not auto-create studio for new movie:', studioCreateError.message);
+        }
       }
 
       // Duration comes from GEVI scraper in seconds, convert to minutes for display
@@ -2763,7 +2891,8 @@ export default function SceneDetail() {
           studioId: studioId,
           front_image: movie.front_image,
           back_image: movie.back_image,
-          url: movie.url
+          url: movie.url,
+          geviUrl: movie.url
         })
       });
 
@@ -2790,6 +2919,8 @@ export default function SceneDetail() {
                   studio: newGroup.studio?.name || studioName,
                   date: newGroup.date,
                   matchedVia: 'created',
+                  frontImage: newGroup.frontImage || movie.front_image || null,
+                  backImage: newGroup.backImage || movie.back_image || null,
                   alternatives: [],
                   originalName: group.name,
                   url: group.url
@@ -2802,7 +2933,45 @@ export default function SceneDetail() {
                 const entryName = typeof entry === 'string' ? entry : entry?.name;
                 return entryName !== group.name;
               })
-            }
+            },
+            selectedResults: Array.isArray(current?.selectedResults)
+              ? current.selectedResults.map((entry) => {
+                  const entryKey = entry?.sourceKey || entry?.sourceName;
+                  if (!group.sourceKey || entryKey !== group.sourceKey) return entry;
+
+                  const existingMatched = Array.isArray(entry?.matched?.groups) ? entry.matched.groups : [];
+                  const existingUnmatched = Array.isArray(entry?.unmatched?.groups) ? entry.unmatched.groups : [];
+
+                  return {
+                    ...entry,
+                    matched: {
+                      ...(entry.matched || {}),
+                      groups: [
+                        ...existingMatched,
+                        {
+                          id: newGroup.id,
+                          name: newGroup.name,
+                          studio: newGroup.studio?.name || studioName,
+                          date: newGroup.date,
+                          matchedVia: 'created',
+                          frontImage: newGroup.frontImage || movie.front_image || null,
+                          backImage: newGroup.backImage || movie.back_image || null,
+                          alternatives: [],
+                          originalName: group.originalName || group.name,
+                          url: group.url
+                        }
+                      ]
+                    },
+                    unmatched: {
+                      ...(entry.unmatched || {}),
+                      groups: existingUnmatched.filter((candidate) => {
+                        const candidateName = typeof candidate === 'string' ? candidate : candidate?.name;
+                        return candidateName !== (group.originalName || group.name);
+                      })
+                    }
+                  };
+                })
+              : current?.selectedResults
           };
         });
 
@@ -5526,6 +5695,8 @@ export default function SceneDetail() {
           onApply={handleApplyAndNext}
           performerSelections={reviewPerformerSelections}
           onPerformerSelectionChange={setReviewPerformerSelections}
+          groupSelections={reviewGroupSelections}
+          onGroupSelectionChange={handleGroupMatchSelectionChange}
           fieldSelections={fieldSelections}
           onFieldSelectionChange={(field, value) => setFieldSelections(prev => ({ ...prev, [field]: value }))}
           onCreateGroup={handleCreateGroup}
