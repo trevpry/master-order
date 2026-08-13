@@ -198,7 +198,7 @@ function createCustomOrdersRoutes(prisma) {
                 }
               }
             },
-            orderBy: { sortOrder: 'asc' }
+            orderBy: [{ sortOrder: 'asc' }, { id: 'asc' }]
           },
           plexPlaylist: true,
           customPlaylist: true,

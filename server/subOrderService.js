@@ -157,7 +157,7 @@ class SubOrderService {
                 ]
               }
             },
-            orderBy: { sortOrder: 'asc' }
+            orderBy: [{ sortOrder: 'asc' }, { id: 'asc' }]
           }
         }
       });

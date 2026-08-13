@@ -1370,10 +1370,11 @@ class HistoryPlusService {
         !section.sectionCompletions?.length || !section.sectionCompletions[0]?.isCompleted
       );
       
-      // Check sections nested under event-linked chapters
+      // Check sections nested under event-linked chapters.
+      // A chapter can be marked complete without its sections being read, so
+      // unread sections must still count as remaining content.
       let unreadNestedUnifiedSections = 0;
       for (const chapter of (event.bookChapters || [])) {
-        if (chapter.chapterCompletions?.[0]?.isCompleted) continue;
         for (const section of (chapter.sections || [])) {
           if (!section.sectionCompletions?.length || !section.sectionCompletions[0]?.isCompleted) {
             unreadNestedUnifiedSections++;
@@ -1416,7 +1417,6 @@ class HistoryPlusService {
       // Check sections nested under event-linked legacy chapters
       let unreadNestedLegacySections = 0;
       for (const chapter of (event.chapters || [])) {
-        if (chapter.user_chapter_reads?.read) continue;
         for (const section of (chapter.sections || [])) {
           if (!section.user_section_reads?.read) {
             unreadNestedLegacySections++;
@@ -1963,10 +1963,11 @@ class HistoryPlusService {
         !isCompleted(section.sectionCompletions)
       );
       
-      // Check sections nested under event-linked chapters (sections without their own eventId)
+      // Check sections nested under event-linked chapters (sections without their own eventId).
+      // A chapter can be marked complete without its sections being read, so unread
+      // sections must still count as remaining content.
       let unreadNestedUnifiedSections = 0;
       for (const chapter of (event.bookChapters || [])) {
-        if (isCompleted(chapter.chapterCompletions)) continue;
         for (const section of (chapter.sections || [])) {
           if (!isCompleted(section.sectionCompletions)) {
             unreadNestedUnifiedSections++;
@@ -2009,7 +2010,6 @@ class HistoryPlusService {
       // Check sections nested under event-linked legacy chapters
       let unreadNestedLegacySections = 0;
       for (const chapter of (event.chapters || [])) {
-        if (chapter.user_chapter_reads?.read) continue;
         for (const section of (chapter.sections || [])) {
           if (!section.user_section_reads?.read) {
             unreadNestedLegacySections++;
@@ -2020,7 +2020,6 @@ class HistoryPlusService {
       // Check chapters/sections nested under event-linked legacy books
       let unreadNestedLegacyBookContent = 0;
       for (const book of (event.books || [])) {
-        if (book.user_book_reads?.read) continue;
         for (const chapter of (book.chapters || [])) {
           if (!chapter.user_chapter_reads?.read) {
             unreadNestedLegacyBookContent++;
@@ -2381,8 +2380,7 @@ class HistoryPlusService {
       // Chapters directly linked to events
       event.bookChapters?.forEach(chapter => {
         const isRead = isCompleted(chapter.chapterCompletions);
-        const parentBookRead = isCompleted(chapter.book?.bookCompletions);
-        if (!isRead && !parentBookRead && !addedChapterIds.has(chapter.id)) {
+        if (!isRead && !addedChapterIds.has(chapter.id)) {
           addedChapterIds.add(chapter.id);
           const parentBook = chapter.book;
           
@@ -2407,9 +2405,9 @@ class HistoryPlusService {
           });
         }
 
-        // Only add nested sections when the event-linked chapter itself is unread.
+        // Always add unread nested sections, even when the chapter itself is marked read.
         // Explicitly linked sections are handled separately via event.bookSections.
-        if (!isRead) {
+        {
           const parentBook = chapter.book;
           for (const section of (chapter.sections || [])) {
             if (!isCompleted(section.sectionCompletions) && !addedSectionIds.has(section.id)) {
@@ -2579,9 +2577,9 @@ class HistoryPlusService {
           });
         }
 
-        // Only add nested sections when the event-linked chapter itself is unread.
+        // Always add unread nested sections, even when the chapter itself is marked read.
         // Explicitly linked legacy sections are handled separately via event.sections.
-        if (!chapter.user_chapter_reads?.read) {
+        {
           for (const section of (chapter.sections || [])) {
             if (!section.user_section_reads?.read && !addedLegacySectionIds.has(section.id)) {
               addedLegacySectionIds.add(section.id);

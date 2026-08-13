@@ -278,7 +278,7 @@ function createOrderManagementRoutes(prisma, services) {
                       }
                     }
                     ,
-                    orderBy: { sortOrder: 'asc' }
+                    orderBy: [{ sortOrder: 'asc' }, { id: 'asc' }]
                   }
                 }
               }, // Include referenced custom order and its items for sub-order items
@@ -298,7 +298,7 @@ function createOrderManagementRoutes(prisma, services) {
                 }
               }
             },
-            orderBy: { sortOrder: 'asc' }
+            orderBy: [{ sortOrder: 'asc' }, { id: 'asc' }]
           },
           parentOrder: true,
           plexPlaylist: true,
@@ -320,7 +320,7 @@ function createOrderManagementRoutes(prisma, services) {
                   storyContainedInBook: true,
                   containedStories: true
                 },
-                orderBy: { sortOrder: 'asc' }
+                orderBy: [{ sortOrder: 'asc' }, { id: 'asc' }]
               }
             }
           }
@@ -478,7 +478,7 @@ function createOrderManagementRoutes(prisma, services) {
                 }
               }
               ,
-              orderBy: { sortOrder: 'asc' }
+              orderBy: [{ sortOrder: 'asc' }, { id: 'asc' }]
             }
           }
         }, // Include referenced custom order and its items for sub-order items
@@ -494,7 +494,7 @@ function createOrderManagementRoutes(prisma, services) {
         include: {
           items: {
             include: itemInclude,
-            orderBy: { sortOrder: 'asc' }
+            orderBy: [{ sortOrder: 'asc' }, { id: 'asc' }]
           },
           plexPlaylist: true,
           customPlaylist: true,
@@ -520,7 +520,7 @@ function createOrderManagementRoutes(prisma, services) {
           include: {
             items: {
               include: itemInclude,
-              orderBy: { sortOrder: 'asc' }
+              orderBy: [{ sortOrder: 'asc' }, { id: 'asc' }]
             },
             backgroundGallery: true
           }
@@ -647,7 +647,7 @@ function createOrderManagementRoutes(prisma, services) {
                       }
                     }
                     ,
-                    orderBy: { sortOrder: 'asc' }
+                    orderBy: [{ sortOrder: 'asc' }, { id: 'asc' }]
                   }
                 }
               }, // Include referenced custom order for sub-order items with full item data
@@ -667,7 +667,7 @@ function createOrderManagementRoutes(prisma, services) {
                 }
               }
             },
-            orderBy: { sortOrder: 'asc' }
+            orderBy: [{ sortOrder: 'asc' }, { id: 'asc' }]
           },
           parentOrder: true,
           plexPlaylist: true,
@@ -680,7 +680,7 @@ function createOrderManagementRoutes(prisma, services) {
                   storyContainedInBook: true,
                   containedStories: true
                 },
-                orderBy: { sortOrder: 'asc' }
+                orderBy: [{ sortOrder: 'asc' }, { id: 'asc' }]
               }
             }
           }

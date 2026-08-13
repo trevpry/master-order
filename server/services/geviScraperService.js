@@ -1162,9 +1162,8 @@ class GeviScraperService {
     const normalizeGroupTitle = (value) => {
       const raw = String(value || '').toLowerCase();
       return raw
-        .replace(/\([^)]*\)/g, '')
-        .replace(/\[[^\]]*\]/g, '')
-        .replace(/\{[^}]*\}/g, '')
+        // Ignore bracket characters but keep enclosed text so numeric identifiers still match.
+        .replace(/[()\[\]{}]/g, '')
         .replace(/[^a-z0-9]/g, '');
     };
 

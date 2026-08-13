@@ -836,6 +836,17 @@ export default function PerformerDetail() {
         body: JSON.stringify(updateData)
       });
       const result = await response.json();
+
+      // Mirror standalone scraper behavior: surface performer conflicts for merge/disambiguation.
+      if (response.status === 409 && result.conflict) {
+        console.log('⚠️ [Scrape All] Name conflict detected:', result);
+        setConflictData(result);
+        setPendingScrapeData(updateData);
+        setShowConflictModal(true);
+        setIsApplyingScrape(false);
+        return;
+      }
+
       if (!result.success) throw new Error(result.error || 'Update failed');
 
       // Additional images: the server PUT always sets the main image, so don't

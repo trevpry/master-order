@@ -3,6 +3,31 @@ export const buildSelectedPerformersForApply = ({ reviewEntries = [], matchedPer
     scrapedPerformers.map((entry) => [String(entry?.name || '').trim().toLowerCase(), entry])
   );
 
+  const normalize = (value) => String(value || '').trim().toLowerCase();
+
+  // Flatten direct matches + alternatives so explicit dropdown selections can
+  // resolve to the selected performer's ID rather than always falling back to
+  // the original matched performer.
+  const matchedCandidates = matchedPerformers.flatMap((entry) => {
+    const direct = [{
+      id: entry?.id || null,
+      name: entry?.name || '',
+      originalName: entry?.originalName || null,
+      actionCode: entry?.actionCode || null
+    }];
+
+    const alternatives = Array.isArray(entry?.alternatives)
+      ? entry.alternatives.map((alternative) => ({
+          id: alternative?.id || null,
+          name: alternative?.name || '',
+          originalName: entry?.originalName || null,
+          actionCode: alternative?.actionCode || entry?.actionCode || null
+        }))
+      : [];
+
+    return [...direct, ...alternatives];
+  });
+
   const base = Array.isArray(reviewEntries) && reviewEntries.length > 0
     ? reviewEntries
     : (() => {
@@ -46,10 +71,21 @@ export const buildSelectedPerformersForApply = ({ reviewEntries = [], matchedPer
       || entry.defaultSelection || entry.options?.[0] || '';
     const selectedName = selectionValue && selectionValue !== '__ADD_NEW__' ? selectionValue : entryName;
 
-    const matchedPerformer = matchedPerformers.find((candidate) =>
-      String(candidate?.name || '').trim().toLowerCase() === String(selectedName).trim().toLowerCase() ||
-      String(candidate?.originalName || '').trim().toLowerCase() === entryName.toLowerCase()
+    const defaultSelection = entry.defaultSelection || entry.options?.[0] || '';
+    const isExplicitOverride = Boolean(selectionValue && selectionValue !== '__ADD_NEW__' && selectionValue !== defaultSelection);
+
+    const matchedBySelectedName = matchedCandidates.find((candidate) =>
+      normalize(candidate?.name) === normalize(selectedName)
     );
+
+    const fallbackMatchedPerformer = isExplicitOverride
+      ? null
+      : matchedPerformers.find((candidate) =>
+          normalize(candidate?.name) === normalize(entryName) ||
+          normalize(candidate?.originalName) === normalize(entryName)
+        );
+
+    const matchedPerformer = matchedBySelectedName || fallbackMatchedPerformer;
 
     const scrapedPerformer = scrapedByOriginalName.get(entryName.toLowerCase())
       || scrapedPerformers.find((candidate) =>

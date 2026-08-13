@@ -64,7 +64,8 @@ async function getActiveCustomOrders() {
       include: {
         items: {
           where: { isWatched: false },
-          orderBy: { sortOrder: 'asc' },
+          // id breaks ties so items sharing a sortOrder never reorder between queries
+          orderBy: [{ sortOrder: 'asc' }, { id: 'asc' }],
           include: {
             book: true // Include unified book data for books
           }
@@ -76,7 +77,7 @@ async function getActiveCustomOrders() {
             customPlaylist: true,
             items: {
               where: { isWatched: false },
-              orderBy: { sortOrder: 'asc' },
+              orderBy: [{ sortOrder: 'asc' }, { id: 'asc' }],
               include: {
                 book: true // Include unified book data for books
               }

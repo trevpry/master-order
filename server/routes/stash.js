@@ -12343,6 +12343,9 @@ router.get('/performers/:id/available-scrapers', asyncHandler(async (req, res) =
   });
 }));
 
+// Upper bound on GEVI performer pages scraped per Scrape All run
+const GEVI_MAX_PERFORMER_CANDIDATES = 10;
+
 // POST /api/stash/performers/:id/scrape-all - Multi-source stash-box scrape for a performer
 router.post('/performers/:id/scrape-all', asyncHandler(async (req, res) => {
   const { id } = req.params;
@@ -12421,7 +12424,7 @@ router.post('/performers/:id/scrape-all', asyncHandler(async (req, res) => {
     });
   }
 
-  // GEVI: use saved URL if available, otherwise search by name + aliases
+  // GEVI: offer every candidate from the saved URL plus the name/alias searches
   try {
     let existingGeviUrl = null;
     if (performer.urls) {
@@ -12432,20 +12435,38 @@ router.post('/performers/:id/scrape-all', asyncHandler(async (req, res) => {
       } catch (_) { /* ignore */ }
     }
 
-    let geviUrl = existingGeviUrl;
-    if (!geviUrl) {
-      const namesToTry = [performer.name, ...(performer.alias ? performer.alias.split(',').map((a) => a.trim()).filter(Boolean) : [])];
-      for (const name of namesToTry) {
+    const candidateUrls = [];
+    const seenGeviUrls = new Set();
+    const addGeviCandidate = (url) => {
+      if (!url || typeof url !== 'string') return;
+      const normalized = url.split('?')[0].replace(/\/+$/, '').toLowerCase();
+      if (seenGeviUrls.has(normalized)) return;
+      seenGeviUrls.add(normalized);
+      candidateUrls.push(url);
+    };
+
+    // Saved URL first so it stays the default selection in the review modal
+    addGeviCandidate(existingGeviUrl);
+
+    const geviNamesToTry = [performer.name, ...(performer.alias ? performer.alias.split(',').map((a) => a.trim()).filter(Boolean) : [])];
+    for (const name of geviNamesToTry) {
+      if (!name || candidateUrls.length >= GEVI_MAX_PERFORMER_CANDIDATES) break;
+      try {
         const hits = await geviScraper.searchPerformer(name);
-        if (hits && hits.length > 0) { geviUrl = hits[0].url; break; }
+        (hits || []).forEach((hit) => addGeviCandidate(hit.url));
+      } catch (err) {
+        console.warn(`⚠️ [Performer Scrape All] GEVI search failed for "${name}":`, err.message);
       }
     }
 
-    if (geviUrl) {
-      console.log(`🔎 [Performer Scrape All] Scraping GEVI: ${geviUrl}`);
-      const scrapedRaw = await geviScraper.scrapePerformer(geviUrl);
-      const performerData = scrapedRaw?.metadata || scrapedRaw;
-      if (performerData && performerData.name) {
+    const geviResults = [];
+    for (const geviUrl of candidateUrls.slice(0, GEVI_MAX_PERFORMER_CANDIDATES)) {
+      try {
+        console.log(`🔎 [Performer Scrape All] Scraping GEVI: ${geviUrl}`);
+        const scrapedRaw = await geviScraper.scrapePerformer(geviUrl);
+        const performerData = scrapedRaw?.metadata || scrapedRaw;
+        if (!performerData || !performerData.name) continue;
+
         if (performerData.image) {
           performerData.displayImage = `${performerData.image}`;
         }
@@ -12458,17 +12479,23 @@ router.post('/performers/:id/scrape-all', asyncHandler(async (req, res) => {
           unmatchedTags = tagMatchResult.unmatched || [];
         }
 
-        sources.push({
-          id: 'gevi',
-          name: 'GEVI',
-          endpoint: 'gevi',
-          configured: true,
-          resultCount: 1,
-          hasResults: true,
-          usedFallback: !existingGeviUrl,
-          results: [{ ...performerData, _geviUrl: geviUrl, _matchedTags: matchedTags, _unmatchedTags: unmatchedTags }]
-        });
+        geviResults.push({ ...performerData, _geviUrl: geviUrl, _matchedTags: matchedTags, _unmatchedTags: unmatchedTags });
+      } catch (err) {
+        console.warn(`⚠️ [Performer Scrape All] GEVI scrape failed for ${geviUrl}:`, err.message);
       }
+    }
+
+    if (geviResults.length) {
+      sources.push({
+        id: 'gevi',
+        name: 'GEVI',
+        endpoint: 'gevi',
+        configured: true,
+        resultCount: geviResults.length,
+        hasResults: true,
+        usedFallback: !existingGeviUrl,
+        results: geviResults
+      });
     }
   } catch (err) {
     console.warn('⚠️ [Performer Scrape All] GEVI failed:', err.message);
