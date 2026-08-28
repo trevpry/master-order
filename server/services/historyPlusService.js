@@ -52,6 +52,14 @@ class HistoryPlusService {
     return year * 10000 + month * 100 + day;
   }
 
+  parseEventDuration(startDate, endDate) {
+    if (!startDate) return 0;
+    const start = this.parseHistoricalDateValue(startDate);
+    const end = endDate ? this.parseHistoricalDateValue(endDate) : start;
+    if (!start || !end) return 0;
+    return end - start;
+  }
+
   isUnifiedCompletionCompleted(completions) {
     if (!Array.isArray(completions) || completions.length === 0) {
       return false;
@@ -1860,11 +1868,21 @@ class HistoryPlusService {
         }
       });
 
-      // Sort events chronologically by parsing dates to numeric values
+      // Sort events by duration (length) in descending order
+      // Events with the same start date will be sorted by their duration (longer events first)
       const sortedEvents = events.sort((a, b) => {
-        const dateA = this.parseHistoricalDate(a.startDate);
-        const dateB = this.parseHistoricalDate(b.startDate);
-        return dateA - dateB;
+        const dateA = this.parseHistoricalDateValue(a.startDate);
+        const dateB = this.parseHistoricalDateValue(b.startDate);
+        
+        // First, sort by start date (ascending)
+        if (dateA !== dateB) {
+          return dateA - dateB;
+        }
+        
+        // If start dates are the same, sort by duration (descending - longer events first)
+        const durationA = this.parseEventDuration(a.startDate, a.endDate);
+        const durationB = this.parseEventDuration(b.startDate, b.endDate);
+        return durationB - durationA;
       });
 
       console.log(`🔍 Checking ${sortedEvents.length} events for unreviewed content...`);
