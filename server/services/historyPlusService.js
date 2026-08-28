@@ -2242,20 +2242,31 @@ class HistoryPlusService {
       const collapseSequentialContentGroups = (items) => {
         const groupedContent = new Map();
         const fallbackItems = [];
+        const explicitItems = []; // Items explicitly linked to event (should NOT be collapsed)
 
         for (const item of items) {
           const groupKey = getOrderedSequenceGroupKey(item);
 
+          // Items without a group key are fallback (videos, etc.)
           if (!groupKey) {
             fallbackItems.push(item);
             continue;
           }
 
+          // Check if this item is explicitly linked to the event
+          // These should NOT be collapsed - they represent direct choices from the event
+          const isExplicitlyLinked = item.explicitlyLinked || false;
+
           if (!groupedContent.has(groupKey)) {
             groupedContent.set(groupKey, []);
           }
 
-          groupedContent.get(groupKey).push(item);
+          // Store items that are explicitly linked separately
+          if (isExplicitlyLinked) {
+            explicitItems.push(item);
+          } else {
+            groupedContent.get(groupKey).push(item);
+          }
         }
 
         const orderedItems = [];
@@ -2271,7 +2282,7 @@ class HistoryPlusService {
           orderedItems.push(nextSequentialItem);
         }
 
-        return [...fallbackItems, ...orderedItems];
+        return [...fallbackItems, ...explicitItems, ...orderedItems];
       };
 
       // Collect only UNREVIEWED content
@@ -2317,11 +2328,13 @@ class HistoryPlusService {
             bookPublisher: book.publisher,
             bookPageCount: book.pageCount,
             bookCoverUrl: book.coverUrl,
-            bookDescription: book.description
+            bookDescription: book.description,
+            explicitlyLinked: true
           });
-          }
+        }
 
         // Always add unread chapters/sections nested under this book, even if the book itself is already completed.
+        // These are NESTED content, not explicitly linked to the event, so they should be collapsed.
         for (const chapter of (book.chapters || [])) {
           if (!isCompleted(chapter.chapterCompletions) && !addedChapterIds.has(chapter.id)) {
             addedChapterIds.add(chapter.id);
@@ -2401,44 +2414,14 @@ class HistoryPlusService {
             bookPublisher: parentBook?.publisher,
             bookPageCount: parentBook?.pageCount,
             bookCoverUrl: parentBook?.coverUrl,
-            bookDescription: parentBook?.description
+            bookDescription: parentBook?.description,
+            explicitlyLinked: true
           });
         }
 
-        // Always add unread nested sections, even when the chapter itself is marked read.
+        // When a chapter is explicitly linked, we don't add its nested sections
+        // because those sections are not explicitly linked to the event.
         // Explicitly linked sections are handled separately via event.bookSections.
-        {
-          const parentBook = chapter.book;
-          for (const section of (chapter.sections || [])) {
-            if (!isCompleted(section.sectionCompletions) && !addedSectionIds.has(section.id)) {
-              addedSectionIds.add(section.id);
-              availableContent.push({
-                type: 'section',
-                content: section,
-                title: `${parentBook?.title || 'Unknown Book'} - Chapter ${chapter.chapterNumber || ''}: ${chapter.title} - Section ${section.sectionNumber || ''}: ${section.title}`,
-                description: section.description || '',
-                sectionNumber: section.sectionNumber || 0,
-                sectionTitle: section.title,
-                sectionDescription: section.description,
-                sectionPageStart: section.pageStart,
-                sectionPageEnd: section.pageEnd,
-                chapterNumber: chapter.chapterNumber || 0,
-                chapterTitle: chapter.title,
-                chapterDescription: chapter.description,
-                pageStart: chapter.pageStart,
-                pageEnd: chapter.pageEnd,
-                bookTitle: parentBook?.title || 'Unknown Book',
-                bookAuthor: parentBook?.author || 'Unknown Author',
-                bookYear: parentBook?.publishYear,
-                bookIsbn: parentBook?.isbn,
-                bookPublisher: parentBook?.publisher,
-                bookPageCount: parentBook?.pageCount,
-                bookCoverUrl: parentBook?.coverUrl,
-                bookDescription: parentBook?.description
-              });
-            }
-          }
-        }
       });
 
       // Sections directly linked to events
@@ -2471,7 +2454,8 @@ class HistoryPlusService {
             bookPublisher: parentBook?.publisher,
             bookPageCount: parentBook?.pageCount,
             bookCoverUrl: parentBook?.coverUrl,
-            bookDescription: parentBook?.description
+            bookDescription: parentBook?.description,
+            explicitlyLinked: true
           });
         }
       });
@@ -2498,11 +2482,13 @@ class HistoryPlusService {
             bookPublisher: book.publisher,
             bookPageCount: book.pageCount,
             bookCoverUrl: book.coverUrl,
-            bookDescription: book.description
+            bookDescription: book.description,
+            explicitlyLinked: true
           });
           }
 
           // Always add unread chapters/sections nested under this book, even if the book itself is already read.
+          // These are NESTED content, not explicitly linked to the event, so they should be collapsed.
           for (const chapter of (book.chapters || [])) {
             if (!chapter.user_chapter_reads?.read && !addedLegacyChapterIds.has(chapter.id)) {
               addedLegacyChapterIds.add(chapter.id);
@@ -2573,12 +2559,14 @@ class HistoryPlusService {
             pageStart: chapter.pageStart,
             pageEnd: chapter.pageEnd,
             bookTitle: 'Unknown Book',
-            bookAuthor: 'Unknown Author'
+            bookAuthor: 'Unknown Author',
+            explicitlyLinked: true
           });
         }
 
         // Always add unread nested sections, even when the chapter itself is marked read.
         // Explicitly linked legacy sections are handled separately via event.sections.
+        // These nested sections are NOT explicitly linked to the event, so they should be collapsed.
         {
           for (const section of (chapter.sections || [])) {
             if (!section.user_section_reads?.read && !addedLegacySectionIds.has(section.id)) {
@@ -2619,7 +2607,8 @@ class HistoryPlusService {
             sectionTitle: section.title,
             sectionDescription: section.description,
             sectionPageStart: section.pageStart,
-            sectionPageEnd: section.pageEnd
+            sectionPageEnd: section.pageEnd,
+            explicitlyLinked: true
           });
         }
       });
