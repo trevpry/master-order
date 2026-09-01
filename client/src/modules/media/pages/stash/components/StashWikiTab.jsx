@@ -1,27 +1,20 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Link } from 'react-router-dom';
 
 /**
  * StashWikiTab - Tag wiki for the Stash section
  * Displays LLM-generated wiki pages for stash tags with relationships and descriptions.
- * Includes settings panel, lint system, and activity log.
  */
-export default function StashWikiTab({ initialSlug = null }) {
+export default function StashWikiTab() {
   const [pages, setPages] = useState([]);
   const [activeSlug, setActiveSlug] = useState(null);
   const [activePage, setActivePage] = useState(null);
-  const [activeView, setActiveView] = useState('wiki'); // 'wiki' | 'log' | 'settings' | 'lint'
+  const [activeView, setActiveView] = useState('wiki'); // 'wiki' | 'log'
   const [stats, setStats] = useState(null);
   const [log, setLog] = useState([]);
   const [loading, setLoading] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [correction, setCorrection] = useState('');
   const [showCorrection, setShowCorrection] = useState(false);
-  const [settings, setSettings] = useState({ stashWikiAutoGenEnabled: false, stashWikiAutoGenInterval: 120 });
-  const [schema, setSchema] = useState('');
-  const [schemaExpanded, setSchemaExpanded] = useState(false);
-  const [saving, setSaving] = useState(false);
-  const [lintResults, setLintResults] = useState(null);
 
   useEffect(() => {
     fetchPages();
@@ -39,13 +32,6 @@ export default function StashWikiTab({ initialSlug = null }) {
       setActivePage(null);
     }
   }, [activeSlug]);
-
-  useEffect(() => {
-    if (initialSlug) {
-      setActiveSlug(initialSlug);
-      setActiveView('wiki');
-    }
-  }, [initialSlug]);
 
   const fetchPages = async () => {
     try {
@@ -167,74 +153,6 @@ export default function StashWikiTab({ initialSlug = null }) {
     setActiveView('wiki');
   }, []);
 
-  const fetchSettings = async () => {
-    try {
-      const res = await fetch('/api/stash-wiki/settings');
-      const json = await res.json();
-      if (json.success) {
-        setSettings({
-          stashWikiAutoGenEnabled: json.data.stashWikiAutoGenEnabled,
-          stashWikiAutoGenInterval: json.data.stashWikiAutoGenInterval
-        });
-      }
-    } catch (err) {
-      console.error('Failed to fetch stash wiki settings:', err);
-    }
-  };
-
-  const fetchSchema = async () => {
-    try {
-      const res = await fetch('/api/stash-wiki/schema');
-      const json = await res.json();
-      if (json.success) setSchema(json.data.schema);
-    } catch (err) {
-      console.error('Failed to fetch stash wiki schema:', err);
-    }
-  };
-
-  const saveSettings = async () => {
-    setSaving(true);
-    try {
-      await fetch('/api/stash-wiki/settings', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(settings)
-      });
-    } catch (err) {
-      console.error('Failed to save stash wiki settings:', err);
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const saveSchema = async () => {
-    setSaving(true);
-    try {
-      await fetch('/api/stash-wiki/schema', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ schema })
-      });
-    } catch (err) {
-      console.error('Failed to save stash wiki schema:', err);
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const handleLint = async () => {
-    setLoading(true);
-    try {
-      const res = await fetch('/api/stash-wiki/lint', { method: 'POST' });
-      const json = await res.json();
-      if (json.success) setLintResults(json.data);
-    } catch (err) {
-      console.error('Lint failed:', err);
-    } finally {
-      setLoading(false);
-    }
-  };
-
   return (
     <div className="flex h-[calc(100vh-10rem)]">
       {/* Sidebar */}
@@ -242,7 +160,7 @@ export default function StashWikiTab({ initialSlug = null }) {
         {/* View Tabs */}
         <div className="flex border-b border-gray-700">
           <button
-            className={`flex-1 px-2 py-2 text-xs font-medium ${
+            className={`flex-1 px-3 py-2 text-sm font-medium ${
               activeView === 'wiki' ? 'text-blue-400 border-b-2 border-blue-400' : 'text-gray-400 hover:text-gray-200'
             }`}
             onClick={() => setActiveView('wiki')}
@@ -250,28 +168,12 @@ export default function StashWikiTab({ initialSlug = null }) {
             📖 Wiki
           </button>
           <button
-            className={`flex-1 px-2 py-2 text-xs font-medium ${
-              activeView === 'lint' ? 'text-blue-400 border-b-2 border-blue-400' : 'text-gray-400 hover:text-gray-200'
-            }`}
-            onClick={() => { setActiveView('lint'); if (!lintResults) handleLint(); }}
-          >
-            🔍 Lint
-          </button>
-          <button
-            className={`flex-1 px-2 py-2 text-xs font-medium ${
+            className={`flex-1 px-3 py-2 text-sm font-medium ${
               activeView === 'log' ? 'text-blue-400 border-b-2 border-blue-400' : 'text-gray-400 hover:text-gray-200'
             }`}
             onClick={() => { setActiveView('log'); fetchLog(); }}
           >
             📋 Log
-          </button>
-          <button
-            className={`flex-1 px-2 py-2 text-xs font-medium ${
-              activeView === 'settings' ? 'text-blue-400 border-b-2 border-blue-400' : 'text-gray-400 hover:text-gray-200'
-            }`}
-            onClick={() => { setActiveView('settings'); fetchSettings(); fetchSchema(); }}
-          >
-            ⚙️ Settings
           </button>
         </div>
 
@@ -343,14 +245,6 @@ export default function StashWikiTab({ initialSlug = null }) {
                   <h1 className="text-2xl font-bold text-white">{activePage.title}</h1>
                   <div className="flex items-center gap-3 mt-1 text-xs text-gray-500">
                     {activePage.tagId && <span className="bg-blue-500/20 text-blue-300 px-2 py-0.5 rounded">🏷️ Tag</span>}
-                    {activePage.tagId && (
-                      <Link
-                        to={`/media/stash/tags/${activePage.tagId}`}
-                        className="bg-blue-600 hover:bg-blue-700 text-white px-2 py-0.5 rounded"
-                      >
-                        Open Tag
-                      </Link>
-                    )}
                     <span>Updated {new Date(activePage.updatedAt).toLocaleString()}</span>
                   </div>
                 </div>
@@ -498,7 +392,6 @@ export default function StashWikiTab({ initialSlug = null }) {
                         entry.action === 'correct' ? 'bg-yellow-500/20 text-yellow-300' :
                         entry.action === 'merge' ? 'bg-purple-500/20 text-purple-300' :
                         entry.action === 'delete' ? 'bg-red-500/20 text-red-300' :
-                        entry.action === 'lint' ? 'bg-cyan-500/20 text-cyan-300' :
                         'bg-gray-500/20 text-gray-300'
                       }`}>
                         {entry.action}
@@ -523,157 +416,6 @@ export default function StashWikiTab({ initialSlug = null }) {
                     )}
                   </div>
                 ))}
-              </div>
-            )}
-          </div>
-        )}
-
-        {activeView === 'settings' && (
-          <div className="max-w-3xl mx-auto p-6">
-            <h2 className="text-2xl font-bold text-white mb-6">Tag Wiki Settings</h2>
-
-            <div className="bg-gray-900 rounded-lg p-6 border border-gray-800 mb-6">
-              <h3 className="text-lg font-semibold text-white mb-4">Auto-Generation</h3>
-
-              <div className="flex items-center justify-between py-3">
-                <div>
-                  <div className="text-sm font-medium text-gray-200">Auto-Generate Wiki Pages</div>
-                  <div className="text-xs text-gray-500">Automatically generate wiki pages for new tags on a schedule</div>
-                </div>
-                <button
-                  onClick={() => setSettings(s => ({ ...s, stashWikiAutoGenEnabled: !s.stashWikiAutoGenEnabled }))}
-                  className={`relative w-11 h-6 rounded-full transition-colors ${
-                    settings.stashWikiAutoGenEnabled ? 'bg-blue-600' : 'bg-gray-700'
-                  }`}
-                >
-                  <span className={`absolute top-0.5 w-5 h-5 rounded-full bg-white transition-transform ${
-                    settings.stashWikiAutoGenEnabled ? 'left-[22px]' : 'left-0.5'
-                  }`} />
-                </button>
-              </div>
-
-              <div className="flex items-center justify-between py-3">
-                <div>
-                  <div className="text-sm font-medium text-gray-200">Generation Interval</div>
-                  <div className="text-xs text-gray-500">How often to check for new tags to process (minutes)</div>
-                </div>
-                <input
-                  type="number"
-                  min={10}
-                  max={1440}
-                  value={settings.stashWikiAutoGenInterval}
-                  onChange={e => setSettings(s => ({ ...s, stashWikiAutoGenInterval: parseInt(e.target.value) || 120 }))}
-                  className="w-24 bg-gray-800 text-gray-200 text-sm rounded px-3 py-1.5 border border-gray-700 focus:border-blue-500 focus:outline-none"
-                />
-              </div>
-
-              <button
-                onClick={saveSettings}
-                disabled={saving}
-                className="mt-4 px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 rounded-lg text-white text-sm"
-              >
-                {saving ? 'Saving...' : 'Save Settings'}
-              </button>
-            </div>
-
-            <div className="bg-gray-900 rounded-lg p-6 border border-gray-800">
-              <div className="flex items-center justify-between mb-4">
-                <div>
-                  <h3 className="text-lg font-semibold text-white">Tag Wiki Schema</h3>
-                  <p className="text-xs text-gray-500 mt-1">
-                    Instructions that tell the AI how to generate and maintain tag wiki pages.
-                  </p>
-                </div>
-                <button
-                  onClick={() => setSchemaExpanded(!schemaExpanded)}
-                  className="text-sm text-gray-400 hover:text-white"
-                >
-                  {schemaExpanded ? 'Collapse' : 'Expand'}
-                </button>
-              </div>
-
-              {schemaExpanded && (
-                <>
-                  <textarea
-                    value={schema}
-                    onChange={e => setSchema(e.target.value)}
-                    rows={20}
-                    className="w-full bg-gray-800 text-gray-200 text-sm font-mono rounded-lg p-4 border border-gray-700 focus:border-blue-500 focus:outline-none resize-y"
-                  />
-                  <button
-                    onClick={saveSchema}
-                    disabled={saving}
-                    className="mt-4 px-4 py-2 bg-purple-600 hover:bg-purple-700 disabled:opacity-50 rounded-lg text-white text-sm"
-                  >
-                    {saving ? 'Saving...' : 'Save Schema'}
-                  </button>
-                </>
-              )}
-            </div>
-          </div>
-        )}
-
-        {activeView === 'lint' && (
-          <div className="max-w-4xl mx-auto p-6">
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="text-xl font-bold text-white">Wiki Health Check</h2>
-              <button
-                onClick={handleLint}
-                disabled={loading}
-                className="px-4 py-2 bg-cyan-600 hover:bg-cyan-700 disabled:opacity-50 rounded text-sm text-white"
-              >
-                {loading ? '⏳ Scanning...' : '🔍 Run Lint'}
-              </button>
-            </div>
-
-            {lintResults ? (
-              <>
-                <div className="mb-4 p-3 bg-gray-900 rounded-lg border border-gray-800">
-                  <span className="text-sm text-gray-300">
-                    Scanned <strong className="text-white">{lintResults.totalPages}</strong> pages — 
-                    found <strong className={lintResults.issues.length === 0 ? 'text-green-400' : 'text-yellow-400'}>
-                      {lintResults.issues.length}
-                    </strong> issues
-                  </span>
-                </div>
-
-                {lintResults.issues.length === 0 ? (
-                  <div className="text-center py-12 text-gray-500">
-                    <div className="text-4xl mb-2">✅</div>
-                    <p>No issues found — wiki is healthy!</p>
-                  </div>
-                ) : (
-                  <div className="space-y-2">
-                    {lintResults.issues.map((issue, idx) => (
-                      <div key={idx} className="p-3 bg-gray-900 rounded-lg border border-gray-800 flex items-start gap-3">
-                        <span className={`px-2 py-0.5 rounded text-xs font-medium flex-shrink-0 ${
-                          issue.type === 'broken-link' ? 'bg-red-500/20 text-red-300' :
-                          issue.type === 'orphan' ? 'bg-yellow-500/20 text-yellow-300' :
-                          issue.type === 'stale' ? 'bg-orange-500/20 text-orange-300' :
-                          issue.type === 'empty' ? 'bg-gray-500/20 text-gray-300' :
-                          issue.type === 'missing-tag' ? 'bg-red-500/20 text-red-300' :
-                          issue.type === 'no-embedding' ? 'bg-purple-500/20 text-purple-300' :
-                          'bg-gray-500/20 text-gray-300'
-                        }`}>
-                          {issue.type}
-                        </span>
-                        <div>
-                          <button
-                            onClick={() => { setActiveSlug(issue.page); setActiveView('wiki'); }}
-                            className="text-sm text-blue-400 hover:text-blue-300 hover:underline"
-                          >
-                            {issue.page}
-                          </button>
-                          <p className="text-xs text-gray-500 mt-0.5">{issue.detail}</p>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </>
-            ) : (
-              <div className="text-center py-12 text-gray-500">
-                <p>Click "Run Lint" to scan wiki pages for issues.</p>
               </div>
             )}
           </div>

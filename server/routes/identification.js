@@ -11,8 +11,9 @@ const identificationService = new IdentificationService();
  */
 router.post('/album/:ratingKey', asyncHandler(async (req, res) => {
   const { ratingKey } = req.params;
+  const { plexUrl, plexToken } = req.body;
   
-  const candidates = await identificationService.identifyAlbum(ratingKey);
+  const candidates = await identificationService.identifyAlbum(ratingKey, { plexUrl, plexToken });
   sendSuccess(res, {
     candidates,
     count: candidates.length,
@@ -26,8 +27,9 @@ router.post('/album/:ratingKey', asyncHandler(async (req, res) => {
  */
 router.post('/artist/:ratingKey', asyncHandler(async (req, res) => {
   const { ratingKey } = req.params;
+  const { plexUrl, plexToken } = req.body;
   
-  const candidates = await identificationService.identifyArtist(ratingKey);
+  const candidates = await identificationService.identifyArtist(ratingKey, { plexUrl, plexToken });
   sendSuccess(res, {
     candidates,
     count: candidates.length,
@@ -48,20 +50,27 @@ router.get('/:entityType/:entityKey/candidates', asyncHandler(async (req, res) =
 
 /**
  * POST /api/identification/accept/:candidateId
- * Accept an identification candidate and apply metadata
+ * Accept an identification candidate and return raw metadata (without saving)
  */
 router.post('/accept/:candidateId', asyncHandler(async (req, res) => {
   const candidateId = parseInt(req.params.candidateId);
+  const { plexUrl, plexToken } = req.body;
   
   if (isNaN(candidateId)) {
     return sendBadRequest(res, 'Invalid candidate ID');
   }
   
-  const updatedEntity = await identificationService.acceptIdentification(candidateId);
-  sendSuccess(res, { 
-    entity: updatedEntity,
-    message: 'Identification accepted and metadata applied'
-  });
+  const result = await identificationService.acceptIdentification(candidateId);
+  
+  if (result.success) {
+    sendSuccess(res, { 
+      data: result.data,
+      candidate: result.candidate,
+      message: 'Metadata retrieved successfully'
+    });
+  } else {
+    sendError(res, result.error);
+  }
 }));
 
 /**

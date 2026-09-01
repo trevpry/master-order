@@ -717,6 +717,16 @@ const ArtistDetail = ({
                       {album.totalPlayCount} {album.totalPlayCount === 1 ? 'play' : 'plays'}
                     </p>
                   )}
+                  {album.trackCount !== undefined && (
+                    <p className="album-track-count">
+                      {album.trackCount} track{album.trackCount !== 1 ? 's' : ''}
+                    </p>
+                  )}
+                  {album.workCount !== undefined && (
+                    <p className="album-work-count">
+                      {album.workCount} work{album.workCount !== 1 ? 's' : ''}
+                    </p>
+                  )}
                 </div>
               </div>
             ))}

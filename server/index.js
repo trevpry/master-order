@@ -20,12 +20,6 @@ const healthRoutes = require('./routes/health');
 const databaseHealthRoutes = require('./routes/databaseHealth');
 const monitoringRoutes = require('./routes/monitoring');
 const plexRoutes = require('./routes/plex');
-const radarrRoutes = require('./routes/radarr');
-const sonarrRoutes = require('./routes/sonarr');
-const mediaProbeRoutes = require('./routes/mediaProbe');
-const streamRoutes = require('./routes/stream');
-const libraryRoutes = require('./routes/library');
-const watchProgressRoutes = require('./routes/watchProgress');
 const createStashRouter = require('./routes/stash');
 const groupsRoutes = require('./routes/groups');
 const comicvineRoutes = require('./routes/comicvine');
@@ -62,9 +56,6 @@ const PlexDatabaseService = require('./plexDatabaseService');
 const PlexSyncService = require('./plexSyncService'); // Added import
 const BackgroundSyncService = require('./backgroundSyncService'); // Added import
 const StashBackgroundSyncService = require('./stashBackgroundSyncService'); // Added import
-const RadarrSyncService = require('./services/radarrSyncService');
-const SonarrSyncService = require('./services/sonarrSyncService');
-const LibraryBackgroundSyncService = require('./services/libraryBackgroundSyncService');
 const ArtworkCacheService = require('./artworkCacheService'); // Added import
 const subOrderService = require('./subOrderService'); // Added import
 const WatchLogService = require('./watchLogService'); // Added import
@@ -74,31 +65,17 @@ const { getTimezoneAwarePeriodBounds, getTimezoneAwareDateGrouping, formatDateIn
 const StatisticsService = require('./services/statisticsService');
 const WatchStatsRoutes = require('./routes/watchStatsRoutes');
 const WeatherSchedulerService = require('./services/WeatherSchedulerService'); // Added import
-const WikiBackgroundService = require('./services/WikiBackgroundService'); // Wiki background ingest
-const StashWikiBackgroundService = require('./services/StashWikiBackgroundService'); // Stash wiki background generation
 
 // Initialize services
 const plexDb = new PlexDatabaseService();
 const plexSync = new PlexSyncService(); // Initialize the sync service
 const backgroundSync = new BackgroundSyncService(); // Initialize background sync service
 const stashBackgroundSync = new StashBackgroundSyncService(); // Initialize Stash background sync service
-const radarrBackgroundSync = new LibraryBackgroundSyncService({
-  providerName: 'radarr',
-  syncService: new RadarrSyncService(),
-  intervalSettingsKey: 'radarrSyncInterval',
-}); // Movie library population (see SONARR_RADARR_DIRECT_PLAY_MIGRATION_PLAN.md)
-const sonarrBackgroundSync = new LibraryBackgroundSyncService({
-  providerName: 'sonarr',
-  syncService: new SonarrSyncService(),
-  intervalSettingsKey: 'sonarrSyncInterval',
-}); // TV library population (see SONARR_RADARR_DIRECT_PLAY_MIGRATION_PLAN.md)
 const artworkCache = new ArtworkCacheService(); // Initialize artwork cache service
 const watchLogService = new WatchLogService(prisma); // Initialize watch log service
 const statisticsService = new StatisticsService(prisma, watchLogService);
 const watchStatsRoutes = new WatchStatsRoutes(watchLogService, statisticsService);
 const weatherScheduler = new WeatherSchedulerService(); // Initialize weather scheduler service
-const wikiBackground = new WikiBackgroundService(); // Initialize wiki background ingest service
-const stashWikiBackground = new StashWikiBackgroundService(); // Initialize stash wiki background service
 const ListScrapeBackgroundService = require('./services/ListScrapeBackgroundService');
 const tvdbServiceInstance = require('./tvdbService');
 const listScrapeBackground = new ListScrapeBackgroundService(tvdbServiceInstance);
@@ -277,14 +254,6 @@ app.use('/api/locations', locationsRoutes);
 const chatRoutes = require('./routes/chat');
 app.use('/api/chat', chatRoutes);
 
-// Wiki (LLM Knowledge Base) API routes
-const wikiRoutes = require('./routes/wiki');
-app.use('/api/wiki', wikiRoutes);
-
-// Stash Tag Wiki API routes
-const stashWikiRoutes = require('./routes/stashWiki');
-app.use('/api/stash-wiki', stashWikiRoutes);
-
 // Settings API routes
 app.use('/api/settings', settingsRoutes);
 
@@ -302,14 +271,6 @@ app.use('/api/database-health', databaseHealthRoutes);
 
 // Plex Integration API routes
 app.use('/api/plex', plexRoutes);
-
-// Radarr/Sonarr Integration API routes (see SONARR_RADARR_DIRECT_PLAY_MIGRATION_PLAN.md)
-app.use('/api/radarr', radarrRoutes);
-app.use('/api/sonarr', sonarrRoutes);
-app.use('/api/media-probe', mediaProbeRoutes);
-app.use('/api/stream', streamRoutes);
-app.use('/api/library', libraryRoutes);
-app.use('/api/watch-progress', watchProgressRoutes);
 
 // Stash Integration API routes
 const stashRoutes = createStashRouter({ 
@@ -691,16 +652,7 @@ async function shutdown() {
   
   // Stop background sync service
   await backgroundSync.stop();
-  await radarrBackgroundSync.stop();
-  await sonarrBackgroundSync.stop();
-
-  // Stop any active direct-play/HLS transcode sessions (kills ffmpeg processes)
-  try {
-    require('./services/streamingService').stopAllSessions();
-  } catch (error) {
-    console.error('Failed to stop streaming sessions during shutdown:', error);
-  }
-
+  
   await prisma.$disconnect();
   console.log('Prisma client disconnected.');
   process.exit(0);
@@ -800,38 +752,12 @@ server.listen(PORT, '0.0.0.0', async () => {
   } catch (error) {
     console.error('Failed to start Stash background sync service:', error);
   }
-
-  // Start Radarr/Sonarr background sync services (no-op if not configured yet)
-  try {
-    await radarrBackgroundSync.start();
-  } catch (error) {
-    console.error('Failed to start Radarr background sync service:', error);
-  }
-  try {
-    await sonarrBackgroundSync.start();
-  } catch (error) {
-    console.error('Failed to start Sonarr background sync service:', error);
-  }
   
   // Start weather scheduler service
   try {
     await weatherScheduler.start();
   } catch (error) {
     console.error('Failed to start weather scheduler service:', error);
-  }
-  
-  // Start wiki background ingest service
-  try {
-    await wikiBackground.start();
-  } catch (error) {
-    console.error('Failed to start wiki background ingest service:', error);
-  }
-  
-  // Start stash wiki background generation service
-  try {
-    await stashWikiBackground.start();
-  } catch (error) {
-    console.error('Failed to start stash wiki background service:', error);
   }
   
   // Start list scrape background service

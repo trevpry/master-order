@@ -1,0 +1,285 @@
+name: WuBoyz
+
+# Normalizes tracking links and mobile URLs into canonical https://www.wuboyz.com/ URLs
+urlReplacements:
+  - pattern: '^https?://(?:www\.)?wuboyz\.net/track/'
+    replace: 'https://www.wuboyz.com/'
+    regex: true
+  - pattern: '^https?://(?:www\.)?wuboyz\.net/strack/'
+    replace: 'https://www.wuboyz.com/'
+    regex: true
+  - pattern: '^https?://(?:www\.)?wuboyz\.net/mobile-'
+    replace: 'https://www.wuboyz.com/'
+    regex: true
+
+sceneByURL:
+  - action: scrapeXPath
+    url:
+      - wuboyz.com/scenes/
+      - wuboyz.com/strack/
+      - www2.wuboyz.com/track/
+    scraper: sceneScraper
+
+movieByURL:
+  - action: scrapeXPath
+    url:
+      - wuboyz.com/scenes/
+      - wuboyz.com/strack/
+      - www2.wuboyz.com/track/
+    scraper: movieScraper
+
+performerByURL:
+  - action: scrapeXPath
+    url:
+      - wuboyz.com/models/
+    scraper: performerScraper
+
+# Title search uses the public search.php endpoint.
+# Performer search is unavailable: /models has no public listing page (404).
+sceneByFragment:
+  - action: scrapeXPath
+    titleSearchScraper: sceneSearchScraper
+    studioSearchUrl: https://www.wuboyz.com/search.php?query={title}&searching=Search
+    spacesConvertTo: '+'
+
+xPathScrapers:
+  sceneScraper:
+    scene:
+      Title:
+        selector: //h2[@class="text-left"]
+      Date:
+        selector: //div[contains(@class,"date")]//span[contains(@class,"mr-2")]
+        postProcess:
+          - replace:
+              - regex: '\s*\d{1,2}:\d{2}\s*$'
+                with: ''
+          - parseDate: 02 Jan 06
+      Details: //div[contains(@class,"description")]
+      Image:
+        selector: //meta[@property="og:image"]/@content
+      Studio:
+        Name:
+          fixed: WuBoyz
+      Performers:
+        Name: //div[@class="model-info"]/h2
+        URL:
+          selector: //div[@class="model-info"]/h2/../following-sibling::div//a/@href
+          postProcess:
+            - replace:
+                - regex: '#.*$'
+                  with: ''
+                - regex: '^/'
+                  with: 'https://www.wuboyz.com/'
+      Tags:
+        Name:
+          selector: //div[contains(@class,"v-tags")]//a
+          postProcess:
+            - replace:
+                - regex: '^#'
+                  with: ''
+
+  movieScraper:
+    movie:
+      Title:
+        selector: //h2[@class="text-left"]
+      Synopsis: //div[contains(@class,"description")]
+      Date:
+        selector: //div[contains(@class,"date")]//span[contains(@class,"mr-2")]
+        postProcess:
+          - replace:
+              - regex: '\s*\d{1,2}:\d{2}\s*$'
+                with: ''
+          - parseDate: 02 Jan 06
+      Duration:
+        selector: //div[contains(@class,"date")]
+        postProcess:
+          - replace:
+              - regex: '^.*?\s*(\d{1,2}:\d{2})\s*$'
+                with: '$1'
+      Studio:
+        Name:
+          fixed: WuBoyz
+      FrontImage:
+        selector: //meta[@property="og:image"]/@content
+        postProcess:
+          - replace:
+              - regex: '^//'
+                with: 'https://'
+
+  performerScraper:
+    performer:
+      Name: //div[@class="model-info"]/h2
+      Gender:
+        fixed: Male
+      Details: //div[@class="bio"]
+      Image:
+        selector: //div[@class="model-info"]//img/@src
+        postProcess:
+          - replace:
+              - regex: '^//'
+                with: 'https://'
+      Ethnicity:
+        selector: //div[@class="stats"]//strong[contains(text(),"Race")]/following-sibling::text()
+        postProcess:
+          - replace:
+              - regex: '^Race:\s*'
+                with: ''
+      EyeColor:
+        selector: //div[@class="stats"]//strong[contains(text(),"Eyes")]/following-sibling::text()
+        postProcess:
+          - replace:
+              - regex: '^Eyes:\s*'
+                with: ''
+      HairColor:
+        selector: //div[@class="stats"]//strong[contains(text(),"Hair")]/following-sibling::text()
+        postProcess:
+          - replace:
+              - regex: '^Hair:\s*'
+                with: ''
+      Height:
+        selector: //div[@class="stats"]//strong[contains(text(),"Height")]/following-sibling::text()
+        postProcess:
+          - replace:
+              - regex: '^Height:\s*'
+                with: ''
+      PenisLength:
+        selector: //div[@class="stats"]//strong[contains(text(),"Dick")]/following-sibling::text()
+        postProcess:
+          - replace:
+              - regex: '^Dick Size:\s*'
+                with: ''
+
+  sceneSearchScraper:
+    pagination:
+      maxPages: 1
+    scene:
+      Title:
+        selector: //div[contains(@class,"v-item")]//div[contains(@class,"v-title")]//a
+      URL:
+        selector: //div[contains(@class,"v-item")]//div[contains(@class,"v-title")]//a/@href
+        postProcess:
+          - replace:
+              - regex: '\?.*$'
+                with: ''
+              - regex: '^/'
+                with: 'https://www.wuboyz.com/'
+      Image:
+        selector: //div[contains(@class,"v-item")]//div[contains(@class,"v-img")]//img/@src
+        postProcess:
+          - replace:
+              - regex: '^//'
+                with: 'https://'
+      Date:
+        selector: //div[contains(@class,"v-item")]//div[contains(@class,"date")]
+        postProcess:
+          - replace:
+              - regex: '^[\s\S]*?(\d{1,2}\s+[A-Za-z]{3}\s+\d{2,4})[\s\S]*$'
+                with: '$1'
+          - parseDate: 02 Jan 06
+
+  performerSearchScraper:
+    performer:
+      performerSceneScraper: performerSceneScraper
+      Name: //div[@class="model-info"]/h2
+      URL:
+        selector: //div[@class="model-info"]/h2/../following-sibling::div//a/@href
+        postProcess:
+          - replace:
+              - regex: '#.*$'
+                with: ''
+              - regex: '^/'
+                with: 'https://www.wuboyz.com/'
+      Image:
+        selector: //div[@class="model-info"]//img/@src
+        postProcess:
+          - replace:
+              - regex: '^//'
+                with: 'https://'
+
+  performerSceneScraper:
+    scene:
+      Title:
+        selector: //div[@class="v-grid"]/div[@class="v-item"]//img/@alt
+        postProcess:
+          - replace:
+              - regex: '%26'
+                with: '&'
+              - regex: '%21'
+                with: '!'
+              - regex: '%27'
+                with: "'"
+              - regex: '%2C'
+                with: ','
+              - regex: '%3F'
+                with: '?'
+              - regex: '%3A'
+                with: ':'
+              - regex: '%28'
+                with: '('
+              - regex: '%29'
+                with: ')'
+              - regex: '\+'
+                with: ' '
+              - regex: '\+'
+                with: ' '
+              - regex: '\+'
+                with: ' '
+              - regex: '\+'
+                with: ' '
+              - regex: '\+'
+                with: ' '
+              - regex: '\+'
+                with: ' '
+              - regex: '\+'
+                with: ' '
+              - regex: '\+'
+                with: ' '
+              - regex: '\+'
+                with: ' '
+              - regex: '\+'
+                with: ' '
+      URL:
+        selector: //div[@class="v-grid"]/div[@class="v-item"]//a/@href
+        postProcess:
+          - replace:
+              - regex: '\?.*$'
+                with: ''
+              - regex: '^/'
+                with: 'https://www.wuboyz.com/'
+      Image:
+        selector: //div[@class="v-grid"]/div[@class="v-item"]//img/@src
+        postProcess:
+          - replace:
+              - regex: '^//'
+                with: 'https://'
+      Date:
+        selector: //div[@class="v-grid"]/div[@class="v-item"]//span[@class="date"]
+        postProcess:
+          - replace:
+              - regex: 'January'
+                with: '01'
+              - regex: 'February'
+                with: '02'
+              - regex: 'March'
+                with: '03'
+              - regex: 'April'
+                with: '04'
+              - regex: 'May'
+                with: '05'
+              - regex: 'June'
+                with: '06'
+              - regex: 'July'
+                with: '07'
+              - regex: 'August'
+                with: '08'
+              - regex: 'September'
+                with: '09'
+              - regex: 'October'
+                with: '10'
+              - regex: 'November'
+                with: '11'
+              - regex: 'December'
+                with: '12'
+              - regex: '\s+'
+                with: ' '
+          - parseDate: 01 02, 2006

@@ -17,8 +17,8 @@ router.get('/settings', asyncHandler(async (req, res) => {
 
 // PUT /api/chat/settings - Update Ollama connection settings
 router.put('/settings', asyncHandler(async (req, res) => {
-  const { ollamaUrl, ollamaDefaultModel, ollamaEmbeddingModel } = req.body;
-  await chatService.updateOllamaSettings({ ollamaUrl, ollamaDefaultModel, ollamaEmbeddingModel });
+  const { ollamaUrl, ollamaDefaultModel } = req.body;
+  await chatService.updateOllamaSettings({ ollamaUrl, ollamaDefaultModel });
   const updated = await chatService.getOllamaSettings();
   sendSuccess(res, updated);
 }));
@@ -163,22 +163,5 @@ router.post('/conversations/:id/messages', async (req, res) => {
     }
   }
 });
-
-// ============================================================================
-// RAG EMBEDDINGS
-// ============================================================================
-
-// POST /api/chat/embeddings/backfill - Generate embeddings for old messages
-router.post('/embeddings/backfill', asyncHandler(async (req, res) => {
-  const { batchSize } = req.body;
-  const result = await chatService.backfillEmbeddings(batchSize || 50);
-  sendSuccess(res, result);
-}));
-
-// GET /api/chat/embeddings/status - Check embedding coverage
-router.get('/embeddings/status', asyncHandler(async (req, res) => {
-  const status = await chatService.getEmbeddingStatus();
-  sendSuccess(res, status);
-}));
 
 module.exports = router;

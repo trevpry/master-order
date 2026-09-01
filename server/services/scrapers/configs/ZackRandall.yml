@@ -1,0 +1,459 @@
+name: ZackRandall
+
+# Normalizes NATS tracking links (www2.zackrandall.net/track/...) and mobile URLs
+# into canonical https://www.zackrandall.net/zack-randall-watch/... URLs before scraping.
+urlReplacements:
+  - pattern: '^https?://www2\.zackrandall\.net/strack/[^/]+/[^/]+/[^/]+/[^/]+/(?:mobile-)?'
+    replace: 'https://www.zackrandall.net/'
+    regex: true
+  - pattern: '^https?://www2\.zackrandall\.net/track/[^/]+/(?:mobile-)?'
+    replace: 'https://www.zackrandall.net/'
+    regex: true
+  - pattern: '^https?://(?:www\.)?zackrandall\.net/mobile-'
+    replace: 'https://www.zackrandall.net/'
+    regex: true
+
+sceneByURL:
+  - action: scrapeXPath
+    url:
+      - zackrandall.net/zack-randall-watch/
+      - zackrandall.net/mobile-zack-randall-watch/
+      - www2.zackrandall.net/track/
+      - www2.zackrandall.net/strack/
+    scraper: sceneScraper
+
+movieByURL:
+  - action: scrapeXPath
+    url:
+      - zackrandall.net/zack-randall-watch/
+      - zackrandall.net/mobile-zack-randall-watch/
+      - www2.zackrandall.net/track/
+      - www2.zackrandall.net/strack/
+    scraper: movieScraper
+
+performerByURL:
+  - action: scrapeXPath
+    url:
+      - zackrandall.net/zack-randall-model/
+    scraper: performerScraper
+
+sceneByFragment:
+  - action: scrapeXPath
+    # Two-stage performer search: locate the model on the (single page) model index,
+    # then pull every scene listed on that model's page.
+    performerSearchScraper: performerSearchScraper
+    performerSearchUrl: https://www.zackrandall.net/zack-randall-models?nats=My4yLjIyLjEyMC4wLjAuMC4wLjA&sort=alpha&show=200
+    # Title search walks the full video index (200 per page) and filters by title.
+    titleSearchScraper: sceneSearchScraper
+    studioSearchUrl: https://www.zackrandall.net/zack-randall-videos?nats=My4yLjIyLjEyMC4wLjAuMC4wLjA&sort=new&show=200
+    spacesConvertTo: '+'
+
+xPathScrapers:
+  sceneScraper:
+    scene:
+      # Header reads "March 17, 2020 - Lucky Javiers Sucks Hung Corey"
+      Title:
+        selector: //span[@class="video-title-text"]
+        postProcess:
+          - replace:
+              - regex: '^.*?\s+-\s+'
+                with: ''
+      Date:
+        selector: //span[@class="video-title-text"]
+        postProcess:
+          - replace:
+              - regex: '\s+-\s+.*$'
+                with: ''
+              - regex: 'January'
+                with: '01'
+              - regex: 'February'
+                with: '02'
+              - regex: 'March'
+                with: '03'
+              - regex: 'April'
+                with: '04'
+              - regex: 'May'
+                with: '05'
+              - regex: 'June'
+                with: '06'
+              - regex: 'July'
+                with: '07'
+              - regex: 'August'
+                with: '08'
+              - regex: 'September'
+                with: '09'
+              - regex: 'October'
+                with: '10'
+              - regex: 'November'
+                with: '11'
+              - regex: 'December'
+                with: '12'
+              - regex: '\s+'
+                with: ' '
+          - parseDate: 01 02, 2006
+      Details: //div[@class="diary-descr"]
+      # No canonical tag exists; the mobile alternate link carries the scene path.
+      URL:
+        selector: //link[@rel="alternate" and @type="text/html"]/@href
+        postProcess:
+          - replace:
+              - regex: '\?.*$'
+                with: ''
+              - regex: '^/mobile-'
+                with: 'https://www.zackrandall.net/'
+              - regex: '\s'
+                with: '+'
+              - regex: '\s'
+                with: '+'
+              - regex: '\s'
+                with: '+'
+              - regex: '\s'
+                with: '+'
+              - regex: '\s'
+                with: '+'
+              - regex: '\s'
+                with: '+'
+              - regex: '\s'
+                with: '+'
+              - regex: '\s'
+                with: '+'
+              - regex: '\s'
+                with: '+'
+              - regex: '\s'
+                with: '+'
+              - regex: '\s'
+                with: '+'
+              - regex: '\s'
+                with: '+'
+      Image:
+        selector: //video/@poster
+        postProcess:
+          - replace:
+              - regex: '^//'
+                with: 'https://'
+      Studio:
+        Name:
+          fixed: Zack Randall
+      Performers:
+        Name: //div[@class="models-name"]/h2/a
+        URL:
+          selector: //div[@class="models-name"]/h2/a/@href
+          postProcess:
+            - replace:
+                - regex: '#.*$'
+                  with: ''
+      Tags:
+        Name: //div[@class="models-name"]/h4/a
+
+  movieScraper:
+    movie:
+      Title:
+        selector: //span[@class="video-title-text"]
+        postProcess:
+          - replace:
+              - regex: '^.*?\s+-\s+'
+                with: ''
+      Synopsis: //div[@class="diary-descr"]
+      Date:
+        selector: //span[@class="video-title-text"]
+        postProcess:
+          - replace:
+              - regex: '\s+-\s+.*$'
+                with: ''
+              - regex: 'January'
+                with: '01'
+              - regex: 'February'
+                with: '02'
+              - regex: 'March'
+                with: '03'
+              - regex: 'April'
+                with: '04'
+              - regex: 'May'
+                with: '05'
+              - regex: 'June'
+                with: '06'
+              - regex: 'July'
+                with: '07'
+              - regex: 'August'
+                with: '08'
+              - regex: 'September'
+                with: '09'
+              - regex: 'October'
+                with: '10'
+              - regex: 'November'
+                with: '11'
+              - regex: 'December'
+                with: '12'
+              - regex: '\s+'
+                with: ' '
+          - parseDate: 01 02, 2006
+      Duration:
+        selector: //span[@class="video-duration"]
+        postProcess:
+          - replace:
+              - regex: '\s*Minutes?\s*$'
+                with: ''
+      Studio:
+        Name:
+          fixed: Zack Randall
+      FrontImage:
+        selector: //video/@poster
+        postProcess:
+          - replace:
+              - regex: '^//'
+                with: 'https://'
+
+  performerScraper:
+    performer:
+      Name: //ul[@class="model-info"]/li[1]
+      Gender:
+        fixed: Male
+      Details: //div[@class="model-descr"]
+      Image:
+        selector: //div[@class="box w230 maxH400 video"]//img/@src
+        postProcess:
+          - replace:
+              - regex: '^//'
+                with: 'https://'
+      Ethnicity:
+        selector: //li[contains(text(),"Race:")]
+        postProcess:
+          - replace:
+              - regex: '^Race:\s*'
+                with: ''
+      EyeColor:
+        selector: //li[contains(text(),"Eyes:")]
+        postProcess:
+          - replace:
+              - regex: '^Eyes:\s*'
+                with: ''
+      HairColor:
+        selector: //li[contains(text(),"Hair:")]
+        postProcess:
+          - replace:
+              - regex: '^Hair:\s*'
+                with: ''
+      Height:
+        selector: //li[contains(text(),"Height:")]
+        postProcess:
+          - replace:
+              - regex: '^Height:\s*'
+                with: ''
+      PenisLength:
+        selector: //li[contains(text(),"Dick Size:")]
+        postProcess:
+          - replace:
+              - regex: '^Dick Size:\s*'
+                with: ''
+
+  # Scene grid used by the video index (title search)
+  sceneSearchScraper:
+    pagination:
+      maxPages: 3
+    scene:
+      # The visible <p class="title"> text is truncated, the thumbnail alt holds the
+      # full (URL-encoded) title. postProcess repeats "+" -> " " because the YAML
+      # replace engine applies each rule non-globally.
+      Title:
+        selector: //div[@id="video"]/div[@class="thumb w303"]//img/@alt
+        postProcess:
+          - replace:
+              - regex: '%26'
+                with: '&'
+              - regex: '%21'
+                with: '!'
+              - regex: '%27'
+                with: "'"
+              - regex: '%2C'
+                with: ','
+              - regex: '%3F'
+                with: '?'
+              - regex: '%3A'
+                with: ':'
+              - regex: '%28'
+                with: '('
+              - regex: '%29'
+                with: ')'
+              - regex: '\+'
+                with: ' '
+              - regex: '\+'
+                with: ' '
+              - regex: '\+'
+                with: ' '
+              - regex: '\+'
+                with: ' '
+              - regex: '\+'
+                with: ' '
+              - regex: '\+'
+                with: ' '
+              - regex: '\+'
+                with: ' '
+              - regex: '\+'
+                with: ' '
+              - regex: '\+'
+                with: ' '
+              - regex: '\+'
+                with: ' '
+              - regex: '\+'
+                with: ' '
+              - regex: '\+'
+                with: ' '
+      URL:
+        selector: //div[@id="video"]/div[@class="thumb w303"]/p/a/@href
+        postProcess:
+          - replace:
+              - regex: '\?.*$'
+                with: ''
+              - regex: '^/'
+                with: 'https://www.zackrandall.net/'
+      Image:
+        selector: //div[@id="video"]/div[@class="thumb w303"]//img/@src
+        postProcess:
+          - replace:
+              - regex: '^//'
+                with: 'https://'
+      Date:
+        selector: //div[@id="video"]/div[@class="thumb w303"]/span[@class="date floatR"]
+        postProcess:
+          - replace:
+              - regex: 'January'
+                with: '01'
+              - regex: 'February'
+                with: '02'
+              - regex: 'March'
+                with: '03'
+              - regex: 'April'
+                with: '04'
+              - regex: 'May'
+                with: '05'
+              - regex: 'June'
+                with: '06'
+              - regex: 'July'
+                with: '07'
+              - regex: 'August'
+                with: '08'
+              - regex: 'September'
+                with: '09'
+              - regex: 'October'
+                with: '10'
+              - regex: 'November'
+                with: '11'
+              - regex: 'December'
+                with: '12'
+              - regex: '\s+'
+                with: ' '
+          - parseDate: 01 02, 2006
+
+  # Model index - used to resolve a performer name to their model page
+  performerSearchScraper:
+    performer:
+      performerSceneScraper: performerSceneScraper
+      Name: //div[@id="model"]/div[@class="thumb w218 h350"]/@title
+      # The nats query parameter must be preserved or the model page returns 403.
+      URL:
+        selector: //div[@id="model"]/div[@class="thumb w218 h350"]/p/a/@href
+        postProcess:
+          - replace:
+              - regex: '#.*$'
+                with: ''
+              - regex: '^/'
+                with: 'https://www.zackrandall.net/'
+      Image:
+        selector: //div[@id="model"]/div[@class="thumb w218 h350"]//img/@src
+        postProcess:
+          - replace:
+              - regex: '^//'
+                with: 'https://'
+
+  # Scene grid on a model page ("<Model> Featured In")
+  performerSceneScraper:
+    scene:
+      Title:
+        selector: //div[@id="video"]/div[@class="thumb w303"]//img/@alt
+        postProcess:
+          - replace:
+              - regex: '%26'
+                with: '&'
+              - regex: '%21'
+                with: '!'
+              - regex: '%27'
+                with: "'"
+              - regex: '%2C'
+                with: ','
+              - regex: '%3F'
+                with: '?'
+              - regex: '%3A'
+                with: ':'
+              - regex: '%28'
+                with: '('
+              - regex: '%29'
+                with: ')'
+              - regex: '\+'
+                with: ' '
+              - regex: '\+'
+                with: ' '
+              - regex: '\+'
+                with: ' '
+              - regex: '\+'
+                with: ' '
+              - regex: '\+'
+                with: ' '
+              - regex: '\+'
+                with: ' '
+              - regex: '\+'
+                with: ' '
+              - regex: '\+'
+                with: ' '
+              - regex: '\+'
+                with: ' '
+              - regex: '\+'
+                with: ' '
+              - regex: '\+'
+                with: ' '
+              - regex: '\+'
+                with: ' '
+      URL:
+        selector: //div[@id="video"]/div[@class="thumb w303"]/p/a/@href
+        postProcess:
+          - replace:
+              - regex: '\?.*$'
+                with: ''
+              - regex: '^/'
+                with: 'https://www.zackrandall.net/'
+      Image:
+        selector: //div[@id="video"]/div[@class="thumb w303"]//img/@src
+        postProcess:
+          - replace:
+              - regex: '^//'
+                with: 'https://'
+      Date:
+        selector: //div[@id="video"]/div[@class="thumb w303"]/span[@class="date floatR"]
+        postProcess:
+          - replace:
+              - regex: 'January'
+                with: '01'
+              - regex: 'February'
+                with: '02'
+              - regex: 'March'
+                with: '03'
+              - regex: 'April'
+                with: '04'
+              - regex: 'May'
+                with: '05'
+              - regex: 'June'
+                with: '06'
+              - regex: 'July'
+                with: '07'
+              - regex: 'August'
+                with: '08'
+              - regex: 'September'
+                with: '09'
+              - regex: 'October'
+                with: '10'
+              - regex: 'November'
+                with: '11'
+              - regex: 'December'
+                with: '12'
+              - regex: '\s+'
+                with: ' '
+          - parseDate: 01 02, 2006

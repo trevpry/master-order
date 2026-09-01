@@ -1,0 +1,439 @@
+≡ƒôï Loaded YAML scraper: WuBoyz
+   - Type: XPath-based
+   - URL Replacements: 3 rule(s) configured
+   - Scene URL patterns: 3
+   - Movie URL patterns: 3
+Testing scene scraping...
+≡ƒöì [WuBoyz] Scraping scene: https://www.wuboyz.com/scenes/Infatuation_vids.html
+   ≡ƒöì DEBUG - Checking all img tags in HTML:
+   ≡ƒöì DEBUG - Found 18 total img tags
+   ≡ƒöì DEBUG - img[0]: class="img-fluid", src="https://www.wuboyz.com/frontend/img/headimg1.jpg"
+   ≡ƒöì DEBUG - img[1]: class="undefined", src="https://www.wuboyz.com/frontend/img/logo-s.png"
+   ≡ƒöì DEBUG - img[2]: class="img-fluid", src="https://c8c321e97b.mjedge.net/Infatuation/capthumbs/00_04_48.jpg?expires=1788144482&l=35&token=cce716be646037f671c3defccf9ac1a5"
+   ≡ƒöì DEBUG - img[3]: class="img-fluid", src="https://c8c321e97b.mjedge.net/Infatuation/capthumbs/00_06_03.jpg?expires=1788144482&l=35&token=11cd9a8e1c44811b2943accdb6bf0046"
+   ≡ƒöì DEBUG - img[4]: class="img-fluid", src="https://c8c321e97b.mjedge.net/Infatuation/capthumbs/00_12_24.jpg?expires=1788144482&l=35&token=a7f64580f7c284724762279e0518af9c"
+   ≡ƒöì DEBUG - img[5]: class="img-fluid", src="https://c8c321e97b.mjedge.net/Infatuation/capthumbs/00_16_50.jpg?expires=1788144482&l=35&token=602b59b9ed207caa382ac2b59e326a0c"
+   ≡ƒöì DEBUG - img[6]: class="img-fluid", src="https://c8c321e97b.mjedge.net/Infatuation/capthumbs/00_18_32.jpg?expires=1788144482&l=35&token=c85edd880b911e8d60bcaa9bd714def1"
+   ≡ƒöì DEBUG - img[7]: class="img-fluid", src="https://c8c321e97b.mjedge.net/Infatuation/capthumbs/00_27_08.jpg?expires=1788144482&l=35&token=0c2b3ac4e2ff67747fafc59e1e7d349d"
+   ≡ƒöì DEBUG - img[8]: class="img-fluid", src="https://c8c321e97b.mjedge.net/Infatuation/capthumbs/00_29_41.jpg?expires=1788144482&l=35&token=326db7b3db726630ae82bff2fe4f9aa7"
+   ≡ƒöì DEBUG - img[9]: class="img-fluid", src="https://c8c321e97b.mjedge.net/Infatuation/capthumbs/00_34_06.jpg?expires=1788144482&l=35&token=083e905a92b823663885dad5e5bfd16e"
+   ≡ƒöì DEBUG - img[10]: class="img-fluid", src="https://c8c321e97b.mjedge.net/Infatuation/capthumbs/00_38_31.jpg?expires=1788144482&l=35&token=47c42d4c69eea91da19f91385660989e"
+   ≡ƒöì DEBUG - img[11]: class="img-fluid", src="https://c8c321e97b.mjedge.net/Infatuation/capthumbs/00_40_54.jpg?expires=1788144482&l=35&token=4a7c66c705cecb51ae9d618a244ba462"
+   ≡ƒöì DEBUG - img[12]: class="img-fluid", src="https://c8c321e97b.mjedge.net/Infatuation/capthumbs/00_41_15.jpg?expires=1788144482&l=35&token=694365bb4c241d08c6db888efab2bb6e"
+   ≡ƒöì DEBUG - img[13]: class="img-fluid", src="https://c8c321e97b.mjedge.net/Infatuation/capthumbs/00_45_04.jpg?expires=1788144482&l=35&token=13d519439a37650dee30d57a8f1bc76f"
+   ≡ƒöì DEBUG - img[14]: class="img-fluid", src="https://www.wuboyz.com/content/contentthumbs/05/50/550-2x.jpg"
+   ≡ƒöì DEBUG - img[15]: class="img-fluid", src="https://www.wuboyz.com/content/contentthumbs/05/56/556-2x.jpg"
+   ≡ƒöì DEBUG - img[16]: class="img-fluid", src="https://www.wuboyz.com/content/contentthumbs/05/08/508-2x.jpg"
+   ≡ƒöì DEBUG - img[17]: class="img-fluid", src="https://www.wuboyz.com/content/contentthumbs/05/12/512-2x.jpg"
+   ≡ƒöì DEBUG - Found 0 div with id="preview"
+   ≡ƒöì DEBUG - Found 0 video tags
+   ≡ƒöì DEBUG - Found 0 img tags with "mejs" in class
+   ≡ƒôî Matched scraper config for URL patterns: wuboyz.com/scenes/, wuboyz.com/strack/, www2.wuboyz.com/track/
+   ≡ƒöì extractValue (complex) - Original XPath: "//h2[@class="text-left"]"
+   ≡ƒöì extractValue (complex) - Converted selector: "h2[class="text-left"]"
+   ≡ƒöì extractValue (complex) - Attribute to extract: "null"
+   ≡ƒöì extractValue (complex) - Found 1 elements
+   ≡ƒöì extractValue (complex) - Element length: 1
+   - Title: Infatuation
+   ≡ƒöì extractValue - Original XPath: "//div[contains(@class,"description")]"
+   ≡ƒöì extractValue - Converted selector: "div[class*="description"]"
+   ≡ƒöì extractValue - Attribute to extract: "null"
+   ≡ƒöì extractValue - Found 1 elements
+   ≡ƒöì extractValue - Element length: 1
+   - Details: Corey tops Tyler.This boy and his Greek God proportions were undoubtedly what first caught my attention, and I was honored when he responded to my DM asking to fuck. After a few months of back and forth sexting, he came to NYC just to see me, and we spent some time cuddling and chatting before the cameras were turned on. I quickly realized that Corey is not only a sexy specimen of a man, but also a sweetheart. ItΓÇÖs no wonder that the sex was so good!
+   ≡ƒöì extractValue (complex) - Original XPath: "//link[@rel="alternate" and contains(@type, "text/html")]/@href"
+   ≡ƒöì extractValue (complex) - Converted selector: "link[rel="alternate"][type*="text/html"]"
+   ≡ƒöì extractValue (complex) - Attribute to extract: "href"
+   ≡ƒöì extractValue (complex) - Found 0 elements
+   ≡ƒöì extractValue (complex) - Element length: 0
+   Γ¥î extractValue (complex) - No elements found for selector: "link[rel="alternate"][type*="text/html"]"
+   ≡ƒöì Extracting Date with config: {
+  "selector": "//div[contains(@class,\"date\")]",
+  "postProcess": [
+    {
+      "replace": [
+        {
+          "regex": "January",
+          "with": "01"
+        },
+        {
+          "regex": "February",
+          "with": "02"
+        },
+        {
+          "regex": "March",
+          "with": "03"
+        },
+        {
+          "regex": "April",
+          "with": "04"
+        },
+        {
+          "regex": "May",
+          "with": "05"
+        },
+        {
+          "regex": "June",
+          "with": "06"
+        },
+        {
+          "regex": "July",
+          "with": "07"
+        },
+        {
+          "regex": "August",
+          "with": "08"
+        },
+        {
+          "regex": "September",
+          "with": "09"
+        },
+        {
+          "regex": "October",
+          "with": "10"
+        },
+        {
+          "regex": "November",
+          "with": "11"
+        },
+        {
+          "regex": "December",
+          "with": "12"
+        },
+        {
+          "regex": "\\s+",
+          "with": " "
+        }
+      ]
+    },
+    {
+      "parseDate": "01 02, 2006"
+    }
+  ]
+}
+   ≡ƒöì extractValue (complex) - Original XPath: "//div[contains(@class,"date")]"
+   ≡ƒöì extractValue (complex) - Converted selector: "div[class*="date"]"
+   ≡ƒöì extractValue (complex) - Attribute to extract: "null"
+   ≡ƒöì extractValue (complex) - Found 1 elements
+   ≡ƒöì extractValue (complex) - Element length: 1
+   ≡ƒöº applyPostProcess called with value: " 14 Aug 26  
+45:42"
+   ≡ƒöº postProcess rules: [
+  {
+    "replace": [
+      {
+        "regex": "January",
+        "with": "01"
+      },
+      {
+        "regex": "February",
+        "with": "02"
+      },
+      {
+        "regex": "March",
+        "with": "03"
+      },
+      {
+        "regex": "April",
+        "with": "04"
+      },
+      {
+        "regex": "May",
+        "with": "05"
+      },
+      {
+        "regex": "June",
+        "with": "06"
+      },
+      {
+        "regex": "July",
+        "with": "07"
+      },
+      {
+        "regex": "August",
+        "with": "08"
+      },
+      {
+        "regex": "September",
+        "with": "09"
+      },
+      {
+        "regex": "October",
+        "with": "10"
+      },
+      {
+        "regex": "November",
+        "with": "11"
+      },
+      {
+        "regex": "December",
+        "with": "12"
+      },
+      {
+        "regex": "\\s+",
+        "with": " "
+      }
+    ]
+  },
+  {
+    "parseDate": "01 02, 2006"
+  }
+]
+   ≡ƒöä Applying replace rule: [
+  { regex: 'January', with: '01' },
+  { regex: 'February', with: '02' },
+  { regex: 'March', with: '03' },
+  { regex: 'April', with: '04' },
+  { regex: 'May', with: '05' },
+  { regex: 'June', with: '06' },
+  { regex: 'July', with: '07' },
+  { regex: 'August', with: '08' },
+  { regex: 'September', with: '09' },
+  { regex: 'October', with: '10' },
+  { regex: 'November', with: '11' },
+  { regex: 'December', with: '12' },
+  { regex: '\\s+', with: ' ' }
+]
+   ≡ƒöä Replace: " 14 Aug 26  
+45:42" ΓåÆ " 14 Aug 26  
+45:42"
+   ≡ƒöä Replace: " 14 Aug 26  
+45:42" ΓåÆ " 14 Aug 26  
+45:42"
+   ≡ƒöä Replace: " 14 Aug 26  
+45:42" ΓåÆ " 14 Aug 26  
+45:42"
+   ≡ƒöä Replace: " 14 Aug 26  
+45:42" ΓåÆ " 14 Aug 26  
+45:42"
+   ≡ƒöä Replace: " 14 Aug 26  
+45:42" ΓåÆ " 14 Aug 26  
+45:42"
+   ≡ƒöä Replace: " 14 Aug 26  
+45:42" ΓåÆ " 14 Aug 26  
+45:42"
+   ≡ƒöä Replace: " 14 Aug 26  
+45:42" ΓåÆ " 14 Aug 26  
+45:42"
+   ≡ƒöä Replace: " 14 Aug 26  
+45:42" ΓåÆ " 14 Aug 26  
+45:42"
+   ≡ƒöä Replace: " 14 Aug 26  
+45:42" ΓåÆ " 14 Aug 26  
+45:42"
+   ≡ƒöä Replace: " 14 Aug 26  
+45:42" ΓåÆ " 14 Aug 26  
+45:42"
+   ≡ƒöä Replace: " 14 Aug 26  
+45:42" ΓåÆ " 14 Aug 26  
+45:42"
+   ΓÜá∩╕Å Date " 14 Aug 26  
+45:42" doesn't match format "01 02, 2006"
+   ΓÜá∩╕Å Array selector error for "div[class="model-info"] h2 .. following-sibling::div a": Expected name, found .. following-sibling::div a
+   ΓÜá∩╕Å Original XPath: "//div[@class="model-info"]/h2/../following-sibling::div//a/@href"
+Scene scraping error: Cannot read properties of undefined (reading 'Title')
+Stack: TypeError: Cannot read properties of undefined (reading 'Title')
+    at runTests (C:\Users\Trevor\Sites\master-order\tmp_wuboyz_test.js:13:49)
+    at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+   ≡ƒöä Replace: " 14 Aug 26  
+45:42" ΓåÆ " 14 Aug 26  
+45:42"
+   ≡ƒöä Replace: " 14 Aug 26  
+45:42" ΓåÆ " 14 Aug 26  
+45:42"
+   ≡ƒöì Parsing date " 14 Aug 26  
+45:42" with format "01 02, 2006"
+   Γ£à Parsed date result: " 14 Aug 26  
+45:42"
+   ≡ƒöº applyPostProcess final value: " 14 Aug 26  
+45:42"
+   ≡ƒôà Date extraction result: "14 Aug 26  
+45:42"
+   - Date: 14 Aug 26  
+45:42
+   ≡ƒöì extractValue (complex) - Original XPath: "//meta[@property="og:image"]/@content"
+   ≡ƒöì extractValue (complex) - Converted selector: "meta[property="og:image"]"
+   ≡ƒöì extractValue (complex) - Attribute to extract: "content"
+   ≡ƒöì extractValue (complex) - Found 1 elements
+   ≡ƒöì extractValue (complex) - Element length: 1
+   ≡ƒöì extractValue (complex) - Attribute "content" value: "https://www.wuboyz.com/content/contentthumbs/05/52/552-3x.jpg"
+   - Cover image: https://www.wuboyz.com/content/contentthumbs/05/52/552-3x.jpg
+   - Studio: WuBoyz
+Γ£à [WuBoyz] Successfully scraped scene
+Scene scrape result:
+
+Testing movie scraping...
+≡ƒÄ¼ [WuBoyz] Scraping movie: https://www.wuboyz.com/scenes/Infatuation_vids.html
+   ≡ƒöì extractValue (complex) - Original XPath: "//h2[@class="text-left"]"
+   ≡ƒöì extractValue (complex) - Converted selector: "h2[class="text-left"]"
+   ≡ƒöì extractValue (complex) - Attribute to extract: "null"
+   ≡ƒöì extractValue (complex) - Found 1 elements
+   ≡ƒöì extractValue (complex) - Element length: 1
+   - Title: Infatuation
+   ≡ƒöì extractValue - Original XPath: "//div[@class="description"]"
+   ≡ƒöì extractValue - Converted selector: "div[class="description"]"
+   ≡ƒöì extractValue - Attribute to extract: "null"
+   ≡ƒöì extractValue - Found 0 elements
+   ≡ƒöì extractValue - Element length: 0
+   Γ¥î extractValue - No elements found for selector: "div[class="description"]"
+   ≡ƒöì extractValue (complex) - Original XPath: "//div[contains(@class,"date")]"
+   ≡ƒöì extractValue (complex) - Converted selector: "div[class*="date"]"
+   ≡ƒöì extractValue (complex) - Attribute to extract: "null"
+   ≡ƒöì extractValue (complex) - Found 1 elements
+   ≡ƒöì extractValue (complex) - Element length: 1
+   ≡ƒöº applyPostProcess called with value: " 14 Aug 26  
+45:42"
+   ≡ƒöº postProcess rules: [
+  {
+    "replace": [
+      {
+        "regex": "January",
+        "with": "01"
+      },
+      {
+        "regex": "February",
+        "with": "02"
+      },
+      {
+        "regex": "March",
+        "with": "03"
+      },
+      {
+        "regex": "April",
+        "with": "04"
+      },
+      {
+        "regex": "May",
+        "with": "05"
+      },
+      {
+        "regex": "June",
+        "with": "06"
+      },
+      {
+   ΓÜá∩╕Å Date " 14 Aug 26  
+        "regex": "July",
+        "with": "07"
+      },
+      {
+        "regex": "August",
+        "with": "08"
+      },
+      {
+        "regex": "September",
+        "with": "09"
+      },
+      {
+        "regex": "October",
+        "with": "10"
+      },
+      {
+        "regex": "November",
+        "with": "11"
+      },
+      {
+        "regex": "December",
+        "with": "12"
+      },
+      {
+        "regex": "\\s+",
+        "with": " "
+      }
+    ]
+  },
+  {
+    "parseDate": "01 02, 2006"
+  }
+]
+45:42" doesn't match format "01 02, 2006"
+Performer scraping error: scraper.scrapePerformer is not a function
+Stack: TypeError: scraper.scrapePerformer is not a function
+    at runTests (C:\Users\Trevor\Sites\master-order\tmp_wuboyz_test.js:47:47)
+    at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+   ≡ƒöä Applying replace rule: [
+  { regex: 'January', with: '01' },
+  { regex: 'February', with: '02' },
+  { regex: 'March', with: '03' },
+  { regex: 'April', with: '04' },
+  { regex: 'May', with: '05' },
+  { regex: 'June', with: '06' },
+  { regex: 'July', with: '07' },
+  { regex: 'August', with: '08' },
+  { regex: 'September', with: '09' },
+  { regex: 'October', with: '10' },
+  { regex: 'November', with: '11' },
+  { regex: 'December', with: '12' },
+  { regex: '\\s+', with: ' ' }
+]
+   ≡ƒöä Replace: " 14 Aug 26  
+45:42" ΓåÆ " 14 Aug 26  
+45:42"
+   ≡ƒöä Replace: " 14 Aug 26  
+45:42" ΓåÆ " 14 Aug 26  
+45:42"
+   ≡ƒöä Replace: " 14 Aug 26  
+45:42" ΓåÆ " 14 Aug 26  
+45:42"
+   ≡ƒöä Replace: " 14 Aug 26  
+45:42" ΓåÆ " 14 Aug 26  
+45:42"
+   ≡ƒöä Replace: " 14 Aug 26  
+45:42" ΓåÆ " 14 Aug 26  
+45:42"
+   ≡ƒöä Replace: " 14 Aug 26  
+45:42" ΓåÆ " 14 Aug 26  
+45:42"
+   ≡ƒöä Replace: " 14 Aug 26  
+45:42" ΓåÆ " 14 Aug 26  
+45:42"
+   ≡ƒöä Replace: " 14 Aug 26  
+45:42" ΓåÆ " 14 Aug 26  
+45:42"
+   ≡ƒöä Replace: " 14 Aug 26  
+45:42" ΓåÆ " 14 Aug 26  
+45:42"
+   ≡ƒöä Replace: " 14 Aug 26  
+45:42" ΓåÆ " 14 Aug 26  
+45:42"
+   ≡ƒöä Replace: " 14 Aug 26  
+45:42" ΓåÆ " 14 Aug 26  
+45:42"
+   ≡ƒöä Replace: " 14 Aug 26  
+45:42" ΓåÆ " 14 Aug 26  
+45:42"
+   ≡ƒöä Replace: " 14 Aug 26  
+45:42" ΓåÆ " 14 Aug 26  
+45:42"
+   ≡ƒöì Parsing date " 14 Aug 26  
+45:42" with format "01 02, 2006"
+   Γ£à Parsed date result: " 14 Aug 26  
+45:42"
+   ≡ƒöº applyPostProcess final value: " 14 Aug 26  
+45:42"
+   - Date: 14 Aug 26  
+45:42
+   ≡ƒöì extractValue (complex) - Original XPath: "//video/@poster"
+   ≡ƒöì extractValue (complex) - Converted selector: "video"
+   ≡ƒöì extractValue (complex) - Attribute to extract: "poster"
+   ≡ƒöì extractValue (complex) - Found 0 elements
+   ≡ƒöì extractValue (complex) - Element length: 0
+   Γ¥î extractValue (complex) - No elements found for selector: "video"
+   - Studio: WuBoyz
+   ≡ƒöì extractValue (complex) - Original XPath: "//div[@class="date"]"
+   ≡ƒöì extractValue (complex) - Converted selector: "div[class="date"]"
+   ≡ƒöì extractValue (complex) - Attribute to extract: "null"
+   ≡ƒöì extractValue (complex) - Found 0 elements
+   ≡ƒöì extractValue (complex) - Element length: 0
+   Γ¥î extractValue (complex) - No elements found for selector: "div[class="date"]"
+Γ£à [WuBoyz] Successfully scraped movie
+Movie scrape result:
+Title: undefined
+Synopsis: undefined
+Date: undefined
+Duration: undefined
+Studio: undefined
+FrontImage: undefined
+
+Testing performer scraping...
+
+All tests completed!

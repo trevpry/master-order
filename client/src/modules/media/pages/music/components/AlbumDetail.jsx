@@ -236,6 +236,34 @@ const AlbumDetail = ({
     }
   };
 
+  const handleDeleteAlbum = async () => {
+    const confirmed = window.confirm('Are you sure you want to delete this album? This will permanently remove it and all its tracks.');
+    if (!confirmed) {
+      return;
+    }
+
+    try {
+      const response = await fetch(`${config.apiBaseUrl}/api/music/albums/${albumData.ratingKey}`, {
+        method: 'DELETE'
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => null);
+        throw new Error(errorData?.error || `Failed to delete album (${response.status})`);
+      }
+
+      alert('Album deleted successfully');
+      
+      // Navigate back to albums view
+      if (onGoBack) {
+        onGoBack();
+      }
+    } catch (error) {
+      console.error('Error deleting album:', error);
+      alert(`Failed to delete album: ${error.message}`);
+    }
+  };
+
   const closeDiscogsPreviewModal = () => {
     setShowDiscogsPreviewModal(false);
     setDiscogsPreview(null);
@@ -965,6 +993,14 @@ const AlbumDetail = ({
             style={{ backgroundColor: isEditMode ? '#10b981' : '#8b5cf6' }}
           >
             {isEditMode ? '✓ Done' : '✏️ Edit Metadata'}
+          </button>
+          <button 
+            className="musicbrainz-search-btn"
+            onClick={handleDeleteAlbum}
+            title="Delete album (only if no tracks are linked)"
+            style={{ backgroundColor: '#ef4444' }}
+          >
+            🗑️ Delete Album
           </button>
         </div>
       </div>

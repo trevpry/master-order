@@ -35,8 +35,6 @@ import Music from './modules/media/pages/music/index';
 import Backgrounds from './modules/media/pages/backgrounds/index';
 import Books from './pages/Books'; // Unified Books component
 import VideoGames from './pages/VideoGames'; // Video Games component
-import TvBrowser from './modules/media/pages/tv-browser/index';
-import MovieBrowser from './modules/media/pages/movie-browser/index';
 
 // Eddie Module Components (placeholders for now)
 import TasksHome from './modules/tasks/pages/TasksHome';
@@ -45,7 +43,6 @@ import CalendarHome from './modules/calendar/pages/CalendarHome';
 import Locations from './modules/locations/pages/Locations';
 import EddieSettings from './modules/eddie/pages/EddieSettings';
 import ChatHome from './modules/chat/pages/ChatHome';
-import WikiHome from './modules/wiki/pages/WikiHome';
 import Dating from './pages/Dating';
 import ConnectionDetail from './pages/ConnectionDetail';
 import DateDetail from './pages/DateDetail';
@@ -56,8 +53,6 @@ import Videos from './modules/history-plus/pages/Videos';
 import Channels from './modules/history-plus/pages/Channels';
 import Categories from './modules/history-plus/pages/Categories';
 import Courses from './modules/history-plus/pages/Courses';
-import CourseDetails from './modules/history-plus/pages/CourseDetails';
-import PromptTemplates from './modules/history-plus/pages/PromptTemplates';
 
 function App() {
   // WebSocket hook for Stash clip overlay notifications
@@ -92,8 +87,6 @@ function App() {
           <Route path="/media/stash/performer/:id" element={<PerformerDetail />} />
           <Route path="/media/stash/performers/:id" element={<PerformerDetail />} />
           <Route path="/media/music" element={<Music />} />
-          <Route path="/media/tv-browser" element={<TvBrowser />} />
-          <Route path="/media/movie-browser" element={<MovieBrowser />} />
           <Route path="/media/backgrounds" element={<Backgrounds />} />
           <Route path="/media/books" element={<Books />} />
           <Route path="/media/games" element={<VideoGames />} />
@@ -136,10 +129,7 @@ function App() {
           <Route path="/history-plus/channels" element={<Channels />} />
           <Route path="/history-plus/categories" element={<Categories />} />
           <Route path="/history-plus/courses" element={<Courses />} />
-          <Route path="/history-plus/courses/:id" element={<CourseDetails />} />
-          <Route path="/history-plus/prompts" element={<PromptTemplates />} />
           <Route path="/chat" element={<ChatHome />} />
-          <Route path="/wiki" element={<WikiHome />} />
           <Route path="/eddie-settings" element={<EddieSettings />} />
         </Routes>
       </Layout>

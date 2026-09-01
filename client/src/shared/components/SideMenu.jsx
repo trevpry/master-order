@@ -134,23 +134,10 @@ const SideMenu = ({ isMobile, closeMobileMenu }) => {
       isSubmenu: true
     },
     {
-      path: '/history-plus/prompts',
-      icon: '🤖',
-      label: 'AI Prompts',
-      description: 'Prompt templates',
-      isSubmenu: true
-    },
-    {
       path: '/chat',
       icon: '💬',
       label: 'AI Chat',
       description: 'Chat with local AI'
-    },
-    {
-      path: '/wiki',
-      icon: '📚',
-      label: 'Wiki',
-      description: 'Personal knowledge wiki'
     },
     {
       path: '/eddie-settings',
@@ -200,20 +187,6 @@ const SideMenu = ({ isMobile, closeMobileMenu }) => {
       icon: '🎵',
       label: 'Music',
       description: 'Music library',
-      isSubmenu: true
-    },
-    {
-      path: '/media/tv-browser',
-      icon: '📺',
-      label: 'TV Browser',
-      description: 'Series, seasons, episodes',
-      isSubmenu: true
-    },
-    {
-      path: '/media/movie-browser',
-      icon: '🎞️',
-      label: 'Movie Browser',
-      description: 'Movies and collections',
       isSubmenu: true
     },
     {

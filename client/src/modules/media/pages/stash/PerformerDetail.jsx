@@ -694,6 +694,46 @@ export default function PerformerDetail() {
     setAcceptedFields(fields);
   };
 
+  // Handle custom YAML scraper button click
+  const handleYamlScraperClick = async (scraper) => {
+    console.log('🌐 Scraping with YAML scraper:', scraper);
+
+    setScrapeAllStatus(scraper.matchedUrl ? `Scraping ${scraper.siteName}…` : `Searching ${scraper.siteName}…`);
+    setSelectedImage(null);
+
+    try {
+      const response = await fetch(`${config.apiBaseUrl}/api/stash/performers/${id}/scrape-yaml`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ scraperName: scraper.siteName, url: scraper.matchedUrl || undefined })
+      });
+
+      const result = await response.json();
+
+      if (!result.success || !result.data?.scraped) {
+        toast.error(result.error || `${scraper.siteName} returned no data`);
+        return;
+      }
+
+      const scraped = result.data.scraped;
+      setScrapeData({
+        source: result.data.source,
+        sourceUrl: result.data.sourceUrl,
+        scraped,
+        matched: result.data.matched || { tags: [] },
+        unmatched: result.data.unmatched || { tags: [] }
+      });
+      initializeAcceptedFields(scraped);
+      if (scraped.image) setSelectedImage(scraped.image);
+      setShowScrapeReviewModal(true);
+    } catch (error) {
+      console.error('Failed to scrape with YAML scraper:', error);
+      toast.error(`Failed to scrape ${scraper.siteName}`);
+    } finally {
+      setScrapeAllStatus(null);
+    }
+  };
+
   // Handle selecting a stash-box result
   const handleSelectStashBoxResult = async (performer) => {
     console.log('📦 Selected stash-box performer:', performer);
@@ -817,6 +857,10 @@ export default function PerformerDetail() {
       // Apply matched tag IDs collected from checked tag sources.
       if (Array.isArray(fieldSelections._matchedTagIds) && fieldSelections._matchedTagIds.length > 0) {
         updateData.tagIds = fieldSelections._matchedTagIds;
+      }
+      // Tags with no local match are created by the update route before assignment.
+      if (Array.isArray(fieldSelections._unmatchedTagNames) && fieldSelections._unmatchedTagNames.length > 0) {
+        updateData.unmatchedTags = fieldSelections._unmatchedTagNames;
       }
       // Use the explicitly chosen main image; fall back to the field-selection image.
       if (mainImage) {
@@ -1543,7 +1587,7 @@ export default function PerformerDetail() {
                     <span>{scrapeAllStatus ? '⏳ Scraping…' : 'Scrape All'}</span>
                   </button>
 
-                  {/* Stash-box scraper buttons */}}
+                  {/* Stash-box scraper buttons */}
                   {availableScrapers.filter(s => s.isStashBox).map((scraper, idx) => (
                     <button
                       key={idx}
@@ -1610,6 +1654,44 @@ export default function PerformerDetail() {
                     >
                       <span style={{ fontSize: '16px' }}>🔍</span>
                       <span>{scraper.name}</span>
+                    </button>
+                  ))}
+
+                  {/* Custom YAML scraper buttons */}
+                  {availableScrapers.filter(s => s.type === 'yaml' && s.supportsPerformerScrape).map((scraper, idx) => (
+                    <button
+                      key={`yaml-${idx}`}
+                      onClick={() => handleYamlScraperClick(scraper)}
+                      disabled={Boolean(scrapeAllStatus)}
+                      title={scraper.matchedUrl
+                        ? `Scrape from ${scraper.siteName} (${scraper.matchedUrl})`
+                        : `Search ${scraper.siteName} by name (linked via studio "${scraper.studioName}")`}
+                      style={{
+                        background: 'linear-gradient(135deg, #ec4899 0%, #db2777 100%)',
+                        border: '2px solid #ec4899',
+                        color: 'white',
+                        padding: '8px 16px',
+                        borderRadius: '8px',
+                        fontSize: '13px',
+                        fontWeight: '600',
+                        cursor: scrapeAllStatus ? 'wait' : 'pointer',
+                        transition: 'all 0.2s ease',
+                        boxShadow: '0 2px 4px rgba(236, 72, 153, 0.2)',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '6px'
+                      }}
+                      onMouseOver={(e) => {
+                        e.currentTarget.style.transform = 'translateY(-2px)';
+                        e.currentTarget.style.boxShadow = '0 4px 8px rgba(236, 72, 153, 0.3)';
+                      }}
+                      onMouseOut={(e) => {
+                        e.currentTarget.style.transform = 'translateY(0)';
+                        e.currentTarget.style.boxShadow = '0 2px 4px rgba(236, 72, 153, 0.2)';
+                      }}
+                    >
+                      <span style={{ fontSize: '16px' }}>{scraper.matchedUrl ? '🌐' : '🔎'}</span>
+                      <span>{scraper.siteName}</span>
                     </button>
                   ))}
                   

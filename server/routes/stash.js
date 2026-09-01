@@ -2249,6 +2249,51 @@ router.post('/tags/create', asyncHandler(async (req, res) => {
   }
 }));
 
+// Splits scraped tag names into ones that already exist locally and ones that
+// still need creating. Unmatched names are passed to the update route, which
+// creates them in Stash before assigning.
+// Matching is done in JS because Prisma's `mode: 'insensitive'` is Postgres-only.
+const matchScrapedTagNames = async (tagNames) => {
+  const names = (Array.isArray(tagNames) ? tagNames : [])
+    .map(tag => (typeof tag === 'string' ? tag : tag?.name || '').trim())
+    .filter(Boolean);
+
+  if (names.length === 0) return { matched: [], unmatched: [] };
+
+  const allTags = await prisma.stashTag.findMany({ select: { id: true, name: true } });
+  const byLowerName = new Map(allTags.map(tag => [tag.name.toLowerCase(), tag]));
+
+  const matched = [];
+  const unmatched = [];
+  const seen = new Set();
+
+  for (const name of names) {
+    const key = name.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+
+    const tag = byLowerName.get(key);
+    if (tag) {
+      matched.push({ id: tag.id, name: tag.name });
+    } else {
+      unmatched.push(name);
+    }
+  }
+
+  return { matched, unmatched };
+};
+
+// Stash's CircumcisedEnum only accepts CUT/UNCUT, but scrapers report free text
+// ("Uncircumcised", "Intact", "Cut or Uncut: Cut", ...). Unknown values are dropped.
+const normalizeCircumcised = (value) => {
+  if (!value) return null;
+  const normalized = String(value).trim().toLowerCase();
+  if (/^(cut|circumcised|circumsized|yes)$/.test(normalized)) return 'CUT';
+  if (/^(uncut|uncircumcised|uncircumsized|intact|natural|no)$/.test(normalized)) return 'UNCUT';
+  console.warn(`⚠️ Unrecognised circumcised value "${value}", ignoring`);
+  return null;
+};
+
 // PUT /api/stash/performers/:id - Update performer in both Stash and local DB
 router.put('/performers/:id', asyncHandler(async (req, res) => {
   console.log('✏️ [Update Performer] Request received');
@@ -2553,7 +2598,10 @@ router.put('/performers/:id', asyncHandler(async (req, res) => {
     if (measurements) variables.input.measurements = measurements;
     if (fake_tits) variables.input.fake_tits = fake_tits;
     if (penis_length) variables.input.penis_length = parseFloat(penis_length);
-    if (circumcised) variables.input.circumcised = circumcised;
+    if (circumcised) {
+      const normalizedCircumcised = normalizeCircumcised(circumcised);
+      if (normalizedCircumcised) variables.input.circumcised = normalizedCircumcised;
+    }
     if (career_length) variables.input.career_length = career_length;
     if (tattoos) variables.input.tattoos = tattoos;
     if (piercings) variables.input.piercings = piercings;
@@ -4773,11 +4821,7 @@ router.post('/scenes/:id/scrape-all', asyncHandler(async (req, res) => {
   }
 
   if (stashBoxes.length === 0) {
-    return sendSuccess(res, {
-      message: 'No stash-box sources are configured.',
-      sceneId: scene.id,
-      sources: []
-    });
+    console.log('ℹ️ [Scrape All] No stash-box sources configured; continuing with scraper and GEVI sources.');
   }
 
   const resultsBySource = {};
@@ -4790,9 +4834,174 @@ router.post('/scenes/:id/scrape-all', asyncHandler(async (req, res) => {
         include: {
           performer: true
         }
+      },
+      studioObject: {
+        select: {
+          id: true,
+          name: true,
+          scraperName: true,
+          url: true
+        }
       }
     }
   });
+
+  // Collect scene URLs for custom scraper matching
+  const sceneUrls = [];
+  if (sceneWithPerformers?.url) sceneUrls.push(sceneWithPerformers.url);
+  if (sceneWithPerformers?.episodeUrls) {
+    try {
+      const parsedUrls = typeof sceneWithPerformers.episodeUrls === 'string'
+        ? JSON.parse(sceneWithPerformers.episodeUrls)
+        : sceneWithPerformers.episodeUrls;
+      if (Array.isArray(parsedUrls)) {
+        parsedUrls.forEach(urlItem => {
+          if (typeof urlItem === 'string') {
+            sceneUrls.push(urlItem);
+          } else if (urlItem?.url) {
+            sceneUrls.push(urlItem.url);
+          }
+        });
+      }
+    } catch (e) {
+      console.warn('   - Failed to parse episodeUrls for scrape-all:', e.message);
+    }
+  }
+
+  const registry = await getScraperRegistry();
+
+  const normalizeYamlScrapeResult = (scrapedData, sourceUrl) => ({
+    url: sourceUrl,
+    sourceUrl,
+    title: scrapedData.title || sceneWithPerformers?.title,
+    date: scrapedData.date,
+    details: scrapedData.details,
+    performers: (scrapedData.performers || []).map(p => ({
+      name: typeof p === 'string' ? p : p.name,
+      url: typeof p === 'string' ? null : p.url
+    })),
+    studio: scrapedData.studio,
+    image: scrapedData.image || scrapedData.coverImage || null,
+    tags: (scrapedData.tags || []).map(t => typeof t === 'string' ? t : t.name)
+  });
+
+  // Try custom YAML scrapers first
+  if (sceneUrls.length > 0) {
+    console.log(`🔍 [Scrape All] Checking custom YAML scrapers for ${sceneUrls.length} URL(s)`);
+
+    for (const scraper of registry.scrapers) {
+      // Only process YAML scrapers (which have sceneUrlPatterns from config)
+      // Skip stash-native and code-based scrapers
+      if (!scraper.sceneUrlPatterns || scraper.sceneUrlPatterns.length === 0) {
+        continue;
+      }
+      
+      // Check if this scraper can handle any of the scene URLs
+      const matchingUrl = sceneUrls.find(url => scraper.canHandle(url));
+      if (!matchingUrl) continue;
+      
+      try {
+        console.log(`   ✅ [${scraper.siteName}] Matched URL: ${matchingUrl}`);
+        const scrapeResult = await scraper.scrape(matchingUrl);
+        
+        if (scrapeResult?.success && scrapeResult?.scraped) {
+          resultsBySource[scraper.siteName] = [normalizeYamlScrapeResult(scrapeResult.scraped, matchingUrl)];
+          fallbackUsage[scraper.siteName] = false;
+          console.log(`   ✅ [${scraper.siteName}] Successfully scraped scene`);
+        } else {
+          console.log(`   ⚠️ [${scraper.siteName}] Scrape returned no data`);
+        }
+      } catch (error) {
+        console.error(`   ❌ [${scraper.siteName}] Error during scrape-all:`, error.message);
+        resultsBySource[scraper.siteName] = [];
+        fallbackUsage[scraper.siteName] = false;
+      }
+    }
+  }
+
+  // If the studio has a linked YAML scraper, also run its performer and/or title search.
+  const studioScraperName = sceneWithPerformers?.studioObject?.scraperName;
+  if (studioScraperName) {
+    const studioScraper = registry.scrapers.find(s => s.siteName === studioScraperName);
+
+    if (!studioScraper) {
+      console.warn(`⚠️ [Scrape All] Studio scraper "${studioScraperName}" not found in registry`);
+    } else {
+      const studioPerformers = (sceneWithPerformers?.performers || [])
+        .map(sp => sp?.performer)
+        .filter(Boolean)
+        .map(p => ({ id: p.id, name: p.name, alias: p.alias }));
+
+      const existingResults = resultsBySource[studioScraperName] || [];
+      const searchHits = [];
+      const seenUrls = new Set(existingResults.map(r => r.url).filter(Boolean));
+      const addHits = (hits) => {
+        (Array.isArray(hits) ? hits : []).forEach(hit => {
+          if (hit?.url && !seenUrls.has(hit.url)) {
+            seenUrls.add(hit.url);
+            searchHits.push(hit);
+          }
+        });
+      };
+
+      if (studioPerformers.length > 0 && typeof studioScraper.searchScenes === 'function') {
+        try {
+          console.log(`🔎 [Scrape All] Performer search via ${studioScraperName} (${studioPerformers.length} performer(s))`);
+          addHits(await studioScraper.searchScenes(studioPerformers));
+        } catch (error) {
+          console.warn(`   ⚠️ [${studioScraperName}] Performer search failed: ${error.message}`);
+        }
+      }
+
+      if (sceneWithPerformers?.title && typeof studioScraper.searchByTitle === 'function') {
+        try {
+          // Only pass the studio URL when the scraper has no search URL of its own,
+          // otherwise it would override a {title} search endpoint.
+          const configuredSearchUrl = studioScraper.config?.sceneByFragment?.[0]?.studioSearchUrl;
+          const titleSearchUrl = configuredSearchUrl ? null : (sceneWithPerformers.studioObject?.url || null);
+
+          console.log(`🔎 [Scrape All] Title search via ${studioScraperName}: "${sceneWithPerformers.title}"`);
+          addHits(await studioScraper.searchByTitle(sceneWithPerformers.title, titleSearchUrl));
+        } catch (error) {
+          console.warn(`   ⚠️ [${studioScraperName}] Title search failed: ${error.message}`);
+        }
+      }
+
+      // Fully scrape the top hits so results carry complete metadata
+      const topHits = searchHits.slice(0, 5);
+      const searchResults = [];
+
+      for (const hit of topHits) {
+        try {
+          const scrapeResult = await studioScraper.scrape(hit.url);
+          if (scrapeResult?.success && scrapeResult?.scraped) {
+            searchResults.push(normalizeYamlScrapeResult(scrapeResult.scraped, hit.url));
+          }
+        } catch (error) {
+          console.warn(`   ⚠️ [${studioScraperName}] Failed to scrape ${hit.url}: ${error.message}`);
+          searchResults.push({
+            url: hit.url,
+            sourceUrl: hit.url,
+            title: hit.title,
+            date: hit.date,
+            image: hit.image,
+            studio: hit.studio,
+            performers: [],
+            tags: []
+          });
+        }
+      }
+
+      if (searchResults.length > 0) {
+        resultsBySource[studioScraperName] = [...existingResults, ...searchResults];
+        fallbackUsage[studioScraperName] = existingResults.length === 0;
+        console.log(`   ✅ [${studioScraperName}] Search produced ${searchResults.length} result(s)`);
+      } else {
+        resultsBySource[studioScraperName] = existingResults;
+        fallbackUsage[studioScraperName] = true;
+      }
+    }
+  }
 
   // Collect any known GEVI URL saved on the scene so we can skip the performer search.
   const knownGeviUrl = (() => {
@@ -4856,6 +5065,27 @@ router.post('/scenes/:id/scrape-all', asyncHandler(async (req, res) => {
   }
 
   const sources = StashScrapeAllService.buildScrapeAllSources(stashBoxes, resultsBySource, fallbackUsage);
+
+  // Add custom YAML scraper sources to the results
+  Object.entries(resultsBySource).forEach(([scraperName, results]) => {
+    // Skip stash box endpoints (they're already in sources from buildScrapeAllSources)
+    const isStashBox = stashBoxes.some(box => box.endpoint === scraperName);
+    if (isStashBox) return;
+    
+    // This is a custom YAML scraper result
+    sources.push({
+      id: `custom-${scraperName.toLowerCase().replace(/\s+/g, '-')}`,
+      name: scraperName,
+      endpoint: scraperName,
+      configured: true,
+      resultCount: Array.isArray(results) ? results.length : 0,
+      hasResults: Array.isArray(results) && results.length > 0,
+      usedFallback: fallbackUsage[scraperName] || false,
+      results: Array.isArray(results) ? results : []
+    });
+    
+    console.log(`   📌 Added custom scraper "${scraperName}" with ${Array.isArray(results) ? results.length : 0} result(s) to scrape-all response`);
+  });
 
   let geviSeedPerformers = [];
   let geviSeedUrls = [];
@@ -12134,6 +12364,59 @@ router.get('/performers/:id', asyncHandler(async (req, res) => {
   return sendSuccess(res, data);
 }));
 
+// Collects the performer's URLs from both the scalar and JSON columns
+const collectPerformerUrls = (performer) => {
+  const urls = [];
+  if (performer?.url) urls.push(performer.url);
+  if (performer?.urls) {
+    try {
+      const parsed = typeof performer.urls === 'string' ? JSON.parse(performer.urls) : performer.urls;
+      (Array.isArray(parsed) ? parsed : []).forEach((entry) => {
+        const value = typeof entry === 'string' ? entry : entry?.url;
+        if (value && !urls.includes(value)) urls.push(value);
+      });
+    } catch (e) {
+      console.warn('   - Failed to parse performer URLs:', e.message);
+    }
+  }
+  return urls;
+};
+
+// Finds YAML scrapers relevant to a performer: either one of the performer's URLs
+// matches the scraper, or the scraper is linked to a studio of one of their scenes.
+const findPerformerYamlScrapers = async (performerId, performerUrls) => {
+  const registry = await getScraperRegistry();
+  const matches = new Map();
+
+  registry.scrapers.forEach((scraper) => {
+    if (!scraper.performerUrlPatterns?.length) return;
+    const matchedUrl = performerUrls.find((url) => scraper.canHandle(url));
+    if (matchedUrl) {
+      matches.set(scraper.siteName, { scraper, matchedUrl });
+    }
+  });
+
+  const linkedStudios = await prisma.stashStudio.findMany({
+    where: {
+      scraperName: { not: null },
+      scenes: { some: { performers: { some: { performerId } } } }
+    },
+    select: { id: true, name: true, scraperName: true, url: true }
+  });
+
+  linkedStudios.forEach((studio) => {
+    if (matches.has(studio.scraperName)) return;
+    const scraper = registry.scrapers.find((s) => s.siteName === studio.scraperName);
+    if (!scraper) {
+      console.warn(`   - Studio scraper "${studio.scraperName}" not found in registry`);
+      return;
+    }
+    matches.set(scraper.siteName, { scraper, studio });
+  });
+
+  return [...matches.values()];
+};
+
 // GET /api/stash/performers/:id/available-scrapers - Get available stash-box and native scrapers for a performer
 router.get('/performers/:id/available-scrapers', asyncHandler(async (req, res) => {
   const { id } = req.params;
@@ -12152,24 +12435,37 @@ router.get('/performers/:id/available-scrapers', asyncHandler(async (req, res) =
     return sendNotFound(res, 'Performer not found');
   }
   
-  // Parse performer's URLs
-  const performerUrls = [];
-  if (performer.urls) {
-    try {
-      const parsedUrls = typeof performer.urls === 'string' 
-        ? JSON.parse(performer.urls) 
-        : performer.urls;
-      if (Array.isArray(parsedUrls)) {
-        performerUrls.push(...parsedUrls);
-      }
-    } catch (e) {
-      console.warn('   - Failed to parse performer URLs:', e.message);
-    }
-  }
+  const performerUrls = collectPerformerUrls(performer);
   
   console.log(`   - Found ${performerUrls.length} URL(s) to check:`, performerUrls);
   
   const availableScrapers = [];
+
+  // Add custom YAML scrapers, matched either by one of the performer's URLs or
+  // by a scraper linked to a studio that produced one of the performer's scenes.
+  try {
+    const yamlMatches = await findPerformerYamlScrapers(id, performerUrls);
+
+    yamlMatches.forEach(({ scraper, matchedUrl, studio }) => {
+      console.log(`   - Adding YAML scraper: ${scraper.siteName}${matchedUrl ? ` (${matchedUrl})` : ` (via studio ${studio.name})`}`);
+      availableScrapers.push({
+        name: scraper.name,
+        siteName: scraper.siteName,
+        type: 'yaml',
+        isStashBox: false,
+        isStashNative: false,
+        configured: true,
+        supportsPerformerScrape: Boolean(scraper.config?.performerByURL),
+        supportsSceneSearch: Boolean(scraper.config?.sceneByFragment?.length),
+        matchedUrl,
+        studioId: studio?.id,
+        studioName: studio?.name,
+        studioUrl: studio?.url
+      });
+    });
+  } catch (error) {
+    console.warn('   - Failed to check custom YAML scrapers:', error.message);
+  }
   
   // Add stash-box endpoints as fragment scrapers - ALWAYS show them
   try {
@@ -12330,16 +12626,77 @@ router.get('/performers/:id/available-scrapers', asyncHandler(async (req, res) =
     scrapers: availableScrapers.map(s => ({
       id: s.id,
       name: s.name,
-      siteName: s.name,
+      siteName: s.siteName || s.name,
       endpoint: s.endpoint,
       type: s.type || 'stash-box',
       isStashBox: s.isStashBox !== false,
       isStashNative: s.isStashNative || false,
       configured: s.configured !== false, // Default to true for backwards compatibility
       supportedScrapes: s.supportedScrapes,
+      supportsPerformerScrape: s.supportsPerformerScrape,
+      supportsSceneSearch: s.supportsSceneSearch,
       matchedUrl: s.matchedUrl,
+      studioId: s.studioId,
+      studioName: s.studioName,
+      studioUrl: s.studioUrl,
       performer: s.performer
     }))
+  });
+}));
+
+// POST /api/stash/performers/:id/scrape-yaml - Scrape a performer using a custom YAML scraper
+router.post('/performers/:id/scrape-yaml', asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  const { scraperName, url } = req.body;
+
+  if (!scraperName) {
+    return sendBadRequest(res, 'Scraper name is required');
+  }
+
+  const performer = await prisma.stashPerformer.findUnique({ where: { id } });
+  if (!performer) {
+    return sendBadRequest(res, 'Performer not found');
+  }
+
+  const registry = await getScraperRegistry();
+  const scraper = registry.scrapers.find(s => s.siteName === scraperName);
+
+  if (!scraper) {
+    return sendBadRequest(res, `Unknown scraper: ${scraperName}`);
+  }
+
+  // Fall back to whichever of the performer's URLs this scraper recognises,
+  // then to searching the site by performer name (studio-linked scrapers).
+  let targetUrl = url;
+  if (!targetUrl) {
+    targetUrl = collectPerformerUrls(performer).find(candidate => scraper.canHandle(candidate));
+  }
+
+  if (!targetUrl && typeof scraper.searchPerformerUrl === 'function') {
+    const aliases = performer.alias ? performer.alias.split(',').map(a => a.trim()).filter(Boolean) : [];
+    console.log(`🔎 [YAML Performer Scrape] No ${scraperName} URL, searching by name "${performer.name}"`);
+    targetUrl = await scraper.searchPerformerUrl(performer.name, aliases);
+  }
+
+  if (!targetUrl) {
+    return sendBadRequest(res, `Could not find ${scraperName} page for "${performer.name}"`);
+  }
+
+  console.log(`👤 [YAML Performer Scrape] ${scraperName} -> ${targetUrl}`);
+
+  const result = await scraper.scrapePerformer(targetUrl);
+  const scraped = result?.scraped || null;
+
+  const { matched: matchedTags, unmatched: unmatchedTags } = await matchScrapedTagNames(scraped?.tags);
+  console.log(`   - Matched ${matchedTags.length} tag(s), ${unmatchedTags.length} unmatched`);
+
+  sendSuccess(res, {
+    performerId: id,
+    source: scraper.siteName,
+    sourceUrl: targetUrl,
+    scraped,
+    matched: { tags: matchedTags },
+    unmatched: { tags: unmatchedTags }
   });
 }));
 
@@ -12365,10 +12722,64 @@ router.post('/performers/:id/scrape-all', asyncHandler(async (req, res) => {
   }
 
   if (!stashBoxes.length) {
-    return sendSuccess(res, { message: 'No stash-box sources configured', performerId: id, sources: [] });
+    console.log('ℹ️ [Performer Scrape All] No stash-box sources configured; continuing with scraper and GEVI sources.');
   }
 
   const sources = [];
+
+  // Custom YAML scrapers matched by performer URL or by a linked studio scraper
+  try {
+    const performerAliases = performer.alias
+      ? performer.alias.split(',').map((a) => a.trim()).filter(Boolean)
+      : [];
+    const yamlMatches = await findPerformerYamlScrapers(id, collectPerformerUrls(performer));
+
+    for (const { scraper, matchedUrl, studio } of yamlMatches) {
+      if (!scraper.config?.performerByURL) continue;
+
+      // Studio-linked scrapers have no performer URL, so look one up by name
+      let targetUrl = matchedUrl;
+      if (!targetUrl && typeof scraper.searchPerformerUrl === 'function') {
+        console.log(`🔎 [Performer Scrape All] ${scraper.siteName} linked via studio "${studio?.name}", searching by name`);
+        targetUrl = await scraper.searchPerformerUrl(performer.name, performerAliases);
+      }
+
+      if (!targetUrl) {
+        console.log(`   - Skipping ${scraper.siteName}: no performer URL found`);
+        continue;
+      }
+
+      try {
+        console.log(`👤 [Performer Scrape All] ${scraper.siteName} -> ${targetUrl}`);
+        const result = await scraper.scrapePerformer(targetUrl);
+        const scraped = result?.scraped;
+
+        if (scraped?.name) {
+          const tagMatch = await matchScrapedTagNames(scraped.tags);
+          sources.push({
+            id: `custom-${scraper.siteName.toLowerCase().replace(/\s+/g, '-')}`,
+            name: scraper.siteName,
+            endpoint: scraper.siteName,
+            configured: true,
+            resultCount: 1,
+            hasResults: true,
+            usedFallback: !matchedUrl,
+            results: [{
+              ...scraped,
+              images: scraped.image ? [scraped.image] : [],
+              _matchedTags: tagMatch.matched,
+              _unmatchedTags: tagMatch.unmatched,
+              _sourceUrl: targetUrl
+            }]
+          });
+        }
+      } catch (err) {
+        console.warn(`⚠️ [Performer Scrape All] ${scraper.siteName} failed:`, err.message);
+      }
+    }
+  } catch (err) {
+    console.warn('⚠️ [Performer Scrape All] Custom scraper pass failed:', err.message);
+  }
 
   for (const box of stashBoxes) {
     const { endpoint, name: boxName } = box;
@@ -12606,22 +13017,7 @@ router.post('/performers/:id/scrape-stashbox-result', asyncHandler(async (req, r
   
   try {
     // Match tags against local database
-    const matchedTags = [];
-    const unmatchedTags = [];
-    
-    if (scraped.tags && Array.isArray(scraped.tags)) {
-      for (const tagName of scraped.tags) {
-        const tag = await prisma.stashTag.findFirst({
-          where: { name: { equals: tagName, mode: 'insensitive' } }
-        });
-        
-        if (tag) {
-          matchedTags.push({ id: tag.id, name: tag.name });
-        } else {
-          unmatchedTags.push(tagName);
-        }
-      }
-    }
+    const { matched: matchedTags, unmatched: unmatchedTags } = await matchScrapedTagNames(scraped.tags);
     
     console.log(`   - Matched ${matchedTags.length} tag(s), ${unmatchedTags.length} unmatched`);
     
@@ -12643,7 +13039,7 @@ router.post('/performers/:id/scrape-stashbox-result', asyncHandler(async (req, r
         measurements: scraped.measurements,
         fake_tits: scraped.fake_tits,
         penis_length: scraped.penis_length,
-        circumcised: scraped.circumcised,
+        circumcised: normalizeCircumcised(scraped.circumcised),
         career_length: scraped.career_length,
         tattoos: scraped.tattoos,
         piercings: scraped.piercings,
@@ -13049,7 +13445,7 @@ router.post('/performers/:id/scrape-native-result', asyncHandler(async (req, res
         measurements: scraped.measurements,
         fake_tits: scraped.fake_tits,
         penis_length: scraped.penis_length,
-        circumcised: scraped.circumcised,
+        circumcised: normalizeCircumcised(scraped.circumcised),
         career_length: scraped.career_length,
         tattoos: scraped.tattoos,
         piercings: scraped.piercings,
@@ -17187,10 +17583,19 @@ router.get('/scenes/duplicates/dismissed', asyncHandler(async (req, res) => {
       return sendBadRequest(res, 'Filename is required');
     }
     const fetch = require('node-fetch');
-    const upstream = `http://192.168.1.252:5001/api/scrape/gheaven/lookup-filename?filename=${encodeURIComponent(filename)}`;
-    const response = await fetch(upstream);
-    const data = await response.json();
-    res.status(response.status).json(data);
+    const baseUrl = process.env.GHEAVEN_SCRAPER_URL || 'http://192.168.1.252:5001';
+    const upstream = `${baseUrl.replace(/\/+$/, '')}/api/scrape/gheaven/lookup-filename?filename=${encodeURIComponent(filename)}`;
+    try {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 5000);
+      const response = await fetch(upstream, { signal: controller.signal }).finally(() => clearTimeout(timeout));
+      const data = await response.json();
+      res.status(response.status).json(data);
+    } catch (err) {
+      // The GHeaven companion scraper is optional and may be offline; degrade gracefully.
+      console.warn(`⚠️  GHeaven scraper lookup unavailable (${baseUrl}): ${err.message}`);
+      res.json({ success: false, count: 0, unavailable: true });
+    }
   }));
 
   return router;

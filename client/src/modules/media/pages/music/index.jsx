@@ -123,6 +123,9 @@ const Music = () => {
     setSearchParams(newParams, { replace }); // Allow control over replace behavior
   };
 
+  // Alphabet filter state
+  const [selectedLetter, setSelectedLetter] = useState(null);
+
   const navigateToView = (view, params = {}) => {
     const updates = { view, ...params };
 
@@ -136,6 +139,7 @@ const Music = () => {
       updates.album = null;
       updates.track = null;
       updates.work = null;
+      updates.letter = null; // Clear letter filter when navigating to artists
     } else if (view === 'artist') {
       updates.album = null;
       updates.track = null;
@@ -276,6 +280,7 @@ const Music = () => {
     const urlSearch = searchParams.get('search') || '';
     const urlSection = searchParams.get('section') || 'all';
     const urlArtistTypeId = searchParams.get('artistTypeId') || 'all';
+    const urlLetter = searchParams.get('letter');
     
     if (urlSearch !== searchQuery) {
       setSearchQuery(urlSearch);
@@ -285,6 +290,9 @@ const Music = () => {
     }
     if (urlArtistTypeId !== selectedArtistTypeId) {
       setSelectedArtistTypeId(urlArtistTypeId);
+    }
+    if (urlLetter !== null && urlLetter !== '') {
+      setSelectedLetter(urlLetter);
     }
   }, [searchParams]);
 
@@ -673,7 +681,7 @@ const Music = () => {
   };
 
   // Refresh just the artists (for filtering/searching)
-  const refreshArtists = async (sectionOverride = null, artistTypeOverride = null) => {
+  const refreshArtists = async (sectionOverride = null, artistTypeOverride = null, letterOverride = null) => {
     try {
       // Reset pagination state for all views
       setArtistsPage(1);
@@ -688,7 +696,7 @@ const Music = () => {
       setTracks([]);
       
       // Load first page of artists with current settings
-      await loadArtists(1, true, sectionOverride, artistTypeOverride);
+      await loadArtists(1, true, sectionOverride, artistTypeOverride, letterOverride);
     } catch (err) {
       console.error('Error refreshing artists:', err);
       setError(err.message);
@@ -836,30 +844,34 @@ const Music = () => {
     }
   };
 
-  const loadArtists = async (page = 1, replace = false, sectionOverride = null, artistTypeOverride = null) => {
+  const loadArtists = async (page = 1, replace = false, sectionOverride = null, artistTypeOverride = null, letterOverride = null) => {
     try {
       setArtistsLoading(true);
       
       const currentSection = sectionOverride !== null ? sectionOverride : selectedSection;
       const currentArtistTypeId = artistTypeOverride !== null ? artistTypeOverride : selectedArtistTypeId;
+      const currentLetter = letterOverride !== null ? letterOverride : selectedLetter;
       const artistTypeFilterParam = currentArtistTypeId !== 'all'
         ? `&artistTypeId=${encodeURIComponent(currentArtistTypeId)}`
         : '';
       
-      console.log('loadArtists called with:', { page, replace, sectionOverride, currentSection, searchQuery, currentArtistTypeId });
+      console.log('loadArtists called with:', { page, replace, sectionOverride, currentSection, searchQuery, currentArtistTypeId, currentLetter });
       
       let url;
       if (searchQuery) {
-        // For search, respect the selected section
+        // For search, respect the selected section and letter
+        const letterFilter = currentLetter ? `&letter=${encodeURIComponent(currentLetter)}` : '';
         if (currentSection !== 'all') {
-          url = `${config.apiBaseUrl}/api/music/artists/section/${currentSection}?search=${encodeURIComponent(searchQuery)}&page=${page}&limit=20${artistTypeFilterParam}`;
+          url = `${config.apiBaseUrl}/api/music/artists/section/${currentSection}?search=${encodeURIComponent(searchQuery)}&page=${page}&limit=20${artistTypeFilterParam}${letterFilter}`;
         } else {
-          url = `${config.apiBaseUrl}/api/music/artists?search=${encodeURIComponent(searchQuery)}&page=${page}&limit=20${artistTypeFilterParam}`;
+          url = `${config.apiBaseUrl}/api/music/artists?search=${encodeURIComponent(searchQuery)}&page=${page}&limit=20${artistTypeFilterParam}${letterFilter}`;
         }
       } else if (currentSection !== 'all') {
-        url = `${config.apiBaseUrl}/api/music/artists/section/${currentSection}?page=${page}&limit=20${artistTypeFilterParam}`;
+        const letterFilter = currentLetter ? `&letter=${encodeURIComponent(currentLetter)}` : '';
+        url = `${config.apiBaseUrl}/api/music/artists/section/${currentSection}?page=${page}&limit=20${artistTypeFilterParam}${letterFilter}`;
       } else {
-        url = `${config.apiBaseUrl}/api/music/artists?page=${page}&limit=20${artistTypeFilterParam}`;
+        const letterFilter = currentLetter ? `&letter=${encodeURIComponent(currentLetter)}` : '';
+        url = `${config.apiBaseUrl}/api/music/artists?page=${page}&limit=20${artistTypeFilterParam}${letterFilter}`;
       }
       
       const response = await fetch(url);
@@ -872,16 +884,19 @@ const Music = () => {
       
       console.log('Received artists data:', data, 'Replace:', replace);
       
+      // When filtering by letter, all artists are returned in one page (no pagination)
+      const isLetterFilterActive = currentLetter !== null;
+      
       if (replace) {
         setArtists(data.artists || data);
         setArtistsPage(1);
+        // When filtering by letter, there's no pagination - all artists are shown
+        setArtistsHasMore(!isLetterFilterActive && (data.artists || data).length === 20);
       } else {
         setArtists(prevArtists => [...prevArtists, ...(data.artists || data)]);
         setArtistsPage(page);
+        setArtistsHasMore(data.hasMore !== false && (data.artists || data).length === 20);
       }
-      
-      // Check if we have more data to load
-      setArtistsHasMore(data.hasMore !== false && (data.artists || data).length === 20);
       
     } catch (err) {
       console.error('Error loading artists:', err);
@@ -899,12 +914,12 @@ const Music = () => {
 
   const searchMusic = async () => {
     if (!searchQuery.trim()) {
-      updateUrlParams({ search: null }, true); // Replace current entry
+      updateUrlParams({ search: null, letter: null }, true); // Replace current entry
       refreshArtists();
       return;
     }
 
-    updateUrlParams({ search: searchQuery.trim() }, true); // Replace current entry
+    updateUrlParams({ search: searchQuery.trim(), letter: null }, true); // Replace current entry
 
     try {
       setLoading(true);
@@ -926,7 +941,7 @@ const Music = () => {
     console.log('Selected section object:', sections.find(s => s.sectionKey === sectionId));
     
     setSelectedSection(sectionId);
-    updateUrlParams({ section: sectionId === 'all' ? null : sectionId }, true); // Replace current entry
+    updateUrlParams({ section: sectionId === 'all' ? null : sectionId, letter: null }, true); // Replace current entry
 
     try {
       setLoading(true);
@@ -936,7 +951,7 @@ const Music = () => {
       // Reset selected artist/album when filtering by section
       setSelectedArtist(null);
       setSelectedAlbum(null);
-      navigateToView('artists', { section: sectionId === 'all' ? null : sectionId });
+      navigateToView('artists', { section: sectionId === 'all' ? null : sectionId, letter: null });
       
       // Always refresh artists data
       await refreshArtists(sectionId);
@@ -979,7 +994,7 @@ const Music = () => {
   const handleArtistTypeFilterChange = async (artistTypeId) => {
     const nextArtistTypeId = artistTypeId || 'all';
     setSelectedArtistTypeId(nextArtistTypeId);
-    updateUrlParams({ artistTypeId: nextArtistTypeId === 'all' ? null : nextArtistTypeId }, true);
+    updateUrlParams({ artistTypeId: nextArtistTypeId === 'all' ? null : nextArtistTypeId, letter: null }, true);
 
     try {
       setLoading(true);
@@ -987,7 +1002,7 @@ const Music = () => {
       setSelectedArtist(null);
       setSelectedAlbum(null);
       setSelectedTrack(null);
-      navigateToView('artists', { artistTypeId: nextArtistTypeId === 'all' ? null : nextArtistTypeId });
+      navigateToView('artists', { artistTypeId: nextArtistTypeId === 'all' ? null : nextArtistTypeId, letter: null });
 
       await refreshArtists();
     } catch (err) {
@@ -1030,6 +1045,95 @@ const Music = () => {
     } catch (err) {
       console.error('Error loading artist data:', err);
       setError(err.message);
+    }
+  };
+
+  const handleDeleteArtist = async (artist) => {
+    console.log('handleDeleteArtist called with:', artist);
+    
+    // Check if artist has any tracks connected
+    try {
+      const tracksRes = await fetch(`${config.apiBaseUrl}/api/music/tracks/artist/${artist.ratingKey}`);
+      const tracksData = await safeJsonParse(tracksRes, `${config.apiBaseUrl}/api/music/tracks/artist/${artist.ratingKey}`);
+      
+      if (tracksData.length > 0) {
+        console.log('Artist has tracks, cannot delete:', tracksData.length, 'tracks found');
+        setError('Cannot delete artist - it has tracks connected. Please remove tracks first.');
+        return;
+      }
+      
+      // Check if artist has any album connections
+      const albumsRes = await fetch(`${config.apiBaseUrl}/api/music/albums/artist/${artist.ratingKey}`);
+      const albumsData = await safeJsonParse(albumsRes, `${config.apiBaseUrl}/api/music/albums/artist/${artist.ratingKey}`);
+      
+      if (albumsData.length > 0) {
+        console.log('Artist has albums, cannot delete:', albumsData.length, 'albums found');
+        setError('Cannot delete artist - it has albums connected. Please remove albums first.');
+        return;
+      }
+      
+      // Now delete the artist
+      const deleteRes = await fetch(`${config.apiBaseUrl}/api/music/artists/${artist.ratingKey}`, {
+        method: 'DELETE'
+      });
+      
+      if (!deleteRes.ok) {
+        throw new Error(`Failed to delete artist (${deleteRes.status})`);
+      }
+      
+      const deleteData = await safeJsonParse(deleteRes, `${config.apiBaseUrl}/api/music/artists/${artist.ratingKey}`);
+      
+      console.log('Artist deleted successfully:', deleteData);
+      
+      // Remove artist from current view
+      setArtists(prevArtists => prevArtists.filter(a => a.ratingKey !== artist.ratingKey));
+      
+      // Clear any selected artist
+      if (selectedArtist?.ratingKey === artist.ratingKey) {
+        setSelectedArtist(null);
+      }
+      
+      // Show success message
+      setError(null);
+      
+    } catch (err) {
+      console.error('Error deleting artist:', err);
+      setError(err.message);
+    }
+  };
+
+  const handleLetterSelect = async (letter) => {
+    console.log('handleLetterSelect called with:', letter, 'Current selectedLetter:', selectedLetter);
+    
+    if (letter === selectedLetter) {
+      // Deselect if clicking the same letter
+      setSelectedLetter(null);
+      updateUrlParams({ letter: null }, true);
+      await refreshArtists();
+      return;
+    }
+    
+    setSelectedLetter(letter);
+    updateUrlParams({ letter: letter }, true); // Replace current entry
+
+    try {
+      setLoading(true);
+      
+      console.log('About to load artists for letter:', letter);
+      
+      // Reset selected artist/album when filtering by letter
+      setSelectedArtist(null);
+      setSelectedAlbum(null);
+      navigateToView('artists', { letter: letter });
+      
+      // Always refresh artists data
+      await refreshArtists(null, null, letter);
+      
+    } catch (err) {
+      console.error('Error filtering by letter:', err);
+      setError(err.message);
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -2063,6 +2167,9 @@ const Music = () => {
                 });
               }}
               onCreateArtist={() => setShowCreateArtistModal(true)}
+              onLetterSelect={handleLetterSelect}
+              selectedLetter={selectedLetter}
+              onDeleteArtist={handleDeleteArtist}
             />
           </>
         )}

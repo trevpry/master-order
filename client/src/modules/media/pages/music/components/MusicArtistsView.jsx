@@ -12,7 +12,9 @@ const MusicArtistsView = ({
   onCreateArtist,
   selectionMode = false,
   selectedArtists = new Set(),
-  onToggleSelection
+  onToggleSelection,
+  onLetterSelect,
+  selectedLetter = null
 }) => {
   
   const handleArtistClick = (artist) => {
@@ -22,6 +24,8 @@ const MusicArtistsView = ({
       onSelectArtist(artist);
     }
   };
+  
+  const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
   
   return (
     <div className="artists-view-container">
@@ -35,6 +39,19 @@ const MusicArtistsView = ({
           </button>
         </div>
       )}
+      
+      {/* Alphabet Browse Bar */}
+      <div className="alphabet-browse-bar">
+        {alphabet.split('').map((letter) => (
+          <button
+            key={letter}
+            className={`alphabet-letter-btn ${selectedLetter === letter ? 'active' : ''}`}
+            onClick={() => onLetterSelect(letter)}
+          >
+            {letter}
+          </button>
+        ))}
+      </div>
       
       <div className="artists-grid">
       {artists.length === 0 ? (

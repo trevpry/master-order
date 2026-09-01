@@ -175,9 +175,14 @@ const MusicAlbumsView = ({
                       {album.genres.slice(0, 2).join(', ')}
                     </span>
                   )}
-                  {album.childCount && (
+                  {album.trackCount !== undefined && (
                     <span className="track-count">
-                      {album.childCount} track{album.childCount !== 1 ? 's' : ''}
+                      {album.trackCount} track{album.trackCount !== 1 ? 's' : ''}
+                    </span>
+                  )}
+                  {album.workCount !== undefined && (
+                    <span className="work-count">
+                      {album.workCount} work{album.workCount !== 1 ? 's' : ''}
                     </span>
                   )}
                   {album.totalPlayCount !== undefined && album.totalPlayCount > 0 && (

@@ -15,11 +15,37 @@ class IdentificationService {
   }
 
   /**
+   * Extract album cover URL from MusicBrainz release/release-group data
+   * @param {Object} musicBrainzData - MusicBrainz release or release-group data
+   * @returns {string|null} Cover art URL or null
+   */
+  extractAlbumCoverUrl(musicBrainzData) {
+    // Try to get cover art from MusicBrainz
+    // Use Cover Art Archive API: https://coverartarchive.org/
+    // For releases: https://coverartarchive.org/release/{id}/front
+    // For release-groups: https://coverartarchive.org/release-group/{id}/front
+    
+    // Check if we have a release object (has id field)
+    const releaseId = musicBrainzData.id;
+    if (releaseId) {
+      // Return the Cover Art Archive URL for the release
+      // Front cover is the default image type
+      const coverUrl = `https://coverartarchive.org/release/${releaseId}/front`;
+      console.log('Cover art URL for', releaseId, ':', coverUrl);
+      return coverUrl;
+    }
+    return null;
+  }
+
+  /**
    * Search MusicBrainz for album matches
    * @param {string} ratingKey - Album's ratingKey
+   * @param {Object} plexInfo - Optional Plex URL and token for artwork URLs
+   * @param {string} plexInfo.plexUrl - Plex server URL
+   * @param {string} plexInfo.plexToken - Plex token for authentication
    * @returns {Promise<Array>} Array of candidates with confidence scores
    */
-  async identifyAlbum(ratingKey) {
+  async identifyAlbum(ratingKey, plexInfo = {}) {
     // Get album with artist info
     const album = await this.prisma.plexAlbum.findUnique({
       where: { ratingKey },
@@ -36,6 +62,14 @@ class IdentificationService {
       throw new Error(`Album not found: ${ratingKey}`);
     }
 
+    // Get cover art URL from database
+    const albumCoverLocalRaw = album.art || album.thumb || null;
+    
+    // Construct proper artwork URL if plexInfo is provided
+    const albumCoverLocal = plexInfo.plexUrl && plexInfo.plexToken && albumCoverLocalRaw
+      ? `${plexInfo.plexUrl}${albumCoverLocalRaw}?X-Plex-Token=${plexInfo.plexToken}`
+      : albumCoverLocalRaw;
+
     // Clear any pending candidates for this album
     await this.prisma.identificationCandidate.deleteMany({
       where: {
@@ -50,6 +84,12 @@ class IdentificationService {
     if (album.musicBrainzId) {
       try {
         const directResult = await this.musicBrainz.getRelease(album.musicBrainzId);
+        
+        // Get cover art from MusicBrainz
+        const albumCoverMusicBrainz = this.extractAlbumCoverUrl(directResult);
+        
+        console.log('Direct album lookup - Album:', album.title, 'Local cover:', albumCoverLocal || 'none', 'MusicBrainz cover:', albumCoverMusicBrainz || 'none');
+        
         const candidate = await this.prisma.identificationCandidate.create({
           data: {
             entityType: 'album',
@@ -60,7 +100,9 @@ class IdentificationService {
             releaseDate: directResult.date ? new Date(directResult.date) : null,
             confidence: 1,
             metadata: JSON.stringify(directResult),
-            status: 'pending'
+            status: 'pending',
+            albumCoverLocal: albumCoverLocal,
+            albumCoverMusicBrainz: albumCoverMusicBrainz
           }
         });
 
@@ -81,6 +123,11 @@ class IdentificationService {
       for (const result of searchResults.slice(0, 10)) { // Top 10 matches
         const confidence = this.calculateAlbumConfidence(album, result);
         
+        // Get cover art from MusicBrainz
+        const albumCoverMusicBrainz = this.extractAlbumCoverUrl(result);
+        
+        console.log('Search result - Album:', result.title, 'Local cover:', albumCoverLocal || 'none', 'MusicBrainz cover:', albumCoverMusicBrainz || 'none');
+        
         // Store candidate
         const candidate = await this.prisma.identificationCandidate.create({
           data: {
@@ -92,11 +139,63 @@ class IdentificationService {
             releaseDate: result.date ? new Date(result.date) : null,
             confidence,
             metadata: JSON.stringify(result),
-            status: 'pending'
+            status: 'pending',
+            albumCoverLocal: albumCoverLocal,
+            albumCoverMusicBrainz: albumCoverMusicBrainz
           }
         });
 
         candidates.push(candidate);
+      }
+    }
+
+    // Search by AcoustID fingerprint if available
+    const tracksWithAcoustId = await this.prisma.plexTrack.findMany({
+      where: {
+        ratingKey: {
+          in: album.tracks.map(t => t.ratingKey)
+        },
+        acoustidId: {
+          not: null
+        }
+      },
+      take: 1 // Just need one track with AcoustID
+    });
+
+    if (tracksWithAcoustId.length > 0) {
+      const firstTrack = tracksWithAcoustId[0];
+      const acoustId = firstTrack.acoustidId;
+      
+      if (acoustId) {
+        try {
+          const recordingResults = await this.musicBrainz.searchRecordingsByAcoustId(acoustId, 10);
+          
+          for (const result of recordingResults) {
+            // Check if this recording is already in candidates
+            const alreadyExists = candidates.find(c => c.musicBrainzId === result.id);
+            if (!alreadyExists) {
+              const confidence = 0.8; // High confidence for AcoustID matches
+              
+              const candidate = await this.prisma.identificationCandidate.create({
+                data: {
+                  entityType: 'album',
+                  entityKey: ratingKey,
+                  musicBrainzId: result.id,
+                  title: result.title,
+                  artist: result['artist-credit']?.[0]?.name,
+                  releaseDate: result.date ? new Date(result.date) : null,
+                  confidence,
+                  metadata: JSON.stringify(result),
+                  status: 'pending'
+                }
+              });
+              
+              candidates.push(candidate);
+            }
+          }
+        } catch (error) {
+          console.error('MusicBrainz AcoustID search error:', error);
+        }
       }
     }
 
@@ -116,9 +215,12 @@ class IdentificationService {
   /**
    * Search MusicBrainz for artist matches
    * @param {string} ratingKey - Artist's ratingKey
+   * @param {Object} plexInfo - Optional Plex URL and token for artwork URLs
+   * @param {string} plexInfo.plexUrl - Plex server URL
+   * @param {string} plexInfo.plexToken - Plex token for authentication
    * @returns {Promise<Array>} Array of candidates with confidence scores
    */
-  async identifyArtist(ratingKey) {
+  async identifyArtist(ratingKey, plexInfo = {}) {
     const artist = await this.prisma.plexArtist.findUnique({
       where: { ratingKey },
       include: {
@@ -133,6 +235,14 @@ class IdentificationService {
       throw new Error(`Artist not found: ${ratingKey}`);
     }
 
+    // Get artist cover art URL from database
+    const artistCoverLocalRaw = artist.art || artist.thumb || null;
+    
+    // Construct proper artwork URL if plexInfo is provided
+    const artistCoverLocal = plexInfo.plexUrl && plexInfo.plexToken && artistCoverLocalRaw
+      ? `${plexInfo.plexUrl}${artistCoverLocalRaw}?X-Plex-Token=${plexInfo.plexToken}`
+      : artistCoverLocalRaw;
+
     // Clear pending candidates
     await this.prisma.identificationCandidate.deleteMany({
       where: {
@@ -143,11 +253,58 @@ class IdentificationService {
     });
 
     // Search MusicBrainz
-    const searchResults = await this.musicBrainz.searchArtist(artist.title);
+    // Handle "lastName, firstName" format by searching both formats
+    const searchName = artist.title;
+    const searchNames = [searchName];
+    
+    // Check if the name is in "lastName, firstName" format
+    if (searchName.includes(',') && !searchName.startsWith(',')) {
+      const parts = searchName.split(',');
+      if (parts.length === 2) {
+        const firstName = parts[1].trim();
+        const lastName = parts[0].trim();
+        // Add "firstName lastName" format to search
+        searchNames.push(`${firstName} ${lastName}`);
+      }
+    }
+    
+    // Also try searching without quotes for better results
+    const searchNamesUnquoted = searchNames.map(name => {
+      if (name.includes(' ')) {
+        return name.replace(/"/g, '');
+      }
+      return name;
+    });
+    
+    let allSearchResults = [];
+    for (const searchName of [...searchNames, ...searchNamesUnquoted]) {
+      // Search with artistaccent (preserves diacritics for non-Latin names)
+      // This will match against aliases and names in other scripts
+      const results = await this.musicBrainz.searchArtist(searchName);
+      allSearchResults.push(...results);
+      
+      // Also search aliases (for cases where the name doesn't match directly)
+      const aliasResults = await this.musicBrainz.searchArtistByAlias(searchName);
+      allSearchResults.push(...aliasResults);
+      
+      // Also search by sort name (for "lastName, firstName" format matches)
+      const sortNameResults = await this.musicBrainz.searchArtistBySortName(searchName);
+      allSearchResults.push(...sortNameResults);
+    }
+    
+    // Deduplicate results
+    const uniqueResults = [];
+    const seenIds = new Set();
+    for (const result of allSearchResults) {
+      if (!seenIds.has(result.id)) {
+        seenIds.add(result.id);
+        uniqueResults.push(result);
+      }
+    }
 
     // Calculate confidence and store candidates
     const candidates = [];
-    for (const result of searchResults.slice(0, 10)) {
+    for (const result of uniqueResults.slice(0, 10)) {
       const confidence = this.calculateArtistConfidence(artist, result);
       const preferredName = getPreferredMusicBrainzArtistName(result) || result.name;
       
@@ -161,7 +318,8 @@ class IdentificationService {
           releaseDate: null,
           confidence,
           metadata: JSON.stringify(result),
-          status: 'pending'
+          status: 'pending',
+          artistCoverLocal: artistCoverLocal
         }
       });
 
@@ -201,57 +359,17 @@ class IdentificationService {
       fullMetadata = await this.musicBrainz.getArtist(candidate.musicBrainzId);
     }
 
-    // Cache the metadata
-    const expiresAt = new Date();
-    expiresAt.setDate(expiresAt.getDate() + 30); // 30-day cache
-
-    await this.prisma.musicBrainzMetadataCache.upsert({
-      where: { musicBrainzId: candidate.musicBrainzId },
-      create: {
-        musicBrainzId: candidate.musicBrainzId,
-        entityType: candidate.entityType,
-        metadata: JSON.stringify(fullMetadata),
-        expiresAt
-      },
-      update: {
-        metadata: JSON.stringify(fullMetadata),
-        lastFetched: new Date(),
-        expiresAt
-      }
-    });
-
-    // Update entity with MusicBrainz ID and metadata
-    let updatedEntity;
-    if (candidate.entityType === 'album') {
-      updatedEntity = await this.applyAlbumMetadata(candidate.entityKey, fullMetadata);
-    } else if (candidate.entityType === 'artist') {
-      updatedEntity = await this.applyArtistMetadata(candidate.entityKey, fullMetadata);
-    }
-
-    // Mark candidate as accepted
-    await this.prisma.identificationCandidate.update({
-      where: { id: candidateId },
-      data: {
-        status: 'accepted',
-        reviewedAt: new Date()
-      }
-    });
-
-    // Mark other candidates as rejected
-    await this.prisma.identificationCandidate.updateMany({
-      where: {
+    // Return the raw metadata without saving to database
+    return {
+      success: true,
+      data: fullMetadata,
+      candidate: {
+        id: candidate.id,
         entityType: candidate.entityType,
         entityKey: candidate.entityKey,
-        id: { not: candidateId },
-        status: 'pending'
-      },
-      data: {
-        status: 'rejected',
-        reviewedAt: new Date()
+        musicBrainzId: candidate.musicBrainzId
       }
-    });
-
-    return updatedEntity;
+    };
   }
 
   /**
@@ -340,7 +458,218 @@ class IdentificationService {
 
     await this.applyReleaseTrackMetadata(album, metadata);
 
+    // Auto-merge albums with the same MusicBrainz ID
+    await this.autoMergeAlbumsByMusicBrainzId(metadata.id);
+
     return updatedAlbum;
+  }
+
+  /**
+   * Auto-merge albums with the same MusicBrainz ID
+   * @param {string} musicBrainzId - MusicBrainz ID to match
+   */
+  async autoMergeAlbumsByMusicBrainzId(musicBrainzId) {
+    // Find all albums with the same MusicBrainz ID
+    const albums = await this.prisma.plexAlbum.findMany({
+      where: {
+        musicBrainzId: musicBrainzId,
+        removed: false
+      },
+      orderBy: [{ addedAt: 'asc' }]
+    });
+
+    // If we have more than one album with the same MusicBrainz ID, merge them
+    if (albums.length > 1) {
+      console.log(`Auto-merging ${albums.length} albums with MusicBrainz ID ${musicBrainzId}`);
+      
+      const primaryAlbum = albums[0];
+      const duplicateAlbums = albums.slice(1);
+
+      // Merge each duplicate album into the primary
+      for (const duplicate of duplicateAlbums) {
+        // Build merge patch
+        const patch = {};
+        const copyIfMissing = (field) => {
+          if ((primaryAlbum[field] === null || primaryAlbum[field] === undefined || primaryAlbum[field] === '')
+            && duplicate[field] !== null
+            && duplicate[field] !== undefined
+            && duplicate[field] !== '') {
+            patch[field] = duplicate[field];
+            primaryAlbum[field] = duplicate[field];
+          }
+        };
+
+        [
+          'titleSort',
+          'summary',
+          'year',
+          'thumb',
+          'art',
+          'parentThumb',
+          'originallyAvailableAt',
+          'musicBrainzReleaseDate',
+          'musicBrainzCountry',
+          'musicBrainzStatus',
+          'musicBrainzPackaging',
+          'musicBrainzLabel',
+          'musicBrainzBarcode',
+          'musicBrainzAsin',
+          'albumArtist',
+          'workId',
+          'userTitle',
+          'userReleaseDate',
+          'userLabel',
+          'metadataPreferences',
+          'identificationStatus',
+          'identificationConfidence',
+          'lastIdentificationAttempt',
+        ].forEach(copyIfMissing);
+
+        const mergeCollections = (primaryCollections, duplicateCollections) => {
+          const parseCollections = (str) => {
+            try {
+              return JSON.parse(str || '[]');
+            } catch {
+              return [];
+            }
+          };
+
+          const merged = [...new Set([...parseCollections(primaryCollections), ...parseCollections(duplicateCollections)])];
+          return merged.length > 0 ? JSON.stringify(merged) : null;
+        };
+
+        const mergedCollections = mergeCollections(primaryAlbum.collections, duplicate.collections);
+        if (mergedCollections && mergedCollections !== primaryAlbum.collections) {
+          patch.collections = mergedCollections;
+          primaryAlbum.collections = mergedCollections;
+        }
+
+        // Update primary album with merged data
+        if (Object.keys(patch).length > 0) {
+          await this.prisma.plexAlbum.update({
+            where: { ratingKey: primaryAlbum.ratingKey },
+            data: patch
+          });
+        }
+
+        // Transfer tracks from duplicate to primary
+        const trackUpdateData = { parentRatingKey: primaryAlbum.ratingKey };
+        if (primaryAlbum.parentRatingKey) {
+          trackUpdateData.grandparentRatingKey = primaryAlbum.parentRatingKey;
+        }
+
+        await this.prisma.plexTrack.updateMany({
+          where: { parentRatingKey: duplicate.ratingKey },
+          data: trackUpdateData
+        });
+
+        // Delete duplicate album
+        await this.prisma.plexAlbum.delete({
+          where: { ratingKey: duplicate.ratingKey }
+        });
+
+        console.log(`Merged album "${duplicate.title}" into "${primaryAlbum.title}"`);
+      }
+    }
+  }
+
+  /**
+   * Auto-merge artists with the same MusicBrainz ID
+   * @param {string} musicBrainzId - MusicBrainz ID to match
+   */
+  async autoMergeArtistsByMusicBrainzId(musicBrainzId) {
+    // Find all artists with the same MusicBrainz ID
+    const artists = await this.prisma.plexArtist.findMany({
+      where: {
+        musicBrainzId: musicBrainzId,
+        removed: false
+      },
+      orderBy: [{ addedAt: 'asc' }]
+    });
+
+    // If we have more than one artist with the same MusicBrainz ID, merge them
+    if (artists.length > 1) {
+      console.log(`Auto-merging ${artists.length} artists with MusicBrainz ID ${musicBrainzId}`);
+      
+      const primaryArtist = artists[0];
+      const duplicateArtists = artists.slice(1);
+
+      // Merge each duplicate artist into the primary
+      for (const duplicate of duplicateArtists) {
+        // Build merge patch
+        const patch = {};
+        const copyIfMissing = (field) => {
+          if ((primaryArtist[field] === null || primaryArtist[field] === undefined || primaryArtist[field] === '')
+            && duplicate[field] !== null
+            && duplicate[field] !== undefined
+            && duplicate[field] !== '') {
+            patch[field] = duplicate[field];
+            primaryArtist[field] = duplicate[field];
+          }
+        };
+
+        [
+          'titleSort',
+          'summary',
+          'thumb',
+          'art',
+          'musicBrainzCountry',
+          'musicBrainzBeginDate',
+          'musicBrainzEndDate',
+          'musicBrainzEnded',
+          'musicBrainzAliases',
+          'musicBrainzLinks',
+          'userTitle',
+          'userSortName',
+          'userBiography',
+          'userCountry',
+          'metadataPreferences',
+          'identificationStatus',
+          'identificationConfidence',
+          'lastIdentificationAttempt',
+        ].forEach(copyIfMissing);
+
+        const mergeCollections = (primaryCollections, duplicateCollections) => {
+          const parseCollections = (str) => {
+            try {
+              return JSON.parse(str || '[]');
+            } catch {
+              return [];
+            }
+          };
+
+          const merged = [...new Set([...parseCollections(primaryCollections), ...parseCollections(duplicateCollections)])];
+          return merged.length > 0 ? JSON.stringify(merged) : null;
+        };
+
+        const mergedCollections = mergeCollections(primaryArtist.collections, duplicate.collections);
+        if (mergedCollections && mergedCollections !== primaryArtist.collections) {
+          patch.collections = mergedCollections;
+          primaryArtist.collections = mergedCollections;
+        }
+
+        // Update primary artist with merged data
+        if (Object.keys(patch).length > 0) {
+          await this.prisma.plexArtist.update({
+            where: { ratingKey: primaryArtist.ratingKey },
+            data: patch
+          });
+        }
+
+        // Transfer albums from duplicate to primary
+        await this.prisma.plexAlbum.updateMany({
+          where: { parentRatingKey: duplicate.ratingKey },
+          data: { parentRatingKey: primaryArtist.ratingKey }
+        });
+
+        // Delete duplicate artist
+        await this.prisma.plexArtist.delete({
+          where: { ratingKey: duplicate.ratingKey }
+        });
+
+        console.log(`Merged artist "${duplicate.title}" into "${primaryArtist.title}"`);
+      }
+    }
   }
 
   async applyReleaseTrackMetadata(album, metadata) {
@@ -1239,6 +1568,11 @@ class IdentificationService {
       data: updateData
     });
 
+    // Auto-merge artists with the same MusicBrainz ID
+    if (metadata.id) {
+      await this.autoMergeArtistsByMusicBrainzId(metadata.id);
+    }
+
     if (this.shouldAssignComposerArtistType(metadata)) {
       await this.ensureArtistTypeAssignmentByName(ratingKey, 'Composer');
     }
@@ -1283,19 +1617,22 @@ class IdentificationService {
       });
     }
 
-    await this.prisma.artistTypeAssignment.upsert({
+    // Check if assignment already exists
+    const existingAssignment = await this.prisma.artistTypeAssignment.findFirst({
       where: {
-        artistKey_artistTypeId: {
-          artistKey,
-          artistTypeId: artistType.id
-        }
-      },
-      update: {},
-      create: {
-        artistKey,
+        artistKey: artistKey,
         artistTypeId: artistType.id
       }
     });
+
+    if (!existingAssignment) {
+      await this.prisma.artistTypeAssignment.create({
+        data: {
+          artistKey,
+          artistTypeId: artistType.id
+        }
+      });
+    }
   }
 
   /**

@@ -51,16 +51,6 @@ class YamlScraperService extends BaseScraperService {
         }
       });
     }
-
-    // Extract URL patterns from performerByURL configuration
-    this.performerUrlPatterns = [];
-    if (this.config.performerByURL) {
-      this.config.performerByURL.forEach(scraper => {
-        if (scraper.url) {
-          this.performerUrlPatterns.push(...scraper.url);
-        }
-      });
-    }
     
     console.log(`📋 Loaded YAML scraper: ${this.siteName}`);
     console.log(`   - Type: ${this.isScriptBased ? 'Script-based' : 'XPath-based'}`);
@@ -188,21 +178,8 @@ class YamlScraperService extends BaseScraperService {
       // Domain must match, then check if URL starts with the full pattern
       return urlDomain === patternDomain && normalizedUrl.startsWith(normalizedPattern);
     });
-
-    if (matchesMovie) return true;
-
-    // Check if URL matches any of the performer URL patterns
-    const matchesPerformer = this.performerUrlPatterns.some(pattern => {
-      const normalizedUrl = url.toLowerCase().replace(/^https?:\/\/(www\.)?/, '');
-      const normalizedPattern = pattern.toLowerCase().replace(/^https?:\/\/(www\.)?/, '');
-
-      const urlDomain = normalizedUrl.split('/')[0];
-      const patternDomain = normalizedPattern.split('/')[0];
-
-      return urlDomain === patternDomain && normalizedUrl.startsWith(normalizedPattern);
-    });
     
-    return matchesPerformer;
+    return matchesMovie;
   }
 
   /**
@@ -326,12 +303,9 @@ class YamlScraperService extends BaseScraperService {
       }
       return `[class="${classes}"]`;
     });
-
-    // Handle bare attribute presence selectors like [@href]
-    selector = selector.replace(/\[@([\w-]+)\]/g, '[$1]');
     
     // Handle other attribute conditions
-    selector = selector.replace(/\[@([\w-]+)="([^"]+)"\]/g, '[$1="$2"]');
+    selector = selector.replace(/\[@(\w+)="([^"]+)"\]/g, '[$1="$2"]');
     
     // Handle text() = "value" - convert to :contains() selector
     // Example: //strong[text() = "From:"] -> strong:contains("From:")
@@ -343,7 +317,7 @@ class YamlScraperService extends BaseScraperService {
     
     // Handle contains() for other attributes  
     // Example: [contains(@href, "value")]
-    selector = selector.replace(/\[contains\(@([\w-]+),\s*["']([^"']+)["']\)\]/g, '[$1*="$2"]');
+    selector = selector.replace(/\[contains\(@(\w+),\s*["']([^"']+)["']\)\]/g, '[$1*="$2"]');
     
     // Handle contains(text(), "value") - convert to :contains() selector
     // Example: //li[contains(text(),"Added:")] -> li:contains("Added:")
@@ -424,74 +398,62 @@ class YamlScraperService extends BaseScraperService {
   /**
    * Parse date string using Go-style format
    * Converts to YYYY-MM-DD format
+   * 
+   * Go date format reference:
+   * 02 = day (01-31)
+   * 01 = month (01-12)  
+   * 2006 = year
+   * 
+   * Example: "02-01-2006" means DD-MM-YYYY
    */
   parseDate(dateString, formatString) {
     if (!dateString || !formatString) return dateString;
 
-    const rawDate = String(dateString).trim();
-    if (!rawDate) return dateString;
-
     try {
-      const monthMap = {
-        Jan: '01', Feb: '02', Mar: '03', Apr: '04', May: '05', Jun: '06',
-        Jul: '07', Aug: '08', Sep: '09', Oct: '10', Nov: '11', Dec: '12',
-        January: '01', February: '02', March: '03', April: '04',
-        June: '06', July: '07', August: '08', September: '09',
-        October: '10', November: '11', December: '12'
-      };
-
-      const monthNameRegex = /^\s*(\d{1,2})\s+(Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\s+(\d{2}|\d{4})\s*$/i;
-      const monthNameMatch = rawDate.match(monthNameRegex);
-      if (monthNameMatch) {
-        const day = monthNameMatch[1].padStart(2, '0');
-        const monthKey = monthNameMatch[2].charAt(0).toUpperCase() + monthNameMatch[2].slice(1).toLowerCase();
-        const month = monthMap[monthKey];
-        const yearPart = monthNameMatch[3];
-        const year = yearPart.length === 2 ? `20${yearPart}` : yearPart;
-
-        if (!month) {
-          console.warn(`   ⚠️ Unsupported month name in date "${dateString}"`);
-          return dateString;
-        }
-
-        return `${year}-${month}-${day}`;
-      }
-
-      // Build regex from Go format string for numeric dates
+      // Build regex from Go format string
+      // 02 = day, 01 = month, 2006 = year
       let regexPattern = formatString
-        .replace(/2006/g, '(\\d{4})')
-        .replace(/01/g, '(\\d{1,2})')
-        .replace(/02/g, '(\\d{1,2})');
-
+        .replace(/2006/g, '(\\d{4})')  // Year
+        .replace(/01/g, '(\\d{1,2})')  // Month
+        .replace(/02/g, '(\\d{1,2})'); // Day
+      
+      // Escape special regex characters in separators
       regexPattern = regexPattern.replace(/[-\/]/g, (match) => '\\' + match);
-
+      
       const regex = new RegExp(regexPattern);
-      const match = rawDate.match(regex);
-
+      const match = dateString.match(regex);
+      
       if (!match) {
         console.warn(`   ⚠️ Date "${dateString}" doesn't match format "${formatString}"`);
         return dateString;
       }
 
+      // Determine which capture group is which based on format string
       const yearIndex = formatString.indexOf('2006');
       const monthIndex = formatString.indexOf('01');
       const dayIndex = formatString.indexOf('02');
+      
+      // Create array of positions
       const positions = [
         { type: 'year', index: yearIndex },
         { type: 'month', index: monthIndex },
         { type: 'day', index: dayIndex }
       ].sort((a, b) => a.index - b.index);
-
+      
+      // Map capture groups to date parts
       const parts = {};
       positions.forEach((pos, idx) => {
         parts[pos.type] = match[idx + 1];
       });
-
+      
+      // Pad month and day with leading zeros if needed
       const year = parts.year;
-      const month = String(parts.month || '00').padStart(2, '0');
-      const day = String(parts.day || '00').padStart(2, '0');
-
+      const month = parts.month.padStart(2, '0');
+      const day = parts.day.padStart(2, '0');
+      
+      // Return in YYYY-MM-DD format
       return `${year}-${month}-${day}`;
+      
     } catch (error) {
       console.warn(`   ⚠️ Error parsing date "${dateString}" with format "${formatString}":`, error.message);
       return dateString;
@@ -906,6 +868,8 @@ class YamlScraperService extends BaseScraperService {
       if (sceneConfig.Details) {
         metadata.details = this.extractValue($, sceneConfig.Details);
         if (metadata.details) {
+          // Convert acute accent to apostrophe
+          metadata.details = metadata.details.replace(/´/g, "'");
           console.log(`   - Details: ${metadata.details}`);
         }
       }
@@ -1082,162 +1046,6 @@ class YamlScraperService extends BaseScraperService {
   }
 
   /**
-   * Resolve a dotted path (supports numeric object keys) against a plain object
-   */
-  _getPath(obj, dottedPath) {
-    if (!dottedPath) return undefined;
-    return dottedPath.split('.').reduce((acc, key) => (acc == null ? acc : acc[key]), obj);
-  }
-
-  /**
-   * Fetch and cache the bearer/instance token some JSON APIs require.
-   * The token is scraped out of a normal site page with a regex.
-   */
-  async _resolveJsonSearchToken(jsonSearch) {
-    if (!jsonSearch.tokenUrl || !jsonSearch.tokenRegex) return null;
-    if (this._jsonSearchToken) return this._jsonSearchToken;
-
-    const response = await fetch(jsonSearch.tokenUrl, {
-      headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' }
-    });
-    const html = await response.text();
-    const match = html.match(new RegExp(jsonSearch.tokenRegex));
-
-    if (!match) {
-      throw new Error(`Could not extract API token from ${jsonSearch.tokenUrl}`);
-    }
-
-    this._jsonSearchToken = match[0];
-    return this._jsonSearchToken;
-  }
-
-  /**
-   * Query a JSON search API described by the sceneByFragment `jsonSearch` config
-   * and normalize the records into the same shape the HTML search paths return.
-   */
-  async _jsonSearchScenes(jsonSearch, searchUrlPattern, query) {
-    const token = await this._resolveJsonSearchToken(jsonSearch);
-    const url = searchUrlPattern.replace('{query}', encodeURIComponent(query));
-
-    const headers = { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)', ...(jsonSearch.headers || {}) };
-    if (token && jsonSearch.tokenHeader) {
-      headers[jsonSearch.tokenHeader] = token;
-    }
-
-    console.log(`   🌐 JSON search: ${url}`);
-    const response = await fetch(url, { headers });
-
-    if (!response.ok) {
-      throw new Error(`JSON search failed with status ${response.status}`);
-    }
-
-    const payload = await response.json();
-    const records = this._getPath(payload, jsonSearch.resultsPath || 'result') || [];
-    const fields = jsonSearch.fields || {};
-
-    return records.map(record => {
-      const id = this._getPath(record, fields.id || 'id');
-      const title = this._getPath(record, fields.title || 'title') || null;
-      const rawDate = this._getPath(record, fields.date || 'date');
-      const slug = String(title || '')
-        .toLowerCase()
-        .replace(/[^a-z0-9]+/g, '-')
-        .replace(/^-+|-+$/g, '');
-
-      const performerRecords = this._getPath(record, jsonSearch.performersPath || 'performers') || [];
-      const tagRecords = this._getPath(record, jsonSearch.tagsPath || 'tags') || [];
-
-      return {
-        url: (jsonSearch.urlTemplate || '{id}').replace('{id}', id).replace('{slug}', slug),
-        title,
-        date: rawDate ? String(rawDate).substring(0, 10) : null,
-        coverImage: this._getPath(record, jsonSearch.imagePath) || null,
-        studio: this.siteName,
-        performers: performerRecords
-          .map(p => (typeof p === 'string'
-            ? { name: p, id: null }
-            : {
-                name: this._getPath(p, jsonSearch.performerNameField || 'name'),
-                id: this._getPath(p, jsonSearch.performerIdField || 'id')
-              }))
-          .filter(p => p.name),
-        tags: tagRecords
-          .map(t => (typeof t === 'string' ? t : this._getPath(t, jsonSearch.tagNameField || 'name')))
-          .filter(Boolean)
-      };
-    });
-  }
-
-  /**
-   * Locate a performer's page URL by name, for sites where we only know the name
-   * (e.g. the scraper was matched through a linked studio rather than a URL).
-   * Tries the JSON search API first, then the HTML performer search page.
-   */
-  async searchPerformerUrl(name, aliases = []) {
-    const searchConfig = this.config.sceneByFragment?.[0];
-    if (!searchConfig) return null;
-
-    const namesToTry = [name, ...aliases].filter(Boolean);
-    const jsonSearch = searchConfig.jsonSearch;
-
-    if (jsonSearch?.performerUrlTemplate && jsonSearch.performerSearchUrl) {
-      for (const candidate of namesToTry) {
-        const candidateLower = candidate.toLowerCase();
-        try {
-          const scenes = await this._jsonSearchScenes(jsonSearch, jsonSearch.performerSearchUrl, candidate);
-          const actor = scenes
-            .flatMap(scene => scene.performers)
-            .find(p => p.id && p.name.toLowerCase() === candidateLower);
-
-          if (actor) {
-            const slug = actor.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
-            const url = jsonSearch.performerUrlTemplate.replace('{id}', actor.id).replace('{slug}', slug);
-            console.log(`   ✓ [${this.siteName}] Resolved performer "${candidate}" to ${url}`);
-            return url;
-          }
-        } catch (error) {
-          console.warn(`   ⚠️ [${this.siteName}] JSON performer lookup failed for "${candidate}": ${error.message}`);
-        }
-      }
-    }
-
-    const performerSearchScraperName = searchConfig.performerSearchScraper;
-    const performerSearchConfig = this.config.xPathScrapers?.[performerSearchScraperName];
-    if (!searchConfig.performerSearchUrl || !performerSearchConfig?.performer) return null;
-
-    const spacesConvertTo = searchConfig.spacesConvertTo || '_';
-    const performerConfig = performerSearchConfig.performer;
-
-    for (const candidate of namesToTry) {
-      const candidateLower = candidate.toLowerCase();
-      const searchUrl = searchConfig.performerSearchUrl.replace(
-        '{performer}',
-        candidate.toLowerCase().replace(/\s+/g, spacesConvertTo)
-      );
-
-      try {
-        const $ = await this.fetchHtml(searchUrl, this.renderJavaScript);
-        const elements = this.extractArrayElements($, performerConfig.Name);
-
-        for (let i = 0; i < elements.length; i++) {
-          const resultName = this.extractValueAtIndex($, performerConfig.Name, i);
-          if (resultName && resultName.toLowerCase().trim() === candidateLower) {
-            const url = this.extractValueAtIndex($, performerConfig.URL, i);
-            if (url) {
-              console.log(`   ✓ [${this.siteName}] Resolved performer "${candidate}" to ${url}`);
-              return url;
-            }
-          }
-        }
-      } catch (error) {
-        console.warn(`   ⚠️ [${this.siteName}] HTML performer lookup failed for "${candidate}": ${error.message}`);
-      }
-    }
-
-    return null;
-  }
-
-  /**
    * Search for scenes using performers
    * Supports two workflows:
    * 1. Direct scene extraction: performerSearchUrl points directly to performer page, extract scenes with performerSearchScraper
@@ -1255,50 +1063,7 @@ class YamlScraperService extends BaseScraperService {
     }
 
     const searchConfig = this.config.sceneByFragment[0];
-
-    // JSON API search takes precedence when configured
-    const jsonSearch = searchConfig.jsonSearch;
-    if (jsonSearch?.performerSearchUrl) {
-      const scenesByUrl = new Map();
-      const matchCounts = new Map();
-
-      for (const performer of performers) {
-        const namesToTry = [performer.name];
-        if (performer.alias) {
-          namesToTry.push(...performer.alias.split(',').map(a => a.trim()).filter(Boolean));
-        }
-
-        const matchedUrls = new Set();
-        for (const name of namesToTry) {
-          const results = await this._jsonSearchScenes(jsonSearch, jsonSearch.performerSearchUrl, name);
-          const nameLower = name.toLowerCase();
-
-          results
-            .filter(scene => scene.performers.some(p => p.name.toLowerCase() === nameLower))
-            .forEach(scene => {
-              scenesByUrl.set(scene.url, scene);
-              matchedUrls.add(scene.url);
-            });
-        }
-
-        matchedUrls.forEach(url => matchCounts.set(url, (matchCounts.get(url) || 0) + 1));
-      }
-
-      // Keep only scenes that matched every requested performer
-      const matching = [...scenesByUrl.values()].filter(scene => matchCounts.get(scene.url) === performers.length);
-
-      console.log(`   ✅ Found ${matching.length} scene(s) with ALL ${performers.length} performer(s)`);
-
-      return matching.map(scene => ({
-        url: scene.url,
-        title: scene.title,
-        date: scene.date,
-        studio: { name: this.siteName },
-        image: scene.coverImage,
-        performers: scene.performers.map(p => ({ name: p.name }))
-      }));
-    }
-
+    
     // Get performer search URL pattern from config
     const performerSearchUrlPattern = searchConfig.performerSearchUrl;
     if (!performerSearchUrlPattern) {
@@ -1780,22 +1545,7 @@ class YamlScraperService extends BaseScraperService {
     }
 
     const searchConfig = this.config.sceneByFragment[0];
-
-    // JSON API search takes precedence when configured
-    const jsonSearch = searchConfig.jsonSearch;
-    if (jsonSearch?.titleSearchUrl) {
-      const results = await this._jsonSearchScenes(jsonSearch, jsonSearch.titleSearchUrl, title);
-      console.log(`   ✅ Found ${results.length} scene(s) matching title: "${title}"`);
-
-      return results.map(scene => ({
-        url: scene.url,
-        title: scene.title,
-        date: scene.date,
-        studio: { name: this.siteName },
-        image: scene.coverImage
-      }));
-    }
-
+    
     // Use titleSearchScraper if specified, otherwise fall back to scraper
     const scraperName = searchConfig.titleSearchScraper || searchConfig.scraper;
     if (!scraperName) {
@@ -1905,7 +1655,6 @@ class YamlScraperService extends BaseScraperService {
       console.log(`   🔍 Fetching scenes from: ${searchUrl}`);
 
       const allScenes = [];
-      const seenSceneUrls = new Set();
       let pageCount = 0;
       const maxPages = scraperConfig.pagination?.maxPages || 1;
 
@@ -1953,7 +1702,6 @@ class YamlScraperService extends BaseScraperService {
           break;
         }
 
-        const countBeforePage = allScenes.length;
         for (let i = 0; i < titleElements.length; i++) {
           const scene = {
             title: null,
@@ -1983,16 +1731,9 @@ class YamlScraperService extends BaseScraperService {
             scene.date = this.extractValueAtIndex($, sceneConfig.Date, i);
           }
 
-          if (scene.title && scene.url && !seenSceneUrls.has(scene.url)) {
-            seenSceneUrls.add(scene.url);
+          if (scene.title && scene.url) {
             allScenes.push(scene);
           }
-        }
-
-        // Sites that ignore the page parameter re-serve page 1 forever
-        if (allScenes.length === countBeforePage) {
-          console.log(`   ✓ Page ${pageCount} added no new scenes, stopping pagination`);
-          break;
         }
       }
 
@@ -2203,160 +1944,6 @@ class YamlScraperService extends BaseScraperService {
         success: false,
         error: error.message
       };
-    }
-  }
-
-  /**
-   * Scrape performer metadata from a performer URL
-   * @param {string} url - Performer URL to scrape
-   * @returns {Promise<Object>} - Scraped performer metadata
-   */
-  async scrapePerformer(url) {
-    console.log(`👤 [${this.siteName}] Scraping performer: ${url}`);
-
-    const performerConfig = Array.isArray(this.config.performerByURL)
-      ? this.config.performerByURL[0]
-      : this.config.performerByURL;
-
-    if (!performerConfig) {
-      throw new Error(`${this.siteName} does not support performer scraping`);
-    }
-
-    try {
-      if (this.isScriptBased && performerConfig.action === 'script' && performerConfig.script) {
-        const result = await this._executeScript(performerConfig.script, 'performer-by-url', { url });
-        const normalized = this._normalizeScriptResult(result);
-        return this.formatResult(normalized);
-      }
-
-      const $ = await this.fetchHtml(url, this.renderJavaScript);
-      const scraperName = performerConfig.scraper;
-      const scraperConfig = this.config.xPathScrapers[scraperName];
-
-      if (!scraperConfig || !scraperConfig.performer) {
-        throw new Error(`Performer scraper configuration not found: ${scraperName}`);
-      }
-
-      const performer = scraperConfig.performer;
-      const metadata = {
-        url,
-        title: null,
-        name: null,
-        gender: null,
-        details: null,
-        studio: null,
-        date: null,
-        coverImage: null,
-        performers: [],
-        tags: [],
-        movies: [],
-        episodeUrls: [],
-        duration: null,
-        image: null,
-        ethnicity: null,
-        eyeColor: null,
-        hairColor: null,
-        height: null,
-        penisLength: null
-      };
-
-      if (performer.Name) {
-        metadata.name = this.extractValue($, performer.Name);
-      }
-      if (performer.Gender) {
-        metadata.gender = this.extractValue($, performer.Gender);
-      }
-      if (performer.Details) {
-        metadata.details = this.extractValue($, performer.Details);
-      }
-      if (performer.Image) {
-        metadata.image = this.extractValue($, performer.Image);
-      }
-      if (performer.Ethnicity) {
-        metadata.ethnicity = this.extractValue($, performer.Ethnicity);
-      }
-      if (performer.EyeColor) {
-        metadata.eyeColor = this.extractValue($, performer.EyeColor);
-      }
-      if (performer.HairColor) {
-        metadata.hairColor = this.extractValue($, performer.HairColor);
-      }
-      if (performer.Height) {
-        metadata.height = this.extractValue($, performer.Height);
-      }
-      if (performer.PenisLength) {
-        metadata.penisLength = this.extractValue($, performer.PenisLength);
-      }
-      if (performer.Circumcised) {
-        metadata.circumcised = this.extractValue($, performer.Circumcised);
-      }
-      if (performer.Weight) {
-        metadata.weight = this.extractValue($, performer.Weight);
-      }
-      if (performer.Measurements) {
-        metadata.measurements = this.extractValue($, performer.Measurements);
-      }
-      if (performer.Country) {
-        metadata.country = this.extractValue($, performer.Country);
-      }
-      if (performer.Birthdate) {
-        metadata.birthdate = this.extractValue($, performer.Birthdate);
-      }
-      if (performer.Tattoos) {
-        metadata.tattoos = this.extractValue($, performer.Tattoos);
-      }
-      if (performer.Piercings) {
-        metadata.piercings = this.extractValue($, performer.Piercings);
-      }
-      if (performer.CareerLength) {
-        metadata.careerLength = this.extractValue($, performer.CareerLength);
-      }
-      if (performer.Aliases) {
-        metadata.aliases = this.extractArray($, performer.Aliases);
-      }
-      if (performer.Tags?.Name) {
-        metadata.tags = this.extractArray($, performer.Tags.Name);
-      }
-
-      if (metadata.name) {
-        console.log(`   - Name: ${metadata.name}`);
-      }
-      if (metadata.image) {
-        console.log(`   - Image: ${metadata.image}`);
-      }
-
-      // formatResult() is scene-shaped and would drop every performer field.
-      // Keys are snake_case to match the Stash performer schema and review modals.
-      return {
-        success: true,
-        source: this.siteName,
-        scraped: {
-          url: metadata.url,
-          name: metadata.name,
-          gender: metadata.gender,
-          details: metadata.details,
-          image: metadata.image || metadata.coverImage || null,
-          birthdate: metadata.birthdate || null,
-          death_date: metadata.deathDate || null,
-          country: metadata.country || null,
-          ethnicity: metadata.ethnicity,
-          eye_color: metadata.eyeColor,
-          hair_color: metadata.hairColor,
-          height: metadata.height,
-          weight: metadata.weight || null,
-          measurements: metadata.measurements || null,
-          penis_length: metadata.penisLength,
-          circumcised: metadata.circumcised || null,
-          tattoos: metadata.tattoos || null,
-          piercings: metadata.piercings || null,
-          career_length: metadata.careerLength || null,
-          aliases: metadata.aliases || [],
-          tags: metadata.tags || []
-        }
-      };
-    } catch (error) {
-      console.error(`❌ [${this.siteName}] Error scraping performer:`, error);
-      throw new Error(`Failed to scrape ${this.siteName} performer: ${error.message}`);
     }
   }
 }

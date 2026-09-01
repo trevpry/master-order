@@ -5,17 +5,12 @@ const DEFAULT_WIKI_SCHEMA = `
 # Personal Wiki Schema (Layer 3)
 
 ## Purpose
-You are maintaining a source-backed personal knowledge wiki about the user. Your job is to compile durable facts from raw inputs into structured, interlinked Markdown wiki pages that compound over time.
-
-Treat the wiki as the maintained knowledge layer between raw sources and future questions. Do not rewrite or forget prior knowledge unless a newer source clearly contradicts it.
+You are maintaining a personal knowledge wiki about the user. Your job is to synthesize raw information from notes, daily journals, and chat conversations into structured, interlinked Markdown wiki pages.
 
 ## Page Types
 - **entity**: Wikipedia-style pages for people, places, tools, companies, media the user interacts with
-- **concept**: Synthesized topic pages - habits, goals, interests, recurring themes, opinions
+- **concept**: Synthesized topic pages — habits, goals, interests, recurring themes, opinions
 - **comparison**: Side-by-side analysis pages when the user evaluates options
-- **source-summary**: One page per raw source, capturing what it said and how it changed the wiki
-- **query**: Filed answers to useful questions worth preserving
-- **overview**: High-level synthesis pages that summarize the current state of understanding
 - **index**: Master catalog pages (auto-managed)
 
 ## Categories
@@ -49,10 +44,6 @@ When processing a source, extract:
 - Health-related information
 - Work and career details
 
-When a query answer or chat exchange produces a durable synthesis, file it back into the wiki as a query or concept page instead of leaving the knowledge only in chat.
-
-Prefer generic knowledge capture over hardcoded topical routing. Infer the right page type and category from the content itself and from existing wiki pages.
-
 ## What NOT to Extract
 - Trivial small talk with no personal information
 - Purely technical questions with no personal context (e.g., "How do I sort an array?")
@@ -63,7 +54,6 @@ Prefer generic knowledge capture over hardcoded topical routing. Infer the right
 - When new info CONTRADICTS existing info, add a contradiction blockquote with dates
 - When new info EXTENDS existing info, append to the relevant section
 - Always update the "Sources" and "Last Updated" sections
-- During lint or maintenance passes, check for contradictions, orphan pages, missing concepts, stale claims, and unanswered gaps that should become new wiki pages.
 `;
 
 class WikiService {
@@ -78,10 +68,6 @@ class WikiService {
       wikiAutoIngestEnabled: settings?.wikiAutoIngestEnabled ?? true,
       wikiAutoIngestInterval: settings?.wikiAutoIngestInterval ?? 60,
       wikiChatExtractionEnabled: settings?.wikiChatExtractionEnabled ?? true,
-      ollamaWikiExtractionModel: settings?.ollamaWikiExtractionModel || process.env.OLLAMA_WIKI_EXTRACTION_MODEL || '',
-      ollamaChatExtractionModel: settings?.ollamaChatExtractionModel || process.env.OLLAMA_CHAT_EXTRACTION_MODEL || '',
-      ollamaNotesExtractionModel: settings?.ollamaNotesExtractionModel || process.env.OLLAMA_NOTES_EXTRACTION_MODEL || '',
-      ollamaDatingExtractionModel: settings?.ollamaDatingExtractionModel || process.env.OLLAMA_DATING_EXTRACTION_MODEL || '',
       wikiSchema: settings?.wikiSchema || DEFAULT_WIKI_SCHEMA,
       lastWikiIngestAt: settings?.lastWikiIngestAt || null
     };
@@ -113,56 +99,13 @@ class WikiService {
     return {
       ollamaUrl: settings?.ollamaUrl || 'http://localhost:11434',
       ollamaDefaultModel: settings?.ollamaDefaultModel || 'llama3',
-      ollamaEmbeddingModel: settings?.ollamaEmbeddingModel || 'nomic-embed-text',
-      // Optional extraction-model overrides (settings value first, then env var).
-      ollamaWikiExtractionModel: settings?.ollamaWikiExtractionModel || process.env.OLLAMA_WIKI_EXTRACTION_MODEL || '',
-      ollamaChatExtractionModel: settings?.ollamaChatExtractionModel || process.env.OLLAMA_CHAT_EXTRACTION_MODEL || '',
-      ollamaNotesExtractionModel: settings?.ollamaNotesExtractionModel || process.env.OLLAMA_NOTES_EXTRACTION_MODEL || '',
-      ollamaDatingExtractionModel: settings?.ollamaDatingExtractionModel || process.env.OLLAMA_DATING_EXTRACTION_MODEL || ''
+      ollamaEmbeddingModel: settings?.ollamaEmbeddingModel || 'nomic-embed-text'
     };
   }
 
-  normalizeSourceKey(source) {
-    const key = String(source || '').trim().toLowerCase();
-    if (key === 'note' || key === 'notes' || key === 'daily_note' || key === 'daily-note') return 'notes';
-    if (key === 'dating' || key === 'relationships') return 'dating';
-    if (key === 'chat' || key === 'conversation') return 'chat';
-    return 'general';
-  }
-
-  resolveWikiExtractionModel(source, ollamaSettings, explicitModel) {
-    const chosenExplicit = String(explicitModel || '').trim();
-    if (chosenExplicit) return chosenExplicit;
-
-    const sourceKey = this.normalizeSourceKey(source);
-    const sourceSpecific = {
-      chat: String(ollamaSettings?.ollamaChatExtractionModel || '').trim(),
-      notes: String(ollamaSettings?.ollamaNotesExtractionModel || '').trim(),
-      dating: String(ollamaSettings?.ollamaDatingExtractionModel || '').trim()
-    };
-
-    if (sourceSpecific[sourceKey]) return sourceSpecific[sourceKey];
-
-    const genericExtraction = String(ollamaSettings?.ollamaWikiExtractionModel || '').trim();
-    if (genericExtraction) return genericExtraction;
-
-    return ollamaSettings?.ollamaDefaultModel || 'llama3';
-  }
-
-  async callOllama(messages, options = {}) {
-    const ollamaSettings = await this.getOllamaSettings();
-    const { ollamaUrl } = ollamaSettings;
-
-    // Backward-compatible: callOllama(messages, 'model-name')
-    const normalizedOptions = typeof options === 'string'
-      ? { model: options, source: 'general' }
-      : (options || {});
-
-    const activeModel = this.resolveWikiExtractionModel(
-      normalizedOptions.source,
-      ollamaSettings,
-      normalizedOptions.model
-    );
+  async callOllama(messages, model) {
+    const { ollamaUrl, ollamaDefaultModel } = await this.getOllamaSettings();
+    const activeModel = model || ollamaDefaultModel;
 
     const response = await fetch(`${ollamaUrl}/api/chat`, {
       method: 'POST',
@@ -385,7 +328,7 @@ class WikiService {
         const aiResponse = await this.callOllama([
           { role: 'system', content: schema },
           { role: 'user', content: prompt }
-        ], { source: 'notes' });
+        ]);
 
         const updates = this.parseWikiResponse(aiResponse);
         for (const update of updates) {
@@ -425,15 +368,7 @@ class WikiService {
 
     const uningested = allNotes.filter(n => !ingestedNoteIds.has(n.id)).map(n => n.id);
 
-    if (uningested.length === 0) {
-      const datingResult = await this.ingestDatingData();
-      return {
-        processed: datingResult.processed,
-        pages: datingResult.pages,
-        notesProcessed: 0,
-        datingProcessed: datingResult.processed
-      };
-    }
+    if (uningested.length === 0) return { processed: 0, pages: [] };
 
     // Process in batches of 5 to avoid overwhelming Ollama
     let totalProcessed = 0;
@@ -446,103 +381,7 @@ class WikiService {
       allAffectedPages.push(...result.pages);
     }
 
-    const datingResult = await this.ingestDatingData();
-
-    return {
-      processed: totalProcessed + datingResult.processed,
-      pages: [...new Set([...allAffectedPages, ...datingResult.pages])],
-      notesProcessed: totalProcessed,
-      datingProcessed: datingResult.processed
-    };
-  }
-
-  // ==========================================
-  // OPERATION A2: INGEST (Dating Section -> Wiki)
-  // ==========================================
-
-  async ingestDatingData(since = null) {
-    const whereClause = since ? { updatedAt: { gt: since } } : {};
-
-    const connections = await prisma.connection.findMany({
-      where: whereClause,
-      orderBy: { updatedAt: 'desc' },
-      take: 50,
-      include: {
-        app: true,
-        dates: {
-          orderBy: { dateTime: 'desc' }
-        },
-        encounters: {
-          orderBy: { dateTime: 'desc' }
-        },
-        messages: {
-          orderBy: { timestamp: 'desc' }
-        },
-        screenshots: {
-          orderBy: { createdAt: 'desc' }
-        },
-        connectionPhotos: {
-          orderBy: { createdAt: 'asc' }
-        }
-      }
-    });
-
-    if (connections.length === 0) {
-      return { processed: 0, pages: [] };
-    }
-
-    const schema = await this.getWikiSchema();
-    const existingPages = await this.getAllPages();
-    const existingIndex = existingPages.map(p => `- [[${p.slug}]]: ${p.title} (${p.type}/${p.category})`).join('\n');
-
-    const affectedSlugs = [];
-    let processed = 0;
-
-    for (const connection of connections) {
-      try {
-        const datingPayload = this.serializeDatingConnection(connection);
-        const prompt = this.buildDatingIngestionPrompt(datingPayload, existingIndex, connection.id);
-
-        const aiResponse = await this.callOllama([
-          { role: 'system', content: schema },
-          { role: 'user', content: prompt }
-        ], { source: 'dating' });
-
-        let updates = this.parseWikiResponse(aiResponse);
-        if (updates.length === 0 && this.hasMeaningfulDatingData(connection)) {
-          const strictPrompt = this.buildStrictDatingIngestionPrompt(datingPayload, existingIndex, connection.id);
-          const strictResponse = await this.callOllama([
-            { role: 'system', content: schema },
-            { role: 'user', content: strictPrompt }
-          ], { source: 'dating' });
-          updates = this.parseWikiResponse(strictResponse);
-        }
-
-        if (updates.length === 0 && this.hasMeaningfulDatingData(connection)) {
-          updates = this.buildDatingFallbackUpdates(connection, existingPages);
-        }
-
-        for (const update of updates) {
-          const slugs = await this.applyWikiUpdate(update, connection.id, 'dating');
-          affectedSlugs.push(...slugs);
-        }
-
-        await this.addLog(
-          'ingest-dating',
-          `Ingested dating connection #${connection.id} (${connection.guyName})`,
-          'dating',
-          connection.id,
-          affectedSlugs
-        );
-
-        processed++;
-      } catch (err) {
-        console.error(`Wiki ingest failed for dating connection ${connection.id}:`, err.message);
-        await this.addLog('ingest-dating', `Failed to ingest dating connection ${connection.id}: ${err.message}`, 'dating', connection.id, []);
-      }
-    }
-
-    return { processed, pages: [...new Set(affectedSlugs)] };
+    return { processed: totalProcessed, pages: [...new Set(allAffectedPages)] };
   }
 
   // ==========================================
@@ -620,44 +459,22 @@ class WikiService {
   // CHAT → WIKI EXTRACTION
   // ==========================================
 
-  async extractFromChat(userMessage, assistantResponse, conversationTitle, conversationId, options = {}) {
+  async extractFromChat(userMessage, assistantResponse, conversationTitle, conversationId) {
     const settings = await this.getWikiSettings();
-    if (!settings.wikiChatExtractionEnabled) {
-      return { processed: false, skipped: 'disabled' };
-    }
+    if (!settings.wikiChatExtractionEnabled) return null;
 
     // Skip trivial messages
-    if (!userMessage || userMessage.trim().length < 20) {
-      return { processed: true, extracted: 0, pages: [], skipped: 'trivial' };
-    }
+    if (!userMessage || userMessage.trim().length < 20) return null;
 
     const schema = await this.getWikiSchema();
     const existingPages = await this.getAllPages();
     const existingIndex = existingPages.map(p => `- [[${p.slug}]]: ${p.title} (${p.type}/${p.category})`).join('\n');
-    const recentMessages = Array.isArray(options.recentMessages) ? options.recentMessages : [];
-    const userSnippet = this.buildChatLogSnippet(userMessage);
-    const turnLabel = options.userMessageId
-      ? `turn #${options.userMessageId}`
-      : 'chat turn';
-    const recentContext = recentMessages.length > 0
-      ? recentMessages.map(msg => {
-        const marker = msg.id === options.userMessageId
-          ? ' (current user turn)'
-          : msg.id === options.assistantMessageId
-            ? ' (current assistant turn)'
-            : '';
-        return `- ${msg.role}${marker}: ${msg.content}`;
-      }).join('\n')
-      : '';
 
     // Find pages relevant to this conversation for dedup context
     const relevantPages = await this.findRelevantPages(userMessage, 5);
     const relevantContext = relevantPages.map(p => `### [[${p.slug}]]\n${p.content}`).join('\n\n');
 
-    const prompt = `Analyze the following chat exchange and extract any NEW meaningful information suitable for the personal wiki, including:
-  - facts/preferences/goals/habits/opinions about the user
-  - durable information about other individuals/entities the conversation references
-  - relationship context and recurring patterns
+    const prompt = `Analyze the following chat exchange and extract any NEW personal facts, preferences, goals, habits, opinions, biographical details, or other meaningful personal information the user revealed.
 
 ## Existing Wiki Pages
 ${existingIndex || '(No pages yet)'}
@@ -670,11 +487,8 @@ ${relevantContext || '(No relevant pages)'}
 **User:** ${userMessage}
 **Assistant:** ${assistantResponse}
 
-## Nearby Conversation Context
-${recentContext || '(No additional nearby context)'}
-
 ## Instructions
-If the exchange revealed genuinely new wiki-worthy information not already captured in the existing wiki pages above, respond with wiki page updates in this exact JSON format:
+If the user revealed genuinely new personal information not already captured in the existing wiki pages above, respond with wiki page updates in this exact JSON format:
 
 \`\`\`json
 {
@@ -685,7 +499,7 @@ If the exchange revealed genuinely new wiki-worthy information not already captu
       "title": "Page Title",
       "type": "entity" | "concept" | "comparison",
       "category": "personal" | "health" | "work" | "interests" | "relationships" | "goals" | "habits" | "media" | "technology" | "finance" | "travel" | "food" | "general",
-      "content": "Markdown content to merge (full page or incremental additions)",
+      "content": "Full markdown page content (complete and merged)",
       "reason": "Brief explanation of what new information was extracted"
     }
   ]
@@ -698,12 +512,8 @@ If NO new personal information was revealed (trivial chat, technical questions, 
 \`\`\`
 
 CRITICAL RULES:
-- For "update" actions: provide AUGMENTING content that adds new facts without deleting existing verified information. You may return a full merged page, but it must preserve prior facts.
+- For "update" actions: provide the COMPLETE MERGED page content — take the existing page shown above and integrate new facts into it. The content will REPLACE the entire page. Do NOT duplicate any information.
 - NEVER create a page that already exists in the Existing Wiki Pages list. Use "update" instead.
-- When an entity/person appears that is not yet represented, create a new entity page for them.
-- When an entity/person already exists, update that existing page with new verified details.
-- Explicit user preferences are wiki-worthy unless already captured (examples: "I enjoy fantasy", "I like Lord of the Rings", "I prefer...", "my favorite...").
-- Use the Nearby Conversation Context to interpret follow-up turns in ongoing conversations, but only extract facts attributable to the user and supported by the current exchange/context.
 - Only extract genuinely personal and meaningful information. Do NOT extract:
   - Information already in existing wiki pages
   - Generic knowledge or technical facts
@@ -713,54 +523,10 @@ CRITICAL RULES:
       const aiResponse = await this.callOllama([
         { role: 'system', content: schema },
         { role: 'user', content: prompt }
-      ], { source: 'chat' });
+      ]);
 
-      let updates = this.parseWikiResponse(aiResponse);
-      const hasPreferenceSignal = this.hasStrongPreferenceSignal(userMessage);
-      const hasPersonalFactSignal = this.hasStrongPersonalFactSignal(userMessage);
-      const hasGeneralUsefulSignal = this.hasGeneralUsefulInfoSignal(userMessage);
-      const shouldForceDurableExtraction = hasPreferenceSignal || hasPersonalFactSignal || hasGeneralUsefulSignal;
-      const updatesAreGrounded = this.hasGroundedChatUpdates(userMessage, updates);
-
-      if (shouldForceDurableExtraction && (!updates.length || !updatesAreGrounded)) {
-        const strictPrompt = this.buildStrictChatExtractionPrompt(
-          userMessage,
-          assistantResponse,
-          conversationTitle,
-          existingIndex,
-          relevantContext
-        );
-
-        const strictResponse = await this.callOllama([
-          { role: 'system', content: schema },
-          { role: 'user', content: strictPrompt }
-        ], { source: 'chat' });
-
-        updates = this.parseWikiResponse(strictResponse);
-      }
-
-      if (updates.length === 0 || (shouldForceDurableExtraction && !this.hasGroundedChatUpdates(userMessage, updates))) {
-        updates = this.extractPreferenceFallbackUpdates(userMessage, conversationTitle, existingPages, relevantPages);
-      }
-
-      if (updates.length === 0 && hasPersonalFactSignal) {
-        updates = this.extractPersonalFactFallbackUpdates(userMessage, conversationTitle, existingPages, relevantPages);
-      }
-
-      if (updates.length === 0 && hasGeneralUsefulSignal) {
-        updates = this.extractGeneralUsefulFallbackUpdates(userMessage, conversationTitle, existingPages, relevantPages);
-      }
-
-      if (updates.length === 0) {
-        await this.addLog(
-          'chat-extract',
-          `No wiki-worthy info from ${turnLabel} in "${conversationTitle}": "${userSnippet}"`,
-          'chat',
-          conversationId,
-          []
-        );
-        return { processed: true, extracted: 0, pages: [] };
-      }
+      const updates = this.parseWikiResponse(aiResponse);
+      if (updates.length === 0) return null;
 
       const affectedSlugs = [];
       for (const update of updates) {
@@ -771,40 +537,21 @@ CRITICAL RULES:
       if (affectedSlugs.length > 0) {
         await this.addLog(
           'chat-extract',
-          `Extracted from ${turnLabel} in "${conversationTitle}": "${userSnippet}" — ${updates.map(u => u.reason || u.slug).join(', ')}`,
+          `Extracted from chat: "${conversationTitle}" — ${updates.map(u => u.reason || u.slug).join(', ')}`,
           'chat',
           conversationId,
           affectedSlugs
         );
       }
 
-      return { processed: true, extracted: updates.length, pages: affectedSlugs };
+      return { extracted: updates.length, pages: affectedSlugs };
     } catch (err) {
       console.error('Wiki chat extraction failed:', err.message);
-
-      try {
-        await this.addLog(
-          'chat-extract',
-          `Failed chat extraction for ${turnLabel} in "${conversationTitle}": "${userSnippet}" — ${err.message}`,
-          'chat',
-          conversationId,
-          []
-        );
-      } catch (logErr) {
-        console.error('Failed to write chat extraction failure log:', logErr.message);
-      }
-
-      return { processed: false, error: err.message };
+      return null;
     }
   }
 
-  async backfillChatExtraction(batchSize = 0, options = {}) {
-    const rawBatchSize = parseInt(batchSize, 10);
-    const normalizedBatchSize = Number.isFinite(rawBatchSize) ? rawBatchSize : 0;
-    const processAllUnextracted = normalizedBatchSize <= 0;
-    const rawRecent = parseInt(options.reprocessRecent, 10);
-    const reprocessRecent = Number.isFinite(rawRecent) ? Math.max(0, Math.min(rawRecent, 50)) : 1;
-
+  async backfillChatExtraction(batchSize = 20) {
     // Find user messages not yet extracted
     const unextracted = await prisma.chatMessage.findMany({
       where: {
@@ -812,408 +559,63 @@ CRITICAL RULES:
         role: 'user'
       },
       orderBy: { createdAt: 'asc' },
-      take: processAllUnextracted ? undefined : normalizedBatchSize,
+      take: batchSize,
       include: {
         conversation: { select: { id: true, title: true } }
       }
     });
 
-    // Optionally reprocess most recent already-extracted user turns.
-    // This helps when extraction logic/schema changed, or latest chats were paired incorrectly before.
-    let recentExtracted = [];
-    if (reprocessRecent > 0) {
-      recentExtracted = await prisma.chatMessage.findMany({
-        where: {
-          wikiExtracted: true,
-          role: 'user'
-        },
-        orderBy: { id: 'desc' },
-        take: reprocessRecent,
-        include: {
-          conversation: { select: { id: true, title: true } }
-        }
-      });
-    }
-
-    const candidateMap = new Map();
-    for (const msg of unextracted) {
-      candidateMap.set(msg.id, msg);
-    }
-    for (const msg of recentExtracted) {
-      candidateMap.set(msg.id, msg);
-    }
-    const candidates = Array.from(candidateMap.values()).sort((a, b) => a.id - b.id);
-
     let processed = 0;
-    let withUpdates = 0;
-    let noUpdates = 0;
-    let failed = 0;
-    let skippedNoAssistant = 0;
-
-    for (const msg of candidates) {
-      // Find the next assistant response by message order
+    for (const msg of unextracted) {
+      // Find the next assistant response
       const assistantMsg = await prisma.chatMessage.findFirst({
         where: {
           conversationId: msg.conversationId,
           role: 'assistant',
-          id: { gt: msg.id }
+          createdAt: { gt: msg.createdAt }
         },
-        orderBy: { id: 'asc' }
+        orderBy: { createdAt: 'asc' }
       });
 
-      if (!assistantMsg) {
-        // Keep for retry: do not mark as extracted without a matching assistant turn.
-        skippedNoAssistant++;
-        continue;
-      }
-
-      const result = await this.extractFromChat(
-        msg.content,
-        assistantMsg.content,
-        msg.conversation.title,
-        msg.conversation.id
-      );
-
-      // Preserve failed pairs for retry instead of permanently marking as extracted.
-      if (result && result.processed === false) {
-        failed++;
-        continue;
+      if (assistantMsg) {
+        await this.extractFromChat(
+          msg.content,
+          assistantMsg.content,
+          msg.conversation.title,
+          msg.conversation.id
+        );
       }
 
       // Mark both messages as extracted
-      await prisma.chatMessage.updateMany({
-        where: {
-          id: { in: [msg.id, assistantMsg.id] },
-          wikiExtracted: false
-        },
+      await prisma.chatMessage.update({
+        where: { id: msg.id },
         data: { wikiExtracted: true }
       });
+      if (assistantMsg) {
+        await prisma.chatMessage.update({
+          where: { id: assistantMsg.id },
+          data: { wikiExtracted: true }
+        });
+      }
 
       processed++;
-      if (result?.extracted > 0) {
-        withUpdates++;
-      } else {
-        noUpdates++;
-      }
     }
 
-    return {
-      processed,
-      total: candidates.length,
-      processAllUnextracted,
-      fromUnextracted: unextracted.length,
-      reprocessedRecent: recentExtracted.length,
-      withUpdates,
-      noUpdates,
-      failed,
-      skippedNoAssistant
-    };
-  }
-
-  async resetChatExtractionFlags(options = {}) {
-    const {
-      conversationId,
-      startDate,
-      endDate,
-      roles = ['user', 'assistant'],
-      limit,
-      dryRun = true
-    } = options;
-
-    const where = {
-      wikiExtracted: true,
-      role: { in: roles }
-    };
-
-    if (conversationId !== undefined && conversationId !== null) {
-      where.conversationId = conversationId;
-    }
-
-    if (startDate || endDate) {
-      where.createdAt = {};
-      if (startDate) where.createdAt.gte = new Date(startDate);
-      if (endDate) where.createdAt.lte = new Date(endDate);
-    }
-
-    const matched = await prisma.chatMessage.count({ where });
-
-    if (dryRun) {
-      return {
-        dryRun: true,
-        matched,
-        updated: 0,
-        filters: {
-          conversationId: conversationId ?? null,
-          startDate: startDate || null,
-          endDate: endDate || null,
-          roles,
-          limit: limit || null
-        }
-      };
-    }
-
-    if (limit && limit > 0) {
-      const rows = await prisma.chatMessage.findMany({
-        where,
-        select: { id: true },
-        orderBy: { createdAt: 'desc' },
-        take: limit
-      });
-
-      const ids = rows.map(r => r.id);
-      if (ids.length === 0) {
-        return {
-          dryRun: false,
-          matched,
-          updated: 0,
-          filters: {
-            conversationId: conversationId ?? null,
-            startDate: startDate || null,
-            endDate: endDate || null,
-            roles,
-            limit
-          }
-        };
-      }
-
-      const result = await prisma.chatMessage.updateMany({
-        where: { id: { in: ids } },
-        data: { wikiExtracted: false }
-      });
-
-      return {
-        dryRun: false,
-        matched,
-        updated: result.count,
-        filters: {
-          conversationId: conversationId ?? null,
-          startDate: startDate || null,
-          endDate: endDate || null,
-          roles,
-          limit
-        }
-      };
-    }
-
-    const result = await prisma.chatMessage.updateMany({
-      where,
-      data: { wikiExtracted: false }
-    });
-
-    return {
-      dryRun: false,
-      matched,
-      updated: result.count,
-      filters: {
-        conversationId: conversationId ?? null,
-        startDate: startDate || null,
-        endDate: endDate || null,
-        roles,
-        limit: limit || null
-      }
-    };
-  }
-
-  async getChatExtractionHealth(options = {}) {
-    const rawHours = parseInt(options.hours, 10);
-    const rawLimit = parseInt(options.limit, 10);
-    const hours = Number.isFinite(rawHours) ? Math.min(Math.max(rawHours, 1), 24 * 30) : 24;
-    const limit = Number.isFinite(rawLimit) ? Math.min(Math.max(rawLimit, 10), 1000) : 200;
-    const since = new Date(Date.now() - hours * 60 * 60 * 1000);
-
-    const [
-      settings,
-      recentUserMessages,
-      recentAssistantMessages,
-      processedUserMessages,
-      pendingUserMessages,
-      rawLogs
-    ] = await Promise.all([
-      this.getWikiSettings(),
-      prisma.chatMessage.count({
-        where: {
-          role: 'user',
-          createdAt: { gte: since }
-        }
-      }),
-      prisma.chatMessage.count({
-        where: {
-          role: 'assistant',
-          createdAt: { gte: since }
-        }
-      }),
-      prisma.chatMessage.count({
-        where: {
-          role: 'user',
-          wikiExtracted: true,
-          createdAt: { gte: since }
-        }
-      }),
-      prisma.chatMessage.count({
-        where: {
-          role: 'user',
-          wikiExtracted: false,
-          createdAt: { gte: since }
-        }
-      }),
-      prisma.wikiLog.findMany({
-        where: {
-          action: 'chat-extract',
-          createdAt: { gte: since }
-        },
-        orderBy: { createdAt: 'desc' },
-        take: limit
-      })
-    ]);
-
-    const logs = rawLogs.map(log => ({
-      ...log,
-      affectedPages: JSON.parse(log.affectedPages || '[]')
-    }));
-
-    let successWithUpdates = 0;
-    let successNoUpdates = 0;
-    let failed = 0;
-
-    for (const log of logs) {
-      const description = (log.description || '').toLowerCase();
-      if (description.startsWith('failed') || description.includes('failed chat extraction')) {
-        failed++;
-      } else if ((log.affectedPages || []).length > 0) {
-        successWithUpdates++;
-      } else {
-        successNoUpdates++;
-      }
-    }
-
-    return {
-      windowHours: hours,
-      extractionEnabled: settings.wikiChatExtractionEnabled,
-      queue: {
-        processedUserMessages,
-        pendingUserMessages
-      },
-      recentMessages: {
-        users: recentUserMessages,
-        assistants: recentAssistantMessages
-      },
-      extractionRuns: {
-        successWithUpdates,
-        successNoUpdates,
-        failed,
-        totalLoggedRuns: logs.length
-      },
-      recentLogs: logs.slice(0, 25)
-    };
+    return { processed, total: unextracted.length };
   }
 
   // ==========================================
   // OPERATION C: LINT
   // ==========================================
 
-  async lintWiki(options = {}) {
-    const autoFix = options.autoFix !== false;
+  async lintWiki() {
     const issues = [];
     const allPages = await prisma.wikiPage.findMany();
     const allSlugs = new Set(allPages.map(p => p.slug));
-    const titleSlugMap = new Map();
 
     for (const page of allPages) {
-      if (page?.title) {
-        titleSlugMap.set(this.slugifyWikiTarget(page.title), page.slug);
-      }
-      titleSlugMap.set(this.slugifyWikiTarget(page.slug), page.slug);
-    }
-
-    let outboundRebuilt = 0;
-    let inboundRebuilt = 0;
-    let strippedBrokenLinks = 0;
-    let contentPagesUpdated = 0;
-    let contentLinksRetargeted = 0;
-    let contentLinksUnlinked = 0;
-
-    // Canonical outbound links for lint/fix checks.
-    // When auto-fix is enabled, this rebuilds link metadata from page content.
-    const canonicalOutboundBySlug = new Map();
-    const contentBySlug = new Map();
-
-    for (const page of allPages) {
-      const originalContent = page.content || '';
-      let workingContent = originalContent;
-      if (autoFix) {
-        const repaired = this.repairWikiLinksInContent(workingContent, allSlugs, titleSlugMap);
-        workingContent = repaired.content;
-        contentLinksRetargeted += repaired.retargeted;
-        contentLinksUnlinked += repaired.unlinked;
-      }
-      contentBySlug.set(page.slug, workingContent);
-
-      const storedOutbound = JSON.parse(page.outboundLinks || '[]');
-      const extractedFromContent = this.extractWikiLinks(workingContent);
-      const uniqueExtracted = [...new Set(extractedFromContent)];
-
-      const validOutbound = uniqueExtracted.filter(slug => allSlugs.has(slug));
-      const removedBroken = uniqueExtracted.length - validOutbound.length;
-      if (removedBroken > 0) strippedBrokenLinks += removedBroken;
-
-      const canonicalOutbound = autoFix ? validOutbound : storedOutbound;
-      canonicalOutboundBySlug.set(page.slug, canonicalOutbound);
-
-      const contentChanged = workingContent !== originalContent;
-      const outboundChanged = !this.areStringArraysEqual(storedOutbound, canonicalOutbound);
-
-      if (autoFix && (contentChanged || outboundChanged)) {
-        const data = {};
-        if (contentChanged) {
-          data.content = workingContent;
-          contentPagesUpdated++;
-        }
-        if (outboundChanged) {
-          data.outboundLinks = JSON.stringify(canonicalOutbound);
-          outboundRebuilt++;
-        }
-
-        await prisma.wikiPage.update({
-          where: { id: page.id },
-          data
-        });
-      }
-    }
-
-    if (autoFix) {
-      const inboundBySlug = new Map();
-      for (const slug of allSlugs) {
-        inboundBySlug.set(slug, []);
-      }
-
-      for (const [fromSlug, outbound] of canonicalOutboundBySlug.entries()) {
-        for (const targetSlug of outbound) {
-          const inbound = inboundBySlug.get(targetSlug);
-          if (inbound) inbound.push(fromSlug);
-        }
-      }
-
-      for (const page of allPages) {
-        const storedInbound = JSON.parse(page.inboundLinks || '[]');
-        const computedInbound = [...new Set(inboundBySlug.get(page.slug) || [])].sort();
-
-        if (!this.areStringArraysEqual(storedInbound, computedInbound)) {
-          await prisma.wikiPage.update({
-            where: { id: page.id },
-            data: { inboundLinks: JSON.stringify(computedInbound) }
-          });
-          inboundRebuilt++;
-        }
-      }
-    }
-
-    for (const page of allPages) {
-      const outbound = canonicalOutboundBySlug.get(page.slug) || JSON.parse(page.outboundLinks || '[]');
-      const inbound = autoFix
-        ? allPages
-          .map(p => p.slug)
-          .filter(slug => (canonicalOutboundBySlug.get(slug) || []).includes(page.slug))
-        : JSON.parse(page.inboundLinks || '[]');
+      const outbound = JSON.parse(page.outboundLinks || '[]');
+      const inbound = JSON.parse(page.inboundLinks || '[]');
 
       // Check for broken outbound links
       for (const slug of outbound) {
@@ -1246,8 +648,7 @@ CRITICAL RULES:
       }
 
       // Check for empty content
-      const effectiveContent = contentBySlug.get(page.slug) || page.content || '';
-      if (!effectiveContent || effectiveContent.trim().length < 10) {
+      if (!page.content || page.content.trim().length < 10) {
         issues.push({
           type: 'empty',
           page: page.slug,
@@ -1256,26 +657,9 @@ CRITICAL RULES:
       }
     }
 
-    const fixes = {
-      enabled: autoFix,
-      outboundRebuilt,
-      inboundRebuilt,
-      contentPagesUpdated,
-      contentLinksRetargeted,
-      contentLinksUnlinked,
-      strippedBrokenLinks,
-      totalFixed: outboundRebuilt + inboundRebuilt + contentPagesUpdated
-    };
+    await this.addLog('lint', `Lint found ${issues.length} issues across ${allPages.length} pages`, 'lint', null, []);
 
-    await this.addLog(
-      'lint',
-      `Lint found ${issues.length} issues across ${allPages.length} pages (fixes: ${fixes.totalFixed}, retargeted links: ${fixes.contentLinksRetargeted}, unlinked: ${fixes.contentLinksUnlinked}, broken links stripped: ${fixes.strippedBrokenLinks})`,
-      'lint',
-      null,
-      []
-    );
-
-    return { totalPages: allPages.length, issues, fixes };
+    return { totalPages: allPages.length, issues };
   }
 
   // ==========================================
@@ -1283,7 +667,7 @@ CRITICAL RULES:
   // ==========================================
 
   buildIngestionPrompt(noteContent, existingIndex, relevantContext, noteId, sourceType) {
-    return `Ingest the following ${sourceType} into the personal wiki. Analyze it for meaningful durable information, including user facts and information about other people/entities mentioned.
+    return `Ingest the following ${sourceType} into the personal wiki. Analyze it for personal facts, preferences, goals, habits, opinions, and any other meaningful personal information.
 
 ## Existing Wiki Pages
 ${existingIndex || '(No pages yet — you are starting the wiki from scratch)'}
@@ -1306,7 +690,7 @@ Based on this source, respond with wiki page creates/updates in this exact JSON 
       "title": "Page Title",
       "type": "entity" | "concept" | "comparison",
       "category": "personal" | "health" | "work" | "interests" | "relationships" | "goals" | "habits" | "media" | "technology" | "finance" | "travel" | "food" | "general",
-      "content": "Markdown content to merge (full page or incremental additions)",
+      "content": "Full markdown page content (complete and merged)",
       "reason": "Brief explanation of what was extracted or changed"
     }
   ]
@@ -1320,205 +704,20 @@ If no meaningful personal information can be extracted, respond with:
 
 CRITICAL RULES:
 - For "create" actions: provide the FULL page content in Markdown.
-- For "update" actions: provide AUGMENTING content that adds new facts without deleting existing verified information. You may return either a full merged page or incremental additions, but avoid duplicate bullets/sections.
+- For "update" actions: provide the COMPLETE MERGED page content — take the existing page content shown above and integrate the new information into it. The content you return will REPLACE the entire page. Do NOT just provide a fragment to append. Do NOT duplicate bullet points or sections that already exist. Merge new facts into the appropriate existing sections.
 - NEVER create a page that already exists in the Existing Wiki Pages list above. Use "update" instead.
-- If the source introduces a new person/entity, create a new entity page.
-- If the source adds facts about an existing person/entity, update the existing page rather than creating duplicates.
 - Always include wiki-links using [[slug]] format when referencing other pages.`;
   }
 
-  buildDatingIngestionPrompt(datingPayload, existingIndex, connectionId) {
-    return `Ingest the following dating-section record into the personal wiki. Extract only meaningful, durable personal insights and relationship patterns.
-
-## Existing Wiki Pages
-${existingIndex || '(No pages yet — you are starting the wiki from scratch)'}
-
-## Source Content (Dating Connection #${connectionId})
-${datingPayload}
-
-## Instructions
-Respond with wiki page creates/updates in this exact JSON format:
-
-\`\`\`json
-{
-  "updates": [
-    {
-      "action": "create" | "update",
-      "slug": "page-slug",
-      "title": "Page Title",
-      "type": "entity" | "concept" | "comparison",
-      "category": "personal" | "health" | "work" | "interests" | "relationships" | "goals" | "habits" | "media" | "technology" | "finance" | "travel" | "food" | "general",
-      "content": "Markdown content to merge (full page or incremental additions)",
-      "reason": "Brief explanation of what was extracted or changed"
-    }
-  ]
-}
-\`\`\`
-
-If no meaningful wiki-worthy information should be added, respond with:
-\`\`\`json
-{"updates": []}
-\`\`\`
-
-CRITICAL RULES:
-- Treat the Source Content as authoritative and complete for this connection. Do not ignore sections.
-- Ensure extraction considers all available fields, including the About section (bio and notes), profile attributes, dates, encounters, messages, screenshots, and photos metadata.
-- Create or update pages for relevant individuals/entities referenced in this record (not just abstract relationship pages).
-- Focus on relationship patterns, preferences, boundaries, compatibility signals, communication habits, and recurring themes.
-- Avoid explicit sexual detail; keep summaries high-level and respectful.
-- For "update" actions: provide augmenting content that preserves existing page facts.
-- NEVER create a page that already exists in the Existing Wiki Pages list above. Use "update" instead.
-- Include source references in the page Sources section using dating IDs (e.g., connection #${connectionId}, date IDs, encounter IDs, message IDs).`;
-  }
-
-  buildStrictDatingIngestionPrompt(datingPayload, existingIndex, connectionId) {
-    return `You must decide whether this dating record contains durable wiki-worthy information and respond with JSON only.
-
-## Existing Wiki Pages
-${existingIndex || '(No pages yet)'}
-
-## Dating Record (Connection #${connectionId})
-${datingPayload}
-
-## Decision Rule
-- If the record includes meaningful personal/relationship information (bio, notes, interests, communication patterns, date outcomes, boundaries, compatibility signals, recurring behavior), return at least one update.
-- Return {"updates": []} only when the record is effectively empty/noisy and has no durable insight.
-- Prefer updating existing relevant pages over creating duplicates.
-
-## Response Format (JSON only)
-{
-  "updates": [
-    {
-      "action": "create" | "update",
-      "slug": "page-slug",
-      "title": "Page Title",
-      "type": "entity" | "concept" | "comparison",
-      "category": "personal" | "health" | "work" | "interests" | "relationships" | "goals" | "habits" | "media" | "technology" | "finance" | "travel" | "food" | "general",
-      "content": "Markdown content to merge",
-      "reason": "Brief explanation"
-    }
-  ]
-}`;
-  }
-
-  serializeDatingConnection(connection) {
-    const payload = {
-      connection,
-      summary: {
-        about: {
-          bio: connection.bio || null,
-          notes: connection.notes || null
-        },
-        counts: {
-          dates: (connection.dates || []).length,
-          encounters: (connection.encounters || []).length,
-          messages: (connection.messages || []).length,
-          screenshots: (connection.screenshots || []).length,
-          photos: (connection.connectionPhotos || []).length
-        }
-      }
-    };
-
-    return JSON.stringify(payload, null, 2);
-  }
-
-  hasMeaningfulDatingData(connection) {
-    if (!connection) return false;
-
-    const textFields = [
-      connection.guyName,
-      connection.bio,
-      connection.notes,
-      connection.interests,
-      connection.lookingFor,
-      connection.relationshipStatus,
-      connection.location,
-      connection.openTo,
-      connection.theyAre,
-      connection.theyAreInto
-    ].filter(v => typeof v === 'string' && v.trim().length >= 3);
-
-    const activityCount = (connection.dates || []).length +
-      (connection.encounters || []).length +
-      (connection.messages || []).length;
-
-    return textFields.length > 0 || activityCount > 0;
-  }
-
-  buildDatingFallbackUpdates(connection, existingPages = []) {
-    const name = (connection.guyName || `Connection ${connection.id}`).trim();
-    const slugBase = this.slugifyWikiTarget(name) || `connection-${connection.id}`;
-    const slug = `dating-connection-${connection.id}-${slugBase}`;
-    const existingPage = (existingPages || []).find(p => p.slug === slug);
-
-    const facts = [];
-    if (connection.bio) facts.push(`- Bio: ${connection.bio}`);
-    if (connection.notes) facts.push(`- Notes: ${connection.notes}`);
-    if (connection.interests) facts.push(`- Interests: ${connection.interests}`);
-    if (connection.lookingFor) facts.push(`- Looking for: ${connection.lookingFor}`);
-    if (connection.relationshipStatus) facts.push(`- Relationship status: ${connection.relationshipStatus}`);
-    if (connection.location) facts.push(`- Location: ${connection.location}`);
-
-    facts.push(`- Dating app: ${connection.app?.name || `App #${connection.appId}`}`);
-    facts.push(`- Messages exchanged: ${connection.messagesExchanged || 0}`);
-    facts.push(`- Recorded dates: ${(connection.dates || []).length}`);
-    facts.push(`- Recorded encounters: ${(connection.encounters || []).length}`);
-
-    const content = [
-      `# ${name}`,
-      '',
-      '## Dating Profile Summary',
-      ...facts,
-      '',
-      '## Sources',
-      `- Dating connection #${connection.id}`,
-      '',
-      '## Last Updated',
-      `- ${new Date().toISOString().slice(0, 10)}`
-    ].join('\n');
-
-    return [{
-      action: existingPage ? 'update' : 'create',
-      slug,
-      title: name,
-      type: 'entity',
-      category: 'relationships',
-      content,
-      reason: 'Fallback extraction from dating connection metadata'
-    }];
-  }
-
   parseWikiResponse(aiResponse) {
-    const tryParse = (raw) => {
-      if (!raw) return null;
-      try {
-        const parsed = JSON.parse(raw);
-        if (Array.isArray(parsed?.updates)) return parsed.updates;
-        return null;
-      } catch {
-        return null;
-      }
-    };
-
     try {
       // Extract JSON from the response (may be wrapped in markdown code blocks)
       const jsonMatch = aiResponse.match(/```json\s*([\s\S]*?)```/) ||
                         aiResponse.match(/```\s*([\s\S]*?)```/) ||
                         [null, aiResponse];
       const jsonStr = jsonMatch[1].trim();
-      const parsedUpdates = tryParse(jsonStr);
-      if (parsedUpdates) return parsedUpdates;
-
-      // Fallback: if model wrapped JSON with additional text, extract the first JSON object.
-      const start = aiResponse.indexOf('{');
-      const end = aiResponse.lastIndexOf('}');
-      if (start !== -1 && end !== -1 && end > start) {
-        const objectStr = aiResponse.slice(start, end + 1).trim();
-        const objectUpdates = tryParse(objectStr);
-        if (objectUpdates) return objectUpdates;
-      }
-
-      return [];
+      const parsed = JSON.parse(jsonStr);
+      return parsed.updates || [];
     } catch (err) {
       // Try parsing the whole response as JSON
       try {
@@ -1531,414 +730,6 @@ ${datingPayload}
     }
   }
 
-  buildStrictChatExtractionPrompt(userMessage, assistantResponse, conversationTitle, existingIndex, relevantContext) {
-    return `You must decide if this chat includes durable personal information and return JSON only.
-
-## Existing Wiki Pages
-${existingIndex || '(No pages yet)'}
-
-## Relevant Existing Page Content
-${relevantContext || '(No relevant pages)'}
-
-## Chat Exchange
-**Conversation:** ${conversationTitle}
-**User:** ${userMessage}
-**Assistant:** ${assistantResponse}
-
-## Decision Rule
-- If the user states a durable preference or interest (examples: "I like...", "I enjoy...", "I love...", "I prefer...", "my favorite...", "I hate...", "I dislike..."), you MUST return at least one update unless that exact fact is already present in the relevant existing page content.
-- Durable preference statements about activities, foods, media, people, tools, or habits are wiki-worthy and should produce updates when new.
-- Significant personal facts and life events are wiki-worthy and should produce updates when new (examples: identity details like name, major health/family events, bereavement, major relationship/work changes).
-- Durable self-descriptions and ongoing personal context are wiki-worthy when new (examples: work role, where the user lives, recurring routines, explicit goals/plans, stable constraints like allergies/medications).
-- For user preference statements, do NOT create or update assistant-centric pages/slugs (e.g., assistant-interaction). Target user knowledge pages instead.
-
-## Response Format (JSON only)
-{
-  "updates": [
-    {
-      "action": "create" | "update",
-      "slug": "page-slug",
-      "title": "Page Title",
-      "type": "entity" | "concept" | "comparison",
-      "category": "personal" | "health" | "work" | "interests" | "relationships" | "goals" | "habits" | "media" | "technology" | "finance" | "travel" | "food" | "general",
-      "content": "Markdown content to merge",
-      "reason": "Brief explanation"
-    }
-  ]
-}
-
-If and only if there is truly no durable personal information, return exactly:
-{"updates": []}`;
-  }
-
-  hasStrongPreferenceSignal(userMessage) {
-    const text = String(userMessage || '').trim();
-    if (!text) return false;
-
-    const preferenceCue = /(\bi\s+(also\s+)?(enjoy|like|love|prefer|hate|dislike)\b|\bmy\s+favorite\b|\bi\s+cant\s+stand\b|\bi\s+cannot\s+stand\b)/i;
-    const tinyOrNonDurable = /^\s*(thanks|ok|okay|cool|nice|got it|hello|hi|hey)[.!?\s]*$/i;
-
-    return preferenceCue.test(text) && !tinyOrNonDurable.test(text);
-  }
-
-  hasStrongPersonalFactSignal(userMessage) {
-    const text = String(userMessage || '').trim();
-    if (!text) return false;
-
-    const identityCue = /\bmy\s+name\s+is\s+[a-z][a-z\-']*/i;
-    const bereavementCue = /\bmy\s+(mom|mother|dad|father|parent|brother|sister|wife|husband|partner|son|daughter|grandma|grandmother|grandpa|grandfather)\b[^.!?\n]*\b(died|passed\s+away|passed)\b/i;
-    const majorEventCue = /\b(i\s+was\s+diagnosed|i\s+lost\s+my\s+job|i\s+got\s+married|i\s+got\s+divorced|i\s+moved\s+to)\b/i;
-
-    return identityCue.test(text) || bereavementCue.test(text) || majorEventCue.test(text);
-  }
-
-  hasGeneralUsefulInfoSignal(userMessage) {
-    const text = String(userMessage || '').trim();
-    if (!text) return false;
-
-    const normalized = text.toLowerCase();
-    const sentenceCandidates = normalized
-      .split(/[.!?\n]+/)
-      .map(s => s.trim())
-      .filter(Boolean);
-
-    const durableCue = /(\bi\s+(am|m|was|have|ve\s+been|work|live|moved|grew\s+up|plan\s+to|want\s+to|need\s+to|usually|normally|often)\b|\bmy\s+(job|work|schedule|routine|goal|goals|plan|plans|health|family|partner|kids?|children|project|projects|allergy|allergies|medication|medications)\b|\bevery\s+(day|week|month)\b)/i;
-    const nonDurableRequestCue = /^(can\s+you|could\s+you|would\s+you|please\b|help\s+me\b|what\s+is\b|how\s+do\s+i\b)/i;
-    const technicalSupportCue = /(error|stack\s*trace|bug|code|compile|build|deploy|api|endpoint|sql|database\s+migration)/i;
-
-    for (const sentence of sentenceCandidates) {
-      if (!durableCue.test(sentence)) continue;
-      if (nonDurableRequestCue.test(sentence)) continue;
-
-      // Ignore purely technical debugging requests unless they also carry clear personal context.
-      if (technicalSupportCue.test(sentence) && !/\bmy\s+(routine|goal|plan|health|family|work)\b/i.test(sentence)) {
-        continue;
-      }
-
-      return true;
-    }
-
-    return false;
-  }
-
-  hasGroundedChatUpdates(userMessage, updates = []) {
-    if (!Array.isArray(updates) || updates.length === 0) return false;
-
-    const userTokens = this.extractGroundingTokens(userMessage);
-    if (userTokens.length === 0) return true;
-
-    const disallowedSlugs = new Set(['assistant-interaction', 'assistant-preferences', 'chat-assistant']);
-
-    for (const update of updates) {
-      const slug = String(update?.slug || '').toLowerCase();
-      if (disallowedSlugs.has(slug)) {
-        continue;
-      }
-
-      const haystack = [
-        update?.slug || '',
-        update?.title || '',
-        update?.reason || '',
-        update?.content || ''
-      ].join(' ').toLowerCase();
-
-      const tokenOverlap = userTokens.some(token => haystack.includes(token));
-      const looksLikeUserPrefs = /(preference|favorite|likes|dislikes|interests|color|board\s+game|games?)/i.test(haystack);
-      const looksLikeUserFacts = /(name|identity|personal\s+profile|life\s+event|bereavement|passed\s+away|died|family|relationship\s+status|health\s+event)/i.test(haystack);
-
-      if (tokenOverlap || looksLikeUserPrefs || looksLikeUserFacts) {
-        return true;
-      }
-    }
-
-    return false;
-  }
-
-  extractGroundingTokens(text) {
-    return [...new Set(
-      String(text || '')
-        .toLowerCase()
-        .replace(/[^a-z0-9\s]/g, ' ')
-        .split(/\s+/)
-        .filter(token => token.length >= 4)
-        .filter(token => ![
-          'always', 'prefer', 'favorite', 'color', 'board', 'games', 'playing', 'with', 'that', 'this', 'from', 'have'
-        ].includes(token))
-    )];
-  }
-
-  buildChatLogSnippet(text, maxLen = 90) {
-    const normalized = String(text || '').replace(/\s+/g, ' ').trim();
-    if (!normalized) return '(empty message)';
-    if (normalized.length <= maxLen) return normalized;
-    return `${normalized.slice(0, maxLen - 3)}...`;
-  }
-
-  extractPreferenceFallbackUpdates(userMessage, conversationTitle, existingPages, relevantPages) {
-    const text = (userMessage || '').trim();
-    if (!text) return [];
-
-    const preferenceCue = /(\bi\s+(also\s+)?(enjoy|like|love|prefer|hate|dislike)\b|\bmy\s+favorite\b|\bi\s+cant\s+stand\b|\bi\s+cannot\s+stand\b)/i.test(text);
-    if (!preferenceCue) return [];
-    const relevantCorpus = (relevantPages || []).map(p => `${p.title || ''}\n${p.content || ''}`).join('\n').toLowerCase();
-
-    const newFacts = [];
-
-    // Generic durable preference extraction from explicit like/love/enjoy/prefer/hate/dislike statements.
-    const preferencePhrases = this.extractPreferencePhrases(text);
-    for (const pref of preferencePhrases) {
-      const normalized = this.normalizeForMerge(pref.fact.replace(/^-\s*/, ''));
-      if (normalized && !this.normalizeForMerge(relevantCorpus).includes(normalized)) {
-        newFacts.push(pref.fact);
-      }
-    }
-
-    if (newFacts.length === 0) return [];
-
-    const target = this.selectGenericPreferencePage(existingPages);
-
-    const content = [
-      '## Preferences',
-      ...[...new Set(newFacts)],
-      `- Source context: ${conversationTitle}`
-    ].join('\n');
-
-    return [{
-      action: target.exists ? 'update' : 'create',
-      slug: target.slug,
-      title: target.title,
-      type: 'concept',
-      category: 'interests',
-      content,
-      reason: 'Extracted explicit user preferences/dislikes from chat message'
-    }];
-  }
-
-  extractPersonalFactFallbackUpdates(userMessage, conversationTitle, existingPages, relevantPages) {
-    const text = String(userMessage || '').trim();
-    if (!text) return [];
-
-    const relevantCorpus = (relevantPages || []).map(p => `${p.title || ''}\n${p.content || ''}`).join('\n').toLowerCase();
-    const facts = [];
-
-    const nameMatch = text.match(/\bmy\s+name\s+is\s+([a-z][a-z\-']*)\b/i);
-    if (nameMatch) {
-      const name = nameMatch[1];
-      const nameFact = `- Name: ${name}.`;
-      if (!this.normalizeForMerge(relevantCorpus).includes(this.normalizeForMerge(nameFact))) {
-        facts.push(nameFact);
-      }
-    }
-
-    const bereavementMatch = text.match(/\bmy\s+(mom|mother|dad|father|parent|brother|sister|wife|husband|partner|son|daughter|grandma|grandmother|grandpa|grandfather)\b[^.!?\n]*\b(died|passed\s+away|passed)\b[^.!?\n]*/i);
-    if (bereavementMatch) {
-      const bereavementDetail = bereavementMatch[0].replace(/\s+/g, ' ').trim();
-      const fact = `- Major life event: ${bereavementDetail}.`;
-      if (!this.normalizeForMerge(relevantCorpus).includes(this.normalizeForMerge(bereavementDetail))) {
-        facts.push(fact);
-      }
-    }
-
-    if (facts.length === 0) return [];
-
-    const target = this.selectPersonalProfilePage(existingPages);
-    const content = [
-      '## Personal Profile',
-      ...facts,
-      `- Source context: ${conversationTitle}`
-    ].join('\n');
-
-    return [{
-      action: target.exists ? 'update' : 'create',
-      slug: target.slug,
-      title: target.title,
-      type: 'concept',
-      category: 'personal',
-      content,
-      reason: 'Extracted significant personal facts/life events from chat message'
-    }];
-  }
-
-  extractGeneralUsefulFallbackUpdates(userMessage, conversationTitle, existingPages, relevantPages) {
-    const text = String(userMessage || '').trim();
-    if (!text) return [];
-
-    const relevantCorpus = (relevantPages || []).map(p => `${p.title || ''}\n${p.content || ''}`).join('\n').toLowerCase();
-    const normalizedCorpus = this.normalizeForMerge(relevantCorpus);
-    const durableLines = this.extractDurablePersonalStatements(text)
-      .map(sentence => `- ${sentence}`)
-      .filter(line => !normalizedCorpus.includes(this.normalizeForMerge(line)));
-
-    if (durableLines.length === 0) return [];
-
-    const target = this.selectPersonalProfilePage(existingPages);
-    const content = [
-      '## Personal Profile',
-      ...[...new Set(durableLines)],
-      `- Source context: ${conversationTitle}`
-    ].join('\n');
-
-    return [{
-      action: target.exists ? 'update' : 'create',
-      slug: target.slug,
-      title: target.title,
-      type: 'concept',
-      category: 'personal',
-      content,
-      reason: 'Extracted durable personal context from chat message'
-    }];
-  }
-
-  extractDurablePersonalStatements(text) {
-    const normalizedText = String(text || '');
-    if (!normalizedText) return [];
-
-    const sentences = normalizedText
-      .split(/(?<=[.!?])\s+|\n+/)
-      .map(s => s.trim())
-      .filter(Boolean);
-
-    const includeCue = /(\bi\s+(am|m|was|have|ve\s+been|work\s+as|work\s+at|live\s+in|moved\s+to|grew\s+up|plan\s+to|want\s+to|need\s+to|usually|normally|often)\b|\bmy\s+(job|work|schedule|routine|goal|goals|plan|plans|health|family|partner|kids?|children|project|projects|allergy|allergies|medication|medications)\b|\bevery\s+(day|week|month)\b)/i;
-    const excludeCue = /^(can\s+you|could\s+you|would\s+you|please\b|help\s+me\b|what\s+is\b|how\s+do\s+i\b)|\?$/i;
-    const technicalOnlyCue = /(error|stack\s*trace|bug|compile|build|deploy|api|endpoint|sql|database\s+migration)/i;
-    const technicalWithPersonalCue = /\bmy\s+(workflow|routine|goal|plan|work|health|family)\b/i;
-
-    const candidates = [];
-    for (const sentence of sentences) {
-      if (excludeCue.test(sentence)) continue;
-      if (!includeCue.test(sentence)) continue;
-      if (technicalOnlyCue.test(sentence) && !technicalWithPersonalCue.test(sentence)) continue;
-
-      let cleaned = sentence.replace(/^[-*]\s*/, '').replace(/\s+/g, ' ').trim();
-      if (!cleaned) continue;
-      if (!/[.!?]$/.test(cleaned)) cleaned = `${cleaned}.`;
-      candidates.push(cleaned);
-    }
-
-    return [...new Set(candidates)];
-  }
-
-  selectPersonalProfilePage(existingPages = []) {
-    const pages = Array.isArray(existingPages) ? existingPages : [];
-
-    const exactSlug = pages.find(p => p.slug === 'personal-profile');
-    if (exactSlug) {
-      return { exists: true, slug: exactSlug.slug, title: exactSlug.title || 'Personal Profile' };
-    }
-
-    const reusable = pages.find(p => /personal\s+profile|about\s+me|biography|identity/i.test(`${p.slug || ''} ${p.title || ''}`));
-    if (reusable) {
-      return { exists: true, slug: reusable.slug, title: reusable.title || 'Personal Profile' };
-    }
-
-    return {
-      exists: false,
-      slug: 'personal-profile',
-      title: 'Personal Profile'
-    };
-  }
-
-  selectGenericPreferencePage(existingPages = []) {
-    const pages = Array.isArray(existingPages) ? existingPages : [];
-
-    const exactSlug = pages.find(p => p.slug === 'personal-preferences');
-    if (exactSlug) {
-      return { exists: true, slug: exactSlug.slug, title: exactSlug.title || 'Personal Preferences' };
-    }
-
-    const reusable = pages.find(p => /preference|taste|interests?/i.test(`${p.slug || ''} ${p.title || ''}`));
-    if (reusable) {
-      return { exists: true, slug: reusable.slug, title: reusable.title || 'Personal Preferences' };
-    }
-
-    return {
-      exists: false,
-      slug: 'personal-preferences',
-      title: 'Personal Preferences'
-    };
-  }
-
-  extractPreferencePhrases(text) {
-    const phrases = [];
-    const sentenceCandidates = String(text || '')
-      .split(/[.!?\n]+/)
-      .map(s => s.trim())
-      .filter(Boolean);
-
-    for (const sentence of sentenceCandidates) {
-      let match = sentence.match(/^i\s+(?:(?:also|always|usually|generally|often)\s+)?(like|love|enjoy|prefer)\s+(?:to\s+)?(.+)$/i);
-      if (match) {
-        const item = this.cleanPreferenceTail(match[2]);
-        if (item) {
-          const gerund = this.gerundify(item);
-          const fact = gerund
-            ? `- Likes ${gerund}.`
-            : `- Likes ${this.humanizePreference(item)}.`;
-          phrases.push({ fact });
-          continue;
-        }
-      }
-
-      match = sentence.match(/^i\s+(?:really\s+)?(hate|dislike)\s+(.+)$/i);
-      if (match) {
-        const item = this.cleanPreferenceTail(match[2]);
-        if (item) {
-          phrases.push({ fact: `- Dislikes ${this.humanizePreference(item)}.` });
-          continue;
-        }
-      }
-
-      match = sentence.match(/^my\s+favorite\s+(.+)$/i);
-      if (match) {
-        const item = this.cleanPreferenceTail(match[1]);
-        if (item) {
-          const colorMatch = item.match(/^color\s+is\s+(.+)$/i);
-          if (colorMatch) {
-            phrases.push({ fact: `- Favorite color: ${this.humanizePreference(colorMatch[1])}.` });
-          } else {
-            phrases.push({ fact: `- Favorite: ${this.humanizePreference(item)}.` });
-          }
-        }
-      }
-    }
-
-    return phrases;
-  }
-
-  cleanPreferenceTail(value) {
-    return String(value || '')
-      .replace(/^(the|a|an)\s+/i, '')
-      .replace(/\s+/g, ' ')
-      .replace(/[,:;]+$/g, '')
-      .trim();
-  }
-
-  gerundify(value) {
-    const cleaned = String(value || '').trim().toLowerCase();
-    const word = cleaned.split(/\s+/)[0];
-    const gerundMap = {
-      cook: 'cooking',
-      read: 'reading',
-      run: 'running',
-      swim: 'swimming',
-      hike: 'hiking',
-      write: 'writing'
-    };
-
-    if (gerundMap[word]) {
-      const remainder = cleaned.split(/\s+/).slice(1).join(' ');
-      return [gerundMap[word], remainder].filter(Boolean).join(' ').trim();
-    }
-
-    return null;
-  }
-
-  humanizePreference(value) {
-    const cleaned = String(value || '').trim();
-    if (!cleaned) return cleaned;
-    return cleaned.charAt(0).toLowerCase() + cleaned.slice(1);
-  }
-
   async applyWikiUpdate(update, sourceId, sourceType) {
     const affectedSlugs = [];
 
@@ -1946,16 +737,9 @@ If and only if there is truly no durable personal information, return exactly:
 
     const existing = await this.getPage(update.slug);
 
-    const wantsCreate = update.action === 'create';
-    const wantsUpdate = update.action === 'update';
-
-    // Treat "update on missing page" as create to avoid dropping valid ingestion output.
-    if ((wantsCreate && !existing) || (wantsUpdate && !existing)) {
+    if (update.action === 'create' && !existing) {
       // Create new page
       const outboundLinks = this.extractWikiLinks(update.content || '');
-      const noteIds = sourceType === 'note' || sourceType === 'daily_note' ? [sourceId] : [];
-      const chatIds = sourceType === 'chat' ? [sourceId] : [];
-
       await this.createPage({
         slug: update.slug,
         title: update.title || update.slug,
@@ -1963,8 +747,8 @@ If and only if there is truly no durable personal information, return exactly:
         type: update.type || 'concept',
         category: update.category || 'general',
         outboundLinks: JSON.stringify(outboundLinks),
-        sourceNoteIds: JSON.stringify(noteIds),
-        sourceChatIds: JSON.stringify(chatIds)
+        sourceNoteIds: sourceType !== 'chat' ? JSON.stringify([sourceId]) : '[]',
+        sourceChatIds: sourceType === 'chat' ? JSON.stringify([sourceId]) : '[]'
       });
       affectedSlugs.push(update.slug);
 
@@ -1972,8 +756,9 @@ If and only if there is truly no durable personal information, return exactly:
       await this.updateInboundLinks(update.slug, outboundLinks);
     } else if (existing) {
       // Update existing page (both "update" action and "create" on existing page)
-      // Merge safely so partial AI updates augment instead of clobbering existing page content.
-      const newContent = this.mergeWikiContent(existing.content, update.content, update.title || existing.title);
+      // Use the AI-provided content as a full REPLACEMENT, not an append.
+      // The prompts instruct the AI to return complete merged content.
+      const newContent = update.content || existing.content;
 
       // Safety: skip if the content is identical (no actual change)
       if (newContent.trim() === existing.content.trim()) {
@@ -1985,7 +770,7 @@ If and only if there is truly no durable personal information, return exactly:
       // Update source tracking
       const existingNoteIds = JSON.parse(existing.sourceNoteIds || '[]');
       const existingChatIds = JSON.parse(existing.sourceChatIds || '[]');
-      if ((sourceType === 'note' || sourceType === 'daily_note') && !existingNoteIds.includes(sourceId)) {
+      if (sourceType !== 'chat' && !existingNoteIds.includes(sourceId)) {
         existingNoteIds.push(sourceId);
       }
       if (sourceType === 'chat' && !existingChatIds.includes(sourceId)) {
@@ -2010,270 +795,7 @@ If and only if there is truly no durable personal information, return exactly:
 
   extractWikiLinks(content) {
     const matches = content.match(/\[\[([^\]]+)\]\]/g) || [];
-    return [...new Set(matches
-      .map(m => m.replace(/\[\[|\]\]/g, '').trim())
-      .map(link => link.split('|')[0].trim())
-      .filter(Boolean))];
-  }
-
-  repairWikiLinksInContent(content, allSlugs, titleSlugMap) {
-    if (!content) {
-      return { content: content || '', retargeted: 0, unlinked: 0 };
-    }
-
-    let retargeted = 0;
-    let unlinked = 0;
-
-    const repairedContent = content.replace(/\[\[([^\]]+)\]\]/g, (_full, rawTarget) => {
-      const raw = String(rawTarget || '').trim();
-      if (!raw) return _full;
-
-      const parts = raw.split('|');
-      const linkTarget = (parts[0] || '').trim();
-      const alias = parts.length > 1 ? parts.slice(1).join('|').trim() : '';
-
-      if (allSlugs.has(linkTarget)) {
-        return alias ? `[[${linkTarget}|${alias}]]` : `[[${linkTarget}]]`;
-      }
-
-      const normalized = this.slugifyWikiTarget(linkTarget);
-      const resolvedSlug = titleSlugMap.get(normalized);
-      if (resolvedSlug && allSlugs.has(resolvedSlug)) {
-        retargeted++;
-        return alias ? `[[${resolvedSlug}|${alias}]]` : `[[${resolvedSlug}]]`;
-      }
-
-      unlinked++;
-      return alias || linkTarget;
-    });
-
-    return {
-      content: repairedContent,
-      retargeted,
-      unlinked
-    };
-  }
-
-  mergeWikiContent(existingContent, incomingContent, title = 'Wiki Page') {
-    const existing = (existingContent || '').trim();
-    const incoming = (incomingContent || '').trim();
-
-    if (!incoming) return existing;
-    if (!existing) return incoming;
-
-    const normalizedExisting = this.normalizeForMerge(existing);
-    const normalizedIncoming = this.normalizeForMerge(incoming);
-
-    if (normalizedExisting === normalizedIncoming) return existing;
-
-    const incomingLooksFullPage = incoming.startsWith('# ');
-    const incomingIsReasonablySized = incoming.length >= Math.floor(existing.length * 0.75);
-    if (incomingLooksFullPage && incomingIsReasonablySized) {
-      return incoming;
-    }
-
-    const resolvedSectionMerge = this.mergeResolvedSections(existing, incoming, title);
-    if (resolvedSectionMerge) {
-      return resolvedSectionMerge;
-    }
-
-    const existingLines = existing.split(/\r?\n/);
-    const existingLineSet = new Set(
-      existingLines
-        .map(line => this.normalizeForMerge(line))
-        .filter(Boolean)
-    );
-
-    const incomingLines = incoming
-      .split(/\r?\n/)
-      .map(line => line.trim())
-      .filter(Boolean);
-
-    const uniqueIncomingLines = incomingLines.filter(line => {
-      const normalized = this.normalizeForMerge(line);
-      return normalized && !existingLineSet.has(normalized);
-    });
-
-    if (uniqueIncomingLines.length === 0) {
-      return existing;
-    }
-
-    const insertionIndex = this.findMergeInsertionIndex(existingLines);
-    const mergedLines = [...existingLines];
-    const spacer = mergedLines[insertionIndex - 1]?.trim() === '' ? [] : [''];
-
-    mergedLines.splice(
-      insertionIndex,
-      0,
-      ...spacer,
-      '## Chat Additions',
-      ...uniqueIncomingLines,
-      ''
-    );
-
-    if (!mergedLines[0]?.startsWith('# ')) {
-      mergedLines.unshift(`# ${title}`, '');
-    }
-
-    return mergedLines.join('\n').replace(/\n{3,}/g, '\n\n').trim();
-  }
-
-  mergeResolvedSections(existingContent, incomingContent, title = 'Wiki Page') {
-    const existingLines = (existingContent || '').split(/\r?\n/);
-    const incomingLines = (incomingContent || '').split(/\r?\n/).map(line => line.replace(/\s+$/g, ''));
-
-    const incomingSections = this.extractMarkdownSections(incomingLines);
-    if (incomingSections.length === 0) return null;
-
-    let workingLines = [...existingLines];
-    let changed = false;
-
-    for (const incomingSection of incomingSections) {
-      const resolved = this.findResolvableSectionMatch(workingLines, incomingSection);
-      if (!resolved) continue;
-
-      const replacementBlock = incomingSection.lines.length > 0
-        ? [...incomingSection.lines]
-        : [incomingSection.headingLine];
-
-      workingLines.splice(
-        resolved.startIndex,
-        resolved.endIndex - resolved.startIndex,
-        ...replacementBlock
-      );
-      changed = true;
-    }
-
-    if (!changed) return null;
-
-    const merged = workingLines.join('\n').replace(/\n{3,}/g, '\n\n').trim();
-    if (!merged.startsWith('# ')) {
-      return `# ${title}\n\n${merged}`.trim();
-    }
-    return merged;
-  }
-
-  extractMarkdownSections(lines = []) {
-    const sections = [];
-    let current = null;
-
-    for (const line of lines) {
-      const heading = line.match(/^(#{2,6})\s+(.*)$/);
-      if (heading) {
-        if (current) sections.push(current);
-        current = {
-          headingLine: line,
-          level: heading[1].length,
-          title: heading[2].trim(),
-          lines: [line]
-        };
-        continue;
-      }
-
-      if (current) {
-        current.lines.push(line);
-      }
-    }
-
-    if (current) sections.push(current);
-    return sections;
-  }
-
-  findResolvableSectionMatch(lines, incomingSection) {
-    const incomingBase = this.normalizeSectionTitle(incomingSection.title);
-    if (!incomingBase) return null;
-
-    const headings = [];
-    for (let i = 0; i < lines.length; i++) {
-      const match = lines[i].match(/^(#{2,6})\s+(.*)$/);
-      if (!match) continue;
-
-      headings.push({
-        index: i,
-        level: match[1].length,
-        title: match[2].trim(),
-        base: this.normalizeSectionTitle(match[2].trim()),
-        isPending: /\(pending\)/i.test(match[2]),
-        isDefinitive: /\(definitive\)|\(resolved\)|\(final\)/i.test(match[2])
-      });
-    }
-
-    const exactHeading = headings.find(h => h.base === incomingBase && h.isPending);
-    if (exactHeading) {
-      const endIndex = this.findSectionEndIndex(lines, exactHeading.index, exactHeading.level);
-      return { startIndex: exactHeading.index, endIndex };
-    }
-
-    const relatedPending = headings.find(h => h.base === incomingBase && h.isPending);
-    if (relatedPending) {
-      const endIndex = this.findSectionEndIndex(lines, relatedPending.index, relatedPending.level);
-      return { startIndex: relatedPending.index, endIndex };
-    }
-
-    const sameBase = headings.find(h => h.base === incomingBase);
-    if (sameBase && incomingSection.title && /\b(definitive|resolved|final)\b/i.test(incomingSection.title)) {
-      const endIndex = this.findSectionEndIndex(lines, sameBase.index, sameBase.level);
-      return { startIndex: sameBase.index, endIndex };
-    }
-
-    return null;
-  }
-
-  findSectionEndIndex(lines, startIndex, level) {
-    for (let i = startIndex + 1; i < lines.length; i++) {
-      const match = lines[i].match(/^(#{2,6})\s+(.*)$/);
-      if (match && match[1].length <= level) {
-        return i;
-      }
-    }
-    return lines.length;
-  }
-
-  normalizeSectionTitle(title) {
-    return this.normalizeForMerge(String(title || '')
-      .replace(/\((pending|definitive|resolved|final|updated|current)\)/ig, '')
-      .replace(/[:\-–—]\s*(pending|definitive|resolved|final|updated|current)\b/ig, '')
-      .replace(/\b(pending|definitive|resolved|final|updated|current)\b/ig, '')
-      .replace(/\s+/g, ' ')
-      .trim());
-  }
-
-  findMergeInsertionIndex(lines) {
-    for (let i = 0; i < lines.length; i++) {
-      const line = lines[i].trim().toLowerCase();
-      if (line === '## sources' || line === '## last updated') {
-        return i;
-      }
-    }
-    return lines.length;
-  }
-
-  normalizeForMerge(value) {
-    return (value || '')
-      .toLowerCase()
-      .replace(/\r/g, '')
-      .replace(/\s+/g, ' ')
-      .trim();
-  }
-
-  areStringArraysEqual(a = [], b = []) {
-    if (a.length !== b.length) return false;
-
-    const left = [...a].map(String).sort();
-    const right = [...b].map(String).sort();
-    for (let i = 0; i < left.length; i++) {
-      if (left[i] !== right[i]) return false;
-    }
-
-    return true;
-  }
-
-  slugifyWikiTarget(value) {
-    return String(value || '')
-      .toLowerCase()
-      .replace(/['’]/g, '')
-      .replace(/[^a-z0-9]+/g, '-')
-      .replace(/^-+|-+$/g, '');
+    return [...new Set(matches.map(m => m.replace(/\[\[|\]\]/g, '')))];
   }
 
   async updateInboundLinks(fromSlug, targetSlugs) {

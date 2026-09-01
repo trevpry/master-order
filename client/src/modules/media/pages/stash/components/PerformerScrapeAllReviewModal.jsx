@@ -265,6 +265,7 @@ export default function PerformerScrapeAllReviewModal({
     }
     // Collect matched tag IDs from all checked tag sources (deduplicated).
     const tagIdMap = new Map();
+    const unmatchedTagNames = new Set();
     for (const src of activeSources) {
       if (!tagSourceSelections.has(src.id)) continue;
       const scraped = selectedScrapedBySrc[src.id];
@@ -272,8 +273,14 @@ export default function PerformerScrapeAllReviewModal({
       for (const tag of matched) {
         if (tag?.id) tagIdMap.set(tag.id, tag);
       }
+      const unmatched = scraped?._unmatchedTags || scraped?.unmatched?.tags || [];
+      for (const tag of unmatched) {
+        const name = typeof tag === 'string' ? tag : tag?.name;
+        if (name) unmatchedTagNames.add(name);
+      }
     }
     result._matchedTagIds = [...tagIdMap.keys()];
+    result._unmatchedTagNames = [...unmatchedTagNames];
 
     // Always read from refs so the latest selection is used regardless of closure age
     onApply?.(result, mainImageRef.current, Array.from(additionalImagesRef.current));

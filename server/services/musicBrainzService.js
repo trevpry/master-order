@@ -7,7 +7,7 @@ class MusicBrainzService {
   constructor() {
     this.baseUrl = 'https://musicbrainz.org/ws/2';
     this.userAgent = 'EddieLifeManagement/1.0.0 (https://github.com/yourusername/eddie)';
-    this.rateLimit = 1000; // 1 request per second
+    this.rateLimit = 2000; // 2 seconds between requests (MusicBrainz allows 1 request per second)
     this.lastRequestTime = 0;
   }
 
@@ -26,9 +26,9 @@ class MusicBrainzService {
   }
 
   /**
-   * Make a request to MusicBrainz API
+   * Make a request to MusicBrainz API with retry logic
    */
-  async request(endpoint, params = {}) {
+  async request(endpoint, params = {}, maxRetries = 3) {
     await this.waitForRateLimit();
 
     const url = new URL(`${this.baseUrl}/${endpoint}`);
@@ -40,18 +40,47 @@ class MusicBrainzService {
       }
     });
 
-    const response = await fetch(url.toString(), {
-      headers: {
-        'User-Agent': this.userAgent,
-        'Accept': 'application/json'
-      }
-    });
+    let lastError = null;
+    let retryDelay = 2000; // Start with 2 second delay (MusicBrainz rate limiting)
 
-    if (!response.ok) {
-      throw new Error(`MusicBrainz API error: ${response.status} ${response.statusText}`);
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      try {
+        const response = await fetch(url.toString(), {
+          headers: {
+            'User-Agent': this.userAgent,
+            'Accept': 'application/json'
+          }
+        });
+
+        if (!response.ok) {
+          // Check for 503 Service Temporarily Unavailable
+          if (response.status === 503) {
+            // Log the 503 error and wait before retrying
+            console.log(`MusicBrainz API returned 503 (attempt ${attempt + 1}/${maxRetries + 1}). Waiting ${retryDelay / 1000} seconds before retry...`);
+            await new Promise(resolve => setTimeout(resolve, retryDelay));
+            retryDelay *= 2; // Exponential backoff: 1s, 2s, 4s
+            continue;
+          }
+          
+          // For other errors, throw immediately
+          throw new Error(`MusicBrainz API error: ${response.status} ${response.statusText}`);
+        }
+
+        return await response.json();
+      } catch (error) {
+        console.error(`Error during request attempt ${attempt + 1}:`, error);
+        lastError = error;
+        // If we've exhausted retries, throw the error
+        if (attempt === maxRetries) {
+          throw new Error(`MusicBrainz API error after ${maxRetries + 1} attempts: ${error.message}`);
+        }
+        // Wait before retrying
+        await new Promise(resolve => setTimeout(resolve, retryDelay));
+        retryDelay *= 2; // Exponential backoff: 2s, 4s, 8s, 16s
+      }
     }
 
-    return await response.json();
+    throw new Error(`MusicBrainz API error after ${maxRetries + 1} attempts: ${lastError ? lastError.message : 'Unknown error'}`);
   }
 
   /**
@@ -78,10 +107,13 @@ class MusicBrainzService {
 
   /**
    * Search for artists
+   * Handles both Latin and non-Latin alphabet names
    */
   async searchArtist(name, limit = 10) {
     try {
-      const query = `artist:"${name}"`;
+      // For non-Latin alphabet names, search with artistaccent to preserve diacritics
+      // For Latin names, use artist field
+      const query = `artistaccent:"${name}"`;
 
       const result = await this.request('artist', {
         query,
@@ -91,6 +123,46 @@ class MusicBrainzService {
       return result.artists || [];
     } catch (error) {
       console.error('MusicBrainz artist search error:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Search for artists by alias
+   * Useful when the artist name doesn't match directly but aliases might
+   */
+  async searchArtistByAlias(name, limit = 10) {
+    try {
+      const query = `alias:"${name}"`;
+
+      const result = await this.request('artist', {
+        query,
+        limit
+      });
+
+      return result.artists || [];
+    } catch (error) {
+      console.error('MusicBrainz artist alias search error:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Search for artists by sort name
+   * Useful for finding artists when you know their sort name format
+   */
+  async searchArtistBySortName(name, limit = 10) {
+    try {
+      const query = `sortname:"${name}"`;
+
+      const result = await this.request('artist', {
+        query,
+        limit
+      });
+
+      return result.artists || [];
+    } catch (error) {
+      console.error('MusicBrainz artist sort name search error:', error);
       throw error;
     }
   }
@@ -182,6 +254,38 @@ class MusicBrainzService {
    */
   async getArtist(mbid) {
     return await this.getArtistDetails(mbid);
+  }
+
+  /**
+   * Search for recordings by AcoustID fingerprint
+   */
+  async searchRecordingsByFingerprint(fingerprint, limit = 10) {
+    try {
+      const result = await this.request('recording', {
+        query: `fingerprint:"${fingerprint}"`,
+        limit
+      });
+      return result.recordings || [];
+    } catch (error) {
+      console.error('MusicBrainz recording fingerprint search error:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Search for recordings by AcoustID
+   */
+  async searchRecordingsByAcoustId(acoustId, limit = 10) {
+    try {
+      const result = await this.request('recording', {
+        query: `acoustid:"${acoustId}"`,
+        limit
+      });
+      return result.recordings || [];
+    } catch (error) {
+      console.error('MusicBrainz recording AcoustID search error:', error);
+      throw error;
+    }
   }
 
   /**

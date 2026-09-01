@@ -1,29 +1,12 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 
 const ChatSettings = ({ settings, onSaved, connected, models }) => {
   const [ollamaUrl, setOllamaUrl] = useState(settings.ollamaUrl || 'http://localhost:11434');
   const [ollamaDefaultModel, setOllamaDefaultModel] = useState(settings.ollamaDefaultModel || '');
-  const [ollamaEmbeddingModel, setOllamaEmbeddingModel] = useState(settings.ollamaEmbeddingModel || 'nomic-embed-text');
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState(null);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
-  const [embeddingStatus, setEmbeddingStatus] = useState(null);
-  const [backfilling, setBackfilling] = useState(false);
-
-  useEffect(() => {
-    fetchEmbeddingStatus();
-  }, []);
-
-  const fetchEmbeddingStatus = async () => {
-    try {
-      const res = await fetch('/api/chat/embeddings/status');
-      const json = await res.json();
-      if (json.success) setEmbeddingStatus(json.data);
-    } catch (err) {
-      console.error('Failed to fetch embedding status:', err);
-    }
-  };
 
   const handleTestConnection = async () => {
     setTesting(true);
@@ -54,7 +37,7 @@ const ChatSettings = ({ settings, onSaved, connected, models }) => {
       const res = await fetch('/api/chat/settings', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ollamaUrl, ollamaDefaultModel, ollamaEmbeddingModel })
+        body: JSON.stringify({ ollamaUrl, ollamaDefaultModel })
       });
       const json = await res.json();
       if (json.success) {
@@ -66,32 +49,6 @@ const ChatSettings = ({ settings, onSaved, connected, models }) => {
       console.error('Failed to save settings:', err);
     } finally {
       setSaving(false);
-    }
-  };
-
-  const handleBackfill = async () => {
-    setBackfilling(true);
-    try {
-      let hasMore = true;
-      while (hasMore) {
-        const res = await fetch('/api/chat/embeddings/backfill', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ batchSize: 50 })
-        });
-        const json = await res.json();
-        if (json.success) {
-          await fetchEmbeddingStatus();
-          hasMore = json.data.processed > 0 && json.data.processed === json.data.total;
-        } else {
-          hasMore = false;
-        }
-      }
-    } catch (err) {
-      console.error('Backfill failed:', err);
-    } finally {
-      setBackfilling(false);
-      fetchEmbeddingStatus();
     }
   };
 
@@ -138,7 +95,7 @@ const ChatSettings = ({ settings, onSaved, connected, models }) => {
           {/* Default Model */}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
-              Default Chat Model
+              Default Model
             </label>
             {models.length > 0 ? (
               <select
@@ -164,68 +121,6 @@ const ChatSettings = ({ settings, onSaved, connected, models }) => {
               The model to use by default for new conversations. You can change models per conversation.
             </p>
           </div>
-
-          {/* Embedding Model */}
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Embedding Model (Memory/RAG)
-            </label>
-            {models.length > 0 ? (
-              <select
-                value={ollamaEmbeddingModel}
-                onChange={(e) => setOllamaEmbeddingModel(e.target.value)}
-                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-              >
-                <option value="">Select a model...</option>
-                {models.map(m => (
-                  <option key={m.name} value={m.name}>{m.name}</option>
-                ))}
-              </select>
-            ) : (
-              <input
-                type="text"
-                value={ollamaEmbeddingModel}
-                onChange={(e) => setOllamaEmbeddingModel(e.target.value)}
-                placeholder="nomic-embed-text"
-                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-              />
-            )}
-            <p className="mt-1 text-xs text-gray-400">
-              Used for cross-conversation memory. Run <code className="bg-gray-100 px-1 rounded">ollama pull nomic-embed-text</code> to install the recommended model.
-            </p>
-          </div>
-
-          {/* Memory / Embeddings Status */}
-          {embeddingStatus && (
-            <div className="p-4 rounded-lg bg-purple-50 border border-purple-100">
-              <div className="flex items-center justify-between mb-2">
-                <h4 className="text-sm font-semibold text-purple-800">Cross-Conversation Memory</h4>
-                <span className="text-xs text-purple-600">
-                  {embeddingStatus.embedded}/{embeddingStatus.total} messages indexed
-                </span>
-              </div>
-              {embeddingStatus.total > 0 && (
-                <div className="w-full bg-purple-200 rounded-full h-2 mb-3">
-                  <div
-                    className="bg-purple-600 h-2 rounded-full transition-all"
-                    style={{ width: `${Math.round((embeddingStatus.embedded / embeddingStatus.total) * 100)}%` }}
-                  />
-                </div>
-              )}
-              {embeddingStatus.pending > 0 && (
-                <button
-                  onClick={handleBackfill}
-                  disabled={backfilling}
-                  className="px-3 py-1.5 bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:opacity-50 transition-colors text-xs font-medium"
-                >
-                  {backfilling ? 'Indexing...' : `Index ${embeddingStatus.pending} remaining message${embeddingStatus.pending !== 1 ? 's' : ''}`}
-                </button>
-              )}
-              {embeddingStatus.pending === 0 && embeddingStatus.total > 0 && (
-                <p className="text-xs text-purple-600">All messages indexed — memory is up to date.</p>
-              )}
-            </div>
-          )}
 
           {/* Connection Status */}
           <div className="flex items-center gap-2 p-3 rounded-lg bg-gray-50 border border-gray-100">
@@ -257,8 +152,7 @@ const ChatSettings = ({ settings, onSaved, connected, models }) => {
           <h3 className="text-sm font-semibold text-blue-800 mb-2">Getting Started with Ollama</h3>
           <ol className="text-sm text-blue-700 space-y-1 list-decimal list-inside">
             <li>Install Ollama from <span className="font-mono">ollama.com</span></li>
-            <li>Run <code className="bg-blue-100 px-1 rounded">ollama pull llama3</code> to download a chat model</li>
-            <li>Run <code className="bg-blue-100 px-1 rounded">ollama pull nomic-embed-text</code> for memory support</li>
+            <li>Run <code className="bg-blue-100 px-1 rounded">ollama pull llama3</code> to download a model</li>
             <li>Start Ollama — it runs on port 11434 by default</li>
             <li>Enter the URL above and test the connection</li>
           </ol>

@@ -11,68 +11,6 @@ class HistoryPlusService {
     this.completionService = new BookCompletionService(this.prisma);
   }
 
-  parseHistoricalDateValue(dateInput) {
-    if (!dateInput) return null;
-
-    const dateString = String(dateInput);
-
-    if (dateString.startsWith('-')) {
-      const secondDashIndex = dateString.indexOf('-', 1);
-
-      if (secondDashIndex === -1) {
-        const year = parseInt(dateString.slice(1), 10);
-        if (Number.isNaN(year)) return null;
-        return -(year * 10000 + 101);
-      }
-
-      const year = parseInt(dateString.slice(1, secondDashIndex), 10);
-      const remainingDate = dateString.slice(secondDashIndex);
-      const parts = remainingDate.split('-');
-      const month = parseInt(parts[1], 10) || 1;
-      const day = parseInt(parts[2], 10) || 1;
-
-      if (Number.isNaN(year)) return null;
-      return -(year * 10000) + month * 100 + day;
-    }
-
-    const firstDashIndex = dateString.indexOf('-');
-    if (firstDashIndex === -1) {
-      const year = parseInt(dateString, 10);
-      if (Number.isNaN(year)) return null;
-      return year * 10000 + 101;
-    }
-
-    const year = parseInt(dateString.slice(0, firstDashIndex), 10);
-    const remainingDate = dateString.slice(firstDashIndex);
-    const parts = remainingDate.split('-');
-    const month = parseInt(parts[1], 10) || 1;
-    const day = parseInt(parts[2], 10) || 1;
-
-    if (Number.isNaN(year)) return null;
-    return year * 10000 + month * 100 + day;
-  }
-
-  parseEventDuration(startDate, endDate) {
-    if (!startDate) return 0;
-    const start = this.parseHistoricalDateValue(startDate);
-    const end = endDate ? this.parseHistoricalDateValue(endDate) : start;
-    if (!start || !end) return 0;
-    return end - start;
-  }
-
-  isUnifiedCompletionCompleted(completions) {
-    if (!Array.isArray(completions) || completions.length === 0) {
-      return false;
-    }
-
-    const defaultCompletion = completions.find(completion => completion?.userId === "default");
-    if (defaultCompletion) {
-      return !!defaultCompletion.isCompleted;
-    }
-
-    return !!completions[0]?.isCompleted;
-  }
-
   // ==========================================
   // HISTORICAL EVENTS
   // ==========================================
@@ -313,177 +251,6 @@ class HistoryPlusService {
     });
   }
 
-  async mergeEvents({ eventIds = [], primaryEventId = null, mergedData = {} }) {
-    const uniqueEventIds = [...new Set((eventIds || []).map(id => parseInt(id, 10)).filter(Number.isInteger))];
-
-    if (uniqueEventIds.length < 2) {
-      throw new Error('At least two event IDs are required to merge events');
-    }
-
-    const parsedPrimaryId = primaryEventId !== null && primaryEventId !== undefined
-      ? parseInt(primaryEventId, 10)
-      : uniqueEventIds[0];
-
-    const targetEventId = uniqueEventIds.includes(parsedPrimaryId) ? parsedPrimaryId : uniqueEventIds[0];
-    const sourceEventIds = uniqueEventIds.filter(id => id !== targetEventId);
-
-    if (sourceEventIds.length === 0) {
-      throw new Error('At least one source event must be provided for merge');
-    }
-
-    const events = await this.prisma.historicalEvent.findMany({
-      where: { id: { in: uniqueEventIds } }
-    });
-
-    if (events.length !== uniqueEventIds.length) {
-      throw new Error('One or more events were not found');
-    }
-
-    const targetEvent = events.find(event => event.id === targetEventId);
-
-    const sortedByStartDate = [...events]
-      .filter(event => event.startDate)
-      .sort((a, b) => {
-        const dateA = this.parseHistoricalDateValue(a.startDate) ?? Number.MAX_SAFE_INTEGER;
-        const dateB = this.parseHistoricalDateValue(b.startDate) ?? Number.MAX_SAFE_INTEGER;
-        return dateA - dateB;
-      });
-
-    const eventsWithEndDate = events
-      .filter(event => event.endDate)
-      .sort((a, b) => {
-        const dateA = this.parseHistoricalDateValue(a.endDate) ?? Number.MIN_SAFE_INTEGER;
-        const dateB = this.parseHistoricalDateValue(b.endDate) ?? Number.MIN_SAFE_INTEGER;
-        return dateB - dateA;
-      });
-
-    const hasOngoingEvent = events.some(event => !event.endDate);
-    const mergedDetails = events
-      .map(event => event.details)
-      .filter(Boolean)
-      .map(details => String(details).trim())
-      .filter(Boolean)
-      .join('\n\n');
-
-    const targetData = {
-      title: mergedData.title || targetEvent.title,
-      category: mergedData.category || targetEvent.category,
-      startDate: mergedData.startDate || sortedByStartDate[0]?.startDate || targetEvent.startDate,
-      endDate: Object.prototype.hasOwnProperty.call(mergedData, 'endDate')
-        ? (mergedData.endDate || null)
-        : (hasOngoingEvent ? null : (eventsWithEndDate[0]?.endDate || targetEvent.endDate || null)),
-      details: Object.prototype.hasOwnProperty.call(mergedData, 'details')
-        ? (mergedData.details || null)
-        : (mergedDetails || targetEvent.details || null)
-    };
-
-    const mergedEventId = await this.prisma.$transaction(async (tx) => {
-      const reviews = await tx.user_event_reviews.findMany({
-        where: { eventId: { in: uniqueEventIds } }
-      });
-
-      const shouldBeReviewed = events.some(event => event.reviewed) || reviews.some(review => review.reviewed);
-
-      await tx.historyVideo.updateMany({
-        where: { eventId: { in: sourceEventIds } },
-        data: { eventId: targetEventId }
-      });
-
-      await tx.historyBook.updateMany({
-        where: { eventId: { in: sourceEventIds } },
-        data: { eventId: targetEventId }
-      });
-
-      await tx.historyChapter.updateMany({
-        where: { eventId: { in: sourceEventIds } },
-        data: { eventId: targetEventId }
-      });
-
-      await tx.historySection.updateMany({
-        where: { eventId: { in: sourceEventIds } },
-        data: { eventId: targetEventId }
-      });
-
-      await tx.bookChapter.updateMany({
-        where: { eventId: { in: sourceEventIds } },
-        data: { eventId: targetEventId }
-      });
-
-      await tx.bookSection.updateMany({
-        where: { eventId: { in: sourceEventIds } },
-        data: { eventId: targetEventId }
-      });
-
-      await tx.readingList.updateMany({
-        where: { eventId: { in: sourceEventIds } },
-        data: { eventId: targetEventId }
-      });
-
-      const sourceBookLinks = await tx.historyBookLink.findMany({
-        where: { eventId: { in: sourceEventIds } },
-        select: { bookId: true }
-      });
-
-      if (sourceBookLinks.length > 0) {
-        const targetBookLinks = await tx.historyBookLink.findMany({
-          where: { eventId: targetEventId },
-          select: { bookId: true }
-        });
-
-        const existingBookIds = new Set(targetBookLinks.map(link => link.bookId));
-        const uniqueBookIdsToAdd = [...new Set(sourceBookLinks.map(link => link.bookId))]
-          .filter(bookId => !existingBookIds.has(bookId));
-
-        if (uniqueBookIdsToAdd.length > 0) {
-          await tx.historyBookLink.createMany({
-            data: uniqueBookIdsToAdd.map(bookId => ({
-              bookId,
-              eventId: targetEventId
-            })),
-            skipDuplicates: true
-          });
-        }
-
-        await tx.historyBookLink.deleteMany({
-          where: { eventId: { in: sourceEventIds } }
-        });
-      }
-
-      await tx.user_event_reviews.deleteMany({
-        where: { eventId: { in: sourceEventIds } }
-      });
-
-      await tx.user_event_reviews.upsert({
-        where: { eventId: targetEventId },
-        update: {
-          reviewed: shouldBeReviewed,
-          reviewedAt: shouldBeReviewed ? new Date() : null
-        },
-        create: {
-          eventId: targetEventId,
-          reviewed: shouldBeReviewed,
-          reviewedAt: shouldBeReviewed ? new Date() : null
-        }
-      });
-
-      await tx.historicalEvent.update({
-        where: { id: targetEventId },
-        data: {
-          ...targetData,
-          reviewed: shouldBeReviewed
-        }
-      });
-
-      await tx.historicalEvent.deleteMany({
-        where: { id: { in: sourceEventIds } }
-      });
-
-      return targetEventId;
-    });
-
-    return this.getEventById(mergedEventId);
-  }
-
   async getEventsByContent(filters) {
     const { bookId, chapterId, sectionId } = filters;
     
@@ -523,7 +290,7 @@ class HistoryPlusService {
       // Find events linked to this specific book and its chapters/sections
       const book = await this.prisma.historyBook.findUnique({
         where: { id: parseInt(bookId) },
-        include: {
+        include: { 
           event: true,
           chapters: {
             include: {
@@ -1368,21 +1135,24 @@ class HistoryPlusService {
         !bookLink.book.bookCompletions?.length || !bookLink.book.bookCompletions[0]?.isCompleted
       );
       
-      // Check for any unread unified chapters (directly linked)
+      // Check for any unread unified chapters (directly linked, skip if parent book is read)
       const unreadUnifiedChapters = (event.bookChapters || []).filter(chapter =>
-        !chapter.chapterCompletions?.length || !chapter.chapterCompletions[0]?.isCompleted
+        (!chapter.chapterCompletions?.length || !chapter.chapterCompletions[0]?.isCompleted) &&
+        !chapter.book?.bookCompletions?.[0]?.isCompleted
       );
       
       // Check for any unread unified sections (directly linked)
       const unreadUnifiedSections = (event.bookSections || []).filter(section =>
-        !section.sectionCompletions?.length || !section.sectionCompletions[0]?.isCompleted
+        (!section.sectionCompletions?.length || !section.sectionCompletions[0]?.isCompleted) &&
+        !section.chapter?.chapterCompletions?.[0]?.isCompleted &&
+        !section.chapter?.book?.bookCompletions?.[0]?.isCompleted
       );
       
-      // Check sections nested under event-linked chapters.
-      // A chapter can be marked complete without its sections being read, so
-      // unread sections must still count as remaining content.
+      // Check sections nested under event-linked chapters
       let unreadNestedUnifiedSections = 0;
       for (const chapter of (event.bookChapters || [])) {
+        if (chapter.book?.bookCompletions?.[0]?.isCompleted) continue;
+        if (chapter.chapterCompletions?.[0]?.isCompleted) continue;
         for (const section of (chapter.sections || [])) {
           if (!section.sectionCompletions?.length || !section.sectionCompletions[0]?.isCompleted) {
             unreadNestedUnifiedSections++;
@@ -1393,12 +1163,14 @@ class HistoryPlusService {
       // Check chapters/sections nested under event-linked books
       let unreadNestedUnifiedBookContent = 0;
       for (const bookLink of (event.bookLinks || [])) {
+        if (bookLink.book.bookCompletions?.[0]?.isCompleted) continue;
         for (const chapter of (bookLink.book.chapters || [])) {
           if (!chapter.chapterCompletions?.length || !chapter.chapterCompletions[0]?.isCompleted) {
             unreadNestedUnifiedBookContent++;
           }
           for (const section of (chapter.sections || [])) {
-            if (!section.sectionCompletions?.length || !section.sectionCompletions[0]?.isCompleted) {
+            if ((!section.sectionCompletions?.length || !section.sectionCompletions[0]?.isCompleted) &&
+                (!chapter.chapterCompletions?.length || !chapter.chapterCompletions[0]?.isCompleted)) {
               unreadNestedUnifiedBookContent++;
             }
           }
@@ -1435,6 +1207,7 @@ class HistoryPlusService {
       // Check chapters/sections nested under event-linked legacy books
       let unreadNestedLegacyBookContent = 0;
       for (const book of (event.books || [])) {
+        if (book.user_book_reads?.read) continue;
         for (const chapter of (book.chapters || [])) {
           if (!chapter.user_chapter_reads?.read) {
             unreadNestedLegacyBookContent++;
@@ -1760,7 +1533,7 @@ class HistoryPlusService {
    * An event is considered "unreviewed" if it has at least one piece of content 
    * (video, book, chapter, or section) that hasn't been marked as read/watched
    */
-  async getNextUnreviewedEvent(allowedTypes = null) {
+  async getNextUnreviewedEvent() {
     try {
       const events = await this.prisma.historicalEvent.findMany({
         where: { hidden: false },
@@ -1770,20 +1543,12 @@ class HistoryPlusService {
             include: {
               book: {
                 include: {
-                  bookCompletions: {
-                    where: { userId: "default" }
-                  },
+                  bookCompletions: true,
                   chapters: {
                     include: {
-                      chapterCompletions: {
-                        where: { userId: "default" }
-                      },
+                      chapterCompletions: true,
                       sections: {
-                        include: {
-                          sectionCompletions: {
-                            where: { userId: "default" }
-                          }
-                        }
+                        include: { sectionCompletions: true }
                       }
                     }
                   }
@@ -1793,40 +1558,26 @@ class HistoryPlusService {
           },
           bookChapters: {
             include: {
-              chapterCompletions: {
-                where: { userId: "default" }
-              },
+              chapterCompletions: true,
               sections: {
-                include: {
-                  sectionCompletions: {
-                    where: { userId: "default" }
-                  }
-                }
+                include: { sectionCompletions: true }
               },
               book: {
                 include: {
-                  bookCompletions: {
-                    where: { userId: "default" }
-                  }
+                  bookCompletions: true
                 }
               }
             }
           },
           bookSections: {
             include: {
-              sectionCompletions: {
-                where: { userId: "default" }
-              },
+              sectionCompletions: true,
               chapter: {
                 include: {
-                  chapterCompletions: {
-                    where: { userId: "default" }
-                  },
+                  chapterCompletions: true,
                   book: {
                     include: {
-                      bookCompletions: {
-                        where: { userId: "default" }
-                      }
+                      bookCompletions: true
                     }
                   }
                 }
@@ -1868,27 +1619,15 @@ class HistoryPlusService {
         }
       });
 
-      // Sort events by duration (length) in descending order
-      // Events with the same start date will be sorted by their duration (longer events first)
+      // Sort events chronologically by parsing dates to numeric values
       const sortedEvents = events.sort((a, b) => {
-        const dateA = this.parseHistoricalDateValue(a.startDate);
-        const dateB = this.parseHistoricalDateValue(b.startDate);
-        
-        // First, sort by start date (ascending)
-        if (dateA !== dateB) {
-          return dateA - dateB;
-        }
-        
-        // If start dates are the same, sort by duration (descending - longer events first)
-        const durationA = this.parseEventDuration(a.startDate, a.endDate);
-        const durationB = this.parseEventDuration(b.startDate, b.endDate);
-        return durationB - durationA;
+        const dateA = this.parseHistoricalDate(a.startDate);
+        const dateB = this.parseHistoricalDate(b.startDate);
+        return dateA - dateB;
       });
 
       console.log(`🔍 Checking ${sortedEvents.length} events for unreviewed content...`);
       
-      const hasTypeFilter = Array.isArray(allowedTypes) && allowedTypes.length > 0;
-
       // Find the first event with actual unreviewed content
       for (const event of sortedEvents) {
         const isEventReviewed = event.user_event_reviews && event.user_event_reviews.reviewed;
@@ -1898,35 +1637,14 @@ class HistoryPlusService {
         const hasUnwatchedContent = await this.checkEventHasUnwatchedContent(event);
         
         if (hasUnwatchedContent) {
-          // Validate with the same content builder used for final selection so we
-          // never select an event that yields zero playable items.
-          const matchingContent = await this.getRandomContentFromEvent(
-            event,
-            hasTypeFilter ? allowedTypes : null
-          );
-
-          if (!matchingContent) {
-            if (hasTypeFilter) {
-              console.log(`⏭️ Event "${event.title}" has no content matching allowed types (${allowedTypes.join(', ')}), continuing to next event...`);
-            } else {
-              console.log(`⏭️ Event "${event.title}" reported unwatched content but yielded no selectable items, continuing...`);
-            }
-            continue;
-          }
-
           console.log(`✅ Selected event with unwatched content: "${event.title}"`);
           return event;
         } else {
           // Event has no unwatched content
           if (!isEventReviewed) {
-            // Safety: re-run authoritative completion check before auto-marking.
-            // This prevents false positives from partial parent-level completion state.
-            console.log(`🔄 Event "${event.title}" has no unwatched content in candidate scan, verifying before marking reviewed...`);
-            const verifiedCompleted = await this.checkAndMarkEventAsReviewed(event.id);
-            if (!verifiedCompleted) {
-              console.log(`⚠️ Verification kept event "${event.title}" unreviewed due to remaining unread content`);
-              return event;
-            }
+            // Event has no unwatched content but isn't marked as reviewed - mark it as reviewed
+            console.log(`🔄 Event "${event.title}" has no unwatched content, marking as reviewed and continuing...`);
+            await this.markEventReviewed(event.id, true);
           } else {
             console.log(`⏭️ Event "${event.title}" already reviewed and has no unwatched content, continuing...`);
           }
@@ -1935,12 +1653,6 @@ class HistoryPlusService {
       }
 
       // If no unreviewed events, return the first event (or null if no events)
-      // unless we were explicitly filtering by allowed content types.
-      if (hasTypeFilter) {
-        console.log(`⚠️ No unreviewed events found with allowed types (${allowedTypes.join(', ')})`);
-        return null;
-      }
-
       console.log('⚠️ No unreviewed events found, returning first event');
       return sortedEvents.length > 0 ? sortedEvents[0] : null;
     } catch (error) {
@@ -1956,8 +1668,6 @@ class HistoryPlusService {
    */
   async checkEventHasUnwatchedContent(event) {
     try {
-      const isCompleted = completions => this.isUnifiedCompletionCompleted(completions);
-
       // Check for any unwatched videos
       const unwatchedVideos = (event.videos || []).filter(video => {
         const watchRecord = video.user_video_watches;
@@ -1968,26 +1678,29 @@ class HistoryPlusService {
       
       // Check for any unread unified books (via bookLinks)
       const unreadUnifiedBooks = (event.bookLinks || []).filter(bookLink =>
-        !isCompleted(bookLink.book.bookCompletions)
+        !bookLink.book.bookCompletions?.[0]?.isCompleted
       );
       
       // Check for any unread unified chapters (directly linked to event)
       const unreadUnifiedChapters = (event.bookChapters || []).filter(chapter =>
-        !isCompleted(chapter.chapterCompletions)
+        !chapter.chapterCompletions?.[0]?.isCompleted &&
+        !chapter.book?.bookCompletions?.[0]?.isCompleted
       );
       
       // Check for any unread unified sections (directly linked to event)
       const unreadUnifiedSections = (event.bookSections || []).filter(section =>
-        !isCompleted(section.sectionCompletions)
+        !section.sectionCompletions?.[0]?.isCompleted &&
+        !section.chapter?.chapterCompletions?.[0]?.isCompleted &&
+        !section.chapter?.book?.bookCompletions?.[0]?.isCompleted
       );
       
-      // Check sections nested under event-linked chapters (sections without their own eventId).
-      // A chapter can be marked complete without its sections being read, so unread
-      // sections must still count as remaining content.
+      // Check sections nested under event-linked chapters (sections without their own eventId)
       let unreadNestedUnifiedSections = 0;
       for (const chapter of (event.bookChapters || [])) {
+        if (chapter.book?.bookCompletions?.[0]?.isCompleted) continue;
+        if (chapter.chapterCompletions?.[0]?.isCompleted) continue;
         for (const section of (chapter.sections || [])) {
-          if (!isCompleted(section.sectionCompletions)) {
+          if (!section.sectionCompletions?.[0]?.isCompleted) {
             unreadNestedUnifiedSections++;
           }
         }
@@ -1996,12 +1709,13 @@ class HistoryPlusService {
       // Check chapters/sections nested under event-linked books (via bookLinks)
       let unreadNestedUnifiedBookContent = 0;
       for (const bookLink of (event.bookLinks || [])) {
+        if (bookLink.book.bookCompletions?.[0]?.isCompleted) continue;
         for (const chapter of (bookLink.book.chapters || [])) {
-          if (!isCompleted(chapter.chapterCompletions)) {
+          if (!chapter.chapterCompletions?.[0]?.isCompleted) {
             unreadNestedUnifiedBookContent++;
           }
           for (const section of (chapter.sections || [])) {
-            if (!isCompleted(section.sectionCompletions)) {
+            if (!section.sectionCompletions?.[0]?.isCompleted && !chapter.chapterCompletions?.[0]?.isCompleted) {
               unreadNestedUnifiedBookContent++;
             }
           }
@@ -2038,6 +1752,7 @@ class HistoryPlusService {
       // Check chapters/sections nested under event-linked legacy books
       let unreadNestedLegacyBookContent = 0;
       for (const book of (event.books || [])) {
+        if (book.user_book_reads?.read) continue;
         for (const chapter of (book.chapters || [])) {
           if (!chapter.user_chapter_reads?.read) {
             unreadNestedLegacyBookContent++;
@@ -2139,7 +1854,6 @@ class HistoryPlusService {
   async hasUnreviewedContent(event) {
     console.log(`  🔍 Checking event "${event.title}" for unreviewed content:`);
     console.log(`    📺 Videos: ${event.videos?.length || 0}, 📚 Book Links: ${event.bookLinks?.length || 0}, 📖 Chapters: ${event.bookChapters?.length || 0}, 📄 Sections: ${event.bookSections?.length || 0}`);
-    const isCompleted = completions => this.isUnifiedCompletionCompleted(completions);
     
     // Check videos
     for (const video of event.videos || []) {
@@ -2161,28 +1875,30 @@ class HistoryPlusService {
     // Check books via bookLinks
     for (const bookLink of event.bookLinks || []) {
       const book = bookLink.book;
-      const bookCompleted = isCompleted(book.bookCompletions);
-      console.log(`    📚 Book "${book.title}": ${!bookCompleted ? 'UNREVIEWED' : 'reviewed'}`);
-      if (!bookCompleted) {
+      const isCompleted = book.bookCompletions && book.bookCompletions.length > 0 && book.bookCompletions[0].isCompleted;
+      console.log(`    📚 Book "${book.title}": ${!isCompleted ? 'UNREVIEWED' : 'reviewed'}`);
+      if (!isCompleted) {
         return true;
       }
     }
 
     // Check chapters (skip if parent book is already read)
     for (const chapter of event.bookChapters || []) {
-      const chapterCompleted = isCompleted(chapter.chapterCompletions);
-      const parentBookRead = isCompleted(chapter.book?.bookCompletions);
-      console.log(`    📖 Chapter "${chapter.title}": ${!chapterCompleted && !parentBookRead ? 'UNREVIEWED' : 'reviewed'}`);
-      if (!chapterCompleted && !parentBookRead) {
+      const isCompleted = chapter.chapterCompletions && chapter.chapterCompletions.length > 0 && chapter.chapterCompletions[0].isCompleted;
+      const parentBookRead = chapter.book?.bookCompletions?.[0]?.isCompleted;
+      console.log(`    📖 Chapter "${chapter.title}": ${!isCompleted && !parentBookRead ? 'UNREVIEWED' : 'reviewed'}`);
+      if (!isCompleted && !parentBookRead) {
         return true;
       }
     }
 
-    // Check sections directly linked to the event
+    // Check sections (skip if parent chapter or book is already read)
     for (const section of event.bookSections || []) {
-      const sectionCompleted = isCompleted(section.sectionCompletions);
-      console.log(`    📄 Section "${section.title}": ${!sectionCompleted ? 'UNREVIEWED' : 'reviewed'}`);
-      if (!sectionCompleted) {
+      const isCompleted = section.sectionCompletions && section.sectionCompletions.length > 0 && section.sectionCompletions[0].isCompleted;
+      const parentChapterRead = section.chapter?.chapterCompletions?.[0]?.isCompleted;
+      const parentBookRead = section.chapter?.book?.bookCompletions?.[0]?.isCompleted;
+      console.log(`    📄 Section "${section.title}": ${!isCompleted && !parentChapterRead && !parentBookRead ? 'UNREVIEWED' : 'reviewed'}`);
+      if (!isCompleted && !parentChapterRead && !parentBookRead) {
         return true;
       }
     }
@@ -2198,110 +1914,6 @@ class HistoryPlusService {
   async getRandomContentFromEvent(event, allowedTypes = null) {
     try {
       let availableContent = [];
-      const isCompleted = completions => this.isUnifiedCompletionCompleted(completions);
-      const getOrderedSequenceGroupKey = (item) => {
-        if (item.type === 'chapter' || item.type === 'section') {
-          const bookId = item.content?.bookId || item.content?.book?.id || item.bookId || item.content?.chapter?.bookId || null;
-          const bookTitle = item.bookTitle || item.content?.book?.title || item.content?.chapter?.book?.title || null;
-
-          if (bookId || bookTitle) {
-            return `book:${bookId || bookTitle}`;
-          }
-        }
-
-        if (item.type === 'video' && item.courseTitle && item.lectureNumber !== null && item.lectureNumber !== undefined) {
-          return `course:${item.courseTitle}`;
-        }
-
-        return null;
-      };
-
-      const compareOrderedSequenceItems = (leftItem, rightItem) => {
-        if (leftItem.type === 'video' && rightItem.type === 'video') {
-          const leftLecture = Number.isFinite(leftItem.lectureNumber) ? leftItem.lectureNumber : Number.MAX_SAFE_INTEGER;
-          const rightLecture = Number.isFinite(rightItem.lectureNumber) ? rightItem.lectureNumber : Number.MAX_SAFE_INTEGER;
-
-          if (leftLecture !== rightLecture) {
-            return leftLecture - rightLecture;
-          }
-
-          return leftItem.title.localeCompare(rightItem.title);
-        }
-
-        const leftChapter = Number.isFinite(leftItem.chapterNumber) ? leftItem.chapterNumber : Number.MAX_SAFE_INTEGER;
-        const rightChapter = Number.isFinite(rightItem.chapterNumber) ? rightItem.chapterNumber : Number.MAX_SAFE_INTEGER;
-
-        if (leftChapter !== rightChapter) {
-          return leftChapter - rightChapter;
-        }
-
-        const typeRank = {
-          chapter: 0,
-          section: 1
-        };
-
-        const leftTypeRank = typeRank[leftItem.type] ?? 99;
-        const rightTypeRank = typeRank[rightItem.type] ?? 99;
-
-        if (leftTypeRank !== rightTypeRank) {
-          return leftTypeRank - rightTypeRank;
-        }
-
-        const leftSection = Number.isFinite(leftItem.sectionNumber) ? leftItem.sectionNumber : Number.MAX_SAFE_INTEGER;
-        const rightSection = Number.isFinite(rightItem.sectionNumber) ? rightItem.sectionNumber : Number.MAX_SAFE_INTEGER;
-
-        if (leftSection !== rightSection) {
-          return leftSection - rightSection;
-        }
-
-        return leftItem.title.localeCompare(rightItem.title);
-      };
-
-      const collapseSequentialContentGroups = (items) => {
-        const groupedContent = new Map();
-        const fallbackItems = [];
-        const explicitItems = []; // Items explicitly linked to event (should NOT be collapsed)
-
-        for (const item of items) {
-          const groupKey = getOrderedSequenceGroupKey(item);
-
-          // Items without a group key are fallback (videos, etc.)
-          if (!groupKey) {
-            fallbackItems.push(item);
-            continue;
-          }
-
-          // Check if this item is explicitly linked to the event
-          // These should NOT be collapsed - they represent direct choices from the event
-          const isExplicitlyLinked = item.explicitlyLinked || false;
-
-          if (!groupedContent.has(groupKey)) {
-            groupedContent.set(groupKey, []);
-          }
-
-          // Store items that are explicitly linked separately
-          if (isExplicitlyLinked) {
-            explicitItems.push(item);
-          } else {
-            groupedContent.get(groupKey).push(item);
-          }
-        }
-
-        const orderedItems = [];
-
-        for (const [groupKey, groupedItems] of groupedContent.entries()) {
-          if (groupedItems.length === 1) {
-            orderedItems.push(groupedItems[0]);
-            continue;
-          }
-
-          const nextSequentialItem = [...groupedItems].sort(compareOrderedSequenceItems)[0];
-          console.log(`📚 Preserving sequence for ${groupKey} — next item is ${nextSequentialItem.title}`);
-          orderedItems.push(nextSequentialItem);
-        }
-
-        return [...fallbackItems, ...explicitItems, ...orderedItems];
-      };
 
       // Collect only UNREVIEWED content
       event.videos?.forEach(video => {
@@ -2314,9 +1926,7 @@ class HistoryPlusService {
             description: video.description || '',
             duration: video.duration,
             thumbnail: video.thumbnail,
-            channel: video.channel?.name || 'Unknown Channel',
-            courseTitle: video.courseTitle || null,
-            lectureNumber: video.lectureNumber ?? null
+            channel: video.channel?.name || 'Unknown Channel'
           });
         }
       });
@@ -2332,7 +1942,7 @@ class HistoryPlusService {
       // Books (via bookLinks)
       event.bookLinks?.forEach(bookLink => {
         const book = bookLink.book;
-        const isRead = isCompleted(book.bookCompletions);
+        const isRead = book.bookCompletions?.[0]?.isCompleted;
         if (!isRead) {
           availableContent.push({
             type: 'book',
@@ -2346,49 +1956,18 @@ class HistoryPlusService {
             bookPublisher: book.publisher,
             bookPageCount: book.pageCount,
             bookCoverUrl: book.coverUrl,
-            bookDescription: book.description,
-            explicitlyLinked: true
+            bookDescription: book.description
           });
-        }
-
-        // Always add unread chapters/sections nested under this book, even if the book itself is already completed.
-        // These are NESTED content, not explicitly linked to the event, so they should be collapsed.
-        for (const chapter of (book.chapters || [])) {
-          if (!isCompleted(chapter.chapterCompletions) && !addedChapterIds.has(chapter.id)) {
-            addedChapterIds.add(chapter.id);
-            availableContent.push({
-              type: 'chapter',
-              content: chapter,
-              title: `${book.title} - Chapter ${chapter.chapterNumber || ''}: ${chapter.title}`,
-              description: chapter.description || '',
-              chapterNumber: chapter.chapterNumber || 0,
-              chapterTitle: chapter.title,
-              chapterDescription: chapter.description,
-              pageStart: chapter.pageStart,
-              pageEnd: chapter.pageEnd,
-              bookTitle: book.title,
-              bookAuthor: book.author || 'Unknown Author',
-              bookYear: book.publishYear,
-              bookIsbn: book.isbn,
-              bookPublisher: book.publisher,
-              bookPageCount: book.pageCount,
-              bookCoverUrl: book.coverUrl,
-              bookDescription: book.description
-            });
-          }
-          for (const section of (chapter.sections || [])) {
-            if (!isCompleted(section.sectionCompletions) && !addedSectionIds.has(section.id)) {
-              addedSectionIds.add(section.id);
+          
+          // Also add unread chapters/sections nested under this book
+          for (const chapter of (book.chapters || [])) {
+            if (!chapter.chapterCompletions?.[0]?.isCompleted && !addedChapterIds.has(chapter.id)) {
+              addedChapterIds.add(chapter.id);
               availableContent.push({
-                type: 'section',
-                content: section,
-                title: `${book.title} - Chapter ${chapter.chapterNumber || ''}: ${chapter.title} - Section ${section.sectionNumber || ''}: ${section.title}`,
-                description: section.description || '',
-                sectionNumber: section.sectionNumber || 0,
-                sectionTitle: section.title,
-                sectionDescription: section.description,
-                sectionPageStart: section.pageStart,
-                sectionPageEnd: section.pageEnd,
+                type: 'chapter',
+                content: chapter,
+                title: `${book.title} - Chapter ${chapter.chapterNumber || ''}: ${chapter.title}`,
+                description: chapter.description || '',
                 chapterNumber: chapter.chapterNumber || 0,
                 chapterTitle: chapter.title,
                 chapterDescription: chapter.description,
@@ -2404,14 +1983,46 @@ class HistoryPlusService {
                 bookDescription: book.description
               });
             }
+            for (const section of (chapter.sections || [])) {
+              if (!section.sectionCompletions?.[0]?.isCompleted && 
+                  !chapter.chapterCompletions?.[0]?.isCompleted &&
+                  !addedSectionIds.has(section.id)) {
+                addedSectionIds.add(section.id);
+                availableContent.push({
+                  type: 'section',
+                  content: section,
+                  title: `${book.title} - Chapter ${chapter.chapterNumber || ''}: ${chapter.title} - Section ${section.sectionNumber || ''}: ${section.title}`,
+                  description: section.description || '',
+                  sectionNumber: section.sectionNumber || 0,
+                  sectionTitle: section.title,
+                  sectionDescription: section.description,
+                  sectionPageStart: section.pageStart,
+                  sectionPageEnd: section.pageEnd,
+                  chapterNumber: chapter.chapterNumber || 0,
+                  chapterTitle: chapter.title,
+                  chapterDescription: chapter.description,
+                  pageStart: chapter.pageStart,
+                  pageEnd: chapter.pageEnd,
+                  bookTitle: book.title,
+                  bookAuthor: book.author || 'Unknown Author',
+                  bookYear: book.publishYear,
+                  bookIsbn: book.isbn,
+                  bookPublisher: book.publisher,
+                  bookPageCount: book.pageCount,
+                  bookCoverUrl: book.coverUrl,
+                  bookDescription: book.description
+                });
+              }
+            }
           }
         }
       });
 
       // Chapters directly linked to events
       event.bookChapters?.forEach(chapter => {
-        const isRead = isCompleted(chapter.chapterCompletions);
-        if (!isRead && !addedChapterIds.has(chapter.id)) {
+        const isRead = chapter.chapterCompletions?.[0]?.isCompleted;
+        const parentBookRead = chapter.book?.bookCompletions?.[0]?.isCompleted;
+        if (!isRead && !parentBookRead && !addedChapterIds.has(chapter.id)) {
           addedChapterIds.add(chapter.id);
           const parentBook = chapter.book;
           
@@ -2432,20 +2043,48 @@ class HistoryPlusService {
             bookPublisher: parentBook?.publisher,
             bookPageCount: parentBook?.pageCount,
             bookCoverUrl: parentBook?.coverUrl,
-            bookDescription: parentBook?.description,
-            explicitlyLinked: true
+            bookDescription: parentBook?.description
           });
+          
+          // Also add unread sections nested under this chapter
+          for (const section of (chapter.sections || [])) {
+            if (!section.sectionCompletions?.[0]?.isCompleted && !addedSectionIds.has(section.id)) {
+              addedSectionIds.add(section.id);
+              availableContent.push({
+                type: 'section',
+                content: section,
+                title: `${parentBook?.title || 'Unknown Book'} - Chapter ${chapter.chapterNumber || ''}: ${chapter.title} - Section ${section.sectionNumber || ''}: ${section.title}`,
+                description: section.description || '',
+                sectionNumber: section.sectionNumber || 0,
+                sectionTitle: section.title,
+                sectionDescription: section.description,
+                sectionPageStart: section.pageStart,
+                sectionPageEnd: section.pageEnd,
+                chapterNumber: chapter.chapterNumber || 0,
+                chapterTitle: chapter.title,
+                chapterDescription: chapter.description,
+                pageStart: chapter.pageStart,
+                pageEnd: chapter.pageEnd,
+                bookTitle: parentBook?.title || 'Unknown Book',
+                bookAuthor: parentBook?.author || 'Unknown Author',
+                bookYear: parentBook?.publishYear,
+                bookIsbn: parentBook?.isbn,
+                bookPublisher: parentBook?.publisher,
+                bookPageCount: parentBook?.pageCount,
+                bookCoverUrl: parentBook?.coverUrl,
+                bookDescription: parentBook?.description
+              });
+            }
+          }
         }
-
-        // When a chapter is explicitly linked, we don't add its nested sections
-        // because those sections are not explicitly linked to the event.
-        // Explicitly linked sections are handled separately via event.bookSections.
       });
 
       // Sections directly linked to events
       event.bookSections?.forEach(section => {
-        const isRead = isCompleted(section.sectionCompletions);
-        if (!isRead && !addedSectionIds.has(section.id)) {
+        const isRead = section.sectionCompletions?.[0]?.isCompleted;
+        const parentChapterRead = section.chapter?.chapterCompletions?.[0]?.isCompleted;
+        const parentBookRead = section.chapter?.book?.bookCompletions?.[0]?.isCompleted;
+        if (!isRead && !parentChapterRead && !parentBookRead && !addedSectionIds.has(section.id)) {
           addedSectionIds.add(section.id);
           const parentChapter = section.chapter;
           const parentBook = parentChapter?.book;
@@ -2472,8 +2111,7 @@ class HistoryPlusService {
             bookPublisher: parentBook?.publisher,
             bookPageCount: parentBook?.pageCount,
             bookCoverUrl: parentBook?.coverUrl,
-            bookDescription: parentBook?.description,
-            explicitlyLinked: true
+            bookDescription: parentBook?.description
           });
         }
       });
@@ -2500,13 +2138,10 @@ class HistoryPlusService {
             bookPublisher: book.publisher,
             bookPageCount: book.pageCount,
             bookCoverUrl: book.coverUrl,
-            bookDescription: book.description,
-            explicitlyLinked: true
+            bookDescription: book.description
           });
-          }
-
-          // Always add unread chapters/sections nested under this book, even if the book itself is already read.
-          // These are NESTED content, not explicitly linked to the event, so they should be collapsed.
+          
+          // Also add unread chapters/sections nested under this book
           for (const chapter of (book.chapters || [])) {
             if (!chapter.user_chapter_reads?.read && !addedLegacyChapterIds.has(chapter.id)) {
               addedLegacyChapterIds.add(chapter.id);
@@ -2560,6 +2195,7 @@ class HistoryPlusService {
               }
             }
           }
+        }
       });
 
       // Legacy chapters (directly linked to event)
@@ -2577,15 +2213,10 @@ class HistoryPlusService {
             pageStart: chapter.pageStart,
             pageEnd: chapter.pageEnd,
             bookTitle: 'Unknown Book',
-            bookAuthor: 'Unknown Author',
-            explicitlyLinked: true
+            bookAuthor: 'Unknown Author'
           });
-        }
-
-        // Always add unread nested sections, even when the chapter itself is marked read.
-        // Explicitly linked legacy sections are handled separately via event.sections.
-        // These nested sections are NOT explicitly linked to the event, so they should be collapsed.
-        {
+          
+          // Also add unread sections nested under this chapter
           for (const section of (chapter.sections || [])) {
             if (!section.user_section_reads?.read && !addedLegacySectionIds.has(section.id)) {
               addedLegacySectionIds.add(section.id);
@@ -2625,8 +2256,7 @@ class HistoryPlusService {
             sectionTitle: section.title,
             sectionDescription: section.description,
             sectionPageStart: section.pageStart,
-            sectionPageEnd: section.pageEnd,
-            explicitlyLinked: true
+            sectionPageEnd: section.pageEnd
           });
         }
       });
@@ -2644,11 +2274,9 @@ class HistoryPlusService {
         return null;
       }
 
-      const selectableContent = collapseSequentialContentGroups(availableContent);
-
-      // Randomly select one piece of content, but never skip ahead within the same book/course.
-      const randomIndex = Math.floor(Math.random() * selectableContent.length);
-      const selectedContent = selectableContent[randomIndex];
+      // Randomly select one piece of unreviewed content
+      const randomIndex = Math.floor(Math.random() * availableContent.length);
+      const selectedContent = availableContent[randomIndex];
 
       console.log(`🎲 Randomly selected ${selectedContent.type}: ${selectedContent.title}`);
 

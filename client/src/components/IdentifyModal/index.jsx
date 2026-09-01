@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { X, Search, Check, AlertCircle, Music, Calendar, Disc } from 'lucide-react';
+import { X, Search, Check, AlertCircle, Music, Calendar, Disc, Image } from 'lucide-react';
+import config from '../../config';
 
 /**
  * IdentifyModal Component
@@ -27,12 +28,8 @@ const IdentifyModal = ({
   const [loading, setLoading] = useState(false);
   const [candidates, setCandidates] = useState([]);
   const [selectedCandidate, setSelectedCandidate] = useState(null);
-  const [showAlbumDetails, setShowAlbumDetails] = useState(false);
-  const [albumDetails, setAlbumDetails] = useState(null);
-  const [albumDetailsCandidateId, setAlbumDetailsCandidateId] = useState(null);
-  const [albumDetailsLoading, setAlbumDetailsLoading] = useState(false);
-  const [albumDetailsError, setAlbumDetailsError] = useState(null);
-  const [accepting, setAccepting] = useState(false);
+  const [showTrackPreview, setShowTrackPreview] = useState(false);
+  const [trackMatchData, setTrackMatchData] = useState(null);
   const [error, setError] = useState(null);
 
   useEffect(() => {
@@ -42,21 +39,15 @@ const IdentifyModal = ({
       // Reset state when modal closes
       setCandidates([]);
       setSelectedCandidate(null);
-      setShowAlbumDetails(false);
-      setAlbumDetails(null);
-      setAlbumDetailsCandidateId(null);
-      setAlbumDetailsLoading(false);
-      setAlbumDetailsError(null);
+      setShowTrackPreview(false);
+      setTrackMatchData(null);
       setError(null);
     }
   }, [isOpen, entityKey]);
 
   useEffect(() => {
-    setShowAlbumDetails(false);
-    setAlbumDetails(null);
-    setAlbumDetailsCandidateId(null);
-    setAlbumDetailsLoading(false);
-    setAlbumDetailsError(null);
+    setTrackMatchData(null);
+    setShowTrackPreview(false);
   }, [selectedCandidate?.id]);
 
   const searchMusicBrainz = async () => {
@@ -66,7 +57,11 @@ const IdentifyModal = ({
     try {
       const response = await fetch(
         `/api/identification/${entityType}/${entityKey}`,
-        { method: 'POST' }
+        { 
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ plexUrl: config.plexUrl, plexToken: config.plexToken })
+        }
       );
       
       const data = await response.json();
@@ -88,30 +83,41 @@ const IdentifyModal = ({
   };
 
   const acceptCandidate = async (candidate) => {
-    setAccepting(true);
     setError(null);
     
     try {
+      // Call the accept API to pull the data
       const response = await fetch(
         `/api/identification/accept/${candidate.id}`,
-        { method: 'POST' }
+        { 
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ plexUrl: config.plexUrl, plexToken: config.plexToken })
+        }
       );
       
       const data = await response.json();
       
-      if (data.success) {
-        if (onIdentified) {
-          onIdentified(data.data.entity);
-        }
-        onClose();
+      // Log the raw data from MusicBrainz
+      console.log('Raw MusicBrainz data from accept:', data);
+      console.log('data.data:', data.data);
+      console.log('data.data.media:', data.data?.media);
+      
+      // Set track match data for display
+      if (data.data && data.data.media) {
+        console.log('Setting trackMatchData with:', data.data);
+        setTrackMatchData(data.data);
+        setShowTrackPreview(true);
+        console.log('trackMatchData after set:', data.data);
       } else {
-        setError(data.error || 'Failed to apply identification');
+        console.log('trackMatchData NOT set - data.data:', data.data);
       }
+      
+      // Don't close modal - let user review the track preview
+      // onClose();
     } catch (err) {
       console.error('Error accepting candidate:', err);
-      setError('Failed to apply identification');
-    } finally {
-      setAccepting(false);
+      setError('Failed to accept candidate');
     }
   };
 
@@ -135,6 +141,7 @@ const IdentifyModal = ({
     };
 
     return (releaseDetails?.media || []).flatMap((medium, mediumIndex) => {
+      console.log('Medium:', medium);
       const discNumber = medium?.position || mediumIndex + 1;
 
       return (medium?.tracks || []).map((track, trackIndex) => ({
@@ -152,12 +159,20 @@ const IdentifyModal = ({
   };
 
   const buildTrackPreview = () => {
-    if (!albumDetails) {
+    console.log('buildTrackPreview called');
+    console.log('trackMatchData in buildTrackPreview:', trackMatchData);
+    
+    if (!trackMatchData) {
+      console.log('No trackMatchData, returning empty');
       return { rows: [], unmatchedRemoteTracks: [] };
     }
 
     const local = [...(albumTracks || [])].sort((left, right) => (left.index || 0) - (right.index || 0));
-    const remote = flattenReleaseTracks(albumDetails);
+    const remote = flattenReleaseTracks(trackMatchData);
+    console.log('Local tracks:', local);
+    console.log('Remote tracks:', remote);
+    console.log('Local tracks length:', local.length);
+    console.log('Remote tracks length:', remote.length);
     const usedRemoteTrackKeys = new Set();
 
     const getTrackNumber = (track) => {
@@ -245,40 +260,6 @@ const IdentifyModal = ({
     return { rows, unmatchedRemoteTracks };
   };
 
-  const loadAlbumDetails = async () => {
-    if (!selectedCandidate?.musicBrainzId) {
-      return;
-    }
-
-    if (albumDetails && albumDetailsCandidateId === selectedCandidate.id) {
-      setShowAlbumDetails((value) => !value);
-      return;
-    }
-
-    setAlbumDetailsLoading(true);
-    setAlbumDetailsError(null);
-
-    try {
-      const response = await fetch(
-        `/api/musicbrainz/release/${selectedCandidate.musicBrainzId}?inc=artists+labels+recordings+release-groups+media+recording-rels+work-rels+work-level-rels`
-      );
-
-      if (!response.ok) {
-        throw new Error('Failed to load album details');
-      }
-
-      const result = await response.json();
-      setAlbumDetails(result.data || null);
-      setAlbumDetailsCandidateId(selectedCandidate.id);
-      setShowAlbumDetails(true);
-    } catch (err) {
-      console.error('Error loading album details:', err);
-      setAlbumDetailsError(err.message || 'Failed to load album details');
-    } finally {
-      setAlbumDetailsLoading(false);
-    }
-  };
-
   const markAsManual = async () => {
     setAccepting(true);
     setError(null);
@@ -321,21 +302,36 @@ const IdentifyModal = ({
 
   if (!isOpen) return null;
 
-  const trackPreview = showAlbumDetails ? buildTrackPreview() : { rows: [], unmatchedRemoteTracks: [] };
+  // Always show track preview if trackMatchData is available
+  const trackPreview = trackMatchData ? buildTrackPreview() : { rows: [], unmatchedRemoteTracks: [] };
+
+  // Debug logging
+  console.log('=== Track Preview Debug ===');
+  console.log('trackMatchData:', trackMatchData);
+  console.log('albumTracks:', albumTracks);
+  console.log('trackPreview computed:', trackPreview);
+  console.log('trackPreview.rows:', trackPreview.rows);
+  console.log('trackPreview.rows.length:', trackPreview.rows.length);
+  console.log('===========================');
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50 p-4">
       <div className="bg-gray-900 rounded-lg max-w-7xl w-full max-h-[92vh] flex flex-col border border-gray-700">
         {/* Header */}
         <div className="flex items-center justify-between p-6 border-b border-gray-700">
-          <div>
+          <div className="flex items-center gap-4">
             <h2 className="text-2xl font-bold text-white flex items-center gap-2">
               <Search size={24} />
               Identify {entityType === 'album' ? 'Album' : 'Artist'}
             </h2>
-            <p className="text-gray-400 mt-1">
-              {entityTitle}
-            </p>
+            {/* Local cover art in header */}
+            {entityType === 'album' && candidates.length > 0 && candidates[0].albumCoverLocal && (
+              <img 
+                src={candidates[0].albumCoverLocal} 
+                className="w-30 h-30 rounded object-cover" 
+                alt="Local cover" 
+              />
+            )}
           </div>
           <button
             onClick={onClose}
@@ -363,6 +359,151 @@ const IdentifyModal = ({
                 Try Again
               </button>
             </div>
+          ) : showTrackPreview ? (
+            <div className="space-y-4">
+              <div className="flex items-center justify-between mb-4">
+                <div>
+                  <h3 className="text-xl font-bold text-white">Track Matches</h3>
+                  <p className="text-gray-400 text-sm">
+                    MusicBrainz tracks matched to existing album tracks for {entityTitle}
+                  </p>
+                </div>
+                <button
+                  onClick={() => {
+                    setShowTrackPreview(false);
+                    setTrackMatchData(null);
+                  }}
+                  className="px-3 py-2 border border-gray-600 text-white rounded hover:bg-gray-700 transition-colors"
+                >
+                  Back to Matches
+                </button>
+              </div>
+
+              {trackMatchData ? (
+                  <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+                    <div className="space-y-4">
+                      <div className="border border-gray-700 rounded-lg bg-gray-900 p-4">
+                        <h4 className="text-lg font-semibold text-white mb-3">Pulled Data</h4>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
+                          <div>
+                            <div className="text-gray-400">Title</div>
+                            <div className="text-white">{trackMatchData.title || 'Unknown'}</div>
+                          </div>
+                          <div>
+                            <div className="text-gray-400">Artist</div>
+                            <div className="text-white">{trackMatchData['artist-credit']?.map((credit) => credit.name || credit.artist?.name).join(', ') || 'Unknown'}</div>
+                          </div>
+                          <div>
+                            <div className="text-gray-400">Release Date</div>
+                            <div className="text-white">{trackMatchData.date || 'Unknown'}</div>
+                          </div>
+                          <div>
+                            <div className="text-gray-400">Country</div>
+                            <div className="text-white">{trackMatchData.country || 'Unknown'}</div>
+                          </div>
+                          <div>
+                            <div className="text-gray-400">Status</div>
+                            <div className="text-white">{trackMatchData.status || 'Unknown'}</div>
+                          </div>
+                          <div>
+                            <div className="text-gray-400">Packaging</div>
+                            <div className="text-white">{trackMatchData.packaging || 'Unknown'}</div>
+                          </div>
+                          <div>
+                            <div className="text-gray-400">Barcode</div>
+                            <div className="text-white">{trackMatchData.barcode || 'Unknown'}</div>
+                          </div>
+                          <div>
+                            <div className="text-gray-400">Media</div>
+                            <div className="text-white">
+                              {(trackMatchData.media || []).length} disc{(trackMatchData.media || []).length === 1 ? '' : 's'}
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="mt-4 text-sm">
+                          <div className="text-gray-400 mb-1">Label</div>
+                          <div className="text-white">
+                            {(trackMatchData['label-info'] || []).length > 0
+                              ? trackMatchData['label-info'].map((entry) => `${entry.label?.name || 'Unknown'}${entry['catalog-number'] ? ` (${entry['catalog-number']})` : ''}`).join(', ')
+                              : 'Unknown'}
+                          </div>
+                        </div>
+
+                        <details className="mt-4">
+                          <summary className="cursor-pointer text-blue-300 hover:text-blue-200 text-sm">Raw pulled data</summary>
+                          <pre className="mt-3 max-h-64 overflow-auto rounded bg-black/40 p-3 text-xs text-gray-300 whitespace-pre-wrap break-all">
+                            {JSON.stringify(trackMatchData, null, 2)}
+                          </pre>
+                        </details>
+                      </div>
+                    </div>
+
+                    <div className="border border-gray-700 rounded-lg bg-gray-900 p-4">
+                      <h4 className="text-lg font-semibold text-white mb-3">Track Matches</h4>
+                      {trackPreview.rows.length === 0 ? (
+                        <div className="text-gray-400 text-sm">No local track data available for comparison.</div>
+                      ) : (
+                        <div className="space-y-3 max-h-[52vh] overflow-y-auto pr-1">
+                          {trackPreview.rows.map((row, index) => (
+                            <div key={index} className="border border-gray-700 rounded p-3 bg-gray-800/60">
+                              <div className="flex items-start justify-between gap-3">
+                                <div className="min-w-0">
+                                  <div className="text-xs uppercase tracking-wide text-gray-400 mb-1">Existing track</div>
+                                  <div className="text-white font-medium truncate">
+                                    {row.localTrack ? `${row.localTrack.index || index + 1}. ${row.localTrack.title || 'Untitled'}` : 'No existing track'}
+                                  </div>
+                                  {row.localTrack?.work?.title && (
+                                    <div className="text-xs text-gray-400 mt-1">Work: {row.localTrack.work.title}</div>
+                                  )}
+                                  {row.localTrack?.musicBrainzTrackId && (
+                                    <div className="text-xs text-gray-400 mt-1">MB Recording ID: {row.localTrack.musicBrainzTrackId}</div>
+                                  )}
+                                </div>
+                                <div className="text-right min-w-0">
+                                  <div className="text-xs uppercase tracking-wide text-gray-400 mb-1">Pulled track</div>
+                                  <div className="text-white font-medium truncate">
+                                    {row.remoteTrack ? `${row.remoteTrack.trackNumber || index + 1}. ${row.remoteTrack.title}` : 'No pulled track'}
+                                  </div>
+                                  {row.remoteTrack?.workTitle && (
+                                    <div className="text-xs text-gray-400 mt-1">Work: {row.remoteTrack.workTitle}</div>
+                                  )}
+                                  {row.remoteTrack?.recordingId && (
+                                    <div className="text-xs text-gray-400 mt-1">MB Recording ID: {row.remoteTrack.recordingId}</div>
+                                  )}
+                                </div>
+                              </div>
+                              <div className="mt-2 text-xs text-gray-300 bg-black/20 rounded px-2 py-1">
+                                {row.changes}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+
+                      {trackPreview.unmatchedRemoteTracks.length > 0 && (
+                        <div className="mt-4 border-t border-gray-700 pt-4">
+                          <h5 className="text-sm font-semibold text-white mb-3">Unmatched Pulled Tracks</h5>
+                          <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
+                            {trackPreview.unmatchedRemoteTracks.map((remoteTrack) => (
+                              <div key={remoteTrack._previewKey} className="border border-gray-700 rounded px-3 py-2 bg-black/20 text-sm text-gray-300">
+                                <div className="font-medium text-white">
+                                  {remoteTrack.discNumber}.{remoteTrack.trackNumber} {remoteTrack.title}
+                                </div>
+                                {remoteTrack.recordingId && (
+                                  <div className="text-xs text-gray-400 mt-1">MB Recording ID: {remoteTrack.recordingId}</div>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                ) : (
+                  <div className="text-gray-400">No track data available.</div>
+                )}
+              </div>
           ) : candidates.length > 0 ? (
             <div className="space-y-4">
               <p className="text-gray-400 text-sm mb-4">
@@ -372,6 +513,12 @@ const IdentifyModal = ({
               {candidates.map((candidate, index) => {
                 const metadata = JSON.parse(candidate.metadata);
                 const isSelected = selectedCandidate?.id === candidate.id;
+                
+                console.log('Candidate', index, {
+                  albumCoverLocal: candidate.albumCoverLocal,
+                  albumCoverMusicBrainz: candidate.albumCoverMusicBrainz,
+                  musicBrainzId: candidate.musicBrainzId
+                });
                 
                 return (
                   <div
@@ -440,6 +587,17 @@ const IdentifyModal = ({
                         </p>
                       </div>
 
+                      {/* MusicBrainz cover on the right */}
+                      {entityType === 'album' && candidate.albumCoverMusicBrainz && (
+                        <div className="flex items-center gap-2 ml-4">
+                          <img 
+                            src={candidate.albumCoverMusicBrainz} 
+                            className="w-30 h-30 rounded object-cover" 
+                            alt="MusicBrainz cover" 
+                          />
+                        </div>
+                      )}
+
                       {/* Selected indicator */}
                       {isSelected && (
                         <Check size={24} className="text-blue-400 flex-shrink-0 ml-4" />
@@ -449,30 +607,27 @@ const IdentifyModal = ({
                 );
               })}
 
-              {entityType === 'album' && selectedCandidate && showAlbumDetails && (
+              {entityType === 'album' && selectedCandidate && trackMatchData && (
                 <div className="mt-6 border border-gray-700 rounded-lg bg-gray-800 p-4 space-y-4">
                   <div className="flex items-center justify-between gap-3 flex-wrap">
                     <div>
-                      <h3 className="text-xl font-bold text-white">View Album Details</h3>
+                      <h3 className="text-xl font-bold text-white">Track Matches</h3>
                       <p className="text-gray-400 text-sm">
-                        Pulled MusicBrainz data and the current database track list for {entityTitle}
+                        MusicBrainz tracks matched to existing album tracks for {entityTitle}
                       </p>
                     </div>
                     <button
-                      onClick={() => setShowAlbumDetails(false)}
+                      onClick={() => {
+                        setShowTrackPreview(false);
+                        setTrackMatchData(null);
+                      }}
                       className="px-3 py-2 border border-gray-600 text-white rounded hover:bg-gray-700 transition-colors"
                     >
                       Back to Matches
                     </button>
                   </div>
 
-                  {albumDetailsLoading ? (
-                    <div className="py-8 text-center text-gray-400">Loading album details...</div>
-                  ) : albumDetailsError ? (
-                    <div className="text-red-400 bg-red-950/40 border border-red-900 rounded p-3">
-                      {albumDetailsError}
-                    </div>
-                  ) : albumDetails ? (
+                  {trackMatchData ? (
                     <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
                       <div className="space-y-4">
                         <div className="border border-gray-700 rounded-lg bg-gray-900 p-4">
@@ -480,36 +635,36 @@ const IdentifyModal = ({
                           <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
                             <div>
                               <div className="text-gray-400">Title</div>
-                              <div className="text-white">{albumDetails.title || 'Unknown'}</div>
+                              <div className="text-white">{trackMatchData.title || 'Unknown'}</div>
                             </div>
                             <div>
                               <div className="text-gray-400">Artist</div>
-                              <div className="text-white">{albumDetails['artist-credit']?.map((credit) => credit.name || credit.artist?.name).join(', ') || 'Unknown'}</div>
+                              <div className="text-white">{trackMatchData['artist-credit']?.map((credit) => credit.name || credit.artist?.name).join(', ') || 'Unknown'}</div>
                             </div>
                             <div>
                               <div className="text-gray-400">Release Date</div>
-                              <div className="text-white">{albumDetails.date || 'Unknown'}</div>
+                              <div className="text-white">{trackMatchData.date || 'Unknown'}</div>
                             </div>
                             <div>
                               <div className="text-gray-400">Country</div>
-                              <div className="text-white">{albumDetails.country || 'Unknown'}</div>
+                              <div className="text-white">{trackMatchData.country || 'Unknown'}</div>
                             </div>
                             <div>
                               <div className="text-gray-400">Status</div>
-                              <div className="text-white">{albumDetails.status || 'Unknown'}</div>
+                              <div className="text-white">{trackMatchData.status || 'Unknown'}</div>
                             </div>
                             <div>
                               <div className="text-gray-400">Packaging</div>
-                              <div className="text-white">{albumDetails.packaging || 'Unknown'}</div>
+                              <div className="text-white">{trackMatchData.packaging || 'Unknown'}</div>
                             </div>
                             <div>
                               <div className="text-gray-400">Barcode</div>
-                              <div className="text-white">{albumDetails.barcode || 'Unknown'}</div>
+                              <div className="text-white">{trackMatchData.barcode || 'Unknown'}</div>
                             </div>
                             <div>
                               <div className="text-gray-400">Media</div>
                               <div className="text-white">
-                                {(albumDetails.media || []).length} disc{(albumDetails.media || []).length === 1 ? '' : 's'}
+                                {(trackMatchData.media || []).length} disc{(trackMatchData.media || []).length === 1 ? '' : 's'}
                               </div>
                             </div>
                           </div>
@@ -517,8 +672,8 @@ const IdentifyModal = ({
                           <div className="mt-4 text-sm">
                             <div className="text-gray-400 mb-1">Label</div>
                             <div className="text-white">
-                              {(albumDetails['label-info'] || []).length > 0
-                                ? albumDetails['label-info'].map((entry) => `${entry.label?.name || 'Unknown'}${entry['catalog-number'] ? ` (${entry['catalog-number']})` : ''}`).join(', ')
+                              {(trackMatchData['label-info'] || []).length > 0
+                                ? trackMatchData['label-info'].map((entry) => `${entry.label?.name || 'Unknown'}${entry['catalog-number'] ? ` (${entry['catalog-number']})` : ''}`).join(', ')
                                 : 'Unknown'}
                             </div>
                           </div>
@@ -526,14 +681,14 @@ const IdentifyModal = ({
                           <details className="mt-4">
                             <summary className="cursor-pointer text-blue-300 hover:text-blue-200 text-sm">Raw pulled data</summary>
                             <pre className="mt-3 max-h-64 overflow-auto rounded bg-black/40 p-3 text-xs text-gray-300 whitespace-pre-wrap break-all">
-                              {JSON.stringify(albumDetails, null, 2)}
+                              {JSON.stringify(trackMatchData, null, 2)}
                             </pre>
                           </details>
                         </div>
                       </div>
 
                       <div className="border border-gray-700 rounded-lg bg-gray-900 p-4">
-                        <h4 className="text-lg font-semibold text-white mb-3">Track Updates</h4>
+                        <h4 className="text-lg font-semibold text-white mb-3">Track Matches</h4>
                         {trackPreview.rows.length === 0 ? (
                           <div className="text-gray-400 text-sm">No local track data available for comparison.</div>
                         ) : (
@@ -542,9 +697,9 @@ const IdentifyModal = ({
                               <div key={index} className="border border-gray-700 rounded p-3 bg-gray-800/60">
                                 <div className="flex items-start justify-between gap-3">
                                   <div className="min-w-0">
-                                    <div className="text-xs uppercase tracking-wide text-gray-400 mb-1">Database track</div>
+                                    <div className="text-xs uppercase tracking-wide text-gray-400 mb-1">Existing track</div>
                                     <div className="text-white font-medium truncate">
-                                      {row.localTrack ? `${row.localTrack.index || index + 1}. ${row.localTrack.title || 'Untitled'}` : 'No database track'}
+                                      {row.localTrack ? `${row.localTrack.index || index + 1}. ${row.localTrack.title || 'Untitled'}` : 'No existing track'}
                                     </div>
                                     {row.localTrack?.work?.title && (
                                       <div className="text-xs text-gray-400 mt-1">Work: {row.localTrack.work.title}</div>
@@ -554,9 +709,9 @@ const IdentifyModal = ({
                                     )}
                                   </div>
                                   <div className="text-right min-w-0">
-                                    <div className="text-xs uppercase tracking-wide text-gray-400 mb-1">Will update to</div>
+                                    <div className="text-xs uppercase tracking-wide text-gray-400 mb-1">Pulled track</div>
                                     <div className="text-white font-medium truncate">
-                                      {row.remoteTrack ? `${row.remoteTrack.trackNumber || index + 1}. ${row.remoteTrack.title}` : 'No MusicBrainz track'}
+                                      {row.remoteTrack ? `${row.remoteTrack.trackNumber || index + 1}. ${row.remoteTrack.title}` : 'No pulled track'}
                                     </div>
                                     {row.remoteTrack?.workTitle && (
                                       <div className="text-xs text-gray-400 mt-1">Work: {row.remoteTrack.workTitle}</div>
@@ -576,7 +731,7 @@ const IdentifyModal = ({
 
                         {trackPreview.unmatchedRemoteTracks.length > 0 && (
                           <div className="mt-4 border-t border-gray-700 pt-4">
-                            <h5 className="text-sm font-semibold text-white mb-3">Unmatched MusicBrainz Tracks</h5>
+                            <h5 className="text-sm font-semibold text-white mb-3">Unmatched Pulled Tracks</h5>
                             <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
                               {trackPreview.unmatchedRemoteTracks.map((remoteTrack) => (
                                 <div key={remoteTrack._previewKey} className="border border-gray-700 rounded px-3 py-2 bg-black/20 text-sm text-gray-300">
@@ -604,45 +759,25 @@ const IdentifyModal = ({
         <div className="border-t border-gray-700 p-6 flex items-center justify-between">
           <button
             onClick={markAsManual}
-            disabled={accepting}
-            className="text-gray-400 hover:text-white transition-colors disabled:opacity-50"
+            className="text-gray-400 hover:text-white transition-colors"
           >
             None of these match
           </button>
           
           <div className="flex gap-3">
-            {entityType === 'album' && selectedCandidate && (
-              <button
-                onClick={loadAlbumDetails}
-                disabled={albumDetailsLoading}
-                className="px-6 py-2 border border-blue-500 text-blue-300 rounded hover:bg-blue-950 transition-colors disabled:opacity-50"
-              >
-                {showAlbumDetails ? 'Hide Album Details' : 'View Album Details'}
-              </button>
-            )}
             <button
               onClick={onClose}
-              disabled={accepting}
-              className="px-6 py-2 border border-gray-600 text-white rounded hover:bg-gray-800 transition-colors disabled:opacity-50"
+              className="px-6 py-2 border border-gray-600 text-white rounded hover:bg-gray-800 transition-colors"
             >
               Cancel
             </button>
             <button
               onClick={() => selectedCandidate && acceptCandidate(selectedCandidate)}
-              disabled={!selectedCandidate || accepting}
+              disabled={!selectedCandidate}
               className="px-6 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              {accepting ? (
-                <>
-                  <Search size={16} className="animate-spin" />
-                  Applying...
-                </>
-              ) : (
-                <>
-                  <Check size={16} />
-                  Accept & Apply Metadata
-                </>
-              )}
+              <Check size={16} />
+              Accept & Apply Metadata
             </button>
           </div>
         </div>

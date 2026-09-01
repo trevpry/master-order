@@ -1,0 +1,189 @@
+name: Voyr
+
+# Voyr is a Project1 SSR site: listings and model pages hydrate client-side,
+# so JavaScript rendering is required for search/pagination to return results.
+renderJavaScript: true
+
+sceneByURL:
+  - action: scrapeXPath
+    url:
+      - voyr.com/scene/
+    scraper: sceneScraper
+
+movieByURL:
+  - action: scrapeXPath
+    url:
+      - voyr.com/scene/
+    scraper: movieScraper
+
+performerByURL:
+  - action: scrapeXPath
+    url:
+      - voyr.com/model/
+    scraper: performerScraper
+
+# Voyr's HTML listings rotate and ignore the page parameter, so title and
+# performer searches go through the Project1 site API that the site itself uses.
+# The required Instance token is a short-lived JWT embedded in any tour page.
+sceneByFragment:
+  - action: scrapeXPath
+    spacesConvertTo: '-'
+    jsonSearch:
+      tokenUrl: https://www.voyr.com/scenes
+      tokenRegex: 'eyJ[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{10,}'
+      tokenHeader: Instance
+      headers:
+        Origin: https://www.voyr.com
+        Referer: https://www.voyr.com/
+      titleSearchUrl: https://site-api.project1service.com/v2/releases?type=scene&limit=20&search={query}
+      performerSearchUrl: https://site-api.project1service.com/v2/releases?type=scene&limit=50&search={query}
+      resultsPath: result
+      urlTemplate: https://www.voyr.com/scene/{id}/{slug}
+      performerUrlTemplate: https://www.voyr.com/model/{id}/{slug}
+      imagePath: images.poster.0.lg.url
+      performersPath: actors
+      tagsPath: tags
+      fields:
+        id: id
+        title: title
+        date: dateReleased
+
+xPathScrapers:
+  # Scene, movie and image metadata all come from the page's single
+  # schema.org VideoObject block, which is far more stable than the
+  # hashed styled-components class names.
+  sceneScraper:
+    scene:
+      Title:
+        selector: //script[@type="application/ld+json"]
+        postProcess:
+          - replace:
+              - regex: '^[\s\S]*?"name":\s*"([\s\S]*?)"[\s\S]*$'
+                with: '$1'
+      Date:
+        selector: //script[@type="application/ld+json"]
+        postProcess:
+          - replace:
+              - regex: '^[\s\S]*?"uploadDate":\s*"(\d{4}-\d{2}-\d{2})[\s\S]*$'
+                with: '$1'
+      Details:
+        selector: //script[@type="application/ld+json"]
+        postProcess:
+          - replace:
+              - regex: '^[\s\S]*?"description":\s*"([\s\S]*?)"[\s\S]*$'
+                with: '$1'
+      Image:
+        selector: //script[@type="application/ld+json"]
+        postProcess:
+          - replace:
+              - regex: '^[\s\S]*?"thumbnailUrl":\s*"([^"]*)"[\s\S]*$'
+                with: '$1'
+      Studio:
+        Name:
+          fixed: Voyr
+      Performers:
+        Name:
+          selector: //h2//a[contains(@href,"/model/")]/@title
+        URL:
+          selector: //h2//a[contains(@href,"/model/")]/@href
+          postProcess:
+            - replace:
+                - regex: '^/'
+                  with: 'https://www.voyr.com/'
+      Tags:
+        Name:
+          selector: //a[contains(@href,"scenes?tags=")]
+
+  movieScraper:
+    movie:
+      Title:
+        selector: //script[@type="application/ld+json"]
+        postProcess:
+          - replace:
+              - regex: '^[\s\S]*?"name":\s*"([\s\S]*?)"[\s\S]*$'
+                with: '$1'
+      Synopsis:
+        selector: //script[@type="application/ld+json"]
+        postProcess:
+          - replace:
+              - regex: '^[\s\S]*?"description":\s*"([\s\S]*?)"[\s\S]*$'
+                with: '$1'
+      Date:
+        selector: //script[@type="application/ld+json"]
+        postProcess:
+          - replace:
+              - regex: '^[\s\S]*?"uploadDate":\s*"(\d{4}-\d{2}-\d{2})[\s\S]*$'
+                with: '$1'
+      Studio:
+        Name:
+          fixed: Voyr
+      FrontImage:
+        selector: //script[@type="application/ld+json"]
+        postProcess:
+          - replace:
+              - regex: '^[\s\S]*?"thumbnailUrl":\s*"([^"]*)"[\s\S]*$'
+                with: '$1'
+
+  # Voyr keeps a performer's physical details inside a single pipe-delimited bio
+  # string, so each attribute is pulled out of the description with a regex.
+  # Each field first blanks itself out when its label is absent, otherwise the
+  # non-matching replace would leak the entire bio into the field.
+  performerScraper:
+    performer:
+      Name:
+        selector: //section[@data-cy="actorProfileName"]//h2
+      Gender:
+        fixed: Male
+      Details:
+        selector: //section[@data-cy="description"]//p
+        postProcess:
+          - replace:
+              - regex: '(Collapse|Expand)+\s*$'
+                with: ''
+      Image:
+        selector: //section[@data-cy="actorProfilePicture"]//img/@src
+      HairColor:
+        selector: //section[@data-cy="description"]//p
+        postProcess:
+          - replace:
+              - regex: '^(?![\s\S]*Hair Color:)[\s\S]*$'
+                with: ''
+              - regex: '^[\s\S]*?Hair Color:\s*([^|]+?)\s*(?:\||$)[\s\S]*$'
+                with: '$1'
+      EyeColor:
+        selector: //section[@data-cy="description"]//p
+        postProcess:
+          - replace:
+              - regex: '^(?![\s\S]*Eye Color:)[\s\S]*$'
+                with: ''
+              - regex: '^[\s\S]*?Eye Color:\s*([^|]+?)\s*(?:\||$)[\s\S]*$'
+                with: '$1'
+      PenisLength:
+        selector: //section[@data-cy="description"]//p
+        postProcess:
+          - replace:
+              - regex: '^(?![\s\S]*Dick Size:)[\s\S]*$'
+                with: ''
+              - regex: '^[\s\S]*?Dick Size:\s*([^|]+?)\s*(?:\||$)[\s\S]*$'
+                with: '$1'
+      Circumcised:
+        selector: //section[@data-cy="description"]//p
+        postProcess:
+          - replace:
+              - regex: '^(?![\s\S]*Cut or Uncut:)[\s\S]*$'
+                with: ''
+              - regex: '^[\s\S]*?Cut or Uncut:\s*([^|]+?)\s*(?:\||$)[\s\S]*$'
+                with: '$1'
+      # Voyr has no performer tag data (the actor API returns an empty tag list),
+      # so the one genuinely tag-like bio trait is used instead.
+      Tags:
+        Name:
+          selector: //section[@data-cy="description"]//p
+          postProcess:
+            - replace:
+                - regex: '^(?![\s\S]*Sexual Position:)[\s\S]*$'
+                  with: ''
+                - regex: '^[\s\S]*?Sexual Position:\s*([^|]+?)\s*(?:\||$)[\s\S]*$'
+                  with: '$1'
+                - regex: '^(?:Versitile|Vers)$'
+                  with: 'Versatile'

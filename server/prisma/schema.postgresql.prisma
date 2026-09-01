@@ -996,6 +996,8 @@ model PlexAlbum {
   musicBrainzLabel      String?
   musicBrainzBarcode    String?
   musicBrainzAsin       String?
+  acoustidId            String?
+  acoustidFingerprint   String?
   albumArtist           String?
   workId                Int?
   userTitle             String?
@@ -1042,6 +1044,8 @@ model PlexTrack {
   lastFmId             String?
   lastViewedAt         DateTime?
   musicBrainzTrackId   String?
+  acoustidId           String?  @unique
+  acoustidFingerprint  String?
   originalTitle        String?
   plexMusicId          String?
   rating               Float?
@@ -1197,6 +1201,10 @@ model IdentificationCandidate {
   status          String   @default("pending")
   createdAt       DateTime @default(now())
   reviewedAt      DateTime?
+  albumCoverLocal String?
+  albumCoverMusicBrainz String?
+  artistCoverLocal String?
+  artistCoverMusicBrainz String?
 
   @@index([entityType, entityKey, status])
   @@map("IdentificationCandidate")
