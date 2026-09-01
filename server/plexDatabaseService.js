@@ -812,11 +812,49 @@ class PlexDatabaseService {
 
   // Music-related methods
   
+  // Build a starts-with filter for alphabet-letter browsing by sort name.
+  makeStartsWithFilter(value) {
+    return this.isPostgreSQL
+      ? { startsWith: value, mode: 'insensitive' }
+      : { startsWith: value };
+  }
+
+  // Letter browsing follows the sorted catalog. Fall back to the display title only when
+  // no explicit sort name exists.
+  buildArtistLetterFilter(letter) {
+    if (!letter) {
+      return null;
+    }
+
+    return {
+      OR: [
+        { titleSort: this.makeStartsWithFilter(letter) },
+        {
+          AND: [
+            {
+              OR: [
+                { titleSort: null },
+                { titleSort: '' }
+              ]
+            },
+            { title: this.makeStartsWithFilter(letter) }
+          ]
+        }
+      ]
+    };
+  }
+
   // Get all artists from database
-  async getAllArtists(limit, offset) {
+  async getAllArtists(limit, offset, letter) {
     try {
+      const where = { removed: false };
+      const letterFilter = this.buildArtistLetterFilter(letter);
+      if (letterFilter) {
+        where.AND = [letterFilter];
+      }
+
       const query = {
-        where: { removed: false },
+        where,
         include: {
           librarySection: true
         },
@@ -842,11 +880,15 @@ class PlexDatabaseService {
   }
 
   // Get total count of artists
-  async getArtistsCount() {
+  async getArtistsCount(letter) {
     try {
-      return await this.prisma.plexArtist.count({
-        where: { removed: false }
-      });
+      const where = { removed: false };
+      const letterFilter = this.buildArtistLetterFilter(letter);
+      if (letterFilter) {
+        where.AND = [letterFilter];
+      }
+
+      return await this.prisma.plexArtist.count({ where });
     } catch (error) {
       console.error('Error fetching artists count:', error);
       throw error;
@@ -854,14 +896,20 @@ class PlexDatabaseService {
   }
 
   // Get artists from specific section
-  async getArtistsBySection(sectionKey, limit, offset) {
+  async getArtistsBySection(sectionKey, limit, offset, letter) {
     try {
+      const where = {
+        librarySection: {
+          sectionKey: sectionKey
+        }
+      };
+      const letterFilter = this.buildArtistLetterFilter(letter);
+      if (letterFilter) {
+        where.AND = [letterFilter];
+      }
+
       const query = {
-        where: {
-          librarySection: {
-            sectionKey: sectionKey
-          }
-        },
+        where,
         include: {
           librarySection: true
         },
@@ -887,15 +935,19 @@ class PlexDatabaseService {
   }
 
   // Get total count of artists in a specific section
-  async getArtistsBySectionCount(sectionKey) {
+  async getArtistsBySectionCount(sectionKey, letter) {
     try {
-      return await this.prisma.plexArtist.count({
-        where: {
-          librarySection: {
-            sectionKey: sectionKey
-          }
+      const where = {
+        librarySection: {
+          sectionKey: sectionKey
         }
-      });
+      };
+      const letterFilter = this.buildArtistLetterFilter(letter);
+      if (letterFilter) {
+        where.AND = [letterFilter];
+      }
+
+      return await this.prisma.plexArtist.count({ where });
     } catch (error) {
       console.error('Error fetching artists count by section:', error);
       throw error;
@@ -903,7 +955,7 @@ class PlexDatabaseService {
   }
 
   // Search artists by title
-  async searchArtists(searchQuery) {
+  async searchArtists(searchQuery, letter) {
     try {
       const makeContainsFilter = (value) => (
         this.isPostgreSQL
@@ -913,24 +965,33 @@ class PlexDatabaseService {
 
       const where = {
         removed: false,
-        OR: [
+        AND: [
           {
-            title: makeContainsFilter(searchQuery)
-          },
-          {
-            titleSort: makeContainsFilter(searchQuery)
-          },
-          {
-            userTitle: makeContainsFilter(searchQuery)
-          },
-          {
-            userSortName: makeContainsFilter(searchQuery)
-          },
-          {
-            musicBrainzAliases: makeContainsFilter(searchQuery)
+            OR: [
+              {
+                title: makeContainsFilter(searchQuery)
+              },
+              {
+                titleSort: makeContainsFilter(searchQuery)
+              },
+              {
+                userTitle: makeContainsFilter(searchQuery)
+              },
+              {
+                userSortName: makeContainsFilter(searchQuery)
+              },
+              {
+                musicBrainzAliases: makeContainsFilter(searchQuery)
+              }
+            ]
           }
         ]
       };
+
+      const letterFilter = this.buildArtistLetterFilter(letter);
+      if (letterFilter) {
+        where.AND.push(letterFilter);
+      }
 
       return await this.prisma.plexArtist.findMany({
         where,
@@ -949,7 +1010,7 @@ class PlexDatabaseService {
   }
 
   // Search artists by title within a specific section
-  async searchArtistsBySection(sectionKey, searchQuery, limit, offset) {
+  async searchArtistsBySection(sectionKey, searchQuery, limit, offset, letter) {
     try {
       const makeContainsFilter = (value) => (
         this.isPostgreSQL
@@ -986,6 +1047,11 @@ class PlexDatabaseService {
           }
         ]
       };
+
+      const letterFilter = this.buildArtistLetterFilter(letter);
+      if (letterFilter) {
+        where.AND.push(letterFilter);
+      }
 
       const query = {
         where,
@@ -1014,7 +1080,7 @@ class PlexDatabaseService {
   }
 
   // Get total count of searched artists in a specific section
-  async searchArtistsBySectionCount(sectionKey, searchQuery) {
+  async searchArtistsBySectionCount(sectionKey, searchQuery, letter) {
     try {
       const makeContainsFilter = (value) => (
         this.isPostgreSQL
@@ -1051,6 +1117,11 @@ class PlexDatabaseService {
           }
         ]
       };
+
+      const letterFilter = this.buildArtistLetterFilter(letter);
+      if (letterFilter) {
+        where.AND.push(letterFilter);
+      }
 
       return await this.prisma.plexArtist.count({
         where

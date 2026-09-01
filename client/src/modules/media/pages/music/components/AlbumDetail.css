@@ -264,6 +264,161 @@
   color: #fff;
 }
 
+.mb-track-match-preview {
+  margin-bottom: 20px;
+  padding: 16px;
+  background: #202020;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+}
+
+.mb-track-match-preview-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 14px;
+}
+
+.mb-track-match-preview-header h3 {
+  margin: 0;
+  font-size: 16px;
+  color: #fff;
+}
+
+.mb-track-match-preview-header p {
+  margin: 4px 0 0;
+  font-size: 13px;
+  color: #9ca3af;
+}
+
+.mb-track-match-apply-error {
+  color: #ef4444 !important;
+  font-weight: 600;
+}
+
+.mb-track-match-columns {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.mb-track-match-column-label {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  color: #9ca3af;
+  letter-spacing: 0.04em;
+}
+
+.mb-track-match-cell {
+  padding: 10px 12px;
+  background: #2a2a2a;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 6px;
+}
+
+.mb-track-match-cell.matched {
+  border-color: rgba(33, 150, 243, 0.5);
+  background: rgba(33, 150, 243, 0.1);
+}
+
+.mb-track-match-cell.matched-length-mismatch {
+  border-color: rgba(245, 158, 11, 0.6);
+  background: rgba(245, 158, 11, 0.12);
+}
+
+.mb-track-match-length-warning {
+  color: #f59e0b;
+  font-weight: 600;
+}
+
+.mb-track-match-cell-title {
+  color: #fff;
+  font-weight: 600;
+  font-size: 14px;
+}
+
+.mb-track-match-cell-meta {
+  margin-top: 4px;
+  font-size: 12px;
+  color: #9ca3af;
+}
+
+.mb-track-match-cell-changes {
+  margin-top: 6px;
+  font-size: 12px;
+  color: #93c5fd;
+}
+
+.mb-track-match-disc-header {
+  grid-column: 1 / -1;
+  margin-top: 10px;
+  padding: 6px 4px;
+  border-bottom: 2px solid #2196F3;
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #2196F3;
+}
+
+.mb-track-match-columns > .mb-track-match-disc-header:first-child,
+.mb-track-match-unmatched > .mb-track-match-disc-header:first-child {
+  margin-top: 0;
+}
+
+.mb-track-match-empty-btn {
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: 1px dashed rgba(255, 255, 255, 0.25);
+  border-radius: 4px;
+  padding: 6px 8px;
+  color: #9ca3af;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.mb-track-match-empty-btn:hover:not(:disabled) {
+  border-color: #2196F3;
+  color: #fff;
+}
+
+.mb-track-match-empty-btn:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+.mb-track-match-select {
+  width: 100%;
+  padding: 6px 8px;
+  border-radius: 4px;
+  border: 1px solid #2196F3;
+  background: #1f1f1f;
+  color: #fff;
+  font-size: 13px;
+}
+
+.mb-track-match-clear-btn {
+  margin-top: 6px;
+  background: none;
+  border: none;
+  padding: 0;
+  color: #f59e0b;
+  font-size: 12px;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.mb-track-match-unmatched {
+  margin-top: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
 /* Reuse tracks table styles */
 .album-detail .tracks-table {
   display: flex;
@@ -308,6 +463,24 @@
   display: flex;
   flex-direction: column;
   gap: 2px;
+}
+
+.album-detail .disc-group-header {
+  margin-top: 18px;
+  padding: 8px 15px;
+  border-bottom: 2px solid #2196F3;
+}
+
+.album-detail .disc-group-header:first-child {
+  margin-top: 0;
+}
+
+.album-detail .disc-group-title {
+  font-size: 13px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #2196F3;
 }
 
 .album-detail .track-group-header {

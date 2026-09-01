@@ -747,6 +747,19 @@
   width: 100%;
 }
 
+.album-identified-badge {
+  display: inline-block;
+  margin-left: 0.45rem;
+  padding: 0.1rem 0.4rem;
+  border-radius: 4px;
+  background: #dcfce7;
+  color: #166534;
+  font-size: 0.7rem;
+  font-weight: 700;
+  line-height: 1.2;
+  vertical-align: middle;
+}
+
 .album-artist {
   color: #007bff !important;
   font-weight: 500;

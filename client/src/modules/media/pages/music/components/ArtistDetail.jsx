@@ -19,6 +19,7 @@ const ArtistDetail = ({
   onMergeWorks,
   onArtistUpdate,
   onArtistDeleted,
+  onDeleteArtist,
   onExtractArtistMetadata,
   isExtractingMetadata = false
 }) => {
@@ -267,6 +268,11 @@ const ArtistDetail = ({
   };
 
   const handleDeleteArtist = async () => {
+    if (onDeleteArtist) {
+      onDeleteArtist(artist);
+      return;
+    }
+
     const confirmed = window.confirm(
       `Delete "${artist.title}"? This will hide the artist from the app, but existing album/work references will remain in place.`
     );
@@ -711,6 +717,9 @@ const ArtistDetail = ({
                   <h3 className="album-title-line">
                     {album.title}
                     {album.year && <span className="album-year"> ({album.year})</span>}
+                    {album.identificationStatus === 'identified' && (
+                      <span className="album-identified-badge">Identified</span>
+                    )}
                   </h3>
                   {album.totalPlayCount !== undefined && album.totalPlayCount > 0 && (
                     <p className="album-play-count">

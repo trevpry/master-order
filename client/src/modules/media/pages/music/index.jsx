@@ -91,6 +91,8 @@ const Music = () => {
   const [newArtistName, setNewArtistName] = useState('');
   const [newArtistSortName, setNewArtistSortName] = useState('');
   const [creatingArtist, setCreatingArtist] = useState(false);
+  const [artistPendingDeletion, setArtistPendingDeletion] = useState(null);
+  const [deletingArtist, setDeletingArtist] = useState(false);
   
   // Artist merge state
   const [artistSelectionMode, setArtistSelectionMode] = useState(false);
@@ -124,7 +126,7 @@ const Music = () => {
   };
 
   // Alphabet filter state
-  const [selectedLetter, setSelectedLetter] = useState(null);
+  const [selectedLetter, setSelectedLetter] = useState(() => searchParams.get('letter') || null);
 
   const navigateToView = (view, params = {}) => {
     const updates = { view, ...params };
@@ -139,7 +141,11 @@ const Music = () => {
       updates.album = null;
       updates.track = null;
       updates.work = null;
-      updates.letter = null; // Clear letter filter when navigating to artists
+      // Only clear the letter filter when the caller didn't explicitly pass one
+      // (e.g. the alphabet selector navigates to 'artists' with a letter to keep).
+      if (!('letter' in params)) {
+        updates.letter = null;
+      }
     } else if (view === 'artist') {
       updates.album = null;
       updates.track = null;
@@ -291,8 +297,9 @@ const Music = () => {
     if (urlArtistTypeId !== selectedArtistTypeId) {
       setSelectedArtistTypeId(urlArtistTypeId);
     }
-    if (urlLetter !== null && urlLetter !== '') {
-      setSelectedLetter(urlLetter);
+    const normalizedLetter = urlLetter || null;
+    if (normalizedLetter !== selectedLetter) {
+      setSelectedLetter(normalizedLetter);
     }
   }, [searchParams]);
 
@@ -1050,35 +1057,40 @@ const Music = () => {
 
   const handleDeleteArtist = async (artist) => {
     console.log('handleDeleteArtist called with:', artist);
-    
-    // Check if artist has any tracks connected
+
     try {
       const tracksRes = await fetch(`${config.apiBaseUrl}/api/music/tracks/artist/${artist.ratingKey}`);
       const tracksData = await safeJsonParse(tracksRes, `${config.apiBaseUrl}/api/music/tracks/artist/${artist.ratingKey}`);
-      
-      if (tracksData.length > 0) {
-        console.log('Artist has tracks, cannot delete:', tracksData.length, 'tracks found');
-        setError('Cannot delete artist - it has tracks connected. Please remove tracks first.');
-        return;
-      }
-      
-      // Check if artist has any album connections
+
       const albumsRes = await fetch(`${config.apiBaseUrl}/api/music/albums/artist/${artist.ratingKey}`);
       const albumsData = await safeJsonParse(albumsRes, `${config.apiBaseUrl}/api/music/albums/artist/${artist.ratingKey}`);
-      
-      if (albumsData.length > 0) {
-        console.log('Artist has albums, cannot delete:', albumsData.length, 'albums found');
-        setError('Cannot delete artist - it has albums connected. Please remove albums first.');
-        return;
-      }
-      
-      // Now delete the artist
+
+      setArtistPendingDeletion({
+        artist,
+        trackCount: tracksData.length,
+        albumCount: albumsData.length
+      });
+    } catch (err) {
+      console.error('Error checking artist connections:', err);
+      setError(err.message);
+    }
+  };
+
+  const confirmDeleteArtist = async () => {
+    const artist = artistPendingDeletion?.artist;
+    if (!artist || deletingArtist) {
+      return;
+    }
+
+    try {
+      setDeletingArtist(true);
       const deleteRes = await fetch(`${config.apiBaseUrl}/api/music/artists/${artist.ratingKey}`, {
         method: 'DELETE'
       });
       
       if (!deleteRes.ok) {
-        throw new Error(`Failed to delete artist (${deleteRes.status})`);
+        const failure = await safeJsonParse(deleteRes, `${config.apiBaseUrl}/api/music/artists/${artist.ratingKey}`);
+        throw new Error(failure.error || `Failed to delete artist (${deleteRes.status})`);
       }
       
       const deleteData = await safeJsonParse(deleteRes, `${config.apiBaseUrl}/api/music/artists/${artist.ratingKey}`);
@@ -1091,14 +1103,16 @@ const Music = () => {
       // Clear any selected artist
       if (selectedArtist?.ratingKey === artist.ratingKey) {
         setSelectedArtist(null);
+        navigateToView('artists', { letter: selectedLetter });
       }
-      
-      // Show success message
+
+      setArtistPendingDeletion(null);
       setError(null);
-      
     } catch (err) {
       console.error('Error deleting artist:', err);
       setError(err.message);
+    } finally {
+      setDeletingArtist(false);
     }
   };
 
@@ -2212,6 +2226,7 @@ const Music = () => {
             onSelectAlbum={selectAlbum}
             onSelectWork={selectWork}
             onSelectTrack={selectTrack}
+            onDeleteArtist={handleDeleteArtist}
             onArtistUpdate={(updatedArtist) => {
               // Update selectedArtist with new data
               setSelectedArtist((prevArtist) => {
@@ -2367,6 +2382,51 @@ const Music = () => {
           />
         )}
       </div>
+
+      {artistPendingDeletion && (
+        <div className="modal-overlay" onClick={() => !deletingArtist && setArtistPendingDeletion(null)}>
+          <div className="modal" onClick={(event) => event.stopPropagation()}>
+            <div className="modal-header">
+              <h2>Delete Artist</h2>
+              <button
+                type="button"
+                className="modal-close"
+                onClick={() => setArtistPendingDeletion(null)}
+                disabled={deletingArtist}
+                aria-label="Close delete artist confirmation"
+              >
+                ✕
+              </button>
+            </div>
+            <div className="modal-content">
+              <p>
+                Delete &ldquo;{artistPendingDeletion.artist.title}&rdquo;? Its tracks will remain in the library,
+                but {artistPendingDeletion.trackCount} track{artistPendingDeletion.trackCount === 1 ? '' : 's'}
+                {artistPendingDeletion.albumCount > 0 && ` and ${artistPendingDeletion.albumCount} album${artistPendingDeletion.albumCount === 1 ? '' : 's'}`}
+                {' '}will be unlinked from this artist.
+              </p>
+            </div>
+            <div className="modal-actions">
+              <button
+                type="button"
+                className="btn-cancel"
+                onClick={() => setArtistPendingDeletion(null)}
+                disabled={deletingArtist}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="btn-danger"
+                onClick={confirmDeleteArtist}
+                disabled={deletingArtist}
+              >
+                {deletingArtist ? 'Deleting...' : 'Delete Artist and Unlink Tracks'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       
       {/* Create Playlist Modal */}
       {showCreatePlaylistModal && (

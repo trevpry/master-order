@@ -1313,12 +1313,14 @@ router.delete('/custom-playlists/:id/tracks/:trackId', asyncHandler(async (req, 
 
 // Music Artists - All
 router.get('/artists', asyncHandler(async (req, res) => {
-  const { search, page = 1, limit = 20, artistTypeId } = req.query;
+  const { search, page = 1, limit = 20, artistTypeId, letter } = req.query;
   const offset = (page - 1) * limit;
+  const listLimit = letter ? undefined : parseInt(limit);
+  const listOffset = letter ? undefined : offset;
   
   if (search) {
     // For search, get all matching artists
-    let artists = await plexDb.searchArtists(search);
+    let artists = await plexDb.searchArtists(search, letter);
     
     // Add play counts for each artist
     artists = await Promise.all(artists.map(async (artist) => {
@@ -1358,7 +1360,7 @@ router.get('/artists', asyncHandler(async (req, res) => {
     res.json(artists);
   } else {
     // For regular requests, use pagination
-    const artists = await plexDb.getAllArtists(parseInt(limit), offset);
+    const artists = await plexDb.getAllArtists(listLimit, listOffset, letter);
     
     // Add play counts
     const artistsWithCounts = await Promise.all(artists.map(async (artist) => {
@@ -1372,13 +1374,13 @@ router.get('/artists', asyncHandler(async (req, res) => {
       };
     }));
     
-    const totalArtists = await plexDb.getArtistsCount();
+    const totalArtists = await plexDb.getArtistsCount(letter);
     
     res.json({
       artists: artistsWithCounts,
       page: parseInt(page),
-      limit: parseInt(limit),
-      totalPages: Math.ceil(totalArtists / limit),
+      limit: letter ? artistsWithCounts.length : parseInt(limit),
+      totalPages: letter ? 1 : Math.ceil(totalArtists / limit),
       totalArtists
     });
   }
@@ -1387,22 +1389,24 @@ router.get('/artists', asyncHandler(async (req, res) => {
 // Music Artists - By Section
 router.get('/artists/section/:sectionKey', asyncHandler(async (req, res) => {
   const { sectionKey } = req.params;
-  const { search, page = 1, limit = 20 } = req.query;
+  const { search, page = 1, limit = 20, letter } = req.query;
   const pageNum = parseInt(page);
   const limitNum = parseInt(limit);
   const offset = (pageNum - 1) * limitNum;
+  const listLimit = letter ? undefined : limitNum;
+  const listOffset = letter ? undefined : offset;
 
-  console.log(`Artists requested for section: ${sectionKey}, page: ${pageNum}, limit: ${limitNum}, search: ${search}`);
+  console.log(`Artists requested for section: ${sectionKey}, page: ${pageNum}, limit: ${limitNum}, search: ${search}, letter: ${letter}`);
 
   let artists;
   let total;
 
   if (search) {
-    artists = await plexDb.searchArtistsBySection(sectionKey, search, limitNum, offset);
-    total = await plexDb.searchArtistsBySectionCount(sectionKey, search);
+    artists = await plexDb.searchArtistsBySection(sectionKey, search, listLimit, listOffset, letter);
+    total = await plexDb.searchArtistsBySectionCount(sectionKey, search, letter);
   } else {
-    artists = await plexDb.getArtistsBySection(sectionKey, limitNum, offset);
-    total = await plexDb.getArtistsBySectionCount(sectionKey);
+    artists = await plexDb.getArtistsBySection(sectionKey, listLimit, listOffset, letter);
+    total = await plexDb.getArtistsBySectionCount(sectionKey, letter);
   }
 
   console.log(`Returning ${artists.length} artists for section ${sectionKey}, total: ${total}`);
@@ -1410,8 +1414,8 @@ router.get('/artists/section/:sectionKey', asyncHandler(async (req, res) => {
   res.json({
     artists,
     page: pageNum,
-    limit: limitNum,
-    totalPages: Math.ceil(total / limitNum),
+    limit: letter ? artists.length : limitNum,
+    totalPages: letter ? 1 : Math.ceil(total / limitNum),
     totalArtists: total
   });
 }));
@@ -1460,6 +1464,92 @@ router.get('/artists/:ratingKey', asyncHandler(async (req, res) => {
       { artistType: { name: 'asc' } }
     ]
   });
+
+  // Works where this artist is the direct composer
+  const composerWorks = await prisma.work.findMany({
+    where: { composerKey: artist.ratingKey },
+    include: {
+      parts: {
+        include: {
+          tracks: {
+            include: { track: true }
+          }
+        }
+      }
+    }
+  });
+
+  // Works reached via any track-level role (composer, conductor, performer, etc.)
+  const workRoleAssignments = await prisma.trackArtist.findMany({
+    where: { artistKey: artist.ratingKey },
+    include: {
+      artistType: true,
+      track: {
+        include: {
+          workPartTracks: {
+            include: {
+              workPart: {
+                include: {
+                  work: {
+                    include: {
+                      parts: {
+                        include: {
+                          tracks: {
+                            include: { track: true }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  });
+
+  const buildWorkSummary = (work) => {
+    const allWorkPartTracks = (work.parts || []).flatMap((part) => part.tracks || []);
+    const uniqueTrackKeys = new Set(allWorkPartTracks.map((wpt) => wpt.trackKey));
+    const totalPlayCount = allWorkPartTracks.reduce((sum, wpt) => sum + (wpt.track?.viewCount || 0), 0);
+
+    return {
+      id: work.id,
+      title: work.userTitle || work.title,
+      partsCount: (work.parts || []).length,
+      tracksCount: uniqueTrackKeys.size,
+      totalPlayCount,
+      linkedArtistTypes: []
+    };
+  };
+
+  const workMap = new Map();
+  const registerWork = (work, roleName) => {
+    if (!work) {
+      return;
+    }
+
+    const existing = workMap.get(work.id) || buildWorkSummary(work);
+    if (roleName && !existing.linkedArtistTypes.includes(roleName)) {
+      existing.linkedArtistTypes.push(roleName);
+    }
+
+    workMap.set(work.id, existing);
+  };
+
+  for (const work of composerWorks) {
+    registerWork(work, 'Composer');
+  }
+
+  for (const assignment of workRoleAssignments) {
+    for (const workPartTrack of (assignment.track?.workPartTracks || [])) {
+      registerWork(workPartTrack.workPart?.work, assignment.artistType?.name);
+    }
+  }
+
+  artist.works = [...workMap.values()].sort((left, right) => (left.title || '').localeCompare(right.title || ''));
 
   const linkedAlbumMap = new Map();
   for (const assignment of linkedAlbumAssignments) {
@@ -1520,6 +1610,64 @@ router.get('/artists/:ratingKey', asyncHandler(async (req, res) => {
   artist.totalPlayCount = playCount._sum.viewCount || 0;
   
   res.json(artist);
+}));
+
+// Delete an artist after unlinking its local track and album associations.
+router.delete('/artists/:ratingKey', asyncHandler(async (req, res) => {
+  const { ratingKey } = req.params;
+
+  const artist = await prisma.plexArtist.findUnique({
+    where: { ratingKey },
+    select: { ratingKey: true, title: true }
+  });
+
+  if (!artist) {
+    return sendNotFound(res, 'Artist not found');
+  }
+
+  const composerWorkCount = await prisma.work.count({
+    where: { composerKey: ratingKey }
+  });
+
+  if (composerWorkCount > 0) {
+    return res.status(409).json({
+      success: false,
+      error: `Cannot delete ${artist.title}: it is the composer for ${composerWorkCount} work${composerWorkCount === 1 ? '' : 's'}. Reassign or delete those works first.`
+    });
+  }
+
+  const result = await prisma.$transaction(async (tx) => {
+    const [tracksUnlinked, albumsUnlinked, trackArtistLinksRemoved, albumArtistLinksRemoved] = await Promise.all([
+      tx.plexTrack.updateMany({
+        where: { grandparentRatingKey: ratingKey },
+        data: { grandparentRatingKey: null }
+      }),
+      tx.plexAlbum.updateMany({
+        where: { parentRatingKey: ratingKey },
+        data: { parentRatingKey: null }
+      }),
+      tx.trackArtist.deleteMany({
+        where: { artistKey: ratingKey }
+      }),
+      tx.albumArtist.deleteMany({
+        where: { artistKey: ratingKey }
+      })
+    ]);
+
+    await tx.plexArtist.delete({ where: { ratingKey } });
+
+    return {
+      tracksUnlinked: tracksUnlinked.count,
+      albumsUnlinked: albumsUnlinked.count,
+      trackArtistLinksRemoved: trackArtistLinksRemoved.count,
+      albumArtistLinksRemoved: albumArtistLinksRemoved.count
+    };
+  });
+
+  sendSuccess(res, {
+    ...result,
+    message: `Deleted ${artist.title} and unlinked its connected tracks`
+  });
 }));
 
 // Update Artist - Name and Sort Name

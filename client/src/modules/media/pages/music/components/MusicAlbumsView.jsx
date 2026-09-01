@@ -163,6 +163,9 @@ const MusicAlbumsView = ({
                 <h3 className="album-title-line" onClick={() => onSelectAlbum(album)} style={{ cursor: 'pointer' }}>
                   {album.title}
                   {album.year && <span className="album-year"> ({album.year})</span>}
+                  {album.identificationStatus === 'identified' && (
+                    <span className="album-identified-badge">Identified</span>
+                  )}
                 </h3>
                 {(album.artist?.title || album.parentTitle) && (
                   <p className="album-artist-name">

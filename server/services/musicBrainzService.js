@@ -111,9 +111,13 @@ class MusicBrainzService {
    */
   async searchArtist(name, limit = 10) {
     try {
-      // For non-Latin alphabet names, search with artistaccent to preserve diacritics
-      // For Latin names, use artist field
-      const query = `artistaccent:"${name}"`;
+      // An unfielded query searches canonical names, aliases, and sort names. This is required
+      // for Latin transliterations of artists whose canonical name is in another script.
+      const query = String(name || '').trim();
+
+      if (!query) {
+        return [];
+      }
 
       const result = await this.request('artist', {
         query,
@@ -187,7 +191,11 @@ class MusicBrainzService {
   async getReleaseDetails(mbid) {
     try {
       return await this.request(`release/${mbid}`, {
-        inc: 'artist-credits+labels+recordings+release-groups+media+tags+artist-rels+recording-rels+work-rels+work-level-rels'
+        // recording-level-rels/work-level-rels are required to nest each track recording's own
+        // relations (e.g. recording->work "performance") and the related work's own relations
+        // (e.g. work->artist "composer") directly in the release payload. Without these, classical
+        // work/composer data is missing per-track and has to be fetched one recording at a time.
+        inc: 'artist-credits+labels+recordings+release-groups+media+tags+artist-rels+recording-rels+recording-level-rels+work-rels+work-level-rels'
       });
     } catch (error) {
       console.error('MusicBrainz release details error:', error);
@@ -224,11 +232,11 @@ class MusicBrainzService {
   /**
    * Get detailed recording information by MBID
    */
-  async getRecordingDetails(mbid) {
+  async getRecordingDetails(mbid, maxRetries = 3) {
     try {
       return await this.request(`recording/${mbid}`, {
         inc: 'artist-credits+artist-rels+work-rels+work-level-rels+tags'
-      });
+      }, maxRetries);
     } catch (error) {
       console.error('MusicBrainz recording details error:', error);
       throw error;
@@ -238,11 +246,11 @@ class MusicBrainzService {
   /**
    * Get detailed artist information by MBID
    */
-  async getArtistDetails(mbid) {
+  async getArtistDetails(mbid, maxRetries = 3) {
     try {
       return await this.request(`artist/${mbid}`, {
         inc: 'aliases+tags+ratings'
-      });
+      }, maxRetries);
     } catch (error) {
       console.error('MusicBrainz artist details error:', error);
       throw error;
@@ -252,8 +260,8 @@ class MusicBrainzService {
   /**
    * Get artist details by MBID (alias for getArtistDetails)
    */
-  async getArtist(mbid) {
-    return await this.getArtistDetails(mbid);
+  async getArtist(mbid, maxRetries = 3) {
+    return await this.getArtistDetails(mbid, maxRetries);
   }
 
   /**

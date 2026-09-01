@@ -5,6 +5,7 @@ import StarRating from '../../../../../components/StarRating';
 import IdentifyModal from '../../../../../components/IdentifyModal';
 import MetadataEditor from '../../../../../components/MetadataEditor';
 import EmbeddedPicardTagsPanel from './EmbeddedPicardTagsPanel';
+import { buildTrackPreview } from '../../../../../utils/musicBrainzTrackMatch';
 import './AlbumDetail.css';
 
 const AlbumDetail = ({
@@ -28,6 +29,11 @@ const AlbumDetail = ({
   
   const [tracks, setTracks] = useState(initialTracks);
   const [showIdentifyModal, setShowIdentifyModal] = useState(false);
+  const [mbTrackMatchPreview, setMbTrackMatchPreview] = useState(null);
+  const [manualTrackMatchOverrides, setManualTrackMatchOverrides] = useState({});
+  const [editingUnmatchedRowKey, setEditingUnmatchedRowKey] = useState(null);
+  const [isApplyingMbMetadata, setIsApplyingMbMetadata] = useState(false);
+  const [applyMbMetadataError, setApplyMbMetadataError] = useState(null);
   const [isEditMode, setIsEditMode] = useState(false);
   const [showMusicBrainzData, setShowMusicBrainzData] = useState(false);
   const [albumData, setAlbumData] = useState(album);
@@ -159,6 +165,74 @@ const AlbumDetail = ({
     } catch (error) {
       console.error('Error refreshing album and tracks:', error);
     }
+  };
+
+  const handleApplyMbTrackMatchMetadata = async () => {
+    const candidateId = mbTrackMatchPreview?.candidate?.id;
+    if (!candidateId || isApplyingMbMetadata) {
+      return;
+    }
+
+    setIsApplyingMbMetadata(true);
+    setApplyMbMetadataError(null);
+
+    try {
+      const trackMatchOverrides = (mbTrackPreview?.rows || [])
+        .filter((row) => row.isManualMatch && row.localTrack?.ratingKey && row.remoteTrack?.recordingId)
+        .map((row) => ({
+          localTrackKey: row.localTrack.ratingKey,
+          recordingId: row.remoteTrack.recordingId
+        }));
+
+      // Reuse the release data already fetched during accept to avoid re-hitting the
+      // rate-limited MusicBrainz API (which can stall for many seconds on retries).
+      const response = await fetch(`${config.apiBaseUrl}/api/identification/apply/${candidateId}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ metadata: mbTrackMatchPreview?.trackMatchData || null, trackMatchOverrides })
+      });
+
+      const data = await response.json();
+
+      if (!data.success) {
+        setApplyMbMetadataError(data.error || 'Failed to apply metadata');
+        return;
+      }
+
+      await refreshAlbumAndTracks();
+      setMbTrackMatchPreview(null);
+      setManualTrackMatchOverrides({});
+      setEditingUnmatchedRowKey(null);
+    } catch (error) {
+      console.error('Error applying MusicBrainz metadata:', error);
+      setApplyMbMetadataError('Failed to apply metadata');
+    } finally {
+      setIsApplyingMbMetadata(false);
+    }
+  };
+
+  const handleManualTrackMatchSelect = (localTrackKey, remotePreviewKey) => {
+    if (!localTrackKey) return;
+
+    setManualTrackMatchOverrides((prev) => {
+      if (!remotePreviewKey) {
+        const next = { ...prev };
+        delete next[localTrackKey];
+        return next;
+      }
+      return { ...prev, [localTrackKey]: remotePreviewKey };
+    });
+    setEditingUnmatchedRowKey(null);
+  };
+
+  const handleClearManualTrackMatch = (localTrackKey) => {
+    if (!localTrackKey) return;
+
+    setManualTrackMatchOverrides((prev) => {
+      const next = { ...prev };
+      delete next[localTrackKey];
+      return next;
+    });
   };
 
   const handleSplitByAlbumId = async () => {
@@ -379,6 +453,11 @@ const AlbumDetail = ({
     return `${minutes}:${String(seconds).padStart(2, '0')}`;
   };
 
+  const mbTrackPreview = useMemo(() => {
+    if (!mbTrackMatchPreview) return null;
+    return buildTrackPreview(tracks, mbTrackMatchPreview.trackMatchData, manualTrackMatchOverrides);
+  }, [tracks, mbTrackMatchPreview, manualTrackMatchOverrides]);
+
   const discogsImportArtistsPreview = useMemo(() => {
     const selectedOrdinals = new Set(
       (Array.isArray(discogsTrackMatches) ? discogsTrackMatches : [])
@@ -487,9 +566,9 @@ const AlbumDetail = ({
     const trackNumber = Number.isInteger(track?.trackNumber)
       ? track.trackNumber
       : (Number.isInteger(track?.index) ? track.index : fallbackIndex);
-    const discNumber = Number.isInteger(track?.discNumber) ? track.discNumber : null;
+    const discNumber = inferDiscNumberFromTrack(track);
 
-    if (discNumber && trackNumber) {
+    if (discNumber && discNumber > 1 && trackNumber) {
       return `D${discNumber}-T${trackNumber}`;
     }
 
@@ -497,8 +576,8 @@ const AlbumDetail = ({
   };
 
   const sortAlbumTracks = (left, right) => {
-    const leftDisc = Number.isInteger(left?.discNumber) ? left.discNumber : Number.MAX_SAFE_INTEGER;
-    const rightDisc = Number.isInteger(right?.discNumber) ? right.discNumber : Number.MAX_SAFE_INTEGER;
+    const leftDisc = inferDiscNumberFromTrack(left) || Number.MAX_SAFE_INTEGER;
+    const rightDisc = inferDiscNumberFromTrack(right) || Number.MAX_SAFE_INTEGER;
 
     if (leftDisc !== rightDisc) {
       return leftDisc - rightDisc;
@@ -529,13 +608,15 @@ const AlbumDetail = ({
     for (const track of sortedTracks) {
       const workId = track.work?.id || null;
       const workTitle = track.work?.title || 'Standalone Tracks';
-      const groupKey = workId ? `work-${workId}` : `standalone-${track.ratingKey}`;
+      const discNumber = inferDiscNumberFromTrack(track) || 1;
+      const groupKey = workId ? `disc-${discNumber}-work-${workId}` : `disc-${discNumber}-standalone-${track.ratingKey}`;
 
       if (!groupMap.has(groupKey)) {
         const group = {
           key: groupKey,
           workId,
           title: workTitle,
+          discNumber,
           tracks: []
         };
 
@@ -550,6 +631,8 @@ const AlbumDetail = ({
   };
 
   const trackGroups = buildTrackGroups(tracks);
+  const albumDiscNumbers = new Set(trackGroups.map((group) => group.discNumber));
+  const albumHasMultipleDiscs = albumDiscNumbers.size > 1;
   const albumWorks = trackGroups
     .filter((group) => group.workId)
     .map((group) => ({ id: group.workId, title: group.title, tracksCount: group.tracks.length }));
@@ -1321,6 +1404,172 @@ const AlbumDetail = ({
             )}
           </div>
         </div>
+
+        {mbTrackMatchPreview && (
+          <div className="mb-track-match-preview">
+            <div className="mb-track-match-preview-header">
+              <div>
+                <h3>MusicBrainz Track Matches</h3>
+                <p>
+                  Pulled from &ldquo;{mbTrackMatchPreview.trackMatchData?.title || 'Unknown release'}&rdquo; — existing tracks are matched to the pulled MusicBrainz tracks below.
+                </p>
+                {applyMbMetadataError && (
+                  <p className="mb-track-match-apply-error">{applyMbMetadataError}</p>
+                )}
+              </div>
+              <div style={{ display: 'flex', gap: '0.5rem', flexShrink: 0 }}>
+                <button
+                  type="button"
+                  className="album-works-select-btn"
+                  onClick={() => {
+                    setMbTrackMatchPreview(null);
+                    setManualTrackMatchOverrides({});
+                    setEditingUnmatchedRowKey(null);
+                  }}
+                  disabled={isApplyingMbMetadata}
+                >
+                  Dismiss
+                </button>
+                <button
+                  type="button"
+                  className="album-works-merge-confirm"
+                  onClick={handleApplyMbTrackMatchMetadata}
+                  disabled={isApplyingMbMetadata}
+                >
+                  {isApplyingMbMetadata ? 'Applying…' : 'Apply Metadata'}
+                </button>
+              </div>
+            </div>
+
+            <div className="mb-track-match-columns">
+              <div className="mb-track-match-column-label">Existing Track</div>
+              <div className="mb-track-match-column-label">Pulled MusicBrainz Track</div>
+
+              {(() => {
+                let lastDiscNumber = null;
+                return (mbTrackPreview?.rows || []).map((row, index) => {
+                  const localMs = Number(row.localTrack?.duration);
+                  const remoteMs = Number(row.remoteTrack?.length);
+                  const hasBothLengths = Number.isFinite(localMs) && localMs > 0 && Number.isFinite(remoteMs) && remoteMs > 0;
+                  const isLengthMismatch = Boolean(row.remoteTrack) && hasBothLengths && Math.abs(localMs - remoteMs) > 10000;
+                  const matchedCellClass = row.remoteTrack ? (isLengthMismatch ? 'matched matched-length-mismatch' : 'matched') : '';
+                  const rowKey = row.localTrack?.ratingKey || `row-${index}`;
+                  const remoteDiscNumber = row.remoteTrack?.discNumber || null;
+                  const showDiscHeader = Boolean(remoteDiscNumber) && remoteDiscNumber !== lastDiscNumber;
+                  if (remoteDiscNumber) {
+                    lastDiscNumber = remoteDiscNumber;
+                  }
+                  const isEditingMatch = editingUnmatchedRowKey === rowKey;
+                  const hasUnmatchedOptions = (mbTrackPreview?.unmatchedRemoteTracks || []).length > 0;
+
+                  return (
+                    <React.Fragment key={rowKey}>
+                      {showDiscHeader && (
+                        <div className="mb-track-match-disc-header">Disc {remoteDiscNumber}</div>
+                      )}
+                      <div className="mb-track-match-cell">
+                        <div className="mb-track-match-cell-title">
+                          {row.localTrack ? `${row.localTrack.index || index + 1}. ${row.localTrack.title || 'Untitled'}` : 'No existing track'}
+                        </div>
+                        {formatMilliseconds(row.localTrack?.duration) && (
+                          <div className="mb-track-match-cell-meta">Length: {formatMilliseconds(row.localTrack.duration)}</div>
+                        )}
+                        {row.localTrack?.musicBrainzTrackId && (
+                          <div className="mb-track-match-cell-meta">MB Recording ID: {row.localTrack.musicBrainzTrackId}</div>
+                        )}
+                      </div>
+                      <div className={`mb-track-match-cell ${matchedCellClass}`}>
+                        {row.remoteTrack ? (
+                          <>
+                            <div className="mb-track-match-cell-title">
+                              {row.remoteTrack.trackNumber || index + 1}. {row.remoteTrack.title}
+                            </div>
+                            {formatMilliseconds(row.remoteTrack.length) && (
+                              <div className="mb-track-match-cell-meta">Length: {formatMilliseconds(row.remoteTrack.length)}</div>
+                            )}
+                            {row.remoteTrack.recordingId && (
+                              <div className="mb-track-match-cell-meta">MB Recording ID: {row.remoteTrack.recordingId}</div>
+                            )}
+                            {isLengthMismatch && (
+                              <div className="mb-track-match-cell-meta mb-track-match-length-warning">
+                                Length differs by {formatMilliseconds(Math.abs(localMs - remoteMs))}
+                              </div>
+                            )}
+                            <div className="mb-track-match-cell-changes">{row.changes}</div>
+                            {row.isManualMatch && (
+                              <button
+                                type="button"
+                                className="mb-track-match-clear-btn"
+                                onClick={() => handleClearManualTrackMatch(row.localTrack?.ratingKey)}
+                              >
+                                Clear manual match
+                              </button>
+                            )}
+                          </>
+                        ) : isEditingMatch ? (
+                          <select
+                            autoFocus
+                            className="mb-track-match-select"
+                            value=""
+                            onChange={(event) => handleManualTrackMatchSelect(row.localTrack?.ratingKey, event.target.value || null)}
+                            onBlur={() => setEditingUnmatchedRowKey(null)}
+                          >
+                            <option value="">— Select a pulled track —</option>
+                            {(mbTrackPreview?.unmatchedRemoteTracks || []).map((remoteTrack) => (
+                              <option key={remoteTrack._previewKey} value={remoteTrack._previewKey}>
+                                Disc {remoteTrack.discNumber} · {remoteTrack.trackNumber}. {remoteTrack.title}
+                              </option>
+                            ))}
+                          </select>
+                        ) : (
+                          <button
+                            type="button"
+                            className="mb-track-match-empty-btn"
+                            onClick={() => setEditingUnmatchedRowKey(rowKey)}
+                            disabled={!hasUnmatchedOptions}
+                            title={hasUnmatchedOptions ? 'Click to manually match a pulled track' : 'No unmatched pulled tracks available'}
+                          >
+                            No pulled match{hasUnmatchedOptions ? ' — click to select' : ''}
+                          </button>
+                        )}
+                      </div>
+                    </React.Fragment>
+                  );
+                });
+              })()}
+            </div>
+
+            {(mbTrackPreview?.unmatchedRemoteTracks || []).length > 0 && (
+              <div className="mb-track-match-unmatched">
+                <div className="mb-track-match-column-label">Unmatched Pulled Tracks</div>
+                {(() => {
+                  let lastUnmatchedDiscNumber = null;
+                  return mbTrackPreview.unmatchedRemoteTracks.map((remoteTrack) => {
+                    const showDiscHeader = remoteTrack.discNumber !== lastUnmatchedDiscNumber;
+                    lastUnmatchedDiscNumber = remoteTrack.discNumber;
+
+                    return (
+                      <React.Fragment key={remoteTrack._previewKey}>
+                        {showDiscHeader && (
+                          <div className="mb-track-match-disc-header">Disc {remoteTrack.discNumber}</div>
+                        )}
+                        <div className="mb-track-match-cell">
+                          <div className="mb-track-match-cell-title">
+                            {remoteTrack.discNumber}.{remoteTrack.trackNumber} {remoteTrack.title}
+                          </div>
+                          {formatMilliseconds(remoteTrack.length) && (
+                            <div className="mb-track-match-cell-meta">Length: {formatMilliseconds(remoteTrack.length)}</div>
+                          )}
+                        </div>
+                      </React.Fragment>
+                    );
+                  });
+                })()}
+              </div>
+            )}
+          </div>
+        )}
+
         {!tracks || tracks.length === 0 ? (
           <div className="empty-state">
             <p>No tracks found for this album.</p>
@@ -1338,8 +1587,20 @@ const AlbumDetail = ({
               <span className="track-size">Size</span>
               <span className="track-playlist">Playlist</span>
             </div>
-            {trackGroups.map((group) => (
-              <div key={group.key} className="track-group">
+            {(() => {
+              let lastRenderedDiscNumber = null;
+              return trackGroups.map((group) => {
+                const showDiscHeader = albumHasMultipleDiscs && group.discNumber !== lastRenderedDiscNumber;
+                lastRenderedDiscNumber = group.discNumber;
+
+                return (
+                  <React.Fragment key={group.key}>
+                    {showDiscHeader && (
+                      <div className="disc-group-header">
+                        <span className="disc-group-title">Disc {group.discNumber}</span>
+                      </div>
+                    )}
+                    <div className="track-group">
                 <div className="track-group-header">
                   <span className="track-group-title">{group.title}</span>
                   <span className="track-group-count">{group.tracks.length} track{group.tracks.length !== 1 ? 's' : ''}</span>
@@ -1460,8 +1721,11 @@ const AlbumDetail = ({
                     </div>
                   </div>
                 ))}
-              </div>
-            ))}
+                    </div>
+                  </React.Fragment>
+                );
+              });
+            })()}
           </div>
         )}
       </div>
@@ -1559,6 +1823,11 @@ const AlbumDetail = ({
         onIdentified={(updatedAlbum) => {
           handleAlbumUpdate(updatedAlbum);
           setShowIdentifyModal(false);
+        }}
+        onAcceptCandidate={(candidate, trackMatchData) => {
+          setMbTrackMatchPreview({ candidate, trackMatchData });
+          setManualTrackMatchOverrides({});
+          setEditingUnmatchedRowKey(null);
         }}
       />
 

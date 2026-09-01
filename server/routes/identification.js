@@ -74,6 +74,28 @@ router.post('/accept/:candidateId', asyncHandler(async (req, res) => {
 }));
 
 /**
+ * POST /api/identification/apply/:candidateId
+ * Persist a candidate's MusicBrainz metadata to the album/artist and its tracks
+ */
+router.post('/apply/:candidateId', asyncHandler(async (req, res) => {
+  const candidateId = parseInt(req.params.candidateId);
+  const { metadata, trackMatchOverrides } = req.body || {};
+
+  if (isNaN(candidateId)) {
+    return sendBadRequest(res, 'Invalid candidate ID');
+  }
+
+  const result = await identificationService.applyIdentification(candidateId, metadata || null, trackMatchOverrides || []);
+
+  sendSuccess(res, {
+    entityType: result.entityType,
+    entityKey: result.entityKey,
+    entity: result.data,
+    message: 'Metadata applied successfully'
+  });
+}));
+
+/**
  * POST /api/identification/reject/:candidateId
  * Reject an identification candidate
  */

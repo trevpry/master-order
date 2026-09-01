@@ -12,6 +12,10 @@ class IdentificationService {
   constructor() {
     this.prisma = new PrismaClient();
     this.musicBrainz = new MusicBrainzService();
+    // Caches resolved local PlexArtist records by MusicBrainz artist ID for the duration of a
+    // single apply operation, since the same composer/conductor/ensemble is typically referenced
+    // by every track on a classical release and would otherwise trigger a network call each time.
+    this.artistResolutionCache = new Map();
   }
 
   /**
@@ -278,18 +282,32 @@ class IdentificationService {
     
     let allSearchResults = [];
     for (const searchName of [...searchNames, ...searchNamesUnquoted]) {
-      // Search with artistaccent (preserves diacritics for non-Latin names)
-      // This will match against aliases and names in other scripts
-      const results = await this.musicBrainz.searchArtist(searchName);
-      allSearchResults.push(...results);
-      
-      // Also search aliases (for cases where the name doesn't match directly)
-      const aliasResults = await this.musicBrainz.searchArtistByAlias(searchName);
-      allSearchResults.push(...aliasResults);
-      
-      // Also search by sort name (for "lastName, firstName" format matches)
-      const sortNameResults = await this.musicBrainz.searchArtistBySortName(searchName);
-      allSearchResults.push(...sortNameResults);
+      // Each MusicBrainz call is isolated: a transient failure (rate limiting, network hiccup)
+      // on one name variant/search type shouldn't abort the whole identification request.
+      let primaryResults = [];
+      try {
+        primaryResults = await this.musicBrainz.searchArtist(searchName);
+        allSearchResults.push(...primaryResults);
+      } catch (error) {
+        console.warn(`MusicBrainz artist search failed for "${searchName}"`, error.message);
+      }
+
+      if (primaryResults.length === 0) {
+        try {
+          // Preserve field-specific fallbacks for unusual names without tripling normal traffic.
+          const aliasResults = await this.musicBrainz.searchArtistByAlias(searchName);
+          allSearchResults.push(...aliasResults);
+        } catch (error) {
+          console.warn(`MusicBrainz artist alias search failed for "${searchName}"`, error.message);
+        }
+
+        try {
+          const sortNameResults = await this.musicBrainz.searchArtistBySortName(searchName);
+          allSearchResults.push(...sortNameResults);
+        } catch (error) {
+          console.warn(`MusicBrainz artist sort name search failed for "${searchName}"`, error.message);
+        }
+      }
     }
     
     // Deduplicate results
@@ -373,10 +391,54 @@ class IdentificationService {
   }
 
   /**
+   * Apply a candidate's MusicBrainz metadata to the album/artist and its tracks, persisting it
+   * @param {number} candidateId - Candidate ID to apply
+   * @param {Object} [preloadedMetadata] - Metadata already fetched (e.g. during accept) to avoid
+   *   re-hitting the rate-limited MusicBrainz API
+   * @param {Array<{localTrackKey: string, recordingId: string}>} [trackMatchOverrides] - manual
+   *   track pairings chosen by the user, applied before the automatic per-track matching
+   * @returns {Promise<Object>} Updated entity
+   */
+  async applyIdentification(candidateId, preloadedMetadata = null, trackMatchOverrides = []) {
+    const candidate = await this.prisma.identificationCandidate.findUnique({
+      where: { id: candidateId }
+    });
+
+    if (!candidate) {
+      throw new Error(`Candidate not found: ${candidateId}`);
+    }
+
+    let updatedEntity;
+    if (candidate.entityType === 'album') {
+      const fullMetadata = preloadedMetadata || await this.musicBrainz.getRelease(candidate.musicBrainzId);
+      updatedEntity = await this.applyAlbumMetadata(candidate.entityKey, fullMetadata, trackMatchOverrides);
+    } else if (candidate.entityType === 'artist') {
+      const fullMetadata = preloadedMetadata || await this.musicBrainz.getArtist(candidate.musicBrainzId);
+      updatedEntity = await this.applyArtistMetadata(candidate.entityKey, fullMetadata);
+    } else {
+      throw new Error(`Unsupported entity type: ${candidate.entityType}`);
+    }
+
+    await this.prisma.identificationCandidate.update({
+      where: { id: candidateId },
+      data: { status: 'accepted' }
+    });
+
+    return {
+      success: true,
+      entityType: candidate.entityType,
+      entityKey: candidate.entityKey,
+      data: updatedEntity
+    };
+  }
+
+  /**
    * Apply MusicBrainz metadata to album
    * @private
    */
-  async applyAlbumMetadata(ratingKey, metadata) {
+  async applyAlbumMetadata(ratingKey, metadata, trackMatchOverrides = []) {
+    this.artistResolutionCache.clear();
+
     const album = await this.prisma.plexAlbum.findUnique({
       where: { ratingKey },
       include: {
@@ -456,7 +518,7 @@ class IdentificationService {
       data: updateData
     });
 
-    await this.applyReleaseTrackMetadata(album, metadata);
+    await this.applyReleaseTrackMetadata(album, metadata, trackMatchOverrides);
 
     // Auto-merge albums with the same MusicBrainz ID
     await this.autoMergeAlbumsByMusicBrainzId(metadata.id);
@@ -672,23 +734,26 @@ class IdentificationService {
     }
   }
 
-  async applyReleaseTrackMetadata(album, metadata) {
+  async applyReleaseTrackMetadata(album, metadata, trackMatchOverrides = []) {
     const releaseTracks = this.flattenReleaseTracks(metadata);
 
     if (releaseTracks.length === 0 || album.tracks.length === 0) {
       return;
     }
 
-    const matchedTracks = this.matchLocalTracksToReleaseTracks(album.tracks, releaseTracks);
+    const overridesByLocalKey = {};
+    for (const override of (Array.isArray(trackMatchOverrides) ? trackMatchOverrides : [])) {
+      if (override?.localTrackKey && override?.recordingId) {
+        overridesByLocalKey[override.localTrackKey] = override.recordingId;
+      }
+    }
+
+    const matchedTracks = this.matchLocalTracksToReleaseTracks(album.tracks, releaseTracks, overridesByLocalKey);
 
     const matchedTrackContexts = [];
-    let albumHasExplicitWorkRelation = false;
 
     for (const { localTrack, releaseTrack } of matchedTracks) {
       const trackWorkContext = await this.resolveTrackWorkContext(releaseTrack);
-      if (trackWorkContext.workRelation) {
-        albumHasExplicitWorkRelation = true;
-      }
 
       matchedTrackContexts.push({
         localTrack,
@@ -698,10 +763,7 @@ class IdentificationService {
     }
 
     for (const { localTrack, releaseTrack, trackWorkContext } of matchedTrackContexts) {
-      await this.applyTrackMetadata(localTrack, releaseTrack, {
-        ...trackWorkContext,
-        allowFallbackSingleTrackWork: albumHasExplicitWorkRelation,
-      });
+      await this.applyTrackMetadata(localTrack, releaseTrack, trackWorkContext);
     }
   }
 
@@ -717,12 +779,39 @@ class IdentificationService {
     })));
   }
 
-  matchLocalTracksToReleaseTracks(localTracks, releaseTracks) {
+  matchLocalTracksToReleaseTracks(localTracks, releaseTracks, overridesByLocalKey = {}) {
     const matchedLocalTrackKeys = new Set();
+    const usedReleaseTracks = new Set();
     const matches = [];
+
+    // Manual overrides take priority: reserve both sides before automatic matching runs.
+    for (const localTrack of localTracks) {
+      const overrideRecordingId = overridesByLocalKey[localTrack.ratingKey];
+      if (!overrideRecordingId) {
+        continue;
+      }
+
+      const releaseTrack = releaseTracks.find((candidate) => {
+        if (usedReleaseTracks.has(candidate)) {
+          return false;
+        }
+        const candidateId = candidate?.recording?.id || candidate?.id || null;
+        return candidateId === overrideRecordingId;
+      });
+
+      if (releaseTrack) {
+        matchedLocalTrackKeys.add(localTrack.ratingKey);
+        usedReleaseTracks.add(releaseTrack);
+        matches.push({ localTrack, releaseTrack });
+      }
+    }
 
     for (let position = 0; position < releaseTracks.length; position += 1) {
       const releaseTrack = releaseTracks[position];
+      if (usedReleaseTracks.has(releaseTrack)) {
+        continue;
+      }
+
       const releaseIndex = Number.parseInt(releaseTrack.number || releaseTrack.position, 10);
       const releaseTrackId = releaseTrack?.recording?.id || releaseTrack?.id || null;
       const releaseHasTrackId = Boolean(releaseTrackId);
@@ -764,6 +853,7 @@ class IdentificationService {
       }
 
       matchedLocalTrackKeys.add(localTrack.ratingKey);
+      usedReleaseTracks.add(releaseTrack);
       matches.push({ localTrack, releaseTrack });
     }
 
@@ -776,7 +866,10 @@ class IdentificationService {
 
     if (!workRelation && recording?.id) {
       try {
-        recording = await this.musicBrainz.getRecordingDetails(recording.id);
+        // The release fetch requests recording-level-rels/work-level-rels so this fallback should
+        // rarely trigger. Keep a couple of retries (not the default 3) so a transient 503 doesn't
+        // lose classical work/composer data, without letting a bad run of tracks stall for minutes.
+        recording = await this.musicBrainz.getRecordingDetails(recording.id, 2);
         workRelation = this.findTrackWorkRelation(recording);
       } catch (error) {
         console.warn(`MusicBrainz recording detail lookup failed for ${recording.id}`, error.message);
@@ -789,41 +882,10 @@ class IdentificationService {
     };
   }
 
-  async createFallbackSingleTrackWorkImport(localTrack, releaseTrack, recording, fallbackComposerKey) {
-    const inferredWorkTitle = recording?.title || releaseTrack?.title || localTrack?.title || null;
-
-    if (!inferredWorkTitle) {
-      return null;
-    }
-
-    const effectiveComposerKey = fallbackComposerKey || await this.ensureFallbackComposerArtistKey();
-    const workRecord = await this.ensureWorkRecord({ title: inferredWorkTitle }, effectiveComposerKey);
-
-    if (!workRecord) {
-      return null;
-    }
-
-    const partOrder = Number.parseInt(
-      releaseTrack?.number || releaseTrack?.position || localTrack?.index || 1,
-      10
-    );
-    const workPart = await this.ensureWorkPartRecord(
-      workRecord.id,
-      inferredWorkTitle,
-      Number.isInteger(partOrder) ? partOrder : 1
-    );
-
-    return {
-      workId: workRecord.id,
-      workPartId: workPart?.id || null,
-    };
-  }
-
   async applyTrackMetadata(localTrack, releaseTrack, options = {}) {
     const {
       recording: resolvedRecording = null,
       workRelation: resolvedWorkRelation = null,
-      allowFallbackSingleTrackWork = false,
     } = options;
     const recording = resolvedRecording || releaseTrack?.recording || null;
     const workRelation = resolvedWorkRelation || this.findTrackWorkRelation(recording);
@@ -840,12 +902,8 @@ class IdentificationService {
       }
     }
 
-    const shouldCreateFallbackSingleTrackWork = allowFallbackSingleTrackWork || (
-      composerArtist?.ratingKey
-      && localTrack.grandparentRatingKey
-      && composerArtist.ratingKey === localTrack.grandparentRatingKey
-    );
-
+    // Only link a track to a work when MusicBrainz actually provided a recording->work
+    // relation. Never synthesize a work from the track's own title.
     const workImport = workRelation
       ? await this.importWorkHierarchy(
           workRelation.work,
@@ -854,13 +912,6 @@ class IdentificationService {
           releaseTrack?.title || recording?.title || localTrack?.title || null,
           releaseTrack?.number || releaseTrack?.position || localTrack?.index || null
         )
-      : shouldCreateFallbackSingleTrackWork
-        ? await this.createFallbackSingleTrackWorkImport(
-            localTrack,
-            releaseTrack,
-            recording,
-            fallbackComposerKey
-          )
       : null;
     const composerNames = this.extractComposerNames(workRelation?.work);
 
@@ -1312,6 +1363,13 @@ class IdentificationService {
       return null;
     }
 
+    // The same composer/conductor/ensemble is usually referenced by every track on a release,
+    // so cache the resolved record per MusicBrainz ID to avoid a network + DB round trip per track.
+    const cacheKey = artist.id || null;
+    if (cacheKey && this.artistResolutionCache.has(cacheKey)) {
+      return this.artistResolutionCache.get(cacheKey);
+    }
+
     let resolvedArtist = artist;
     const rawName = String(artist.name || '').trim();
     const nameLooksNonLatin = /[\u0400-\u04FF\u0370-\u03FF\u0600-\u06FF\u3040-\u30FF\u4E00-\u9FFF]/.test(rawName);
@@ -1321,7 +1379,9 @@ class IdentificationService {
     // Pull full artist details in those cases so locale/primary alias ranking can run.
     if (artist.id && (nameLooksNonLatin || !hasAliasesInPayload)) {
       try {
-        const fullArtist = await this.musicBrainz.getArtist(artist.id);
+        // Bounded retries: this can be called for many distinct contributors on a classical
+        // release, so don't let the default retry/backoff policy multiply into a long stall.
+        const fullArtist = await this.musicBrainz.getArtist(artist.id, 2);
         if (fullArtist?.name) {
           resolvedArtist = {
             ...artist,
@@ -1377,23 +1437,30 @@ class IdentificationService {
       );
     }
 
+    let resolvedResult;
     if (existingArtist) {
-      return await this.prisma.plexArtist.update({
+      resolvedResult = await this.prisma.plexArtist.update({
         where: { ratingKey: existingArtist.ratingKey },
         data: artistData
       });
+    } else {
+      const syntheticKeySource = preferredName || resolvedArtist.name || artist.name;
+      const syntheticKey = resolvedArtist.id ? `mb-artist:${resolvedArtist.id}` : `mb-artist:${syntheticKeySource.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`;
+
+      resolvedResult = await this.prisma.plexArtist.create({
+        data: {
+          ratingKey: syntheticKey,
+          key: `/library/metadata/${syntheticKey}`,
+          ...artistData
+        }
+      });
     }
 
-    const syntheticKeySource = preferredName || resolvedArtist.name || artist.name;
-    const syntheticKey = resolvedArtist.id ? `mb-artist:${resolvedArtist.id}` : `mb-artist:${syntheticKeySource.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`;
+    if (cacheKey) {
+      this.artistResolutionCache.set(cacheKey, resolvedResult);
+    }
 
-    return await this.prisma.plexArtist.create({
-      data: {
-        ratingKey: syntheticKey,
-        key: `/library/metadata/${syntheticKey}`,
-        ...artistData
-      }
-    });
+    return resolvedResult;
   }
 
   async ensureTrackArtistAssignment(trackKey, artistKey, typeName) {
