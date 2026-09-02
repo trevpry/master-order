@@ -802,6 +802,20 @@ async function extractAlbumFileMetadataByRatingKey(ratingKey) {
         }
       }
 
+      if (discPosition.no !== null && discPosition.no !== undefined) {
+        const parsedDiscNumber = parseInt(discPosition.no, 10);
+        if (!Number.isNaN(parsedDiscNumber)) {
+          trackUpdates.discNumber = parsedDiscNumber;
+        }
+      }
+
+      if (discPosition.of !== null && discPosition.of !== undefined) {
+        const parsedDiscTotal = parseInt(discPosition.of, 10);
+        if (!Number.isNaN(parsedDiscTotal)) {
+          trackUpdates.discTotal = parsedDiscTotal;
+        }
+      }
+
       if (metadata.common.musicbrainz_recordingid) {
         const recordingId = Array.isArray(metadata.common.musicbrainz_recordingid)
           ? metadata.common.musicbrainz_recordingid[0]

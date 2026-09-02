@@ -1061,6 +1061,8 @@ model PlexTrack {
   identificationStatus String?  @default("unidentified")
   identificationConfidence Float?
   lastIdentificationAttempt DateTime?
+  discNumber           Int?
+  discTotal            Int?
   album                PlexAlbum?          @relation(fields: [parentRatingKey], references: [ratingKey])
   librarySection       PlexLibrarySection? @relation(fields: [librarySectionID], references: [id])
   work                 Work?               @relation(fields: [workId], references: [id], onDelete: SetNull)

@@ -22,6 +22,46 @@ const getRelationWorkTitle = (entity) => {
   return preferred?.work?.title || null;
 };
 
+/**
+ * Best-effort disc number for a local track: the synced Plex value, else the disc encoded in the
+ * file path/name for libraries that were synced before disc numbers were stored.
+ */
+export const inferLocalDiscNumber = (track) => {
+  const extractedDisc = Number.isInteger(track?.discNumber) ? track.discNumber : null;
+  if (extractedDisc) {
+    return extractedDisc;
+  }
+
+  const directDisc = Number.isInteger(track?.parentIndex) ? track.parentIndex : null;
+  if (directDisc) {
+    return directDisc;
+  }
+
+  const filePath = String(track?.file || '').trim();
+  if (!filePath) {
+    return null;
+  }
+
+  const folderDiscMatch = filePath.match(/[\\/](?:disc|cd)\s*(\d{1,2})[\\/]/i);
+  if (folderDiscMatch) {
+    const parsed = Number.parseInt(folderDiscMatch[1], 10);
+    if (Number.isInteger(parsed)) {
+      return parsed;
+    }
+  }
+
+  const filename = filePath.split(/[\\/]/).pop() || '';
+  const filenameDiscMatch = filename.match(/^(\d{1,2})\s*[-._]\s*\d{1,3}\b/);
+  if (filenameDiscMatch) {
+    const parsed = Number.parseInt(filenameDiscMatch[1], 10);
+    if (Number.isInteger(parsed)) {
+      return parsed;
+    }
+  }
+
+  return null;
+};
+
 export const flattenReleaseTracks = (releaseDetails) => {
   return (releaseDetails?.media || []).flatMap((medium, mediumIndex) => {
     const discNumber = medium?.position || mediumIndex + 1;
@@ -53,58 +93,68 @@ export const buildTrackPreview = (albumTracks, releaseDetails, manualMatchesByLo
     return { rows: [], unmatchedRemoteTracks: [] };
   }
 
-  const local = [...(albumTracks || [])].sort((left, right) => (left.index || 0) - (right.index || 0));
-  const remote = flattenReleaseTracks(releaseDetails);
-  const usedRemoteTrackKeys = new Set();
-
   const getTrackNumber = (track) => {
-    const value = track?.index ?? track?.trackNumber ?? null;
+    const value = track?.trackNumber ?? track?.index ?? null;
     const parsed = Number.parseInt(value, 10);
     return Number.isInteger(parsed) ? parsed : null;
   };
 
+  const getDiscNumber = (track) => (
+    Number.isInteger(track?.discNumber) ? track.discNumber : inferLocalDiscNumber(track)
+  );
+
+  const local = [...(albumTracks || [])].sort((left, right) => {
+    const discDelta = (getDiscNumber(left) || Number.MAX_SAFE_INTEGER) - (getDiscNumber(right) || Number.MAX_SAFE_INTEGER);
+    if (discDelta !== 0) {
+      return discDelta;
+    }
+    return (getTrackNumber(left) || 0) - (getTrackNumber(right) || 0);
+  });
+  const remote = flattenReleaseTracks(releaseDetails);
+  const usedRemoteTrackKeys = new Set();
+
+  // Discs only disqualify a pairing when both sides know their disc, so single-disc releases and
+  // libraries synced before disc numbers existed still match on track number alone.
+  const discsAreCompatible = (localTrack, remoteTrack) => {
+    const localDisc = getDiscNumber(localTrack);
+    const remoteDisc = getDiscNumber(remoteTrack);
+    if (localDisc === null || remoteDisc === null) {
+      return true;
+    }
+    return localDisc === remoteDisc;
+  };
+
   const getTrackId = (track) => track?.musicBrainzTrackId || track?.recordingId || null;
 
-  const findStrictMatch = (localTrack) => {
+  // Mirrors the server's matchLocalTracksToReleaseTracks so the preview shows exactly what will
+  // be applied: recording IDs win when both sides have one, otherwise pair on disc + track number.
+  const isCompatible = (localTrack, remoteTrack) => {
+    if (!discsAreCompatible(localTrack, remoteTrack)) {
+      return false;
+    }
+
     const localTrackNumber = getTrackNumber(localTrack);
+    const remoteTrackNumber = getTrackNumber(remoteTrack);
+    const numbersMatch = localTrackNumber !== null
+      && remoteTrackNumber !== null
+      && localTrackNumber === remoteTrackNumber;
+
     const localTrackId = getTrackId(localTrack);
+    const remoteTrackId = getTrackId(remoteTrack);
 
-    if (localTrackId) {
-      return remote.find((remoteTrack) => {
-        if (usedRemoteTrackKeys.has(remoteTrack._previewKey)) {
-          return false;
-        }
-
-        const remoteTrackId = getTrackId(remoteTrack);
-        if (!remoteTrackId || remoteTrackId !== localTrackId) {
-          return false;
-        }
-
-        const remoteTrackNumber = getTrackNumber(remoteTrack);
-        if (localTrackNumber !== null && remoteTrackNumber !== null) {
-          return remoteTrackNumber === localTrackNumber;
-        }
-
-        return true;
-      }) || null;
-    }
-
-    if (localTrackNumber === null) {
-      return null;
-    }
-
-    return remote.find((remoteTrack) => {
-      if (usedRemoteTrackKeys.has(remoteTrack._previewKey)) {
+    if (localTrackId && remoteTrackId) {
+      if (localTrackId !== remoteTrackId) {
         return false;
       }
+      return localTrackNumber === null || remoteTrackNumber === null || numbersMatch;
+    }
 
-      if (getTrackId(remoteTrack)) {
-        return false;
-      }
-
-      return getTrackNumber(remoteTrack) === localTrackNumber;
-    }) || null;
+    return numbersMatch;
   };
+
+  const findStrictMatch = (localTrack) => remote.find((remoteTrack) => (
+    !usedRemoteTrackKeys.has(remoteTrack._previewKey) && isCompatible(localTrack, remoteTrack)
+  )) || null;
 
   // Reserve manual matches first so the automatic matching pass below can't steal a remote
   // track the user has already manually assigned to a different local track.
@@ -136,8 +186,12 @@ export const buildTrackPreview = (albumTracks, releaseDetails, manualMatchesByLo
         changes.push('Manually matched');
       }
 
-      if ((localTrack.index || null) !== (remoteTrack.trackNumber || null)) {
-        changes.push(`Track # ${localTrack.index || '—'} -> ${remoteTrack.trackNumber || '—'}`);
+      if (getDiscNumber(localTrack) !== remoteTrack.discNumber) {
+        changes.push(`Disc # ${getDiscNumber(localTrack) || '—'} -> ${remoteTrack.discNumber || '—'}`);
+      }
+
+      if (getTrackNumber(localTrack) !== (remoteTrack.trackNumber || null)) {
+        changes.push(`Track # ${getTrackNumber(localTrack) || '—'} -> ${remoteTrack.trackNumber || '—'}`);
       }
 
       if ((localTrack.title || '') !== (remoteTrack.title || '')) {

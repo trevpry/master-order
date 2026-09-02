@@ -2181,7 +2181,8 @@ router.get('/playlist/:playlistName/random-track', async (req, res) => {
         // Additional metadata from Plex
         year: plexTrackMetadata?.year,
         index: plexTrackMetadata?.index, // Track number
-        parentIndex: plexTrackMetadata?.parentIndex, // Disc number
+        discNumber: randomTrack.discNumber || plexTrackMetadata?.parentIndex, // Disc number
+        discTotal: randomTrack.discTotal || plexTrackMetadata?.parentCount, // Disc total
         rating: plexTrackMetadata?.rating
       };
     } else {
@@ -2200,7 +2201,8 @@ router.get('/playlist/:playlistName/random-track', async (req, res) => {
         // Additional metadata from Plex
         year: plexTrackMetadata?.year,
         index: plexTrackMetadata?.index, // Track number
-        parentIndex: plexTrackMetadata?.parentIndex, // Disc number
+        discNumber: randomTrack.discNumber || plexTrackMetadata?.parentIndex, // Disc number
+        discTotal: randomTrack.discTotal || plexTrackMetadata?.parentCount, // Disc total
         rating: plexTrackMetadata?.rating
       };
     }

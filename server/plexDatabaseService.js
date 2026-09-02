@@ -1470,7 +1470,10 @@ class PlexDatabaseService {
             }
           }
         },
-        orderBy: { index: 'asc' }
+        orderBy: [
+          { discNumber: 'asc' },
+          { index: 'asc' }
+        ]
       });
     } catch (error) {
       console.error('Error fetching tracks by album:', error);

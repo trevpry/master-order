@@ -2001,36 +2001,61 @@ class PlexSyncService {
 
       const existingTracks = await prisma.plexTrack.findMany({
         where: { ratingKey: { in: tracks.map(track => track.ratingKey) } },
-        select: { ratingKey: true }
+        select: { ratingKey: true, discNumber: true, discTotal: true }
       });
-      const existingTrackKeys = new Set(existingTracks.map(track => track.ratingKey));
+      const existingTrackMap = new Map(existingTracks.map(track => [track.ratingKey, track]));
       const newTrackRows = [];
+      const updateTrackData = [];
 
       for (const track of tracks) {
-        if (existingTrackKeys.has(track.ratingKey)) {
-          continue;
-        }
+        const existingTrack = existingTrackMap.get(track.ratingKey);
+        const shouldUpdateDiscInfo = existingTrack && 
+          (track.parentIndex || track.parentCount) && 
+          (existingTrack.discNumber !== parseInt(track.parentIndex) || 
+           existingTrack.discTotal !== parseInt(track.parentCount));
 
-        newTrackRows.push({
-          ratingKey: track.ratingKey,
-          key: track.key,
-          parentRatingKey: track.parentRatingKey || albumRatingKey,
-          grandparentRatingKey: track.grandparentRatingKey || null,
-          guid: track.guid || null,
-          type: track.type || 'track',
-          title: track.title,
-          titleSort: track.titleSort || null,
-          summary: track.summary || null,
-          index: track.index ? parseInt(track.index) : null,
-          duration: track.duration ? parseInt(track.duration) : null,
-          thumb: track.thumb || null,
-          art: track.art || null,
-          parentThumb: track.parentThumb || null,
-          grandparentThumb: track.grandparentThumb || null,
-          addedAt: track.addedAt ? new Date(parseInt(track.addedAt) * 1000) : null,
-          updatedAt: track.updatedAt ? new Date(parseInt(track.updatedAt) * 1000) : null,
-          librarySectionID: section.id
-        });
+        if (existingTrack && shouldUpdateDiscInfo) {
+          updateTrackData.push({
+            ratingKey: track.ratingKey,
+            discNumber: track.parentIndex ? parseInt(track.parentIndex) : null,
+            discTotal: track.parentCount ? parseInt(track.parentCount) : null
+          });
+        } else if (!existingTrack) {
+          newTrackRows.push({
+            ratingKey: track.ratingKey,
+            key: track.key,
+            parentRatingKey: track.parentRatingKey || albumRatingKey,
+            grandparentRatingKey: track.grandparentRatingKey || null,
+            guid: track.guid || null,
+            type: track.type || 'track',
+            title: track.title,
+            titleSort: track.titleSort || null,
+            summary: track.summary || null,
+            index: track.index ? parseInt(track.index) : null,
+            duration: track.duration ? parseInt(track.duration) : null,
+            thumb: track.thumb || null,
+            art: track.art || null,
+            parentThumb: track.parentThumb || null,
+            grandparentThumb: track.grandparentThumb || null,
+            addedAt: track.addedAt ? new Date(parseInt(track.addedAt) * 1000) : null,
+            updatedAt: track.updatedAt ? new Date(parseInt(track.updatedAt) * 1000) : null,
+            librarySectionID: section.id,
+            discNumber: track.parentIndex ? parseInt(track.parentIndex) : null,
+            discTotal: track.parentCount ? parseInt(track.parentCount) : null
+          });
+        }
+      }
+
+      // Update existing tracks with disc info
+      for (const update of updateTrackData) {
+        try {
+          await prisma.plexTrack.update({
+            where: { ratingKey: update.ratingKey },
+            data: { discNumber: update.discNumber, discTotal: update.discTotal }
+          });
+        } catch (error) {
+          console.error(`Error updating disc info for track ${update.ratingKey}:`, error.message);
+        }
       }
 
       if (newTrackRows.length > 0) {
@@ -2043,7 +2068,7 @@ class PlexSyncService {
         }
       }
 
-      console.log(`✅ Tracks for album ${albumRatingKey}: ${newTrackRows.length} added, ${existingTrackKeys.size} skipped (already exist)`);
+      console.log(`✅ Tracks for album ${albumRatingKey}: ${newTrackRows.length} added, ${updateTrackData.length} updated, ${existingTracks.length} skipped (already exist)`);
     } catch (error) {
       console.error('Error syncing tracks:', error);
       throw error;

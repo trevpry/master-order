@@ -1,6 +1,6 @@
 const { PrismaClient } = require('@prisma/client');
 const MusicBrainzService = require('./musicBrainzService');
-const { getPreferredMusicBrainzArtistName } = require('../utils/musicBrainzNames');
+const { getPreferredMusicBrainzArtistName, unsortMusicBrainzName } = require('../utils/musicBrainzNames');
 
 /**
  * IdentificationService
@@ -117,11 +117,21 @@ class IdentificationService {
     }
 
     if (candidates.length === 0) {
-      // Search MusicBrainz when no stored MusicBrainz album ID is available or lookup fails
-      const searchResults = await this.musicBrainz.searchRelease(
-        album.title,
-        album.artist?.title
-      );
+      // Plex stores many artists (especially classical) as sort names like "Scarlatti, Alessandro",
+      // which never match MusicBrainz's fielded artist search, so try the unsorted form and finally
+      // a title-only search before giving up.
+      const artistTitle = album.artist?.title?.trim() || null;
+      const artistVariants = [...new Set([artistTitle, unsortMusicBrainzName(artistTitle), null])]
+        .filter((name) => name === null || Boolean(name));
+
+      let searchResults = [];
+      for (const artistName of artistVariants) {
+        searchResults = await this.musicBrainz.searchRelease(album.title, artistName);
+
+        if (searchResults.length > 0) {
+          break;
+        }
+      }
 
       // Calculate confidence scores and store candidates
       for (const result of searchResults.slice(0, 10)) { // Top 10 matches
@@ -445,6 +455,7 @@ class IdentificationService {
         artist: true,
         tracks: {
           orderBy: [
+            { discNumber: 'asc' },
             { index: 'asc' },
             { ratingKey: 'asc' }
           ]
@@ -772,11 +783,17 @@ class IdentificationService {
       return [];
     }
 
-    return metadata.media.flatMap(medium => (medium?.tracks || []).map(track => ({
-      ...track,
-      mediaTitle: medium?.title || null,
-      mediaPosition: medium?.position || null
-    })));
+    return metadata.media.flatMap((medium, mediumIndex) => {
+      const discNumber = Number.parseInt(medium?.position, 10);
+
+      return (medium?.tracks || []).map(track => ({
+        ...track,
+        mediaTitle: medium?.title || null,
+        mediaPosition: medium?.position || null,
+        discNumber: Number.isInteger(discNumber) ? discNumber : mediumIndex + 1,
+        discTotal: metadata.media.length
+      }));
+    });
   }
 
   matchLocalTracksToReleaseTracks(localTracks, releaseTracks, overridesByLocalKey = {}) {
@@ -816,9 +833,17 @@ class IdentificationService {
       const releaseTrackId = releaseTrack?.recording?.id || releaseTrack?.id || null;
       const releaseHasTrackId = Boolean(releaseTrackId);
       const releaseHasTrackNumber = Number.isInteger(releaseIndex);
+      const releaseDisc = Number.isInteger(releaseTrack.discNumber) ? releaseTrack.discNumber : null;
 
       const localTrack = localTracks.find(track => {
         if (matchedLocalTrackKeys.has(track.ratingKey)) {
+          return false;
+        }
+
+        // A disc mismatch only disqualifies a pairing when both sides know their disc, so
+        // single-disc releases and tracks synced without a disc number still match on number alone.
+        const localDisc = Number.isInteger(track.discNumber) ? track.discNumber : null;
+        if (localDisc !== null && releaseDisc !== null && localDisc !== releaseDisc) {
           return false;
         }
 
@@ -923,6 +948,25 @@ class IdentificationService {
       userComposer: composerNames.length > 0 ? composerNames.join(', ') : null,
       workId: workImport?.workId || null
     };
+
+    const releaseTitle = releaseTrack?.title || recording?.title || null;
+    if (releaseTitle) {
+      trackUpdateData.title = releaseTitle;
+      trackUpdateData.titleSort = releaseTitle;
+    }
+
+    const releaseTrackNumber = Number.parseInt(releaseTrack?.number ?? releaseTrack?.position, 10);
+    if (Number.isInteger(releaseTrackNumber)) {
+      trackUpdateData.index = releaseTrackNumber;
+    }
+
+    if (Number.isInteger(releaseTrack?.discNumber)) {
+      trackUpdateData.discNumber = releaseTrack.discNumber;
+    }
+
+    if (Number.isInteger(releaseTrack?.discTotal)) {
+      trackUpdateData.discTotal = releaseTrack.discTotal;
+    }
 
     await this.prisma.plexTrack.update({
       where: { ratingKey: localTrack.ratingKey },
@@ -1717,10 +1761,15 @@ class IdentificationService {
     confidence += titleSimilarity * 40;
 
     // Artist match (30 points)
-    if (localAlbum.artist && mbResult['artist-credit']?.[0]?.name) {
-      const artistSimilarity = this.stringSimilarity(
-        this.normalizeString(localAlbum.artist.title),
-        this.normalizeString(mbResult['artist-credit'][0].name)
+    const mbArtistName = mbResult['artist-credit']?.[0]?.name;
+    let artistSimilarity = 0;
+    if (localAlbum.artist?.title && mbArtistName) {
+      const normalizedMbArtist = this.normalizeString(mbArtistName);
+      // Compare against the unsorted form too, since Plex stores "Family, Given" sort names.
+      artistSimilarity = Math.max(
+        ...[localAlbum.artist.title, unsortMusicBrainzName(localAlbum.artist.title)]
+          .filter(Boolean)
+          .map((name) => this.stringSimilarity(this.normalizeString(name), normalizedMbArtist))
       );
       confidence += artistSimilarity * 30;
     }
@@ -1746,14 +1795,8 @@ class IdentificationService {
     }
 
     // Exact title + artist match bonus (5 points)
-    if (titleSimilarity > 0.95 && localAlbum.artist && mbResult['artist-credit']?.[0]?.name) {
-      const artistSimilarity = this.stringSimilarity(
-        this.normalizeString(localAlbum.artist.title),
-        this.normalizeString(mbResult['artist-credit'][0].name)
-      );
-      if (artistSimilarity > 0.95) {
-        confidence += 5;
-      }
+    if (titleSimilarity > 0.95 && artistSimilarity > 0.95) {
+      confidence += 5;
     }
 
     return Math.min(confidence / 100, 1.0); // Normalize to 0-1

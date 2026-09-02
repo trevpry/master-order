@@ -5,7 +5,7 @@ import StarRating from '../../../../../components/StarRating';
 import IdentifyModal from '../../../../../components/IdentifyModal';
 import MetadataEditor from '../../../../../components/MetadataEditor';
 import EmbeddedPicardTagsPanel from './EmbeddedPicardTagsPanel';
-import { buildTrackPreview } from '../../../../../utils/musicBrainzTrackMatch';
+import { buildTrackPreview, inferLocalDiscNumber } from '../../../../../utils/musicBrainzTrackMatch';
 import './AlbumDetail.css';
 
 const AlbumDetail = ({
@@ -526,41 +526,7 @@ const AlbumDetail = ({
     };
   }, [discogsPreview, discogsTrackMatches, discogsExcludedCreditKeys]);
 
-  const inferDiscNumberFromTrack = (track) => {
-    const extractedDisc = Number.isInteger(track?.discNumber) ? track.discNumber : null;
-    if (extractedDisc) {
-      return extractedDisc;
-    }
-
-    const directDisc = Number.isInteger(track?.parentIndex) ? track.parentIndex : null;
-    if (directDisc) {
-      return directDisc;
-    }
-
-    const filePath = String(track?.file || '').trim();
-    if (!filePath) {
-      return null;
-    }
-
-    const folderDiscMatch = filePath.match(/[\\/](?:disc|cd)\s*(\d{1,2})[\\/]/i);
-    if (folderDiscMatch) {
-      const parsed = parseInt(folderDiscMatch[1], 10);
-      if (!Number.isNaN(parsed)) {
-        return parsed;
-      }
-    }
-
-    const filename = filePath.split(/[\\/]/).pop() || '';
-    const filenameDiscMatch = filename.match(/^(\d{1,2})\s*[-._]\s*\d{1,3}\b/);
-    if (filenameDiscMatch) {
-      const parsed = parseInt(filenameDiscMatch[1], 10);
-      if (!Number.isNaN(parsed)) {
-        return parsed;
-      }
-    }
-
-    return null;
-  };
+  const inferDiscNumberFromTrack = inferLocalDiscNumber;
 
   const formatTrackNumberLabel = (track, fallbackIndex) => {
     const trackNumber = Number.isInteger(track?.trackNumber)

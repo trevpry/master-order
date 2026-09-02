@@ -48,18 +48,23 @@ const IdentifyModal = ({
   const searchMusicBrainz = async () => {
     setLoading(true);
     setError(null);
+
+    const requestUrl = `/api/identification/${entityType}/${entityKey}`;
+    const requestBody = { plexUrl: config.plexUrl, plexToken: config.plexToken };
+    console.log('[IdentifyModal] Sending identification request:', { url: requestUrl, body: requestBody, entityType, entityKey, entityTitle });
     
     try {
       const response = await fetch(
-        `/api/identification/${entityType}/${entityKey}`,
+        requestUrl,
         { 
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ plexUrl: config.plexUrl, plexToken: config.plexToken })
+          body: JSON.stringify(requestBody)
         }
       );
       
       const data = await response.json();
+      console.log('[IdentifyModal] Identification response:', data);
       
       if (data.success) {
         setCandidates(data.data.candidates);
