@@ -1195,6 +1195,7 @@ model IdentificationCandidate {
   entityType      String
   entityKey       String
   musicBrainzId   String
+  musicBrainzEntityType String @default("release")
   title           String
   artist          String?
   releaseDate     DateTime?

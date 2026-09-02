@@ -99,6 +99,7 @@ class IdentificationService {
             entityType: 'album',
             entityKey: ratingKey,
             musicBrainzId: directResult.id,
+            musicBrainzEntityType: 'release',
             title: directResult.title,
             artist: directResult['artist-credit']?.[0]?.name,
             releaseDate: directResult.date ? new Date(directResult.date) : null,
@@ -148,6 +149,7 @@ class IdentificationService {
             entityType: 'album',
             entityKey: ratingKey,
             musicBrainzId: result.id,
+            musicBrainzEntityType: 'release',
             title: result.title,
             artist: result['artist-credit']?.[0]?.name,
             releaseDate: result.date ? new Date(result.date) : null,
@@ -195,6 +197,7 @@ class IdentificationService {
                   entityType: 'album',
                   entityKey: ratingKey,
                   musicBrainzId: result.id,
+                  musicBrainzEntityType: 'recording',
                   title: result.title,
                   artist: result['artist-credit']?.[0]?.name,
                   releaseDate: result.date ? new Date(result.date) : null,
@@ -341,6 +344,7 @@ class IdentificationService {
           entityType: 'artist',
           entityKey: ratingKey,
           musicBrainzId: result.id,
+          musicBrainzEntityType: 'artist',
           title: preferredName,
           artist: null,
           releaseDate: null,
@@ -382,6 +386,10 @@ class IdentificationService {
     // Fetch full metadata from MusicBrainz
     let fullMetadata;
     if (candidate.entityType === 'album') {
+      // AcoustID matches are recordings, not releases, so there is no release to pull a tracklist from.
+      if (candidate.musicBrainzEntityType !== 'release') {
+        throw new Error(`Candidate ${candidateId} points at a MusicBrainz ${candidate.musicBrainzEntityType}, not a release`);
+      }
       fullMetadata = await this.musicBrainz.getRelease(candidate.musicBrainzId);
     } else if (candidate.entityType === 'artist') {
       fullMetadata = await this.musicBrainz.getArtist(candidate.musicBrainzId);
@@ -395,7 +403,8 @@ class IdentificationService {
         id: candidate.id,
         entityType: candidate.entityType,
         entityKey: candidate.entityKey,
-        musicBrainzId: candidate.musicBrainzId
+        musicBrainzId: candidate.musicBrainzId,
+        musicBrainzEntityType: candidate.musicBrainzEntityType
       }
     };
   }

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { X, Search, Check, AlertCircle, Music, Calendar, Disc } from 'lucide-react';
+import { X, Search, Check, AlertCircle, Music, Calendar, Disc, ExternalLink } from 'lucide-react';
 import config from '../../config';
 
 /**
@@ -305,9 +305,22 @@ const IdentifyModal = ({
                         )}
 
                         {/* MusicBrainz ID */}
-                        <p className="text-xs text-gray-600 mt-2">
-                          MusicBrainz ID: {candidate.musicBrainzId}
-                        </p>
+                        <div className="flex items-center gap-3 mt-2">
+                          <p className="text-xs text-gray-600">
+                            MusicBrainz ID: {candidate.musicBrainzId}
+                          </p>
+                          <a
+                            href={`https://musicbrainz.org/${candidate.musicBrainzEntityType || (entityType === 'album' ? 'release' : 'artist')}/${candidate.musicBrainzId}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            onClick={(event) => event.stopPropagation()}
+                            className="flex items-center gap-1 text-xs text-blue-400 hover:text-blue-300 hover:underline"
+                            title="Open on MusicBrainz in a new tab"
+                          >
+                            <ExternalLink size={12} />
+                            View on MusicBrainz
+                          </a>
+                        </div>
                       </div>
 
                       {/* MusicBrainz cover on the right */}
