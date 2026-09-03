@@ -1,4 +1,5 @@
 const { PrismaClient } = require('@prisma/client');
+const { recordDeletedPlexEntity } = require('../utils/plexDeletedEntities');
 
 /**
  * ArtistMergeService - Handles merging multiple music artists into one
@@ -86,6 +87,10 @@ class ArtistMergeService {
         await tx.plexArtist.deleteMany({
           where: { ratingKey: { in: mergeArtistKeys } }
         });
+        // Tombstone merged artists so Plex sync (add-only) never re-creates them
+        for (const merged of mergeArtists) {
+          await recordDeletedPlexEntity(tx, 'artist', merged.ratingKey, merged.title);
+        }
         console.log(`   - Deleted ${mergeArtistKeys.length} artist(s) from database`);
 
         return {

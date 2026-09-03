@@ -67,6 +67,10 @@ const AlbumDetail = ({
   const [discogsTrackMatches, setDiscogsTrackMatches] = useState([]);
   const [discogsLinkAllToAlbumWork, setDiscogsLinkAllToAlbumWork] = useState(false);
   const [discogsExcludedCreditKeys, setDiscogsExcludedCreditKeys] = useState(new Set());
+  const [discogsSearchQuery, setDiscogsSearchQuery] = useState('');
+  const [searchingDiscogs, setSearchingDiscogs] = useState(false);
+  const [discogsSearchResults, setDiscogsSearchResults] = useState([]);
+  const [showDiscogsSearchModal, setShowDiscogsSearchModal] = useState(false);
   
   // Sync local state when prop changes
   useEffect(() => {
@@ -290,6 +294,100 @@ const AlbumDetail = ({
           'Content-Type': 'application/json'
         },
         body: JSON.stringify({ url: normalizedUrl, apply: false })
+      });
+
+      const result = await response.json();
+      if (!response.ok) {
+        throw new Error(result.error || 'Failed to import Discogs metadata');
+      }
+
+      setDiscogsPreview(result?.data || null);
+      setDiscogsTrackMatches(result?.data?.mapping?.defaultTrackMappings || []);
+      setDiscogsLinkAllToAlbumWork(false);
+      setDiscogsExcludedCreditKeys(new Set());
+      setShowDiscogsPreviewModal(true);
+    } catch (error) {
+      console.error('Error importing Discogs metadata:', error);
+      alert(`Discogs import failed: ${error.message}`);
+    } finally {
+      setImportingDiscogs(false);
+    }
+  };
+
+  const handleSearchDiscogs = async () => {
+    let query = String(discogsSearchQuery || '').trim();
+    
+    // If no query provided, automatically use album title and artists
+    if (!query) {
+      const albumArtists = albumData?.albumArtists || [];
+      const albumTitle = albumData?.title || '';
+      
+      // Build search query from album title and artists
+      const artistNames = albumArtists
+        .map(a => a?.artist?.title || '')
+        .filter(name => name)
+        .slice(0, 3) // Limit to first 3 artists
+        .join(' ');
+      
+      if (artistNames && albumTitle) {
+        query = `${albumTitle} ${artistNames}`;
+      } else if (albumTitle) {
+        query = albumTitle;
+      } else {
+        alert('No album information available for search.');
+        return;
+      }
+      
+      // Show the search query in the input
+      setDiscogsSearchQuery(query);
+    }
+
+    try {
+      setSearchingDiscogs(true);
+      const response = await fetch(`${config.apiBaseUrl}/api/music/discogs-search`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ query, limit: 10 })
+      });
+
+      const result = await response.json();
+      if (!response.ok) {
+        throw new Error(result.error || 'Failed to search Discogs');
+      }
+
+      setDiscogsSearchResults(result?.data?.releases || []);
+      setShowDiscogsSearchModal(true);
+    } catch (error) {
+      console.error('Error searching Discogs:', error);
+      alert(`Discogs search failed: ${error.message}`);
+    } finally {
+      setSearchingDiscogs(false);
+    }
+  };
+
+  const closeDiscogsSearchModal = () => {
+    setShowDiscogsSearchModal(false);
+    setDiscogsSearchResults([]);
+    setDiscogsSearchQuery('');
+  };
+
+  const handleSelectDiscogsRelease = async (release) => {
+    // Set the release URL and trigger import
+    const releaseUrl = `https://www.discogs.com/release/${release.id}`;
+    setDiscogsUrl(releaseUrl);
+    closeDiscogsSearchModal();
+    
+    // Trigger import
+    try {
+      setImportingDiscogs(true);
+      const response = await fetch(`${config.apiBaseUrl}/api/music/albums/${albumData.ratingKey}/discogs-import`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ url: releaseUrl, apply: false })
       });
 
       const result = await response.json();
@@ -972,6 +1070,15 @@ const AlbumDetail = ({
               color: '#f9fafb'
             }}
           />
+          <button
+            className="musicbrainz-search-btn"
+            onClick={handleSearchDiscogs}
+            disabled={searchingDiscogs}
+            title="Search Discogs for releases"
+            style={{ backgroundColor: '#0f766e', opacity: searchingDiscogs ? 0.7 : 1 }}
+          >
+            {searchingDiscogs ? '⏳ Searching Discogs...' : '🔍 Search Discogs'}
+          </button>
           <button
             className="musicbrainz-search-btn"
             onClick={handleImportFromDiscogs}
@@ -1796,6 +1903,77 @@ const AlbumDetail = ({
           setEditingUnmatchedRowKey(null);
         }}
       />
+
+      {/* Discogs Search Modal */}
+      {showDiscogsSearchModal && (
+        <div className="modal-overlay" onClick={closeDiscogsSearchModal}>
+          <div className="modal-content" onClick={(event) => event.stopPropagation()}>
+            <h2>Discogs Search Results</h2>
+            <div className="track-link-modal-step">
+              <input
+                type="text"
+                value={discogsSearchQuery}
+                onChange={(event) => setDiscogsSearchQuery(event.target.value)}
+                placeholder="Search query (e.g., 'Album Title Artist')"
+                style={{
+                  width: '100%',
+                  padding: '0.45rem 0.6rem',
+                  borderRadius: '0.375rem',
+                  border: '1px solid #4b5563',
+                  backgroundColor: '#111827',
+                  color: '#f9fafb',
+                  marginBottom: '0.5rem',
+                }}
+              />
+              <button
+                onClick={handleSearchDiscogs}
+                disabled={searchingDiscogs}
+                style={{ backgroundColor: '#0f766e', padding: '0.45rem 1rem', borderRadius: '0.375rem' }}
+              >
+                {searchingDiscogs ? 'Searching...' : 'Search'}
+              </button>
+            </div>
+            <div className="track-link-modal-results" style={{ maxHeight: '360px' }}>
+              {discogsSearchResults.length === 0 ? (
+                <div className="track-link-modal-hint">No results found.</div>
+              ) : (
+                discogsSearchResults.map((release, index) => (
+                  <div key={index} className="track-link-modal-result" style={{ cursor: 'pointer', display: 'block' }}>
+                    <strong>{release.title}</strong>
+                    <div className="track-link-modal-hint">
+                      Artist: {release.artist || 'Unknown'}
+                    </div>
+                    <div className="track-link-modal-hint">
+                      ID: {release.id} • Type: {release.type || 'release'}
+                    </div>
+                    <button
+                      onClick={() => handleSelectDiscogsRelease(release)}
+                      disabled={importingDiscogs}
+                      style={{
+                        marginTop: '0.25rem',
+                        padding: '0.25rem 0.5rem',
+                        backgroundColor: '#0f766e',
+                        borderRadius: '0.25rem',
+                      }}
+                    >
+                      Select this release
+                    </button>
+                  </div>
+                ))
+              )}
+            </div>
+            <div className="track-link-modal-actions">
+              <button
+                type="button"
+                className="track-link-modal-btn-cancel"
+                onClick={closeDiscogsSearchModal}
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {showDiscogsPreviewModal && (
         <div className="modal-overlay" onClick={closeDiscogsPreviewModal}>

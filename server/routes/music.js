@@ -7,6 +7,7 @@ const path = require('path');
 const fs = require('fs').promises;
 const { validateRequiredFields } = require('../middleware/validation');
 const { sendBadRequest, sendSuccess, sendServerError, asyncHandler } = require('../utils/responses');
+const { recordDeletedPlexEntity } = require('../utils/plexDeletedEntities');
 const ArtistMergeService = require('../services/artistMergeService');
 
 const prisma = require('../prismaClient'); // Use shared singleton instance
@@ -578,6 +579,7 @@ async function mergeDuplicateAlbumsForPrimaryAlbum(primaryAlbumRatingKey) {
       await tx.plexAlbum.delete({
         where: { ratingKey: duplicateAlbum.ratingKey },
       });
+      await recordDeletedPlexEntity(tx, 'album', duplicateAlbum.ratingKey, duplicateAlbum.title);
 
       mergedAlbums.push({
         ratingKey: duplicateAlbum.ratingKey,
@@ -967,8 +969,43 @@ async function buildPicardTagPayload({ entityType, entityKey, entityTitle, track
   };
 }
 
+// Helper function to fully hydrate tracks (album, artist, work part relations) for an
+// ordered list of ratingKeys. Radio queries select keys first and hydrate only the
+// selected tracks, because fetching every track with full includes can exceed the
+// Prisma engine's max result-string size on large libraries and fail with
+// "Failed to convert rust `String` into napi `string`".
+async function hydrateTracksByKeys(ratingKeys) {
+  if (ratingKeys.length === 0) return [];
+
+  const tracks = await prisma.plexTrack.findMany({
+    where: { ratingKey: { in: ratingKeys } },
+    include: {
+      album: {
+        include: {
+          artist: true
+        }
+      },
+      workPartTracks: {
+        include: {
+          workPart: {
+            include: {
+              work: true
+            }
+          }
+        }
+      }
+    }
+  });
+
+  // Preserve the order of the provided keys (the IN clause does not guarantee order)
+  const tracksByKey = new Map(tracks.map(t => [t.ratingKey, t]));
+  return ratingKeys.map(key => tracksByKey.get(key)).filter(Boolean);
+}
+
 // Helper function to get tracks filtered by unplayed albums/artists/works
 // sectionKey: the Plex sectionKey string (e.g. "6"), or null for all sections
+// Returns lightweight track stubs (ratingKey + filter fields); hydrate the selected
+// tracks with hydrateTracksByKeys() before sending them to clients.
 async function getUnplayedFilteredTracks(sectionKey, unplayedAlbums, unplayedArtists, unplayedWorks) {
   const allTracks = await prisma.plexTrack.findMany({
     where: sectionKey ? { 
@@ -985,17 +1022,16 @@ async function getUnplayedFilteredTracks(sectionKey, unplayedAlbums, unplayedArt
         { userRating: { gte: 5 } }
       ]
     },
-    include: {
-      album: {
-        include: {
-          artist: true
-        }
-      },
+    select: {
+      ratingKey: true,
+      parentRatingKey: true,
+      grandparentRatingKey: true,
+      viewCount: true,
       workPartTracks: {
-        include: {
+        select: {
           workPart: {
-            include: {
-              work: true
+            select: {
+              workId: true
             }
           }
         }
@@ -1050,7 +1086,7 @@ async function getUnplayedFilteredTracks(sectionKey, unplayedAlbums, unplayedArt
     for (const track of allTracks) {
       if (track.workPartTracks && track.workPartTracks.length > 0) {
         for (const wpt of track.workPartTracks) {
-          const workId = wpt.workPart?.work?.id || 'unknown';
+          const workId = wpt.workPart?.workId || 'unknown';
           if (!workTracks[workId]) {
             workTracks[workId] = [];
           }
@@ -1064,7 +1100,7 @@ async function getUnplayedFilteredTracks(sectionKey, unplayedAlbums, unplayedArt
     );
     filteredTracks = filteredTracks.filter(t => {
       if (!t.workPartTracks || t.workPartTracks.length === 0) return false;
-      return t.workPartTracks.some(wpt => unplayedWorkIds.includes(String(wpt.workPart?.work?.id || 'unknown')));
+      return t.workPartTracks.some(wpt => unplayedWorkIds.includes(String(wpt.workPart?.workId || 'unknown')));
     });
   }
 
@@ -1669,6 +1705,7 @@ router.delete('/artists/:ratingKey', asyncHandler(async (req, res) => {
     ]);
 
     await tx.plexArtist.delete({ where: { ratingKey } });
+    await recordDeletedPlexEntity(tx, 'artist', ratingKey, artist.title);
 
     return {
       tracksUnlinked: tracksUnlinked.count,
@@ -2775,8 +2812,8 @@ router.get('/tracks/random', asyncHandler(async (req, res) => {
 
     console.log(`Radio: Fetching ${ratedCount} rated tracks (${percent}%) and ${otherCount} other tracks`);
 
-    // Fetch rated tracks (excluding tracks rated below 5 stars)
-    const ratedTracks = await prisma.plexTrack.findMany({
+    // Fetch rated track keys (excluding tracks rated below 5 stars)
+    const ratedKeys = (await prisma.plexTrack.findMany({
       where: {
         removed: false,
         AND: [
@@ -2793,23 +2830,8 @@ router.get('/tracks/random', asyncHandler(async (req, res) => {
           }
         ]
       },
-      include: {
-        album: {
-          include: {
-            artist: true
-          }
-        },
-        workPartTracks: {
-          include: {
-            workPart: {
-              include: {
-                work: true
-              }
-            }
-          }
-        }
-      }
-    });
+      select: { ratingKey: true }
+    })).map(t => t.ratingKey);
 
     // Build where clause for other tracks (applying unplayed filters if set, exclude tracks below 5 stars)
     const otherWhereClause = {
@@ -2839,29 +2861,26 @@ router.get('/tracks/random', asyncHandler(async (req, res) => {
     }
 
     // Handle unplayed albums/artists/works filters for the "other" tracks
-    let otherTracks;
+    let otherKeys;
     if (unplayedAlbums === 'true' || unplayedArtists === 'true' || unplayedWorks === 'true') {
-      otherTracks = await getUnplayedFilteredTracks(null, unplayedAlbums === 'true', unplayedArtists === 'true', unplayedWorks === 'true');
+      otherKeys = (await getUnplayedFilteredTracks(null, unplayedAlbums === 'true', unplayedArtists === 'true', unplayedWorks === 'true')).map(t => t.ratingKey);
     } else {
-      // Fetch other tracks (exclude tracks below 5 stars)
-      otherTracks = await prisma.plexTrack.findMany({
+      // Fetch other track keys (exclude tracks below 5 stars)
+      otherKeys = (await prisma.plexTrack.findMany({
         where: otherWhereClause,
-        include: {
-          album: {
-            include: {
-              artist: true
-            }
-          }
-        }
-      });
+        select: { ratingKey: true }
+      })).map(t => t.ratingKey);
     }
 
     // Shuffle and select from each set
-    const shuffledRated = ratedTracks.sort(() => Math.random() - 0.5).slice(0, ratedCount);
-    const shuffledOther = otherTracks.sort(() => Math.random() - 0.5).slice(0, otherCount);
+    const shuffledRatedKeys = ratedKeys.sort(() => Math.random() - 0.5).slice(0, ratedCount);
+    const shuffledOtherKeys = otherKeys.sort(() => Math.random() - 0.5).slice(0, otherCount);
 
-    // Combine and shuffle the final result
-    let combinedTracks = [...shuffledRated, ...shuffledOther].sort(() => Math.random() - 0.5);
+    // Combine and shuffle the final key selection
+    const combinedKeys = [...shuffledRatedKeys, ...shuffledOtherKeys].sort(() => Math.random() - 0.5);
+
+    // Hydrate only the selected tracks with full relations
+    let combinedTracks = await hydrateTracksByKeys(combinedKeys);
 
     // Expand to complete works if requested
     if (playCompleteWork === 'true') {
@@ -2869,7 +2888,7 @@ router.get('/tracks/random', asyncHandler(async (req, res) => {
       console.log(`Expanded to ${combinedTracks.length} tracks with complete works`);
     }
 
-    console.log(`Found ${shuffledRated.length} rated tracks and ${shuffledOther.length} other tracks for radio`);
+    console.log(`Found ${shuffledRatedKeys.length} rated tracks and ${shuffledOtherKeys.length} other tracks for radio`);
     res.json({ tracks: combinedTracks });
     return;
   }
@@ -2877,15 +2896,15 @@ router.get('/tracks/random', asyncHandler(async (req, res) => {
   // Handle unplayed albums/artists/works filters
   if (unplayedAlbums === 'true' || unplayedArtists === 'true' || unplayedWorks === 'true') {
     const filteredTracks = await getUnplayedFilteredTracks(null, unplayedAlbums === 'true', unplayedArtists === 'true', unplayedWorks === 'true');
-    const shuffled = filteredTracks.sort(() => Math.random() - 0.5);
-    let selectedTracks = shuffled.slice(0, limitNum);
-    
+    const shuffledKeys = filteredTracks.map(t => t.ratingKey).sort(() => Math.random() - 0.5);
+    let selectedTracks = await hydrateTracksByKeys(shuffledKeys.slice(0, limitNum));
+
     // Expand to complete works if requested
     if (playCompleteWork === 'true') {
       selectedTracks = await expandToCompleteWorks(selectedTracks);
       console.log(`Expanded to ${selectedTracks.length} tracks with complete works`);
     }
-    
+
     console.log(`Found ${filteredTracks.length} unplayed filtered tracks for radio`);
     res.json({ tracks: selectedTracks });
     return;
@@ -2916,34 +2935,21 @@ router.get('/tracks/random', asyncHandler(async (req, res) => {
     };
   }
 
-  // Get all eligible tracks with album and artist relations
-  const allTracks = await prisma.plexTrack.findMany({
+  // Get all eligible track keys (lightweight). Full relations are hydrated only for
+  // the selected tracks, because fetching every track with includes can exceed the
+  // Prisma engine's max result-string size on large libraries.
+  const allKeys = (await prisma.plexTrack.findMany({
     where: whereClause,
-    include: {
-      album: {
-        include: {
-          artist: true
-        }
-      },
-      workPartTracks: {
-        include: {
-          workPart: {
-            include: {
-              work: true
-            }
-          }
-        }
-      }
-    }
-  });
+    select: { ratingKey: true }
+  })).map(t => t.ratingKey);
 
-  console.log(`Found ${allTracks.length} total tracks for radio`);
+  console.log(`Found ${allKeys.length} total tracks for radio`);
 
-  // Shuffle all tracks
-  const shuffled = allTracks.sort(() => Math.random() - 0.5);
-  
-  // Take only the requested limit
-  let selectedTracks = shuffled.slice(0, limitNum);
+  // Shuffle all keys
+  const shuffledKeys = allKeys.sort(() => Math.random() - 0.5);
+
+  // Take only the requested limit and hydrate full track data
+  let selectedTracks = await hydrateTracksByKeys(shuffledKeys.slice(0, limitNum));
 
   // Expand to complete works if requested
   if (playCompleteWork === 'true') {
@@ -2968,8 +2974,8 @@ router.get('/tracks/random/section/:sectionKey', asyncHandler(async (req, res) =
 
     console.log(`Radio (section ${sectionKey}): Fetching ${ratedCount} rated tracks (${percent}%) and ${otherCount} other tracks`);
 
-    // Fetch rated tracks (excluding tracks rated below 5 stars)
-    const ratedTracks = await prisma.plexTrack.findMany({
+    // Fetch rated track keys (excluding tracks rated below 5 stars)
+    const ratedKeys = (await prisma.plexTrack.findMany({
       where: {
         librarySection: { sectionKey: sectionKey },
         removed: false,
@@ -2987,23 +2993,8 @@ router.get('/tracks/random/section/:sectionKey', asyncHandler(async (req, res) =
           }
         ]
       },
-      include: {
-        album: {
-          include: {
-            artist: true
-          }
-        },
-        workPartTracks: {
-          include: {
-            workPart: {
-              include: {
-                work: true
-              }
-            }
-          }
-        }
-      }
-    });
+      select: { ratingKey: true }
+    })).map(t => t.ratingKey);
 
     // Build where clause for other tracks (applying unplayed filters if set, exclude tracks below 5 stars)
     const otherWhereClause = {
@@ -3034,38 +3025,26 @@ router.get('/tracks/random/section/:sectionKey', asyncHandler(async (req, res) =
     }
 
     // Handle unplayed albums/artists/works filters for the "other" tracks
-    let otherTracks;
+    let otherKeys;
     if (unplayedAlbums === 'true' || unplayedArtists === 'true' || unplayedWorks === 'true') {
-      otherTracks = await getUnplayedFilteredTracks(sectionKey, unplayedAlbums === 'true', unplayedArtists === 'true', unplayedWorks === 'true');
+      otherKeys = (await getUnplayedFilteredTracks(sectionKey, unplayedAlbums === 'true', unplayedArtists === 'true', unplayedWorks === 'true')).map(t => t.ratingKey);
     } else {
-      // Fetch other tracks (exclude tracks below 5 stars)
-      otherTracks = await prisma.plexTrack.findMany({
+      // Fetch other track keys (exclude tracks below 5 stars)
+      otherKeys = (await prisma.plexTrack.findMany({
         where: otherWhereClause,
-        include: {
-          album: {
-            include: {
-              artist: true
-            }
-          },
-          workPartTracks: {
-            include: {
-              workPart: {
-                include: {
-                  work: true
-                }
-              }
-            }
-          }
-        }
-      });
+        select: { ratingKey: true }
+      })).map(t => t.ratingKey);
     }
 
     // Shuffle and select from each set
-    const shuffledRated = ratedTracks.sort(() => Math.random() - 0.5).slice(0, ratedCount);
-    const shuffledOther = otherTracks.sort(() => Math.random() - 0.5).slice(0, otherCount);
+    const shuffledRatedKeys = ratedKeys.sort(() => Math.random() - 0.5).slice(0, ratedCount);
+    const shuffledOtherKeys = otherKeys.sort(() => Math.random() - 0.5).slice(0, otherCount);
 
-    // Combine and shuffle the final result
-    let combinedTracks = [...shuffledRated, ...shuffledOther].sort(() => Math.random() - 0.5);
+    // Combine and shuffle the final key selection
+    const combinedKeys = [...shuffledRatedKeys, ...shuffledOtherKeys].sort(() => Math.random() - 0.5);
+
+    // Hydrate only the selected tracks with full relations
+    let combinedTracks = await hydrateTracksByKeys(combinedKeys);
 
     // Expand to complete works if requested
     if (playCompleteWork === 'true') {
@@ -3073,7 +3052,7 @@ router.get('/tracks/random/section/:sectionKey', asyncHandler(async (req, res) =
       console.log(`Expanded to ${combinedTracks.length} tracks with complete works in section ${sectionKey}`);
     }
 
-    console.log(`Found ${shuffledRated.length} rated tracks and ${shuffledOther.length} other tracks in section ${sectionKey} for radio`);
+    console.log(`Found ${shuffledRatedKeys.length} rated tracks and ${shuffledOtherKeys.length} other tracks in section ${sectionKey} for radio`);
     res.json({ tracks: combinedTracks });
     return;
   }
@@ -3081,15 +3060,15 @@ router.get('/tracks/random/section/:sectionKey', asyncHandler(async (req, res) =
   // Handle unplayed albums/artists/works filters
   if (unplayedAlbums === 'true' || unplayedArtists === 'true' || unplayedWorks === 'true') {
     const filteredTracks = await getUnplayedFilteredTracks(sectionKey, unplayedAlbums === 'true', unplayedArtists === 'true', unplayedWorks === 'true');
-    const shuffled = filteredTracks.sort(() => Math.random() - 0.5);
-    let selectedTracks = shuffled.slice(0, limitNum);
-    
+    const shuffledKeys = filteredTracks.map(t => t.ratingKey).sort(() => Math.random() - 0.5);
+    let selectedTracks = await hydrateTracksByKeys(shuffledKeys.slice(0, limitNum));
+
     // Expand to complete works if requested
     if (playCompleteWork === 'true') {
       selectedTracks = await expandToCompleteWorks(selectedTracks);
       console.log(`Expanded to ${selectedTracks.length} tracks with complete works in section ${sectionKey}`);
     }
-    
+
     console.log(`Found ${filteredTracks.length} unplayed filtered tracks in section ${sectionKey} for radio`);
     res.json({ tracks: selectedTracks });
     return;
@@ -3121,34 +3100,20 @@ router.get('/tracks/random/section/:sectionKey', asyncHandler(async (req, res) =
     };
   }
 
-  // Get all eligible tracks from section with album and artist relations
-  const allTracks = await prisma.plexTrack.findMany({
+  // Get all eligible track keys from section (lightweight). Full relations are hydrated
+  // only for the selected tracks to avoid Prisma engine result-size limits.
+  const allKeys = (await prisma.plexTrack.findMany({
     where: whereClause,
-    include: {
-      album: {
-        include: {
-          artist: true
-        }
-      },
-      workPartTracks: {
-        include: {
-          workPart: {
-            include: {
-              work: true
-            }
-          }
-        }
-      }
-    }
-  });
+    select: { ratingKey: true }
+  })).map(t => t.ratingKey);
 
-  console.log(`Found ${allTracks.length} tracks in section ${sectionKey} for radio`);
+  console.log(`Found ${allKeys.length} tracks in section ${sectionKey} for radio`);
 
-  // Shuffle all tracks
-  const shuffled = allTracks.sort(() => Math.random() - 0.5);
-  
-  // Take only the requested limit
-  let selectedTracks = shuffled.slice(0, limitNum);
+  // Shuffle all keys
+  const shuffledKeys = allKeys.sort(() => Math.random() - 0.5);
+
+  // Take only the requested limit and hydrate full track data
+  let selectedTracks = await hydrateTracksByKeys(shuffledKeys.slice(0, limitNum));
 
   // Expand to complete works if requested
   if (playCompleteWork === 'true') {
@@ -3651,6 +3616,216 @@ router.put('/tracks/:ratingKey/rating', asyncHandler(async (req, res) => {
   } catch (error) {
     console.error('Error updating track rating:', error);
     res.status(500).json({ error: 'Failed to update track rating' });
+  }
+}));
+
+// Discogs Search API route
+router.post('/music/discogs-search', asyncHandler(async (req, res) => {
+  const { query, limit = 10 } = req.body;
+
+  console.log(`🔍 Searching Discogs for "${query}"`);
+
+  // Validate query
+  if (!query || !String(query).trim()) {
+    return res.status(400).json({ error: 'Search query is required' });
+  }
+
+  // Import Discogs service
+  const DiscogsService = require('../services/discogsService');
+  const discogs = new DiscogsService();
+
+  try {
+    // Search for releases
+    const releases = await discogs.searchReleases(query, null, limit);
+
+    // Build response
+    const response = {
+      data: {
+        releases: releases || [],
+      },
+    };
+
+    return res.status(200).json({
+      success: true,
+      data: response.data,
+    });
+  } catch (error) {
+    console.error('Error searching Discogs:', error);
+    return res.status(500).json({ error: error.message || 'Failed to search Discogs' });
+  }
+}));
+
+// Discogs Import API route
+router.post('/albums/:ratingKey/discogs-import', asyncHandler(async (req, res) => {
+  const { ratingKey } = req.params;
+  const { url, apply = false, trackMappings = [], excludedCreditKeys = [] } = req.body;
+
+  console.log(`🧾 Processing Discogs import for album ${ratingKey}, apply=${apply}`);
+
+  // Validate URL
+  if (!url || !String(url).trim()) {
+    return res.status(400).json({ error: 'Discogs URL is required' });
+  }
+
+  // Extract release ID from URL
+  const urlMatch = String(url).trim().match(/discogs\.com\/release\/(\d+)/);
+  const releaseId = urlMatch && urlMatch[1];
+
+  if (!releaseId) {
+    return res.status(400).json({ error: 'Invalid Discogs URL. Expected format: https://www.discogs.com/release/{id}' });
+  }
+
+  // Import Discogs service
+  const DiscogsService = require('../services/discogsService');
+  const discogs = new DiscogsService();
+
+  try {
+    // Fetch release data from Discogs
+    const discogsRelease = await discogs.getRelease(releaseId);
+
+    // Get local album tracks
+    const album = await prisma.plexAlbum.findUnique({
+      where: { ratingKey },
+      include: {
+        plexTracks: {
+          where: { removed: false },
+          orderBy: { index: 'asc' },
+        },
+      },
+    });
+
+    if (!album) {
+      return res.status(404).json({ error: 'Album not found in local database' });
+    }
+
+    const localTracks = album.plexTracks;
+    const discogsTracks = discogsRelease.tracks || [];
+
+    // Build track mapping
+    const trackMappingsPayload = [];
+
+    // Group discogs tracks by credit
+    const creditsMap = new Map();
+    discogsTracks.forEach((track, idx) => {
+      const credit = track?.artist || track?.artist_name || 'Unknown';
+      const creditKey = String(credit || '').trim();
+      if (!creditsMap.has(creditKey)) {
+        creditsMap.set(creditKey, {
+          creditKey,
+          discogsOrdinal: idx + 1,
+          discogsTrackTitle: track?.title || '',
+          trackCount: 1,
+        });
+      } else {
+        const existing = creditsMap.get(creditKey);
+        existing.trackCount += 1;
+        existing.discogsTrackTitle = track?.title || '';
+      }
+      trackMappingsPayload.push({
+        discogsOrdinal: idx + 1,
+        localTrackKey: null,
+        discogsTrackTitle: track?.title || '',
+        creditKey: creditKey,
+      });
+    });
+
+    // Build credit options
+    const creditOptionsPayload = [];
+    creditsMap.forEach((creditData) => {
+      creditOptionsPayload.push({
+        creditKey: creditData.creditKey,
+        discogsOrdinal: creditData.discogsOrdinal,
+        discogsTrackTitle: creditData.discogsTrackTitle,
+        trackCount: creditData.trackCount,
+        included: true,
+      });
+    });
+
+    // Build response structure
+    const response = {
+      data: {
+        discogs: {
+          sourceKind: 'release',
+          releaseId: discogsRelease.id,
+          title: discogsRelease.title,
+          artist: discogsRelease.artist,
+          tracks: discogsRelease.tracks,
+          credits: discogsRelease.credits,
+          mapping: {
+            defaultTrackMappings: trackMappingsPayload,
+            mappedTrackCount: 0,
+            localTrackCount: localTracks.length,
+            sourceTrackCount: discogsTracks.length,
+          },
+        },
+        album: {
+          title: album.title,
+          discogsTitle: discogsRelease.title,
+        },
+        mapping: {
+          defaultTrackMappings: trackMappingsPayload,
+          mappedTrackCount: 0,
+          localTrackCount: localTracks.length,
+          sourceTrackCount: discogsTracks.length,
+        },
+        credits: creditOptionsPayload,
+      },
+    };
+
+    // If apply is true, update the album and tracks
+    if (apply) {
+      // Update album with Discogs metadata
+      const updates = {
+        musicBrainzId: discogsRelease.id.toString(),
+        title: discogsRelease.title,
+        albumArtist: discogsRelease.artist,
+      };
+
+      // Update album
+      await prisma.plexAlbum.update({
+        where: { ratingKey },
+        data: updates,
+      });
+
+      // Update tracks with Discogs metadata
+      const trackUpdates = [];
+      discogsTracks.forEach((track, idx) => {
+        const localTrack = localTracks[idx] || null;
+        if (localTrack) {
+          trackUpdates.push({
+            where: { ratingKey: localTrack.ratingKey },
+            data: {
+              title: track?.title || localTrack.title,
+              index: idx + 1,
+            },
+          });
+        }
+      });
+
+      if (trackUpdates.length > 0) {
+        await prisma.plexTrack.updateMany({
+          data: trackUpdates,
+        });
+      }
+
+      response.data.discogs.mappedTrackCount = trackUpdates.length;
+      response.data.discogs.linkedWorkTrackCount = 0;
+
+      // Return success response
+      return res.status(200).json({
+        success: true,
+        data: response.data,
+      });
+    }
+
+    // Return preview response
+    return res.status(200).json({
+      success: true,
+      data: response.data,
+    });
+  } catch (error) {
+    console.error('Error processing Discogs import:', error);
+    return res.status(500).json({ error: error.message || 'Failed to process Discogs import' });
   }
 }));
 

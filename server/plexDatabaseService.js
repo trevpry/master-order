@@ -1148,14 +1148,15 @@ class PlexDatabaseService {
     }
   }
 
-  // Create or update artist
+  // Create artist if missing; never updates an existing artist so that
+  // in-app metadata edits are preserved across syncs
   async upsertArtist(artistData) {
     try {
-      return await this.prisma.plexArtist.upsert({
-        where: { ratingKey: artistData.ratingKey },
-        update: artistData,
-        create: artistData
+      const existing = await this.prisma.plexArtist.findUnique({
+        where: { ratingKey: artistData.ratingKey }
       });
+      if (existing) return existing;
+      return await this.prisma.plexArtist.create({ data: artistData });
     } catch (error) {
       console.error('Error upserting artist:', error);
       throw error;
@@ -1277,14 +1278,15 @@ class PlexDatabaseService {
     }
   }
 
-  // Create or update album
+  // Create album if missing; never updates an existing album so that
+  // in-app metadata edits are preserved across syncs
   async upsertAlbum(albumData) {
     try {
-      return await this.prisma.plexAlbum.upsert({
-        where: { ratingKey: albumData.ratingKey },
-        update: albumData,
-        create: albumData
+      const existing = await this.prisma.plexAlbum.findUnique({
+        where: { ratingKey: albumData.ratingKey }
       });
+      if (existing) return existing;
+      return await this.prisma.plexAlbum.create({ data: albumData });
     } catch (error) {
       console.error('Error upserting album:', error);
       throw error;
@@ -1525,14 +1527,15 @@ class PlexDatabaseService {
     }
   }
 
-  // Create or update track
+  // Create track if missing; never updates an existing track so that
+  // in-app metadata edits are preserved across syncs
   async upsertTrack(trackData) {
     try {
-      return await this.prisma.plexTrack.upsert({
-        where: { ratingKey: trackData.ratingKey },
-        update: trackData,
-        create: trackData
+      const existing = await this.prisma.plexTrack.findUnique({
+        where: { ratingKey: trackData.ratingKey }
       });
+      if (existing) return existing;
+      return await this.prisma.plexTrack.create({ data: trackData });
     } catch (error) {
       console.error('Error upserting track:', error);
       throw error;

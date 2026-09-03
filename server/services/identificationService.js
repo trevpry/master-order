@@ -1,6 +1,7 @@
 const { PrismaClient } = require('@prisma/client');
 const MusicBrainzService = require('./musicBrainzService');
 const { getPreferredMusicBrainzArtistName, unsortMusicBrainzName } = require('../utils/musicBrainzNames');
+const { recordDeletedPlexEntity } = require('../utils/plexDeletedEntities');
 
 /**
  * IdentificationService
@@ -649,6 +650,8 @@ class IdentificationService {
         await this.prisma.plexAlbum.delete({
           where: { ratingKey: duplicate.ratingKey }
         });
+        // Tombstone the duplicate so Plex sync (add-only) never re-creates it
+        await recordDeletedPlexEntity(this.prisma, 'album', duplicate.ratingKey, duplicate.title);
 
         console.log(`Merged album "${duplicate.title}" into "${primaryAlbum.title}"`);
       }
@@ -748,6 +751,8 @@ class IdentificationService {
         await this.prisma.plexArtist.delete({
           where: { ratingKey: duplicate.ratingKey }
         });
+        // Tombstone the duplicate so Plex sync (add-only) never re-creates it
+        await recordDeletedPlexEntity(this.prisma, 'artist', duplicate.ratingKey, duplicate.title);
 
         console.log(`Merged artist "${duplicate.title}" into "${primaryArtist.title}"`);
       }

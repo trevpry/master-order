@@ -5,6 +5,7 @@ if (process.env.NODE_ENV !== 'production') {
 const fetch = require('node-fetch');
 const prisma = require('./prismaClient'); // Use shared Prisma client
 const { reconcileCustomOrderWatchStateFromPlex } = require('./getNextCustomOrder');
+const { getDeletedPlexEntityKeys } = require('./utils/plexDeletedEntities');
 
 class PlexSyncService {
   constructor() {
@@ -1178,9 +1179,11 @@ class PlexSyncService {
       results.seasons += await this.markRemovedSeasons(validPlexIds.seasons);
       results.shows += await this.markRemovedShows(validPlexIds.shows);
       results.movies += await this.markRemovedMovies(validPlexIds.movies);
-      results.tracks += await this.markRemovedTracks(validPlexIds.tracks);
-      results.albums += await this.markRemovedAlbums(validPlexIds.albums);
-      results.artists += await this.markRemovedArtists(validPlexIds.artists);
+      // Music tracks/albums/artists are intentionally NOT marked as removed.
+      // Music sync is add-only: existing music items are owned by in-app edits and
+      // must never be modified by sync, and since nothing resurrects a removed row,
+      // a false-positive cleanup would hide the item permanently.
+      console.log('🎵 Skipping removal marking for music tracks/albums/artists (add-only sync)');
       results.playlists += await this.markRemovedPlaylists(validPlexIds.playlists);
 
       // Step 3: Clean up complex fields for items that no longer exist in Plex
@@ -1808,7 +1811,11 @@ class PlexSyncService {
         select: { ratingKey: true, updatedAt: true }
       });
       const existingArtistMap = new Map(existingArtists.map(artist => [artist.ratingKey, artist]));
-      const artistsNeedingRefresh = artists.filter(artist => !this.isDateTimestampCurrent(existingArtistMap.get(artist.ratingKey)?.updatedAt, artist.updatedAt));
+      // Tombstoned artists were deleted in the app and must never be re-created by sync
+      const deletedArtistKeys = await getDeletedPlexEntityKeys(prisma, 'artist');
+      // Detailed metadata is only needed for artists that don't exist locally yet
+      // (existing artists are never updated so their edits are preserved)
+      const artistsNeedingRefresh = artists.filter(artist => !existingArtistMap.has(artist.ratingKey) && !deletedArtistKeys.has(artist.ratingKey));
       const detailedArtistMap = await this.fetchDetailedMetadataBatch(artistsNeedingRefresh, 'artist');
 
       for (const artist of artists) {
@@ -1833,11 +1840,15 @@ class PlexSyncService {
         };
 
         if (shouldRefreshArtist) {
+          // Add-only sync: never update existing artists. Any metadata edits made in
+          // the app must be preserved, so only create artists that don't exist yet.
+          // Tombstoned artists were deleted in the app and must not be re-created.
+          if (existingArtistMap.has(detailedArtist.ratingKey) || deletedArtistKeys.has(detailedArtist.ratingKey)) {
+            continue;
+          }
           try {
-            await prisma.plexArtist.upsert({
-              where: { ratingKey: detailedArtist.ratingKey },
-              update: artistData,
-              create: artistData
+            await prisma.plexArtist.create({
+              data: artistData
             });
           } catch (error) {
             await this.handleDatabaseError(
@@ -1845,10 +1856,8 @@ class PlexSyncService {
               'artist',
               detailedArtist.title,
               async () => {
-                return await prisma.plexArtist.upsert({
-                  where: { ratingKey: detailedArtist.ratingKey },
-                  update: artistData,
-                  create: artistData
+                return await prisma.plexArtist.create({
+                  data: artistData
                 });
               }
             );
@@ -1856,7 +1865,7 @@ class PlexSyncService {
         }
       }
 
-      console.log(`✅ Synced ${artists.length} artists for section ${sectionKey}`);
+      console.log(`✅ Synced ${artists.length} artists for section ${sectionKey} (existing artists left unchanged)`);
     } catch (error) {
       console.error('Error syncing artists:', error);
       throw error;
@@ -1926,7 +1935,11 @@ class PlexSyncService {
         select: { ratingKey: true, updatedAt: true }
       });
       const existingAlbumMap = new Map(existingAlbums.map(album => [album.ratingKey, album]));
-      const albumsNeedingRefresh = albums.filter(album => !this.isDateTimestampCurrent(existingAlbumMap.get(album.ratingKey)?.updatedAt, album.updatedAt));
+      // Tombstoned albums were deleted in the app and must never be re-created by sync
+      const deletedAlbumKeys = await getDeletedPlexEntityKeys(prisma, 'album');
+      // Detailed metadata is only needed for albums that don't exist locally yet
+      // (existing albums are never updated so their edits are preserved)
+      const albumsNeedingRefresh = albums.filter(album => !existingAlbumMap.has(album.ratingKey) && !deletedAlbumKeys.has(album.ratingKey));
       const detailedAlbumMap = await this.fetchDetailedMetadataBatch(albumsNeedingRefresh, 'album');
 
       for (const album of albums) {
@@ -1955,11 +1968,15 @@ class PlexSyncService {
         };
 
         if (shouldRefreshAlbum) {
+          // Add-only sync: never update existing albums. Any metadata edits made in
+          // the app must be preserved, so only create albums that don't exist yet.
+          // Tombstoned albums were deleted in the app and must not be re-created.
+          if (existingAlbumMap.has(detailedAlbum.ratingKey) || deletedAlbumKeys.has(detailedAlbum.ratingKey)) {
+            continue;
+          }
           try {
-            await prisma.plexAlbum.upsert({
-              where: { ratingKey: detailedAlbum.ratingKey },
-              update: albumData,
-              create: albumData
+            await prisma.plexAlbum.create({
+              data: albumData
             });
           } catch (error) {
             await this.handleDatabaseError(
@@ -1967,10 +1984,8 @@ class PlexSyncService {
               'album',
               detailedAlbum.title,
               async () => {
-                return await prisma.plexAlbum.upsert({
-                  where: { ratingKey: detailedAlbum.ratingKey },
-                  update: albumData,
-                  create: albumData
+                return await prisma.plexAlbum.create({
+                  data: albumData
                 });
               }
             );
@@ -1978,7 +1993,7 @@ class PlexSyncService {
         }
       }
 
-      console.log(`✅ Synced ${albums.length} albums for artist ${artistRatingKey}`);
+      console.log(`✅ Synced ${albums.length} albums for artist ${artistRatingKey} (existing albums left unchanged)`);
     } catch (error) {
       console.error('Error syncing albums:', error);
       throw error;
@@ -2001,26 +2016,17 @@ class PlexSyncService {
 
       const existingTracks = await prisma.plexTrack.findMany({
         where: { ratingKey: { in: tracks.map(track => track.ratingKey) } },
-        select: { ratingKey: true, discNumber: true, discTotal: true }
+        select: { ratingKey: true }
       });
       const existingTrackMap = new Map(existingTracks.map(track => [track.ratingKey, track]));
       const newTrackRows = [];
-      const updateTrackData = [];
 
+      // Add-only sync: existing tracks are never updated. Only tracks that do not
+      // exist locally are created, so any in-app edits are preserved.
       for (const track of tracks) {
         const existingTrack = existingTrackMap.get(track.ratingKey);
-        const shouldUpdateDiscInfo = existingTrack && 
-          (track.parentIndex || track.parentCount) && 
-          (existingTrack.discNumber !== parseInt(track.parentIndex) || 
-           existingTrack.discTotal !== parseInt(track.parentCount));
 
-        if (existingTrack && shouldUpdateDiscInfo) {
-          updateTrackData.push({
-            ratingKey: track.ratingKey,
-            discNumber: track.parentIndex ? parseInt(track.parentIndex) : null,
-            discTotal: track.parentCount ? parseInt(track.parentCount) : null
-          });
-        } else if (!existingTrack) {
+        if (!existingTrack) {
           newTrackRows.push({
             ratingKey: track.ratingKey,
             key: track.key,
@@ -2046,17 +2052,7 @@ class PlexSyncService {
         }
       }
 
-      // Update existing tracks with disc info
-      for (const update of updateTrackData) {
-        try {
-          await prisma.plexTrack.update({
-            where: { ratingKey: update.ratingKey },
-            data: { discNumber: update.discNumber, discTotal: update.discTotal }
-          });
-        } catch (error) {
-          console.error(`Error updating disc info for track ${update.ratingKey}:`, error.message);
-        }
-      }
+      // Existing tracks are intentionally left untouched (add-only sync)
 
       if (newTrackRows.length > 0) {
         try {
@@ -2068,7 +2064,7 @@ class PlexSyncService {
         }
       }
 
-      console.log(`✅ Tracks for album ${albumRatingKey}: ${newTrackRows.length} added, ${updateTrackData.length} updated, ${existingTracks.length} skipped (already exist)`);
+      console.log(`✅ Tracks for album ${albumRatingKey}: ${newTrackRows.length} added, ${existingTracks.length} skipped (already exist, left unchanged)`);
     } catch (error) {
       console.error('Error syncing tracks:', error);
       throw error;

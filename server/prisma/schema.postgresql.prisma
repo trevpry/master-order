@@ -967,6 +967,19 @@ model PlexArtist {
   @@map("PlexArtist")
 }
 
+// Tombstone for artists/albums deleted in the app. Plex sync is add-only for music
+// and must never re-create entities the user deleted locally.
+model PlexDeletedEntity {
+  id         Int      @id @default(autoincrement())
+  entityType String   // 'artist' | 'album'
+  ratingKey  String
+  title      String?
+  deletedAt  DateTime @default(now())
+
+  @@unique([entityType, ratingKey])
+  @@map("PlexDeletedEntity")
+}
+
 model PlexAlbum {
   id                    Int                 @id @default(autoincrement())
   ratingKey             String              @unique
