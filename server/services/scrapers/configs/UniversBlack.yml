@@ -1,0 +1,115 @@
+name: UniversBlack
+
+sceneByURL:
+  - action: scrapeXPath
+    scraper: sceneScraper
+    url:
+      - universblack.com/en/videos/detail/
+
+movieByURL:
+  - action: scrapeXPath
+    scraper: movieScraper
+    url:
+      - universblack.com/en/dvd/detail/
+
+performerByURL:
+  - action: scrapeXPath
+    scraper: performerScraper
+    url:
+      - universblack.com/en/modeles/detail/
+
+sceneByFragment:
+  - action: scrapeXPath
+    spacesConvertTo: +
+    titleSearchScraper: sceneSearchScraper
+    performerSearchScraper: performerSearchScraper
+    performerSearchUrl: https://www.universblack.com/en/modeles/text-search?page=0&name={performer}
+    studioSearchUrl: https://www.universblack.com/en/videos/text-search?page=0&name={title}
+
+xPathScrapers:
+  sceneScraper:
+    scene:
+      Title: //h1[@class="mt-3 mb-1 h5"]/text()
+      Details: //span[@class="lh15 opacity-70"]/text()
+      URL: &url //link[@rel="alternate" and hreflang="en"]/@href
+      Image:
+              selector: //div[@class="vc-preview-bg"]/@style
+              postProcess:
+                - replace:
+                    - regex: "background-image:url\\('(.+)'\\)"
+                      with: "$1"
+      Studio:
+        Name:
+          fixed: UniversBlack
+      Performers:
+        Name: //div[contains(@class, "text-terciary") and contains(@class, "text-truncate") and contains(@class, "p-1")]/text()
+        URL: //a[contains(@class, "h100")]/@href
+      Tags:
+        Name:
+          selector: //h3[@class="h120"]/text()
+
+  movieScraper:
+    movie:
+      Title: //h1[@class="h4 text-dark"]/text()
+      Image:
+        selector: //div[@class="mb-2 embed-responsive embed-responsive-2by3"]/img/@src
+      Studio:
+        Name:
+          fixed: UniversBlack
+
+  performerScraper:
+    performer:
+      Name: //div[@class="p-1 pt-2 text-center h90 text-terciary -bg-black-50 text-truncate"]/text()
+      Gender:
+        fixed: Male
+      URL: &url //link[@rel="canonical"]/@content
+      Image:
+        selector: //img[@class="border embed-responsive-item bg-light border-dark obj-cover"]/@src
+        postProcess:
+          - replace:
+              - regex: "^/"
+                with: "https://www.universblack.com/"
+
+  sceneSearchScraper:
+    scene:
+      Title: //a[contains(@class, "h110") and contains(@class, "text-truncate")]/text()
+      URL:
+        selector: //a[contains(@class, "h110") and contains(@class, "text-truncate")]/@href
+        postProcess:
+          - replace:
+              - regex: ^/
+                with: https://www.universblack.com/
+      Image:
+        selector: //div[@class="rounded embed-responsive embed-responsive-16by9"]/img/@src
+        postProcess:
+          - replace:
+              - regex: "^/"
+                with: https://www.universblack.com/
+
+  performerSearchScraper:
+    performer:
+      Name: //div[@class="pb-1 m-2 text-center b-0 l-0 r-0 h6 text-truncate text-dark"]/text()
+      URL:
+        selector: //a[@class="mb-3 col-xxl-2 col-xl-3 col-md-3 col-sm-4 col-6 "]/@href
+        postProcess:
+          - replace:
+              - regex: ^/
+                with: https://www.universblack.com/en/modeles/
+      Image:
+        selector: //div[@class="rounded embed-responsive embed-responsive-16by9"]/img/@src
+        postProcess:
+          - replace:
+              - regex: "^/"
+                with: https://www.universblack.com/
+      performerSceneScraper: performerSceneScraper
+
+  performerSceneScraper:
+    scene:
+      Title: //a[@class="px-3 pt-3 pb-0 text-center d-block h110 text-truncate text-primary font-weight-bold"]/text()
+      URL:
+        selector: //a[@class="px-3 pt-3 pb-0 text-center d-block h110 text-truncate text-primary font-weight-bold"]/@href
+        postProcess:
+          - replace:
+              - regex: ^/
+                with: https://www.universblack.com/en/videos/
+
