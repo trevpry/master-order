@@ -1543,12 +1543,12 @@ class HistoryPlusService {
             include: {
               book: {
                 include: {
-                  bookCompletions: true,
+                  bookCompletions: { where: { userId: "default" } },
                   chapters: {
                     include: {
-                      chapterCompletions: true,
+                      chapterCompletions: { where: { userId: "default" } },
                       sections: {
-                        include: { sectionCompletions: true }
+                        include: { sectionCompletions: { where: { userId: "default" } } }
                       }
                     }
                   }
@@ -1558,26 +1558,26 @@ class HistoryPlusService {
           },
           bookChapters: {
             include: {
-              chapterCompletions: true,
+              chapterCompletions: { where: { userId: "default" } },
               sections: {
-                include: { sectionCompletions: true }
+                include: { sectionCompletions: { where: { userId: "default" } } }
               },
               book: {
                 include: {
-                  bookCompletions: true
+                  bookCompletions: { where: { userId: "default" } }
                 }
               }
             }
           },
           bookSections: {
             include: {
-              sectionCompletions: true,
+              sectionCompletions: { where: { userId: "default" } },
               chapter: {
                 include: {
-                  chapterCompletions: true,
+                  chapterCompletions: { where: { userId: "default" } },
                   book: {
                     include: {
-                      bookCompletions: true
+                      bookCompletions: { where: { userId: "default" } }
                     }
                   }
                 }

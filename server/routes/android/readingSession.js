@@ -486,9 +486,20 @@ function createReadingSessionRoutes(prisma) {
 
     // Regular custom order reading session logic continues below...
     // Check if this will result in 100% completion for better response handling
-    const willMarkAsRead = progress?.readPercentage === 100;
+    const willMarkAsRead = progress?.readPercentage === 100 || progress?.percentComplete === 100;
 
     console.log('Stopping session with ID:', activeSession.id);
+
+    // Helper to normalize percentage from either Android (readPercentage) or web (percentComplete)
+    function normalizeProgressPercentage(progress) {
+      let raw = progress?.readPercentage !== undefined ? progress.readPercentage : progress?.percentComplete;
+      if (raw === undefined || raw === null || raw === '') return null;
+      if (typeof raw === 'string') raw = parseFloat(raw);
+      if (!Number.isFinite(raw)) return null;
+      // Android may send 0-1 decimal for 0%-100%
+      if (raw > 0 && raw <= 1) raw = raw * 100;
+      return Math.round(raw * 100) / 100;
+    }
 
     // Update reading progress if provided and custom order item exists
     let actuallyMarkedAsRead = false;
@@ -510,127 +521,80 @@ function createReadingSessionRoutes(prisma) {
         // Determine if this is a book or comic/other media
         const isUnifiedBook = existingItem?.bookId !== null;
         const isBookMediaType = activeSession.mediaType === 'book';
+        const isComic = activeSession.mediaType === 'comic';
+        const isShortStory = activeSession.mediaType === 'shortstory';
         
         console.log(`Media type: ${activeSession.mediaType}, Has bookId: ${!!existingItem?.bookId}, IsUnifiedBook: ${isUnifiedBook}`);
 
         let updateData = {};
-        let currentPage, totalPages, finalReadPercentage;
+        let currentPage = progress.currentPage !== undefined ? progress.currentPage : null;
+        let totalPages = progress.totalPages !== undefined ? progress.totalPages : null;
+        
+        // Convert page values to numbers if provided as strings
+        if (currentPage !== null && currentPage !== '') currentPage = Number(currentPage);
+        if (totalPages !== null && totalPages !== '') totalPages = Number(totalPages);
+        if (!Number.isFinite(currentPage)) currentPage = null;
+        if (!Number.isFinite(totalPages)) totalPages = null;
 
-        if (isUnifiedBook && isBookMediaType) {
+        // Calculate percentage from pages if no explicit percentage provided
+        let calculatedReadPercentage = null;
+        if (currentPage !== null && totalPages && totalPages > 0) {
+          calculatedReadPercentage = Math.min(100, Math.max(0, Math.round((currentPage / totalPages) * 100)));
+          console.log(`📊 Calculated read percentage: ${calculatedReadPercentage}% (${currentPage}/${totalPages})`);
+        }
+
+        let normalizedPercentage = normalizeProgressPercentage(progress);
+        let finalReadPercentage = normalizedPercentage !== null ? normalizedPercentage : calculatedReadPercentage;
+        
+        // Debug logging for Android percentage values
+        console.log(`📊 Debug - Raw progress.readPercentage: ${progress?.readPercentage} (type: ${typeof progress?.readPercentage})`);
+        console.log(`📊 Debug - Raw progress.percentComplete: ${progress?.percentComplete} (type: ${typeof progress?.percentComplete})`);
+        console.log(`📊 Debug - Final read percentage: ${finalReadPercentage} (type: ${typeof finalReadPercentage})`);
+
+        const isComplete = finalReadPercentage !== null && finalReadPercentage >= 99.95; // Allow slight precision errors
+
+        if (isBookMediaType && isUnifiedBook) {
           // FOR BOOKS: Only update unified system, do NOT touch CustomOrderItem book fields
           console.log('📚 Processing book progress update - using unified system only');
           
-          // Calculate values but don't store in CustomOrderItem
-          currentPage = progress.currentPage !== undefined ? progress.currentPage : null;
-          totalPages = progress.totalPages !== undefined ? progress.totalPages : null;
-          
-          // Calculate read percentage if we have current page and total pages
-          let calculatedReadPercentage = null;
-          if (currentPage !== null && totalPages && totalPages > 0) {
-            calculatedReadPercentage = Math.round((currentPage / totalPages) * 100);
-            calculatedReadPercentage = Math.min(100, Math.max(0, calculatedReadPercentage));
-            console.log(`📚 Calculated read percentage: ${calculatedReadPercentage}% (${currentPage}/${totalPages})`);
-          }
-          
-          finalReadPercentage = progress.readPercentage !== undefined ? progress.readPercentage : calculatedReadPercentage;
-          
-          // Debug logging for Android percentage values
-          console.log(`📊 Debug - Raw progress.readPercentage: ${progress.readPercentage} (type: ${typeof progress.readPercentage})`);
-          console.log(`📊 Debug - Final read percentage: ${finalReadPercentage} (type: ${typeof finalReadPercentage})`);
-          
-          // Convert to number if needed and handle different formats from Android
-          let normalizedPercentage = null;
-          if (finalReadPercentage !== null && finalReadPercentage !== undefined) {
-            // Convert to number if it's a string
-            normalizedPercentage = typeof finalReadPercentage === 'string' ? parseFloat(finalReadPercentage) : finalReadPercentage;
-            
-            // Handle cases where Android might send 1.0 to mean 100%
-            if (normalizedPercentage > 0 && normalizedPercentage <= 1) {
-              normalizedPercentage = normalizedPercentage * 100;
-              console.log(`📊 Converted decimal percentage ${finalReadPercentage} to ${normalizedPercentage}%`);
-            }
-            
-            // Round to handle floating point precision issues
-            normalizedPercentage = Math.round(normalizedPercentage * 100) / 100;
-            console.log(`📊 Normalized percentage: ${normalizedPercentage}%`);
-          }
-          
-          // Mark as read if 100% (with tolerance for floating point issues)
-          const isComplete = normalizedPercentage !== null && normalizedPercentage >= 99.95; // Allow slight precision errors
           if (isComplete) {
             updateData.isWatched = true;
+            updateData.watchedAt = new Date();
             actuallyMarkedAsRead = true;
-            console.log(`✅ Will mark book as read in unified system (${normalizedPercentage}% completion >= 99.95%)`);
-          } else if (normalizedPercentage !== null) {
-            console.log(`📊 Book not marked as read - completion is ${normalizedPercentage}% (needs >= 99.95%)`);
+            console.log(`✅ Will mark book as read in unified system (${finalReadPercentage}% completion >= 99.95%)`);
+          } else if (finalReadPercentage !== null) {
+            console.log(`📊 Book not marked as read - completion is ${finalReadPercentage}% (needs >= 99.95%)`);
           }
-          
-          // Update finalReadPercentage with normalized value for response
-          finalReadPercentage = normalizedPercentage;
         } else {
-          // FOR COMICS/OTHER: Comics don't use the unified book system
-          console.log('📖 Processing comic/other media progress update - unified system not applicable for comics');
+          // FOR COMICS/SHORT STORIES/OTHER: Legacy CustomOrderItem fields
+          console.log('📖 Processing comic/other media progress update');
           
-          // Calculate read percentage for comics (without storing in deprecated fields)
-          currentPage = progress.currentPage !== undefined ? progress.currentPage : null;
-          totalPages = progress.totalPages !== undefined ? progress.totalPages : null;
-          
-          let calculatedReadPercentage = null;
-          if (currentPage !== null && totalPages && totalPages > 0) {
-            calculatedReadPercentage = Math.round((currentPage / totalPages) * 100);
-            calculatedReadPercentage = Math.min(100, Math.max(0, calculatedReadPercentage));
-            console.log(`Calculated read percentage: ${calculatedReadPercentage}% (${currentPage}/${totalPages})`);
+          if (isComic) {
+            // Persist comic progress fields so web UI reflects the read state
+            if (currentPage !== null && currentPage >= 0) updateData.comicCurrentPage = currentPage;
+            if (totalPages !== null && totalPages > 0) updateData.comicPageCount = totalPages;
+            if (finalReadPercentage !== null) updateData.comicPercentRead = finalReadPercentage;
+            console.log(`📖 Updated comic progress fields: currentPage=${currentPage}, totalPages=${totalPages}, percent=${finalReadPercentage}`);
           }
           
-          finalReadPercentage = progress.readPercentage !== undefined ? progress.readPercentage : calculatedReadPercentage;
-          
-          // Debug logging for Android percentage values
-          console.log(`📊 Debug - Raw progress.readPercentage: ${progress.readPercentage} (type: ${typeof progress.readPercentage})`);
-          console.log(`📊 Debug - Final read percentage: ${finalReadPercentage} (type: ${typeof finalReadPercentage})`);
-          
-          // Convert to number if needed and handle different formats from Android
-          let normalizedPercentage = null;
-          if (finalReadPercentage !== null && finalReadPercentage !== undefined) {
-            // Convert to number if it's a string
-            normalizedPercentage = typeof finalReadPercentage === 'string' ? parseFloat(finalReadPercentage) : finalReadPercentage;
-            
-            // Handle cases where Android might send 1.0 to mean 100%
-            if (normalizedPercentage > 0 && normalizedPercentage <= 1) {
-              normalizedPercentage = normalizedPercentage * 100;
-              console.log(`📊 Converted decimal percentage ${finalReadPercentage} to ${normalizedPercentage}%`);
-            }
-            
-            // Round to handle floating point precision issues
-            normalizedPercentage = Math.round(normalizedPercentage * 100) / 100;
-            console.log(`📊 Normalized percentage: ${normalizedPercentage}%`);
-          }
-          
-          // Mark comic as read if 100% (with tolerance for floating point issues)
-          const isComplete = normalizedPercentage !== null && normalizedPercentage >= 99.95; // Allow slight precision errors
           if (isComplete) {
             updateData.isWatched = true;
+            updateData.watchedAt = new Date();
             actuallyMarkedAsRead = true;
-            console.log(`✅ Marking comic as read/watched (${normalizedPercentage}% completion >= 99.95%)`);
-          } else if (normalizedPercentage !== null) {
-            console.log(`📊 Comic not marked as read - completion is ${normalizedPercentage}% (needs >= 99.95%)`);
+            console.log(`✅ Marking ${activeSession.mediaType} as read/watched (${finalReadPercentage}% completion >= 99.95%)`);
+          } else if (finalReadPercentage !== null) {
+            console.log(`📊 ${activeSession.mediaType} not marked as read - completion is ${finalReadPercentage}% (needs >= 99.95%)`);
           }
-          
-          // Update finalReadPercentage with normalized value for response
-          finalReadPercentage = normalizedPercentage;
         }
         
-        // Apply updates to CustomOrderItem only for comics/other media (not books)
+        // Apply updates to CustomOrderItem (isWatched, watchedAt, and comic progress fields)
         if (Object.keys(updateData).length > 0) {
           await prisma.customOrderItem.update({
             where: { id: activeSession.customOrderItemId },
             data: updateData
           });
           
-          if (isUnifiedBook && isBookMediaType) {
-            console.log('📚 Updated book completion status in CustomOrderItem (isWatched only):', updateData);
-          } else {
-            console.log('📖 Updated reading progress in CustomOrderItem (legacy fields):', updateData);
-          }
+          console.log(`✅ Updated CustomOrderItem ${activeSession.customOrderItemId}:`, updateData);
         }
 
         // Update unified BookCompletion system for books
@@ -646,11 +610,10 @@ function createReadingSessionRoutes(prisma) {
           if (finalReadPercentage !== null && finalReadPercentage >= 0 && finalReadPercentage <= 100) {
             sessionData.percentRead = finalReadPercentage;
             
-            // Use normalized percentage for completion checking
             if (isComplete) {
               sessionData.isCompleted = true;
-              actuallyMarkedAsRead = true; // Update flag for unified system completion
-              console.log('📚 Marking book as completed in unified system (normalized percentage >= 99.95%:', normalizedPercentage + '%)');
+              actuallyMarkedAsRead = true;
+              console.log('📚 Marking book as completed in unified system:', finalReadPercentage + '%');
             }
           }
           
@@ -687,23 +650,14 @@ function createReadingSessionRoutes(prisma) {
               console.error('Error updating Book pageCount:', bookUpdateError);
             }
           }
-
-          // For books, get progress data from what we just set
-          finalProgressData = {
-            currentPage: currentPage,
-            totalPages: totalPages,
-            readPercentage: finalReadPercentage
-          };
-        } else {
-          console.log('📖 Skipping unified BookCompletion update (not a unified book)');
-          
-          // For comics/other media, get progress data from calculated values
-          finalProgressData = {
-            currentPage: currentPage,
-            totalPages: totalPages,
-            readPercentage: finalReadPercentage
-          };
         }
+
+        // Build final progress data for response
+        finalProgressData = {
+          currentPage: currentPage,
+          totalPages: totalPages,
+          readPercentage: finalReadPercentage
+        };
       } catch (progressError) {
         console.error('❌ Error updating reading progress:', progressError);
         console.error('❌ Error stack:', progressError.stack);

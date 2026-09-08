@@ -1,0 +1,68 @@
+name: UncutTwinks
+renderJavaScript: true
+sceneByFragment:
+  - action: scrapeXPath
+    scraper: sceneScraper
+    performerSearchScraper: sceneSearchScraper
+    titleSearchScraper: sceneSearchScraper
+    # Search for scenes by performers
+    # {performer} will be replaced with performer name (spaces converted to underscores, lowercased)
+    performerSearchUrl: https://uncuttwinks.com/search.php?query={performer}
+    # Search for scenes by title - direct scene URL
+    # {title} will be replaced with scene title (spaces converted to plus signs, lowercased)
+    studioSearchUrl: https://uncuttwinks.com/search.php?query={title}
+    spacesConvertTo: +
+sceneByURL:
+  - action: scrapeXPath
+    url:
+      - uncuttwinks.com
+    scraper: sceneScraper
+xPathScrapers:
+  sceneScraper:
+    scene:
+      Title: //div[@class="memberPicVid"]/h3/text()
+      Date:
+        selector: //div[@class="date"]
+        postProcess:
+          - parseDate: January 2, 2006
+      Details: //div[@class="memberContent"]/p/text()
+      Image:
+        selector: //video/@poster | //img[contains(@class,"mejs__poster-img")]/@src | //div[@class="mejs__poster mejs__layer"]/img/@src
+        postProcess:
+          - replace:
+              - regex: "^(?!https?:\\/\\/)"
+                with: "https://www.uncuttwinks.com"
+              - regex: "/content//"
+                with: "/content/"
+      Studio:
+        Name:
+          fixed: "Uncut Twinks"
+      Code:
+        selector: //link[@rel='canonical']/@href
+        postProcess:
+          - replace:
+              - regex: .+/(\d+).+$
+                with: $1
+      Tags:
+        Name: //div[@class="memberL"]/p[1]/a
+      Performers:
+        Name: //p[contains(.,'Guys')]/a
+        URL: //p[contains(.,'Guys')]/a/@href
+  sceneSearchScraper:
+    # Search for scenes on the site
+    scene:
+      Title: //div[@class="videoBox"]/h3/a/text()
+      URL:
+        selector: //div[@class="videoBox"]/h3/a/@href
+      Image:
+        selector: //div[@class="videoBox"]/a/img/@src
+        postProcess:
+          - replace:
+              - regex: "^(?!https?:\\/\\/)"
+                with: "https://www.uncuttwinks.com"
+    pagination:
+      # Check for "no results" error message to stop pagination
+      noResultsSelector: //div[@class="errorMsg"]/h3/text()
+      # Maximum number of pages to scrape (safety limit)
+      maxPages: 10
+# Last Updated September 8, 2026

@@ -19,7 +19,6 @@ sceneByURL:
       - hungpapi.com
       - uncutking.com
       - uncutlatinos.com
-      - uncuttwinks.com
     scraper: sceneScraper
 xPathScrapers:
   sceneScraper:
@@ -70,22 +69,22 @@ xPathScrapers:
   performerSearchScraper:
     # Search for performers - returns list of matching performers with URLs
     performer:
-      Name: //div[@class="b-0 l-0 r-0 h6 m-2 pb-1 text-truncate text-center text-dark"]/text()
+      Name: //div[@class="pb-1 m-2 text-center b-0 l-0 r-0 h6 text-truncate text-dark"]/text()
       URL:
-        selector: //a[@class="col-xxl-2 col-xl-3 col-md-3 col-sm-4 col-6 mb-3 "]/@href
+        selector: //a[@class="mb-3 col-xxl-2 col-xl-3 col-md-3 col-sm-4 col-6 "]/@href
         postProcess:
           - replace:
               - regex: ^
                 with: https://www.hotcast.fr
       Image:
-        selector: //div[@class="embed-responsive embed-responsive-16by9 rounded"]/img/@src    
+        selector: //div[@class="rounded embed-responsive embed-responsive-16by9"]/img/@src    
       performerSceneScraper: performerSceneScraper
   performerSceneScraper:
     # Extract scenes from a performer's detail page
     scene:
-      Title: //a[@class="d-block h110 pt-3 pb-0 px-3 text-truncate text-center text-primary font-weight-bold"]/text()
+      Title: //a[@class="px-3 pt-3 pb-0 text-center d-block h110 text-truncate text-primary font-weight-bold"]/text()
       URL:
-        selector: //a[@class="d-block h110 pt-3 pb-0 px-3 text-truncate text-center text-primary font-weight-bold"]/@href
+        selector: //a[@class="px-3 pt-3 pb-0 text-center d-block h110 text-truncate text-primary font-weight-bold"]/@href
         postProcess:
           - replace:
               - regex: ^

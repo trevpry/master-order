@@ -575,7 +575,7 @@ async function markCustomOrderItemAsWatched(itemIdentifier) {
     
     await prisma.customOrderItem.update({
       where: { id: actualItemId },
-      data: { isWatched: true }
+      data: { isWatched: true, watchedAt: new Date() }
     });
     console.log(`Marked custom order item ${actualItemId} as watched`);
   } catch (error) {

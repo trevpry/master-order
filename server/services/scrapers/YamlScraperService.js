@@ -504,6 +504,24 @@ class YamlScraperService extends BaseScraperService {
   extractValue($, config) {
     if (!config) return null;
     
+    // Handle union selectors: try each XPath part and return the first match.
+    // This must happen before attribute detection so each part keeps its own
+    // trailing attribute (e.g. //video/@poster | //img/@src).
+    const selectorString = typeof config === 'string' ? config : config.selector;
+    if (selectorString && typeof selectorString === 'string' && selectorString.includes('|')) {
+      const parts = selectorString.split('|').map(p => p.trim()).filter(Boolean);
+      for (const part of parts) {
+        const partConfig = typeof config === 'string' ? part : { ...config, selector: part };
+        const value = this.extractValue($, partConfig);
+        if (value) {
+          console.log(`   ✅ Union selector matched part: "${part}" -> "${value}"`);
+          return value;
+        }
+      }
+      console.log(`   ❌ No union selector parts matched: "${selectorString}"`);
+      return null;
+    }
+    
     if (typeof config === 'string') {
       // Simple XPath selector - convert and extract
       const originalXpath = config;
@@ -652,6 +670,18 @@ class YamlScraperService extends BaseScraperService {
     const results = [];
     
     if (!config) return results;
+    
+    // Handle union selectors for arrays: collect results from all parts.
+    const selectorString = typeof config === 'string' ? config : config.selector;
+    if (selectorString && typeof selectorString === 'string' && selectorString.includes('|')) {
+      const parts = selectorString.split('|').map(p => p.trim()).filter(Boolean);
+      for (const part of parts) {
+        const partConfig = typeof config === 'string' ? part : { ...config, selector: part };
+        const partResults = this.extractArray($, partConfig);
+        results.push(...partResults);
+      }
+      return results;
+    }
     
     // Handle complex config with selector and postProcess
     if (typeof config === 'object' && config.selector) {
