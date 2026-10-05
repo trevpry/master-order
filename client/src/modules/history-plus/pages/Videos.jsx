@@ -34,6 +34,8 @@ const Videos = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
   const [videosPerPage] = useState(20);
+  const [selectedVideoIds, setSelectedVideoIds] = useState(new Set());
+  const [bulkDeleting, setBulkDeleting] = useState(false);
   const [events, setEvents] = useState([]);
   const [channels, setChannels] = useState([]);
   const [showCreateForm, setShowCreateForm] = useState(false);
@@ -64,6 +66,10 @@ const Videos = () => {
   useEffect(() => {
     fetchData();
   }, []);
+
+  useEffect(() => {
+    setSelectedVideoIds(new Set());
+  }, [currentPage, filter, typeFilter, assignmentFilter, aiAssignmentFilter, searchQuery]);
 
   const fetchData = async () => {
     try {
@@ -171,6 +177,38 @@ const Videos = () => {
     (currentPage - 1) * videosPerPage,
     currentPage * videosPerPage
   );
+
+  const allOnPageSelected = currentVideos.length > 0 && currentVideos.every(v => selectedVideoIds.has(v.id));
+
+  const handleToggleSelectVideo = (videoId) => {
+    setSelectedVideoIds(prev => {
+      const next = new Set(prev);
+      if (next.has(videoId)) next.delete(videoId); else next.add(videoId);
+      return next;
+    });
+  };
+
+  const handleToggleSelectPage = () => {
+    setSelectedVideoIds(allOnPageSelected ? new Set() : new Set(currentVideos.map(v => v.id)));
+  };
+
+  const handleBulkDelete = async () => {
+    const ids = Array.from(selectedVideoIds);
+    if (ids.length === 0) return;
+    if (!confirm(`Are you sure you want to delete ${ids.length} video${ids.length === 1 ? '' : 's'}?`)) return;
+
+    setBulkDeleting(true);
+    try {
+      await historyPlusApi.bulkDeleteVideos(ids);
+      setSelectedVideoIds(new Set());
+      await fetchData();
+    } catch (error) {
+      console.error('Error deleting videos:', error);
+      alert('Failed to delete selected videos');
+    } finally {
+      setBulkDeleting(false);
+    }
+  };
 
   // Calculate type counts for filter buttons (considering current filters)
   const getTypeCount = (type) => {
@@ -825,11 +863,35 @@ const Videos = () => {
       </div>
 
       {/* Video List */}
+      {currentVideos.length > 0 && (
+        <div className="flex items-center gap-4 mb-3">
+          <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={allOnPageSelected}
+              onChange={handleToggleSelectPage}
+              className="w-4 h-4"
+            />
+            Select all on this page ({currentVideos.length})
+          </label>
+          {selectedVideoIds.size > 0 && (
+            <button
+              onClick={handleBulkDelete}
+              disabled={bulkDeleting}
+              className="px-3 py-1 text-sm text-white transition-colors bg-red-500 rounded-lg hover:bg-red-600 disabled:bg-red-300 disabled:cursor-not-allowed"
+            >
+              {bulkDeleting ? 'Deleting...' : `Delete Selected (${selectedVideoIds.size})`}
+            </button>
+          )}
+        </div>
+      )}
       <div className="mb-6 space-y-4">
         {currentVideos.map((video) => (
           <VideoCard
             key={video.id}
             video={video}
+            selected={selectedVideoIds.has(video.id)}
+            onToggleSelect={handleToggleSelectVideo}
             onEdit={handleEdit}
             onDelete={handleDelete}
             onToggleWatch={handleToggleWatch}

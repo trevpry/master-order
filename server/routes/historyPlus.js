@@ -1155,6 +1155,16 @@ router.put('/videos/:id', asyncHandler(async (req, res) => {
   sendSuccess(res, video);
 }));
 
+// POST /api/history-plus/videos/bulk-delete
+router.post('/videos/bulk-delete', asyncHandler(async (req, res) => {
+  const { ids } = req.body || {};
+  if (!Array.isArray(ids) || ids.length === 0 || ids.some(id => !Number.isInteger(Number(id)))) {
+    return sendBadRequest(res, 'ids must be a non-empty array of video IDs');
+  }
+  const result = await historyPlusService.bulkDeleteVideos(ids);
+  sendSuccess(res, { deleted: result.count });
+}));
+
 // DELETE /api/history-plus/videos/:id
 router.delete('/videos/:id', asyncHandler(async (req, res) => {
   await historyPlusService.deleteVideo(req.params.id);

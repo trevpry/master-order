@@ -307,6 +307,16 @@ export class HistoryPlusApiService {
     return response.json();
   }
 
+  static async bulkDeleteVideos(ids) {
+    const response = await fetch(`${API_BASE}/videos/bulk-delete`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ids })
+    });
+    if (!response.ok) throw new Error('Failed to delete videos');
+    return response.json();
+  }
+
   static async toggleVideoWatched(videoId) {
     const response = await fetch(`${API_BASE}/videos/${videoId}/toggle-watched`, {
       method: 'POST'
@@ -588,6 +598,7 @@ export const historyPlusApi = {
   createVideo: HistoryPlusApiService.createVideo,
   updateVideo: HistoryPlusApiService.updateVideo,
   deleteVideo: HistoryPlusApiService.deleteVideo,
+  bulkDeleteVideos: HistoryPlusApiService.bulkDeleteVideos,
   markVideoWatched: HistoryPlusApiService.markVideoWatched,
   toggleVideoWatched: HistoryPlusApiService.toggleVideoWatched,
   markEventReviewed: HistoryPlusApiService.markEventReviewed,

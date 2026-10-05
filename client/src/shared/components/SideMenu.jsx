@@ -134,6 +134,13 @@ const SideMenu = ({ isMobile, closeMobileMenu }) => {
       isSubmenu: true
     },
     {
+      path: '/history-plus/prompts',
+      icon: '🤖',
+      label: 'AI Prompts',
+      description: 'Edit History Plus prompts',
+      isSubmenu: true
+    },
+    {
       path: '/chat',
       icon: '💬',
       label: 'AI Chat',
@@ -217,8 +224,13 @@ const SideMenu = ({ isMobile, closeMobileMenu }) => {
       description: 'Comic library',
       isSubmenu: true
     },
-    {
-      path: '/media/settings',
+    {      path: '/channels',
+      icon: '📺',
+      label: 'YouTube Channels',
+      description: 'Channel library & video syncs',
+      isSubmenu: false
+    },
+    {      path: '/media/settings',
       icon: '⚙️',
       label: 'Media Settings',
       description: 'Configure media',

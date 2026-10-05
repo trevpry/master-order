@@ -4,6 +4,7 @@ const DcuTimelineParser = require('./DcuTimelineParser');
 const MarvelComicsParser = require('./MarvelComicsParser');
 const McuTimelineParser = require('./McuTimelineParser');
 const StarWarsTimelineParser = require('./StarWarsTimelineParser');
+const YouTubeChannelParser = require('./YouTubeChannelParser');
 
 /**
  * Registry mapping parserType strings to parser instances.
@@ -15,7 +16,8 @@ const parsers = {
   'dcu-timeline': new DcuTimelineParser(),
   'marvel-comics': new MarvelComicsParser(),
   'mcu-timeline': new McuTimelineParser(),
-  'starwars-timeline': new StarWarsTimelineParser()
+  'starwars-timeline': new StarWarsTimelineParser(),
+  'youtube-channel': new YouTubeChannelParser()
 };
 
 /**

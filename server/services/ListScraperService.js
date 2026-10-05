@@ -226,6 +226,13 @@ class ListScraperService {
     });
 
     if (byFingerprint) {
+      if (item.position !== undefined && byFingerprint.position !== item.position) {
+        await prisma.listScrapedItem.update({
+          where: { id: byFingerprint.id },
+          data: { position: item.position }
+        });
+        return { ...byFingerprint, position: item.position };
+      }
       return byFingerprint;
     }
 
@@ -331,9 +338,10 @@ class ListScraperService {
    * @param {Array<{ item: Object }>} plannedItems
    * @returns {Map<string, number>} fingerprint -> sortOrder
    */
-  async planInsertSortOrders(configId, customOrderId, plannedItems) {
+  async planInsertSortOrders(configId, customOrderId, plannedItems, currentFingerprints = null) {
     const assignments = new Map();
     if (!plannedItems || plannedItems.length === 0) return assignments;
+    const currentSet = currentFingerprints ? new Set(currentFingerprints) : null;
 
     const sortedPlans = [...plannedItems].sort((a, b) => (a.item.position ?? 0) - (b.item.position ?? 0));
 
@@ -348,7 +356,7 @@ class ListScraperService {
     });
 
     const validAnchors = anchors
-      .filter(a => a.customOrderItem)
+      .filter(a => a.customOrderItem && (!currentSet || currentSet.has(a.fingerprint)))
       .map(a => ({
         position: a.position,
         sortOrder: a.customOrderItem.sortOrder,
@@ -422,6 +430,8 @@ class ListScraperService {
    */
   async enforceListOrder(configId, customOrderId, options = {}) {
     const excludedIds = new Set(options.excludeCustomOrderItemIds || []);
+    // Tracked items no longer in the scrape keep stale positions that can collide.
+    const currentFingerprints = options.currentFingerprints ? new Set(options.currentFingerprints) : null;
 
     const trackedItems = (await prisma.listScrapedItem.findMany({
       where: {
@@ -430,7 +440,9 @@ class ListScraperService {
       },
       orderBy: { position: 'asc' },
       include: { customOrderItem: { select: { id: true, sortOrder: true } } }
-    })).filter(item => item.customOrderItem && !excludedIds.has(item.customOrderItem.id));
+    })).filter(item => item.customOrderItem &&
+      !excludedIds.has(item.customOrderItem.id) &&
+      (!currentFingerprints || currentFingerprints.has(item.fingerprint)));
 
     if (trackedItems.length < 2) return;
 
@@ -695,7 +707,7 @@ class ListScraperService {
     // === PHASE 3: Insert new items (all anchor points are now visible) ===
     const createdCustomOrderItemIds = [];
     const plannedNewItems = itemPlan.filter(({ duplicate, shouldImport }) => shouldImport && !duplicate);
-    const plannedSortOrders = await this.planInsertSortOrders(configId, config.customOrderId, plannedNewItems);
+    const plannedSortOrders = await this.planInsertSortOrders(configId, config.customOrderId, plannedNewItems, scrapedItems.map(i => i.fingerprint));
 
     for (const { item, enriched, duplicate, shouldImport } of itemPlan) {
       if (!shouldImport || duplicate) continue;
@@ -719,7 +731,8 @@ class ListScraperService {
     // === PHASE 4: Enforce scraped list order on all linked items ===
     if (hasOrder && config.customOrderId) {
       await this.enforceListOrder(configId, config.customOrderId, {
-        excludeCustomOrderItemIds: createdCustomOrderItemIds
+        excludeCustomOrderItemIds: createdCustomOrderItemIds,
+        currentFingerprints: scrapedItems.map(i => i.fingerprint)
       });
     }
 
@@ -984,7 +997,7 @@ class ListScraperService {
       // === PHASE 3: Insert new items (all anchor points now visible) ===
       const createdCustomOrderItemIds = [];
       const plannedNewItems = updatePlan.filter(({ duplicate }) => !duplicate);
-      const plannedSortOrders = await this.planInsertSortOrders(configId, config.customOrderId, plannedNewItems);
+      const plannedSortOrders = await this.planInsertSortOrders(configId, config.customOrderId, plannedNewItems, scrapedItems.map(i => i.fingerprint));
 
       for (const { item, enriched, duplicate } of updatePlan) {
         if (duplicate) continue;
@@ -1008,7 +1021,8 @@ class ListScraperService {
 
       // === PHASE 4: Enforce scraped list order on all linked items ===
       await this.enforceListOrder(configId, config.customOrderId, {
-        excludeCustomOrderItemIds: createdCustomOrderItemIds
+        excludeCustomOrderItemIds: createdCustomOrderItemIds,
+        currentFingerprints: scrapedItems.map(i => i.fingerprint)
       });
 
       console.log(`[ListSync] checkForUpdates COMPLETE — added:${results.added} unresolved:${results.notInPlex.length} errors:${results.errors.length}`);
@@ -1472,6 +1486,29 @@ class ListScraperService {
         return await prisma.customOrderItem.findFirst({
           where: { customOrderId, mediaType: 'webvideo', webUrl: enrichedItem.webUrl }
         });
+      }
+
+      if (enrichedItem.title) {
+        const normalizedTitle = normalizeTitleForExactMatch(enrichedItem.title);
+        const webVideoCandidates = await prisma.customOrderItem.findMany({
+          where: {
+            customOrderId,
+            mediaType: 'webvideo'
+          },
+          select: {
+            id: true,
+            title: true,
+            webUrl: true
+          }
+        });
+
+        const exactTitleMatches = webVideoCandidates.filter((candidate) =>
+          normalizeTitleForExactMatch(candidate.title || '') === normalizedTitle
+        );
+
+        if (exactTitleMatches.length > 0) {
+          return exactTitleMatches[0];
+        }
       }
     }
 

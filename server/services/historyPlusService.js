@@ -760,6 +760,13 @@ class HistoryPlusService {
     });
   }
 
+  async bulkDeleteVideos(ids) {
+    return await this.prisma.historyVideo.updateMany({
+      where: { id: { in: ids.map(id => parseInt(id)) } },
+      data: { deleted: true }
+    });
+  }
+
   async getAllChannels() {
     return await this.prisma.historyChannel.findMany({
       include: {

@@ -15,7 +15,9 @@ const VideoCard = ({
   channels,
   onEditSubmit,
   onEditCancel,
-  onEditInputChange
+  onEditInputChange,
+  selected,
+  onToggleSelect
 }) => {
   if (!video) return null;
 
@@ -37,8 +39,19 @@ const VideoCard = ({
   };
 
   return (
-    <div className="bg-white border border-gray-200 rounded-lg p-4 shadow-sm hover:shadow-md transition-shadow">
+    <div className={`bg-white border rounded-lg p-4 shadow-sm hover:shadow-md transition-shadow ${selected ? 'border-blue-500 ring-1 ring-blue-500' : 'border-gray-200'}`}>
       <div className="flex gap-4">
+        {onToggleSelect && (
+          <div className="flex items-start pt-1">
+            <input
+              type="checkbox"
+              checked={!!selected}
+              onChange={() => onToggleSelect(video.id)}
+              className="w-4 h-4 cursor-pointer"
+              aria-label={`Select ${video.title}`}
+            />
+          </div>
+        )}
         {/* Thumbnail */}
         <div className="flex-shrink-0">
           {video.thumbnailUrl ? (
