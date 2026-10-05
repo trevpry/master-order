@@ -1,4 +1,14 @@
 /* Global Music Player Styles */
+.player-track-title-link {
+  cursor: pointer;
+}
+
+.player-track-title-link:hover,
+.player-track-title-link:focus-visible {
+  color: #007bff;
+  text-decoration: underline;
+}
+
 .global-music-player {
   position: fixed;
   bottom: 0;

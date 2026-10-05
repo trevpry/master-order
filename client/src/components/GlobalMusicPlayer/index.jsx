@@ -711,6 +711,32 @@ const GlobalMusicPlayer = () => {
     console.log('🎵 Navigating to album:', albumName);
     navigate(`/media/music?view=album&album=${albumRatingKey}`);
   };
+
+  // Navigate to track detail page
+  const goToTrack = (track) => {
+    if (!track?.ratingKey) return;
+    if (isExpanded) setIsExpanded(false);
+    const albumRatingKey = track.parentRatingKey || track.album?.ratingKey;
+    navigate(`/media/music?view=track&track=${encodeURIComponent(track.ratingKey)}${albumRatingKey ? `&album=${encodeURIComponent(albumRatingKey)}` : ''}`);
+  };
+
+  const trackTitleLinkProps = (track) => (track?.ratingKey ? {
+    role: 'link',
+    tabIndex: 0,
+    title: 'Go to track details',
+    className: 'player-track-title-link',
+    onClick: (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      goToTrack(track);
+    },
+    onKeyDown: (event) => {
+      if (event.key === 'Enter') {
+        event.stopPropagation();
+        goToTrack(track);
+      }
+    }
+  } : {});
   
   const handleRatingChange = async (rating) => {
     if (!currentTrack) return;
@@ -825,7 +851,7 @@ const GlobalMusicPlayer = () => {
                 )}
               </div>
               <div className="track-info">
-                <div className="track-title">{currentTrack.title}</div>
+                <div className="track-title"><span {...trackTitleLinkProps(currentTrack)}>{currentTrack.title}</span></div>
                 <div className="track-meta">
                   <span 
                     className="artist-link"
@@ -1056,7 +1082,9 @@ const GlobalMusicPlayer = () => {
               )}
             </div>
             <div className="mini-track-details">
-              <span className="mini-track-title">{currentTrack?.title || 'No track loaded'}</span>
+              <span className="mini-track-title">
+                {currentTrack ? <span {...trackTitleLinkProps(currentTrack)}>{currentTrack.title}</span> : 'No track loaded'}
+              </span>
               <span className="mini-track-artist">
                 {currentTrack?.artist || currentTrack?.grandparentTitle || 'Unknown artist'}
               </span>
@@ -1089,7 +1117,7 @@ const GlobalMusicPlayer = () => {
             
             {/* Track Info */}
             <div className="expanded-track-info">
-              <h1 className="expanded-track-title">{currentTrack.title}</h1>
+              <h1 className="expanded-track-title"><span {...trackTitleLinkProps(currentTrack)}>{currentTrack.title}</span></h1>
               <h2 
                 className="expanded-track-artist"
                 onClick={(e) => {
@@ -1270,7 +1298,7 @@ const GlobalMusicPlayer = () => {
                     )}
                   </div>
                   <div className="up-next-info">
-                    <div className="up-next-track-title">{track.title}</div>
+                    <div className="up-next-track-title"><span {...trackTitleLinkProps(track)}>{track.title}</span></div>
                     <div className="up-next-track-artist">
                       {track.originalTitle || track.album?.parentTitle || track.grandparentTitle || 'Unknown Artist'}
                     </div>

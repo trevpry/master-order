@@ -3,6 +3,7 @@ import LoadingState from '../../../../../shared/components/LoadingState';
 import TracksPlaylistPlayer from './TracksPlaylistPlayer';
 import StarRating from '../../../../../components/StarRating';
 import config from '../../../../../config';
+import { getAlbumArtworkUrl } from '../../../../../utils/albumArtwork';
 import './TracksPlaylistPlayer.css';
 
 const MusicTracksView = ({ 
@@ -87,9 +88,9 @@ const MusicTracksView = ({
         
         {/* Album/Artist Header with Artwork */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '20px', marginTop: '10px' }}>
-          {selectedAlbum?.thumb && (
+          {getAlbumArtworkUrl(selectedAlbum) && (
             <img 
-              src={`${config.plexUrl}${selectedAlbum.thumb}?X-Plex-Token=${config.plexToken}`}
+              src={getAlbumArtworkUrl(selectedAlbum)}
               alt={selectedAlbum.title}
               style={{
                 width: '150px',

@@ -3,9 +3,13 @@ import config from '../../../../../config';
 import TracksPlaylistPlayer from './TracksPlaylistPlayer';
 import StarRating from '../../../../../components/StarRating';
 import IdentifyModal from '../../../../../components/IdentifyModal';
+import DiscogsIdentifyModal from '../../../../../components/DiscogsIdentifyModal';
 import MetadataEditor from '../../../../../components/MetadataEditor';
 import EmbeddedPicardTagsPanel from './EmbeddedPicardTagsPanel';
+import ArtworkPicker from './ArtworkPicker';
 import { buildTrackPreview, inferLocalDiscNumber } from '../../../../../utils/musicBrainzTrackMatch';
+import { splitArtistNameAndType } from '../../../../../utils/artistNameMatch';
+import { getAlbumArtworkUrl } from '../../../../../utils/albumArtwork';
 import './AlbumDetail.css';
 
 const AlbumDetail = ({
@@ -21,6 +25,7 @@ const AlbumDetail = ({
   onPlayTrack,
   onSelectArtist,
   onSelectTrack,
+  onSelectWork,
   onAddTrackToCustomPlaylist,
   formatDuration,
   formatFileSize
@@ -67,9 +72,18 @@ const AlbumDetail = ({
   const [discogsTrackMatches, setDiscogsTrackMatches] = useState([]);
   const [discogsLinkAllToAlbumWork, setDiscogsLinkAllToAlbumWork] = useState(false);
   const [discogsExcludedCreditKeys, setDiscogsExcludedCreditKeys] = useState(new Set());
-  const [discogsSearchQuery, setDiscogsSearchQuery] = useState('');
-  const [searchingDiscogs, setSearchingDiscogs] = useState(false);
-  const [discogsSearchResults, setDiscogsSearchResults] = useState([]);
+  const [editingDiscogsRowKey, setEditingDiscogsRowKey] = useState(null);
+  const [discogsApplyError, setDiscogsApplyError] = useState(null);
+  const [discogsArtistOverrides, setDiscogsArtistOverrides] = useState({});
+  const [editingCreditKey, setEditingCreditKey] = useState(null);
+  const [creditArtistQuery, setCreditArtistQuery] = useState('');
+  const [creditArtistResults, setCreditArtistResults] = useState([]);
+  const [searchingCreditArtists, setSearchingCreditArtists] = useState(false);
+  const [artworkSide, setArtworkSide] = useState('front');
+  const [discogsArtworkSelection, setDiscogsArtworkSelection] = useState({ front: null, back: null });
+  const [discogsWorkSelections, setDiscogsWorkSelections] = useState({});
+  const [mbCoverArt, setMbCoverArt] = useState({ loading: false, images: [], error: null });
+  const [mbArtworkSelection, setMbArtworkSelection] = useState({ front: null, back: null });
   const [showDiscogsSearchModal, setShowDiscogsSearchModal] = useState(false);
   
   // Sync local state when prop changes
@@ -89,7 +103,78 @@ const AlbumDetail = ({
     setMergeTargetWorkId('');
     setMergeTitle('');
     setIsMergingWorks(false);
+    setArtworkSide('front');
   }, [album?.ratingKey]);
+
+  useEffect(() => {
+    setDiscogsArtworkSelection(discogsPreview?.discogs?.defaultArtwork || { front: null, back: null });
+    setDiscogsWorkSelections(Object.fromEntries(
+      (discogsPreview?.mapping?.workGroups || []).map((group) => [group.key, group.defaultChoice || { mode: 'create' }])
+    ));
+  }, [discogsPreview]);
+
+  useEffect(() => {
+    const releaseId = mbTrackMatchPreview?.trackMatchData?.id || mbTrackMatchPreview?.candidate?.musicBrainzId || null;
+    setMbArtworkSelection({ front: null, back: null });
+    if (!releaseId) {
+      setMbCoverArt({ loading: false, images: [], error: null });
+      return undefined;
+    }
+
+    let cancelled = false;
+    setMbCoverArt({ loading: true, images: [], error: null });
+    fetch(`${config.apiBaseUrl}/api/identification/release/${encodeURIComponent(releaseId)}/cover-art`)
+      .then((response) => response.json())
+      .then((result) => {
+        if (cancelled) return;
+        if (!result.success) {
+          setMbCoverArt({ loading: false, images: [], error: result.error || 'Failed to load cover art' });
+          return;
+        }
+        const images = (result.data?.images || []).map((image) => ({
+          ...image,
+          label: [image.types.join(', '), image.comment].filter(Boolean).join(' · ') || `Image ${image.index + 1}`
+        }));
+        setMbCoverArt({ loading: false, images, error: null });
+        setMbArtworkSelection(result.data?.defaultArtwork || { front: null, back: null });
+      })
+      .catch((error) => {
+        if (!cancelled) setMbCoverArt({ loading: false, images: [], error: error.message || 'Failed to load cover art' });
+      });
+
+    return () => { cancelled = true; };
+  }, [mbTrackMatchPreview]);
+
+  useEffect(() => {
+    const query = splitArtistNameAndType(creditArtistQuery).name;
+    if (!editingCreditKey || query.length < 2) {
+      setCreditArtistResults([]);
+      return undefined;
+    }
+
+    let cancelled = false;
+    const timer = setTimeout(async () => {
+      try {
+        setSearchingCreditArtists(true);
+        const response = await fetch(
+          `${config.apiBaseUrl}/api/music/artists?search=${encodeURIComponent(creditArtistQuery.trim())}&limit=8`
+        );
+        const result = response.ok ? await response.json() : [];
+        if (!cancelled) {
+          setCreditArtistResults((result.artists || result || []).slice(0, 8));
+        }
+      } catch (error) {
+        console.error('Error searching artists:', error);
+      } finally {
+        if (!cancelled) setSearchingCreditArtists(false);
+      }
+    }, 300);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [creditArtistQuery, editingCreditKey]);
   
   const handleRatingChange = async (trackRatingKey, newRating) => {
     try {
@@ -193,7 +278,11 @@ const AlbumDetail = ({
       const response = await fetch(`${config.apiBaseUrl}/api/identification/apply/${candidateId}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ metadata: mbTrackMatchPreview?.trackMatchData || null, trackMatchOverrides })
+        body: JSON.stringify({
+          metadata: mbTrackMatchPreview?.trackMatchData || null,
+          trackMatchOverrides,
+          artwork: mbArtworkSelection
+        })
       });
 
       const data = await response.json();
@@ -207,6 +296,11 @@ const AlbumDetail = ({
       setMbTrackMatchPreview(null);
       setManualTrackMatchOverrides({});
       setEditingUnmatchedRowKey(null);
+
+      const artworkErrors = data.data?.artworkErrors || [];
+      if (artworkErrors.length > 0) {
+        alert(`Metadata applied, but some artwork could not be saved:\n${artworkErrors.map((entry) => `${entry.type}: ${entry.error}`).join('\n')}`);
+      }
     } catch (error) {
       console.error('Error applying MusicBrainz metadata:', error);
       setApplyMbMetadataError('Failed to apply metadata');
@@ -314,63 +408,12 @@ const AlbumDetail = ({
     }
   };
 
-  const handleSearchDiscogs = async () => {
-    let query = String(discogsSearchQuery || '').trim();
-    
-    // If no query provided, automatically use album title and artists
-    if (!query) {
-      const albumArtists = albumData?.albumArtists || [];
-      const albumTitle = albumData?.title || '';
-      
-      // Build search query from album title and artists
-      const artistNames = albumArtists
-        .map(a => a?.artist?.title || '')
-        .filter(name => name)
-        .slice(0, 3) // Limit to first 3 artists
-        .join(' ');
-      
-      if (artistNames && albumTitle) {
-        query = `${albumTitle} ${artistNames}`;
-      } else if (albumTitle) {
-        query = albumTitle;
-      } else {
-        alert('No album information available for search.');
-        return;
-      }
-      
-      // Show the search query in the input
-      setDiscogsSearchQuery(query);
-    }
-
-    try {
-      setSearchingDiscogs(true);
-      const response = await fetch(`${config.apiBaseUrl}/api/music/discogs-search`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({ query, limit: 10 })
-      });
-
-      const result = await response.json();
-      if (!response.ok) {
-        throw new Error(result.error || 'Failed to search Discogs');
-      }
-
-      setDiscogsSearchResults(result?.data?.releases || []);
-      setShowDiscogsSearchModal(true);
-    } catch (error) {
-      console.error('Error searching Discogs:', error);
-      alert(`Discogs search failed: ${error.message}`);
-    } finally {
-      setSearchingDiscogs(false);
-    }
+  const handleSearchDiscogs = () => {
+    setShowDiscogsSearchModal(true);
   };
 
   const closeDiscogsSearchModal = () => {
     setShowDiscogsSearchModal(false);
-    setDiscogsSearchResults([]);
-    setDiscogsSearchQuery('');
   };
 
   const handleSelectDiscogsRelease = async (release) => {
@@ -442,6 +485,35 @@ const AlbumDetail = ({
     setDiscogsTrackMatches([]);
     setDiscogsLinkAllToAlbumWork(false);
     setDiscogsExcludedCreditKeys(new Set());
+    setEditingDiscogsRowKey(null);
+    setDiscogsApplyError(null);
+    setDiscogsArtistOverrides({});
+    closeCreditArtistEditor();
+  };
+
+  const openCreditArtistEditor = (credit) => {
+    setEditingCreditKey(credit.creditKey);
+    setCreditArtistQuery(`${credit.artistName} — ${credit.artistTypeName}`);
+    setCreditArtistResults([]);
+  };
+
+  const closeCreditArtistEditor = () => {
+    setEditingCreditKey(null);
+    setCreditArtistQuery('');
+    setCreditArtistResults([]);
+  };
+
+  const setCreditArtistOverride = (creditKey, override) => {
+    setDiscogsArtistOverrides((prev) => {
+      const next = { ...prev };
+      if (override) {
+        next[creditKey] = override;
+      } else {
+        delete next[creditKey];
+      }
+      return next;
+    });
+    closeCreditArtistEditor();
   };
 
   const toggleDiscogsExcludedCredit = (creditKey) => {
@@ -461,23 +533,30 @@ const AlbumDetail = ({
     });
   };
 
-  const updateDiscogsTrackMatch = (discogsOrdinal, localTrackKey) => {
+  const handleDiscogsManualMatch = (localTrackKey, discogsOrdinal) => {
+    if (!localTrackKey || !Number.isInteger(discogsOrdinal)) return;
+
     setDiscogsTrackMatches((prev) => {
-      const next = Array.isArray(prev) ? [...prev] : [];
+      const next = (Array.isArray(prev) ? prev : []).map((entry) => (
+        entry.localTrackKey === localTrackKey ? { ...entry, localTrackKey: null } : entry
+      ));
       const idx = next.findIndex((entry) => entry.discogsOrdinal === discogsOrdinal);
-      const payload = {
-        discogsOrdinal,
-        localTrackKey: localTrackKey || null,
-      };
-
       if (idx >= 0) {
-        next[idx] = payload;
+        next[idx] = { ...next[idx], localTrackKey };
       } else {
-        next.push(payload);
+        next.push({ discogsOrdinal, localTrackKey });
       }
-
       return next;
     });
+    setEditingDiscogsRowKey(null);
+  };
+
+  const handleClearDiscogsMatch = (localTrackKey) => {
+    if (!localTrackKey) return;
+
+    setDiscogsTrackMatches((prev) => (Array.isArray(prev) ? prev : []).map((entry) => (
+      entry.localTrackKey === localTrackKey ? { ...entry, localTrackKey: null } : entry
+    )));
   };
 
   const handleAcceptDiscogsImport = async () => {
@@ -503,6 +582,7 @@ const AlbumDetail = ({
 
     try {
       setImportingDiscogs(true);
+      setDiscogsApplyError(null);
       const response = await fetch(`${config.apiBaseUrl}/api/music/albums/${albumData.ratingKey}/discogs-import`, {
         method: 'POST',
         headers: {
@@ -513,6 +593,16 @@ const AlbumDetail = ({
           apply: true,
           trackMappings: trackMappingsPayload,
           excludedCreditKeys: [...discogsExcludedCreditKeys],
+          artistOverrides: Object.fromEntries(
+            Object.entries(discogsArtistOverrides).map(([creditKey, override]) => [
+              creditKey,
+              override.ratingKey
+                ? { ratingKey: override.ratingKey, typeName: override.typeName || null }
+                : { createName: override.createName, typeName: override.typeName || null }
+            ])
+          ),
+          artwork: discogsArtworkSelection,
+          workSelections: discogsWorkSelections,
         })
       });
 
@@ -524,16 +614,13 @@ const AlbumDetail = ({
       await refreshAlbumAndTracks();
       closeDiscogsPreviewModal();
 
-      const discogsMeta = result?.data?.discogs;
-      if (discogsMeta) {
-        alert(
-          `Discogs import complete. Updated ${discogsMeta.mappedTrackCount || 0} track(s)`
-          + ` and linked ${discogsMeta.linkedWorkTrackCount || 0} track(s) into works.`
-        );
+      const artworkErrors = result?.data?.discogs?.artworkErrors || [];
+      if (artworkErrors.length > 0) {
+        alert(`Metadata imported, but some artwork could not be saved:\n${artworkErrors.map((entry) => `${entry.type}: ${entry.error}`).join('\n')}`);
       }
     } catch (error) {
       console.error('Error applying Discogs metadata:', error);
-      alert(`Discogs import failed: ${error.message}`);
+      setDiscogsApplyError(error.message || 'Failed to apply metadata');
     } finally {
       setImportingDiscogs(false);
     }
@@ -555,6 +642,63 @@ const AlbumDetail = ({
     if (!mbTrackMatchPreview) return null;
     return buildTrackPreview(tracks, mbTrackMatchPreview.trackMatchData, manualTrackMatchOverrides);
   }, [tracks, mbTrackMatchPreview, manualTrackMatchOverrides]);
+
+  const discogsTrackPreview = useMemo(() => {
+    if (!discogsPreview) return null;
+
+    const remoteTracks = discogsPreview.mapping?.discogsTracks || [];
+    const remoteByOrdinal = new Map(remoteTracks.map((track) => [track.discogsOrdinal, track]));
+    const defaultLocalKeyByOrdinal = new Map(
+      (discogsPreview.mapping?.defaultTrackMappings || []).map((entry) => [entry.discogsOrdinal, entry.localTrackKey || null])
+    );
+    const ordinalByLocalKey = new Map();
+    (discogsTrackMatches || []).forEach((entry) => {
+      if (entry?.localTrackKey && remoteByOrdinal.has(entry.discogsOrdinal)) {
+        ordinalByLocalKey.set(entry.localTrackKey, entry.discogsOrdinal);
+      }
+    });
+
+    const localTracks = [...(discogsPreview.mapping?.localTracks || [])].sort((left, right) => (
+      ((left.discNumber || Number.MAX_SAFE_INTEGER) - (right.discNumber || Number.MAX_SAFE_INTEGER))
+      || ((left.index || 0) - (right.index || 0))
+    ));
+
+    const rows = localTracks.map((localTrack) => {
+      const ordinal = ordinalByLocalKey.get(localTrack.ratingKey);
+      const remoteTrack = ordinal ? remoteByOrdinal.get(ordinal) : null;
+      const isManualMatch = Boolean(remoteTrack) && defaultLocalKeyByOrdinal.get(ordinal) !== localTrack.ratingKey;
+      const changes = [];
+
+      if (remoteTrack) {
+        if (isManualMatch) {
+          changes.push('Manually matched');
+        }
+        if (remoteTrack.discNumber && (localTrack.discNumber || null) !== remoteTrack.discNumber) {
+          changes.push(`Disc # ${localTrack.discNumber || '—'} -> ${remoteTrack.discNumber}`);
+        }
+        if (remoteTrack.trackNumber && (localTrack.index || null) !== remoteTrack.trackNumber) {
+          changes.push(`Track # ${localTrack.index || '—'} -> ${remoteTrack.trackNumber}`);
+        }
+        if ((localTrack.title || '') !== (remoteTrack.discogsTrackTitle || '')) {
+          changes.push(`Title -> ${remoteTrack.discogsTrackTitle}`);
+        }
+      } else {
+        changes.push('No matching Discogs track found');
+      }
+
+      return {
+        localTrack,
+        remoteTrack,
+        isManualMatch,
+        changes: changes.length > 0 ? changes.join(', ') : 'No change'
+      };
+    });
+
+    const matchedOrdinals = new Set(ordinalByLocalKey.values());
+    const unmatchedRemoteTracks = remoteTracks.filter((track) => !matchedOrdinals.has(track.discogsOrdinal));
+
+    return { rows, unmatchedRemoteTracks };
+  }, [discogsPreview, discogsTrackMatches]);
 
   const discogsImportArtistsPreview = useMemo(() => {
     const selectedOrdinals = new Set(
@@ -612,8 +756,12 @@ const AlbumDetail = ({
       });
 
     const includedCreditCount = creditOptions.filter((credit) => !credit.excluded).length;
-    const matchedExistingCount = creditOptions.filter((credit) => !credit.excluded && credit.matchedExisting).length;
-    const newArtistCount = creditOptions.filter((credit) => !credit.excluded && !credit.matchedExisting).length;
+    const usesExistingArtist = (credit) => {
+      const override = discogsArtistOverrides[credit.creditKey];
+      return override ? Boolean(override.ratingKey) : credit.matchedExisting;
+    };
+    const matchedExistingCount = creditOptions.filter((credit) => !credit.excluded && usesExistingArtist(credit)).length;
+    const newArtistCount = creditOptions.filter((credit) => !credit.excluded && !usesExistingArtist(credit)).length;
 
     return {
       selectedTrackCount: selectedOrdinals.size,
@@ -622,7 +770,7 @@ const AlbumDetail = ({
       matchedExistingCount,
       newArtistCount,
     };
-  }, [discogsPreview, discogsTrackMatches, discogsExcludedCreditKeys]);
+  }, [discogsPreview, discogsTrackMatches, discogsExcludedCreditKeys, discogsArtistOverrides]);
 
   const inferDiscNumberFromTrack = inferLocalDiscNumber;
 
@@ -673,14 +821,17 @@ const AlbumDetail = ({
       const workId = track.work?.id || null;
       const workTitle = track.work?.title || 'Standalone Tracks';
       const discNumber = inferDiscNumberFromTrack(track) || 1;
-      const groupKey = workId ? `disc-${discNumber}-work-${workId}` : `disc-${discNumber}-standalone-${track.ratingKey}`;
+      // A work spanning several discs stays one group; discs are shown as dividers inside it.
+      const groupKey = workId ? `work-${workId}` : `disc-${discNumber}-standalone-${track.ratingKey}`;
 
       if (!groupMap.has(groupKey)) {
         const group = {
           key: groupKey,
           workId,
           title: workTitle,
+          composerName: track.work?.composer ? (track.work.composer.userTitle || track.work.composer.title) : null,
           discNumber,
+          discNumbers: new Set(),
           tracks: []
         };
 
@@ -688,18 +839,20 @@ const AlbumDetail = ({
         groups.push(group);
       }
 
-      groupMap.get(groupKey).tracks.push(track);
+      const group = groupMap.get(groupKey);
+      group.discNumbers.add(discNumber);
+      group.tracks.push(track);
     }
 
     return groups;
   };
 
   const trackGroups = buildTrackGroups(tracks);
-  const albumDiscNumbers = new Set(trackGroups.map((group) => group.discNumber));
+  const albumDiscNumbers = new Set(trackGroups.flatMap((group) => [...group.discNumbers]));
   const albumHasMultipleDiscs = albumDiscNumbers.size > 1;
   const albumWorks = trackGroups
     .filter((group) => group.workId)
-    .map((group) => ({ id: group.workId, title: group.title, tracksCount: group.tracks.length }));
+    .map((group) => ({ id: group.workId, title: group.title, composerName: group.composerName, tracksCount: group.tracks.length }));
 
   useEffect(() => {
     if (!workSelectionMode || mergeMode !== 'existing') return;
@@ -1073,11 +1226,11 @@ const AlbumDetail = ({
           <button
             className="musicbrainz-search-btn"
             onClick={handleSearchDiscogs}
-            disabled={searchingDiscogs}
-            title="Search Discogs for releases"
-            style={{ backgroundColor: '#0f766e', opacity: searchingDiscogs ? 0.7 : 1 }}
+            disabled={importingDiscogs}
+            title="Search Discogs by artist and album title"
+            style={{ backgroundColor: '#0f766e', opacity: importingDiscogs ? 0.7 : 1 }}
           >
-            {searchingDiscogs ? '⏳ Searching Discogs...' : '🔍 Search Discogs'}
+            🔍 Search Discogs
           </button>
           <button
             className="musicbrainz-search-btn"
@@ -1163,16 +1316,31 @@ const AlbumDetail = ({
 
       {/* Album Info Section */}
       <div className="album-info">
-        {album.thumb && (
+        {getAlbumArtworkUrl(albumData) && (
           <div className="album-artwork">
             <img 
-              src={`${config.plexUrl}${album.thumb}?X-Plex-Token=${config.plexToken}`}
-              alt={album.title}
+              key={`${albumData.ratingKey}-${artworkSide}`}
+              src={getAlbumArtworkUrl(albumData, albumData?.artwork?.back ? artworkSide : 'front')}
+              alt={`${albumData.title} (${artworkSide} cover)`}
               onError={(e) => {
                 console.error('Album artwork failed to load');
                 e.target.style.display = 'none';
               }}
             />
+            {albumData?.artwork?.back && (
+              <div className="album-artwork-sides">
+                {['front', 'back'].map((side) => (
+                  <button
+                    key={side}
+                    type="button"
+                    className={`album-artwork-side-btn ${artworkSide === side ? 'active' : ''}`}
+                    onClick={() => setArtworkSide(side)}
+                  >
+                    {side === 'front' ? 'Front' : 'Back'}
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
         )}
         
@@ -1416,7 +1584,9 @@ const AlbumDetail = ({
                     toggleWorkSelection(work.id);
                     return;
                   }
+                  onSelectWork && onSelectWork(work.id);
                 }}
+                title={workSelectionMode ? undefined : 'Open work details'}
               >
                 {workSelectionMode && (
                   <span className="album-work-checkbox" onClick={(event) => event.stopPropagation()}>
@@ -1427,7 +1597,10 @@ const AlbumDetail = ({
                     />
                   </span>
                 )}
-                <span className="album-work-item-title">{work.title}</span>
+                <span className="album-work-item-title">
+                  {work.title}
+                  {work.composerName && <span className="album-work-item-composer"> — {work.composerName}</span>}
+                </span>
                 <span className="album-work-item-meta">{work.tracksCount} track{work.tracksCount !== 1 ? 's' : ''}</span>
               </button>
             ))}
@@ -1512,6 +1685,17 @@ const AlbumDetail = ({
                   {isApplyingMbMetadata ? 'Applying…' : 'Apply Metadata'}
                 </button>
               </div>
+            </div>
+
+            <div className="discogs-preview-options">
+              <ArtworkPicker
+                images={mbCoverArt.images}
+                selection={mbArtworkSelection}
+                onChange={setMbArtworkSelection}
+                disabled={isApplyingMbMetadata}
+                loading={mbCoverArt.loading}
+                error={mbCoverArt.error}
+              />
             </div>
 
             <div className="mb-track-match-columns">
@@ -1643,6 +1827,352 @@ const AlbumDetail = ({
           </div>
         )}
 
+        {showDiscogsPreviewModal && discogsTrackPreview && (
+          <div className="mb-track-match-preview">
+            <div className="mb-track-match-preview-header">
+              <div>
+                <h3>Discogs Track Matches</h3>
+                <p>
+                  Pulled from &ldquo;{discogsPreview?.album?.discogsTitle || 'Unknown release'}&rdquo; (Discogs release #{discogsPreview?.discogs?.releaseId || '?'}) — existing tracks are matched to the pulled Discogs tracks below.
+                </p>
+                {discogsApplyError && (
+                  <p className="mb-track-match-apply-error">{discogsApplyError}</p>
+                )}
+              </div>
+              <div style={{ display: 'flex', gap: '0.5rem', flexShrink: 0 }}>
+                <button
+                  type="button"
+                  className="album-works-select-btn"
+                  onClick={closeDiscogsPreviewModal}
+                  disabled={importingDiscogs}
+                >
+                  Dismiss
+                </button>
+                <button
+                  type="button"
+                  className="album-works-merge-confirm"
+                  onClick={handleAcceptDiscogsImport}
+                  disabled={importingDiscogs}
+                >
+                  {importingDiscogs ? 'Applying…' : 'Apply Metadata'}
+                </button>
+              </div>
+            </div>
+
+            <div className="discogs-preview-options">
+              <label className="discogs-preview-option">
+                <input
+                  type="checkbox"
+                  checked={discogsLinkAllToAlbumWork}
+                  onChange={(event) => setDiscogsLinkAllToAlbumWork(event.target.checked)}
+                  disabled={importingDiscogs}
+                />
+                Link all matched tracks to a single work titled &ldquo;{(discogsPreview?.album?.discogsTitle || albumData?.title || 'Album Title').trim() || 'Album Title'}&rdquo;
+              </label>
+
+              {(discogsPreview?.mapping?.workGroups || []).length > 0 && (
+                <>
+                  <div className="mb-track-match-column-label">
+                    Works ({discogsPreview.mapping.workGroups.length} found on Discogs)
+                    {discogsLinkAllToAlbumWork ? ' — overridden by “link all to a single work”' : ''}
+                  </div>
+                  <div className="discogs-credit-grid">
+                    {discogsPreview.mapping.workGroups.map((group) => {
+                      const selection = discogsWorkSelections[group.key] || group.defaultChoice || { mode: 'create' };
+                      const selectValue = selection.mode === 'existing' ? `existing:${selection.workId}` : selection.mode;
+                      const chosenCandidate = selection.mode === 'existing'
+                        ? group.candidates.find((candidate) => candidate.id === Number(selection.workId))
+                        : null;
+
+                      return (
+                        <div
+                          key={group.key}
+                          className={`mb-track-match-cell ${selection.mode === 'existing' ? 'matched' : ''} ${discogsLinkAllToAlbumWork || selection.mode === 'none' ? 'discogs-credit-cell excluded' : ''}`}
+                        >
+                          <div className="mb-track-match-cell-title">{group.title}</div>
+                          <div className="mb-track-match-cell-meta">
+                            {group.trackCount} track{group.trackCount !== 1 ? 's' : ''}
+                            {group.composerName ? ` · ${group.composerName}` : ''}
+                            {group.inferred ? ' · inferred from track title' : ''}
+                          </div>
+                          <select
+                            className="mb-track-match-select"
+                            style={{ marginTop: '6px' }}
+                            value={selectValue}
+                            disabled={importingDiscogs || discogsLinkAllToAlbumWork}
+                            onChange={(event) => {
+                              const value = event.target.value;
+                              setDiscogsWorkSelections((prev) => ({
+                                ...prev,
+                                [group.key]: value.startsWith('existing:')
+                                  ? { mode: 'existing', workId: Number(value.slice('existing:'.length)) }
+                                  : { mode: value }
+                              }));
+                            }}
+                          >
+                            {group.candidates.map((candidate) => (
+                              <option key={candidate.id} value={`existing:${candidate.id}`}>
+                                Link to existing: {candidate.title}{candidate.composerName ? ` — ${candidate.composerName}` : ''} ({Math.round(candidate.score * 100)}%)
+                              </option>
+                            ))}
+                            <option value="create">Create new work &ldquo;{group.title}&rdquo;</option>
+                            <option value="none">Don&apos;t link to a work</option>
+                          </select>
+                          <div className="mb-track-match-cell-meta">
+                            {selection.mode === 'existing' && chosenCandidate
+                              ? `Existing work with ${chosenCandidate.partCount} part(s); tracks are matched to its parts by title.`
+                              : (group.candidates.length === 0 ? 'No matching works found in your library.' : `${group.candidates.length} possible match(es) in your library.`)}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </>
+              )}
+
+              <ArtworkPicker
+                images={(discogsPreview?.discogs?.images || []).map((image) => ({
+                  ...image,
+                  label: `${image.width && image.height ? `${image.width}×${image.height}` : 'Unknown size'}${image.discogsType === 'primary' ? ' · primary' : ''}`
+                }))}
+                selection={discogsArtworkSelection}
+                onChange={setDiscogsArtworkSelection}
+                disabled={importingDiscogs}
+              />
+
+              <div className="mb-track-match-column-label">
+                Artists to Import ({discogsImportArtistsPreview.includedCreditCount} of {discogsImportArtistsPreview.creditOptions.length} selected · {discogsImportArtistsPreview.matchedExistingCount} existing, {discogsImportArtistsPreview.newArtistCount} new)
+              </div>
+              {discogsImportArtistsPreview.creditOptions.length === 0 ? (
+                <div className="mb-track-match-cell-meta">No artist credits will be imported with the current matches.</div>
+              ) : (
+                <div className="discogs-credit-grid">
+                  {discogsImportArtistsPreview.creditOptions.map((credit) => {
+                    const override = discogsArtistOverrides[credit.creditKey] || null;
+                    const isEditing = editingCreditKey === credit.creditKey;
+                    const typed = splitArtistNameAndType(creditArtistQuery);
+                    const effectiveType = override?.typeName || credit.artistTypeName;
+                    const isMatched = override ? Boolean(override.ratingKey) : credit.matchedExisting;
+
+                    return (
+                      <div
+                        key={credit.creditKey}
+                        className={`mb-track-match-cell discogs-credit-cell ${credit.excluded ? 'excluded' : (isMatched ? 'matched' : '')}`}
+                      >
+                        <label className="mb-track-match-cell-title">
+                          <input
+                            type="checkbox"
+                            checked={!credit.excluded}
+                            onChange={() => toggleDiscogsExcludedCredit(credit.creditKey)}
+                            disabled={importingDiscogs}
+                          />
+                          {credit.artistName} — {effectiveType}
+                        </label>
+                        <div className="mb-track-match-cell-meta">
+                          {credit.sourceLabel}{credit.discogsTrackTitle ? ` · ${credit.discogsTrackTitle}` : ''}
+                        </div>
+                        <div className="mb-track-match-cell-meta">
+                          {override?.ratingKey && `Will use existing artist: ${override.title}`}
+                          {override && !override.ratingKey && `Will create new artist: ${override.createName}`}
+                          {!override && (credit.matchedExisting
+                            ? `Matches existing artist${credit.matchKind === 'fuzzy' ? ' (fuzzy)' : ''}: ${credit.matchedArtist?.title || credit.artistName}`
+                            : 'New artist will be created')}
+                        </div>
+
+                        {isEditing ? (
+                          <div className="discogs-credit-editor">
+                            <input
+                              autoFocus
+                              type="text"
+                              className="mb-track-match-select"
+                              value={creditArtistQuery}
+                              onChange={(event) => setCreditArtistQuery(event.target.value)}
+                              onKeyDown={(event) => { if (event.key === 'Escape') closeCreditArtistEditor(); }}
+                              placeholder="Artist name — Type"
+                            />
+                            <div className="mb-track-match-cell-meta">
+                              {searchingCreditArtists ? 'Searching…' : 'Pick an existing artist or create a new one.'}
+                            </div>
+                            {creditArtistResults.map((artist) => (
+                              <button
+                                key={artist.ratingKey}
+                                type="button"
+                                className="mb-track-match-empty-btn discogs-credit-option"
+                                onClick={() => setCreditArtistOverride(credit.creditKey, {
+                                  ratingKey: artist.ratingKey,
+                                  title: artist.userTitle || artist.title,
+                                  typeName: typed.typeName || credit.artistTypeName
+                                })}
+                              >
+                                Use {artist.userTitle || artist.title} — {typed.typeName || credit.artistTypeName}
+                              </button>
+                            ))}
+                            {typed.name && (
+                              <button
+                                type="button"
+                                className="mb-track-match-empty-btn discogs-credit-option"
+                                onClick={() => setCreditArtistOverride(credit.creditKey, {
+                                  createName: typed.name,
+                                  typeName: typed.typeName || credit.artistTypeName
+                                })}
+                              >
+                                + Create new artist &ldquo;{typed.name}&rdquo; — {typed.typeName || credit.artistTypeName}
+                              </button>
+                            )}
+                            <button type="button" className="mb-track-match-clear-btn" onClick={closeCreditArtistEditor}>
+                              Cancel
+                            </button>
+                          </div>
+                        ) : (
+                          <div className="discogs-credit-actions">
+                            <button
+                              type="button"
+                              className="mb-track-match-clear-btn"
+                              onClick={() => openCreditArtistEditor(credit)}
+                              disabled={importingDiscogs || credit.excluded}
+                            >
+                              Change artist
+                            </button>
+                            {override && (
+                              <button
+                                type="button"
+                                className="mb-track-match-clear-btn"
+                                onClick={() => setCreditArtistOverride(credit.creditKey, null)}
+                              >
+                                Reset
+                              </button>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
+            <div className="mb-track-match-columns">
+              <div className="mb-track-match-column-label">Existing Track</div>
+              <div className="mb-track-match-column-label">Pulled Discogs Track</div>
+
+              {(() => {
+                let lastDiscNumber = null;
+                return discogsTrackPreview.rows.map((row, index) => {
+                  const localMs = Number(row.localTrack?.duration);
+                  const remoteMs = Number(row.remoteTrack?.discogsTrackDurationMs);
+                  const hasBothLengths = Number.isFinite(localMs) && localMs > 0 && Number.isFinite(remoteMs) && remoteMs > 0;
+                  const isLengthMismatch = Boolean(row.remoteTrack) && hasBothLengths && Math.abs(localMs - remoteMs) > 10000;
+                  const matchedCellClass = row.remoteTrack ? (isLengthMismatch ? 'matched matched-length-mismatch' : 'matched') : '';
+                  const rowKey = row.localTrack?.ratingKey || `discogs-row-${index}`;
+                  const remoteDiscNumber = row.remoteTrack?.discNumber || null;
+                  const showDiscHeader = Boolean(remoteDiscNumber) && remoteDiscNumber !== lastDiscNumber;
+                  if (remoteDiscNumber) {
+                    lastDiscNumber = remoteDiscNumber;
+                  }
+                  const isEditingMatch = editingDiscogsRowKey === rowKey;
+                  const hasUnmatchedOptions = discogsTrackPreview.unmatchedRemoteTracks.length > 0;
+
+                  return (
+                    <React.Fragment key={rowKey}>
+                      {showDiscHeader && (
+                        <div className="mb-track-match-disc-header">Disc {remoteDiscNumber}</div>
+                      )}
+                      <div className="mb-track-match-cell">
+                        <div className="mb-track-match-cell-title">
+                          {`${row.localTrack.index || index + 1}. ${row.localTrack.title || 'Untitled'}`}
+                        </div>
+                        {formatMilliseconds(row.localTrack.duration) && (
+                          <div className="mb-track-match-cell-meta">Length: {formatMilliseconds(row.localTrack.duration)}</div>
+                        )}
+                      </div>
+                      <div className={`mb-track-match-cell ${matchedCellClass}`}>
+                        {row.remoteTrack ? (
+                          <>
+                            <div className="mb-track-match-cell-title">
+                              {row.remoteTrack.trackNumber || row.remoteTrack.discogsTrackIndex}. {row.remoteTrack.discogsTrackTitle || 'Untitled'}
+                            </div>
+                            {formatMilliseconds(row.remoteTrack.discogsTrackDurationMs) && (
+                              <div className="mb-track-match-cell-meta">Length: {formatMilliseconds(row.remoteTrack.discogsTrackDurationMs)}</div>
+                            )}
+                            <div className="mb-track-match-cell-meta">Discogs position: {row.remoteTrack.discogsTrackIndex}</div>
+                            {isLengthMismatch && (
+                              <div className="mb-track-match-cell-meta mb-track-match-length-warning">
+                                Length differs by {formatMilliseconds(Math.abs(localMs - remoteMs))}
+                              </div>
+                            )}
+                            <div className="mb-track-match-cell-changes">{row.changes}</div>
+                            <button
+                              type="button"
+                              className="mb-track-match-clear-btn"
+                              onClick={() => handleClearDiscogsMatch(row.localTrack.ratingKey)}
+                            >
+                              {row.isManualMatch ? 'Clear manual match' : 'Clear match'}
+                            </button>
+                          </>
+                        ) : isEditingMatch ? (
+                          <select
+                            autoFocus
+                            className="mb-track-match-select"
+                            value=""
+                            onChange={(event) => handleDiscogsManualMatch(row.localTrack.ratingKey, Number.parseInt(event.target.value, 10))}
+                            onBlur={() => setEditingDiscogsRowKey(null)}
+                          >
+                            <option value="">— Select a pulled track —</option>
+                            {discogsTrackPreview.unmatchedRemoteTracks.map((remoteTrack) => (
+                              <option key={remoteTrack.discogsOrdinal} value={remoteTrack.discogsOrdinal}>
+                                {remoteTrack.discNumber ? `Disc ${remoteTrack.discNumber} · ` : ''}{remoteTrack.trackNumber || remoteTrack.discogsTrackIndex}. {remoteTrack.discogsTrackTitle}
+                              </option>
+                            ))}
+                          </select>
+                        ) : (
+                          <button
+                            type="button"
+                            className="mb-track-match-empty-btn"
+                            onClick={() => setEditingDiscogsRowKey(rowKey)}
+                            disabled={!hasUnmatchedOptions}
+                            title={hasUnmatchedOptions ? 'Click to manually match a pulled track' : 'No unmatched pulled tracks available'}
+                          >
+                            No pulled match{hasUnmatchedOptions ? ' — click to select' : ''}
+                          </button>
+                        )}
+                      </div>
+                    </React.Fragment>
+                  );
+                });
+              })()}
+            </div>
+
+            {discogsTrackPreview.unmatchedRemoteTracks.length > 0 && (
+              <div className="mb-track-match-unmatched">
+                <div className="mb-track-match-column-label">Unmatched Pulled Tracks</div>
+                {(() => {
+                  let lastUnmatchedDiscNumber = null;
+                  return discogsTrackPreview.unmatchedRemoteTracks.map((remoteTrack) => {
+                    const showDiscHeader = Boolean(remoteTrack.discNumber) && remoteTrack.discNumber !== lastUnmatchedDiscNumber;
+                    lastUnmatchedDiscNumber = remoteTrack.discNumber;
+
+                    return (
+                      <React.Fragment key={remoteTrack.discogsOrdinal}>
+                        {showDiscHeader && (
+                          <div className="mb-track-match-disc-header">Disc {remoteTrack.discNumber}</div>
+                        )}
+                        <div className="mb-track-match-cell">
+                          <div className="mb-track-match-cell-title">
+                            {remoteTrack.discogsTrackIndex} {remoteTrack.discogsTrackTitle}
+                          </div>
+                          {formatMilliseconds(remoteTrack.discogsTrackDurationMs) && (
+                            <div className="mb-track-match-cell-meta">Length: {formatMilliseconds(remoteTrack.discogsTrackDurationMs)}</div>
+                          )}
+                        </div>
+                      </React.Fragment>
+                    );
+                  });
+                })()}
+              </div>
+            )}
+          </div>
+        )}
+
         {!tracks || tracks.length === 0 ? (
           <div className="empty-state">
             <p>No tracks found for this album.</p>
@@ -1664,7 +2194,8 @@ const AlbumDetail = ({
               let lastRenderedDiscNumber = null;
               return trackGroups.map((group) => {
                 const showDiscHeader = albumHasMultipleDiscs && group.discNumber !== lastRenderedDiscNumber;
-                lastRenderedDiscNumber = group.discNumber;
+                const groupSpansDiscs = group.discNumbers.size > 1;
+                lastRenderedDiscNumber = inferDiscNumberFromTrack(group.tracks[group.tracks.length - 1]) || 1;
 
                 return (
                   <React.Fragment key={group.key}>
@@ -1675,13 +2206,40 @@ const AlbumDetail = ({
                     )}
                     <div className="track-group">
                 <div className="track-group-header">
-                  <span className="track-group-title">{group.title}</span>
-                  <span className="track-group-count">{group.tracks.length} track{group.tracks.length !== 1 ? 's' : ''}</span>
+                  <span className="track-group-title">
+                    {group.workId ? (
+                      <span
+                        className="track-group-work-link"
+                        role="link"
+                        tabIndex={0}
+                        onClick={() => onSelectWork && onSelectWork(group.workId)}
+                        onKeyDown={(event) => { if (event.key === 'Enter') onSelectWork && onSelectWork(group.workId); }}
+                        title="Open work details"
+                      >
+                        {group.title}
+                      </span>
+                    ) : group.title}
+                    {group.composerName && <span className="album-work-item-composer"> — {group.composerName}</span>}
+                  </span>
+                  <span className="track-group-count">
+                    {group.tracks.length} track{group.tracks.length !== 1 ? 's' : ''}
+                    {groupSpansDiscs ? ` · ${group.discNumbers.size} discs` : ''}
+                  </span>
                 </div>
 
-                {group.tracks.map((track, index) => (
+                {group.tracks.map((track, index) => {
+                  const trackDisc = inferDiscNumberFromTrack(track) || 1;
+                  const previousDisc = index > 0 ? (inferDiscNumberFromTrack(group.tracks[index - 1]) || 1) : group.discNumber;
+                  const showInnerDiscHeader = groupSpansDiscs && index > 0 && trackDisc !== previousDisc;
+
+                  return (
+                  <React.Fragment key={track.ratingKey}>
+                  {showInnerDiscHeader && (
+                    <div className="disc-group-header disc-group-header-inner">
+                      <span className="disc-group-title">Disc {trackDisc}</span>
+                    </div>
+                  )}
                   <div 
-                    key={track.ratingKey} 
                     className={`track-row ${currentTrack?.ratingKey === track.ratingKey ? 'playing' : ''}`}
                   >
                     {bulkTrackLinkSelectionMode && (
@@ -1714,7 +2272,17 @@ const AlbumDetail = ({
                       )}
                       {group.workId && (
                         <div className="track-subtitle">
-                          Work: {group.title}
+                          Work:{' '}
+                          <span
+                            className="track-group-work-link"
+                            role="link"
+                            tabIndex={0}
+                            onClick={() => onSelectWork && onSelectWork(group.workId)}
+                            onKeyDown={(event) => { if (event.key === 'Enter') onSelectWork && onSelectWork(group.workId); }}
+                          >
+                            {group.title}
+                          </span>
+                          {group.composerName ? ` — ${group.composerName}` : ''}
                         </div>
                       )}
                       {track.musicBrainzTrackId && (
@@ -1793,7 +2361,9 @@ const AlbumDetail = ({
                       )}
                     </div>
                   </div>
-                ))}
+                  </React.Fragment>
+                  );
+                })}
                     </div>
                   </React.Fragment>
                 );
@@ -1904,240 +2474,14 @@ const AlbumDetail = ({
         }}
       />
 
-      {/* Discogs Search Modal */}
-      {showDiscogsSearchModal && (
-        <div className="modal-overlay" onClick={closeDiscogsSearchModal}>
-          <div className="modal-content" onClick={(event) => event.stopPropagation()}>
-            <h2>Discogs Search Results</h2>
-            <div className="track-link-modal-step">
-              <input
-                type="text"
-                value={discogsSearchQuery}
-                onChange={(event) => setDiscogsSearchQuery(event.target.value)}
-                placeholder="Search query (e.g., 'Album Title Artist')"
-                style={{
-                  width: '100%',
-                  padding: '0.45rem 0.6rem',
-                  borderRadius: '0.375rem',
-                  border: '1px solid #4b5563',
-                  backgroundColor: '#111827',
-                  color: '#f9fafb',
-                  marginBottom: '0.5rem',
-                }}
-              />
-              <button
-                onClick={handleSearchDiscogs}
-                disabled={searchingDiscogs}
-                style={{ backgroundColor: '#0f766e', padding: '0.45rem 1rem', borderRadius: '0.375rem' }}
-              >
-                {searchingDiscogs ? 'Searching...' : 'Search'}
-              </button>
-            </div>
-            <div className="track-link-modal-results" style={{ maxHeight: '360px' }}>
-              {discogsSearchResults.length === 0 ? (
-                <div className="track-link-modal-hint">No results found.</div>
-              ) : (
-                discogsSearchResults.map((release, index) => (
-                  <div key={index} className="track-link-modal-result" style={{ cursor: 'pointer', display: 'block' }}>
-                    <strong>{release.title}</strong>
-                    <div className="track-link-modal-hint">
-                      Artist: {release.artist || 'Unknown'}
-                    </div>
-                    <div className="track-link-modal-hint">
-                      ID: {release.id} • Type: {release.type || 'release'}
-                    </div>
-                    <button
-                      onClick={() => handleSelectDiscogsRelease(release)}
-                      disabled={importingDiscogs}
-                      style={{
-                        marginTop: '0.25rem',
-                        padding: '0.25rem 0.5rem',
-                        backgroundColor: '#0f766e',
-                        borderRadius: '0.25rem',
-                      }}
-                    >
-                      Select this release
-                    </button>
-                  </div>
-                ))
-              )}
-            </div>
-            <div className="track-link-modal-actions">
-              <button
-                type="button"
-                className="track-link-modal-btn-cancel"
-                onClick={closeDiscogsSearchModal}
-              >
-                Cancel
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {showDiscogsPreviewModal && (
-        <div className="modal-overlay" onClick={closeDiscogsPreviewModal}>
-          <div className="modal-content" onClick={(event) => event.stopPropagation()}>
-            <h2>Discogs Match Preview</h2>
-            <p className="track-link-modal-subtitle">
-              {discogsPreview?.album?.title || albumData.title}
-              {' → '}
-              {discogsPreview?.album?.discogsTitle || albumData.title}
-            </p>
-
-            <div className="track-link-modal-step">
-              <h4>Summary</h4>
-              <div className="track-link-modal-hint">
-                Source: {discogsPreview?.discogs?.sourceKind || 'release'} #{discogsPreview?.discogs?.releaseId || 'unknown'}
-              </div>
-              <div className="track-link-modal-hint">
-                Mapping {discogsPreview?.mapping?.mappedTrackCount || 0} local track(s) from {discogsPreview?.mapping?.localTrackCount || 0} local / {discogsPreview?.discogs?.sourceTrackCount || 0} Discogs tracks.
-              </div>
-              <label className="track-link-modal-hint" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginTop: '0.5rem', cursor: 'pointer' }}>
-                <input
-                  type="checkbox"
-                  checked={discogsLinkAllToAlbumWork}
-                  onChange={(event) => setDiscogsLinkAllToAlbumWork(event.target.checked)}
-                  disabled={importingDiscogs}
-                />
-                Link all imported tracks to a single work titled "{(discogsPreview?.album?.discogsTitle || albumData?.title || 'Album Title').trim() || 'Album Title'}"
-              </label>
-            </div>
-
-            <div className="track-link-modal-step">
-              <h4>Artists to Import</h4>
-              {discogsImportArtistsPreview.creditOptions.length === 0 ? (
-                <div className="track-link-modal-hint">No artist credits will be imported with the current mapping.</div>
-              ) : (
-                <>
-                  <div className="track-link-modal-hint" style={{ marginBottom: '0.45rem' }}>
-                    {discogsImportArtistsPreview.includedCreditCount} of {discogsImportArtistsPreview.creditOptions.length} credit(s) selected from album credits and {discogsImportArtistsPreview.selectedTrackCount} mapped track(s).
-                  </div>
-                  <div className="track-link-modal-hint" style={{ marginBottom: '0.45rem' }}>
-                    Included: {discogsImportArtistsPreview.matchedExistingCount} match existing artist(s), {discogsImportArtistsPreview.newArtistCount} will create new artist(s).
-                  </div>
-                  <div className="track-link-modal-results" style={{ maxHeight: '220px' }}>
-                    {discogsImportArtistsPreview.creditOptions.map((credit) => {
-                      return (
-                        <label key={credit.creditKey} className="track-link-modal-result" style={{ cursor: 'pointer', display: 'block' }}>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                            <input
-                              type="checkbox"
-                              checked={!credit.excluded}
-                              onChange={() => toggleDiscogsExcludedCredit(credit.creditKey)}
-                              disabled={importingDiscogs}
-                            />
-                            <strong>{credit.artistName}</strong> - {credit.artistTypeName}
-                          </div>
-                          <div className="track-link-modal-hint">
-                            {credit.sourceLabel}
-                            {credit.discogsTrackTitle ? ` · ${credit.discogsTrackTitle}` : ''}
-                          </div>
-                          <div className="track-link-modal-hint" style={{ marginTop: '0.2rem' }}>
-                            {credit.matchedExisting
-                              ? `Matched existing artist${credit.matchKind === 'fuzzy' ? ' (fuzzy)' : ''}: ${credit.matchedArtist?.title || credit.artistName}`
-                              : 'New artist will be created'}
-                          </div>
-                        </label>
-                      );
-                    })}
-                  </div>
-                </>
-              )}
-            </div>
-
-            <div className="track-link-modal-step">
-              <h4>Track Matches</h4>
-              {(discogsPreview?.mapping?.discogsTracks || []).length === 0 ? (
-                <div className="track-link-modal-hint">No track mappings found.</div>
-              ) : (
-                <div className="track-link-modal-results discogs-match-results" style={{ maxHeight: '360px' }}>
-                  <div className="discogs-match-row discogs-match-row-header">
-                    <div className="discogs-match-header">Local Track</div>
-                    <div className="discogs-match-header">Discogs Track</div>
-                  </div>
-                  {discogsPreview.mapping.discogsTracks.map((discogsTrack) => {
-                    const selectedMapping = (discogsTrackMatches || []).find((entry) => entry.discogsOrdinal === discogsTrack.discogsOrdinal);
-                    const selectedLocalTrackKey = selectedMapping?.localTrackKey || '';
-                    const selectedLocalTrack = (discogsPreview?.mapping?.localTracks || []).find((track) => track.ratingKey === selectedLocalTrackKey) || null;
-                    const discogsDurationLabel = formatMilliseconds(discogsTrack.discogsTrackDurationMs);
-                    const localDurationLabel = formatMilliseconds(selectedLocalTrack?.duration);
-
-                    return (
-                      <div key={`discogs-track-row-${discogsTrack.discogsOrdinal}`} className="discogs-match-row">
-                        <div className="track-link-modal-result discogs-match-cell" style={{ cursor: 'default' }}>
-                          <div className="track-link-modal-hint">Pick local track</div>
-                          <select
-                            className="track-link-modal-input"
-                            value={selectedLocalTrackKey}
-                            onChange={(event) => updateDiscogsTrackMatch(discogsTrack.discogsOrdinal, event.target.value)}
-                          >
-                            <option value="">Do not import this track</option>
-                            {(discogsPreview?.mapping?.localTracks || []).map((localTrack) => (
-                              <option key={localTrack.ratingKey} value={localTrack.ratingKey}>
-                                {Number.isInteger(localTrack.discNumber) && Number.isInteger(localTrack.trackNumber)
-                                  ? `D${localTrack.discNumber}-T${localTrack.trackNumber}. `
-                                  : (Number.isInteger(localTrack.trackNumber)
-                                    ? `T${localTrack.trackNumber}. `
-                                    : (Number.isInteger(localTrack.index) ? `${localTrack.index}. ` : ''))}
-                                {localTrack.title || 'Untitled'}
-                              </option>
-                            ))}
-                          </select>
-                          {selectedLocalTrack && (
-                            <div className="track-link-modal-hint">
-                              {Number.isInteger(selectedLocalTrack.index) ? `#${selectedLocalTrack.index}` : 'Unnumbered'}
-                              {localDurationLabel ? ` · ${localDurationLabel}` : ''}
-                            </div>
-                          )}
-                        </div>
-                        <div className="track-link-modal-result discogs-match-cell" style={{ cursor: 'default' }}>
-                          <strong>{discogsTrack.discogsTrackIndex}. {discogsTrack.discogsTrackTitle || 'Untitled'}</strong>
-                          <div className="track-link-modal-hint">
-                            Discogs #{discogsTrack.discogsOrdinal}
-                            {discogsDurationLabel ? ` · ${discogsDurationLabel}` : ''}
-                          </div>
-                        </div>
-                      </div>
-                    );})}
-                </div>
-              )}
-            </div>
-
-            {(discogsPreview?.mapping?.proposedWorks || []).length > 0 && (
-              <div className="track-link-modal-step">
-                <h4>Proposed Works</h4>
-                <div className="track-link-modal-results">
-                  {discogsPreview.mapping.proposedWorks.map((work) => (
-                    <div key={work.title} className="track-link-modal-result" style={{ cursor: 'default' }}>
-                      {work.title} ({work.trackCount} tracks)
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            <div className="track-link-modal-actions">
-              <button
-                type="button"
-                className="track-link-modal-btn-cancel"
-                onClick={closeDiscogsPreviewModal}
-                disabled={importingDiscogs}
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                className="track-link-modal-btn-confirm"
-                onClick={handleAcceptDiscogsImport}
-                disabled={importingDiscogs}
-              >
-                {importingDiscogs ? 'Importing...' : 'Accept and Import'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      {/* Discogs Identify Modal */}
+      <DiscogsIdentifyModal
+        isOpen={showDiscogsSearchModal}
+        onClose={closeDiscogsSearchModal}
+        albumRatingKey={albumData.ratingKey}
+        albumTitle={albumData.title}
+        onAccept={handleSelectDiscogsRelease}
+      />
 
       {showLinkWorkModal && (
         <div className="modal-overlay" onClick={closeLinkWorkModal}>

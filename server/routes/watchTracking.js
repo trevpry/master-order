@@ -41,10 +41,16 @@ router.post('/mark-custom-order-item-watched/:itemId', asyncHandler(async (req, 
       where: { id: actualItemId }
     });
   } else {
-    // Non-numeric ID - look up by plexKey
-    customOrderItem = await prisma.customOrderItem.findFirst({
-      where: { plexKey: itemId }
-    });
+    // Non-numeric ID - look up by plexKey (prefer the unwatched, newest item when shared across orders)
+    customOrderItem =
+      await prisma.customOrderItem.findFirst({
+        where: { plexKey: itemId, isWatched: false },
+        orderBy: { id: 'desc' }
+      }) ||
+      await prisma.customOrderItem.findFirst({
+        where: { plexKey: itemId },
+        orderBy: { id: 'desc' }
+      });
     
     if (customOrderItem) {
       actualItemId = customOrderItem.id;

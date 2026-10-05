@@ -1025,6 +1025,7 @@ model PlexAlbum {
   work                  Work?               @relation(fields: [workId], references: [id], onDelete: SetNull)
   tracks                PlexTrack[]
   albumArtists          AlbumArtist[]
+  artworks              AlbumArtwork[]
 
   @@map("PlexAlbum")
 }
@@ -1201,6 +1202,25 @@ model AlbumArtist {
 
   @@unique([albumKey, artistKey, artistTypeId])
   @@map("AlbumArtist")
+}
+
+// Album cover images stored in the database (e.g. imported from Discogs).
+model AlbumArtwork {
+  id        Int       @id @default(autoincrement())
+  albumKey  String
+  type      String    // 'front' | 'back'
+  mimeType  String
+  data      Bytes
+  width     Int?
+  height    Int?
+  source    String?
+  sourceUrl String?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  album     PlexAlbum @relation(fields: [albumKey], references: [ratingKey], onDelete: Cascade)
+
+  @@unique([albumKey, type])
+  @@map("AlbumArtwork")
 }
 
 model IdentificationCandidate {

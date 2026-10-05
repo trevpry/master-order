@@ -1,5 +1,6 @@
 import React from 'react';
 import LoadingState from '../../../../../shared/components/LoadingState';
+import { getAlbumArtworkUrl } from '../../../../../utils/albumArtwork';
 
 const MusicAlbumsView = ({ 
   albums, 
@@ -90,13 +91,13 @@ const MusicAlbumsView = ({
               key={album.ratingKey} 
               className="album-card"
             >
-              {album.thumb && (
+              {getAlbumArtworkUrl(album) && (
                 <div 
                   className="album-image"
                   style={{ position: 'relative' }}
                 >
                   <img 
-                    src={`${config.plexUrl}${album.thumb}?X-Plex-Token=${config.plexToken}`}
+                    src={getAlbumArtworkUrl(album)}
                     alt={album.title}
                     onClick={() => onSelectAlbum(album)}
                     style={{ cursor: 'pointer', width: '100%', height: '100%' }}

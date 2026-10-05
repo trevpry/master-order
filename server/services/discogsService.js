@@ -99,25 +99,19 @@ class DiscogsService {
   }
 
   /**
-   * Search for releases by title and artist
+   * Search the Discogs database for releases.
+   * @param {Object} params - { q, release_title, artist, year, per_page }
    */
-  async searchReleases(title, artist, limit = 10) {
+  async searchReleases(params = {}) {
     try {
-      const params = {
-        q: `release:"${title}"`,
+      const result = await this.request('database/search', {
         type: 'release',
-        limit
-      };
-
-      if (artist) {
-        params.q += ` AND artist:"${artist}"`;
-      }
-
-      const result = await this.request('master', params);
-      // Discogs returns { data: {...} } for search endpoints
-      return result.data || result;
+        per_page: 25,
+        ...params
+      });
+      return Array.isArray(result?.results) ? result.results : [];
     } catch (error) {
-      console.error(`Error searching releases for "${title}" by "${artist}":`, error);
+      console.error('Error searching Discogs releases:', params, error);
       throw error;
     }
   }

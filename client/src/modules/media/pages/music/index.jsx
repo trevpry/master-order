@@ -933,7 +933,7 @@ const Music = () => {
       
       // For search, just load artists initially
       // Albums and tracks will be loaded if user navigates to those views
-      await refreshArtists(null, nextArtistTypeId);
+      await refreshArtists();
     } catch (err) {
       console.error('Error searching music:', err);
       setError(err.message);
@@ -1011,7 +1011,7 @@ const Music = () => {
       setSelectedTrack(null);
       navigateToView('artists', { artistTypeId: nextArtistTypeId === 'all' ? null : nextArtistTypeId, letter: null });
 
-      await refreshArtists();
+      await refreshArtists(null, nextArtistTypeId);
     } catch (err) {
       console.error('Error filtering artists by type:', err);
       setError(err.message);
@@ -2269,6 +2269,7 @@ const Music = () => {
             onPlayTrack={playTrack}
             onSelectArtist={selectArtist}
             onSelectTrack={selectTrack}
+            onSelectWork={selectWork}
             onAddTrackToCustomPlaylist={addTrackToCustomPlaylist}
             formatDuration={formatDuration}
             formatFileSize={formatFileSize}

@@ -448,6 +448,7 @@ class IdentificationService {
       success: true,
       entityType: candidate.entityType,
       entityKey: candidate.entityKey,
+      musicBrainzId: candidate.musicBrainzId,
       data: updatedEntity
     };
   }

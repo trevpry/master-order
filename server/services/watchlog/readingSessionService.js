@@ -231,8 +231,9 @@ class ReadingSessionService {
 
       const activeSession = await this.prisma.watchLog.findFirst({
         where: whereClause,
+        // updatedAt (not startTime) so a resumed older session counts as the current one
         orderBy: {
-          startTime: 'desc'
+          updatedAt: 'desc'
         }
       });
 

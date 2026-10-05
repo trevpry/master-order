@@ -1,4 +1,5 @@
 import React from 'react';
+import { useNavigate } from 'react-router-dom';
 
 const MusicAudioPlayer = ({
   currentTrack,
@@ -14,7 +15,15 @@ const MusicAudioPlayer = ({
   onSelectAlbum,
   formatTime
 }) => {
+  const navigate = useNavigate();
   if (!currentTrack) return null;
+
+  const handleTitleClick = (e) => {
+    e.stopPropagation();
+    if (!currentTrack.ratingKey) return;
+    const album = currentTrack.parentRatingKey ? `&album=${encodeURIComponent(currentTrack.parentRatingKey)}` : '';
+    navigate(`/media/music?view=track&track=${encodeURIComponent(currentTrack.ratingKey)}${album}`);
+  };
 
   const handleArtistClick = (e) => {
     e.stopPropagation();
@@ -39,7 +48,16 @@ const MusicAudioPlayer = ({
   return (
     <div className="audio-player">
       <div className="player-info">
-        <span className="track-title">{currentTrack.title}</span>
+        <span
+          className="track-title player-track-title-link"
+          role="link"
+          tabIndex={0}
+          title="Go to track details"
+          onClick={handleTitleClick}
+          onKeyDown={(e) => { if (e.key === 'Enter') handleTitleClick(e); }}
+        >
+          {currentTrack.title}
+        </span>
         <div className="track-meta-links">
           {currentTrack.grandparentTitle && (
             <span 

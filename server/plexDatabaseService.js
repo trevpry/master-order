@@ -957,35 +957,21 @@ class PlexDatabaseService {
   // Search artists by title
   async searchArtists(searchQuery, letter) {
     try {
+      const { normalizeArtistName, tokenizeArtistName, scoreArtistNameMatch } = require('./utils/artistNameMatch');
       const makeContainsFilter = (value) => (
         this.isPostgreSQL
           ? { contains: value, mode: 'insensitive' }
           : { contains: value }
       );
+      const searchFields = ['title', 'titleSort', 'userTitle', 'userSortName', 'musicBrainzAliases'];
 
+      // Every word must appear somewhere, so "Antonio Mazzoni" finds "Antonio Maria Mazzoni".
+      const words = String(searchQuery || '').trim().split(/\s+/).filter(Boolean);
       const where = {
         removed: false,
-        AND: [
-          {
-            OR: [
-              {
-                title: makeContainsFilter(searchQuery)
-              },
-              {
-                titleSort: makeContainsFilter(searchQuery)
-              },
-              {
-                userTitle: makeContainsFilter(searchQuery)
-              },
-              {
-                userSortName: makeContainsFilter(searchQuery)
-              },
-              {
-                musicBrainzAliases: makeContainsFilter(searchQuery)
-              }
-            ]
-          }
-        ]
+        AND: (words.length > 0 ? words : [String(searchQuery || '')]).map(word => ({
+          OR: searchFields.map(field => ({ [field]: makeContainsFilter(word) }))
+        }))
       };
 
       const letterFilter = this.buildArtistLetterFilter(letter);
@@ -993,7 +979,7 @@ class PlexDatabaseService {
         where.AND.push(letterFilter);
       }
 
-      return await this.prisma.plexArtist.findMany({
+      let artists = await this.prisma.plexArtist.findMany({
         where,
         include: {
           librarySection: true
@@ -1003,6 +989,35 @@ class PlexDatabaseService {
           { title: 'asc' }
         ]
       });
+
+      const queryTokens = tokenizeArtistName(searchQuery);
+      const nameVariants = (artist) => [artist.title, artist.userTitle, artist.titleSort, artist.userSortName].filter(Boolean);
+
+      // Fallback for accents and spelling differences the database LIKE can't handle.
+      if (artists.length === 0 && queryTokens.length > 0) {
+        const candidates = await this.prisma.plexArtist.findMany({
+          where: { removed: false, ...(letterFilter ? { AND: [letterFilter] } : {}) },
+          include: { librarySection: true }
+        });
+
+        artists = candidates.filter((artist) => nameVariants(artist).some((name) => {
+          const normalized = normalizeArtistName(name);
+          return queryTokens.every(token => normalized.includes(token))
+            || scoreArtistNameMatch(searchQuery, name) >= 0.75;
+        }));
+      }
+
+      const relevance = (artist) => Math.max(0, ...nameVariants(artist).map((name) => {
+        const normalized = normalizeArtistName(name);
+        if (normalized === normalizeArtistName(searchQuery)) return 2;
+        if (normalized.startsWith(normalizeArtistName(searchQuery))) return 1.5;
+        return scoreArtistNameMatch(searchQuery, name);
+      }));
+
+      return artists
+        .map(artist => ({ artist, score: relevance(artist) }))
+        .sort((a, b) => b.score - a.score)
+        .map(entry => entry.artist);
     } catch (error) {
       console.error('Error searching artists:', error);
       throw error;
@@ -1465,7 +1480,11 @@ class PlexDatabaseService {
         where: { parentRatingKey: albumRatingKey },
         include: {
           librarySection: true,
-          work: true,
+          work: {
+            include: {
+              composer: { select: { ratingKey: true, title: true, userTitle: true } }
+            }
+          },
           album: {
             include: {
               artist: true

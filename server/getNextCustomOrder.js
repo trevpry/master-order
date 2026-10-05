@@ -558,10 +558,16 @@ async function markCustomOrderItemAsWatched(itemIdentifier) {
       }
 
       if (!actualItemId) {
-      // Non-numeric identifier - look up by plexKey
-      const item = await prisma.customOrderItem.findFirst({
-        where: { plexKey: String(itemIdentifier) }
-      });
+      // Non-numeric identifier - look up by plexKey (prefer the unwatched, newest item)
+      const item =
+        await prisma.customOrderItem.findFirst({
+          where: { plexKey: String(itemIdentifier), isWatched: false },
+          orderBy: { id: 'desc' }
+        }) ||
+        await prisma.customOrderItem.findFirst({
+          where: { plexKey: String(itemIdentifier) },
+          orderBy: { id: 'desc' }
+        });
       
       if (!item) {
         console.error(`Could not find CustomOrderItem with plexKey: ${itemIdentifier}`);

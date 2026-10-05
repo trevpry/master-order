@@ -7,6 +7,7 @@
  */
 
 import React, { useState, useRef, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import config from '../../../../../config';
 
 const TracksPlaylistPlayer = ({ 
@@ -19,6 +20,12 @@ const TracksPlaylistPlayer = ({
   selectedAlbum,
   selectedArtist 
 }) => {
+  const navigate = useNavigate();
+  const goToTrackDetail = (track) => {
+    if (!track?.ratingKey) return;
+    const album = track.parentRatingKey ? `&album=${encodeURIComponent(track.parentRatingKey)}` : '';
+    navigate(`/media/music?view=track&track=${encodeURIComponent(track.ratingKey)}${album}`);
+  };
   const [isShuffled, setIsShuffled] = useState(false);
   const [shuffledTracks, setShuffledTracks] = useState([]);
   const [currentTrackIndex, setCurrentTrackIndex] = useState(-1);
@@ -348,7 +355,16 @@ const TracksPlaylistPlayer = ({
           {currentTrack && (
             <div className="current-track-info">
               <div className="track-details">
-                <span className="track-title">{currentTrack.title}</span>
+                <span
+                  className="track-title player-track-title-link"
+                  role="link"
+                  tabIndex={0}
+                  title="Go to track details"
+                  onClick={(e) => { e.stopPropagation(); goToTrackDetail(currentTrack); }}
+                  onKeyDown={(e) => { if (e.key === 'Enter') goToTrackDetail(currentTrack); }}
+                >
+                  {currentTrack.title}
+                </span>
                 <span className="track-artist">
                   {currentTrack.grandparentTitle || currentTrack.artist || 'Unknown Artist'}
                 </span>

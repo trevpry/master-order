@@ -43,6 +43,55 @@
   box-shadow: 0 8px 16px rgba(0, 0, 0, 0.3);
 }
 
+.album-artwork-sides {
+  display: flex;
+  justify-content: center;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.album-artwork-side-btn {
+  padding: 3px 10px;
+  border-radius: 4px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  background: #2a2a2a;
+  color: #d1d5db;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.album-artwork-side-btn.active {
+  border-color: #2196F3;
+  background: rgba(33, 150, 243, 0.2);
+  color: #fff;
+}
+
+.album-artwork-side-btn:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+.discogs-artwork-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.discogs-artwork-cell img {
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  object-fit: cover;
+  border-radius: 4px;
+  display: block;
+}
+
+.discogs-artwork-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 6px;
+}
+
 .album-metadata {
   flex: 1;
   display: flex;
@@ -475,6 +524,27 @@
   margin-top: 0;
 }
 
+.album-detail .disc-group-header-inner {
+  margin-top: 6px;
+  padding: 4px 15px;
+  border-bottom: 1px dashed rgba(33, 150, 243, 0.6);
+}
+
+.album-work-item-composer {
+  font-weight: 400;
+  color: #9ca3af;
+}
+
+.track-group-work-link {
+  cursor: pointer;
+}
+
+.track-group-work-link:hover,
+.track-group-work-link:focus-visible {
+  color: #2196F3;
+  text-decoration: underline;
+}
+
 .album-detail .disc-group-title {
   font-size: 13px;
   font-weight: 700;
@@ -596,18 +666,62 @@
   cursor: not-allowed;
 }
 
-.discogs-match-header {
-  font-size: 12px;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  color: #9ca3af;
-  padding: 2px 4px;
-}
-
-.discogs-match-cell {
+.discogs-preview-options {
   display: flex;
   flex-direction: column;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.discogs-preview-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: #d1d5db;
+  cursor: pointer;
+}
+
+.discogs-credit-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 8px;
+  max-height: 260px;
+  overflow-y: auto;
+}
+
+.discogs-credit-cell {
+  cursor: pointer;
+}
+
+.discogs-credit-cell .mb-track-match-cell-title {
+  display: flex;
+  align-items: center;
   gap: 6px;
+}
+
+.discogs-credit-cell.excluded {
+  opacity: 0.5;
+}
+
+.discogs-credit-cell .mb-track-match-cell-title {
+  cursor: pointer;
+}
+
+.discogs-credit-actions {
+  display: flex;
+  gap: 12px;
+}
+
+.discogs-credit-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 6px;
+}
+
+.discogs-credit-option {
+  font-size: 12px;
 }
 
 .album-detail .track-inline-btn-danger {
@@ -658,32 +772,6 @@
   gap: 0.4rem;
   max-height: 180px;
   overflow-y: auto;
-}
-
-.track-link-modal-results.discogs-match-results {
-  gap: 0.5rem;
-}
-
-.discogs-match-row {
-  display: grid;
-  grid-template-columns: minmax(260px, 1fr) minmax(260px, 1fr);
-  gap: 0.5rem;
-  align-items: start;
-}
-
-.discogs-match-row-header {
-  position: sticky;
-  top: 0;
-  z-index: 1;
-  background: #1f2937;
-  padding: 4px 6px;
-  border-radius: 8px;
-}
-
-@media (max-width: 680px) {
-  .discogs-match-row {
-    grid-template-columns: 1fr;
-  }
 }
 
 .track-link-modal-result {

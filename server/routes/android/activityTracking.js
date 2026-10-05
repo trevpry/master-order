@@ -25,11 +25,17 @@ async function resolveCustomOrderItemId(prisma, itemIdentifier) {
     return parseInt(itemIdentifier);
   }
   
-  // If it's non-numeric, look it up by plexKey
+  // If it's non-numeric, look it up by plexKey (prefer the unwatched, newest item when shared across orders)
   try {
-    const item = await prisma.customOrderItem.findFirst({
-      where: { plexKey: String(itemIdentifier) }
-    });
+    const item =
+      await prisma.customOrderItem.findFirst({
+        where: { plexKey: String(itemIdentifier), isWatched: false },
+        orderBy: { id: 'desc' }
+      }) ||
+      await prisma.customOrderItem.findFirst({
+        where: { plexKey: String(itemIdentifier) },
+        orderBy: { id: 'desc' }
+      });
     
     if (item) {
       console.log(`🔍 Resolved non-numeric itemId '${itemIdentifier}' to database ID ${item.id}`);

@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import config from '../../../../../config';
 import EmbeddedPicardTagsPanel from './EmbeddedPicardTagsPanel';
+import { getAlbumArtworkUrl } from '../../../../../utils/albumArtwork';
 import './TrackDetail.css';
 
 const TrackDetail = ({ trackRatingKey, onGoBack, onSelectAlbum, onSelectArtist, onSelectWork, onPlayTrack }) => {
@@ -260,7 +261,7 @@ const TrackDetail = ({ trackRatingKey, onGoBack, onSelectAlbum, onSelectArtist, 
         {track.album && (
           <div className="track-artwork">
             <img
-              src={`${config.plexUrl}${track.album.thumb || track.thumb}?X-Plex-Token=${config.plexToken}`}
+              src={getAlbumArtworkUrl(track.album) || `${config.plexUrl}${track.thumb}?X-Plex-Token=${config.plexToken}`}
               alt={track.title}
               onError={(e) => {
                 e.target.style.display = 'none';

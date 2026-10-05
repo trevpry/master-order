@@ -1,9 +1,25 @@
 const express = require('express');
 const router = express.Router();
 const IdentificationService = require('../services/identificationService');
+const CoverArtService = require('../services/coverArtService');
 const { asyncHandler, sendSuccess, sendBadRequest, sendServerError } = require('../utils/responses');
 
 const identificationService = new IdentificationService();
+const coverArtService = new CoverArtService();
+
+/**
+ * GET /api/identification/release/:releaseId/cover-art
+ * List Cover Art Archive images for a MusicBrainz release, with a default front/back selection
+ */
+router.get('/release/:releaseId/cover-art', asyncHandler(async (req, res) => {
+  const { releaseId } = req.params;
+  if (!CoverArtService.isValidMbid(releaseId)) {
+    return sendBadRequest(res, 'Invalid MusicBrainz release ID');
+  }
+
+  const images = await coverArtService.getReleaseImages(releaseId);
+  sendSuccess(res, { images, defaultArtwork: CoverArtService.defaultSelection(images) });
+}));
 
 /**
  * POST /api/identification/album/:ratingKey
@@ -79,7 +95,7 @@ router.post('/accept/:candidateId', asyncHandler(async (req, res) => {
  */
 router.post('/apply/:candidateId', asyncHandler(async (req, res) => {
   const candidateId = parseInt(req.params.candidateId);
-  const { metadata, trackMatchOverrides } = req.body || {};
+  const { metadata, trackMatchOverrides, artwork } = req.body || {};
 
   if (isNaN(candidateId)) {
     return sendBadRequest(res, 'Invalid candidate ID');
@@ -87,10 +103,23 @@ router.post('/apply/:candidateId', asyncHandler(async (req, res) => {
 
   const result = await identificationService.applyIdentification(candidateId, metadata || null, trackMatchOverrides || []);
 
+  let artworkResult = { saved: [], errors: [] };
+  if (result.entityType === 'album' && artwork && typeof artwork === 'object') {
+    const releaseId = CoverArtService.isValidMbid(metadata?.id) ? metadata.id : result.musicBrainzId;
+    try {
+      artworkResult = await coverArtService.saveSelectedArtwork(result.entityKey, releaseId, artwork);
+    } catch (error) {
+      console.error('Error saving MusicBrainz artwork:', error);
+      artworkResult.errors.push({ type: 'all', error: error.message });
+    }
+  }
+
   sendSuccess(res, {
     entityType: result.entityType,
     entityKey: result.entityKey,
     entity: result.data,
+    artworkSaved: artworkResult.saved,
+    artworkErrors: artworkResult.errors,
     message: 'Metadata applied successfully'
   });
 }));

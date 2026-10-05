@@ -6,6 +6,7 @@ import MusicBrainzSearchModal from '../../../../../components/music/MusicBrainzS
 import IdentifyModal from '../../../../../components/IdentifyModal';
 import MetadataEditor from '../../../../../components/MetadataEditor';
 import EmbeddedPicardTagsPanel from './EmbeddedPicardTagsPanel';
+import { getAlbumArtworkUrl } from '../../../../../utils/albumArtwork';
 import './ArtistDetail.css';
 
 const ArtistDetail = ({
@@ -704,10 +705,10 @@ const ArtistDetail = ({
                 className="album-card"
                 onClick={() => onSelectAlbum(album)}
               >
-                {album.thumb && (
+                {getAlbumArtworkUrl(album) && (
                   <div className="album-image">
                     <img 
-                      src={`${config.plexUrl}${album.thumb}?X-Plex-Token=${config.plexToken}`}
+                      src={getAlbumArtworkUrl(album)}
                       alt={album.title}
                       onError={(e) => e.target.style.display = 'none'}
                     />
@@ -874,10 +875,10 @@ const ArtistDetail = ({
                 className="album-card"
                 onClick={() => onSelectAlbum && onSelectAlbum(album)}
               >
-                {album.thumb && (
+                {getAlbumArtworkUrl(album) && (
                   <div className="album-image">
                     <img
-                      src={`${config.plexUrl}${album.thumb}?X-Plex-Token=${config.plexToken}`}
+                      src={getAlbumArtworkUrl(album)}
                       alt={album.title}
                       onError={(e) => e.target.style.display = 'none'}
                     />

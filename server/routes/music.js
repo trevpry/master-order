@@ -9,10 +9,13 @@ const { validateRequiredFields } = require('../middleware/validation');
 const { sendBadRequest, sendSuccess, sendServerError, asyncHandler } = require('../utils/responses');
 const { recordDeletedPlexEntity } = require('../utils/plexDeletedEntities');
 const ArtistMergeService = require('../services/artistMergeService');
+const { splitArtistNameAndType } = require('../utils/artistNameMatch');
+const AlbumArtworkService = require('../services/albumArtworkService');
 
 const prisma = require('../prismaClient'); // Use shared singleton instance
 const plexDb = new PlexDatabaseService();
 const plexSync = new PlexSyncService();
+const albumArtwork = new AlbumArtworkService();
 
 const PICARD_TAG_SECTIONS = [
   {
@@ -1369,8 +1372,9 @@ router.get('/artists', asyncHandler(async (req, res) => {
   const listOffset = letter ? undefined : offset;
   
   if (search) {
-    // For search, get all matching artists
-    let artists = await plexDb.searchArtists(search, letter);
+    // "Name — Type" searches by name and ranks artists with that type first.
+    const { name: searchName, typeName: searchTypeName } = splitArtistNameAndType(search);
+    let artists = await plexDb.searchArtists(searchName, letter);
     
     // Add play counts for each artist
     artists = await Promise.all(artists.map(async (artist) => {
@@ -1384,10 +1388,14 @@ router.get('/artists', asyncHandler(async (req, res) => {
       };
     }));
     
-    // If artistTypeId is provided, sort artists that have this type to the top
-    if (artistTypeId) {
-      const typeId = parseInt(artistTypeId);
-      
+    // If an artist type is provided (by ID or "Name — Type"), sort artists that have it to the top
+    let typeId = artistTypeId ? parseInt(artistTypeId) : null;
+    if (!typeId && searchTypeName) {
+      const types = await prisma.artistType.findMany({ select: { id: true, name: true } });
+      typeId = types.find(type => type.name.toLowerCase() === searchTypeName.toLowerCase())?.id || null;
+    }
+
+    if (typeId) {
       // Get artists that have this type assigned
       const artistsWithType = await prisma.artistTypeAssignment.findMany({
         where: { artistTypeId: typeId },
@@ -1639,6 +1647,7 @@ router.get('/artists/:ratingKey', asyncHandler(async (req, res) => {
 
   artist.linkedAlbums = [...linkedAlbumMap.values()]
     .sort((left, right) => (left.title || '').localeCompare(right.title || ''));
+  await albumArtwork.attachArtworkInfo(artist.linkedAlbums);
   artist.linkedTracks = [...linkedTrackMap.values()]
     .sort((left, right) => {
       const leftTitle = left.title || '';
@@ -1950,6 +1959,7 @@ router.get('/albums', asyncHandler(async (req, res) => {
       const totalPlayCount = tracks.reduce((sum, track) => sum + (track.viewCount || 0), 0);
       return { ...album, totalPlayCount };
     }));
+    await albumArtwork.attachArtworkInfo(albumsWithPlayCount);
     res.json(albumsWithPlayCount);
   } else {
     const albums = await plexDb.getAllAlbums(parseInt(limit), offset);
@@ -1963,6 +1973,7 @@ router.get('/albums', asyncHandler(async (req, res) => {
       return { ...album, totalPlayCount };
     }));
     const totalAlbums = await plexDb.getAlbumsCount();
+    await albumArtwork.attachArtworkInfo(albumsWithPlayCount);
     
     res.json({
       albums: albumsWithPlayCount,
@@ -1992,6 +2003,7 @@ router.get('/albums/section/:sectionKey', asyncHandler(async (req, res) => {
     albums = await plexDb.getAlbumsBySection(sectionKey, limitNum, offset);
     total = await plexDb.getAlbumsBySectionCount(sectionKey);
   }
+  await albumArtwork.attachArtworkInfo(albums);
 
   res.json({
     albums,
@@ -2017,6 +2029,7 @@ router.get('/albums/artist/:artistRatingKey', asyncHandler(async (req, res) => {
     const totalPlayCount = tracks.reduce((sum, track) => sum + (track.viewCount || 0), 0);
     return { ...album, totalPlayCount };
   }));
+  await albumArtwork.attachArtworkInfo(albumsWithPlayCount);
 
   res.json(albumsWithPlayCount);
 }));
@@ -2037,8 +2050,38 @@ router.get('/albums/:ratingKey', asyncHandler(async (req, res) => {
   });
   const totalPlayCount = tracks.reduce((sum, track) => sum + (track.viewCount || 0), 0);
   album.totalPlayCount = totalPlayCount;
+  await albumArtwork.attachArtworkInfo(album);
   
   res.json(album);
+}));
+
+// GET /api/music/albums/:ratingKey/artwork/:type - Serve artwork stored in the database
+router.get('/albums/:ratingKey/artwork/:type', asyncHandler(async (req, res) => {
+  const { ratingKey, type } = req.params;
+  if (!AlbumArtworkService.isValidType(type)) {
+    return sendBadRequest(res, 'Artwork type must be front or back');
+  }
+
+  const artwork = await albumArtwork.getArtwork(ratingKey, type);
+  if (!artwork) {
+    return res.status(404).json({ error: 'Artwork not found' });
+  }
+
+  res.set('Content-Type', artwork.mimeType);
+  res.set('Cache-Control', 'public, max-age=31536000, immutable');
+  res.set('X-Content-Type-Options', 'nosniff');
+  res.send(Buffer.from(artwork.data));
+}));
+
+// DELETE /api/music/albums/:ratingKey/artwork/:type - Remove stored artwork
+router.delete('/albums/:ratingKey/artwork/:type', asyncHandler(async (req, res) => {
+  const { ratingKey, type } = req.params;
+  if (!AlbumArtworkService.isValidType(type)) {
+    return sendBadRequest(res, 'Artwork type must be front or back');
+  }
+
+  await albumArtwork.deleteArtwork(ratingKey, type);
+  sendSuccess(res, { message: `Removed ${type} artwork` });
 }));
 
 // Music Albums - By Custom Playlist (albums that have tracks in the playlist)
@@ -2087,6 +2130,8 @@ router.get('/albums/playlist/:playlistId', asyncHandler(async (req, res) => {
       }
     }
   });
+
+  await albumArtwork.attachArtworkInfo(albumsWithTracks);
 
   res.json({
     albums: albumsWithTracks,
@@ -2147,6 +2192,8 @@ router.get('/albums/not-in-playlist/:playlistId', asyncHandler(async (req, res) 
       }
     }
   });
+
+  await albumArtwork.attachArtworkInfo(albumsNotInPlaylist);
 
   res.json({
     albums: albumsNotInPlaylist,
@@ -3179,6 +3226,10 @@ router.get('/track/:ratingKey', asyncHandler(async (req, res) => {
     return sendBadRequest(res, 'Track not found');
   }
 
+  if (track.album) {
+    await albumArtwork.attachArtworkInfo(track.album);
+  }
+
   sendSuccess(res, track);
 }));
 
@@ -3619,7 +3670,28 @@ router.put('/tracks/:ratingKey/rating', asyncHandler(async (req, res) => {
   }
 }));
 
-// Discogs Search API route
+// POST /api/music/albums/:ratingKey/discogs-search - Ranked Discogs release candidates for an album
+router.post('/albums/:ratingKey/discogs-search', asyncHandler(async (req, res) => {
+  const { ratingKey } = req.params;
+  const query = String(req.body?.query || '').trim() || null;
+  const limit = Math.min(Math.max(Number.parseInt(req.body?.limit, 10) || 15, 1), 50);
+
+  const DiscogsImportService = require('../services/discogsImportService');
+  const importer = new DiscogsImportService();
+
+  try {
+    const data = await importer.searchForAlbum(ratingKey, { query, limit });
+    return res.status(200).json({ success: true, data });
+  } catch (error) {
+    if (error.statusCode === 404) {
+      return res.status(404).json({ error: error.message });
+    }
+    console.error('Error searching Discogs:', error);
+    return res.status(500).json({ error: error.message || 'Failed to search Discogs' });
+  }
+}));
+
+// Legacy Discogs Search API route (kept for compatibility)
 router.post('/music/discogs-search', asyncHandler(async (req, res) => {
   const { query, limit = 10 } = req.body;
 
@@ -3636,7 +3708,7 @@ router.post('/music/discogs-search', asyncHandler(async (req, res) => {
 
   try {
     // Search for releases
-    const releases = await discogs.searchReleases(query, null, limit);
+    const releases = await discogs.searchReleases({ q: String(query).trim(), per_page: Math.min(Number(limit) || 10, 50) });
 
     // Build response
     const response = {
@@ -3658,7 +3730,7 @@ router.post('/music/discogs-search', asyncHandler(async (req, res) => {
 // Discogs Import API route
 router.post('/albums/:ratingKey/discogs-import', asyncHandler(async (req, res) => {
   const { ratingKey } = req.params;
-  const { url, apply = false, trackMappings = [], excludedCreditKeys = [] } = req.body;
+  const { url, apply = false, trackMappings = [], excludedCreditKeys = [], artistOverrides = {}, artwork = null, workSelections = null } = req.body;
 
   console.log(`🧾 Processing Discogs import for album ${ratingKey}, apply=${apply}`);
 
@@ -3668,162 +3740,25 @@ router.post('/albums/:ratingKey/discogs-import', asyncHandler(async (req, res) =
   }
 
   // Extract release ID from URL
-  const urlMatch = String(url).trim().match(/discogs\.com\/release\/(\d+)/);
-  const releaseId = urlMatch && urlMatch[1];
+  const releaseId = require('../services/discogsImportService').extractReleaseId(url);
 
   if (!releaseId) {
     return res.status(400).json({ error: 'Invalid Discogs URL. Expected format: https://www.discogs.com/release/{id}' });
   }
 
-  // Import Discogs service
-  const DiscogsService = require('../services/discogsService');
-  const discogs = new DiscogsService();
+  const DiscogsImportService = require('../services/discogsImportService');
+  const importer = new DiscogsImportService();
 
   try {
-    // Fetch release data from Discogs
-    const discogsRelease = await discogs.getRelease(releaseId);
+    const data = apply
+      ? await importer.apply(ratingKey, releaseId, { trackMappings, excludedCreditKeys, artistOverrides, artwork, workSelections })
+      : await importer.preview(ratingKey, releaseId);
 
-    // Get local album tracks
-    const album = await prisma.plexAlbum.findUnique({
-      where: { ratingKey },
-      include: {
-        plexTracks: {
-          where: { removed: false },
-          orderBy: { index: 'asc' },
-        },
-      },
-    });
-
-    if (!album) {
-      return res.status(404).json({ error: 'Album not found in local database' });
-    }
-
-    const localTracks = album.plexTracks;
-    const discogsTracks = discogsRelease.tracks || [];
-
-    // Build track mapping
-    const trackMappingsPayload = [];
-
-    // Group discogs tracks by credit
-    const creditsMap = new Map();
-    discogsTracks.forEach((track, idx) => {
-      const credit = track?.artist || track?.artist_name || 'Unknown';
-      const creditKey = String(credit || '').trim();
-      if (!creditsMap.has(creditKey)) {
-        creditsMap.set(creditKey, {
-          creditKey,
-          discogsOrdinal: idx + 1,
-          discogsTrackTitle: track?.title || '',
-          trackCount: 1,
-        });
-      } else {
-        const existing = creditsMap.get(creditKey);
-        existing.trackCount += 1;
-        existing.discogsTrackTitle = track?.title || '';
-      }
-      trackMappingsPayload.push({
-        discogsOrdinal: idx + 1,
-        localTrackKey: null,
-        discogsTrackTitle: track?.title || '',
-        creditKey: creditKey,
-      });
-    });
-
-    // Build credit options
-    const creditOptionsPayload = [];
-    creditsMap.forEach((creditData) => {
-      creditOptionsPayload.push({
-        creditKey: creditData.creditKey,
-        discogsOrdinal: creditData.discogsOrdinal,
-        discogsTrackTitle: creditData.discogsTrackTitle,
-        trackCount: creditData.trackCount,
-        included: true,
-      });
-    });
-
-    // Build response structure
-    const response = {
-      data: {
-        discogs: {
-          sourceKind: 'release',
-          releaseId: discogsRelease.id,
-          title: discogsRelease.title,
-          artist: discogsRelease.artist,
-          tracks: discogsRelease.tracks,
-          credits: discogsRelease.credits,
-          mapping: {
-            defaultTrackMappings: trackMappingsPayload,
-            mappedTrackCount: 0,
-            localTrackCount: localTracks.length,
-            sourceTrackCount: discogsTracks.length,
-          },
-        },
-        album: {
-          title: album.title,
-          discogsTitle: discogsRelease.title,
-        },
-        mapping: {
-          defaultTrackMappings: trackMappingsPayload,
-          mappedTrackCount: 0,
-          localTrackCount: localTracks.length,
-          sourceTrackCount: discogsTracks.length,
-        },
-        credits: creditOptionsPayload,
-      },
-    };
-
-    // If apply is true, update the album and tracks
-    if (apply) {
-      // Update album with Discogs metadata
-      const updates = {
-        musicBrainzId: discogsRelease.id.toString(),
-        title: discogsRelease.title,
-        albumArtist: discogsRelease.artist,
-      };
-
-      // Update album
-      await prisma.plexAlbum.update({
-        where: { ratingKey },
-        data: updates,
-      });
-
-      // Update tracks with Discogs metadata
-      const trackUpdates = [];
-      discogsTracks.forEach((track, idx) => {
-        const localTrack = localTracks[idx] || null;
-        if (localTrack) {
-          trackUpdates.push({
-            where: { ratingKey: localTrack.ratingKey },
-            data: {
-              title: track?.title || localTrack.title,
-              index: idx + 1,
-            },
-          });
-        }
-      });
-
-      if (trackUpdates.length > 0) {
-        await prisma.plexTrack.updateMany({
-          data: trackUpdates,
-        });
-      }
-
-      response.data.discogs.mappedTrackCount = trackUpdates.length;
-      response.data.discogs.linkedWorkTrackCount = 0;
-
-      // Return success response
-      return res.status(200).json({
-        success: true,
-        data: response.data,
-      });
-    }
-
-    // Return preview response
-    return res.status(200).json({
-      success: true,
-      data: response.data,
-    });
+    return res.status(200).json({ success: true, data });
   } catch (error) {
+    if (error.statusCode === 404) {
+      return res.status(404).json({ error: error.message });
+    }
     console.error('Error processing Discogs import:', error);
     return res.status(500).json({ error: error.message || 'Failed to process Discogs import' });
   }

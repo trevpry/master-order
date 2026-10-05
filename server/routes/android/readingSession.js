@@ -222,15 +222,15 @@ function createReadingSessionRoutes(prisma) {
       console.log(`🔍 No customOrderItemId provided, searching for item by title: "${title}"`);
       
       try {
-        const matchingItem = await prisma.customOrderItem.findFirst({
-          where: {
-            title: {
-              equals: title,
-              mode: 'insensitive'
-            },
-            mediaType: mediaType
-          }
-        });
+        const matchingItem =
+          await prisma.customOrderItem.findFirst({
+            where: { title: { equals: title, mode: 'insensitive' }, mediaType, isWatched: false },
+            orderBy: { id: 'desc' }
+          }) ||
+          await prisma.customOrderItem.findFirst({
+            where: { title: { equals: title, mode: 'insensitive' }, mediaType },
+            orderBy: { id: 'desc' }
+          });
         
         if (matchingItem) {
           finalCustomOrderItemId = matchingItem.id;
@@ -330,9 +330,12 @@ function createReadingSessionRoutes(prisma) {
     console.log('📱 Android app requesting to stop reading session...');
     
     const { progress } = req.body;
+    const requestedItemId = parseInt(req.body.customOrderItemId ?? req.body.id, 10);
 
-    // Get active reading session
-    const activeSession = await watchLogService.getActiveReadingSession();
+    // Get active reading session (scoped to the item when the app provides it)
+    const activeSession =
+      (Number.isInteger(requestedItemId) && await watchLogService.getActiveReadingSession(requestedItemId)) ||
+      await watchLogService.getActiveReadingSession();
     
     if (!activeSession) {
       return sendBadRequest(res, 'No active reading session found');
@@ -347,8 +350,16 @@ function createReadingSessionRoutes(prisma) {
     const stoppedSession = await watchLogService.stopReading(activeSession.id);
     clearAndroidMusicState();
 
+    const progressMarksComplete = (() => {
+      const pct = normalizeProgressPercentage(progress);
+      if (pct !== null) return pct >= 99.95;
+      const current = Number(progress?.currentPage);
+      const total = Number(progress?.totalPages);
+      return Number.isFinite(current) && Number.isFinite(total) && total > 0 && current >= total;
+    })();
+
     // Handle different scenarios based on session outcome
-    if (stoppedSession.deleted) {
+    if (stoppedSession.deleted && (isHistoryPlusSession || !activeSession.customOrderItemId || !progressMarksComplete)) {
       // Session was deleted due to being under 1 minute
       console.log('Reading session was deleted (under 1 minute)');
       
@@ -681,7 +692,8 @@ function createReadingSessionRoutes(prisma) {
       type: 'READING_SESSION_STOPPED',
       data: {
         success: true,
-        sessionId: stoppedSession.id,
+        sessionId: stoppedSession.id ?? activeSession.id,
+        sessionDeleted: Boolean(stoppedSession.deleted),
         title: activeSession.title,
         mediaType: activeSession.mediaType,
         duration: stoppedSession.duration,
