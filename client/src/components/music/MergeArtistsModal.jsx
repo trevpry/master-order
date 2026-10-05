@@ -193,6 +193,8 @@ const styles = {
   },
 };
 
+export const mergeModalStyles = styles;
+
 export default function MergeArtistsModal({ 
   artists, 
   onClose, 

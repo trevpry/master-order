@@ -9,6 +9,7 @@ const { validateRequiredFields } = require('../middleware/validation');
 const { sendBadRequest, sendSuccess, sendServerError, asyncHandler } = require('../utils/responses');
 const { recordDeletedPlexEntity } = require('../utils/plexDeletedEntities');
 const ArtistMergeService = require('../services/artistMergeService');
+const AlbumMergeService = require('../services/albumMergeService');
 const { splitArtistNameAndType } = require('../utils/artistNameMatch');
 const AlbumArtworkService = require('../services/albumArtworkService');
 
@@ -1884,6 +1885,32 @@ router.post('/artists', validateRequiredFields('title', 'Artist name is required
   } catch (error) {
     console.error('Error creating artist:', error);
     sendServerError(res, `Failed to create artist: ${error.message}`);
+  }
+}));
+
+// POST /api/music/albums/merge - Merge multiple albums into one main album
+router.post('/albums/merge', asyncHandler(async (req, res) => {
+  const { mainAlbumKey, mergeAlbumKeys } = req.body || {};
+
+  if (!mainAlbumKey) {
+    return sendBadRequest(res, 'mainAlbumKey is required');
+  }
+  if (!Array.isArray(mergeAlbumKeys) || mergeAlbumKeys.length === 0) {
+    return sendBadRequest(res, 'mergeAlbumKeys must be a non-empty array');
+  }
+  if (mergeAlbumKeys.map(String).includes(String(mainAlbumKey))) {
+    return sendBadRequest(res, 'Cannot merge an album into itself');
+  }
+
+  try {
+    const result = await new AlbumMergeService(prisma).mergeAlbums(String(mainAlbumKey), mergeAlbumKeys);
+    sendSuccess(res, {
+      ...result,
+      message: `Successfully merged ${result.mergedCount} album(s) into "${result.mainAlbum.title}"`
+    });
+  } catch (error) {
+    console.error('Error merging albums:', error);
+    sendBadRequest(res, error.message || 'Failed to merge albums');
   }
 }));
 

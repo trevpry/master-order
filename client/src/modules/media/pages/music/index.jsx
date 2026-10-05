@@ -1055,6 +1055,25 @@ const Music = () => {
     }
   };
 
+  const refreshArtistAfterAlbumMerge = async (artistRatingKey) => {
+    if (!artistRatingKey) return;
+    try {
+      const [artistRes, albumsRes] = await Promise.all([
+        fetch(`${config.apiBaseUrl}/api/music/artists/${artistRatingKey}`),
+        fetch(`${config.apiBaseUrl}/api/music/albums/artist/${artistRatingKey}`)
+      ]);
+      const [artistData, albumsData] = await Promise.all([
+        safeJsonParse(artistRes, `${config.apiBaseUrl}/api/music/artists/${artistRatingKey}`),
+        safeJsonParse(albumsRes, `${config.apiBaseUrl}/api/music/albums/artist/${artistRatingKey}`)
+      ]);
+      if (artistData) setSelectedArtist(artistData);
+      setAlbums(Array.isArray(albumsData) ? albumsData : []);
+    } catch (err) {
+      console.error('Error refreshing artist after album merge:', err);
+      setError(err.message);
+    }
+  };
+
   const handleDeleteArtist = async (artist) => {
     console.log('handleDeleteArtist called with:', artist);
 
@@ -2217,6 +2236,7 @@ const Music = () => {
               totalTracks: tracks?.length || 0
             }}
             onMergeWorks={handleMergeWorks}
+            onAlbumsMerged={refreshArtistAfterAlbumMerge}
             onExtractArtistMetadata={extractArtistMetadata}
             isExtractingMetadata={extractingMetadata.has(selectedArtist.ratingKey)}
             onGoBack={() => {

@@ -33,6 +33,13 @@ const stripComposerPrefix = (title) => {
 
 const isValidCatalogueId = (value) => CATALOGUE_ID_PATTERN.test(String(value || ''));
 
+// "<strong>Caputo, Aldo</strong> (tenor) <br>Calderon, Rani (Conductor)" -> [{ name, role }, ...]
+const parsePerformers = (html) => String(html || '')
+  .split(/<br\s*\/?>/i)
+  .map(line => stripTags(line).match(/^(.+?)\s*\(([^()]+)\)\s*$/))
+  .filter(Boolean)
+  .map(match => ({ name: match[1].trim(), role: match[2].trim() }));
+
 const fetchHtml = async (url) => {
   const response = await fetch(url, { headers: { 'User-Agent': USER_AGENT, 'Accept-Language': 'en-US,en;q=0.9' } });
   if (!response.ok) {
@@ -110,11 +117,13 @@ const parseCatalogueDetail = (html, catalogueId) => {
 
   const composers = sidebarField('Composer\\(s\\)');
   const credit = (name, role) => ({ name: naturalName(name), anv: '', join: '', role, tracks: '', id: null });
-  const extraartists = [
+  const writerCredits = [
     // With several composers the per-work composer lines (below) carry the attribution instead.
     ...(composers.length === 1 ? composers.map(name => credit(name, 'Composed By')) : []),
     ...sidebarField('Lyricist\\(s\\)').map(name => credit(name, 'Lyrics By')),
-    ...sidebarField('Arranger\\(s\\)').map(name => credit(name, 'Arranged By')),
+    ...sidebarField('Arranger\\(s\\)').map(name => credit(name, 'Arranged By'))
+  ];
+  const sidebarPerformerCredits = [
     ...sidebarField('Conductor\\(s\\)').map(name => credit(name, 'Conductor')),
     ...sidebarField('Orchestra\\(s\\)').map(name => credit(name, 'Orchestra')),
     ...sidebarField('Choir\\(s\\)').map(name => credit(name, 'Chorus')),
@@ -129,9 +138,9 @@ const parseCatalogueDetail = (html, catalogueId) => {
   const tokenPattern = /<div[^>]*>\s*Disc (\d+)\s*<\/div>|<div class="track-composer">\s*<strong>([\s\S]*?)<\/strong>|<div class="card-header3[\s\S]*?<strong>([\s\S]*?)<\/strong>|class="number-track"[^>]*>\s*(\d+)\s*<\/td>\s*<td[^>]*>([\s\S]*?)<\/td>\s*<td[^>]*class="track-num"[^>]*>\s*([\d:]*)\s*<\/td>/gi;
 
   let disc = 1;
-  let currentComposer = composers.length === 1 ? composers[0] : null;
-  let currentWork = null;
-  for (const match of trackSection.matchAll(tokenPattern)) {
+  const allTracks = [];
+  const tokens = [...trackSection.matchAll(tokenPattern)];
+  tokens.forEach((match, tokenIndex) => {
     if (match[1]) {
       disc = Number(match[1]);
     } else if (match[2]) {
@@ -147,12 +156,19 @@ const parseCatalogueDetail = (html, catalogueId) => {
       };
       tracklist.push(currentWork);
     } else if (match[4]) {
+      // Each track row is followed by its own collapsed performer list (the "+" icon on naxos.com).
+      const nextTokenStart = tokens[tokenIndex + 1]?.index ?? trackSection.length;
+      const trailing = trackSection.slice(match.index + match[0].length, nextTokenStart);
+      const performerHtml = (trailing.match(/class="card-body[^"]*">([\s\S]*?)<\/div>/i) || [])[1] || '';
+
       const track = {
         type_: 'track',
         position: multiDisc ? `${disc}-${match[4]}` : match[4],
         title: stripTags(match[5]),
-        duration: match[6] || ''
+        duration: match[6] || '',
+        performers: parsePerformers(performerHtml)
       };
+      allTracks.push(track);
       if (currentWork) {
         currentWork.sub_tracks.push(track);
       } else {
@@ -160,7 +176,33 @@ const parseCatalogueDetail = (html, catalogueId) => {
         tracklist.push(track);
       }
     }
+  });
+
+  // Performers on every track are album credits; the rest are credited only on their tracks.
+  let albumPerformerCredits = sidebarPerformerCredits;
+  if (allTracks.some(track => track.performers.length > 0)) {
+    const tracksByPerformer = new Map();
+    for (const track of allTracks) {
+      for (const performer of track.performers) {
+        const key = `${performer.name}|${performer.role}`;
+        if (!tracksByPerformer.has(key)) tracksByPerformer.set(key, { performer, tracks: new Set() });
+        tracksByPerformer.get(key).tracks.add(track);
+      }
+    }
+
+    albumPerformerCredits = [];
+    for (const { performer, tracks } of tracksByPerformer.values()) {
+      if (tracks.size === allTracks.length) {
+        albumPerformerCredits.push(credit(performer.name, performer.role));
+      } else {
+        for (const track of tracks) {
+          track.extraartists = [...(track.extraartists || []), credit(performer.name, performer.role)];
+        }
+      }
+    }
   }
+  allTracks.forEach((track) => { delete track.performers; });
+  const extraartists = [...writerCredits, ...albumPerformerCredits];
 
   const coverUrl = (text.match(/href="(https:\/\/cdn\.naxos\.com\/sharedfiles\/images\/cds\/hires\/[^"]+)"/i) || [])[1]
     || (text.match(/src="(https:\/\/cdn\.naxos\.com\/sharedfiles\/images\/cds\/hires\/[^"]+)"/i) || [])[1]
@@ -212,4 +254,4 @@ const createNaxosSource = () => ({
   }
 });
 
-module.exports = { createNaxosSource, parseSearchResults, parseCatalogueDetail, stripComposerPrefix, naturalName };
+module.exports = { createNaxosSource, parseSearchResults, parseCatalogueDetail, parsePerformers, stripComposerPrefix, naturalName };

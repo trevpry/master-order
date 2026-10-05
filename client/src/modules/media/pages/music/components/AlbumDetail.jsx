@@ -502,7 +502,7 @@ const AlbumDetail = ({
   };
 
   const openCreditArtistEditor = (credit) => {
-    setEditingCreditKey(credit.creditKey);
+    setEditingCreditKey(credit.groupKey);
     setCreditArtistQuery(`${credit.artistName} — ${credit.artistTypeName}`);
     setCreditArtistResults([]);
   };
@@ -513,32 +513,30 @@ const AlbumDetail = ({
     setCreditArtistResults([]);
   };
 
-  const setCreditArtistOverride = (creditKey, override) => {
+  const setCreditArtistOverride = (creditKeys, override) => {
     setDiscogsArtistOverrides((prev) => {
       const next = { ...prev };
-      if (override) {
-        next[creditKey] = override;
-      } else {
-        delete next[creditKey];
+      for (const creditKey of creditKeys) {
+        if (override) {
+          next[creditKey] = override;
+        } else {
+          delete next[creditKey];
+        }
       }
       return next;
     });
     closeCreditArtistEditor();
   };
 
-  const toggleDiscogsExcludedCredit = (creditKey) => {
-    const normalizedKey = String(creditKey || '').trim();
-    if (!normalizedKey) {
+  const toggleDiscogsExcludedCredit = (creditGroup) => {
+    const keys = (creditGroup?.creditKeys || []).map((key) => String(key || '').trim()).filter(Boolean);
+    if (keys.length === 0) {
       return;
     }
 
     setDiscogsExcludedCreditKeys((prev) => {
       const next = new Set(prev);
-      if (next.has(normalizedKey)) {
-        next.delete(normalizedKey);
-      } else {
-        next.add(normalizedKey);
-      }
+      keys.forEach((key) => (creditGroup.excluded ? next.delete(key) : next.add(key)));
       return next;
     });
   };
@@ -728,7 +726,10 @@ const AlbumDetail = ({
         .map((mapping) => Number.parseInt(mapping?.discogsOrdinal, 10))
         .filter((ordinal) => Number.isInteger(ordinal))
     );
-    const creditOptions = (Array.isArray(discogsPreview?.discogs?.creditOptions) ? discogsPreview.discogs.creditOptions : [])
+    const positionByOrdinal = new Map(
+      (discogsPreview?.mapping?.discogsTracks || []).map((track) => [track.discogsOrdinal, String(track.discogsTrackIndex || track.discogsOrdinal)])
+    );
+    const relevantCredits = (Array.isArray(discogsPreview?.discogs?.creditOptions) ? discogsPreview.discogs.creditOptions : [])
       .filter((credit) => {
         if (credit?.source === 'album') {
           return true;
@@ -736,25 +737,60 @@ const AlbumDetail = ({
 
         const ordinal = Number.parseInt(credit?.discogsOrdinal, 10);
         return Number.isInteger(ordinal) && selectedOrdinals.has(ordinal);
-      })
-      .map((credit) => {
-        const sourceLabel = credit?.source === 'album'
-          ? 'Album'
-          : `Track #${Number.isInteger(credit?.discogsOrdinal) ? credit.discogsOrdinal : '?'}`;
+      });
 
-        return {
-          creditKey: String(credit?.creditKey || '').trim(),
-          artistName: String(credit?.artistName || '').trim(),
-          artistTypeName: String(credit?.artistTypeName || 'Performer').trim() || 'Performer',
-          source: credit?.source === 'album' ? 'album' : 'track',
-          sourceLabel,
-          discogsOrdinal: Number.isInteger(credit?.discogsOrdinal) ? credit.discogsOrdinal : null,
-          discogsTrackTitle: String(credit?.discogsTrackTitle || '').trim() || null,
+    // Track credits are grouped into one card per artist and role, listing the tracks they cover.
+    const groups = new Map();
+    for (const credit of relevantCredits) {
+      const creditKey = String(credit?.creditKey || '').trim();
+      const artistName = String(credit?.artistName || '').trim();
+      const artistTypeName = String(credit?.artistTypeName || 'Performer').trim() || 'Performer';
+      const source = credit?.source === 'album' ? 'album' : 'track';
+      const groupKey = source === 'album'
+        ? creditKey
+        : `track:${credit?.discogsArtistId || artistName.toLowerCase()}:${artistTypeName}`;
+
+      if (!groups.has(groupKey)) {
+        groups.set(groupKey, {
+          groupKey,
+          creditKeys: [],
+          ordinals: [],
+          trackTitles: [],
+          artistName,
+          artistTypeName,
+          source,
           matchedExisting: Boolean(credit?.matchedExisting),
           willCreateArtist: Boolean(credit?.willCreateArtist),
           matchedArtist: credit?.matchedArtist || null,
-          matchKind: credit?.matchKind || null,
-          excluded: discogsExcludedCreditKeys.has(String(credit?.creditKey || '').trim()),
+          matchKind: credit?.matchKind || null
+        });
+      }
+
+      const group = groups.get(groupKey);
+      group.creditKeys.push(creditKey);
+      if (Number.isInteger(credit?.discogsOrdinal)) group.ordinals.push(credit.discogsOrdinal);
+      if (credit?.discogsTrackTitle) group.trackTitles.push(String(credit.discogsTrackTitle).trim());
+    }
+
+    const creditOptions = [...groups.values()]
+      .map((group) => {
+        const ordinals = [...group.ordinals].sort((a, b) => a - b);
+        const positions = ordinals.map((ordinal) => positionByOrdinal.get(ordinal) || String(ordinal));
+        let sourceLabel = 'Album';
+        if (group.source === 'track') {
+          sourceLabel = positions.length === 1
+            ? `Track ${positions[0]}`
+            : `${positions.length} tracks: ${positions.slice(0, 8).join(', ')}${positions.length > 8 ? ', …' : ''}`;
+        }
+
+        return {
+          ...group,
+          creditKey: group.creditKeys[0],
+          discogsOrdinal: ordinals[0] ?? null,
+          sourceLabel,
+          discogsTrackTitle: group.trackTitles.length === 1 ? group.trackTitles[0] : null,
+          // Partially excluded groups count as included; toggling re-includes everything.
+          excluded: group.creditKeys.every((key) => discogsExcludedCreditKeys.has(key)),
         };
       })
       .sort((left, right) => {
@@ -2016,26 +2052,26 @@ const AlbumDetail = ({
                 <div className="discogs-credit-grid">
                   {discogsImportArtistsPreview.creditOptions.map((credit) => {
                     const override = discogsArtistOverrides[credit.creditKey] || null;
-                    const isEditing = editingCreditKey === credit.creditKey;
+                    const isEditing = editingCreditKey === credit.groupKey;
                     const typed = splitArtistNameAndType(creditArtistQuery);
                     const effectiveType = override?.typeName || credit.artistTypeName;
                     const isMatched = override ? Boolean(override.ratingKey) : credit.matchedExisting;
 
                     return (
                       <div
-                        key={credit.creditKey}
+                        key={credit.groupKey}
                         className={`mb-track-match-cell discogs-credit-cell ${credit.excluded ? 'excluded' : (isMatched ? 'matched' : '')}`}
                       >
                         <label className="mb-track-match-cell-title">
                           <input
                             type="checkbox"
                             checked={!credit.excluded}
-                            onChange={() => toggleDiscogsExcludedCredit(credit.creditKey)}
+                            onChange={() => toggleDiscogsExcludedCredit(credit)}
                             disabled={importingDiscogs}
                           />
                           {credit.artistName} — {effectiveType}
                         </label>
-                        <div className="mb-track-match-cell-meta">
+                        <div className="mb-track-match-cell-meta" title={credit.trackTitles.length > 1 ? credit.trackTitles.join('\n') : undefined}>
                           {credit.sourceLabel}{credit.discogsTrackTitle ? ` · ${credit.discogsTrackTitle}` : ''}
                         </div>
                         <div className="mb-track-match-cell-meta">
@@ -2065,7 +2101,7 @@ const AlbumDetail = ({
                                 key={artist.ratingKey}
                                 type="button"
                                 className="mb-track-match-empty-btn discogs-credit-option"
-                                onClick={() => setCreditArtistOverride(credit.creditKey, {
+                                onClick={() => setCreditArtistOverride(credit.creditKeys, {
                                   ratingKey: artist.ratingKey,
                                   title: artist.userTitle || artist.title,
                                   typeName: typed.typeName || credit.artistTypeName
@@ -2078,7 +2114,7 @@ const AlbumDetail = ({
                               <button
                                 type="button"
                                 className="mb-track-match-empty-btn discogs-credit-option"
-                                onClick={() => setCreditArtistOverride(credit.creditKey, {
+                                onClick={() => setCreditArtistOverride(credit.creditKeys, {
                                   createName: typed.name,
                                   typeName: typed.typeName || credit.artistTypeName
                                 })}
@@ -2104,7 +2140,7 @@ const AlbumDetail = ({
                               <button
                                 type="button"
                                 className="mb-track-match-clear-btn"
-                                onClick={() => setCreditArtistOverride(credit.creditKey, null)}
+                                onClick={() => setCreditArtistOverride(credit.creditKeys, null)}
                               >
                                 Reset
                               </button>

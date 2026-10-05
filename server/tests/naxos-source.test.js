@@ -1,7 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-const { parseSearchResults, parseCatalogueDetail, stripComposerPrefix, naturalName } = require('../services/publishers/naxosSource');
+const { parseSearchResults, parseCatalogueDetail, parsePerformers, stripComposerPrefix, naturalName } = require('../services/publishers/naxosSource');
 
 const searchHtml = `
 <div id="page_detail_1" class="row"><div class="col-md-12">
@@ -62,6 +62,50 @@ test('parses Naxos search results without duplicates', () => {
   assert.deepEqual(results[0].releaseTitles, ['MEYERBEER: Semiramide riconosciuta', 'Semiramide riconosciuta']);
   assert.deepEqual(results[0].releaseArtistNames, ['Giacomo Meyerbeer', 'Eufemia Tufano', 'Rani Calderon', "Orchestra Internazionale d'Italia"]);
   assert.equal(results[0].url, 'https://www.naxos.com/CatalogueDetail/?id=CDS533');
+});
+
+test('parses per-track performer lists', () => {
+  assert.deepEqual(
+    parsePerformers("<strong>Caputo, Aldo</strong> (tenor) <br>Orchestra Internazionale d&#39;Italia (Orchestra) <br>Calderon, Rani (Conductor) "),
+    [
+      { name: 'Caputo, Aldo', role: 'tenor' },
+      { name: "Orchestra Internazionale d'Italia", role: 'Orchestra' },
+      { name: 'Calderon, Rani', role: 'Conductor' }
+    ]
+  );
+});
+
+test('credits performers only on the tracks they appear on', () => {
+  const html = `
+<div class="mb-1">Composer(s): <span><a class="sidebar-link">Meyerbeer, Giacomo</a></span></div>
+<div class="mb-1">Conductor(s): <span><a class="sidebar-link">Calderon, Rani</a></span></div>
+<div class="mb-1">Artist(s): <span><a class="sidebar-link">Tufano, Eufemia</a>; <a class="sidebar-link">Polito, Clara</a></span></div>
+<h3 id="album-title">MEYERBEER: Semiramide riconosciuta</h3>
+<div id="all-tracks-wrap">
+  <div class="card-header3 shadow-none"><label><strong>Semiramide riconosciuta</strong></label></div>
+  <div class="collapse all-tracks"><div class="card-body mb-2"><strong>Tufano, Eufemia</strong> (mezzo-soprano) <br><strong>Polito, Clara</strong> (soprano) <br><strong>Calderon, Rani</strong> (Conductor) </div></div>
+  <table><tr><td class="number-track" valign="top">7</td>
+  <td valign="top">Act I Scene 5: Sperai su questa sponda (Scitalce)</td>
+  <td class="track-num" valign="top">05:33</td></tr></table>
+  <div class="collapse all-tracks"><div class="card-body mb-2"> Tufano, Eufemia (mezzo-soprano) <br>Calderon, Rani (Conductor) </div></div>
+  <table><tr><td class="number-track" valign="top">8</td>
+  <td valign="top">Act I Scene 5: Amico in rivederti</td>
+  <td class="track-num" valign="top">03:12</td></tr></table>
+  <div class="collapse all-tracks"><div class="card-body mb-2"> Polito, Clara (soprano) <br>Tufano, Eufemia (mezzo-soprano) <br>Calderon, Rani (Conductor) </div></div>
+</div>`;
+
+  const release = parseCatalogueDetail(html, 'CDS533');
+  const tracks = release.tracklist[0].sub_tracks;
+
+  // On every track -> album credit; sidebar artists are no longer applied to all tracks.
+  assert.deepEqual(release.extraartists.map(a => `${a.name}/${a.role}`), [
+    'Giacomo Meyerbeer/Composed By',
+    'Eufemia Tufano/mezzo-soprano',
+    'Rani Calderon/Conductor'
+  ]);
+  assert.equal(tracks[0].extraartists, undefined);
+  assert.deepEqual(tracks[1].extraartists.map(a => `${a.name}/${a.role}`), ['Clara Polito/soprano']);
+  assert.equal(tracks.some(track => 'performers' in track), false);
 });
 
 test('parses a Naxos catalogue page into a Discogs-shaped release', () => {

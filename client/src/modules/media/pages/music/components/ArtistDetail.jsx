@@ -6,6 +6,7 @@ import MusicBrainzSearchModal from '../../../../../components/music/MusicBrainzS
 import IdentifyModal from '../../../../../components/IdentifyModal';
 import MetadataEditor from '../../../../../components/MetadataEditor';
 import EmbeddedPicardTagsPanel from './EmbeddedPicardTagsPanel';
+import MergeAlbumsModal from '../../../../../components/music/MergeAlbumsModal';
 import { getAlbumArtworkUrl } from '../../../../../utils/albumArtwork';
 import './ArtistDetail.css';
 
@@ -22,6 +23,7 @@ const ArtistDetail = ({
   onArtistDeleted,
   onDeleteArtist,
   onExtractArtistMetadata,
+  onAlbumsMerged,
   isExtractingMetadata = false
 }) => {
   const [isEditing, setIsEditing] = useState(false);
@@ -47,6 +49,9 @@ const ArtistDetail = ({
   const [searchingMergeArtist, setSearchingMergeArtist] = useState(false);
   const [isMergingArtist, setIsMergingArtist] = useState(false);
   const [isDeletingArtist, setIsDeletingArtist] = useState(false);
+  const [albumSelectionMode, setAlbumSelectionMode] = useState(false);
+  const [selectedAlbumKeys, setSelectedAlbumKeys] = useState(new Set());
+  const [showMergeAlbumsModal, setShowMergeAlbumsModal] = useState(false);
   const mergeArtistSearchRequestId = useRef(0);
 
   const linkedAlbums = artist?.linkedAlbums || [];
@@ -116,6 +121,12 @@ const ArtistDetail = ({
     setIsMergingArtist(false);
     setIsDeletingArtist(false);
   }, [artist]);
+
+  useEffect(() => {
+    setAlbumSelectionMode(false);
+    setSelectedAlbumKeys(new Set());
+    setShowMergeAlbumsModal(false);
+  }, [artist?.ratingKey]);
 
   useEffect(() => {
     if (!workSelectionMode || mergeMode !== 'existing') return;
@@ -697,14 +708,57 @@ const ArtistDetail = ({
       {/* Albums Grid */}
       {albums && albums.length > 0 && (
         <div className="artist-albums-section">
-          <h2>Albums</h2>
+          <div className={`artist-album-selection-controls ${albumSelectionMode ? 'active' : ''}`}>
+            <h2>Albums</h2>
+            {albums.length > 1 && (
+              <button
+                type="button"
+                className={`artist-album-select-btn ${albumSelectionMode ? 'active' : ''}`}
+                onClick={() => {
+                  setAlbumSelectionMode(!albumSelectionMode);
+                  setSelectedAlbumKeys(new Set());
+                }}
+              >
+                {albumSelectionMode ? '✓ Selection Mode' : '☑️ Select Albums'}
+              </button>
+            )}
+            {albumSelectionMode && selectedAlbumKeys.size > 0 && (
+              <span className="artist-album-selected-count">{selectedAlbumKeys.size} selected</span>
+            )}
+            {albumSelectionMode && selectedAlbumKeys.size >= 2 && (
+              <button
+                type="button"
+                className="artist-album-merge-btn"
+                onClick={() => setShowMergeAlbumsModal(true)}
+              >
+                🔀 Merge {selectedAlbumKeys.size} Albums
+              </button>
+            )}
+          </div>
           <div className="albums-grid">
-            {albums.map(album => (
+            {albums.map(album => {
+              const isSelected = selectedAlbumKeys.has(album.ratingKey);
+              return (
               <div 
                 key={album.ratingKey} 
-                className="album-card"
-                onClick={() => onSelectAlbum(album)}
+                className={`album-card ${albumSelectionMode ? 'selection-mode' : ''} ${isSelected ? 'selected' : ''}`}
+                onClick={() => {
+                  if (!albumSelectionMode) {
+                    onSelectAlbum(album);
+                    return;
+                  }
+                  setSelectedAlbumKeys((prev) => {
+                    const next = new Set(prev);
+                    if (next.has(album.ratingKey)) next.delete(album.ratingKey); else next.add(album.ratingKey);
+                    return next;
+                  });
+                }}
               >
+                {albumSelectionMode && (
+                  <div className="selection-checkbox">
+                    <input type="checkbox" checked={isSelected} readOnly aria-label={`Select ${album.title}`} />
+                  </div>
+                )}
                 {getAlbumArtworkUrl(album) && (
                   <div className="album-image">
                     <img 
@@ -739,8 +793,20 @@ const ArtistDetail = ({
                   )}
                 </div>
               </div>
-            ))}
+              );
+            })}
           </div>
+          {showMergeAlbumsModal && (
+            <MergeAlbumsModal
+              albums={albums.filter((album) => selectedAlbumKeys.has(album.ratingKey))}
+              onClose={() => setShowMergeAlbumsModal(false)}
+              onSuccess={async () => {
+                setAlbumSelectionMode(false);
+                setSelectedAlbumKeys(new Set());
+                await onAlbumsMerged?.(artist.ratingKey);
+              }}
+            />
+          )}
         </div>
       )}
 
