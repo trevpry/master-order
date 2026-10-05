@@ -85,12 +85,15 @@ export const flattenReleaseTracks = (releaseDetails) => {
  * @param {Array} albumTracks - local tracks (e.g. from PlexTrack)
  * @param {Object} releaseDetails - raw MusicBrainz release data (with `media`)
  * @param {Object} [manualMatchesByLocalKey] - optional map of localTrack.ratingKey -> remote track's
- *   `_previewKey`, used to force a specific pairing instead of the automatic strict match
- * @returns {{ rows: Array, unmatchedRemoteTracks: Array }}
+ *   `_previewKey` (or NO_MATCH_KEY to leave the local track unmatched), used to force a specific
+ *   pairing instead of the automatic strict match
+ * @returns {{ rows: Array, unmatchedRemoteTracks: Array, remoteTracks: Array }}
  */
+export const NO_MATCH_KEY = '__no_match__';
+
 export const buildTrackPreview = (albumTracks, releaseDetails, manualMatchesByLocalKey = {}) => {
   if (!releaseDetails) {
-    return { rows: [], unmatchedRemoteTracks: [] };
+    return { rows: [], unmatchedRemoteTracks: [], remoteTracks: [] };
   }
 
   const getTrackNumber = (track) => {
@@ -173,8 +176,9 @@ export const buildTrackPreview = (albumTracks, releaseDetails, manualMatchesByLo
   }
 
   const rows = local.map((localTrack) => {
+    const isManualNoMatch = manualMatchesByLocalKey?.[localTrack.ratingKey] === NO_MATCH_KEY;
     const manualRemoteTrack = manualRemoteTrackByLocalKey.get(localTrack.ratingKey) || null;
-    const remoteTrack = manualRemoteTrack || findStrictMatch(localTrack);
+    const remoteTrack = isManualNoMatch ? null : (manualRemoteTrack || findStrictMatch(localTrack));
     if (remoteTrack && !manualRemoteTrack) {
       usedRemoteTrackKeys.add(remoteTrack._previewKey);
     }
@@ -202,19 +206,20 @@ export const buildTrackPreview = (albumTracks, releaseDetails, manualMatchesByLo
         changes.push('MusicBrainz recording ID');
       }
     } else {
-      changes.push('No matching MusicBrainz track found');
+      changes.push(isManualNoMatch ? 'Manually left unmatched' : 'No matching MusicBrainz track found');
     }
 
     return {
       localTrack,
       remoteTrack,
-      isManualMatch: Boolean(manualRemoteTrack),
+      isManualMatch: Boolean(manualRemoteTrack) || isManualNoMatch,
+      isManualNoMatch,
       changes: changes.length > 0 ? changes.join(', ') : 'No change'
     };
   });
 
   const unmatchedRemoteTracks = remote.filter((remoteTrack) => !usedRemoteTrackKeys.has(remoteTrack._previewKey));
 
-  return { rows, unmatchedRemoteTracks };
+  return { rows, unmatchedRemoteTracks, remoteTracks: remote };
 };
 

@@ -107,9 +107,52 @@ const parsePosition = (position) => {
   return { discNumber: null, trackNumber: null };
 };
 
+/**
+ * Default release source. Other sources (e.g. publisher catalogues) implement the same shape:
+ * { key, label, userAgent, getRelease(id), buildSearches(ctx), search(params) -> normalized results }
+ * where getRelease returns a Discogs-shaped release (tracklist, artists, extraartists, images, ...).
+ */
+const createDiscogsSource = (discogs) => ({
+  key: 'discogs',
+  label: 'Discogs',
+  userAgent: discogs.userAgent,
+  getRelease: (releaseId) => discogs.getRelease(releaseId),
+  buildSearches: ({ query, albumTitle, artistNames, titleSegments, primarySurname, secondarySurname, keyWords }) => (query
+    ? [{ q: query }]
+    : [
+        ...(artistNames[0] ? [{ release_title: albumTitle, artist: artistNames[0] }] : [{ release_title: albumTitle }]),
+        ...titleSegments.map(segment => ({ q: [primarySurname, keyWords(segment)].filter(Boolean).join(' ') })),
+        ...(secondarySurname ? [{ q: [primarySurname, secondarySurname, keyWords(titleSegments[titleSegments.length - 1] || albumTitle)].join(' ') }] : [])
+      ]),
+  search: async (params) => {
+    const results = await discogs.searchReleases({ ...params, per_page: 15 });
+    return results.map((result) => {
+      // Discogs titles are "Artist(s) - Title", and the artist part may itself contain " - ".
+      const parts = String(result.title || '').split(' - ');
+      const releaseTitle = parts.length > 1 ? parts[parts.length - 1] : parts[0];
+      const releaseArtist = parts.length > 1 ? parts.slice(0, -1).join(' - ') : '';
+      return {
+        id: result.id,
+        releaseTitles: [releaseTitle],
+        releaseArtist: releaseArtist || null,
+        releaseArtistNames: releaseArtist.split(/\s*(?:,|&| - |\/)\s*/).map(cleanDiscogsName).filter(Boolean),
+        year: Number.parseInt(result.year, 10) || null,
+        country: result.country || null,
+        label: Array.isArray(result.label) ? result.label[0] : (result.label || null),
+        catno: result.catno || null,
+        format: Array.isArray(result.format) ? result.format.join(', ') : null,
+        formatQuantity: Number.parseInt(result.format_quantity, 10) || null,
+        thumb: result.cover_image || result.thumb || null,
+        url: result.uri ? `https://www.discogs.com${result.uri}` : `https://www.discogs.com/release/${result.id}`
+      };
+    });
+  }
+});
+
 class DiscogsImportService {
-  constructor() {
+  constructor({ source = null } = {}) {
     this.discogs = new DiscogsService();
+    this.source = source || createDiscogsSource(this.discogs);
     this.identification = new IdentificationService();
     this.identification.prisma = prisma;
   }
@@ -581,7 +624,7 @@ class DiscogsImportService {
       throw error;
     }
 
-    const release = await this.discogs.getRelease(releaseId);
+    const release = await this.source.getRelease(releaseId);
     const items = this.flattenTracklist(release);
     const artistIndex = await this.loadArtistIndex();
     const credits = this.buildCredits(release, items, artistIndex);
@@ -635,9 +678,11 @@ class DiscogsImportService {
 
     return {
       album: { title: album.title, discogsTitle: release.title },
+      source: { key: this.source.key, label: this.source.label },
       discogs: {
         sourceKind: 'release',
         releaseId: release.id,
+        releaseUrl: release.uri || null,
         title: release.title,
         year: release.year || null,
         sourceTrackCount: items.length,
@@ -695,21 +740,18 @@ class DiscogsImportService {
     const primarySurname = surname(artistNames[0]);
     const secondarySurname = surname(artistNames.find(name => surname(name) !== primarySurname));
 
-    const searches = query
-      ? [{ q: query }]
-      : [
-          ...(artistNames[0] ? [{ release_title: albumTitle, artist: artistNames[0] }] : [{ release_title: albumTitle }]),
-          ...titleSegments.map(segment => ({ q: [primarySurname, keyWords(segment)].filter(Boolean).join(' ') })),
-          ...(secondarySurname ? [{ q: [primarySurname, secondarySurname, keyWords(titleSegments[titleSegments.length - 1] || albumTitle)].join(' ') }] : [])
-        ];
+    const searches = this.source.buildSearches({
+      query, albumTitle, artistNames, titleSegments, primarySurname, secondarySurname, keyWords
+    });
 
     const resultsById = new Map();
     const seenSearches = new Set();
     for (const params of searches) {
       const signature = JSON.stringify(params);
-      if (seenSearches.has(signature) || !Object.values(params).some(value => String(value || '').trim())) continue;
+      const hasValue = typeof params === 'string' ? params.trim() : Object.values(params).some(value => String(value || '').trim());
+      if (seenSearches.has(signature) || !hasValue) continue;
       seenSearches.add(signature);
-      const results = await this.discogs.searchReleases({ ...params, per_page: 15 });
+      const results = await this.source.search(params);
       results.forEach(result => {
         if (result?.id && !resultsById.has(result.id)) resultsById.set(result.id, result);
       });
@@ -717,41 +759,37 @@ class DiscogsImportService {
     }
 
     const candidates = [...resultsById.values()].map((result) => {
-      // Discogs titles are "Artist(s) - Title", and the artist part may itself contain " - ".
-      const parts = String(result.title || '').split(' - ');
-      const releaseTitle = parts.length > 1 ? parts[parts.length - 1] : parts[0];
-      const releaseArtist = parts.length > 1 ? parts.slice(0, -1).join(' - ') : '';
-      const releaseArtistNames = releaseArtist.split(/\s*(?:,|&| - |\/)\s*/).map(cleanDiscogsName).filter(Boolean);
-
-      const titleScore = Math.max(0, ...titleVariants.map(variant => titleSimilarity(variant, releaseTitle)));
+      const titleScore = Math.max(0, ...titleVariants.flatMap(variant => (result.releaseTitles || []).map(title => titleSimilarity(variant, title))));
+      const releaseArtistNames = result.releaseArtistNames || [];
       const artistScore = artistNames.length === 0 || releaseArtistNames.length === 0
         ? 0.5
         : Math.max(0, ...artistNames.flatMap(local => releaseArtistNames.map(remote => scoreArtistNameMatch(local, remote))));
-      const year = Number.parseInt(result.year, 10);
+      const year = result.year;
       const yearScore = !album.year || !year ? 0.5 : (album.year === year ? 1 : (Math.abs(album.year - year) <= 1 ? 0.6 : 0));
-      const discCount = Number.parseInt(result.format_quantity, 10);
+      const discCount = result.formatQuantity;
       const discScore = !discCount ? 0.5 : (discCount === localDiscCount ? 1 : 0);
 
       const confidence = Math.min(1, (titleScore * 0.55) + (artistScore * 0.25) + (yearScore * 0.1) + (discScore * 0.1));
 
       return {
         id: result.id,
-        title: releaseTitle,
-        artist: releaseArtist || null,
+        title: (result.releaseTitles || [])[0] || '',
+        artist: result.releaseArtist || null,
         year: year || null,
         country: result.country || null,
-        label: Array.isArray(result.label) ? result.label[0] : (result.label || null),
+        label: result.label || null,
         catno: result.catno || null,
-        format: Array.isArray(result.format) ? result.format.join(', ') : null,
+        format: result.format || null,
         formatQuantity: discCount || null,
-        thumb: result.cover_image || result.thumb || null,
-        url: result.uri ? `https://www.discogs.com${result.uri}` : `https://www.discogs.com/release/${result.id}`,
+        thumb: result.thumb || null,
+        url: result.url || null,
         confidence: Math.round(confidence * 1000) / 1000
       };
     });
 
     return {
-      query: query || searches.map(params => Object.values(params).join(' ')).find(Boolean) || albumTitle,
+      source: { key: this.source.key, label: this.source.label },
+      query: query || searches.map(params => (typeof params === 'string' ? params : Object.values(params).join(' '))).find(Boolean) || albumTitle,
       local: { title: albumTitle, artists: artistNames, year: album.year || null, discCount: localDiscCount, trackCount: album.tracks.length },
       candidates: candidates.sort((a, b) => b.confidence - a.confidence).slice(0, limit)
     };
@@ -912,10 +950,10 @@ class DiscogsImportService {
 
       try {
         await artworkService.saveFromUrl(albumRatingKey, type, image.uri, {
-          source: 'discogs',
+          source: this.source.key,
           width: image.width || null,
           height: image.height || null,
-          headers: { 'User-Agent': this.discogs.userAgent }
+          headers: { 'User-Agent': this.source.userAgent }
         });
         saved.push(type);
       } catch (error) {

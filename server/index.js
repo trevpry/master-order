@@ -384,6 +384,8 @@ const booksRoutes = require('./routes/books');
 app.use('/api/books', booksRoutes);
 
 // Music API routes
+const publisherImportRoutes = require('./routes/publisherImport');
+app.use('/api/music/publishers', publisherImportRoutes);
 const musicRoutes = require('./routes/music');
 app.use('/api/music', musicRoutes);
 

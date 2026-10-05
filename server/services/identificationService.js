@@ -3,6 +3,8 @@ const MusicBrainzService = require('./musicBrainzService');
 const { getPreferredMusicBrainzArtistName, unsortMusicBrainzName } = require('../utils/musicBrainzNames');
 const { recordDeletedPlexEntity } = require('../utils/plexDeletedEntities');
 
+const NO_MATCH_OVERRIDE = '__no_match__';
+
 /**
  * IdentificationService
  * 
@@ -769,7 +771,10 @@ class IdentificationService {
 
     const overridesByLocalKey = {};
     for (const override of (Array.isArray(trackMatchOverrides) ? trackMatchOverrides : [])) {
-      if (override?.localTrackKey && override?.recordingId) {
+      if (!override?.localTrackKey) continue;
+      if (override.noMatch) {
+        overridesByLocalKey[override.localTrackKey] = NO_MATCH_OVERRIDE;
+      } else if (override.recordingId) {
         overridesByLocalKey[override.localTrackKey] = override.recordingId;
       }
     }
@@ -820,6 +825,12 @@ class IdentificationService {
     for (const localTrack of localTracks) {
       const overrideRecordingId = overridesByLocalKey[localTrack.ratingKey];
       if (!overrideRecordingId) {
+        continue;
+      }
+
+      // The user explicitly left this local track unmatched.
+      if (overrideRecordingId === NO_MATCH_OVERRIDE) {
+        matchedLocalTrackKeys.add(localTrack.ratingKey);
         continue;
       }
 

@@ -5,15 +5,18 @@ import config from '../../config';
 /**
  * DiscogsIdentifyModal
  *
- * Searches Discogs by the album's title and artists and shows ranked release matches with
- * confidence scores, mirroring the MusicBrainz IdentifyModal.
+ * Searches Discogs (or another release source such as a publisher catalogue) by the album's title
+ * and artists and shows ranked release matches with confidence scores, mirroring the MusicBrainz
+ * IdentifyModal.
  *
  * Props:
  * - isOpen, onClose
  * - albumRatingKey, albumTitle
  * - onAccept: (candidate) => void|Promise (fired with the chosen release)
+ * - sourceLabel: display name of the source (default "Discogs")
+ * - searchUrl: endpoint returning ranked candidates (defaults to the Discogs album search)
  */
-const DiscogsIdentifyModal = ({ isOpen, onClose, albumRatingKey, albumTitle, onAccept }) => {
+const DiscogsIdentifyModal = ({ isOpen, onClose, albumRatingKey, albumTitle, onAccept, sourceLabel = 'Discogs', searchUrl = null }) => {
   const [loading, setLoading] = useState(false);
   const [candidates, setCandidates] = useState([]);
   const [selectedCandidate, setSelectedCandidate] = useState(null);
@@ -32,7 +35,7 @@ const DiscogsIdentifyModal = ({ isOpen, onClose, albumRatingKey, albumTitle, onA
       setError(null);
       setLocalSummary(null);
     }
-  }, [isOpen, albumRatingKey]);
+  }, [isOpen, albumRatingKey, searchUrl]);
 
   const searchDiscogs = async (customQuery = query) => {
     setLoading(true);
@@ -41,7 +44,7 @@ const DiscogsIdentifyModal = ({ isOpen, onClose, albumRatingKey, albumTitle, onA
 
     try {
       const response = await fetch(
-        `${config.apiBaseUrl}/api/music/albums/${encodeURIComponent(albumRatingKey)}/discogs-search`,
+        searchUrl || `${config.apiBaseUrl}/api/music/albums/${encodeURIComponent(albumRatingKey)}/discogs-search`,
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -52,7 +55,7 @@ const DiscogsIdentifyModal = ({ isOpen, onClose, albumRatingKey, albumTitle, onA
 
       if (!response.ok || !data.success) {
         setCandidates([]);
-        setError(data.error || 'Failed to search Discogs');
+        setError(data.error || `Failed to search ${sourceLabel}`);
         return;
       }
 
@@ -60,11 +63,11 @@ const DiscogsIdentifyModal = ({ isOpen, onClose, albumRatingKey, albumTitle, onA
       setLocalSummary(data.data.local || null);
       if (!customQuery) setQuery(data.data.query || '');
       if ((data.data.candidates || []).length === 0) {
-        setError('No matches found on Discogs');
+        setError(`No matches found on ${sourceLabel}`);
       }
     } catch (err) {
-      console.error('Error searching Discogs:', err);
-      setError('Failed to connect to Discogs');
+      console.error(`Error searching ${sourceLabel}:`, err);
+      setError(`Failed to connect to ${sourceLabel}`);
     } finally {
       setLoading(false);
     }
@@ -105,7 +108,7 @@ const DiscogsIdentifyModal = ({ isOpen, onClose, albumRatingKey, albumTitle, onA
           <div>
             <h2 className="text-2xl font-bold text-white flex items-center gap-2">
               <Search size={24} />
-              Identify Album on Discogs
+              Identify Album on {sourceLabel}
             </h2>
             {albumTitle && <p className="text-sm text-gray-400 mt-1">{albumTitle}</p>}
           </div>
@@ -143,7 +146,7 @@ const DiscogsIdentifyModal = ({ isOpen, onClose, albumRatingKey, albumTitle, onA
           {loading ? (
             <div className="flex flex-col items-center justify-center py-12">
               <Search size={48} className="text-blue-400 animate-pulse mb-4" />
-              <p className="text-gray-400">Searching Discogs...</p>
+              <p className="text-gray-400">Searching {sourceLabel}...</p>
             </div>
           ) : error ? (
             <div className="flex flex-col items-center justify-center py-12">
@@ -222,24 +225,24 @@ const DiscogsIdentifyModal = ({ isOpen, onClose, albumRatingKey, albumTitle, onA
                         </div>
 
                         <div className="flex items-center gap-3 mt-2">
-                          <p className="text-xs text-gray-600">Discogs release: {candidate.id}</p>
+                          <p className="text-xs text-gray-600">{sourceLabel} release: {candidate.id}</p>
                           <a
                             href={candidate.url}
                             target="_blank"
                             rel="noopener noreferrer"
                             onClick={(event) => event.stopPropagation()}
                             className="flex items-center gap-1 text-xs text-blue-400 hover:text-blue-300 hover:underline"
-                            title="Open on Discogs in a new tab"
+                            title={`Open on ${sourceLabel} in a new tab`}
                           >
                             <ExternalLink size={12} />
-                            View on Discogs
+                            View on {sourceLabel}
                           </a>
                         </div>
                       </div>
 
                       {candidate.thumb && (
                         <div className="flex items-center gap-2 ml-4">
-                          <img src={candidate.thumb} className="w-30 h-30 rounded object-cover" alt="Discogs cover" />
+                          <img src={candidate.thumb} className="w-30 h-30 rounded object-cover" alt={`${sourceLabel} cover`} />
                         </div>
                       )}
 

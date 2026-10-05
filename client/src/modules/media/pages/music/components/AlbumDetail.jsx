@@ -4,10 +4,11 @@ import TracksPlaylistPlayer from './TracksPlaylistPlayer';
 import StarRating from '../../../../../components/StarRating';
 import IdentifyModal from '../../../../../components/IdentifyModal';
 import DiscogsIdentifyModal from '../../../../../components/DiscogsIdentifyModal';
+import PublisherPickerModal from '../../../../../components/PublisherPickerModal';
 import MetadataEditor from '../../../../../components/MetadataEditor';
 import EmbeddedPicardTagsPanel from './EmbeddedPicardTagsPanel';
 import ArtworkPicker from './ArtworkPicker';
-import { buildTrackPreview, inferLocalDiscNumber } from '../../../../../utils/musicBrainzTrackMatch';
+import { buildTrackPreview, inferLocalDiscNumber, NO_MATCH_KEY } from '../../../../../utils/musicBrainzTrackMatch';
 import { splitArtistNameAndType } from '../../../../../utils/artistNameMatch';
 import { getAlbumArtworkUrl } from '../../../../../utils/albumArtwork';
 import './AlbumDetail.css';
@@ -85,6 +86,10 @@ const AlbumDetail = ({
   const [mbCoverArt, setMbCoverArt] = useState({ loading: false, images: [], error: null });
   const [mbArtworkSelection, setMbArtworkSelection] = useState({ front: null, back: null });
   const [showDiscogsSearchModal, setShowDiscogsSearchModal] = useState(false);
+  const [showPublisherPicker, setShowPublisherPicker] = useState(false);
+  const [activePublisher, setActivePublisher] = useState(null);
+  // Where the current import preview came from: { kind: 'discogs' } or { kind: 'publisher', key, label, releaseId }
+  const [importSource, setImportSource] = useState({ kind: 'discogs' });
   
   // Sync local state when prop changes
   useEffect(() => {
@@ -267,11 +272,10 @@ const AlbumDetail = ({
 
     try {
       const trackMatchOverrides = (mbTrackPreview?.rows || [])
-        .filter((row) => row.isManualMatch && row.localTrack?.ratingKey && row.remoteTrack?.recordingId)
-        .map((row) => ({
-          localTrackKey: row.localTrack.ratingKey,
-          recordingId: row.remoteTrack.recordingId
-        }));
+        .filter((row) => row.isManualMatch && row.localTrack?.ratingKey && (row.isManualNoMatch || row.remoteTrack?.recordingId))
+        .map((row) => (row.isManualNoMatch
+          ? { localTrackKey: row.localTrack.ratingKey, noMatch: true }
+          : { localTrackKey: row.localTrack.ratingKey, recordingId: row.remoteTrack.recordingId }));
 
       // Reuse the release data already fetched during accept to avoid re-hitting the
       // rate-limited MusicBrainz API (which can stall for many seconds on retries).
@@ -318,7 +322,11 @@ const AlbumDetail = ({
         delete next[localTrackKey];
         return next;
       }
-      return { ...prev, [localTrackKey]: remotePreviewKey };
+      // A pulled track can only belong to one local track, so steal it from any earlier manual pick.
+      const next = Object.fromEntries(
+        Object.entries(prev).filter(([key, value]) => remotePreviewKey === NO_MATCH_KEY || value !== remotePreviewKey || key === localTrackKey)
+      );
+      return { ...next, [localTrackKey]: remotePreviewKey };
     });
     setEditingUnmatchedRowKey(null);
   };
@@ -373,6 +381,35 @@ const AlbumDetail = ({
     }
   };
 
+  const requestImportPreview = async (url, body, source) => {
+    const sourceLabel = source.kind === 'publisher' ? source.label : 'Discogs';
+    try {
+      setImportingDiscogs(true);
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...body, apply: false })
+      });
+
+      const result = await response.json();
+      if (!response.ok) {
+        throw new Error(result.error || `Failed to import ${sourceLabel} metadata`);
+      }
+
+      setImportSource(source);
+      setDiscogsPreview(result?.data || null);
+      setDiscogsTrackMatches(result?.data?.mapping?.defaultTrackMappings || []);
+      setDiscogsLinkAllToAlbumWork(false);
+      setDiscogsExcludedCreditKeys(new Set());
+      setShowDiscogsPreviewModal(true);
+    } catch (error) {
+      console.error(`Error importing ${sourceLabel} metadata:`, error);
+      alert(`${sourceLabel} import failed: ${error.message}`);
+    } finally {
+      setImportingDiscogs(false);
+    }
+  };
+
   const handleImportFromDiscogs = async () => {
     const normalizedUrl = String(discogsUrl || '').trim();
     if (!normalizedUrl) {
@@ -380,32 +417,11 @@ const AlbumDetail = ({
       return;
     }
 
-    try {
-      setImportingDiscogs(true);
-      const response = await fetch(`${config.apiBaseUrl}/api/music/albums/${albumData.ratingKey}/discogs-import`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({ url: normalizedUrl, apply: false })
-      });
-
-      const result = await response.json();
-      if (!response.ok) {
-        throw new Error(result.error || 'Failed to import Discogs metadata');
-      }
-
-      setDiscogsPreview(result?.data || null);
-      setDiscogsTrackMatches(result?.data?.mapping?.defaultTrackMappings || []);
-      setDiscogsLinkAllToAlbumWork(false);
-      setDiscogsExcludedCreditKeys(new Set());
-      setShowDiscogsPreviewModal(true);
-    } catch (error) {
-      console.error('Error importing Discogs metadata:', error);
-      alert(`Discogs import failed: ${error.message}`);
-    } finally {
-      setImportingDiscogs(false);
-    }
+    await requestImportPreview(
+      `${config.apiBaseUrl}/api/music/albums/${albumData.ratingKey}/discogs-import`,
+      { url: normalizedUrl },
+      { kind: 'discogs' }
+    );
   };
 
   const handleSearchDiscogs = () => {
@@ -417,38 +433,32 @@ const AlbumDetail = ({
   };
 
   const handleSelectDiscogsRelease = async (release) => {
-    // Set the release URL and trigger import
     const releaseUrl = `https://www.discogs.com/release/${release.id}`;
     setDiscogsUrl(releaseUrl);
     closeDiscogsSearchModal();
-    
-    // Trigger import
-    try {
-      setImportingDiscogs(true);
-      const response = await fetch(`${config.apiBaseUrl}/api/music/albums/${albumData.ratingKey}/discogs-import`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({ url: releaseUrl, apply: false })
-      });
 
-      const result = await response.json();
-      if (!response.ok) {
-        throw new Error(result.error || 'Failed to import Discogs metadata');
-      }
+    await requestImportPreview(
+      `${config.apiBaseUrl}/api/music/albums/${albumData.ratingKey}/discogs-import`,
+      { url: releaseUrl },
+      { kind: 'discogs' }
+    );
+  };
 
-      setDiscogsPreview(result?.data || null);
-      setDiscogsTrackMatches(result?.data?.mapping?.defaultTrackMappings || []);
-      setDiscogsLinkAllToAlbumWork(false);
-      setDiscogsExcludedCreditKeys(new Set());
-      setShowDiscogsPreviewModal(true);
-    } catch (error) {
-      console.error('Error importing Discogs metadata:', error);
-      alert(`Discogs import failed: ${error.message}`);
-    } finally {
-      setImportingDiscogs(false);
-    }
+  const handleSelectPublisher = (publisher) => {
+    setShowPublisherPicker(false);
+    setActivePublisher(publisher);
+  };
+
+  const handleSelectPublisherRelease = async (release) => {
+    const publisher = activePublisher;
+    setActivePublisher(null);
+    if (!publisher) return;
+
+    await requestImportPreview(
+      `${config.apiBaseUrl}/api/music/publishers/${encodeURIComponent(publisher.key)}/albums/${encodeURIComponent(albumData.ratingKey)}/import`,
+      { releaseId: release.id },
+      { kind: 'publisher', key: publisher.key, label: publisher.label, releaseId: release.id }
+    );
   };
 
   const handleDeleteAlbum = async () => {
@@ -560,11 +570,16 @@ const AlbumDetail = ({
   };
 
   const handleAcceptDiscogsImport = async () => {
+    const isPublisherImport = importSource.kind === 'publisher';
     const normalizedUrl = String(discogsUrl || '').trim();
-    if (!normalizedUrl) {
+    if (!isPublisherImport && !normalizedUrl) {
       alert('Discogs URL is required to continue.');
       return;
     }
+    const importUrl = isPublisherImport
+      ? `${config.apiBaseUrl}/api/music/publishers/${encodeURIComponent(importSource.key)}/albums/${encodeURIComponent(albumData.ratingKey)}/import`
+      : `${config.apiBaseUrl}/api/music/albums/${albumData.ratingKey}/discogs-import`;
+    const releaseReference = isPublisherImport ? { releaseId: importSource.releaseId } : { url: normalizedUrl };
 
     const albumWorkTitle = String(discogsPreview?.album?.discogsTitle || albumData?.title || '').trim();
     const trackMappingsPayload = (Array.isArray(discogsTrackMatches) ? discogsTrackMatches : []).map((mapping) => {
@@ -583,13 +598,13 @@ const AlbumDetail = ({
     try {
       setImportingDiscogs(true);
       setDiscogsApplyError(null);
-      const response = await fetch(`${config.apiBaseUrl}/api/music/albums/${albumData.ratingKey}/discogs-import`, {
+      const response = await fetch(importUrl, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'
         },
         body: JSON.stringify({
-          url: normalizedUrl,
+          ...releaseReference,
           apply: true,
           trackMappings: trackMappingsPayload,
           excludedCreditKeys: [...discogsExcludedCreditKeys],
@@ -608,7 +623,7 @@ const AlbumDetail = ({
 
       const result = await response.json();
       if (!response.ok) {
-        throw new Error(result.error || 'Failed to apply Discogs import');
+        throw new Error(result.error || `Failed to apply ${previewSourceLabel} import`);
       }
 
       await refreshAlbumAndTracks();
@@ -619,7 +634,7 @@ const AlbumDetail = ({
         alert(`Metadata imported, but some artwork could not be saved:\n${artworkErrors.map((entry) => `${entry.type}: ${entry.error}`).join('\n')}`);
       }
     } catch (error) {
-      console.error('Error applying Discogs metadata:', error);
+      console.error(`Error applying ${previewSourceLabel} metadata:`, error);
       setDiscogsApplyError(error.message || 'Failed to apply metadata');
     } finally {
       setImportingDiscogs(false);
@@ -642,6 +657,12 @@ const AlbumDetail = ({
     if (!mbTrackMatchPreview) return null;
     return buildTrackPreview(tracks, mbTrackMatchPreview.trackMatchData, manualTrackMatchOverrides);
   }, [tracks, mbTrackMatchPreview, manualTrackMatchOverrides]);
+
+  const mbRemoteMatchOwners = useMemo(() => new Map(
+    (mbTrackPreview?.rows || [])
+      .filter((row) => row.remoteTrack && row.localTrack)
+      .map((row) => [row.remoteTrack._previewKey, row.localTrack.title || 'Untitled'])
+  ), [mbTrackPreview]);
 
   const discogsTrackPreview = useMemo(() => {
     if (!discogsPreview) return null;
@@ -683,7 +704,7 @@ const AlbumDetail = ({
           changes.push(`Title -> ${remoteTrack.discogsTrackTitle}`);
         }
       } else {
-        changes.push('No matching Discogs track found');
+        changes.push(`No matching ${discogsPreview?.source?.label || 'Discogs'} track found`);
       }
 
       return {
@@ -1187,6 +1208,8 @@ const AlbumDetail = ({
     return (work.title || '').toLowerCase().includes(query);
   });
 
+  const previewSourceLabel = discogsPreview?.source?.label || 'Discogs';
+
   const albumContributors = (albumData?.albumArtists || album?.albumArtists || [])
     .filter((entry) => entry?.artist && entry?.artistType)
     .sort((left, right) => {
@@ -1231,6 +1254,15 @@ const AlbumDetail = ({
             style={{ backgroundColor: '#0f766e', opacity: importingDiscogs ? 0.7 : 1 }}
           >
             🔍 Search Discogs
+          </button>
+          <button
+            className="musicbrainz-search-btn"
+            onClick={() => setShowPublisherPicker(true)}
+            disabled={importingDiscogs}
+            title="Search a publisher's catalogue (e.g. Naxos) by artist and album title"
+            style={{ backgroundColor: '#1d4ed8', opacity: importingDiscogs ? 0.7 : 1 }}
+          >
+            🏛️ Search by Publisher
           </button>
           <button
             className="musicbrainz-search-btn"
@@ -1717,7 +1749,30 @@ const AlbumDetail = ({
                     lastDiscNumber = remoteDiscNumber;
                   }
                   const isEditingMatch = editingUnmatchedRowKey === rowKey;
-                  const hasUnmatchedOptions = (mbTrackPreview?.unmatchedRemoteTracks || []).length > 0;
+                  const hasRemoteOptions = (mbTrackPreview?.remoteTracks || []).length > 0;
+                  const matchSelect = (
+                    <select
+                      autoFocus
+                      className="mb-track-match-select"
+                      style={{ marginTop: row.remoteTrack ? '6px' : 0 }}
+                      value=""
+                      onChange={(event) => handleManualTrackMatchSelect(row.localTrack?.ratingKey, event.target.value || null)}
+                      onBlur={() => setEditingUnmatchedRowKey(null)}
+                    >
+                      <option value="">— Select a pulled track —</option>
+                      {row.remoteTrack && <option value={NO_MATCH_KEY}>— No match (don&apos;t update this track) —</option>}
+                      {(mbTrackPreview?.remoteTracks || []).map((remoteTrack) => {
+                        const takenBy = mbRemoteMatchOwners.get(remoteTrack._previewKey);
+                        const isCurrent = remoteTrack._previewKey === row.remoteTrack?._previewKey;
+                        return (
+                          <option key={remoteTrack._previewKey} value={remoteTrack._previewKey} disabled={isCurrent}>
+                            Disc {remoteTrack.discNumber} · {remoteTrack.trackNumber}. {remoteTrack.title}
+                            {isCurrent ? ' (current)' : (takenBy ? ` (matched to: ${takenBy})` : '')}
+                          </option>
+                        );
+                      })}
+                    </select>
+                  );
 
                   return (
                     <React.Fragment key={rowKey}>
@@ -1753,41 +1808,50 @@ const AlbumDetail = ({
                               </div>
                             )}
                             <div className="mb-track-match-cell-changes">{row.changes}</div>
-                            {row.isManualMatch && (
+                            {isEditingMatch ? matchSelect : (
+                              <div className="discogs-credit-actions">
+                                <button
+                                  type="button"
+                                  className="mb-track-match-clear-btn"
+                                  onClick={() => setEditingUnmatchedRowKey(rowKey)}
+                                >
+                                  Change match
+                                </button>
+                                {row.isManualMatch && (
+                                  <button
+                                    type="button"
+                                    className="mb-track-match-clear-btn"
+                                    onClick={() => handleClearManualTrackMatch(row.localTrack?.ratingKey)}
+                                  >
+                                    Clear manual match
+                                  </button>
+                                )}
+                              </div>
+                            )}
+                          </>
+                        ) : isEditingMatch ? (
+                          matchSelect
+                        ) : (
+                          <>
+                            <button
+                              type="button"
+                              className="mb-track-match-empty-btn"
+                              onClick={() => setEditingUnmatchedRowKey(rowKey)}
+                              disabled={!hasRemoteOptions}
+                              title={hasRemoteOptions ? 'Click to manually match a pulled track' : 'No pulled tracks available'}
+                            >
+                              {row.isManualNoMatch ? 'Manually left unmatched' : 'No pulled match'}{hasRemoteOptions ? ' — click to select' : ''}
+                            </button>
+                            {row.isManualNoMatch && (
                               <button
                                 type="button"
                                 className="mb-track-match-clear-btn"
                                 onClick={() => handleClearManualTrackMatch(row.localTrack?.ratingKey)}
                               >
-                                Clear manual match
+                                Restore automatic match
                               </button>
                             )}
                           </>
-                        ) : isEditingMatch ? (
-                          <select
-                            autoFocus
-                            className="mb-track-match-select"
-                            value=""
-                            onChange={(event) => handleManualTrackMatchSelect(row.localTrack?.ratingKey, event.target.value || null)}
-                            onBlur={() => setEditingUnmatchedRowKey(null)}
-                          >
-                            <option value="">— Select a pulled track —</option>
-                            {(mbTrackPreview?.unmatchedRemoteTracks || []).map((remoteTrack) => (
-                              <option key={remoteTrack._previewKey} value={remoteTrack._previewKey}>
-                                Disc {remoteTrack.discNumber} · {remoteTrack.trackNumber}. {remoteTrack.title}
-                              </option>
-                            ))}
-                          </select>
-                        ) : (
-                          <button
-                            type="button"
-                            className="mb-track-match-empty-btn"
-                            onClick={() => setEditingUnmatchedRowKey(rowKey)}
-                            disabled={!hasUnmatchedOptions}
-                            title={hasUnmatchedOptions ? 'Click to manually match a pulled track' : 'No unmatched pulled tracks available'}
-                          >
-                            No pulled match{hasUnmatchedOptions ? ' — click to select' : ''}
-                          </button>
                         )}
                       </div>
                     </React.Fragment>
@@ -1831,9 +1895,12 @@ const AlbumDetail = ({
           <div className="mb-track-match-preview">
             <div className="mb-track-match-preview-header">
               <div>
-                <h3>Discogs Track Matches</h3>
+                <h3>{previewSourceLabel} Track Matches</h3>
                 <p>
-                  Pulled from &ldquo;{discogsPreview?.album?.discogsTitle || 'Unknown release'}&rdquo; (Discogs release #{discogsPreview?.discogs?.releaseId || '?'}) — existing tracks are matched to the pulled Discogs tracks below.
+                  Pulled from &ldquo;{discogsPreview?.album?.discogsTitle || 'Unknown release'}&rdquo; ({previewSourceLabel} release{' '}
+                  {discogsPreview?.discogs?.releaseUrl ? (
+                    <a href={discogsPreview.discogs.releaseUrl} target="_blank" rel="noopener noreferrer">#{discogsPreview?.discogs?.releaseId}</a>
+                  ) : `#${discogsPreview?.discogs?.releaseId || '?'}`}) — existing tracks are matched to the pulled {previewSourceLabel} tracks below.
                 </p>
                 {discogsApplyError && (
                   <p className="mb-track-match-apply-error">{discogsApplyError}</p>
@@ -1873,7 +1940,7 @@ const AlbumDetail = ({
               {(discogsPreview?.mapping?.workGroups || []).length > 0 && (
                 <>
                   <div className="mb-track-match-column-label">
-                    Works ({discogsPreview.mapping.workGroups.length} found on Discogs)
+                    Works ({discogsPreview.mapping.workGroups.length} found on {previewSourceLabel})
                     {discogsLinkAllToAlbumWork ? ' — overridden by “link all to a single work”' : ''}
                   </div>
                   <div className="discogs-credit-grid">
@@ -2053,7 +2120,7 @@ const AlbumDetail = ({
 
             <div className="mb-track-match-columns">
               <div className="mb-track-match-column-label">Existing Track</div>
-              <div className="mb-track-match-column-label">Pulled Discogs Track</div>
+              <div className="mb-track-match-column-label">Pulled {previewSourceLabel} Track</div>
 
               {(() => {
                 let lastDiscNumber = null;
@@ -2094,7 +2161,7 @@ const AlbumDetail = ({
                             {formatMilliseconds(row.remoteTrack.discogsTrackDurationMs) && (
                               <div className="mb-track-match-cell-meta">Length: {formatMilliseconds(row.remoteTrack.discogsTrackDurationMs)}</div>
                             )}
-                            <div className="mb-track-match-cell-meta">Discogs position: {row.remoteTrack.discogsTrackIndex}</div>
+                            <div className="mb-track-match-cell-meta">{previewSourceLabel} position: {row.remoteTrack.discogsTrackIndex}</div>
                             {isLengthMismatch && (
                               <div className="mb-track-match-cell-meta mb-track-match-length-warning">
                                 Length differs by {formatMilliseconds(Math.abs(localMs - remoteMs))}
@@ -2481,6 +2548,24 @@ const AlbumDetail = ({
         albumRatingKey={albumData.ratingKey}
         albumTitle={albumData.title}
         onAccept={handleSelectDiscogsRelease}
+      />
+
+      {/* Publisher catalogue search (same flow as Discogs) */}
+      <PublisherPickerModal
+        isOpen={showPublisherPicker}
+        onClose={() => setShowPublisherPicker(false)}
+        onSelect={handleSelectPublisher}
+      />
+      <DiscogsIdentifyModal
+        isOpen={Boolean(activePublisher)}
+        onClose={() => setActivePublisher(null)}
+        albumRatingKey={albumData.ratingKey}
+        albumTitle={albumData.title}
+        sourceLabel={activePublisher?.label || 'Publisher'}
+        searchUrl={activePublisher
+          ? `${config.apiBaseUrl}/api/music/publishers/${encodeURIComponent(activePublisher.key)}/albums/${encodeURIComponent(albumData.ratingKey)}/search`
+          : null}
+        onAccept={handleSelectPublisherRelease}
       />
 
       {showLinkWorkModal && (
