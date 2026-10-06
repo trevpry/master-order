@@ -4,6 +4,7 @@ import config from '../../config';
 import CastButton from './CastButton';
 import SonosCastButton from './SonosCastButton';
 import StarRating from '../StarRating';
+import { createPlayRecorder, reportPlaybackState } from './playTracking';
 import './GlobalMusicPlayer.css';
 
 const GlobalMusicPlayer = () => {
@@ -31,6 +32,14 @@ const GlobalMusicPlayer = () => {
   
   const audioRef = useRef(null);
   const progressRef = useRef(null);
+  const playRecorderRef = useRef(null);
+  const playbackSessionRef = useRef(null);
+  if (!playRecorderRef.current) {
+    playRecorderRef.current = createPlayRecorder({ apiBaseUrl: config.apiBaseUrl });
+  }
+  if (!playbackSessionRef.current) {
+    playbackSessionRef.current = globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random()}`;
+  }
 
   // Refs to always hold the latest handlers (avoids stale closures in event listeners)
   const handleNextTrackRef = useRef(null);
@@ -181,7 +190,8 @@ const GlobalMusicPlayer = () => {
     };
     
     const handleEnded = () => {
-      handleNextTrack();
+      playRecorderRef.current.complete().catch(error => console.error('Error recording completed music track:', error));
+      handleNextTrackRef.current?.();
     };
     
     const handleError = () => {
@@ -205,7 +215,7 @@ const GlobalMusicPlayer = () => {
   
   // Auto-play when tracks are loaded from event
   useEffect(() => {
-    if (tracks && tracks.length > 0 && playlist && playlist.id && (playlist.id.includes('tracks-playlist') || playlist.id.includes('radio-playlist'))) {
+    if (tracks && tracks.length > 0 && playlist && playlist.id) {
       // This is a playlist that should auto-play
       console.log('🎵 Auto-playing playlist with', tracks.length, 'tracks', isShuffled ? '(shuffled)' : '');
       setCurrentTrackIndex(0);
@@ -241,6 +251,19 @@ const GlobalMusicPlayer = () => {
     window.dispatchEvent(new CustomEvent('musicPlayerStateChanged', {
       detail: { track: currentTrack, isPlaying }
     }));
+  }, [currentTrack, isPlaying]);
+
+  useEffect(() => {
+    const report = () => reportPlaybackState({
+      apiBaseUrl: config.apiBaseUrl,
+      sessionId: playbackSessionRef.current,
+      track: currentTrack,
+      isPlaying
+    }).catch(error => console.error('Error reporting music playback:', error));
+    report();
+    if (!currentTrack) return;
+    const interval = setInterval(report, 15000);
+    return () => clearInterval(interval);
   }, [currentTrack, isPlaying]);
 
   // Respond to on-demand state requests (e.g. Dashboard mounting after playback started)
@@ -377,6 +400,7 @@ const GlobalMusicPlayer = () => {
     if (!trackList[trackIndex]) return;
     
     const track = trackList[trackIndex];
+    setCurrentTrack(track);
     console.log('🎵 [playTrack] Playing track at index:', trackIndex, '| Track:', track.title, 'by', track.artist);
     console.log('🎵 [playTrack] Current track index before:', currentTrackIndex, 'setting to:', trackIndex);
     
@@ -398,7 +422,7 @@ const GlobalMusicPlayer = () => {
       
       // Get stream URL based on track type
       let streamUrl;
-      if (track.type === 'plex' && track.ratingKey) {
+      if ((track.type === 'plex' || track.type === 'track') && track.ratingKey) {
         streamUrl = `${config.apiBaseUrl}/api/music/stream/${track.ratingKey}`;
       } else if (track.type === 'custom' && track.ratingKey) {
         streamUrl = `${config.apiBaseUrl}/api/music/stream/${track.ratingKey}`;
@@ -417,9 +441,11 @@ const GlobalMusicPlayer = () => {
         audio.pause();
         // Keep audio paused; SonosCastButton's useEffect will send the track to Sonos
         setIsPlaying(true); // keep UI play-state in sync
+        playRecorderRef.current.start(track);
       } else {
         try {
           await audio.play();
+          playRecorderRef.current.start(track);
           setIsPlaying(true);
           console.log('🎵 Successfully started playing:', track.title);
         } catch (playError) {
@@ -579,6 +605,7 @@ const GlobalMusicPlayer = () => {
           Date.now() - sonosTrackStartTimeRef.current > 4000
         ) {
           console.log('🔊 Sonos track ended — auto-advancing');
+          playRecorderRef.current.complete().catch(error => console.error('Error recording completed Sonos track:', error));
           sonosWasPlayingRef.current = false;
           handleNextTrackRef.current?.();
         }

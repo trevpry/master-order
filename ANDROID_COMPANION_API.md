@@ -13,6 +13,42 @@ The Master O**Updated**: Stash integration now uses **both WebSocket messages an
   - `http://localhost:8080/stop` - Stop playback
 - **Forwarding Endpoint**: `/api/android/play` (on Master Order server)er emits real-time WebSocket messages specifically designed for Android companion app integration. These messages provide notifications about reading sessions and media playback events, allowing the Android app to synchronize music playback and provide contextual information during reading sessions.
 
+## Music Playback Reporting
+
+Report music from any Android player to `POST /api/android/music/state` when
+tracks change, pause/resume occurs, and periodically during playback:
+
+```json
+{
+  "deviceId": "phone-1",
+  "playbackId": "unique-id-for-this-play",
+  "ratingKey": "12345",
+  "title": "Track Title",
+  "artist": "Artist",
+  "album": "Album",
+  "isPlaying": true,
+  "positionMs": 45000,
+  "durationMs": 180000
+}
+```
+
+- Use a stable `deviceId` and a new `playbackId` for each play, including replays.
+- At completion, send `completed: true` with the state, or call
+  `POST /api/android/music/played` with `ratingKey`, `deviceId`, and `playbackId`.
+  The completion endpoint can look up the title from the rating key.
+- Duplicate reports for the same play do not increment the play count again.
+- Reaching the reported duration records completion. A track change or stop
+  also records the previous track if its last reported position reached 90%.
+  Pauses and early skips do not count as completed plays.
+- Call `POST /api/android/music/stop` with `deviceId` and final progress when
+  playback stops, to clear dashboard state.
+- Reading-session `music`/`musicTrack` payloads use the same tracking logic.
+- Metadata-only tracks are recorded only when title and supplied artist/album
+  identify exactly one local library track. Unmatched or ambiguous tracks still
+  appear in live monitoring but do not modify a library track's play count.
+- Title-only state reports cannot establish completion; the companion must
+  report progress or send an explicit completion notification.
+
 ## WebSocket Connection
 
 ### Connection Details

@@ -17,6 +17,7 @@ const prisma = require('../prismaClient'); // Use shared singleton instance
 const plexDb = new PlexDatabaseService();
 const plexSync = new PlexSyncService();
 const albumArtwork = new AlbumArtworkService();
+const musicPlaybackService = require('../services/musicPlaybackService').getInstance();
 
 const PICARD_TAG_SECTIONS = [
   {
@@ -3363,103 +3364,13 @@ router.delete('/track/:trackKey/artists/:artistKey/types/:artistTypeId', asyncHa
 // Mark track as played
 router.post('/track/:ratingKey/scrobble', asyncHandler(async (req, res) => {
   const { ratingKey } = req.params;
-  
-  // Get settings for Plex API
-  const settings = await prisma.settings.findFirst();
-  
-  if (!settings || !settings.plexUrl || !settings.plexToken) {
-    return sendBadRequest(res, 'Plex configuration not found');
-  }
+  sendSuccess(res, await musicPlaybackService.recordPlay(ratingKey));
+}));
 
-  // Get track to verify it exists
-  const track = await prisma.plexTrack.findUnique({
-    where: { ratingKey }
-  });
-
-  if (!track) {
-    return sendBadRequest(res, 'Track not found');
-  }
-
-  console.log('🔍 Track data:', {
-    ratingKey: track.ratingKey,
-    key: track.key,
-    title: track.title,
-    duration: track.duration,
-    viewCount: track.viewCount
-  });
-
-  try {
-    // For music tracks, we need to send a timeline update to mark as played
-    // This is what Plex clients actually do
-    const duration = track.duration || 180000; // Duration in milliseconds
-    const trackKey = track.key || `/library/metadata/${ratingKey}`;
-    
-    // Send timeline update with state=stopped and time=duration (track finished)
-    const timelineUrl = `${settings.plexUrl}/:/timeline?` + new URLSearchParams({
-      ratingKey: ratingKey,
-      key: trackKey,
-      state: 'stopped',
-      time: duration.toString(),
-      duration: duration.toString(),
-      'X-Plex-Token': settings.plexToken
-    }).toString();
-    
-    console.log('🎵 Sending timeline update for completed track:', trackKey);
-    
-    const timelineResponse = await fetch(timelineUrl, {
-      method: 'GET',
-      headers: {
-        'Accept': 'application/json'
-      }
-    });
-    
-    if (!timelineResponse.ok) {
-      console.warn('⚠️  Timeline update failed:', timelineResponse.status);
-      const responseText = await timelineResponse.text();
-      console.log('Response:', responseText.substring(0, 200));
-    } else {
-      console.log('✓ Timeline update successful');
-    }
-    
-    // Also try the scrobble endpoint
-    const scrobbleUrl = `${settings.plexUrl}/:/scrobble?key=${ratingKey}&identifier=com.plexapp.plugins.library&X-Plex-Token=${settings.plexToken}`;
-    console.log('🎵 Attempting scrobble with ratingKey:', ratingKey);
-    
-    const scrobbleResponse = await fetch(scrobbleUrl, {
-      method: 'GET',
-      headers: {
-        'Accept': 'application/json'
-      }
-    });
-
-    console.log('📊 Scrobble response status:', scrobbleResponse.status);
-    if (scrobbleResponse.ok) {
-      console.log('✓ Scrobble successful - track should now show as played in Plex');
-      console.log('ℹ️  Note: You may need to refresh your Plex library to see the update');
-    } else {
-      const errorText = await scrobbleResponse.text();
-      console.log('❌ Scrobble failed:', scrobbleResponse.status, errorText.substring(0, 100));
-    }
-
-    // Update local database
-    const now = new Date();
-    const updatedTrack = await prisma.plexTrack.update({
-      where: { ratingKey },
-      data: {
-        viewCount: (track.viewCount || 0) + 1,
-        lastViewedAt: now
-      }
-    });
-
-    sendSuccess(res, { 
-      message: 'Track marked as played',
-      viewCount: updatedTrack.viewCount,
-      lastViewedAt: updatedTrack.lastViewedAt
-    });
-  } catch (err) {
-    console.error('Error scrobbling track:', err);
-    return sendServerError(res, `Failed to mark track as played: ${err.message}`);
-  }
+router.post('/playback-state', asyncHandler(async (req, res) => {
+  const { sessionId, track = null, isPlaying = false } = req.body || {};
+  musicPlaybackService.updatePlayback(sessionId, track, isPlaying);
+  sendSuccess(res, { message: 'Music playback state updated' });
 }));
 
 // Music streaming endpoint - Stream audio track from Plex

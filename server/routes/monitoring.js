@@ -3,6 +3,7 @@ const router = express.Router();
 const { asyncHandler } = require('../utils/responses');
 const prisma = require('../prismaClient');
 const PlexPlayerService = require('../plexPlayerService');
+const musicPlaybackService = require('../services/musicPlaybackService').getInstance();
 
 let plexPlayerService = null;
 
@@ -26,6 +27,7 @@ router.get('/', asyncHandler(async (req, res) => {
   const results = {
     plexSessions: [],
     plexSessionsError: null,
+    webMusic: musicPlaybackService.getCurrentPlayback(),
     androidMusic: null,
     plexMusicSession: null,
     lastPlexItem: null,

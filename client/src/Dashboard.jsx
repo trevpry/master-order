@@ -287,7 +287,8 @@ function Dashboard() {
   const sessions = data?.plexSessions || [];
   const playingSessions = sessions.filter(s => s.state === 'playing');
   const pausedSessions = sessions.filter(s => s.state !== 'playing');
-  const dashboardMusic = appMusic || data?.androidMusic || data?.plexMusicSession || null;
+  const musicSources = [appMusic, data?.webMusic, data?.androidMusic, data?.plexMusicSession].filter(Boolean);
+  const dashboardMusic = musicSources.find(source => source.isPlaying) || musicSources[0] || null;
   const dashboardMusicArt = musicArtworkUrl(dashboardMusic);
 
   const openMusicRatingModal = () => {

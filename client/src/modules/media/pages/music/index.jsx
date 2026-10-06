@@ -19,6 +19,7 @@ import RadioView from './components/RadioView';
 import MusicSettings from './MusicSettings';
 import MergeArtistsModal from '../../../../components/music/MergeArtistsModal';
 import LoadingState from '../../../../shared/components/LoadingState';
+import { createPlayRecorder, reportPlaybackState } from '../../../../components/GlobalMusicPlayer/playTracking';
 import './Music.css';
 
 const Music = () => {
@@ -109,6 +110,24 @@ const Music = () => {
   const [trackQueue, setTrackQueue] = useState([]);
   const [queueIndex, setQueueIndex] = useState(0);
   const audioRef = useRef(null);
+  const playRecorderRef = useRef(null);
+  const playbackSessionRef = useRef(null);
+  if (!playRecorderRef.current) playRecorderRef.current = createPlayRecorder({ apiBaseUrl: config.apiBaseUrl });
+  if (!playbackSessionRef.current) playbackSessionRef.current = globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random()}`;
+
+  useEffect(() => {
+    if (!currentTrack) return;
+    const report = () => reportPlaybackState({ apiBaseUrl: config.apiBaseUrl, sessionId: playbackSessionRef.current, track: currentTrack, isPlaying })
+      .catch(error => console.error('Error reporting track playback:', error));
+    report();
+    const interval = setInterval(report, 15000);
+    return () => clearInterval(interval);
+  }, [currentTrack, isPlaying]);
+
+  useEffect(() => () => {
+    reportPlaybackState({ apiBaseUrl: config.apiBaseUrl, sessionId: playbackSessionRef.current, track: null, isPlaying: false })
+      .catch(error => console.error('Error clearing track playback:', error));
+  }, []);
 
   // Helper functions for URL management
   const updateUrlParams = (updates, replace = true) => {
@@ -340,23 +359,7 @@ const Music = () => {
     setIsPlaying(false);
     setCurrentTime(0);
     
-    // Automatically mark track as played in Plex
-    if (currentTrack && currentTrack.ratingKey) {
-      try {
-        const response = await fetch(
-          `${config.apiBaseUrl}/api/music/track/${currentTrack.ratingKey}/scrobble`,
-          { method: 'POST' }
-        );
-        
-        if (response.ok) {
-          console.log('✓ Track marked as played:', currentTrack.title);
-        } else {
-          console.error('Failed to mark track as played');
-        }
-      } catch (err) {
-        console.error('Error marking track as played:', err);
-      }
-    }
+    await playRecorderRef.current.complete().catch(error => console.error('Error recording completed track:', error));
 
     // Play next track in queue if available
     if (trackQueue.length > 0 && queueIndex < trackQueue.length - 1) {
@@ -414,13 +417,11 @@ const Music = () => {
 
     audio.addEventListener('loadedmetadata', handleLoadedMetadata);
     audio.addEventListener('timeupdate', handleTimeUpdate);
-    audio.addEventListener('ended', handleEnded);
     audio.addEventListener('error', handleError);
 
     return () => {
       audio.removeEventListener('loadedmetadata', handleLoadedMetadata);
       audio.removeEventListener('timeupdate', handleTimeUpdate);
-      audio.removeEventListener('ended', handleEnded);
       audio.removeEventListener('error', handleError);
     };
   }, [currentTrack]);
@@ -445,7 +446,9 @@ const Music = () => {
         } else {
           setIsLoading(true);
           try {
+            const restarting = audioRef.current.ended;
             await audioRef.current.play();
+            if (restarting) playRecorderRef.current.start(track);
             setIsPlaying(true);
           } catch (playError) {
             console.error('Failed to resume track:', playError);
@@ -480,6 +483,7 @@ const Music = () => {
         const playAudio = async () => {
           try {
             await audioRef.current.play();
+            playRecorderRef.current.start(track);
             setIsPlaying(true);
             setError(null);
             console.log('✅ Audio playback started successfully');

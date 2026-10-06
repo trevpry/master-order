@@ -6,6 +6,7 @@
 const express = require('express');
 const fetch = require('node-fetch');
 const { getAndroidApiBaseUrl, createAndroidResponse, createAndroidErrorResponse } = require('./utilities/androidHelpers');
+const musicPlaybackService = require('../../services/musicPlaybackService').getInstance();
 
 /**
  * Create playback control routes for Android app
@@ -17,25 +18,8 @@ function createPlaybackControlRoutes() {
   // Android app reports current music playback state for dashboard monitoring
   router.post('/music/state', async (req, res) => {
     try {
-      const {
-        title,
-        artist,
-        album,
-        ratingKey = null,
-        userRating = null,
-        artworkUrl = null,
-        thumb = null,
-        parentThumb = null,
-        grandparentThumb = null,
-        art = null,
-        isPlaying = true,
-        positionMs = null,
-        durationMs = null,
-        source = 'android_app',
-        appName = null,
-      } = req.body || {};
-
-      if (!title || typeof title !== 'string' || !title.trim()) {
+      const normalized = await musicPlaybackService.updateAndroidPlayback(req.body || {});
+      if (!normalized) {
         return res.status(400).json({
           type: 'MUSIC_STATE_ERROR',
           data: {
@@ -45,25 +29,6 @@ function createPlaybackControlRoutes() {
           },
         });
       }
-
-      const normalized = {
-        title: title.trim(),
-        artist: typeof artist === 'string' ? artist.trim() || null : null,
-        album: typeof album === 'string' ? album.trim() || null : null,
-        ratingKey: typeof ratingKey === 'string' ? ratingKey.trim() || null : null,
-        userRating: Number.isFinite(Number(userRating)) ? Number(userRating) : null,
-        artworkUrl: typeof artworkUrl === 'string' ? artworkUrl.trim() || null : null,
-        thumb: typeof thumb === 'string' ? thumb.trim() || null : null,
-        parentThumb: typeof parentThumb === 'string' ? parentThumb.trim() || null : null,
-        grandparentThumb: typeof grandparentThumb === 'string' ? grandparentThumb.trim() || null : null,
-        art: typeof art === 'string' ? art.trim() || null : null,
-        isPlaying: Boolean(isPlaying),
-        positionMs: Number.isFinite(Number(positionMs)) ? Number(positionMs) : null,
-        durationMs: Number.isFinite(Number(durationMs)) ? Number(durationMs) : null,
-        source,
-        appName: typeof appName === 'string' ? appName.trim() || null : null,
-        updatedAt: new Date().toISOString(),
-      };
 
       // Store in global process memory for lightweight dashboard monitoring.
       global.androidMusicState = normalized;
@@ -89,9 +54,21 @@ function createPlaybackControlRoutes() {
     }
   });
 
+  router.post('/music/played', async (req, res) => {
+    try {
+      const state = await musicPlaybackService.updateAndroidPlayback({ ...req.body, completed: true, isPlaying: false });
+      if (!state) return res.status(400).json(createAndroidErrorResponse('MUSIC_PLAY_ERROR', 'A valid track title or ratingKey is required'));
+      global.androidMusicState = state;
+      return res.json(createAndroidResponse('MUSIC_PLAY_RECORDED', { success: true, tracked: Boolean(state.ratingKey), state }));
+    } catch (error) {
+      return res.status(error.statusCode || 500).json(createAndroidErrorResponse('MUSIC_PLAY_ERROR', 'Failed to record music play', error.message));
+    }
+  });
+
   // Explicitly clear Android music playback state
   router.post('/music/stop', async (req, res) => {
     try {
+      await musicPlaybackService.stopAndroidPlayback({ deviceId: global.androidMusicState?.deviceId, ...req.body });
       global.androidMusicState = {
         title: null,
         artist: null,

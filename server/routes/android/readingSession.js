@@ -11,34 +11,14 @@ const { validateRequiredFields } = require('../../middleware/validation');
 const WatchLogService = require('../../watchLogService');
 const BookCompletionService = require('../../services/BookCompletionService');
 const prisma = require('../../prismaClient');
+const musicPlaybackService = require('../../services/musicPlaybackService').getInstance();
 
-function normalizeAndroidMusicPayload(payload = {}) {
-  if (!payload || typeof payload !== 'object') return null;
-
-  const title = typeof payload.title === 'string' ? payload.title.trim() : '';
-  if (!title) return null;
-
-  return {
-    title,
-    artist: typeof payload.artist === 'string' ? payload.artist.trim() || null : null,
-    album: typeof payload.album === 'string' ? payload.album.trim() || null : null,
-    ratingKey: typeof payload.ratingKey === 'string' ? payload.ratingKey.trim() || null : null,
-    userRating: Number.isFinite(Number(payload.userRating)) ? Number(payload.userRating) : null,
-    artworkUrl: typeof payload.artworkUrl === 'string' ? payload.artworkUrl.trim() || null : null,
-    thumb: typeof payload.thumb === 'string' ? payload.thumb.trim() || null : null,
-    parentThumb: typeof payload.parentThumb === 'string' ? payload.parentThumb.trim() || null : null,
-    grandparentThumb: typeof payload.grandparentThumb === 'string' ? payload.grandparentThumb.trim() || null : null,
-    art: typeof payload.art === 'string' ? payload.art.trim() || null : null,
-    isPlaying: payload.isPlaying !== undefined ? Boolean(payload.isPlaying) : true,
-    positionMs: Number.isFinite(Number(payload.positionMs)) ? Number(payload.positionMs) : null,
-    durationMs: Number.isFinite(Number(payload.durationMs)) ? Number(payload.durationMs) : null,
-    source: 'android_app',
-    appName: typeof payload.appName === 'string' ? payload.appName.trim() || null : 'Android Reading Session',
-    updatedAt: new Date().toISOString(),
-  };
+async function normalizeAndroidMusicPayload(payload = {}) {
+  return musicPlaybackService.updateAndroidPlayback({ ...payload, appName: payload?.appName || 'Android Reading Session' });
 }
 
-function clearAndroidMusicState() {
+async function clearAndroidMusicState() {
+  await musicPlaybackService.stopAndroidPlayback({ deviceId: global.androidMusicState?.deviceId });
   global.androidMusicState = {
     title: null,
     artist: null,
@@ -114,7 +94,7 @@ function createReadingSessionRoutes(prisma) {
           customOrderItemId: null
         });
         
-        const normalizedMusic = normalizeAndroidMusicPayload(music || musicTrack);
+        const normalizedMusic = await normalizeAndroidMusicPayload(music || musicTrack);
         if (normalizedMusic) {
           global.androidMusicState = normalizedMusic;
         }
@@ -149,7 +129,7 @@ function createReadingSessionRoutes(prisma) {
         customOrderItemId: null // No customOrderItemId for History Plus
       });
 
-      const normalizedMusic = normalizeAndroidMusicPayload(music || musicTrack);
+      const normalizedMusic = await normalizeAndroidMusicPayload(music || musicTrack);
       if (normalizedMusic) {
         global.androidMusicState = normalizedMusic;
       }
@@ -251,7 +231,7 @@ function createReadingSessionRoutes(prisma) {
       customOrderItemId: finalCustomOrderItemId
     });
 
-    const normalizedMusic = normalizeAndroidMusicPayload(music || musicTrack);
+    const normalizedMusic = await normalizeAndroidMusicPayload(music || musicTrack);
     if (normalizedMusic) {
       global.androidMusicState = normalizedMusic;
     }
@@ -348,7 +328,7 @@ function createReadingSessionRoutes(prisma) {
 
     // Stop the reading session
     const stoppedSession = await watchLogService.stopReading(activeSession.id);
-    clearAndroidMusicState();
+    await clearAndroidMusicState();
 
     const progressMarksComplete = (() => {
       const pct = normalizeProgressPercentage(progress);
