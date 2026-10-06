@@ -116,8 +116,8 @@ const PromptTemplates = () => {
     try {
       const response = await historyPlusApi.getEvents();
       const events = response.data?.events || response.data || response.events || [];
-      const fileName = getExistingEventsCsvFileName(`${templateKey}-prompt-template`);
-      downloadCsvFile(fileName, buildExistingEventsCsv(events));
+      const fileName = getExistingEventsCsvFileName(templateKey === 'video' ? undefined : `${templateKey}-prompt-template`);
+      downloadCsvFile(fileName, buildExistingEventsCsv(events, { includeDescription: templateKey !== 'video' }));
       setTemplateStatus(templateKey, `Downloaded ${fileName}`);
     } catch (downloadError) {
       console.error(`Error exporting existing events CSV for ${templateKey}:`, downloadError);
@@ -217,7 +217,7 @@ const PromptTemplates = () => {
                   {template.placeholders?.includes('{{EXISTING_EVENTS}}') && (
                     <div className="mt-4 rounded-lg bg-white p-3 shadow-sm">
                       <p className="text-xs text-gray-700">
-                        {'{{EXISTING_EVENTS}}'} should be supplied as a CSV export with columns: Event Title, Start Date, End Date, Event Description.
+                        {'{{EXISTING_EVENTS}}'} should be supplied as a CSV export with columns: Event Title, Start Date, End Date{template.key !== 'video' && ', Event Description'}.
                       </p>
                       <button
                         onClick={() => handleDownloadExistingEventsCsv(template.key)}

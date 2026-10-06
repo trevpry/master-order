@@ -281,16 +281,50 @@ class DiscogsImportService {
     return [...groups.values()];
   }
 
-  composerCreditForItem(credits, item) {
-    return credits.find(credit => credit.artistTypeName === 'Composer' && credit.discogsOrdinal === item.discogsOrdinal)
-      || credits.find(credit => credit.artistTypeName === 'Composer' && credit.source === 'album')
-      || null;
+  /**
+   * Composer choices for a work: the release's composers on the group's tracks first, then the
+   * release's album-level composers, then composers already credited on the local album.
+   * Option keys are "credit:<creditKey>" or "artist:<ratingKey>".
+   */
+  buildComposerOptions(credits, localAlbumComposers = [], groupItems = null) {
+    const options = [];
+    const seenArtistKeys = new Set();
+    const seenNames = new Set();
+    const add = (option) => {
+      const nameKey = normalizeText(option.name);
+      if ((option.existingArtistKey && seenArtistKeys.has(option.existingArtistKey)) || seenNames.has(nameKey)) return;
+      if (option.existingArtistKey) seenArtistKeys.add(option.existingArtistKey);
+      seenNames.add(nameKey);
+      options.push(option);
+    };
+    const fromCredit = (credit) => add({
+      key: `credit:${credit.creditKey}`,
+      name: credit.artistName,
+      existingArtistKey: credit.matchedArtist?.ratingKey || null,
+      source: 'release'
+    });
+
+    const ordinals = groupItems ? new Set(groupItems.map(item => item.discogsOrdinal)) : null;
+    credits
+      .filter(credit => credit.artistTypeName === 'Composer' && credit.source === 'track' && (!ordinals || ordinals.has(credit.discogsOrdinal)))
+      .forEach(fromCredit);
+    credits
+      .filter(credit => credit.artistTypeName === 'Composer' && credit.source === 'album')
+      .forEach(fromCredit);
+    localAlbumComposers.forEach(composer => add({
+      key: `artist:${composer.ratingKey}`,
+      name: composer.name,
+      existingArtistKey: composer.ratingKey,
+      source: 'album'
+    }));
+
+    return options;
   }
 
   /**
    * Finds existing works that match each work group and picks a default action.
    */
-  async matchWorkGroups(workGroups, credits) {
+  async matchWorkGroups(workGroups, credits, localAlbumComposers = []) {
     if (workGroups.length === 0) return [];
 
     const works = await prisma.work.findMany({
@@ -315,9 +349,10 @@ class DiscogsImportService {
     };
 
     return workGroups.map((group) => {
-      const composerCredit = this.composerCreditForItem(credits, group.items[0]);
-      const composerKey = composerCredit?.matchedArtist?.ratingKey || null;
-      const composerName = composerCredit?.artistName || null;
+      const composerOptions = this.buildComposerOptions(credits, localAlbumComposers, group.items);
+      const defaultComposer = composerOptions[0] || null;
+      const composerKey = defaultComposer?.existingArtistKey || null;
+      const composerName = defaultComposer?.name || null;
 
       const candidates = works
         .map((work) => {
@@ -357,6 +392,8 @@ class DiscogsImportService {
         trackOrdinals: group.items.map(item => item.discogsOrdinal),
         trackCount: group.items.length,
         composerName,
+        composerOptions,
+        defaultComposerKey: defaultComposer?.key || null,
         candidates,
         defaultChoice
       };
@@ -624,17 +661,24 @@ class DiscogsImportService {
       throw error;
     }
 
-    const release = await this.source.getRelease(releaseId);
+    const release = await this.source.getRelease(releaseId, { album });
     const items = this.flattenTracklist(release);
     const artistIndex = await this.loadArtistIndex();
     const credits = this.buildCredits(release, items, artistIndex);
-    const workGroups = await this.matchWorkGroups(this.buildWorkGroups(items), credits);
+    const localAlbumComposers = (await prisma.albumArtist.findMany({
+      where: { albumKey: albumRatingKey, artistType: { name: 'Composer' } },
+      include: { artist: { select: { ratingKey: true, title: true, userTitle: true } } }
+    })).map(entry => ({ ratingKey: entry.artist.ratingKey, name: entry.artist.userTitle || entry.artist.title }));
+    const workGroups = await this.matchWorkGroups(this.buildWorkGroups(items), credits, localAlbumComposers);
+    const albumComposerOptions = this.buildComposerOptions(credits, localAlbumComposers);
 
-    return { album, release, items, credits, workGroups };
+    return { album, release, items, credits, workGroups, albumComposerOptions };
   }
 
-  buildPreview({ album, release, items, credits, workGroups = [] }, trackMappings) {
+  buildPreview({ album, release, items, credits, workGroups = [], albumComposerOptions = [] }, trackMappings) {
     const mapping = {
+      albumComposerOptions,
+      defaultAlbumComposerKey: albumComposerOptions[0]?.key || null,
       defaultTrackMappings: trackMappings,
       mappedTrackCount: trackMappings.filter(entry => entry.localTrackKey).length,
       localTrackCount: album.tracks.length,
@@ -827,10 +871,10 @@ class DiscogsImportService {
   }
 
   /**
-   * selection: { mode: 'existing', workId } | { mode: 'create', title? } | { mode: 'none' };
-   * falls back to the group's default when not provided.
+   * selection: { mode: 'existing', workId } | { mode: 'create', title?, composerKey? } | { mode: 'none' };
+   * falls back to the group's default when not provided. composerKey is one of the group's composerOptions.
    */
-  async resolveWorkSelection(group, selection, composerKey) {
+  async resolveWorkSelection(group, selection, fallbackComposerKey, resolveComposer) {
     const choice = selection && typeof selection === 'object' ? selection : group.defaultChoice;
 
     if (choice?.mode === 'existing') {
@@ -841,8 +885,36 @@ class DiscogsImportService {
 
     if (choice?.mode === 'create' || choice?.mode === 'existing') {
       const title = String(choice.title || '').trim() || group.title;
-      const effectiveComposerKey = composerKey || await this.identification.ensureFallbackComposerArtistKey();
+      const allowedKeys = new Set((group.composerOptions || []).map(option => option.key));
+      const requestedKey = allowedKeys.has(choice.composerKey) ? choice.composerKey : group.defaultComposerKey;
+      const chosenComposer = requestedKey ? await resolveComposer(requestedKey) : null;
+      const effectiveComposerKey = chosenComposer?.ratingKey
+        || fallbackComposerKey
+        || await this.identification.ensureFallbackComposerArtistKey();
       return await this.ensureWork(title, effectiveComposerKey);
+    }
+
+    return null;
+  }
+
+  async resolveComposerOption(optionKey, credits, artistKeyByCredit) {
+    const key = String(optionKey || '');
+    if (key.startsWith('artist:')) {
+      const artist = await prisma.plexArtist.findUnique({
+        where: { ratingKey: key.slice('artist:'.length) },
+        select: { ratingKey: true, title: true, userTitle: true }
+      });
+      return artist ? { ratingKey: artist.ratingKey, name: artist.userTitle || artist.title } : null;
+    }
+
+    if (key.startsWith('credit:')) {
+      const creditKey = key.slice('credit:'.length);
+      const credit = credits.find(entry => entry.creditKey === creditKey);
+      if (!credit) return null;
+      if (!artistKeyByCredit.has(creditKey)) {
+        artistKeyByCredit.set(creditKey, await this.resolveArtist(credit));
+      }
+      return { ratingKey: artistKeyByCredit.get(creditKey), name: credit.artistName };
     }
 
     return null;
@@ -965,7 +1037,7 @@ class DiscogsImportService {
     return { saved, errors };
   }
 
-  async apply(albumRatingKey, releaseId, { trackMappings = [], excludedCreditKeys = [], artistOverrides = {}, artwork = null, workSelections = null } = {}) {
+  async apply(albumRatingKey, releaseId, { trackMappings = [], excludedCreditKeys = [], artistOverrides = {}, artwork = null, workSelections = null, albumWorkComposerKey = null } = {}) {
     const context = await this.loadContext(albumRatingKey, releaseId);
     const { album, release, items } = context;
     const excluded = new Set(excludedCreditKeys.map(key => String(key || '').trim()));
@@ -1034,6 +1106,10 @@ class DiscogsImportService {
     const groupsByKey = new Map((context.workGroups || []).map(group => [group.key, group]));
     const resolvedWorkByGroup = new Map();
     const usedPartIds = new Set();
+    // A work composer may be an excluded credit (still a valid choice), so resolve against all credits.
+    const composerCandidates = this.applyArtistOverrides(context.credits, artistOverrides);
+    const resolveComposer = (optionKey) => this.resolveComposerOption(optionKey, composerCandidates, artistKeyByCredit);
+    let albumWorkComposer;
 
     for (const { item, localKey, workTitleHint } of mappings) {
       const trackCredits = credits.filter(credit => credit.source === 'album' || credit.discogsOrdinal === item.discogsOrdinal);
@@ -1042,18 +1118,24 @@ class DiscogsImportService {
 
       let workId = null;
       let workPartId = null;
+      let work = null;
       if (workTitleHint) {
-        const effectiveComposerKey = composerKey || await this.identification.ensureFallbackComposerArtistKey();
-        const work = await this.ensureWork(workTitleHint, effectiveComposerKey);
+        if (albumWorkComposer === undefined) {
+          const allowedKeys = new Set((context.albumComposerOptions || []).map(option => option.key));
+          const requestedKey = allowedKeys.has(albumWorkComposerKey) ? albumWorkComposerKey : context.albumComposerOptions?.[0]?.key;
+          albumWorkComposer = requestedKey ? await resolveComposer(requestedKey) : null;
+        }
+        const effectiveComposerKey = albumWorkComposer?.ratingKey || composerKey || await this.identification.ensureFallbackComposerArtistKey();
+        work = await this.ensureWork(workTitleHint, effectiveComposerKey);
         workId = work.id;
         const part = await this.identification.ensureWorkPartRecord(work.id, item.title, item.discogsOrdinal);
         workPartId = part?.id || null;
       } else if (item.workGroupKey && groupsByKey.has(item.workGroupKey)) {
         const group = groupsByKey.get(item.workGroupKey);
         if (!resolvedWorkByGroup.has(group.key)) {
-          resolvedWorkByGroup.set(group.key, await this.resolveWorkSelection(group, workSelections?.[group.key], composerKey));
+          resolvedWorkByGroup.set(group.key, await this.resolveWorkSelection(group, workSelections?.[group.key], composerKey, resolveComposer));
         }
-        const work = resolvedWorkByGroup.get(group.key);
+        work = resolvedWorkByGroup.get(group.key);
         if (work) {
           workId = work.id;
           const part = await this.findOrCreateWorkPart(work.id, item.workPartTitle, item.workPartOrder, usedPartIds);
@@ -1061,9 +1143,12 @@ class DiscogsImportService {
         }
       }
 
-      if (workId && composerKey) {
-        await this.identification.ensureArtistTypeAssignmentByName(composerKey, 'Composer');
+      if (work?.composerKey) {
+        await this.identification.ensureArtistTypeAssignmentByName(work.composerKey, 'Composer');
       }
+      const workComposerName = work?.composerKey && composerCredits.length === 0
+        ? (await prisma.plexArtist.findUnique({ where: { ratingKey: work.composerKey }, select: { title: true, userTitle: true } }))
+        : null;
 
       const trackUpdate = {
         title: item.title,
@@ -1071,7 +1156,9 @@ class DiscogsImportService {
         identificationStatus: 'identified',
         identificationConfidence: 1.0,
         lastIdentificationAttempt: new Date(),
-        userComposer: composerCredits.length > 0 ? [...new Set(composerCredits.map(credit => credit.artistName))].join(', ') : null
+        userComposer: composerCredits.length > 0
+          ? [...new Set(composerCredits.map(credit => credit.artistName))].join(', ')
+          : (workComposerName ? (workComposerName.userTitle || workComposerName.title) : null)
       };
       if (Number.isInteger(item.trackNumber)) trackUpdate.index = item.trackNumber;
       if (Number.isInteger(item.discNumber)) trackUpdate.discNumber = item.discNumber;

@@ -51,7 +51,8 @@ router.post('/:publisher/albums/:ratingKey/import', asyncHandler(async (req, res
     excludedCreditKeys = [],
     artistOverrides = {},
     artwork = null,
-    workSelections = null
+    workSelections = null,
+    albumWorkComposerKey = null
   } = req.body || {};
 
   const importer = createImporter(publisher);
@@ -61,7 +62,7 @@ router.post('/:publisher/albums/:ratingKey/import', asyncHandler(async (req, res
 
   try {
     const data = apply
-      ? await importer.apply(req.params.ratingKey, String(releaseId), { trackMappings, excludedCreditKeys, artistOverrides, artwork, workSelections })
+      ? await importer.apply(req.params.ratingKey, String(releaseId), { trackMappings, excludedCreditKeys, artistOverrides, artwork, workSelections, albumWorkComposerKey })
       : await importer.preview(req.params.ratingKey, String(releaseId));
     return sendSuccess(res, data);
   } catch (error) {

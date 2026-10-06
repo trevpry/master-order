@@ -570,8 +570,7 @@ async function markCustomOrderItemAsWatched(itemIdentifier) {
         });
       
       if (!item) {
-        console.error(`Could not find CustomOrderItem with plexKey: ${itemIdentifier}`);
-        return;
+        throw new Error(`Could not find CustomOrderItem with plexKey: ${itemIdentifier}`);
       }
       
       actualItemId = item.id;
@@ -581,11 +580,12 @@ async function markCustomOrderItemAsWatched(itemIdentifier) {
     
     await prisma.customOrderItem.update({
       where: { id: actualItemId },
-      data: { isWatched: true, watchedAt: new Date() }
+      data: { isWatched: true }
     });
     console.log(`Marked custom order item ${actualItemId} as watched`);
   } catch (error) {
     console.error(`Error marking custom order item ${itemIdentifier} as watched:`, error);
+    throw error;
   }
 }
 

@@ -98,3 +98,23 @@ test('matches local tracks using disc/track numbers embedded in titles', () => {
 
   assert.deepEqual(mappings.map(m => m.localTrackKey), ['l1', null, null, 'l2']);
 });
+
+test('builds work composer options from track, release, and local album composers', () => {
+  const credits = [
+    { creditKey: 't1', artistName: 'Aaron Copland', artistTypeName: 'Composer', source: 'track', discogsOrdinal: 1, matchedArtist: { ratingKey: 'a1' } },
+    { creditKey: 't2', artistName: 'Samuel Barber', artistTypeName: 'Composer', source: 'track', discogsOrdinal: 5 },
+    { creditKey: 'r1', artistName: 'Leonard Bernstein', artistTypeName: 'Composer', source: 'album' },
+    { creditKey: 'p1', artistName: 'Some Orchestra', artistTypeName: 'Orchestra', source: 'album' }
+  ];
+  const localComposers = [
+    { ratingKey: 'a1', name: 'Aaron Copland' },
+    { ratingKey: 'a9', name: 'Charles Ives' }
+  ];
+
+  const forGroup = service.buildComposerOptions(credits, localComposers, [{ discogsOrdinal: 1 }]);
+  assert.deepEqual(forGroup.map(o => o.key), ['credit:t1', 'credit:r1', 'artist:a9']);
+  assert.deepEqual(forGroup.map(o => o.source), ['release', 'release', 'album']);
+
+  const albumWide = service.buildComposerOptions(credits, localComposers);
+  assert.deepEqual(albumWide.map(o => o.name), ['Aaron Copland', 'Samuel Barber', 'Leonard Bernstein', 'Charles Ives']);
+});

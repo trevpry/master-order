@@ -197,13 +197,13 @@ const VideoAIAssignment = ({
     if (!promptData?.fullPrompt) return;
     
     try {
-      const csvFileName = getExistingEventsCsvFileName(video?.title || `video-${video?.id || 'prompt'}`);
+      const csvFileName = getExistingEventsCsvFileName();
       const promptWithoutExistingEvents = String(promptData.fullPrompt || '').replaceAll(
         '{{EXISTING_EVENTS}}',
-        getExistingEventsCsvReferenceText(csvFileName)
+        getExistingEventsCsvReferenceText(csvFileName, { includeDescription: false })
       );
 
-      downloadCsvFile(csvFileName, buildExistingEventsCsv(promptData?.events || []));
+      downloadCsvFile(csvFileName, buildExistingEventsCsv(promptData?.events || [], { includeDescription: false }));
 
       const copied = await copyTextToClipboard(promptWithoutExistingEvents);
       if (!copied) {
@@ -279,10 +279,10 @@ const VideoAIAssignment = ({
 
   const isUnassignedVideo = video?.url && !video?.eventId;
 
-  const existingEventsCsvFileName = getExistingEventsCsvFileName(video?.title || `video-${video?.id || 'prompt'}`);
+  const existingEventsCsvFileName = getExistingEventsCsvFileName();
   const promptPreview = String(promptData?.fullPrompt || '').replaceAll(
     '{{EXISTING_EVENTS}}',
-    getExistingEventsCsvReferenceText(existingEventsCsvFileName)
+    getExistingEventsCsvReferenceText(existingEventsCsvFileName, { includeDescription: false })
   );
 
   if (!isUnassignedVideo) {
@@ -354,7 +354,7 @@ const VideoAIAssignment = ({
                   <div className="text-sm space-y-1 text-gray-700">
                     <div><strong>File:</strong> {existingEventsCsvFileName}</div>
                     <div><strong>Rows:</strong> {promptData.events?.length || 0}</div>
-                    <div><strong>Columns:</strong> Event Title, Start Date, End Date, Event Description</div>
+                    <div><strong>Columns:</strong> Event Title, Start Date, End Date</div>
                     <div>The copied prompt references this CSV instead of embedding the full event list.</div>
                   </div>
                 </div>

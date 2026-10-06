@@ -19,16 +19,18 @@ export const sanitizeDownloadName = (value, fallback = 'history-plus-events') =>
   return sanitized || fallback;
 };
 
-export const getExistingEventsCsvFileName = (baseName = 'history-plus-existing-events') => (
-  `${sanitizeDownloadName(baseName, 'history-plus-existing-events')}-existing-events.csv`
+export const getExistingEventsCsvFileName = (baseName) => (
+  baseName
+    ? `${sanitizeDownloadName(baseName, 'history-plus-existing-events')}-existing-events.csv`
+    : 'Existing History Events.csv'
 );
 
-export const getExistingEventsCsvReferenceText = (fileName = 'existing-events.csv') => (
-  `Existing historical events are provided separately in the CSV file "${fileName}". The file columns are: Event Title, Start Date, End Date, Event Description.`
+export const getExistingEventsCsvReferenceText = (fileName = 'existing-events.csv', { includeDescription = true } = {}) => (
+  `Existing historical events are provided separately in the CSV file "${fileName}". The file columns are: ${CSV_HEADERS.slice(0, includeDescription ? 4 : 3).join(', ')}.`
 );
 
-export const buildExistingEventsCsv = (events = []) => {
-  const rows = [CSV_HEADERS.join(',')];
+export const buildExistingEventsCsv = (events = [], { includeDescription = true } = {}) => {
+  const rows = [CSV_HEADERS.slice(0, includeDescription ? 4 : 3).join(',')];
 
   events.forEach((event) => {
     const eventDescription = event?.details
@@ -40,7 +42,7 @@ export const buildExistingEventsCsv = (events = []) => {
       escapeCsvValue(event?.title || ''),
       escapeCsvValue(event?.startDate || ''),
       escapeCsvValue(event?.endDate || ''),
-      escapeCsvValue(eventDescription)
+      ...(includeDescription ? [escapeCsvValue(eventDescription)] : [])
     ].join(','));
   });
 

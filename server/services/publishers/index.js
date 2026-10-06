@@ -1,7 +1,14 @@
 // Registry of publisher catalogues that can be searched and imported like Discogs releases.
 const { createNaxosSource } = require('./naxosSource');
+const { createBongiovanniSource } = require('./bongiovanniSource');
 
 const PUBLISHERS = {
+  bongiovanni: {
+    key: 'bongiovanni',
+    label: 'Bongiovanni',
+    description: 'Bongiovanni Musica album catalogue',
+    createSource: createBongiovanniSource
+  },
   naxos: {
     key: 'naxos',
     label: 'Naxos',

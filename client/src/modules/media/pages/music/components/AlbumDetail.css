@@ -724,6 +724,17 @@
   font-size: 12px;
 }
 
+.discogs-composer-choice {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.discogs-composer-choice .mb-track-match-select {
+  flex: 1;
+}
+
 .album-detail .track-inline-btn-danger {
   border-color: #ef4444;
   background: rgba(239, 68, 68, 0.16);

@@ -3757,7 +3757,7 @@ router.post('/music/discogs-search', asyncHandler(async (req, res) => {
 // Discogs Import API route
 router.post('/albums/:ratingKey/discogs-import', asyncHandler(async (req, res) => {
   const { ratingKey } = req.params;
-  const { url, apply = false, trackMappings = [], excludedCreditKeys = [], artistOverrides = {}, artwork = null, workSelections = null } = req.body;
+  const { url, apply = false, trackMappings = [], excludedCreditKeys = [], artistOverrides = {}, artwork = null, workSelections = null, albumWorkComposerKey = null } = req.body;
 
   console.log(`🧾 Processing Discogs import for album ${ratingKey}, apply=${apply}`);
 
@@ -3778,7 +3778,7 @@ router.post('/albums/:ratingKey/discogs-import', asyncHandler(async (req, res) =
 
   try {
     const data = apply
-      ? await importer.apply(ratingKey, releaseId, { trackMappings, excludedCreditKeys, artistOverrides, artwork, workSelections })
+      ? await importer.apply(ratingKey, releaseId, { trackMappings, excludedCreditKeys, artistOverrides, artwork, workSelections, albumWorkComposerKey })
       : await importer.preview(ratingKey, releaseId);
 
     return res.status(200).json({ success: true, data });

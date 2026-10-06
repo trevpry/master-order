@@ -83,6 +83,7 @@ const AlbumDetail = ({
   const [artworkSide, setArtworkSide] = useState('front');
   const [discogsArtworkSelection, setDiscogsArtworkSelection] = useState({ front: null, back: null });
   const [discogsWorkSelections, setDiscogsWorkSelections] = useState({});
+  const [discogsAlbumWorkComposerKey, setDiscogsAlbumWorkComposerKey] = useState(null);
   const [mbCoverArt, setMbCoverArt] = useState({ loading: false, images: [], error: null });
   const [mbArtworkSelection, setMbArtworkSelection] = useState({ front: null, back: null });
   const [showDiscogsSearchModal, setShowDiscogsSearchModal] = useState(false);
@@ -116,6 +117,7 @@ const AlbumDetail = ({
     setDiscogsWorkSelections(Object.fromEntries(
       (discogsPreview?.mapping?.workGroups || []).map((group) => [group.key, group.defaultChoice || { mode: 'create' }])
     ));
+    setDiscogsAlbumWorkComposerKey(discogsPreview?.mapping?.defaultAlbumComposerKey || null);
   }, [discogsPreview]);
 
   useEffect(() => {
@@ -616,6 +618,7 @@ const AlbumDetail = ({
           ),
           artwork: discogsArtworkSelection,
           workSelections: discogsWorkSelections,
+          albumWorkComposerKey: discogsAlbumWorkComposerKey,
         })
       });
 
@@ -1245,6 +1248,31 @@ const AlbumDetail = ({
   });
 
   const previewSourceLabel = discogsPreview?.source?.label || 'Discogs';
+
+  const renderComposerChoice = (options, value, onChange, disabled) => {
+    if (!options || options.length === 0) {
+      return <div className="mb-track-match-cell-meta">Composer: Unknown Composer (no composer credited on this album)</div>;
+    }
+    const describe = (option) => `${option.name}${option.source === 'album' ? ' (credited on this album)' : ''}`;
+    if (options.length === 1) {
+      return <div className="mb-track-match-cell-meta">Composer: {describe(options[0])}</div>;
+    }
+    return (
+      <label className="mb-track-match-cell-meta discogs-composer-choice">
+        Composer:
+        <select
+          className="mb-track-match-select"
+          value={value || options[0].key}
+          onChange={(event) => onChange(event.target.value)}
+          disabled={disabled}
+        >
+          {options.map((option) => (
+            <option key={option.key} value={option.key}>{describe(option)}</option>
+          ))}
+        </select>
+      </label>
+    );
+  };
 
   const albumContributors = (albumData?.albumArtists || album?.albumArtists || [])
     .filter((entry) => entry?.artist && entry?.artistType)
@@ -1972,6 +2000,12 @@ const AlbumDetail = ({
                 />
                 Link all matched tracks to a single work titled &ldquo;{(discogsPreview?.album?.discogsTitle || albumData?.title || 'Album Title').trim() || 'Album Title'}&rdquo;
               </label>
+              {discogsLinkAllToAlbumWork && renderComposerChoice(
+                discogsPreview?.mapping?.albumComposerOptions,
+                discogsAlbumWorkComposerKey,
+                setDiscogsAlbumWorkComposerKey,
+                importingDiscogs
+              )}
 
               {(discogsPreview?.mapping?.workGroups || []).length > 0 && (
                 <>
@@ -2008,8 +2042,8 @@ const AlbumDetail = ({
                               setDiscogsWorkSelections((prev) => ({
                                 ...prev,
                                 [group.key]: value.startsWith('existing:')
-                                  ? { mode: 'existing', workId: Number(value.slice('existing:'.length)) }
-                                  : { mode: value }
+                                  ? { ...prev[group.key], mode: 'existing', workId: Number(value.slice('existing:'.length)) }
+                                  : { ...prev[group.key], mode: value }
                               }));
                             }}
                           >
@@ -2021,6 +2055,15 @@ const AlbumDetail = ({
                             <option value="create">Create new work &ldquo;{group.title}&rdquo;</option>
                             <option value="none">Don&apos;t link to a work</option>
                           </select>
+                          {selection.mode === 'create' && !discogsLinkAllToAlbumWork && renderComposerChoice(
+                            group.composerOptions,
+                            selection.composerKey || group.defaultComposerKey,
+                            (composerKey) => setDiscogsWorkSelections((prev) => ({
+                              ...prev,
+                              [group.key]: { ...(prev[group.key] || group.defaultChoice || { mode: 'create' }), composerKey }
+                            })),
+                            importingDiscogs
+                          )}
                           <div className="mb-track-match-cell-meta">
                             {selection.mode === 'existing' && chosenCandidate
                               ? `Existing work with ${chosenCandidate.partCount} part(s); tracks are matched to its parts by title.`

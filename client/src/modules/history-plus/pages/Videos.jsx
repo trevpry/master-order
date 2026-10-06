@@ -489,7 +489,7 @@ const Videos = () => {
 
   const renderVideoPromptPreview = (template, eventsList = [], categoriesList = []) => {
     const activeTemplate = String(template || '');
-    const existingEventsCsvFileName = getExistingEventsCsvFileName('video-ai-assignment');
+    const existingEventsCsvFileName = getExistingEventsCsvFileName();
 
     const renderedCategories = categoriesList.map(category => 
       `- "${category.name}": ${category.description || 'Historical category'}`
@@ -499,14 +499,14 @@ const Videos = () => {
       .replaceAll('{{VIDEO_URL}}', 'https://www.youtube.com/watch?v=SAMPLE_VIDEO_ID')
       .replaceAll('{{VIDEO_TITLE_LINE}}', 'Video Title: Sample Educational History Video')
       .replaceAll('{{VIDEO_DESCRIPTION_LINE}}', 'Video Description: Sample video description for AI analysis')
-      .replaceAll('{{EXISTING_EVENTS}}', getExistingEventsCsvReferenceText(existingEventsCsvFileName))
+      .replaceAll('{{EXISTING_EVENTS}}', getExistingEventsCsvReferenceText(existingEventsCsvFileName, { includeDescription: false }))
       .replaceAll('{{SHARED_EVENT_DECISION_GUIDANCE}}', sharedEventDecisionGuidance)
       .replaceAll('{{AVAILABLE_CATEGORIES}}', renderedCategories || 'No available categories');
   };
 
-  const downloadExistingEventsCsv = (fileBaseName = 'video-ai-assignment') => {
-    const fileName = getExistingEventsCsvFileName(fileBaseName);
-    downloadCsvFile(fileName, buildExistingEventsCsv(aiPromptData?.events || []));
+  const downloadExistingEventsCsv = () => {
+    const fileName = getExistingEventsCsvFileName();
+    downloadCsvFile(fileName, buildExistingEventsCsv(aiPromptData?.events || [], { includeDescription: false }));
     return fileName;
   };
 
@@ -553,7 +553,7 @@ const Videos = () => {
   const handleCopyAiPrompt = () => {
     if (aiPromptData) {
       const preview = renderVideoPromptPreview(promptTemplate, aiPromptData.events, aiPromptData.categories);
-      downloadExistingEventsCsv('video-ai-assignment');
+      downloadExistingEventsCsv();
 
       copyTextToClipboard(preview)
         .then((copied) => {
@@ -1023,10 +1023,10 @@ const Videos = () => {
                   <h4 className="font-medium text-green-900 mb-2">📚 Existing Events CSV Export</h4>
                   <div className="text-sm space-y-1 text-gray-700">
                     <div><strong>Rows:</strong> {aiPromptData.eventsCount}</div>
-                    <div><strong>Columns:</strong> Event Title, Start Date, End Date, Event Description</div>
-                    <div><strong>File:</strong> {getExistingEventsCsvFileName('video-ai-assignment')}</div>
+                    <div><strong>Columns:</strong> Event Title, Start Date, End Date</div>
+                    <div><strong>File:</strong> {getExistingEventsCsvFileName()}</div>
                     <button
-                      onClick={() => downloadExistingEventsCsv('video-ai-assignment')}
+                      onClick={() => downloadExistingEventsCsv()}
                       className="mt-2 px-3 py-1 text-xs bg-green-600 text-white rounded hover:bg-green-700"
                     >
                       Download Existing Events CSV
