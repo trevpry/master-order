@@ -978,11 +978,16 @@ async function buildPicardTagPayload({ entityType, entityKey, entityTitle, track
 // selected tracks, because fetching every track with full includes can exceed the
 // Prisma engine's max result-string size on large libraries and fail with
 // "Failed to convert rust `String` into napi `string`".
-async function hydrateTracksByKeys(ratingKeys) {
+const UNPLAYED_TRACK_FILTER = { OR: [{ viewCount: null }, { viewCount: 0 }] };
+
+async function hydrateTracksByKeys(ratingKeys, unplayedOnly = false) {
   if (ratingKeys.length === 0) return [];
 
   const tracks = await prisma.plexTrack.findMany({
-    where: { ratingKey: { in: ratingKeys } },
+    where: {
+      ratingKey: { in: ratingKeys },
+      ...(unplayedOnly ? { AND: [UNPLAYED_TRACK_FILTER] } : {})
+    },
     include: {
       album: {
         include: {
@@ -1010,32 +1015,39 @@ async function hydrateTracksByKeys(ratingKeys) {
 // sectionKey: the Plex sectionKey string (e.g. "6"), or null for all sections
 // Returns lightweight track stubs (ratingKey + filter fields); hydrate the selected
 // tracks with hydrateTracksByKeys() before sending them to clients.
-async function getUnplayedFilteredTracks(sectionKey, unplayedAlbums, unplayedArtists, unplayedWorks) {
+async function getUnplayedFilteredTracks(sectionKey, unplayedAlbums, unplayedArtists, unplayedWorks, unplayedOnly = false, minRating = 0, unplayedComposers = false) {
   const allTracks = await prisma.plexTrack.findMany({
-    where: sectionKey ? { 
-      librarySection: { sectionKey: sectionKey },
+    where: {
       removed: false,
-      OR: [
-        { userRating: null },
-        { userRating: { gte: 5 } }
-      ]
-    } : { 
-      removed: false,
-      OR: [
-        { userRating: null },
-        { userRating: { gte: 5 } }
-      ]
+      ...(sectionKey ? { librarySection: { sectionKey } } : {})
     },
     select: {
       ratingKey: true,
       parentRatingKey: true,
       grandparentRatingKey: true,
       viewCount: true,
+      userRating: true,
+      ...(unplayedComposers ? {
+        work: { select: { composerKey: true } },
+        trackArtists: {
+          where: { artistType: { name: 'Composer' } },
+          select: { artistKey: true }
+        },
+        album: {
+          select: {
+            albumArtists: {
+              where: { artistType: { name: 'Composer' } },
+              select: { artistKey: true }
+            }
+          }
+        }
+      } : {}),
       workPartTracks: {
         select: {
           workPart: {
             select: {
-              workId: true
+              workId: true,
+              ...(unplayedComposers ? { work: { select: { composerKey: true } } } : {})
             }
           }
         }
@@ -1043,76 +1055,45 @@ async function getUnplayedFilteredTracks(sectionKey, unplayedAlbums, unplayedArt
     }
   });
 
-  let filteredTracks = allTracks;
+  const workIds = track => (track.workPartTracks || [])
+    .map(entry => entry.workPart?.workId)
+    .filter(workId => workId !== null && workId !== undefined);
+  const playedTracks = allTracks.filter(track => track.viewCount > 0);
+  const playedAlbumKeys = new Set(playedTracks.map(track => track.parentRatingKey));
+  const playedArtistKeys = new Set(playedTracks.map(track => track.grandparentRatingKey));
+  const playedWorkIds = new Set(playedTracks.flatMap(workIds));
+  const composerKeys = track => {
+    const trackComposers = [
+      track.work?.composerKey,
+      ...(track.trackArtists || []).map(credit => credit.artistKey),
+      ...(track.workPartTracks || []).map(entry => entry.workPart?.work?.composerKey)
+    ].filter(Boolean);
+    return [...new Set(trackComposers.length > 0
+      ? trackComposers
+      : (track.album?.albumArtists || []).map(credit => credit.artistKey).filter(Boolean))];
+  };
+  const playedComposerKeys = unplayedComposers ? new Set(playedTracks.flatMap(composerKeys)) : new Set();
 
-  if (unplayedAlbums) {
-    // Group by album and check if ALL tracks in album are unplayed
-    const albumTracks = {};
-    for (const track of allTracks) {
-      const albumKey = track.parentRatingKey || 'unknown';
-      if (!albumTracks[albumKey]) {
-        albumTracks[albumKey] = [];
-      }
-      albumTracks[albumKey].push(track);
+  return allTracks.filter(track => {
+    if (track.userRating !== null && track.userRating < 5) return false;
+    if (minRating > 0 && (track.userRating === null || track.userRating < minRating)) return false;
+    if (unplayedOnly && track.viewCount !== null && track.viewCount !== 0) return false;
+    if (unplayedAlbums && (!track.parentRatingKey || playedAlbumKeys.has(track.parentRatingKey))) return false;
+    if (unplayedArtists && (!track.grandparentRatingKey || playedArtistKeys.has(track.grandparentRatingKey))) return false;
+    if (unplayedWorks) {
+      const ids = workIds(track);
+      if (ids.length === 0 || ids.some(workId => playedWorkIds.has(workId))) return false;
     }
-    // An album is unplayed only if ALL its tracks have viewCount null or 0
-    const unplayedAlbumKeys = Object.keys(albumTracks).filter(key => 
-      albumTracks[key].every(t => !t.viewCount || t.viewCount === 0)
-    );
-    filteredTracks = filteredTracks.filter(t => unplayedAlbumKeys.includes(t.parentRatingKey || 'unknown'));
-  }
-
-  if (unplayedArtists) {
-    // Fetch ALL tracks for the section (no rating filter) to correctly determine play history.
-    // The pre-filtered allTracks excludes low-rated played tracks, which would make a
-    // played artist appear unplayed if those tracks were their only played ones.
-    const allTracksForArtistCheck = await prisma.plexTrack.findMany({
-      where: sectionKey
-        ? { librarySection: { sectionKey: sectionKey }, removed: false }
-        : { removed: false },
-      select: { grandparentRatingKey: true, viewCount: true }
-    });
-
-    // Build a set of artist keys that have ANY played track in their entire catalog
-    const playedArtistKeys = new Set();
-    for (const track of allTracksForArtistCheck) {
-      if (track.viewCount && track.viewCount > 0) {
-        playedArtistKeys.add(track.grandparentRatingKey || 'unknown');
-      }
+    if (unplayedComposers) {
+      const keys = composerKeys(track);
+      if (keys.length === 0 || keys.some(key => playedComposerKeys.has(key))) return false;
     }
-
-    filteredTracks = filteredTracks.filter(t => !playedArtistKeys.has(t.grandparentRatingKey || 'unknown'));
-  }
-
-  if (unplayedWorks) {
-    // Group by work and check if ALL tracks in work are unplayed
-    const workTracks = {};
-    for (const track of allTracks) {
-      if (track.workPartTracks && track.workPartTracks.length > 0) {
-        for (const wpt of track.workPartTracks) {
-          const workId = wpt.workPart?.workId || 'unknown';
-          if (!workTracks[workId]) {
-            workTracks[workId] = [];
-          }
-          workTracks[workId].push(track);
-        }
-      }
-    }
-    // A work is unplayed only if ALL its tracks have viewCount null or 0
-    const unplayedWorkIds = Object.keys(workTracks).filter(key => 
-      workTracks[key].every(t => !t.viewCount || t.viewCount === 0)
-    );
-    filteredTracks = filteredTracks.filter(t => {
-      if (!t.workPartTracks || t.workPartTracks.length === 0) return false;
-      return t.workPartTracks.some(wpt => unplayedWorkIds.includes(String(wpt.workPart?.workId || 'unknown')));
-    });
-  }
-
-  return filteredTracks;
+    return true;
+  });
 }
 
 // Helper function to expand tracks to include complete works
-async function expandToCompleteWorks(tracks) {
+async function expandToCompleteWorks(tracks, unplayedOnly = false, eligibleKeys = null) {
   const expandedTracks = [];
   const processedTrackIds = new Set();
 
@@ -1134,6 +1115,8 @@ async function expandToCompleteWorks(tracks) {
           where: {
             parentRatingKey: albumRatingKey,
             removed: false,
+            ...(unplayedOnly ? { AND: [UNPLAYED_TRACK_FILTER] } : {}),
+            ...(eligibleKeys ? { ratingKey: { in: eligibleKeys } } : {}),
             workPartTracks: {
               some: {
                 workPart: {
@@ -1368,6 +1351,10 @@ router.delete('/custom-playlists/:id/tracks/:trackId', asyncHandler(async (req, 
 // Music Artists - All
 router.get('/artists', asyncHandler(async (req, res) => {
   const { search, page = 1, limit = 20, artistTypeId, letter } = req.query;
+  const selectedTypeId = artistTypeId ? Number(artistTypeId) : null;
+  if (artistTypeId && (!Number.isInteger(selectedTypeId) || selectedTypeId <= 0)) {
+    return sendBadRequest(res, 'A valid artist type ID is required');
+  }
   const offset = (page - 1) * limit;
   const listLimit = letter ? undefined : parseInt(limit);
   const listOffset = letter ? undefined : offset;
@@ -1375,7 +1362,7 @@ router.get('/artists', asyncHandler(async (req, res) => {
   if (search) {
     // "Name — Type" searches by name and ranks artists with that type first.
     const { name: searchName, typeName: searchTypeName } = splitArtistNameAndType(search);
-    let artists = await plexDb.searchArtists(searchName, letter);
+    let artists = await plexDb.searchArtists(searchName, letter, selectedTypeId);
     
     // Add play counts for each artist
     artists = await Promise.all(artists.map(async (artist) => {
@@ -1390,7 +1377,7 @@ router.get('/artists', asyncHandler(async (req, res) => {
     }));
     
     // If an artist type is provided (by ID or "Name — Type"), sort artists that have it to the top
-    let typeId = artistTypeId ? parseInt(artistTypeId) : null;
+    let typeId = selectedTypeId;
     if (!typeId && searchTypeName) {
       const types = await prisma.artistType.findMany({ select: { id: true, name: true } });
       typeId = types.find(type => type.name.toLowerCase() === searchTypeName.toLowerCase())?.id || null;
@@ -1419,7 +1406,7 @@ router.get('/artists', asyncHandler(async (req, res) => {
     res.json(artists);
   } else {
     // For regular requests, use pagination
-    const artists = await plexDb.getAllArtists(listLimit, listOffset, letter);
+    const artists = await plexDb.getAllArtists(listLimit, listOffset, letter, selectedTypeId);
     
     // Add play counts
     const artistsWithCounts = await Promise.all(artists.map(async (artist) => {
@@ -1433,7 +1420,7 @@ router.get('/artists', asyncHandler(async (req, res) => {
       };
     }));
     
-    const totalArtists = await plexDb.getArtistsCount(letter);
+    const totalArtists = await plexDb.getArtistsCount(letter, selectedTypeId);
     
     res.json({
       artists: artistsWithCounts,
@@ -1448,7 +1435,11 @@ router.get('/artists', asyncHandler(async (req, res) => {
 // Music Artists - By Section
 router.get('/artists/section/:sectionKey', asyncHandler(async (req, res) => {
   const { sectionKey } = req.params;
-  const { search, page = 1, limit = 20, letter } = req.query;
+  const { search, page = 1, limit = 20, artistTypeId, letter } = req.query;
+  const selectedTypeId = artistTypeId ? Number(artistTypeId) : null;
+  if (artistTypeId && (!Number.isInteger(selectedTypeId) || selectedTypeId <= 0)) {
+    return sendBadRequest(res, 'A valid artist type ID is required');
+  }
   const pageNum = parseInt(page);
   const limitNum = parseInt(limit);
   const offset = (pageNum - 1) * limitNum;
@@ -1461,11 +1452,11 @@ router.get('/artists/section/:sectionKey', asyncHandler(async (req, res) => {
   let total;
 
   if (search) {
-    artists = await plexDb.searchArtistsBySection(sectionKey, search, listLimit, listOffset, letter);
-    total = await plexDb.searchArtistsBySectionCount(sectionKey, search, letter);
+    artists = await plexDb.searchArtistsBySection(sectionKey, search, listLimit, listOffset, letter, selectedTypeId);
+    total = await plexDb.searchArtistsBySectionCount(sectionKey, search, letter, selectedTypeId);
   } else {
-    artists = await plexDb.getArtistsBySection(sectionKey, listLimit, listOffset, letter);
-    total = await plexDb.getArtistsBySectionCount(sectionKey, letter);
+    artists = await plexDb.getArtistsBySection(sectionKey, listLimit, listOffset, letter, selectedTypeId);
+    total = await plexDb.getArtistsBySectionCount(sectionKey, letter, selectedTypeId);
   }
 
   console.log(`Returning ${artists.length} artists for section ${sectionKey}, total: ${total}`);
@@ -2875,8 +2866,14 @@ router.get('/tracks/artist/:artistRatingKey', asyncHandler(async (req, res) => {
 
 // Get random tracks - All sections
 router.get('/tracks/random', asyncHandler(async (req, res) => {
-  const { limit = 100, unplayed, unplayedAlbums, unplayedArtists, unplayedWorks, minRating, minRatingPercent, playCompleteWork } = req.query;
+  const { limit = 100, unplayed, unplayedAlbums, unplayedArtists, unplayedWorks, unplayedComposers, minRating, minRatingPercent, playCompleteWork } = req.query;
+  if ([unplayed, unplayedAlbums, unplayedArtists, unplayedWorks, unplayedComposers].filter(value => value === 'true').length > 1) {
+    return sendBadRequest(res, 'Only one unplayed filter can be selected at a time');
+  }
   const limitNum = Math.min(parseInt(limit), 500); // Cap at 500 tracks
+  const groupedKeys = unplayedAlbums === 'true' || unplayedArtists === 'true' || unplayedWorks === 'true' || unplayedComposers === 'true'
+    ? (await getUnplayedFilteredTracks(null, unplayedAlbums === 'true', unplayedArtists === 'true', unplayedWorks === 'true', unplayed === 'true', parseInt(minRatingPercent) > 0 ? 0 : parseInt(minRating) || 0, unplayedComposers === 'true')).map(track => track.ratingKey)
+    : null;
 
   // If minRatingPercent is specified, we need to fetch two separate sets
   if (minRating && parseInt(minRating) > 0 && minRatingPercent && parseInt(minRatingPercent) > 0) {
@@ -2890,7 +2887,9 @@ router.get('/tracks/random', asyncHandler(async (req, res) => {
     const ratedKeys = (await prisma.plexTrack.findMany({
       where: {
         removed: false,
+        ...(groupedKeys ? { ratingKey: { in: groupedKeys } } : {}),
         AND: [
+          ...(unplayed === 'true' ? [UNPLAYED_TRACK_FILTER] : []),
           {
             userRating: {
               gte: parseInt(minRating)
@@ -2936,8 +2935,8 @@ router.get('/tracks/random', asyncHandler(async (req, res) => {
 
     // Handle unplayed albums/artists/works filters for the "other" tracks
     let otherKeys;
-    if (unplayedAlbums === 'true' || unplayedArtists === 'true' || unplayedWorks === 'true') {
-      otherKeys = (await getUnplayedFilteredTracks(null, unplayedAlbums === 'true', unplayedArtists === 'true', unplayedWorks === 'true')).map(t => t.ratingKey);
+    if (groupedKeys !== null) {
+      otherKeys = groupedKeys;
     } else {
       // Fetch other track keys (exclude tracks below 5 stars)
       otherKeys = (await prisma.plexTrack.findMany({
@@ -2954,11 +2953,11 @@ router.get('/tracks/random', asyncHandler(async (req, res) => {
     const combinedKeys = [...shuffledRatedKeys, ...shuffledOtherKeys].sort(() => Math.random() - 0.5);
 
     // Hydrate only the selected tracks with full relations
-    let combinedTracks = await hydrateTracksByKeys(combinedKeys);
+    let combinedTracks = await hydrateTracksByKeys(combinedKeys, unplayed === 'true');
 
     // Expand to complete works if requested
     if (playCompleteWork === 'true') {
-      combinedTracks = await expandToCompleteWorks(combinedTracks);
+      combinedTracks = await expandToCompleteWorks(combinedTracks, unplayed === 'true', groupedKeys);
       console.log(`Expanded to ${combinedTracks.length} tracks with complete works`);
     }
 
@@ -2968,18 +2967,17 @@ router.get('/tracks/random', asyncHandler(async (req, res) => {
   }
 
   // Handle unplayed albums/artists/works filters
-  if (unplayedAlbums === 'true' || unplayedArtists === 'true' || unplayedWorks === 'true') {
-    const filteredTracks = await getUnplayedFilteredTracks(null, unplayedAlbums === 'true', unplayedArtists === 'true', unplayedWorks === 'true');
-    const shuffledKeys = filteredTracks.map(t => t.ratingKey).sort(() => Math.random() - 0.5);
-    let selectedTracks = await hydrateTracksByKeys(shuffledKeys.slice(0, limitNum));
+  if (groupedKeys !== null) {
+    const shuffledKeys = [...groupedKeys].sort(() => Math.random() - 0.5);
+    let selectedTracks = await hydrateTracksByKeys(shuffledKeys.slice(0, limitNum), unplayed === 'true');
 
     // Expand to complete works if requested
     if (playCompleteWork === 'true') {
-      selectedTracks = await expandToCompleteWorks(selectedTracks);
+      selectedTracks = await expandToCompleteWorks(selectedTracks, unplayed === 'true', groupedKeys);
       console.log(`Expanded to ${selectedTracks.length} tracks with complete works`);
     }
 
-    console.log(`Found ${filteredTracks.length} unplayed filtered tracks for radio`);
+    console.log(`Found ${groupedKeys.length} unplayed filtered tracks for radio`);
     res.json({ tracks: selectedTracks });
     return;
   }
@@ -2996,10 +2994,7 @@ router.get('/tracks/random', asyncHandler(async (req, res) => {
 
   // Add unplayed filter if requested
   if (unplayed === 'true') {
-    whereClause.OR = [
-      { viewCount: null },
-      { viewCount: 0 }
-    ];
+    whereClause.AND = [UNPLAYED_TRACK_FILTER];
   }
 
   // Add rating filter if requested
@@ -3023,11 +3018,11 @@ router.get('/tracks/random', asyncHandler(async (req, res) => {
   const shuffledKeys = allKeys.sort(() => Math.random() - 0.5);
 
   // Take only the requested limit and hydrate full track data
-  let selectedTracks = await hydrateTracksByKeys(shuffledKeys.slice(0, limitNum));
+  let selectedTracks = await hydrateTracksByKeys(shuffledKeys.slice(0, limitNum), unplayed === 'true');
 
   // Expand to complete works if requested
   if (playCompleteWork === 'true') {
-    selectedTracks = await expandToCompleteWorks(selectedTracks);
+    selectedTracks = await expandToCompleteWorks(selectedTracks, unplayed === 'true');
     console.log(`Expanded to ${selectedTracks.length} tracks with complete works`);
   }
 
@@ -3037,8 +3032,14 @@ router.get('/tracks/random', asyncHandler(async (req, res) => {
 // Get random tracks - By section
 router.get('/tracks/random/section/:sectionKey', asyncHandler(async (req, res) => {
   const { sectionKey } = req.params;
-  const { limit = 100, unplayed, unplayedAlbums, unplayedArtists, unplayedWorks, minRating, minRatingPercent, playCompleteWork } = req.query;
+  const { limit = 100, unplayed, unplayedAlbums, unplayedArtists, unplayedWorks, unplayedComposers, minRating, minRatingPercent, playCompleteWork } = req.query;
+  if ([unplayed, unplayedAlbums, unplayedArtists, unplayedWorks, unplayedComposers].filter(value => value === 'true').length > 1) {
+    return sendBadRequest(res, 'Only one unplayed filter can be selected at a time');
+  }
   const limitNum = Math.min(parseInt(limit), 500); // Cap at 500 tracks
+  const groupedKeys = unplayedAlbums === 'true' || unplayedArtists === 'true' || unplayedWorks === 'true' || unplayedComposers === 'true'
+    ? (await getUnplayedFilteredTracks(sectionKey, unplayedAlbums === 'true', unplayedArtists === 'true', unplayedWorks === 'true', unplayed === 'true', parseInt(minRatingPercent) > 0 ? 0 : parseInt(minRating) || 0, unplayedComposers === 'true')).map(track => track.ratingKey)
+    : null;
 
   // If minRatingPercent is specified, we need to fetch two separate sets
   if (minRating && parseInt(minRating) > 0 && minRatingPercent && parseInt(minRatingPercent) > 0) {
@@ -3053,7 +3054,9 @@ router.get('/tracks/random/section/:sectionKey', asyncHandler(async (req, res) =
       where: {
         librarySection: { sectionKey: sectionKey },
         removed: false,
+        ...(groupedKeys ? { ratingKey: { in: groupedKeys } } : {}),
         AND: [
+          ...(unplayed === 'true' ? [UNPLAYED_TRACK_FILTER] : []),
           {
             userRating: {
               gte: parseInt(minRating)
@@ -3100,8 +3103,8 @@ router.get('/tracks/random/section/:sectionKey', asyncHandler(async (req, res) =
 
     // Handle unplayed albums/artists/works filters for the "other" tracks
     let otherKeys;
-    if (unplayedAlbums === 'true' || unplayedArtists === 'true' || unplayedWorks === 'true') {
-      otherKeys = (await getUnplayedFilteredTracks(sectionKey, unplayedAlbums === 'true', unplayedArtists === 'true', unplayedWorks === 'true')).map(t => t.ratingKey);
+    if (groupedKeys !== null) {
+      otherKeys = groupedKeys;
     } else {
       // Fetch other track keys (exclude tracks below 5 stars)
       otherKeys = (await prisma.plexTrack.findMany({
@@ -3118,11 +3121,11 @@ router.get('/tracks/random/section/:sectionKey', asyncHandler(async (req, res) =
     const combinedKeys = [...shuffledRatedKeys, ...shuffledOtherKeys].sort(() => Math.random() - 0.5);
 
     // Hydrate only the selected tracks with full relations
-    let combinedTracks = await hydrateTracksByKeys(combinedKeys);
+    let combinedTracks = await hydrateTracksByKeys(combinedKeys, unplayed === 'true');
 
     // Expand to complete works if requested
     if (playCompleteWork === 'true') {
-      combinedTracks = await expandToCompleteWorks(combinedTracks);
+      combinedTracks = await expandToCompleteWorks(combinedTracks, unplayed === 'true', groupedKeys);
       console.log(`Expanded to ${combinedTracks.length} tracks with complete works in section ${sectionKey}`);
     }
 
@@ -3132,18 +3135,17 @@ router.get('/tracks/random/section/:sectionKey', asyncHandler(async (req, res) =
   }
 
   // Handle unplayed albums/artists/works filters
-  if (unplayedAlbums === 'true' || unplayedArtists === 'true' || unplayedWorks === 'true') {
-    const filteredTracks = await getUnplayedFilteredTracks(sectionKey, unplayedAlbums === 'true', unplayedArtists === 'true', unplayedWorks === 'true');
-    const shuffledKeys = filteredTracks.map(t => t.ratingKey).sort(() => Math.random() - 0.5);
-    let selectedTracks = await hydrateTracksByKeys(shuffledKeys.slice(0, limitNum));
+  if (groupedKeys !== null) {
+    const shuffledKeys = [...groupedKeys].sort(() => Math.random() - 0.5);
+    let selectedTracks = await hydrateTracksByKeys(shuffledKeys.slice(0, limitNum), unplayed === 'true');
 
     // Expand to complete works if requested
     if (playCompleteWork === 'true') {
-      selectedTracks = await expandToCompleteWorks(selectedTracks);
+      selectedTracks = await expandToCompleteWorks(selectedTracks, unplayed === 'true', groupedKeys);
       console.log(`Expanded to ${selectedTracks.length} tracks with complete works in section ${sectionKey}`);
     }
 
-    console.log(`Found ${filteredTracks.length} unplayed filtered tracks in section ${sectionKey} for radio`);
+    console.log(`Found ${groupedKeys.length} unplayed filtered tracks in section ${sectionKey} for radio`);
     res.json({ tracks: selectedTracks });
     return;
   }
@@ -3161,10 +3163,7 @@ router.get('/tracks/random/section/:sectionKey', asyncHandler(async (req, res) =
 
   // Add unplayed filter if requested
   if (unplayed === 'true') {
-    whereClause.OR = [
-      { viewCount: null },
-      { viewCount: 0 }
-    ];
+    whereClause.AND = [UNPLAYED_TRACK_FILTER];
   }
 
   // Add rating filter if requested
@@ -3187,11 +3186,11 @@ router.get('/tracks/random/section/:sectionKey', asyncHandler(async (req, res) =
   const shuffledKeys = allKeys.sort(() => Math.random() - 0.5);
 
   // Take only the requested limit and hydrate full track data
-  let selectedTracks = await hydrateTracksByKeys(shuffledKeys.slice(0, limitNum));
+  let selectedTracks = await hydrateTracksByKeys(shuffledKeys.slice(0, limitNum), unplayed === 'true');
 
   // Expand to complete works if requested
   if (playCompleteWork === 'true') {
-    selectedTracks = await expandToCompleteWorks(selectedTracks);
+    selectedTracks = await expandToCompleteWorks(selectedTracks, unplayed === 'true');
     console.log(`Expanded to ${selectedTracks.length} tracks with complete works in section ${sectionKey}`);
   }
 

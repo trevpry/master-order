@@ -845,9 +845,12 @@ class PlexDatabaseService {
   }
 
   // Get all artists from database
-  async getAllArtists(limit, offset, letter) {
+  async getAllArtists(limit, offset, letter, artistTypeId) {
     try {
-      const where = { removed: false };
+      const where = {
+        removed: false,
+        ...(artistTypeId ? { artistTypes: { some: { artistTypeId } } } : {})
+      };
       const letterFilter = this.buildArtistLetterFilter(letter);
       if (letterFilter) {
         where.AND = [letterFilter];
@@ -880,9 +883,12 @@ class PlexDatabaseService {
   }
 
   // Get total count of artists
-  async getArtistsCount(letter) {
+  async getArtistsCount(letter, artistTypeId) {
     try {
-      const where = { removed: false };
+      const where = {
+        removed: false,
+        ...(artistTypeId ? { artistTypes: { some: { artistTypeId } } } : {})
+      };
       const letterFilter = this.buildArtistLetterFilter(letter);
       if (letterFilter) {
         where.AND = [letterFilter];
@@ -896,9 +902,10 @@ class PlexDatabaseService {
   }
 
   // Get artists from specific section
-  async getArtistsBySection(sectionKey, limit, offset, letter) {
+  async getArtistsBySection(sectionKey, limit, offset, letter, artistTypeId) {
     try {
       const where = {
+        ...(artistTypeId ? { artistTypes: { some: { artistTypeId } } } : {}),
         librarySection: {
           sectionKey: sectionKey
         }
@@ -935,9 +942,10 @@ class PlexDatabaseService {
   }
 
   // Get total count of artists in a specific section
-  async getArtistsBySectionCount(sectionKey, letter) {
+  async getArtistsBySectionCount(sectionKey, letter, artistTypeId) {
     try {
       const where = {
+        ...(artistTypeId ? { artistTypes: { some: { artistTypeId } } } : {}),
         librarySection: {
           sectionKey: sectionKey
         }
@@ -955,7 +963,7 @@ class PlexDatabaseService {
   }
 
   // Search artists by title
-  async searchArtists(searchQuery, letter) {
+  async searchArtists(searchQuery, letter, artistTypeId) {
     try {
       const { normalizeArtistName, tokenizeArtistName, scoreArtistNameMatch } = require('./utils/artistNameMatch');
       const makeContainsFilter = (value) => (
@@ -969,6 +977,7 @@ class PlexDatabaseService {
       const words = String(searchQuery || '').trim().split(/\s+/).filter(Boolean);
       const where = {
         removed: false,
+        ...(artistTypeId ? { artistTypes: { some: { artistTypeId } } } : {}),
         AND: (words.length > 0 ? words : [String(searchQuery || '')]).map(word => ({
           OR: searchFields.map(field => ({ [field]: makeContainsFilter(word) }))
         }))
@@ -996,7 +1005,11 @@ class PlexDatabaseService {
       // Fallback for accents and spelling differences the database LIKE can't handle.
       if (artists.length === 0 && queryTokens.length > 0) {
         const candidates = await this.prisma.plexArtist.findMany({
-          where: { removed: false, ...(letterFilter ? { AND: [letterFilter] } : {}) },
+          where: {
+            removed: false,
+            ...(artistTypeId ? { artistTypes: { some: { artistTypeId } } } : {}),
+            ...(letterFilter ? { AND: [letterFilter] } : {})
+          },
           include: { librarySection: true }
         });
 
@@ -1025,7 +1038,7 @@ class PlexDatabaseService {
   }
 
   // Search artists by title within a specific section
-  async searchArtistsBySection(sectionKey, searchQuery, limit, offset, letter) {
+  async searchArtistsBySection(sectionKey, searchQuery, limit, offset, letter, artistTypeId) {
     try {
       const makeContainsFilter = (value) => (
         this.isPostgreSQL
@@ -1035,6 +1048,7 @@ class PlexDatabaseService {
 
       const where = {
         removed: false,
+        ...(artistTypeId ? { artistTypes: { some: { artistTypeId } } } : {}),
         AND: [
           {
             librarySection: {
@@ -1095,7 +1109,7 @@ class PlexDatabaseService {
   }
 
   // Get total count of searched artists in a specific section
-  async searchArtistsBySectionCount(sectionKey, searchQuery, letter) {
+  async searchArtistsBySectionCount(sectionKey, searchQuery, letter, artistTypeId) {
     try {
       const makeContainsFilter = (value) => (
         this.isPostgreSQL
@@ -1105,6 +1119,7 @@ class PlexDatabaseService {
 
       const where = {
         removed: false,
+        ...(artistTypeId ? { artistTypes: { some: { artistTypeId } } } : {}),
         AND: [
           {
             librarySection: {

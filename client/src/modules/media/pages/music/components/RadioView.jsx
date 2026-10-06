@@ -1,13 +1,19 @@
 import React, { useState } from 'react';
 import config from '../../../../../config';
 
+const UNPLAYED_FILTER_OPTIONS = [
+  { key: '', label: 'Any Tracks' },
+  { key: 'unplayed', label: 'Unplayed Tracks Only' },
+  { key: 'unplayedAlbums', label: 'Unplayed Albums Only' },
+  { key: 'unplayedArtists', label: 'Unplayed Artists Only' },
+  { key: 'unplayedWorks', label: 'Unplayed Works Only' },
+  { key: 'unplayedComposers', label: 'Unplayed Composers Only' }
+];
+
 const RadioView = ({ selectedSection }) => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
-  const [unplayedOnly, setUnplayedOnly] = useState(false);
-  const [unplayedAlbumsOnly, setUnplayedAlbumsOnly] = useState(false);
-  const [unplayedArtistsOnly, setUnplayedArtistsOnly] = useState(false);
-  const [unplayedWorksOnly, setUnplayedWorksOnly] = useState(false);
+  const [unplayedFilter, setUnplayedFilter] = useState('');
   const [minRating, setMinRating] = useState(0);
   const [minRatingPercent, setMinRatingPercent] = useState(0);
   const [playCompleteWork, setPlayCompleteWork] = useState(false);
@@ -25,24 +31,8 @@ const RadioView = ({ selectedSection }) => {
         endpoint = `${config.apiBaseUrl}/api/music/tracks/random/section/${selectedSection}?limit=100`;
       }
 
-      // Add unplayed filter if enabled
-      if (unplayedOnly) {
-        endpoint += '&unplayed=true';
-      }
-
-      // Add unplayed albums filter if enabled
-      if (unplayedAlbumsOnly) {
-        endpoint += '&unplayedAlbums=true';
-      }
-
-      // Add unplayed artists filter if enabled
-      if (unplayedArtistsOnly) {
-        endpoint += '&unplayedArtists=true';
-      }
-
-      // Add unplayed works filter if enabled
-      if (unplayedWorksOnly) {
-        endpoint += '&unplayedWorks=true';
+      if (unplayedFilter) {
+        endpoint += `&${unplayedFilter}=true`;
       }
 
       // Add rating filter if selected
@@ -136,41 +126,20 @@ const RadioView = ({ selectedSection }) => {
         </div>
 
         <div className="radio-filters">
-          <label className="radio-filter-checkbox">
-            <input
-              type="checkbox"
-              checked={unplayedOnly}
-              onChange={(e) => setUnplayedOnly(e.target.checked)}
-            />
-            <span>Unplayed Tracks Only</span>
-          </label>
-
-          <label className="radio-filter-checkbox">
-            <input
-              type="checkbox"
-              checked={unplayedAlbumsOnly}
-              onChange={(e) => setUnplayedAlbumsOnly(e.target.checked)}
-            />
-            <span>Unplayed Albums Only</span>
-          </label>
-
-          <label className="radio-filter-checkbox">
-            <input
-              type="checkbox"
-              checked={unplayedArtistsOnly}
-              onChange={(e) => setUnplayedArtistsOnly(e.target.checked)}
-            />
-            <span>Unplayed Artists Only</span>
-          </label>
-
-          <label className="radio-filter-checkbox">
-            <input
-              type="checkbox"
-              checked={unplayedWorksOnly}
-              onChange={(e) => setUnplayedWorksOnly(e.target.checked)}
-            />
-            <span>Unplayed Works Only</span>
-          </label>
+          <div className="radio-unplayed-filters" role="radiogroup" aria-label="Unplayed filter">
+            {UNPLAYED_FILTER_OPTIONS.map(option => (
+              <label key={option.key} className="radio-filter-checkbox">
+                <input
+                  type="radio"
+                  name="music-radio-unplayed-filter"
+                  value={option.key}
+                  checked={unplayedFilter === option.key}
+                  onChange={() => setUnplayedFilter(option.key)}
+                />
+                <span>{option.label}</span>
+              </label>
+            ))}
+          </div>
 
           <label className="radio-filter-checkbox">
             <input
@@ -224,11 +193,7 @@ const RadioView = ({ selectedSection }) => {
               {minRatingPercent > 0 && (
                 <small className="percent-help-text">
                   {minRatingPercent}% rated {minRating}+ stars, {100 - minRatingPercent}% {
-                    unplayedOnly ? 'unplayed tracks' : 
-                    unplayedAlbumsOnly ? 'unplayed albums' :
-                    unplayedArtistsOnly ? 'unplayed artists' :
-                    unplayedWorksOnly ? 'unplayed works' :
-                    'any tracks'
+                    UNPLAYED_FILTER_OPTIONS.find(option => option.key === unplayedFilter)?.label.toLowerCase()
                   }
                 </small>
               )}
