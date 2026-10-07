@@ -189,6 +189,7 @@ function Dashboard() {
   const [error, setError] = useState(null);
   const [lastRefreshed, setLastRefreshed] = useState(null);
   const [appMusic, setAppMusic] = useState(null);
+  const [selectedMusic, setSelectedMusic] = useState(null);
   const [showMusicRatingModal, setShowMusicRatingModal] = useState(false);
   const [musicRatingSaving, setMusicRatingSaving] = useState(false);
   const [musicRatingError, setMusicRatingError] = useState(null);
@@ -217,9 +218,10 @@ function Dashboard() {
   }, [fetchData]);
 
   useEffect(() => {
-    const applyState = ({ track, isPlaying: playing }) => {
+    const applyState = ({ track, isPlaying: playing, sessionId }) => {
       if (track) {
         setAppMusic({
+          sessionId: sessionId || 'this-tab',
           title: track.title,
           artist: track.artist || track.grandparentTitle,
           album: track.album || track.parentTitle,
@@ -249,6 +251,7 @@ function Dashboard() {
       const first = e.detail?.playlist?.tracks?.[0];
       if (first) {
         setAppMusic({
+          sessionId: window.__musicPlayerState?.sessionId || 'this-tab',
           title: first.title,
           artist: first.artist,
           album: first.album,
@@ -287,18 +290,32 @@ function Dashboard() {
   const sessions = data?.plexSessions || [];
   const playingSessions = sessions.filter(s => s.state === 'playing');
   const pausedSessions = sessions.filter(s => s.state !== 'playing');
-  const musicSources = [appMusic, data?.webMusic, data?.androidMusic, data?.plexMusicSession].filter(Boolean);
-  const dashboardMusic = musicSources.find(source => source.isPlaying) || musicSources[0] || null;
+  const serverMusic = data?.musicSessions
+    || [data?.webMusic, data?.androidMusic, data?.plexMusicSession].filter(Boolean);
+  const musicSessions = [
+    ...(appMusic ? [{ ...appMusic, isThisTab: true }] : []),
+    ...serverMusic.filter(session => !appMusic || session.sessionId !== appMusic.sessionId),
+  ].sort((left, right) => Number(right.isPlaying) - Number(left.isPlaying));
+  const dashboardMusic = selectedMusic
+    ? musicSessions.find(session => session.sessionId === selectedMusic) || null
+    : null;
   const dashboardMusicArt = musicArtworkUrl(dashboardMusic);
+  const musicSourceLabel = (music) => music.isThisTab ? 'This tab'
+    : music.source === 'android_app' ? (music.appName || 'Android App')
+    : music.source === 'plex_app' ? (music.appName || 'Plex')
+    : music.source === 'sonos' ? (music.appName || 'Sonos')
+    : music.source === 'server_stream' ? `${music.appName || 'Stream'}${music.clientAddress ? ` (${music.clientAddress})` : ''}`
+    : 'Music Player (another browser)';
 
-  const openMusicRatingModal = () => {
-    if (!dashboardMusic) return;
+  const openMusicRatingModal = (music) => {
+    setSelectedMusic(music.sessionId);
     setMusicRatingError(null);
     setShowMusicRatingModal(true);
   };
 
   const closeMusicRatingModal = () => {
     setShowMusicRatingModal(false);
+    setSelectedMusic(null);
     setMusicRatingSaving(false);
     setMusicRatingError(null);
   };
@@ -328,9 +345,11 @@ function Dashboard() {
       const newUserRating = payload?.track?.userRating ?? null;
 
       setAppMusic(prev => prev ? { ...prev, userRating: newUserRating } : prev);
+      const applyRating = session => session?.ratingKey === dashboardMusic.ratingKey ? { ...session, userRating: newUserRating } : session;
       setData(prev => prev ? {
         ...prev,
-        androidMusic: prev.androidMusic ? { ...prev.androidMusic, userRating: newUserRating } : prev.androidMusic,
+        musicSessions: prev.musicSessions?.map(applyRating),
+        androidMusic: applyRating(prev.androidMusic),
       } : prev);
     } catch (error) {
       setMusicRatingError(error.message || 'Failed to update track rating');
@@ -408,11 +427,16 @@ function Dashboard() {
 
       {/* Music in App */}
       <Card style={{ marginBottom: '1.5rem' }}>
-        <SectionHeader icon="🎵" title="Music in App" />
-        {dashboardMusic ? (
+        <SectionHeader icon="🎵" title="Music Playing" count={musicSessions.length} />
+        {musicSessions.length > 0 ? (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+          {musicSessions.map(music => {
+            const art = musicArtworkUrl(music);
+            return (
           <button
+            key={music.sessionId || `${music.source}-${music.ratingKey || music.title}`}
             type="button"
-            onClick={openMusicRatingModal}
+            onClick={() => openMusicRatingModal(music)}
             style={{
               display: 'flex',
               alignItems: 'center',
@@ -428,10 +452,10 @@ function Dashboard() {
             title="Click to rate this track"
           >
             <div style={{ width: 48, height: 48, borderRadius: 8, background: '#e0e7ff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '1.5rem', flexShrink: 0, overflow: 'hidden' }}>
-              {dashboardMusicArt ? (
+              {art ? (
                 <img
-                  src={dashboardMusicArt}
-                  alt={dashboardMusic.album ? `${dashboardMusic.album} artwork` : `${dashboardMusic.title} artwork`}
+                  src={art}
+                  alt={music.album ? `${music.album} artwork` : `${music.title} artwork`}
                   style={{ width: '100%', height: '100%', objectFit: 'cover' }}
                   onError={(e) => {
                     e.target.style.display = 'none';
@@ -439,29 +463,25 @@ function Dashboard() {
                   }}
                 />
               ) : null}
-              <span style={{ display: dashboardMusicArt ? 'none' : 'flex', alignItems: 'center', justifyContent: 'center', width: '100%', height: '100%' }}>🎵</span>
+              <span style={{ display: art ? 'none' : 'flex', alignItems: 'center', justifyContent: 'center', width: '100%', height: '100%' }}>🎵</span>
             </div>
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                <span style={{ display: 'inline-block', width: 8, height: 8, borderRadius: '50%', background: dashboardMusic.isPlaying ? '#22c55e' : '#f59e0b', animation: dashboardMusic.isPlaying ? 'pulse 1.5s ease-in-out infinite' : 'none' }} />
-                <span style={{ fontWeight: 600, fontSize: '0.95rem', color: '#1e293b', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{dashboardMusic.title}</span>
+                <span style={{ display: 'inline-block', width: 8, height: 8, borderRadius: '50%', background: music.isPlaying ? '#22c55e' : '#f59e0b', animation: music.isPlaying ? 'pulse 1.5s ease-in-out infinite' : 'none' }} />
+                <span style={{ fontWeight: 600, fontSize: '0.95rem', color: '#1e293b', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{music.title}</span>
               </div>
-              {(dashboardMusic.artist || dashboardMusic.album) && (
-                <div style={{ fontSize: '0.82rem', color: '#64748b', marginTop: '0.2rem' }}>{[dashboardMusic.artist, dashboardMusic.album].filter(Boolean).join(' · ')}</div>
+              {(music.artist || music.album) && (
+                <div style={{ fontSize: '0.82rem', color: '#64748b', marginTop: '0.2rem' }}>{[music.artist, music.album].filter(Boolean).join(' · ')}</div>
               )}
               <div style={{ fontSize: '0.78rem', color: '#94a3b8', marginTop: '0.15rem' }}>
-                {dashboardMusic.isPlaying ? '▶ Playing' : '⏸ Paused'} in {dashboardMusic.source === 'android_app' ? (dashboardMusic.appName || 'Android App') : dashboardMusic.source === 'plex_app' ? (dashboardMusic.appName || 'Plex') : 'Music Player'}
+                {music.isPlaying ? '▶ Playing' : '⏸ Paused'} in {musicSourceLabel(music)}
+                {!music.isThisTab && music.updatedAt && ` · updated ${timeAgo(music.updatedAt)}`}
               </div>
-              <div style={{ fontSize: '0.74rem', color: '#3b82f6', marginTop: '0.1rem' }}>
-                Click to rate this track
-              </div>
-              {(dashboardMusic.source === 'android_app' || dashboardMusic.source === 'plex_app') && dashboardMusic.updatedAt && (
-                <div style={{ fontSize: '0.74rem', color: '#94a3b8', marginTop: '0.1rem' }}>
-                  {dashboardMusic.source === 'plex_app' ? 'Plex' : 'Android'} update: {timeAgo(dashboardMusic.updatedAt)}
-                </div>
-              )}
             </div>
           </button>
+            );
+          })}
+          </div>
         ) : (
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
             <EmptyState label="Music player is not active" />
@@ -531,7 +551,7 @@ function Dashboard() {
                 <div style={{ color: '#64748b', fontSize: '0.9rem' }}>{[dashboardMusic.artist, dashboardMusic.album].filter(Boolean).join(' · ')}</div>
               )}
               <div style={{ color: '#94a3b8', fontSize: '0.8rem', marginTop: '0.2rem' }}>
-                Source: {dashboardMusic.source === 'android_app' ? (dashboardMusic.appName || 'Android App') : dashboardMusic.source === 'plex_app' ? (dashboardMusic.appName || 'Plex') : 'Music Player'}
+                Source: {musicSourceLabel(dashboardMusic)}
               </div>
               </div>
             </div>

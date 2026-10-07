@@ -28,6 +28,7 @@ router.get('/', asyncHandler(async (req, res) => {
     plexSessions: [],
     plexSessionsError: null,
     webMusic: musicPlaybackService.getCurrentPlayback(),
+    musicSessions: musicPlaybackService.getActivePlayback(),
     androidMusic: null,
     plexMusicSession: null,
     lastPlexItem: null,
@@ -99,30 +100,32 @@ router.get('/', asyncHandler(async (req, res) => {
     // ── Active Plex music session (track playing in any Plex client) ─────────
     // Prefer a playing session; fall back to any paused music session.
     const musicSessions = sessionList.filter(s => s.type === 'track');
+    const toMusicSession = s => ({
+      sessionId: `plex:${s.sessionKey || s.ratingKey}`,
+      title: s.title,
+      artist: s.originalTitle || s.grandparentTitle || null,
+      album: s.parentTitle || null,
+      ratingKey: s.ratingKey || null,
+      userRating: s.userRating ?? null,
+      artworkUrl: null,
+      thumb: s.thumb || null,
+      parentThumb: s.parentThumb || null,
+      grandparentThumb: s.grandparentThumb || null,
+      art: s.art || null,
+      isPlaying: s.Player?.state === 'playing',
+      positionMs: s.viewOffset ?? null,
+      durationMs: s.duration ?? null,
+      source: 'plex_app',
+      appName: s.Player?.title || s.Player?.device || 'Plex',
+      updatedAt: new Date().toISOString(),
+    });
+    results.musicSessions.push(...musicSessions.map(toMusicSession));
     const activeMusicSession =
       musicSessions.find(s => s.Player?.state === 'playing') ||
       musicSessions.find(s => s.Player?.state === 'paused');
 
     if (activeMusicSession) {
-      const s = activeMusicSession;
-      results.plexMusicSession = {
-        title: s.title,
-        artist: s.grandparentTitle || null,
-        album: s.parentTitle || null,
-        ratingKey: s.ratingKey || null,
-        userRating: s.userRating ?? null,
-        artworkUrl: null,
-        thumb: s.thumb || null,
-        parentThumb: s.parentThumb || null,
-        grandparentThumb: s.grandparentThumb || null,
-        art: s.art || null,
-        isPlaying: s.Player?.state === 'playing',
-        positionMs: s.viewOffset ?? null,
-        durationMs: s.duration ?? null,
-        source: 'plex_app',
-        appName: s.Player?.title || s.Player?.device || 'Plex',
-        updatedAt: new Date().toISOString(),
-      };
+      results.plexMusicSession = toMusicSession(activeMusicSession);
     }
   } catch (err) {
     results.plexSessionsError = err.message;

@@ -12,13 +12,15 @@ class MusicPlaybackService {
     return this.instance;
   }
 
-  updatePlayback(sessionId, track, isPlaying) {
+  updatePlayback(sessionId, track, isPlaying, { source = 'web_player', appName = null } = {}) {
     if (typeof sessionId !== 'string' || !sessionId || sessionId.length > 128) {
       const error = new Error('A valid playback session ID is required');
       error.statusCode = 400;
       throw error;
     }
+    const previous = this.sessions.get(sessionId);
     if (!track) {
+      if (previous) console.log(`🎵 Music stopped on ${this.describe(previous)}: ${previous.title}`);
       this.sessions.delete(sessionId);
       return;
     }
@@ -27,23 +29,73 @@ class MusicPlaybackService {
       error.statusCode = 400;
       throw error;
     }
-    const state = { source: 'web_player', isPlaying: isPlaying === true, updatedAt: this.now().toISOString() };
+    const state = { sessionId, source, appName, isPlaying: isPlaying === true, updatedAt: this.now().toISOString() };
     for (const field of ['title', 'artist', 'album', 'ratingKey', 'artworkUrl', 'thumb', 'parentThumb', 'grandparentThumb', 'art']) {
       state[field] = typeof track[field] === 'string' ? track[field].slice(0, 2048) : null;
     }
     state.userRating = Number.isFinite(track.userRating) ? track.userRating : null;
+    this.logTrackChange(previous, state);
     this.sessions.set(sessionId, state);
     this.getCurrentPlayback();
   }
 
-  getCurrentPlayback() {
+  // Server-observed stream; used when the client does not report its own state.
+  recordStream(sessionId, track, { appName = null, clientAddress = null } = {}) {
+    this.prune();
+    const ratingKey = track?.ratingKey != null ? String(track.ratingKey) : null;
+    if (!sessionId || !ratingKey || !track.title) return;
+    const previous = this.sessions.get(sessionId);
+    if (previous && previous.source !== 'server_stream' && previous.ratingKey === ratingKey) return;
+    const now = this.now();
+    const durationMs = Number(track.duration) > 0 ? Number(track.duration) : null;
+    const state = {
+      sessionId, source: 'server_stream', appName, clientAddress, isPlaying: true,
+      title: track.title, artist: track.originalTitle || track.grandparentTitle || null, album: track.parentTitle || null,
+      ratingKey, artworkUrl: null, thumb: track.thumb || null, parentThumb: track.parentThumb || null,
+      grandparentThumb: track.grandparentThumb || null, art: track.art || null,
+      userRating: Number.isFinite(track.userRating) ? track.userRating : null,
+      durationMs, updatedAt: now.toISOString(),
+      expiresAt: new Date(now.getTime() + (durationMs || 15000) + 30000).toISOString()
+    };
+    this.logTrackChange(previous, state);
+    this.sessions.set(sessionId, state);
+  }
+
+  describe(state) {
+    return [state.source, state.appName].filter(Boolean).join(' / ');
+  }
+
+  logTrackChange(previous, next) {
+    if (previous && previous.ratingKey === next.ratingKey && previous.title === next.title) return;
+    console.log(`🎵 Now playing on ${this.describe(next)}: ${next.title}${next.artist ? ` — ${next.artist}` : ''}`);
+  }
+
+  prune() {
     const now = this.now().getTime();
     for (const [sessionId, state] of this.sessions) {
-      if (now - Date.parse(state.updatedAt) > 45000) this.sessions.delete(sessionId);
+      const expired = state.expiresAt ? now > Date.parse(state.expiresAt) : now - Date.parse(state.updatedAt) > 45000;
+      if (expired) this.sessions.delete(sessionId);
     }
+  }
+
+  getCurrentPlayback() {
+    this.prune();
     return [...this.sessions.values()].sort((left, right) =>
       Number(right.isPlaying) - Number(left.isPlaying) || Date.parse(right.updatedAt) - Date.parse(left.updatedAt)
     )[0] || null;
+  }
+
+  getActivePlayback() {
+    this.prune();
+    const now = this.now().getTime();
+    const android = [...this.androidPlays.values()].map(play => play.state).filter(state => {
+      const remaining = state.durationMs > 0 && state.positionMs !== null ? state.durationMs - state.positionMs : null;
+      const ttl = state.isPlaying && remaining !== null ? Math.max(remaining, 0) + 60000 : 600000;
+      return now - Date.parse(state.updatedAt) <= ttl;
+    });
+    return [...this.sessions.values(), ...android].sort((left, right) =>
+      Number(right.isPlaying) - Number(left.isPlaying) || Date.parse(right.updatedAt) - Date.parse(left.updatedAt)
+    );
   }
 
   async updateAndroidPlayback(payload = {}) {
@@ -65,8 +117,10 @@ class MusicPlaybackService {
     for (const field of ['artworkUrl', 'thumb', 'parentThumb', 'grandparentThumb', 'art']) state[field] = text(payload[field]);
     const sessionId = String(payload.deviceId || payload.sessionId || 'android-default').slice(0, 128);
     state.deviceId = sessionId;
+    state.sessionId = `android:${sessionId}`;
     const identity = state.ratingKey || JSON.stringify([state.title, state.artist, state.album]);
     let play = this.androidPlays.get(sessionId);
+    const previousState = play?.state;
     const restarted = play?.recorded && state.isPlaying && state.positionMs !== null && state.positionMs <= 1000 && play.positionMs > 1000;
     const sameTrack = play && (play.identity === identity || (state.ratingKey && play.state.ratingKey === state.ratingKey));
     if (!sameTrack || restarted || (payload.playbackId && play.playbackId !== payload.playbackId)) {
@@ -75,6 +129,7 @@ class MusicPlaybackService {
       this.androidPlays.set(sessionId, play);
     }
     state.ratingKey = state.ratingKey || play.state.ratingKey;
+    this.logTrackChange(previousState, state);
     play.state = state;
     if (state.positionMs !== null) play.positionMs = Math.max(play.positionMs, state.positionMs);
     if (state.durationMs > 0) play.durationMs = state.durationMs;
@@ -127,6 +182,7 @@ class MusicPlaybackService {
       await this.updateAndroidPlayback({ ...play.state, ...payload, deviceId: sessionId, isPlaying: false });
       if (play.durationMs > 0 && play.positionMs >= play.durationMs * 0.9) await this.completeAndroidPlay(play);
       this.androidPlays.delete(sessionId);
+      console.log(`🎵 Music stopped on ${this.describe(play.state)}: ${play.state.title}`);
     }
   }
 

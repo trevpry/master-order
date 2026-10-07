@@ -3438,6 +3438,17 @@ router.get('/stream/:ratingKey', asyncHandler(async (req, res) => {
 
   console.log(`✅ Successfully got stream from Plex: ${streamResponse.status}`);
 
+  // Sonos and Chromecast playback is already reported by the speaker poller or the casting tab.
+  const userAgent = req.get('user-agent') || '';
+  if (!/Sonos|CrKey/i.test(userAgent)) {
+    const requestedSession = typeof req.query.session === 'string' && req.query.session.length <= 128 ? req.query.session : null;
+    const sessionId = requestedSession || `stream:${require('crypto').createHash('sha1').update(`${req.ip}|${userAgent}`).digest('hex').slice(0, 16)}`;
+    musicPlaybackService.recordStream(sessionId, track, {
+      appName: /Android/i.test(userAgent) ? 'Android device' : 'Web browser',
+      clientAddress: req.ip || null
+    });
+  }
+
   // Copy relevant headers from Plex response
   const contentType = streamResponse.headers.get('content-type');
   if (contentType) {

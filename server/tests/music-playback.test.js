@@ -47,6 +47,24 @@ test('live state selects an active session, expires stale reports, and clears on
   assert.throws(() => service.updatePlayback('session', {}, true), /track title/);
 });
 
+test('active playback lists streams, client reports, and Android devices together', async () => {
+  let now = new Date('2026-10-06T12:00:00Z');
+  const service = new MusicPlaybackService({}, { now: () => now });
+  service.recordStream('browser-b', { ratingKey: '7', title: 'Streamed', grandparentTitle: 'Artist', duration: 120000 }, { appName: 'Web browser' });
+  service.updatePlayback('browser-a', { title: 'Reported', ratingKey: '8' }, true);
+  await service.updateAndroidPlayback({ deviceId: 'phone', title: 'Phone track', positionMs: 0, durationMs: 200000 });
+  assert.deepEqual(service.getActivePlayback().map(state => state.sessionId).sort(), ['android:phone', 'browser-a', 'browser-b']);
+  service.updatePlayback('browser-b', { title: 'Streamed', ratingKey: '7' }, false);
+  service.recordStream('browser-b', { ratingKey: '7', title: 'Streamed', duration: 120000 });
+  assert.equal(service.getActivePlayback().find(state => state.sessionId === 'browser-b').isPlaying, false);
+  now = new Date(now.getTime() + 60000);
+  service.recordStream('browser-c', { ratingKey: '9', title: 'Long', duration: 300000 });
+  now = new Date(now.getTime() + 120000);
+  assert.deepEqual(service.getActivePlayback().map(state => state.sessionId).sort(), ['android:phone', 'browser-c']);
+  await service.stopAndroidPlayback({ deviceId: 'phone' });
+  assert.deepEqual(service.getActivePlayback().map(state => state.sessionId), ['browser-c']);
+});
+
 const createAndroidService = () => {
   const recorded = [];
   const service = new MusicPlaybackService({ plexTrack: { findMany: async () => [] } });

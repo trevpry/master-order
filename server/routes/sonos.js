@@ -4,6 +4,8 @@ const fetch = require('node-fetch');
 const { Client } = require('node-ssdp');
 const os = require('os');
 const prisma = require('../prismaClient');
+const SonosPlaybackService = require('../services/sonosPlaybackService');
+const musicPlaybackService = require('../services/musicPlaybackService').getInstance();
 
 // Direct UPnP/SOAP control for Sonos devices
 // No external services required - works in Docker/Unraid
@@ -128,6 +130,16 @@ async function sendSoapRequest(controlUrl, service, action, args = {}) {
   return await response.text();
 }
 
+const sonosPlaybackService = new SonosPlaybackService(musicPlaybackService, {
+  readState: async device => {
+    const [transport, position] = await Promise.all([
+      sendSoapRequest(device.avTransportControl, 'AVTransport', 'GetTransportInfo', { InstanceID: 0 }),
+      sendSoapRequest(device.avTransportControl, 'AVTransport', 'GetPositionInfo', { InstanceID: 0 })
+    ]);
+    return SonosPlaybackService.parseState(transport, position);
+  }
+});
+
 // Helper function to find device by ID
 function findDevice(deviceId) {
   return deviceCache.find(d => 
@@ -180,6 +192,7 @@ router.post('/play', async (req, res) => {
     
     // Get Plex settings and construct stream URL
     let streamUrl = providedStreamUrl;
+    let playbackTrack = { ...metadata, title: metadata?.title || 'Unknown Track', ratingKey: trackRatingKey ? String(trackRatingKey) : null };
     if (trackRatingKey) {
       const settings = await prisma.settings.findFirst();
       
@@ -206,6 +219,17 @@ router.post('/play', async (req, res) => {
       if (!track) {
         return res.status(404).json({ error: 'Track metadata not found' });
       }
+      playbackTrack = {
+        ...playbackTrack,
+        title: metadata?.title || track.title,
+        artist: metadata?.artist || track.grandparentTitle,
+        album: metadata?.album || track.parentTitle,
+        duration: track.duration,
+        userRating: track.userRating,
+        thumb: track.thumb,
+        parentThumb: track.parentThumb,
+        grandparentThumb: track.grandparentThumb
+      };
       
       // Get the media part for streaming
       const mediaPart = track.Media?.[0]?.Part?.[0];
@@ -215,10 +239,10 @@ router.post('/play', async (req, res) => {
       
       // Construct Plex stream URL with token
       streamUrl = `${settings.plexUrl}${mediaPart.key}?X-Plex-Token=${settings.plexToken}`;
-      console.log('🔊 Using Plex stream URL:', streamUrl);
+      console.log('🔊 Using authenticated Plex stream for track:', trackRatingKey);
     }
     
-    console.log('🔊 Playing on SONOS:', { device: device.name, streamUrl });
+    console.log('🔊 Playing on SONOS:', { device: device.name, title: playbackTrack.title });
     
     // Build DIDL-Lite metadata
     const title = metadata?.title || 'Unknown Track';
@@ -254,6 +278,7 @@ router.post('/play', async (req, res) => {
     });
     
     console.log('✅ Playback started on', device.name);
+    sonosPlaybackService.start(device, playbackTrack, streamUrl);
     
     res.json({ 
       success: true, 
@@ -312,6 +337,7 @@ router.post('/control', async (req, res) => {
     }
     
     await sendSoapRequest(device.avTransportControl, 'AVTransport', soapAction, args);
+    await sonosPlaybackService.control(device.uuid, action.toLowerCase());
     
     console.log('✅ SONOS control executed:', action);
     
@@ -422,18 +448,11 @@ router.get('/state/:deviceId', async (req, res) => {
       InstanceID: 0
     });
     
-    // Parse XML responses
-    const currentState = transportInfo.match(/<CurrentTransportState>([^<]+)<\/CurrentTransportState>/)?.[1];
-    const trackUri = positionInfo.match(/<TrackURI>([^<]+)<\/TrackURI>/)?.[1];
-    const trackDuration = positionInfo.match(/<TrackDuration>([^<]+)<\/TrackDuration>/)?.[1];
-    const relTime = positionInfo.match(/<RelTime>([^<]+)<\/RelTime>/)?.[1];
-    
+    const state = await SonosPlaybackService.parseState(transportInfo, positionInfo);
+    await sonosPlaybackService.observe(device.uuid, state);
     res.json({
       device: device.name,
-      state: currentState,
-      trackUri,
-      duration: trackDuration,
-      position: relTime
+      ...state
     });
     
   } catch (error) {

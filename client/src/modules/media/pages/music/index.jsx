@@ -472,7 +472,7 @@ const Music = () => {
         setIsLoading(true);
         setError(null); // Clear any previous errors
         
-        const streamUrl = `${config.apiBaseUrl}/api/music/stream/${track.ratingKey}`;
+        const streamUrl = `${config.apiBaseUrl}/api/music/stream/${track.ratingKey}?session=${encodeURIComponent(playbackSessionRef.current)}`;
         console.log('🎵 Loading track:', track.title, 'from:', streamUrl);
         
         // Set the source and wait for it to load

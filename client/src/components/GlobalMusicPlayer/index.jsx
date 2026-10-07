@@ -247,13 +247,18 @@ const GlobalMusicPlayer = () => {
   // Broadcast current playback state to other components (e.g. Dashboard monitoring)
   useEffect(() => {
     // Cache in window so any component can read the current state on mount
-    window.__musicPlayerState = { track: currentTrack, isPlaying };
+    window.__musicPlayerState = { track: currentTrack, isPlaying, sessionId: playbackSessionRef.current };
     window.dispatchEvent(new CustomEvent('musicPlayerStateChanged', {
-      detail: { track: currentTrack, isPlaying }
+      detail: { track: currentTrack, isPlaying, sessionId: playbackSessionRef.current }
     }));
   }, [currentTrack, isPlaying]);
 
   useEffect(() => {
+    if (isCasting && castDeviceType === 'sonos') {
+      reportPlaybackState({ apiBaseUrl: config.apiBaseUrl, sessionId: playbackSessionRef.current, track: null, isPlaying: false })
+        .catch(error => console.error('Error clearing local music report:', error));
+      return;
+    }
     const report = () => reportPlaybackState({
       apiBaseUrl: config.apiBaseUrl,
       sessionId: playbackSessionRef.current,
@@ -264,13 +269,13 @@ const GlobalMusicPlayer = () => {
     if (!currentTrack) return;
     const interval = setInterval(report, 15000);
     return () => clearInterval(interval);
-  }, [currentTrack, isPlaying]);
+  }, [currentTrack, isPlaying, isCasting, castDeviceType]);
 
   // Respond to on-demand state requests (e.g. Dashboard mounting after playback started)
   useEffect(() => {
     const handleRequest = () => {
       window.dispatchEvent(new CustomEvent('musicPlayerStateChanged', {
-        detail: { track: currentTrack, isPlaying }
+        detail: { track: currentTrack, isPlaying, sessionId: playbackSessionRef.current }
       }));
     };
     window.addEventListener('requestMusicPlayerState', handleRequest);
@@ -422,10 +427,8 @@ const GlobalMusicPlayer = () => {
       
       // Get stream URL based on track type
       let streamUrl;
-      if ((track.type === 'plex' || track.type === 'track') && track.ratingKey) {
-        streamUrl = `${config.apiBaseUrl}/api/music/stream/${track.ratingKey}`;
-      } else if (track.type === 'custom' && track.ratingKey) {
-        streamUrl = `${config.apiBaseUrl}/api/music/stream/${track.ratingKey}`;
+      if ((track.type === 'plex' || track.type === 'track' || track.type === 'custom') && track.ratingKey) {
+        streamUrl = `${config.apiBaseUrl}/api/music/stream/${track.ratingKey}?session=${encodeURIComponent(playbackSessionRef.current)}`;
       } else {
         throw new Error('Invalid track data');
       }
@@ -605,7 +608,6 @@ const GlobalMusicPlayer = () => {
           Date.now() - sonosTrackStartTimeRef.current > 4000
         ) {
           console.log('🔊 Sonos track ended — auto-advancing');
-          playRecorderRef.current.complete().catch(error => console.error('Error recording completed Sonos track:', error));
           sonosWasPlayingRef.current = false;
           handleNextTrackRef.current?.();
         }
