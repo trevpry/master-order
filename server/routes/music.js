@@ -3369,7 +3369,10 @@ router.post('/track/:ratingKey/scrobble', asyncHandler(async (req, res) => {
 
 router.post('/playback-state', asyncHandler(async (req, res) => {
   const { sessionId, track = null, isPlaying = false } = req.body || {};
-  musicPlaybackService.updatePlayback(sessionId, track, isPlaying);
+  musicPlaybackService.updatePlayback(sessionId, track, isPlaying, {
+    appName: musicPlaybackService.describeClient(req.headers?.['user-agent']),
+    clientAddress: req.ip || null
+  });
   sendSuccess(res, { message: 'Music playback state updated' });
 }));
 
@@ -3444,7 +3447,7 @@ router.get('/stream/:ratingKey', asyncHandler(async (req, res) => {
     const requestedSession = typeof req.query.session === 'string' && req.query.session.length <= 128 ? req.query.session : null;
     const sessionId = requestedSession || `stream:${require('crypto').createHash('sha1').update(`${req.ip}|${userAgent}`).digest('hex').slice(0, 16)}`;
     musicPlaybackService.recordStream(sessionId, track, {
-      appName: /Android/i.test(userAgent) ? 'Android device' : 'Web browser',
+      appName: musicPlaybackService.describeClient(userAgent),
       clientAddress: req.ip || null
     });
   }

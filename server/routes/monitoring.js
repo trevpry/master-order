@@ -131,6 +131,20 @@ router.get('/', asyncHandler(async (req, res) => {
     results.plexSessionsError = err.message;
   }
 
+  // Players report the rating they loaded with; the library holds the current one.
+  try {
+    const ratingKeys = [...new Set(results.musicSessions.map(s => s.ratingKey).filter(Boolean).map(String))];
+    if (ratingKeys.length) {
+      const tracks = await prisma.plexTrack.findMany({ where: { ratingKey: { in: ratingKeys } }, select: { ratingKey: true, userRating: true } });
+      const ratings = new Map(tracks.map(t => [t.ratingKey, t.userRating]));
+      results.musicSessions = results.musicSessions.map(s =>
+        s.ratingKey && ratings.has(String(s.ratingKey)) ? { ...s, userRating: ratings.get(String(s.ratingKey)) } : s
+      );
+    }
+  } catch (err) {
+    // non-fatal
+  }
+
   // ── Last played Plex item (TV / movie) ──────────────────────────────────
   try {
     const lastLog = await prisma.watchLog.findFirst({

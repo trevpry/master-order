@@ -18,7 +18,7 @@ function createPlaybackControlRoutes() {
   // Android app reports current music playback state for dashboard monitoring
   router.post('/music/state', async (req, res) => {
     try {
-      const normalized = await musicPlaybackService.updateAndroidPlayback(req.body || {});
+      const normalized = await musicPlaybackService.updateAndroidPlayback({ ...(req.body || {}), clientAddress: req.ip || null });
       if (!normalized) {
         return res.status(400).json({
           type: 'MUSIC_STATE_ERROR',

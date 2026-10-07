@@ -14,6 +14,14 @@ const { getAndroidApiBaseUrl, createAndroidResponse, createAndroidErrorResponse 
  */
 function createGalleryPlaylistRoutes(prisma) {
   const router = express.Router();
+  const serverUrl = req => `${req.protocol}://${req.get('host')}`;
+  // Streaming through the server lets the dashboard see Android playback and keeps the Plex token private.
+  const trackStreamUrl = (req, ratingKey) => `${serverUrl(req)}/api/music/stream/${encodeURIComponent(ratingKey)}`;
+  const artworkProxyUrl = (req, metadata) => {
+    const thumb = metadata?.thumb || metadata?.parentThumb || metadata?.grandparentThumb;
+    if (!thumb) return null;
+    return thumb.startsWith('http') ? thumb : `${serverUrl(req)}/api/artwork/${thumb.replace(/^\//, '')}`;
+  };
 
   // Android Gallery Endpoint - Get Random Gallery Image
   router.get('/gallery/:galleryName/random-image', async (req, res) => {
@@ -191,26 +199,13 @@ function createGalleryPlaylistRoutes(prisma) {
                 // Get the actual media part for streaming
                 const mediaPart = plexTrackMetadata?.Media?.[0]?.Part?.[0];
                 if (mediaPart && mediaPart.key) {
-                  streamUrl = `${settings.plexUrl}${mediaPart.key}?X-Plex-Token=${settings.plexToken}`;
-                  console.log(`📱 ✅ Generated stream URL from media part: ${streamUrl}`);
+                  streamUrl = trackStreamUrl(req, randomTrack.ratingKey);
+                  console.log(`📱 ✅ Generated stream URL: ${streamUrl}`);
                 } else {
                   console.warn(`📱 ❌ No media part found for classical track ${randomTrack.ratingKey}`);
                 }
                 
-                // Generate artwork URL with fallback hierarchy
-                if (plexTrackMetadata?.thumb) {
-                  artworkUrl = plexTrackMetadata.thumb.startsWith('http') 
-                    ? plexTrackMetadata.thumb 
-                    : `${settings.plexUrl}${plexTrackMetadata.thumb}?X-Plex-Token=${settings.plexToken}`;
-                } else if (plexTrackMetadata?.parentThumb) {
-                  artworkUrl = plexTrackMetadata.parentThumb.startsWith('http')
-                    ? plexTrackMetadata.parentThumb
-                    : `${settings.plexUrl}${plexTrackMetadata.parentThumb}?X-Plex-Token=${settings.plexToken}`;
-                } else if (plexTrackMetadata?.grandparentThumb) {
-                  artworkUrl = plexTrackMetadata.grandparentThumb.startsWith('http')
-                    ? plexTrackMetadata.grandparentThumb
-                    : `${settings.plexUrl}${plexTrackMetadata.grandparentThumb}?X-Plex-Token=${settings.plexToken}`;
-                }
+                artworkUrl = artworkProxyUrl(req, plexTrackMetadata);
               } else {
                 console.warn(`📱 ❌ Failed to fetch Plex metadata for classical track ${randomTrack.ratingKey}:`, trackResponse.status);
               }
@@ -466,26 +461,13 @@ function createGalleryPlaylistRoutes(prisma) {
             // Get the actual media part for streaming (this is the correct approach)
             const mediaPart = plexTrackMetadata?.Media?.[0]?.Part?.[0];
             if (mediaPart && mediaPart.key) {
-              streamUrl = `${settings.plexUrl}${mediaPart.key}?X-Plex-Token=${settings.plexToken}`;
-              console.log(`📱 ✅ Generated stream URL from media part: ${streamUrl}`);
+              streamUrl = trackStreamUrl(req, randomTrack.ratingKey);
+              console.log(`📱 ✅ Generated stream URL: ${streamUrl}`);
             } else {
               console.warn(`📱 ❌ No media part found for track ${randomTrack.ratingKey}`);
             }
             
-            // Generate artwork URL with fallback hierarchy (from Plex metadata)
-            if (plexTrackMetadata?.thumb) {
-              artworkUrl = plexTrackMetadata.thumb.startsWith('http') 
-                ? plexTrackMetadata.thumb 
-                : `${settings.plexUrl}${plexTrackMetadata.thumb}?X-Plex-Token=${settings.plexToken}`;
-            } else if (plexTrackMetadata?.parentThumb) {
-              artworkUrl = plexTrackMetadata.parentThumb.startsWith('http')
-                ? plexTrackMetadata.parentThumb
-                : `${settings.plexUrl}${plexTrackMetadata.parentThumb}?X-Plex-Token=${settings.plexToken}`;
-            } else if (plexTrackMetadata?.grandparentThumb) {
-              artworkUrl = plexTrackMetadata.grandparentThumb.startsWith('http')
-                ? plexTrackMetadata.grandparentThumb
-                : `${settings.plexUrl}${plexTrackMetadata.grandparentThumb}?X-Plex-Token=${settings.plexToken}`;
-            }
+            artworkUrl = artworkProxyUrl(req, plexTrackMetadata);
           } else {
             console.warn(`📱 ❌ Failed to fetch Plex metadata for track ${randomTrack.ratingKey}:`, trackResponse.status);
           }

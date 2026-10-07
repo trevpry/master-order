@@ -12,7 +12,18 @@ class MusicPlaybackService {
     return this.instance;
   }
 
-  updatePlayback(sessionId, track, isPlaying, { source = 'web_player', appName = null } = {}) {
+  describeClient(userAgent = '') {
+    if (!/Mozilla/i.test(userAgent)) {
+      return /Android|Dalvik|ExoPlayer|okhttp/i.test(userAgent) ? 'Android app' : 'Media client';
+    }
+    const browser = [[/Edg\//, 'Edge'], [/OPR\//, 'Opera'], [/SamsungBrowser/, 'Samsung Internet'], [/Firefox|FxiOS/, 'Firefox'], [/Chrome|CriOS/, 'Chrome'], [/Safari/, 'Safari']]
+      .find(([pattern]) => pattern.test(userAgent))?.[1] || 'Browser';
+    const os = [[/Android/, 'Android'], [/iPhone|iPad|iPod/, 'iOS'], [/Windows/, 'Windows'], [/Mac OS X/, 'macOS'], [/CrOS/, 'ChromeOS'], [/Linux/, 'Linux']]
+      .find(([pattern]) => pattern.test(userAgent))?.[1];
+    return os ? `${browser} on ${os}` : browser;
+  }
+
+  updatePlayback(sessionId, track, isPlaying, { source = 'web_player', appName = null, clientAddress = null } = {}) {
     if (typeof sessionId !== 'string' || !sessionId || sessionId.length > 128) {
       const error = new Error('A valid playback session ID is required');
       error.statusCode = 400;
@@ -29,7 +40,7 @@ class MusicPlaybackService {
       error.statusCode = 400;
       throw error;
     }
-    const state = { sessionId, source, appName, isPlaying: isPlaying === true, updatedAt: this.now().toISOString() };
+    const state = { sessionId, source, appName, clientAddress, isPlaying: isPlaying === true, updatedAt: this.now().toISOString() };
     for (const field of ['title', 'artist', 'album', 'ratingKey', 'artworkUrl', 'thumb', 'parentThumb', 'grandparentThumb', 'art']) {
       state[field] = typeof track[field] === 'string' ? track[field].slice(0, 2048) : null;
     }
@@ -93,7 +104,14 @@ class MusicPlaybackService {
       const ttl = state.isPlaying && remaining !== null ? Math.max(remaining, 0) + 60000 : 600000;
       return now - Date.parse(state.updatedAt) <= ttl;
     });
-    return [...this.sessions.values(), ...android].sort((left, right) =>
+    const all = [...this.sessions.values(), ...android];
+    const speakerTracks = new Set(all.filter(s => s.source === 'sonos' && s.ratingKey).map(s => String(s.ratingKey)));
+    const reportingAddresses = new Set(all.filter(s => s.source !== 'server_stream' && s.clientAddress).map(s => s.clientAddress));
+    return all.filter(s => {
+      // The tab controlling a speaker also reports/streams the same track.
+      if ((s.source === 'web_player' || s.source === 'server_stream') && s.ratingKey && speakerTracks.has(String(s.ratingKey))) return false;
+      return !(s.source === 'server_stream' && s.clientAddress && reportingAddresses.has(s.clientAddress));
+    }).sort((left, right) =>
       Number(right.isPlaying) - Number(left.isPlaying) || Date.parse(right.updatedAt) - Date.parse(left.updatedAt)
     );
   }
@@ -112,7 +130,7 @@ class MusicPlaybackService {
       isPlaying: payload.isPlaying === undefined ? true : payload.isPlaying === true,
       positionMs: number(payload.positionMs), durationMs: number(payload.durationMs),
       userRating: number(payload.userRating), source: 'android_app',
-      appName: text(payload.appName), updatedAt: this.now().toISOString()
+      appName: text(payload.appName), clientAddress: text(payload.clientAddress), updatedAt: this.now().toISOString()
     };
     for (const field of ['artworkUrl', 'thumb', 'parentThumb', 'grandparentThumb', 'art']) state[field] = text(payload[field]);
     const sessionId = String(payload.deviceId || payload.sessionId || 'android-default').slice(0, 128);

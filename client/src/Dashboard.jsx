@@ -292,8 +292,10 @@ function Dashboard() {
   const pausedSessions = sessions.filter(s => s.state !== 'playing');
   const serverMusic = data?.musicSessions
     || [data?.webMusic, data?.androidMusic, data?.plexMusicSession].filter(Boolean);
+  const serverCopyOfThisTab = appMusic && serverMusic.find(session => session.sessionId === appMusic.sessionId && session.ratingKey === appMusic.ratingKey);
+  const thisTabOnSpeaker = appMusic?.ratingKey && serverMusic.some(session => session.source === 'sonos' && String(session.ratingKey) === String(appMusic.ratingKey));
   const musicSessions = [
-    ...(appMusic ? [{ ...appMusic, isThisTab: true }] : []),
+    ...(appMusic && !thisTabOnSpeaker ? [{ ...appMusic, userRating: serverCopyOfThisTab ? serverCopyOfThisTab.userRating : appMusic.userRating, isThisTab: true }] : []),
     ...serverMusic.filter(session => !appMusic || session.sessionId !== appMusic.sessionId),
   ].sort((left, right) => Number(right.isPlaying) - Number(left.isPlaying));
   const dashboardMusic = selectedMusic
@@ -304,8 +306,8 @@ function Dashboard() {
     : music.source === 'android_app' ? (music.appName || 'Android App')
     : music.source === 'plex_app' ? (music.appName || 'Plex')
     : music.source === 'sonos' ? (music.appName || 'Sonos')
-    : music.source === 'server_stream' ? `${music.appName || 'Stream'}${music.clientAddress ? ` (${music.clientAddress})` : ''}`
-    : 'Music Player (another browser)';
+    : music.source === 'server_stream' ? `${/^(Android app|Media client)$/.test(music.appName || '') ? music.appName : `Web app · ${music.appName || 'Browser'}`}${music.clientAddress ? ` (${music.clientAddress})` : ''}`
+    : `Web app${music.appName ? ` · ${music.appName}` : ''}${music.clientAddress ? ` (${music.clientAddress})` : ''}`;
 
   const openMusicRatingModal = (music) => {
     setSelectedMusic(music.sessionId);
@@ -338,18 +340,22 @@ function Dashboard() {
       });
 
       if (!response.ok) {
-        throw new Error('Failed to update track rating');
+        const body = await response.json().catch(() => null);
+        throw new Error(body?.error || 'Failed to update track rating');
       }
 
       const payload = await response.json();
       const newUserRating = payload?.track?.userRating ?? null;
+      const ratedKey = String(dashboardMusic.ratingKey);
+      const applyRating = session => session && String(session.ratingKey) === ratedKey ? { ...session, userRating: newUserRating } : session;
 
-      setAppMusic(prev => prev ? { ...prev, userRating: newUserRating } : prev);
-      const applyRating = session => session?.ratingKey === dashboardMusic.ratingKey ? { ...session, userRating: newUserRating } : session;
+      setAppMusic(applyRating);
       setData(prev => prev ? {
         ...prev,
         musicSessions: prev.musicSessions?.map(applyRating),
+        webMusic: applyRating(prev.webMusic),
         androidMusic: applyRating(prev.androidMusic),
+        plexMusicSession: applyRating(prev.plexMusicSession),
       } : prev);
     } catch (error) {
       setMusicRatingError(error.message || 'Failed to update track rating');

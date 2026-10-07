@@ -65,6 +65,24 @@ test('active playback lists streams, client reports, and Android devices togethe
   assert.deepEqual(service.getActivePlayback().map(state => state.sessionId), ['browser-c']);
 });
 
+test('one playback appears once across speaker, controlling tab, and stream', () => {
+  const service = new MusicPlaybackService({});
+  service.recordStream('tab', { ratingKey: '1', title: 'Song', duration: 100000 }, { clientAddress: '10.0.0.5' });
+  service.updatePlayback('tab', { title: 'Song', ratingKey: '1' }, false, { clientAddress: '10.0.0.5' });
+  service.recordStream('stream:x', { ratingKey: '1', title: 'Song', duration: 100000 }, { clientAddress: '10.0.0.5' });
+  service.updatePlayback('sonos:office', { title: 'Song', ratingKey: '1' }, true, { source: 'sonos', appName: 'Office' });
+  service.recordStream('stream:phone', { ratingKey: '2', title: 'Other', duration: 100000 }, { clientAddress: '10.0.0.9' });
+  service.recordStream('stream:phone', { ratingKey: '2', title: 'Other', duration: 100000 }, { clientAddress: '10.0.0.9' });
+  assert.deepEqual(service.getActivePlayback().map(state => state.sessionId).sort(), ['sonos:office', 'stream:phone']);
+});
+
+test('client labels distinguish mobile browsers from native apps', () => {
+  const service = new MusicPlaybackService({});
+  assert.equal(service.describeClient('Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0 Mobile Safari/537.36'), 'Chrome on Android');
+  assert.equal(service.describeClient('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0 Safari/537.36 Edg/129.0'), 'Edge on Windows');
+  assert.equal(service.describeClient('Dalvik/2.1.0 (Linux; U; Android 14; Pixel 8)'), 'Android app');
+});
+
 const createAndroidService = () => {
   const recorded = [];
   const service = new MusicPlaybackService({ plexTrack: { findMany: async () => [] } });
