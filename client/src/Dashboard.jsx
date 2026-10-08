@@ -552,7 +552,18 @@ function Dashboard() {
                 <span style={{ display: dashboardMusicArt ? 'none' : 'flex', alignItems: 'center', justifyContent: 'center', width: '100%', height: '100%', fontSize: '1.35rem' }}>🎵</span>
               </div>
               <div style={{ minWidth: 0 }}>
-              <div style={{ fontWeight: 700, color: '#1e293b' }}>{dashboardMusic.title}</div>
+              <div style={{ fontWeight: 700, color: '#1e293b' }}>
+                {dashboardMusic.ratingKey ? (
+                  <Link
+                    to={`/media/music?view=track&track=${encodeURIComponent(dashboardMusic.ratingKey)}`}
+                    onClick={closeMusicRatingModal}
+                    style={{ color: '#1d4ed8', textDecoration: 'none' }}
+                    title="Open track details"
+                  >
+                    {dashboardMusic.title}
+                  </Link>
+                ) : dashboardMusic.title}
+              </div>
               {(dashboardMusic.artist || dashboardMusic.album) && (
                 <div style={{ color: '#64748b', fontSize: '0.9rem' }}>{[dashboardMusic.artist, dashboardMusic.album].filter(Boolean).join(' · ')}</div>
               )}
