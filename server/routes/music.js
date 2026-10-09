@@ -2860,6 +2860,15 @@ router.get('/tracks/album/:albumRatingKey', asyncHandler(async (req, res) => {
   res.json(tracks);
 }));
 
+router.get('/tracks/:ratingKey/artist-albums', asyncHandler(async (req, res) => {
+  const albums = await plexDb.getAlbumsForTrackArtists(req.params.ratingKey);
+  if (!albums) {
+    return res.status(404).json({ error: 'Track not found' });
+  }
+  await albumArtwork.attachArtworkInfo(albums);
+  res.json(albums);
+}));
+
 router.post('/tracks/:ratingKey/disconnect-album', asyncHandler(async (req, res) => {
   const track = await plexDb.disconnectTrackFromAlbum(req.params.ratingKey);
   if (!track) {

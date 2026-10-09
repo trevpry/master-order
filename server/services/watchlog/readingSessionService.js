@@ -37,6 +37,11 @@ class ReadingSessionService {
       const activeSession = await this.prisma.watchLog.findFirst({
         where: {
           customOrderItemId: params.customOrderItemId,
+          ...(params.bookId && {
+            bookId: params.bookId,
+            chapterId: params.chapterId || null,
+            sectionId: params.sectionId || null
+          }),
           activityType: 'read',
           endTime: null
         }
@@ -55,6 +60,9 @@ class ReadingSessionService {
           title: params.title,
           seriesTitle: params.seriesTitle || null,
           customOrderItemId: params.customOrderItemId,
+          bookId: params.bookId || null,
+          chapterId: params.chapterId || null,
+          sectionId: params.sectionId || null,
           startTime: new Date(),
           endTime: null,
           duration: null, // No set duration for reading

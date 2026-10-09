@@ -3,6 +3,7 @@ import config from '../../config';
 import { mergeModalStyles as styles } from './MergeArtistsModal';
 
 export default function AddTrackToAlbumModal({ track, onClose, onSuccess }) {
+  const [scope, setScope] = useState('artists');
   const [search, setSearch] = useState('');
   const [query, setQuery] = useState('');
   const [page, setPage] = useState(1);
@@ -23,7 +24,10 @@ export default function AddTrackToAlbumModal({ track, onClose, onSuccess }) {
       try {
         const params = new URLSearchParams({ page: String(page), limit: '20' });
         if (query) params.set('search', query);
-        const response = await fetch(`${config.apiBaseUrl}/api/music/albums?${params}`, {
+        const url = scope === 'artists'
+          ? `${config.apiBaseUrl}/api/music/tracks/${encodeURIComponent(track.ratingKey)}/artist-albums`
+          : `${config.apiBaseUrl}/api/music/albums?${params}`;
+        const response = await fetch(url, {
           signal: controller.signal
         });
         const result = await response.json();
@@ -40,7 +44,15 @@ export default function AddTrackToAlbumModal({ track, onClose, onSuccess }) {
     };
     loadAlbums();
     return () => controller.abort();
-  }, [query, page]);
+  }, [query, page, scope, track.ratingKey]);
+
+  const changeScope = nextScope => {
+    setScope(nextScope);
+    setPage(1);
+    setSearch('');
+    setQuery('');
+    setSelectedAlbumKey('');
+  };
 
   const handleAdd = async () => {
     if (!selectedAlbumKey || saving) return;
@@ -71,19 +83,27 @@ export default function AddTrackToAlbumModal({ track, onClose, onSuccess }) {
           <p style={styles.subtitle}>{track.title} - existing artist and metadata will be preserved.</p>
         </div>
         <div style={styles.body}>
-          <form onSubmit={event => {
+          <div role="group" aria-label="Album source">
+            <button type="button" onClick={() => changeScope('artists')} disabled={saving}
+              aria-pressed={scope === 'artists'}>Track artists' albums</button>
+            <button type="button" onClick={() => changeScope('all')} disabled={saving}
+              aria-pressed={scope === 'all'}>Search all albums</button>
+          </div>
+          {scope === 'all' ? <form onSubmit={event => {
             event.preventDefault();
             setPage(1);
             setQuery(search.trim());
           }}>
-            <label htmlFor="track-album-search">Search albums</label>
+            <label htmlFor="track-album-search">Search all albums</label>
             <input id="track-album-search" value={search} onChange={event => setSearch(event.target.value)} disabled={saving} />
             <button type="submit" disabled={saving}>Search</button>
-          </form>
+          </form> : <p>Albums associated with this track's artists, including linked artist credits.</p>}
           {error && <p role="alert">{error}</p>}
           {loading ? <p>Loading albums...</p> : (
             <div style={styles.artistsList}>
-              {albums.length === 0 && <p>No albums found.</p>}
+              {albums.length === 0 && <p>{scope === 'artists'
+                ? "No albums found for this track's artists. Use Search all albums to choose another album."
+                : 'No albums found.'}</p>}
               {albums.map(album => (
                 <label key={album.ratingKey} style={{
                   ...styles.artistOption,
@@ -100,7 +120,7 @@ export default function AddTrackToAlbumModal({ track, onClose, onSuccess }) {
               ))}
             </div>
           )}
-          {!query && totalPages > 1 && (
+          {scope === 'all' && !query && totalPages > 1 && (
             <div>
               <button disabled={loading || saving || page <= 1} onClick={() => setPage(page - 1)}>Previous</button>
               <span> Page {page} of {totalPages} </span>

@@ -31,6 +31,15 @@ class BookCompletionService {
     return userId || "default";
   }
 
+  async syncCustomOrderParts(mediaType, id, isCompleted, userId) {
+    if (this.normalizeUserId(userId) !== 'default') return;
+    const field = mediaType === 'chapter' ? 'chapterId' : 'sectionId';
+    await this.prisma.customOrderItem.updateMany({
+      where: { mediaType, [field]: id },
+      data: { isWatched: isCompleted }
+    });
+  }
+
   // ==========================================
   // BOOK COMPLETION TRACKING
   // ==========================================
@@ -195,6 +204,7 @@ class BookCompletionService {
 
       // Update book progress
       await this.updateBookProgressFromChapters(chapterId, userId);
+      await this.syncCustomOrderParts('chapter', chapterId, true, userId);
 
       console.log(`✅ Marked chapter ${chapterId} as completed`);
       return completion;
@@ -267,6 +277,7 @@ class BookCompletionService {
       if (!skipChapterUpdate) {
         await this.updateChapterProgressFromSections(sectionId, userId);
       }
+      await this.syncCustomOrderParts('section', sectionId, true, userId);
 
       console.log(`✅ Marked section ${sectionId} as completed`);
       return completion;
@@ -351,7 +362,7 @@ class BookCompletionService {
       
       if (isCurrentlyCompleted) {
         // Mark as not completed
-        return await this.prisma.chapterCompletion.upsert({
+        const completion = await this.prisma.chapterCompletion.upsert({
           where: {
             chapterId_userId: {
               chapterId,
@@ -370,6 +381,9 @@ class BookCompletionService {
             updatedAt: new Date()
           }
         });
+        await this.syncCustomOrderParts('chapter', chapterId, false, normalizedUserId);
+        await this.updateBookProgressFromChapters(chapterId, normalizedUserId);
+        return completion;
       } else {
         // Mark as completed
         return await this.markChapterCompleted(chapterId, normalizedUserId);
@@ -396,7 +410,7 @@ class BookCompletionService {
       
       if (isCurrentlyCompleted) {
         // Mark as not completed
-        return await this.prisma.sectionCompletion.upsert({
+        const completion = await this.prisma.sectionCompletion.upsert({
           where: {
             sectionId_userId: {
               sectionId,
@@ -415,6 +429,19 @@ class BookCompletionService {
             updatedAt: new Date()
           }
         });
+        await this.syncCustomOrderParts('section', sectionId, false, normalizedUserId);
+        const section = await this.prisma.bookSection.findUnique({
+          where: { id: sectionId }, select: { chapterId: true }
+        });
+        if (section) {
+          await this.prisma.chapterCompletion.updateMany({
+            where: { chapterId: section.chapterId, userId: normalizedUserId },
+            data: { isCompleted: false, completedAt: null }
+          });
+          await this.syncCustomOrderParts('chapter', section.chapterId, false, normalizedUserId);
+          await this.updateBookProgressFromChapters(section.chapterId, normalizedUserId);
+        }
+        return completion;
       } else {
         // Mark as completed
         return await this.markSectionCompleted(sectionId, normalizedUserId);
@@ -616,6 +643,7 @@ class BookCompletionService {
       }
     } catch (error) {
       console.error('Error updating book progress from chapters:', error);
+      throw error;
     }
   }
 
@@ -642,6 +670,7 @@ class BookCompletionService {
       }
     } catch (error) {
       console.error('Error updating chapter progress from sections:', error);
+      throw error;
     }
   }
 

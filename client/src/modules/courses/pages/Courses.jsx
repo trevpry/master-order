@@ -396,12 +396,13 @@ const Courses = ({ HistoryAssignmentComponent }) => {
         method: 'POST'
       });
 
-      if (!response.ok) throw new Error('Failed to scrape videos');
-      
       const result = await response.json();
 
-      if (!result.success) {
-        throw new Error(result.message || 'Failed to scrape videos');
+      if (!response.ok || !result.success) {
+        throw new Error(result.error || result.message || 'Failed to scrape videos');
+      }
+      if (!result.data.videosFound) {
+        throw new Error('No lectures found. The course has not been marked as imported; please try again.');
       }
 
       // Mark course as "added" in local state
@@ -409,11 +410,13 @@ const Courses = ({ HistoryAssignmentComponent }) => {
       newAddedCourses.add(course.id);
       setAddedCourses(newAddedCourses);
       localStorage.setItem('addedCourses', JSON.stringify([...newAddedCourses]));
+      await fetchCourses();
 
       const message = `🎉 Video scraping completed!\n\n` +
                     `📊 Results:\n` +
                     `• Videos Found: ${result.data.videosFound || 0}\n` +
                     `• Videos Added: ${result.data.videosAdded || 0}\n` +
+                    `• Videos Updated: ${result.data.videosUpdated || 0}\n` +
                     `• Videos Skipped: ${result.data.videosSkipped || 0} (already in database)\n\n` +
                     `✅ All course videos have been processed!`;
       alert(message);
@@ -632,8 +635,8 @@ const Courses = ({ HistoryAssignmentComponent }) => {
           <>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
               {filteredCourses.map((course) => {
-                const isAdded = addedCourses.has(course.id);
                 const videoCount = course.videos ? course.videos.length : 0;
+                const isAdded = addedCourses.has(course.id) && videoCount > 0;
                 const watchedCount = course.videos ? course.videos.filter(v => v.watched).length : 0;
                 
                 return (
@@ -724,8 +727,7 @@ const Courses = ({ HistoryAssignmentComponent }) => {
 
                       {/* Action Buttons */}
                       <div className="mt-4 pt-3 border-t border-gray-100 space-y-2">
-                        {!isAdded && (
-                          <button
+                        <button
                             onClick={() => handleScrapeVideos(course)}
                             disabled={loading}
                             className="w-full bg-blue-600 hover:bg-blue-700 text-white text-xs py-2 px-3 rounded font-medium disabled:bg-gray-400"
@@ -737,11 +739,10 @@ const Courses = ({ HistoryAssignmentComponent }) => {
                               </>
                             ) : (
                               <>
-                                📥 Add Course Videos
+                                {videoCount > 0 ? 'Refresh Course Videos' : '📥 Add Course Videos'}
                               </>
                             )}
-                          </button>
-                        )}
+                        </button>
                         
                         <button
                           onClick={() => setOrderCourse(course)}

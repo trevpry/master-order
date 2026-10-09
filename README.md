@@ -10,10 +10,18 @@ A comprehensive media management application that intelligently curates your nex
 - **Multi-Source Integration**: Combines Plex library data with TVDB and ComicVine metadata
 - **Custom Order Management**: Create and manage custom viewing orders for complex franchises
 - **Course Library**: Browse courses under **Media > Courses**, independently of History Plus. Use **Add to Custom Order** on a course or lecture to select one, several, or all lectures. Lectures are appended in course order as web videos, with duplicate URLs skipped and independent watch/progress tracking per custom order. Import course videos first if a course has no lectures yet. Existing History Plus course URLs, video linking, and AI event assignment remain available.
+- **Course Video Import**: **Add Course Videos** supports current Great Courses lecture lists and older numbered headings. **Refresh Course Videos** safely retries imports, skips existing lectures, and replaces older placeholder lecture URLs with the provider's `?lecplay=` links without resetting lecture watch status. Pages with no detected lectures report an error rather than a successful empty import.
 - **Plex Watch Tracking**: Custom-order movies and episodes are automatically marked watched only when Plex reports a positive `viewCount` during sync or sends a `media.scrobble` webhook. Playback activity (`lastViewedAt`, play, resume, pause, or stop) alone does not mark items watched. Manual watched marking remains available.
 - **Comic Publisher Integration**: Automatically extracts and displays comic publisher information from ComicVine
 - **Advanced Statistics**: Publisher breakdowns, author statistics, and comprehensive watch analytics
 - **Real-time Artwork**: Dynamic artwork fetching and caching from TVDB
+
+### Book Chapters and Sections
+- In **Media > Books**, open a book and use **Add Chapters / Sections to Custom Order**, or the add-to-order button beside an individual chapter or section.
+- From a custom order, **Add Book Chapters / Sections** opens the book library with that order preselected.
+- Select chapters, sections, or a mixture. Items are appended in book order and existing entries are skipped. Chapters and sections are distinct entries; selecting a chapter does not also insert its sections.
+- Read/unread status is shared with the book library and all orders referencing the same content. Completing a section does not directly mark the whole book complete; existing section-to-chapter and chapter-to-book completion rules apply. Up Next supports these items under the book filter, including reading sessions.
+- Schema deployment is required: the SQLite migration is `20261009203004_add_custom_order_book_parts`. All three Prisma schemas include the new nullable chapter/section references; PostgreSQL deployments should use the project's existing PostgreSQL schema setup and safe schema-deployment workflow.
 
 ### Notes & Daily Journaling
 - **Daily Notes System**: Structured daily journaling with mood tracking, goals, habits, and gratitude
@@ -24,7 +32,7 @@ A comprehensive media management application that intelligently curates your nex
 
 ### Music Library
 - **Disconnect Album**: Removes a track's local album association without deleting the track or changing its other metadata, artist credits, or work links. Disconnected tracks remain on the artist details page under **Tracks Not In Albums** (and retain any linked-artist listings). Plex music sync preserves the disconnection.
-- **Add to Album**: Use **Add to Album** under **Tracks Not In Albums** on artist details to browse or search any album in the library. Adding a disconnected track changes only its album association; its existing artist, metadata, credits, work links, and track numbering are preserved.
+- **Add to Album**: Use **Add to Album** under **Tracks Not In Albums** on artist details. The picker defaults to albums associated with the track's primary and linked artists (including linked album artist credits), with duplicate albums shown only once. Choose **Search all albums** to browse or search the entire library, or return to **Track artists' albums**. Adding a disconnected track changes only its album association; its existing artist, metadata, credits, work links, and track numbering are preserved.
 
 ### Technical Stack
 - **Frontend**: React with Vite, TailwindCSS

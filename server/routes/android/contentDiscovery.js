@@ -122,7 +122,7 @@ function formatAndroidCustomOrderResponse(upNextData, baseUrl) {
   const baseData = {
     id: upNextData.customOrderItemId || upNextData.id,
     title: upNextData.title,
-    type: upNextData.type,
+    type: ['chapter', 'section'].includes(upNextData.type) ? 'book' : upNextData.type,
     orderName: upNextData.customOrderName || 'Custom Order',
     summary: upNextData.summary || '',
     duration: upNextData.duration || 0,
@@ -154,7 +154,11 @@ function formatAndroidCustomOrderResponse(upNextData, baseUrl) {
       seriesTitle: upNextData.seriesTitle || upNextData.grandparentTitle || null
     }),
     // Book-specific fields for custom order books
-    ...(upNextData.type === 'book' && {
+    ...(['book', 'chapter', 'section'].includes(upNextData.type) && {
+      readingContentType: upNextData.type,
+      bookId: upNextData.bookId,
+      chapterId: upNextData.chapterId,
+      sectionId: upNextData.sectionId,
       bookTitle: upNextData.bookTitle,
       bookAuthor: upNextData.bookAuthor,
       bookYear: upNextData.bookYear,

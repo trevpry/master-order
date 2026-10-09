@@ -85,10 +85,16 @@ test('album picker browses, searches across artists, selects an album and saves 
   picker.render();
   await settle();
   let tree = picker.render();
+  assert.equal(requests[0].url, 'http://local/api/music/tracks/track/artist-albums');
+  assert.equal(find(tree, node => node.type === 'button' && node.children.includes("Track artists' albums")).props['aria-pressed'], true);
+  find(tree, node => node.type === 'button' && node.children.includes('Search all albums')).props.onClick();
+  picker.render();
+  await settle();
+  tree = picker.render();
   find(tree, node => node.type === 'button' && node.children.includes('Next')).props.onClick();
   picker.render();
   await settle();
-  assert.ok(requests[1].url.includes('page=2'));
+  assert.ok(requests[2].url.includes('page=2'));
   tree = picker.render();
   find(tree, node => node.type === 'input' && node.props.id === 'track-album-search')
     .props.onChange({ target: { value: 'Other Album' } });
@@ -96,17 +102,84 @@ test('album picker browses, searches across artists, selects an album and saves 
   find(tree, node => node.type === 'form').props.onSubmit({ preventDefault() {} });
   picker.render();
   await settle();
-  assert.ok(requests[2].url.includes('page=1'));
-  assert.ok(requests[2].url.includes('search=Other+Album'));
+  assert.ok(requests[3].url.includes('page=1'));
+  assert.ok(requests[3].url.includes('search=Other+Album'));
   tree = picker.render();
   assert.ok(find(tree, node => node.children.includes('Other Artist')));
   find(tree, node => node.type === 'input' && node.props.type === 'radio').props.onChange();
   tree = picker.render();
   await find(tree, node => node.type === 'button' && node.children.includes('Add to Album')).props.onClick();
-  assert.equal(requests[3].url, 'http://local/api/music/tracks/track/album');
-  assert.equal(requests[3].options.method, 'POST');
-  assert.deepEqual(JSON.parse(requests[3].options.body), { albumRatingKey: 'other-album' });
+  assert.equal(requests[4].url, 'http://local/api/music/tracks/track/album');
+  assert.equal(requests[4].options.method, 'POST');
+  assert.deepEqual(JSON.parse(requests[4].options.body), { albumRatingKey: 'other-album' });
   assert.equal(picker.selectedTrack(), updatedTrack);
+});
+
+test('returning to track artists clears the global search, pagination and selected album', async () => {
+  const requests = [];
+  const picker = modal(async url => {
+    requests.push(url);
+    return { ok: true, json: async () => url.includes('artist-albums')
+      ? [{ ratingKey: 'artist-album', title: 'Artist Album' }]
+      : { albums: [{ ratingKey: 'global-album', title: 'Global Album' }], totalPages: 3 } };
+  });
+  picker.render();
+  await settle();
+  let tree = picker.render();
+  find(tree, node => node.type === 'button' && node.children.includes('Search all albums')).props.onClick();
+  picker.render();
+  await settle();
+  tree = picker.render();
+  find(tree, node => node.type === 'input' && node.props.type === 'radio').props.onChange();
+  tree = picker.render();
+  assert.equal(find(tree, node => node.type === 'button' && node.children.includes('Add to Album')).props.disabled, false);
+  find(tree, node => node.type === 'button' && node.children.includes('Next')).props.onClick();
+  picker.render();
+  await settle();
+  tree = picker.render();
+  find(tree, node => node.type === 'input' && node.props.id === 'track-album-search')
+    .props.onChange({ target: { value: 'Global' } });
+  tree = picker.render();
+  find(tree, node => node.type === 'form').props.onSubmit({ preventDefault() {} });
+  picker.render();
+  await settle();
+  tree = picker.render();
+  find(tree, node => node.type === 'button' && node.children.includes("Track artists' albums")).props.onClick();
+  picker.render();
+  await settle();
+  tree = picker.render();
+  assert.equal(requests.at(-1), 'http://local/api/music/tracks/track/artist-albums');
+  assert.ok(find(tree, node => node.children.includes('Artist Album')));
+  assert.equal(find(tree, node => node.type === 'button' && node.children.includes('Add to Album')).props.disabled, true);
+  assert.equal(find(tree, node => node.type === 'form'), undefined);
+});
+
+test('empty artist albums offer global search without automatically switching scope', async () => {
+  const requests = [];
+  const picker = modal(async url => {
+    requests.push(url);
+    return { ok: true, json: async () => [] };
+  });
+  picker.render();
+  await settle();
+  const tree = picker.render();
+  assert.equal(requests.length, 1);
+  assert.ok(find(tree, node => node.type === 'p' &&
+    node.children.includes("No albums found for this track's artists. Use Search all albums to choose another album.")));
+  assert.ok(find(tree, node => node.type === 'button' && node.children.includes('Search all albums')));
+});
+
+test('artist album load failures are visible and do not silently browse all albums', async () => {
+  const requests = [];
+  const picker = modal(async url => {
+    requests.push(url);
+    return { ok: false, json: async () => ({ error: 'Track not found' }) };
+  });
+  picker.render();
+  await settle();
+  const tree = picker.render();
+  assert.equal(find(tree, node => node.props.role === 'alert').children[0], 'Track not found');
+  assert.equal(requests.length, 1);
 });
 
 test('album picker displays save errors without reporting success', async () => {

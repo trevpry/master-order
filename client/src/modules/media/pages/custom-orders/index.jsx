@@ -3994,7 +3994,7 @@ const handleSearchComics = async (e) => {
                        item.mediaType === 'tv' ? '📺' : 
                        item.mediaType === 'movie' ? '🎬' :
                        item.mediaType === 'comic' ? '📚' :
-                       item.mediaType === 'book' ? '📖' :
+                       ['book', 'chapter', 'section'].includes(item.mediaType) ? '📖' :
                        item.mediaType === 'shortstory' ? '📖' : 
                        item.mediaType === 'webvideo' ? '🎬' : 
                        item.mediaType === 'game' ? '🎮' : '📄'}
@@ -4045,7 +4045,7 @@ const handleSearchComics = async (e) => {
                           ) : (
                             item.title
                           )
-                        ) : item.mediaType === 'book' ? (
+                        ) : ['book', 'chapter', 'section'].includes(item.mediaType) ? (
                           // Book - link to unified Books page
                           item.bookId ? (
                             <Link 
@@ -4132,10 +4132,10 @@ const handleSearchComics = async (e) => {
                           )}
                         </div>
                       )}
-                      {(item.mediaType === 'book' || item.mediaType === 'shortstory') && (
+                      {(['book', 'chapter', 'section', 'shortstory'].includes(item.mediaType)) && (
                         <p className="item-series">
-                          {item.bookAuthor && `${item.bookAuthor}`}
-                          {item.bookYear && ` (${item.bookYear})`}
+                          {(item.book?.author || item.bookAuthor) && `${item.book?.author || item.bookAuthor}`}
+                          {(item.book?.publishYear || item.bookYear) && ` (${item.book?.publishYear || item.bookYear})`}
                         </p>
                       )}
                       {item.mediaType === 'webvideo' && (
@@ -4153,9 +4153,11 @@ const handleSearchComics = async (e) => {
                           {item.mediaType === 'suborder' ? 'sub-order' : item.mediaType}
                         </span>
                         <span className={`item-status ${item.isWatched ? 'watched' : 'unwatched'}`}>
-                          {item.isWatched ? 'Watched' : 'Unwatched'}
+                          {['chapter', 'section'].includes(item.mediaType)
+                            ? (item.isWatched ? 'Read' : 'Unread')
+                            : (item.isWatched ? 'Watched' : 'Unwatched')}
                         </span>
-                        {item.mediaType === 'book' && item.book && (
+                        {['book', 'chapter', 'section'].includes(item.mediaType) && item.book && (
                           <span className={`item-owned ${item.book.owned ? 'owned' : 'not-owned'}`}>
                             {item.book.owned ? '📖 Owned' : '📖 Not Owned'}
                           </span>
@@ -4219,7 +4221,11 @@ const handleSearchComics = async (e) => {
                       </>
                     ) : (
                       <>
-                        {item.mediaType === 'episode' ? (
+                        {['chapter', 'section'].includes(item.mediaType) ? (
+                          <Link to={`/media/books?id=${item.bookId}`} className="book-link">
+                            View in Book Library
+                          </Link>
+                        ) : item.mediaType === 'episode' ? (
                           <Button
                             onClick={() => handleEditEpisodeTitle(item)}
                             className="secondary"
@@ -4285,7 +4291,7 @@ const handleSearchComics = async (e) => {
                             className="primary"
                             size="small"
                           >
-                            Mark as Watched
+                            {['chapter', 'section'].includes(item.mediaType) ? 'Mark as Read' : 'Mark as Watched'}
                           </Button>
                         )}
                         {item.isWatched && (
@@ -4294,7 +4300,7 @@ const handleSearchComics = async (e) => {
                             className="secondary"
                             size="small"
                           >
-                            Mark as Unwatched
+                            {['chapter', 'section'].includes(item.mediaType) ? 'Mark as Unread' : 'Mark as Unwatched'}
                           </Button>
                         )}
                         <Button
@@ -4555,4 +4561,3 @@ const handleSearchComics = async (e) => {
 }
 
 export default CustomOrders;
-

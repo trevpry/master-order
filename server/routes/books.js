@@ -23,6 +23,7 @@ const BookService = require('../services/BookService');
 const BookCompletionService = require('../services/BookCompletionService');
 const BookIntegrationService = require('../services/BookIntegrationService');
 const prisma = require('../prismaClient');
+router.use(require('./bookCustomOrders')(prisma));
 
 // Initialize services
 const bookService = new BookService();

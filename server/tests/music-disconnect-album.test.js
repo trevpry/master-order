@@ -51,6 +51,80 @@ function routeHandlers(plexDb, prisma = {}) {
   return handlers;
 }
 
+test('track artist albums include primary and all linked artists without duplicate albums or artist queries', async () => {
+  const queries = [];
+  const shared = { ratingKey: 'shared', title: 'Shared Album', year: 2024 };
+  const primary = { ratingKey: 'primary-album', title: 'Primary Album', year: 2020 };
+  const credited = { ratingKey: 'credited-album', title: 'Credited Album', year: 2023 };
+  const service = databaseService({
+    plexTrack: {
+      findUnique: async args => {
+        assert.deepEqual(plain(args), {
+          where: { ratingKey: 'track' },
+          include: { trackArtists: { select: { artistKey: true } } }
+        });
+        return {
+          grandparentRatingKey: 'primary', removed: false,
+          trackArtists: [{ artistKey: 'primary' }, { artistKey: 'credited' }, { artistKey: 'credited' }]
+        };
+      }
+    },
+    plexAlbum: {
+      findMany: async args => {
+        const query = plain(args);
+        queries.push(query);
+        const key = query.where.OR[0].parentRatingKey;
+        assert.equal(query.where.removed, false);
+        assert.deepEqual(query.where.OR[1], { albumArtists: { some: { artistKey: key } } });
+        return key === 'primary' ? [primary, shared] : [shared, credited];
+      }
+    }
+  });
+  const res = response();
+  await routeHandlers(service).get('/tracks/:ratingKey/artist-albums')({ params: { ratingKey: 'track' } }, res);
+  assert.equal(res.statusCode, 200);
+  assert.deepEqual(plain(res.body), [shared, credited, primary]);
+  assert.equal(queries.length, 2);
+});
+
+test('track artist album recommendations do not default to every album when artist credits are absent', async () => {
+  const service = databaseService({
+    plexTrack: { findUnique: async () => ({ grandparentRatingKey: null, trackArtists: [], removed: false }) },
+    plexAlbum: { findMany: async () => assert.fail('No artist keys must not query the album library') }
+  });
+  const res = response();
+  await routeHandlers(service).get('/tracks/:ratingKey/artist-albums')({ params: { ratingKey: 'track' } }, res);
+  assert.equal(res.statusCode, 200);
+  assert.deepEqual(plain(res.body), []);
+});
+
+test('track artist albums support credited artists without a primary artist and reject missing or removed tracks', async () => {
+  const album = { ratingKey: 'album', title: 'Album' };
+  for (const track of [null, { removed: true }, {
+    grandparentRatingKey: null, trackArtists: [{ artistKey: 'credited' }], removed: false
+  }]) {
+    const service = databaseService({
+      plexTrack: { findUnique: async () => track },
+      plexAlbum: { findMany: async () => [album] }
+    });
+    const res = response();
+    await routeHandlers(service).get('/tracks/:ratingKey/artist-albums')({ params: { ratingKey: 'track' } }, res);
+    assert.equal(res.statusCode, !track || track.removed ? 404 : 200);
+    if (res.statusCode === 200) assert.deepEqual(plain(res.body), [album]);
+    else assert.equal(res.body.error, 'Track not found');
+  }
+});
+
+test('track artist album query failures propagate rather than returning an empty success', async () => {
+  const service = databaseService({
+    plexTrack: { findUnique: async () => ({
+      grandparentRatingKey: 'artist', trackArtists: [], removed: false
+    }) },
+    plexAlbum: { findMany: async () => { throw new Error('Album lookup failed'); } }
+  });
+  await assert.rejects(service.getAlbumsForTrackArtists('track'), /Album lookup failed/);
+});
+
 test('disconnect endpoint removes only the album relation and preserves all track metadata', async () => {
   let track = {
     ratingKey: 'track', parentRatingKey: 'album', grandparentRatingKey: 'artist',

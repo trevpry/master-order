@@ -43,6 +43,7 @@ import {
   Upload
 } from 'lucide-react';
 import readingSessionService from '../services/readingSessionService';
+import AddBookPartsToOrderModal from '../components/books/AddBookPartsToOrderModal';
 import {
   buildExistingEventsCsv,
   copyTextToClipboard,
@@ -127,8 +128,10 @@ const DEFAULT_SHARED_EVENT_DECISION_GUIDANCE = `SHARED EVENT DECISION GUIDANCE:
 
 const Books = () => {
   const [searchParams] = useSearchParams();
+  const requestedBookId = searchParams.get('id');
   const [books, setBooks] = useState([]);
   const [selectedBook, setSelectedBook] = useState(null);
+  const [orderPartSelection, setOrderPartSelection] = useState(null);
   const [selectedChapter, setSelectedChapter] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -213,14 +216,29 @@ const Books = () => {
 
   // Handle book ID from URL parameter
   useEffect(() => {
-    const bookId = searchParams.get('id');
-    if (bookId && books.length > 0) {
-      const book = books.find(b => b.id === parseInt(bookId));
-      if (book) {
-        setSelectedBook(book);
+    if (!requestedBookId) return;
+    const controller = new AbortController();
+    const loadRequestedBook = async () => {
+      try {
+        const response = await fetch(`/api/books/${requestedBookId}?includeChapters=true&includeProgress=true`, {
+          signal: controller.signal
+        });
+        const result = await response.json();
+        if (!response.ok || !result.success) {
+          throw new Error(result.error || 'Failed to load linked book');
+        }
+        setSelectedBook(result.data);
+        setSelectedChapter(null);
+      } catch (loadError) {
+        if (loadError.name !== 'AbortError') {
+          console.error('Error loading linked book:', loadError);
+          setError(loadError.message);
+        }
       }
-    }
-  }, [searchParams, books]);
+    };
+    loadRequestedBook();
+    return () => controller.abort();
+  }, [requestedBookId]);
 
   // Add window focus and visibility listeners for reading session synchronization
   useEffect(() => {
@@ -1092,6 +1110,13 @@ const Books = () => {
               </div>
             </div>
             <div className="space-y-3">
+              <button
+                type="button"
+                onClick={() => setOrderPartSelection({ book: selectedBook })}
+                className="px-3 py-2 text-sm bg-green-600 text-white rounded-lg hover:bg-green-700"
+              >
+                Add Chapters / Sections to Custom Order
+              </button>
               {selectedBook.chapters && selectedBook.chapters.length > 0 ? selectedBook.chapters.map(chapter => {
                 // Check if the chapter is completed for the current user ("default")
                 const userCompletion = chapter.chapterCompletions && chapter.chapterCompletions.find(completion => 
@@ -1130,6 +1155,15 @@ const Books = () => {
                     </div>
                     
                     <div className="flex items-center space-x-2">
+                      <button
+                        type="button"
+                        onClick={() => setOrderPartSelection({ book: selectedBook, part: { type: 'chapter', id: chapter.id } })}
+                        className="p-2 text-green-600 hover:bg-green-100 rounded"
+                        title="Add chapter to custom order"
+                        aria-label={`Add chapter ${chapter.chapterNumber} to custom order`}
+                      >
+                        <List className="w-4 h-4" />
+                      </button>
                       <button
                         onClick={() => openEventLinker('chapter', chapter.id, `Chapter ${chapter.chapterNumber}: ${chapter.title}`)}
                         className="p-2 text-amber-600 hover:bg-amber-100 rounded"
@@ -1191,6 +1225,15 @@ const Books = () => {
                           </div>
                           
                           <div className="flex items-center space-x-1">
+                            <button
+                              type="button"
+                              onClick={() => setOrderPartSelection({ book: selectedBook, part: { type: 'section', id: section.id } })}
+                              className="p-1 text-green-600 hover:bg-green-100 rounded"
+                              title="Add section to custom order"
+                              aria-label={`Add section ${section.sectionNumber} to custom order`}
+                            >
+                              <List className="w-3 h-3" />
+                            </button>
                             <button
                               onClick={() => openEventLinker('section', section.id, `Section: ${section.title}`)}
                               className="p-1 text-amber-600 hover:bg-amber-100 rounded"
@@ -1953,6 +1996,14 @@ const Books = () => {
             </form>
           </div>
         </div>
+      )}
+
+      {orderPartSelection && (
+        <AddBookPartsToOrderModal
+          book={orderPartSelection.book}
+          initialPart={orderPartSelection.part}
+          onClose={() => setOrderPartSelection(null)}
+        />
       )}
 
       {/* Create Book Modal */}

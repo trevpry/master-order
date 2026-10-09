@@ -92,6 +92,12 @@ const OrderHeader = ({
           Add Book
         </Button>
         <Button
+          onClick={() => navigate(`/media/books?customOrderId=${viewingOrderItems.id}`)}
+          className="secondary"
+        >
+          Add Book Chapters / Sections
+        </Button>
+        <Button
           onClick={() => {
             setShowComicForm(true);
             setComicFormData({ series: '', year: '', issue: '', title: '' });

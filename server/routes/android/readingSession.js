@@ -10,6 +10,7 @@ const { asyncHandler, sendSuccess, sendBadRequest, sendServerError } = require('
 const { validateRequiredFields } = require('../../middleware/validation');
 const WatchLogService = require('../../watchLogService');
 const BookCompletionService = require('../../services/BookCompletionService');
+const { BookCustomOrderService, isBookPart, normalizeBookPartProgress } = require('../../services/BookCustomOrderService');
 const prisma = require('../../prismaClient');
 const musicPlaybackService = require('../../services/musicPlaybackService').getInstance();
 
@@ -166,19 +167,23 @@ function createReadingSessionRoutes(prisma) {
     }
 
     // Validate media type
-    if (!['book', 'comic', 'shortstory'].includes(mediaType)) {
+    if (!['book', 'comic', 'shortstory', 'chapter', 'section'].includes(mediaType)) {
       return sendBadRequest(res, 'Reading sessions are only supported for books, comics, and stories');
+    }
+    if (['chapter', 'section'].includes(mediaType) && !actualCustomOrderItemId) {
+      return sendBadRequest(res, 'Chapter and section sessions require a valid book-part custom order item');
     }
 
     console.log(`📱 Start reading session - mediaType: ${mediaType}, title: ${title}, customOrderItemId: ${customOrderItemId}, id: ${id}, actualId: ${actualCustomOrderItemId}`);
 
     let finalCustomOrderItemId = null;
+    let bookPartContext = {};
     
     if (actualCustomOrderItemId) {
       // Validate and parse customOrderItemId (if provided)
-      const parsedId = parseInt(actualCustomOrderItemId);
-      if (!Number.isInteger(parsedId)) {
-        return sendBadRequest(res, 'customOrderItemId must be a valid integer');
+      const parsedId = Number(actualCustomOrderItemId);
+      if (!Number.isSafeInteger(parsedId) || parsedId <= 0) {
+        return sendBadRequest(res, 'customOrderItemId must be a positive integer');
       }
 
       // Verify the custom order item exists
@@ -192,6 +197,17 @@ function createReadingSessionRoutes(prisma) {
 
       console.log(`✅ Validated customOrderItemId: ${parsedId} for item: "${existingItem.title}"`);
       finalCustomOrderItemId = parsedId;
+      if (isBookPart(existingItem)) {
+        if (['chapter', 'section'].includes(mediaType) && mediaType !== existingItem.mediaType) {
+          return sendBadRequest(res, 'Reading media type does not match the selected book part');
+        }
+        bookPartContext = {
+          bookId: existingItem.bookId, chapterId: existingItem.chapterId, sectionId: existingItem.sectionId
+        };
+      }
+      if (['chapter', 'section'].includes(mediaType) && !bookPartContext.bookId) {
+        return sendBadRequest(res, 'Chapter and section sessions require a valid book-part custom order item');
+      }
 
       // Verify the title matches (optional check for data consistency)
       if (existingItem.title !== title) {
@@ -225,10 +241,11 @@ function createReadingSessionRoutes(prisma) {
 
     // Start reading session using the service directly
     const readingSession = await watchLogService.startReading({
-      mediaType,
+      mediaType: ['chapter', 'section'].includes(mediaType) ? 'book' : mediaType,
       title,
       seriesTitle,
-      customOrderItemId: finalCustomOrderItemId
+      customOrderItemId: finalCustomOrderItemId,
+      ...bookPartContext
     });
 
     const normalizedMusic = await normalizeAndroidMusicPayload(music || musicTrack);
@@ -310,12 +327,16 @@ function createReadingSessionRoutes(prisma) {
     console.log('📱 Android app requesting to stop reading session...');
     
     const { progress } = req.body;
-    const requestedItemId = parseInt(req.body.customOrderItemId ?? req.body.id, 10);
+    const requestedId = req.body.customOrderItemId ?? req.body.id;
+    const requestedItemId = requestedId === undefined ? null : Number(requestedId);
+    if (requestedItemId !== null && (!Number.isInteger(requestedItemId) || requestedItemId <= 0)) {
+      return sendBadRequest(res, 'customOrderItemId must be a positive integer');
+    }
 
     // Get active reading session (scoped to the item when the app provides it)
-    const activeSession =
-      (Number.isInteger(requestedItemId) && await watchLogService.getActiveReadingSession(requestedItemId)) ||
-      await watchLogService.getActiveReadingSession();
+    const activeSession = requestedItemId === null
+      ? await watchLogService.getActiveReadingSession()
+      : await watchLogService.getActiveReadingSession(requestedItemId);
     
     if (!activeSession) {
       return sendBadRequest(res, 'No active reading session found');
@@ -323,6 +344,32 @@ function createReadingSessionRoutes(prisma) {
 
     // Check if this is a History Plus session
     const isHistoryPlusSession = activeSession.seriesTitle && activeSession.seriesTitle.startsWith('HISTORY_PLUS:');
+    const readingItem = activeSession.customOrderItemId
+      ? await prisma.customOrderItem.findUnique({ where: { id: activeSession.customOrderItemId } })
+      : null;
+    if (readingItem && isBookPart(readingItem)) {
+      let normalizedProgress;
+      try {
+        normalizedProgress = normalizeBookPartProgress(progress);
+      } catch (error) {
+        if (error instanceof TypeError || error instanceof RangeError) {
+          return sendBadRequest(res, error.message);
+        }
+        throw error;
+      }
+      const markedAsRead = await new BookCustomOrderService(prisma).updateReadingProgress(readingItem, normalizedProgress);
+      const stopped = await watchLogService.stopReading(activeSession.id);
+      await clearAndroidMusicState();
+      return sendSuccess(res, {
+        success: true, sessionId: stopped.id ?? activeSession.id,
+        sessionDeleted: Boolean(stopped.deleted),
+        title: activeSession.title, mediaType: 'book',
+        totalActiveTime: stopped.totalTime, progressUpdated: markedAsRead,
+        progress: progress || null, markedAsRead,
+        message: `Stopped reading session for "${activeSession.title}"`,
+        completedAt: stopped.endTime, timestamp: new Date().toISOString()
+      });
+    }
     
     console.log(`📱 Session type: ${isHistoryPlusSession ? 'History Plus' : 'Regular'}, seriesTitle: ${activeSession.seriesTitle}`);
 

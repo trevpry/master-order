@@ -15,6 +15,9 @@ function createCustomOrdersRoutes(prisma) {
   
   // Import required services
   const getArtworkUrl = (item, baseUrl) => {
+    if (['chapter', 'section'].includes(item.mediaType) && item.book?.coverUrl) {
+      return item.book.coverUrl;
+    }
     // Check if we have cached artwork
     if (item.localArtworkPath) {
       const filename = item.localArtworkPath.includes('\\') || item.localArtworkPath.includes('/') 
@@ -227,7 +230,10 @@ function createCustomOrdersRoutes(prisma) {
             id: item.id,
             customOrderId: customOrder.id,
             customOrderName: customOrder.name,
-            mediaType: item.mediaType,
+            mediaType: ['chapter', 'section'].includes(item.mediaType) ? 'book' : item.mediaType,
+            readingContentType: ['chapter', 'section'].includes(item.mediaType) ? item.mediaType : null,
+            chapterId: item.chapterId,
+            sectionId: item.sectionId,
             title: item.title,
             sortOrder: item.sortOrder,
             isWatched: item.isWatched,
@@ -255,11 +261,11 @@ function createCustomOrdersRoutes(prisma) {
             comicCoverDate: item.comicCoverDate,
             
             // Book-specific fields
-            bookTitle: item.bookTitle,
-            bookAuthor: item.bookAuthor,
-            bookYear: item.bookYear,
-            bookPublisher: item.bookPublisher,
-            bookPageCount: item.bookPageCount,
+            bookTitle: item.bookTitle || item.book?.title,
+            bookAuthor: item.bookAuthor || item.book?.author,
+            bookYear: item.bookYear || item.book?.publishYear,
+            bookPublisher: item.bookPublisher || item.book?.publisher,
+            bookPageCount: item.bookPageCount || item.book?.pageCount,
             bookCurrentPage: item.bookCurrentPage,
             bookPercentRead: item.bookPercentRead,
             

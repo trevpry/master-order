@@ -6,6 +6,7 @@ const { markCustomOrderItemAsWatched } = require('../getNextCustomOrder');
 const { validateRequiredFields, validateMediaTypeAndTitle, validateReadingOperation, validateViewingOperation, validateEpisodeMovieMediaType } = require('../middleware/validation');
 const { sendBadRequest, sendNotFound, sendSuccess, sendServerError, asyncHandler, logError } = require('../utils/responses');
 const BookCompletionService = require('../services/BookCompletionService');
+const { BookCustomOrderService, isBookPart, normalizeBookPartProgress } = require('../services/BookCustomOrderService');
 
 const prisma = require('../prismaClient'); // Use shared singleton instance
 
@@ -63,11 +64,15 @@ router.post('/mark-custom-order-item-watched/:itemId', asyncHandler(async (req, 
   }
 
   // Mark the custom order item as watched using the actual database ID
+  if (isBookPart(customOrderItem)) {
+    await new BookCustomOrderService(prisma).setCompleted(customOrderItem, true);
+  }
   await markCustomOrderItemAsWatched(actualItemId);
 
   // Create a watch log entry for statistics
   let duration = null;
   let mediaType = customOrderItem.mediaType;
+  if (isBookPart(customOrderItem)) mediaType = 'book';
   // Map custom order media types to watch log media types
   if (customOrderItem.mediaType === 'episode') {
     mediaType = 'tv';
@@ -129,6 +134,11 @@ router.post('/mark-custom-order-item-watched/:itemId', asyncHandler(async (req, 
       activityType: (mediaType === 'book' || mediaType === 'comic' || mediaType === 'shortstory') ? 'read' : 'watch',
       isCompleted: true
     };
+  if (isBookPart(customOrderItem)) {
+    watchLogParams.bookId = customOrderItem.bookId;
+    watchLogParams.chapterId = customOrderItem.chapterId;
+    watchLogParams.sectionId = customOrderItem.sectionId;
+  }
 
   await watchLogService.logWatched(watchLogParams);
   console.log(`Created watch log entry for custom order item ${actualItemId} (original ID: ${itemId})`);
@@ -336,6 +346,7 @@ router.post('/reading/start', validateReadingOperation, asyncHandler(async (req,
 
   // Validate customOrderItemId if provided - Fix for foreign key constraint error
   let finalCustomOrderItemId = null;
+  let bookPartContext = {};
   if (customOrderItemId) {
       const parsedId = parseInt(customOrderItemId);
       if (Number.isInteger(parsedId)) {
@@ -346,6 +357,13 @@ router.post('/reading/start', validateReadingOperation, asyncHandler(async (req,
         
         if (existingItem) {
           finalCustomOrderItemId = parsedId;
+          if (isBookPart(existingItem)) {
+            bookPartContext = {
+              bookId: existingItem.bookId,
+              chapterId: existingItem.chapterId,
+              sectionId: existingItem.sectionId
+            };
+          }
           console.log(`✅ Validated customOrderItemId: ${finalCustomOrderItemId}`);
         } else {
           console.log(`⚠️  CustomOrderItem ${parsedId} not found - proceeding without link`);
@@ -359,7 +377,8 @@ router.post('/reading/start', validateReadingOperation, asyncHandler(async (req,
       mediaType,
       title,
       seriesTitle,
-      customOrderItemId: finalCustomOrderItemId
+      customOrderItemId: finalCustomOrderItemId,
+      ...bookPartContext
     });
 
     console.log('Reading session started successfully:', readingSession.id);
@@ -490,6 +509,24 @@ router.post('/reading/stop', asyncHandler(async (req, res) => {
   if (!activeSession) {
     console.log('No active reading session found');
     return sendNotFound(res, 'No active reading session found');
+  }
+
+  const readingItem = activeSession.customOrderItemId
+    ? await prisma.customOrderItem.findUnique({ where: { id: activeSession.customOrderItemId } })
+    : null;
+  if (readingItem && isBookPart(readingItem)) {
+    let normalizedProgress;
+    try {
+      normalizedProgress = normalizeBookPartProgress(progress);
+    } catch (error) {
+      if (error instanceof TypeError || error instanceof RangeError) {
+        return sendBadRequest(res, error.message);
+      }
+      throw error;
+    }
+    await new BookCustomOrderService(prisma).updateReadingProgress(readingItem, normalizedProgress);
+    const completed = await watchLogService.stopReading(activeSession.id);
+    return sendSuccess(res, completed);
   }
 
   console.log('Stopping session with ID:', activeSession.id);

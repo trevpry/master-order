@@ -74,6 +74,9 @@ function createBulkOperationsRoutes(prisma, services) {
     } = req.body;
 
     console.log(mediaType);
+    if (['chapter', 'section'].includes(mediaType)) {
+      return sendBadRequest(res, 'Add library chapters and sections through the book custom-order parts endpoint');
+    }
     
     // Additional media-specific validation (beyond basic middleware)
     if (mediaType === 'episode') {

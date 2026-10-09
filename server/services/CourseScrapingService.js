@@ -3,11 +3,13 @@ const { PrismaClient } = require('@prisma/client');
 const fs = require('fs');
 const path = require('path');
 const { getGreatCoursesAnchorSelectors, isSupportedGreatCoursesUrl } = require('../utils/courseUrlValidation');
+const { parseGreatCoursesLectures } = require('./parsers/GreatCoursesLectureParser');
 
 const prisma = new PrismaClient();
 
 class CourseScrapingService {
-  constructor() {
+  constructor(database = prisma) {
+    this.prisma = database;
     this.userAgent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36';
   }
 
@@ -502,78 +504,64 @@ class CourseScrapingService {
       }
 
       const html = await response.text();
-      const $ = cheerio.load(html);
+      const videos = parseGreatCoursesLectures(html, course);
+      if (videos.length === 0) {
+        throw new Error('No lectures found on the course page. The page may require sign-in or its layout may have changed.');
+      }
 
-      const videos = [];
-      let videosAdded = 0;
-      let videosSkipped = 0;
-
-      // Find all lecture sections - they appear as h4 elements with lecture numbers
-      $('h4').each((index, element) => {
-        const lectureText = $(element).text().trim();
-        
-        // Look for patterns like "Lecture 1:", "1.", etc.
-        const lectureMatch = lectureText.match(/(?:lecture\s*)?(\d+)[\.:]\s*(.+)/i);
-        
-        if (lectureMatch) {
-          const lectureNumber = parseInt(lectureMatch[1]);
-          const lectureTitle = lectureMatch[2].trim();
-          
-          // Create a video URL (this is a placeholder - actual implementation would need
-          // to find the real video URLs from the page)
-          const videoUrl = `${course.url}/lecture-${lectureNumber}`;
-          
-          videos.push({
-            title: `Lecture ${lectureNumber}: ${lectureTitle}`,
-            url: videoUrl,
-            description: `Lecture ${lectureNumber} from ${course.title}`,
-            order: lectureNumber,
-            courseId: course.id
-          });
-        }
-      });
-
-      // Create videos in database
-      for (const videoData of videos) {
-        try {
-          // Check if HistoryCourseVideo already exists
-          const existingVideo = await prisma.historyCourseVideo.findUnique({
-            where: { url: videoData.url }
-          });
-
-          if (existingVideo) {
-            console.log(`⏭️  Course video already exists: ${videoData.title}`);
-            videosSkipped++;
-            continue;
-          }
-
-          // Create the HistoryCourseVideo
-          const courseVideo = await prisma.historyCourseVideo.create({
-            data: {
-              ...videoData,
-              watched: false
+      const imported = await this.prisma.$transaction(async (tx) => {
+        let videosAdded = 0;
+        let videosSkipped = 0;
+        let videosUpdated = 0;
+        const newVideos = [];
+        for (const videoData of videos) {
+          const existingVideo = await tx.historyCourseVideo.findFirst({
+            where: {
+              OR: [
+                { url: videoData.url },
+                { courseId: course.id, order: videoData.order }
+              ]
             }
           });
 
-          // Now check if a corresponding HistoryVideo exists or should be created
-          await this.linkOrCreateHistoryVideo(courseVideo, course);
+          if (existingVideo) {
+            if (existingVideo.courseId !== course.id) {
+              throw new Error(`Lecture ${videoData.order} is already associated with another course`);
+            }
+            if (existingVideo.url !== videoData.url) {
+              await tx.historyCourseVideo.update({
+                where: { id: existingVideo.id },
+                data: videoData
+              });
+              videosUpdated++;
+            } else {
+              videosSkipped++;
+            }
+            continue;
+          }
 
-          console.log(`✅ Added video: ${videoData.title}`);
+          newVideos.push(await tx.historyCourseVideo.create({
+            data: { ...videoData, watched: false }
+          }));
           videosAdded++;
-
-        } catch (error) {
-          console.error(`❌ Error adding video ${videoData.title}:`, error);
         }
+        return { videosAdded, videosSkipped, videosUpdated, newVideos };
+      }, { timeout: 30000 });
+
+      for (const courseVideo of imported.newVideos) {
+        await this.linkOrCreateHistoryVideo(courseVideo, course);
       }
 
-      console.log(`🎉 Video scraping completed: ${videosAdded} added, ${videosSkipped} skipped`);
+      const { videosAdded, videosSkipped, videosUpdated } = imported;
+      console.log(`🎉 Video scraping completed: ${videosAdded} added, ${videosSkipped} skipped, ${videosUpdated} updated`);
 
       return {
         success: true,
         message: 'Video scraping completed',
         videosFound: videos.length,
         videosAdded,
-        videosSkipped
+        videosSkipped,
+        videosUpdated
       };
 
     } catch (error) {

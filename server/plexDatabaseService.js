@@ -1281,6 +1281,31 @@ class PlexDatabaseService {
     }
   }
 
+  async getAlbumsForTrackArtists(ratingKey) {
+    try {
+      const track = await this.prisma.plexTrack.findUnique({
+        where: { ratingKey },
+        include: { trackArtists: { select: { artistKey: true } } }
+      });
+      if (!track || track.removed) return null;
+
+      const artistKeys = new Set([
+        track.grandparentRatingKey,
+        ...track.trackArtists.map(credit => credit.artistKey)
+      ].filter(Boolean));
+      const groups = await Promise.all([...artistKeys].map(key => this.getAlbumsByArtist(key)));
+      const albums = new Map();
+      for (const album of groups.flat()) albums.set(album.ratingKey, album);
+      return [...albums.values()].sort((a, b) =>
+        (b.year || 0) - (a.year || 0) ||
+        (a.userTitle || a.title).localeCompare(b.userTitle || b.title) ||
+        a.ratingKey.localeCompare(b.ratingKey));
+    } catch (error) {
+      console.error('Error fetching albums for track artists:', error);
+      throw error;
+    }
+  }
+
   // Get album by rating key
   async getAlbumByRatingKey(ratingKey) {
     try {

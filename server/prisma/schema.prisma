@@ -401,6 +401,8 @@ model CustomOrderItem {
   
   // NEW: Reference to unified books table
   bookId                  Int?
+  chapterId               Int?
+  sectionId               Int?
   
   // NEW: Reference to unified video games table
   gameId                  Int?
@@ -410,6 +412,8 @@ model CustomOrderItem {
   storyContainedInBook    CustomOrderItem?  @relation("StoryInBook", fields: [storyContainedInBookId], references: [id])
   containedStories        CustomOrderItem[] @relation("StoryInBook")
   book                    Book?             @relation(fields: [bookId], references: [id])
+  chapter                 BookChapter?      @relation(fields: [chapterId], references: [id], onDelete: Cascade)
+  section                 BookSection?      @relation(fields: [sectionId], references: [id], onDelete: Cascade)
   game                    VideoGame?        @relation(fields: [gameId], references: [id])
   movie                   Movie?            @relation(fields: [movieId], references: [id])
   episode                 Episode?          @relation(fields: [episodeId], references: [id])
@@ -418,6 +422,8 @@ model CustomOrderItem {
 
   @@index([movieId])
   @@index([episodeId])
+  @@index([chapterId])
+  @@index([sectionId])
 }
 
 model PlexLibrarySection {
@@ -2597,6 +2603,7 @@ model BookChapter {
   event               HistoricalEvent?    @relation(fields: [eventId], references: [id], onDelete: Cascade)
   sections            BookSection[]
   chapterCompletions  ChapterCompletion[]
+  customOrderItems    CustomOrderItem[]
   
   @@unique([bookId, chapterNumber])
   @@index([bookId])
@@ -2625,6 +2632,7 @@ model BookSection {
   chapter             BookChapter         @relation(fields: [chapterId], references: [id], onDelete: Cascade)
   event               HistoricalEvent?    @relation(fields: [eventId], references: [id], onDelete: Cascade)
   sectionCompletions  SectionCompletion[]
+  customOrderItems    CustomOrderItem[]
   
   @@unique([chapterId, sectionNumber])
   @@index([chapterId])

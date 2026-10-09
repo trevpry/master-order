@@ -6,6 +6,7 @@
 
 const express = require('express');
 const PlexDatabaseService = require('../../plexDatabaseService');
+const { BookCustomOrderService, isBookPart } = require('../../services/BookCustomOrderService');
 
 const plexDb = new PlexDatabaseService();
 
@@ -183,10 +184,31 @@ function createItemManagementRoutes(prisma, services) {
         episode !== undefined
       );
 
+      if (isBookReselect || isComicReselect || isStoryReselect || isEpisodeReselect ||
+          req.body.bookId !== undefined || req.body.chapterId !== undefined || req.body.sectionId !== undefined) {
+        const existingItem = await prisma.customOrderItem.findUnique({
+          where: { id: parseInt(itemId) }
+        });
+        if (existingItem && isBookPart(existingItem)) {
+          return res.status(400).json({ error: 'Chapter and section references cannot be changed; remove the item and add another book part instead' });
+        }
+      }
+
       const updateData = {};
       let episodeResolutionDebug = null;
       if (sortOrder !== undefined) updateData.sortOrder = sortOrder;
       if (isWatched !== undefined) updateData.isWatched = isWatched;
+      if (isWatched !== undefined) {
+        const readingItem = await prisma.customOrderItem.findUnique({
+          where: { id: parseInt(itemId) }
+        });
+        if (readingItem && isBookPart(readingItem)) {
+          if (typeof isWatched !== 'boolean') {
+            return res.status(400).json({ error: 'isWatched must be a boolean' });
+          }
+          await new BookCustomOrderService(prisma).setCompleted(readingItem, isWatched);
+        }
+      }
       
       // If marking a book, comic, or short story as watched, handle appropriately
       if (isWatched === true) {

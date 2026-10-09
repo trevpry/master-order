@@ -284,12 +284,25 @@ async function fetchMediaDetailsFromPlex(plexKey, mediaType, customOrderItem, ba
     }
     
     // Handle books differently since they don't exist in Plex
-    if (mediaType === 'book') {
+    if (['book', 'chapter', 'section'].includes(mediaType)) {
       // For books, we generate mock Plex-like metadata
       let bookDetails = null;
       
       // Get unified book data if available
-      const unifiedBook = customOrderItem.book;
+      const unifiedBook = customOrderItem.book || (customOrderItem.bookId
+        ? await prisma.book.findUnique({ where: { id: customOrderItem.bookId } })
+        : null);
+      const part = mediaType === 'section'
+        ? await prisma.bookSection.findUnique({
+          where: { id: customOrderItem.sectionId }, include: { chapter: true }
+        })
+        : mediaType === 'chapter'
+          ? await prisma.bookChapter.findUnique({ where: { id: customOrderItem.chapterId } })
+          : null;
+      if (mediaType !== 'book' && !part) {
+        throw new Error(`Library ${mediaType} for custom order item ${customOrderItem.id} not found`);
+      }
+      const chapter = mediaType === 'section' ? part.chapter : part;
       
       // Try to get additional details from OpenLibrary if we have an ID
       if (unifiedBook?.openLibraryId) {
@@ -314,9 +327,18 @@ async function fetchMediaDetailsFromPlex(plexKey, mediaType, customOrderItem, ba
         const mockMetadata = {
         ratingKey: plexKey,
         title: customOrderItem.title,
-        type: 'book',
+        type: mediaType,
+        bookId: customOrderItem.bookId,
+        chapterId: customOrderItem.chapterId,
+        sectionId: customOrderItem.sectionId,
+        chapterNumber: chapter?.chapterNumber,
+        chapterTitle: chapter?.title,
+        sectionNumber: mediaType === 'section' ? part.sectionNumber : null,
+        sectionTitle: mediaType === 'section' ? part.title : null,
+        pageStart: part?.pageStart,
+        pageEnd: part?.pageEnd,
         year: unifiedBook?.publishYear || null,
-        summary: bookDetails?.description || unifiedBook?.description || '',
+        summary: part?.description || bookDetails?.description || unifiedBook?.description || '',
         thumb: artworkUrl, // Use cached artwork URL
         art: artworkUrl,   // Use cached artwork URL for both thumb and art
         bookDetails: bookDetails, // Store OpenLibrary details
@@ -698,7 +720,7 @@ async function getNextCustomOrder(req = null, mediaTypeLimiters = null) {
       allowedMediaTypes = [];
       if (mediaTypeLimiters.episode) allowedMediaTypes.push('episode');
       if (mediaTypeLimiters.movie) allowedMediaTypes.push('movie');
-      if (mediaTypeLimiters.book) allowedMediaTypes.push('book', 'shortstory');
+      if (mediaTypeLimiters.book) allowedMediaTypes.push('book', 'shortstory', 'chapter', 'section');
       if (mediaTypeLimiters.webvideo) allowedMediaTypes.push('webvideo');
       if (mediaTypeLimiters.videogame) allowedMediaTypes.push('game');
       if (mediaTypeLimiters.comic) allowedMediaTypes.push('comic');

@@ -293,7 +293,7 @@ export const getItemArtworkUrl = (item) => {
   }
   
   // Check for linked unified book artwork first (highest priority)
-  if (item.book && item.mediaType === 'book') {
+  if (item.book && ['book', 'chapter', 'section'].includes(item.mediaType)) {
     // Linked unified book has its own cached artwork
     if (item.book.localArtworkPath) {
       const filename = item.book.localArtworkPath.includes('\\') || item.book.localArtworkPath.includes('/') 

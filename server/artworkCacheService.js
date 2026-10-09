@@ -428,6 +428,8 @@ class ArtworkCacheService {
         break;
       
       case 'book':
+      case 'chapter':
+      case 'section':
         // Check unified book system first (preferred)
         if (item.book?.coverUrl) {
           return item.book.coverUrl;

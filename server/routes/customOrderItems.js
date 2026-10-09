@@ -68,6 +68,9 @@ router.post('/:id/items', validateMediaTypeAndTitle, asyncHandler(async (req, re
   } = req.body;
 
   console.log('🔍 Destructuring completed');
+  if (['chapter', 'section'].includes(mediaType)) {
+    return sendBadRequest(res, 'Add library chapters and sections through the book custom-order parts endpoint');
+  }
 
   console.log('🔍 Full request body:', JSON.stringify(req.body, null, 2));
   console.log('🔍 MediaType:', mediaType);

@@ -602,7 +602,8 @@ function MediaHome() {
         setSelectedMedia(null);
         
         // Use appropriate terminology based on content type
-        const successMessage = selectedMedia.orderType === 'HISTORY_PLUS' && ['book', 'chapter', 'section'].includes(selectedMedia.type)
+        const successMessage = ['chapter', 'section'].includes(selectedMedia.type) ||
+          (selectedMedia.orderType === 'HISTORY_PLUS' && selectedMedia.type === 'book')
           ? 'Item marked as read! Getting next item...'
           : 'Item marked as watched! Getting next item...';
         
@@ -844,13 +845,14 @@ function MediaHome() {
     try {
       // Prepare parameters for the modular reading service
       let sessionParams = {
-        mediaType: selectedMedia.type,
+        mediaType: selectedMedia.orderType === 'CUSTOM_ORDER' && ['chapter', 'section'].includes(selectedMedia.type)
+          ? 'book' : selectedMedia.type,
         title: selectedMedia.title || selectedMedia.storyTitle || selectedMedia.comicSeries,
         customOrderItemId: selectedMedia.customOrderItemId || selectedMedia.ratingKey
       };
 
       // Handle History Plus chapters and sections - create session on parent book
-      if (selectedMedia.type === 'chapter' || selectedMedia.type === 'section') {
+      if (selectedMedia.orderType === 'HISTORY_PLUS' && (selectedMedia.type === 'chapter' || selectedMedia.type === 'section')) {
         sessionParams = {
           mediaType: 'book', // Always create session as book type
           title: selectedMedia.bookTitle || 'Unknown Book',
@@ -1287,7 +1289,7 @@ function MediaHome() {
                       minWidth: '40px',
                       padding: '8px 12px'
                     }}
-                    title={selectedMedia.orderType === 'HISTORY_PLUS' && ['chapter', 'section'].includes(selectedMedia.type) ? "Mark as Read" : "Mark as Watched"}
+                    title={['chapter', 'section'].includes(selectedMedia.type) ? "Mark as Read" : "Mark as Watched"}
                   >
                     {markingWatched ? '⏳' : '✓'}
                   </Button>
