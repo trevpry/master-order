@@ -8,10 +8,13 @@ const GeminiService = require('../services/GeminiService');
 const { asyncHandler, sendSuccess, sendBadRequest, sendServerError } = require('../utils/responses');
 const { validateRequiredFieldsDirect } = require('../middleware/validation');
 const { isSupportedGreatCoursesUrl } = require('../utils/courseUrlValidation');
+const createCourseCustomOrdersRouter = require('./courseCustomOrders');
 
 const prisma = new PrismaClient();
 const courseScrapingService = new CourseScrapingService();
 const geminiService = new GeminiService();
+
+router.use(createCourseCustomOrdersRouter(prisma));
 
 async function markEventUnreviewed(eventId) {
   if (!eventId) return;
@@ -505,8 +508,8 @@ router.post('/:id/scrape-videos', asyncHandler(async (req, res) => {
 // VIDEO LINKING OPERATIONS
 // ==========================================
 
-// GET /api/courses/:id/videos - Get videos for a course with linking status
-router.get('/:id/videos', asyncHandler(async (req, res) => {
+// GET /api/courses/:id/history-linking - Get videos with History Plus linking status
+router.get('/:id/history-linking', asyncHandler(async (req, res) => {
   const { id } = req.params;
   
   const course = await prisma.historyCourse.findUnique({

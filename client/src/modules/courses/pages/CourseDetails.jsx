@@ -1,8 +1,10 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
+import AddCourseVideosToOrderModal from '../components/AddCourseVideosToOrderModal';
 
-const CourseDetails = () => {
+const CourseDetails = ({ historyIntegration = false }) => {
   const { id } = useParams();
+  const [orderSelection, setOrderSelection] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [course, setCourse] = useState(null);
@@ -19,7 +21,7 @@ const CourseDetails = () => {
       setLoading(true);
       setError(null);
 
-      const response = await fetch(`/api/courses/${id}/details`);
+      const response = await fetch(`/api/courses/${id}${historyIntegration ? '/details' : ''}`);
       if (!response.ok) {
         throw new Error('Failed to load course details');
       }
@@ -29,21 +31,31 @@ const CourseDetails = () => {
         throw new Error(result.message || 'Failed to load course details');
       }
 
-      setCourse(result.data.course || null);
-      setLectures(result.data.lectures || []);
-      setSummary(result.data.summary || {
-        totalLectures: 0,
-        watchedLectures: 0,
-        linkedLectures: 0,
-        linkedToEvents: 0
-      });
+      if (historyIntegration) {
+        setCourse(result.data.course);
+        setLectures(result.data.lectures);
+        setSummary(result.data.summary);
+      } else {
+        const videos = result.data.videos || [];
+        setCourse(result.data);
+        setLectures(videos.map(video => ({
+          ...video,
+          watchStatus: { effectiveWatched: video.watched }
+        })));
+        setSummary({
+          totalLectures: videos.length,
+          watchedLectures: videos.filter(video => video.watched).length,
+          linkedLectures: 0,
+          linkedToEvents: 0
+        });
+      }
     } catch (detailsError) {
       console.error('Error loading course details:', detailsError);
       setError(detailsError.message);
     } finally {
       setLoading(false);
     }
-  }, [id]);
+  }, [id, historyIntegration]);
 
   useEffect(() => {
     fetchCourseDetails();
@@ -65,7 +77,7 @@ const CourseDetails = () => {
       <div className="min-h-screen bg-gray-50 p-6">
         <div className="max-w-5xl mx-auto">
           <Link
-            to="/history-plus/courses"
+            to={historyIntegration ? '/history-plus/courses' : '/media/courses'}
             className="inline-block mb-4 text-blue-600 hover:text-blue-800 font-medium"
           >
             ← Back to Courses
@@ -88,7 +100,7 @@ const CourseDetails = () => {
       <div className="bg-white border-b shadow-sm">
         <div className="max-w-7xl mx-auto px-4 py-6">
           <Link
-            to="/history-plus/courses"
+            to={historyIntegration ? '/history-plus/courses' : '/media/courses'}
             className="inline-block mb-4 text-blue-600 hover:text-blue-800 font-medium"
           >
             ← Back to Courses
@@ -98,6 +110,14 @@ const CourseDetails = () => {
             <div className="flex-1">
               <h1 className="text-3xl font-bold text-gray-900">{course.title}</h1>
               <p className="text-gray-600 mt-2">{course.description || 'No description provided.'}</p>
+              <div className="mt-4 flex flex-wrap gap-4">
+                <button type="button" onClick={() => setOrderSelection({})} disabled={lectures.length === 0} className="bg-blue-600 text-white px-4 py-2 rounded disabled:opacity-50">
+                  Add Course to Custom Order
+                </button>
+                {!historyIntegration && (
+                  <Link to={`/history-plus/courses/${id}`} className="text-blue-600 hover:underline self-center">View History Plus links</Link>
+                )}
+              </div>
 
               <div className="mt-4 flex flex-wrap gap-3 text-sm">
                 <span className="px-3 py-1 rounded-full bg-blue-100 text-blue-700 font-medium">
@@ -121,14 +141,14 @@ const CourseDetails = () => {
                   <span>Watched</span>
                   <span className="font-semibold">{summary.watchedLectures}/{summary.totalLectures}</span>
                 </div>
-                <div className="flex justify-between">
+                {historyIntegration && <div className="flex justify-between">
                   <span>Linked Videos</span>
                   <span className="font-semibold">{summary.linkedLectures}</span>
-                </div>
-                <div className="flex justify-between">
+                </div>}
+                {historyIntegration && <div className="flex justify-between">
                   <span>Linked Events</span>
                   <span className="font-semibold">{summary.linkedToEvents}</span>
-                </div>
+                </div>}
               </div>
               <div className="mt-3 w-full bg-gray-200 rounded-full h-2">
                 <div
@@ -179,9 +199,13 @@ const CourseDetails = () => {
                         {lecture.description && (
                           <p className="text-sm text-gray-600 mt-1">{lecture.description}</p>
                         )}
+                        <div className="flex gap-4 mt-3 text-sm">
+                          <a href={lecture.url} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">Open Video</a>
+                          <button type="button" onClick={() => setOrderSelection({ videoId: lecture.id })} className="text-green-700 hover:underline">Add to Custom Order</button>
+                        </div>
                       </div>
 
-                      <div className="lg:w-96 bg-gray-50 border rounded-lg p-3">
+                      {historyIntegration && <div className="lg:w-96 bg-gray-50 border rounded-lg p-3">
                         <div className="text-xs text-gray-500 mb-1">Linked Event</div>
                         {linkedEvent ? (
                           <div>
@@ -196,7 +220,7 @@ const CourseDetails = () => {
                         ) : (
                           <p className="text-sm text-gray-500">Not linked to an event</p>
                         )}
-                      </div>
+                      </div>}
                     </div>
                   </div>
                 );
@@ -205,6 +229,9 @@ const CourseDetails = () => {
           )}
         </div>
       </div>
+      {orderSelection && (
+        <AddCourseVideosToOrderModal course={course} videoId={orderSelection.videoId} onClose={() => setOrderSelection(null)} />
+      )}
     </div>
   );
 };

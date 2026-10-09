@@ -7,6 +7,7 @@ import IdentifyModal from '../../../../../components/IdentifyModal';
 import MetadataEditor from '../../../../../components/MetadataEditor';
 import EmbeddedPicardTagsPanel from './EmbeddedPicardTagsPanel';
 import MergeAlbumsModal from '../../../../../components/music/MergeAlbumsModal';
+import AddTrackToAlbumModal from '../../../../../components/music/AddTrackToAlbumModal';
 import { getAlbumArtworkUrl } from '../../../../../utils/albumArtwork';
 import './ArtistDetail.css';
 
@@ -52,6 +53,7 @@ const ArtistDetail = ({
   const [albumSelectionMode, setAlbumSelectionMode] = useState(false);
   const [selectedAlbumKeys, setSelectedAlbumKeys] = useState(new Set());
   const [showMergeAlbumsModal, setShowMergeAlbumsModal] = useState(false);
+  const [trackToAddToAlbum, setTrackToAddToAlbum] = useState(null);
   const mergeArtistSearchRequestId = useRef(0);
 
   const linkedAlbums = artist?.linkedAlbums || [];
@@ -123,6 +125,7 @@ const ArtistDetail = ({
   }, [artist]);
 
   useEffect(() => {
+    setTrackToAddToAlbum(null);
     setAlbumSelectionMode(false);
     setSelectedAlbumKeys(new Set());
     setShowMergeAlbumsModal(false);
@@ -987,6 +990,12 @@ const ArtistDetail = ({
                 </div>
                 <div className="linked-track-meta">
                   Linked as: {(track.linkedArtistTypes || []).join(', ')}
+                  {track.parentRatingKey === null && (
+                    <button type="button" onClick={event => {
+                      event.stopPropagation();
+                      setTrackToAddToAlbum(track);
+                    }}>Add to Album</button>
+                  )}
                 </div>
               </div>
             ))}
@@ -1012,6 +1021,10 @@ const ArtistDetail = ({
                 </div>
                 <div className="linked-track-meta">
                   {Number.isInteger(track.index) ? `Track #${track.index}` : 'Unnumbered'}
+                  <button type="button" onClick={event => {
+                    event.stopPropagation();
+                    setTrackToAddToAlbum(track);
+                  }}>Add to Album</button>
                 </div>
               </div>
             ))}
@@ -1019,6 +1032,22 @@ const ArtistDetail = ({
         </div>
       )}
       
+      {trackToAddToAlbum && (
+        <AddTrackToAlbumModal
+          track={trackToAddToAlbum}
+          onClose={() => setTrackToAddToAlbum(null)}
+          onSuccess={updatedTrack => {
+            onArtistUpdate?.({
+              ...artist,
+              tracksWithoutAlbum: tracksWithoutAlbum.filter(track => track.ratingKey !== updatedTrack.ratingKey),
+              linkedTracks: linkedTracks.map(track => track.ratingKey === updatedTrack.ratingKey
+                ? { ...track, ...updatedTrack } : track)
+            });
+            setTrackToAddToAlbum(null);
+          }}
+        />
+      )}
+
       {/* MusicBrainz Search Modal */}
       {showMusicBrainzModal && (
         <MusicBrainzSearchModal

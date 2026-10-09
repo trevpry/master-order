@@ -558,6 +558,9 @@ router.post('/play', asyncHandler(async (req, res) => {
   console.log('Playing media on device:', targetPlayerId);
   
   const result = await plexPlayerService.playMedia(targetPlayerId, ratingKey, offset);
+  if (result?.success !== true) {
+    return sendServerError(res, result?.error || 'Plex player did not accept the playback command');
+  }
   sendSuccess(res, result);
 }));
 

@@ -176,6 +176,13 @@ const SideMenu = ({ isMobile, closeMobileMenu }) => {
       isSubmenu: true
     },
     {
+      path: '/media/courses',
+      icon: '🎓',
+      label: 'Courses',
+      description: 'Course library & custom orders',
+      isSubmenu: true
+    },
+    {
       path: '/media/watch-stats',
       icon: '📊',
       label: 'Watch Stats',

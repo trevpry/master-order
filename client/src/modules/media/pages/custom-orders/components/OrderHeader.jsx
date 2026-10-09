@@ -1,4 +1,5 @@
 import React from 'react';
+import { useNavigate } from 'react-router-dom';
 import Button from '../../../../../shared/components/Button';
 import { getTotalItemsWithSubOrders, getUnwatchedItemsWithSubOrders } from '../utils/itemUtils';
 
@@ -29,6 +30,7 @@ const OrderHeader = ({
   setBulkImportData,
   setCmroBulkImportData
 }) => {
+  const navigate = useNavigate();
   return (
     <div className="order-items-header">
       <div className="order-header-content">
@@ -115,6 +117,12 @@ const OrderHeader = ({
           className="secondary"
         >
           Add Web Video
+        </Button>
+        <Button
+          onClick={() => navigate(`/media/courses?customOrderId=${viewingOrderItems.id}`)}
+          className="secondary"
+        >
+          Add Course Videos
         </Button>
         <Button
           onClick={() => {

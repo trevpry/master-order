@@ -831,6 +831,16 @@ curl -X GET "http://localhost:3001/api/android/up-next"
 
 **Endpoint**: `POST /api/android/play-plex`
 
+Playback success requires the underlying Plex player's result to report
+`success: true`, not just an HTTP 200 response. Player names are read from
+the `/api/plex/play` response's `data.player` field. This also applies to
+episode and movie playback through `/api/android/play-episode`.
+
+If the player cannot be found or the command fails, the endpoint returns
+`PLAY_ERROR` with `data.success: false` and the actual error on a non-2xx
+status. An upstream HTTP 200 containing a failed playback result becomes
+HTTP 502 rather than a false `PLAY_SUCCESS`.
+
 **Description**: Triggers playback of media content on the configured Plex player, equivalent to pressing the "Play" button on the home page. This endpoint emulates the exact same functionality as the web interface's play button.
 
 **Request Body**:

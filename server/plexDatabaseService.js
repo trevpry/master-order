@@ -1541,6 +1541,53 @@ class PlexDatabaseService {
     }
   }
 
+  async getTracksWithoutAlbumByArtist(artistRatingKey) {
+    try {
+      return await this.prisma.plexTrack.findMany({
+        where: {
+          grandparentRatingKey: artistRatingKey,
+          parentRatingKey: null,
+          removed: false
+        },
+        include: { work: true },
+        orderBy: [{ title: 'asc' }, { index: 'asc' }]
+      });
+    } catch (error) {
+      console.error('Error fetching artist tracks without albums:', error);
+      throw error;
+    }
+  }
+
+  async disconnectTrackFromAlbum(ratingKey) {
+    try {
+      const track = await this.prisma.plexTrack.findUnique({
+        where: { ratingKey }
+      });
+      if (!track) return null;
+
+      return await this.prisma.plexTrack.update({
+        where: { ratingKey },
+        data: { parentRatingKey: null }
+      });
+    } catch (error) {
+      console.error('Error disconnecting track from album:', error);
+      throw error;
+    }
+  }
+
+  async addTrackToAlbum(ratingKey, albumRatingKey) {
+    try {
+      return await this.prisma.plexTrack.update({
+        where: { ratingKey, parentRatingKey: null },
+        data: { parentRatingKey: albumRatingKey },
+        include: { album: { include: { artist: true } } }
+      });
+    } catch (error) {
+      console.error('Error adding track to album:', error);
+      throw error;
+    }
+  }
+
   // Get track by rating key
   async getTrackByRatingKey(ratingKey) {
     try {

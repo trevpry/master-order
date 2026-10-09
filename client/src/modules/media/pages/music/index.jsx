@@ -213,7 +213,7 @@ const Music = () => {
     const loadDataFromUrl = async () => {
       try {
         // Load selected artist data if artistRatingKey exists
-        if (artistRatingKey && (!selectedArtist || selectedArtist.ratingKey !== artistRatingKey)) {
+        if (artistRatingKey && (activeView === 'artist' || !selectedArtist || selectedArtist.ratingKey !== artistRatingKey)) {
           const artistRes = await fetch(`${config.apiBaseUrl}/api/music/artists/${artistRatingKey}`);
           if (artistRes.ok) {
             const artistData = await artistRes.json();

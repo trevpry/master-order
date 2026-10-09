@@ -1,9 +1,10 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Link } from 'react-router-dom';
-import { HistoryPlusApiService } from '../services/historyPlusApi';
-import CourseAIAssignment from '../components/CourseAIAssignment';
+import { Link, useLocation } from 'react-router-dom';
+import AddCourseVideosToOrderModal from '../components/AddCourseVideosToOrderModal';
 
-const Courses = () => {
+const Courses = ({ HistoryAssignmentComponent }) => {
+  const location = useLocation();
+  const [orderCourse, setOrderCourse] = useState(null);
   const [courses, setCourses] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -209,7 +210,7 @@ const Courses = () => {
   const handleOpenVideoLinking = async (course) => {
     try {
       setLinkingLoading(true);
-      const response = await fetch(`/api/courses/${course.id}/videos`);
+      const response = await fetch(`/api/courses/${course.id}/history-linking`);
       
       if (!response.ok) throw new Error('Failed to fetch course videos');
       
@@ -451,7 +452,10 @@ const Courses = () => {
           <div className="flex justify-between items-start">
             <div>
               <h1 className="text-3xl font-bold text-gray-900">Great Courses</h1>
-              <p className="text-gray-600 mt-1">Explore history courses from The Great Courses Plus</p>
+              <p className="text-gray-600 mt-1">Explore courses and add lectures to your custom orders</p>
+              {!HistoryAssignmentComponent && (
+                <Link to="/history-plus/courses" className="text-sm text-blue-600 hover:underline">History Plus linking and AI assignment</Link>
+              )}
             </div>
             
             <div className="flex items-center gap-4 flex-wrap">
@@ -466,12 +470,12 @@ const Courses = () => {
                 📚 Add Course(s)
               </button>
 
-              <button
+              {HistoryAssignmentComponent && <button
                 onClick={handleOpenPromptTemplateEditor}
                 className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors"
               >
                 ✏️ Edit AI Prompt Template
-              </button>
+              </button>}
               
               {addedCourses.size > 0 && (
                 <button
@@ -639,7 +643,7 @@ const Courses = () => {
                       <div className="absolute inset-0 bg-black bg-opacity-20"></div>
                       <div className="absolute bottom-4 left-4 right-4">
                         <Link
-                          to={`/history-plus/courses/${course.id}`}
+                          to={`${HistoryAssignmentComponent ? '/history-plus' : '/media'}/courses/${course.id}${location.search}`}
                           className="text-white font-semibold text-sm line-clamp-2 leading-tight hover:underline"
                           title={`Open details for ${course.title}`}
                         >
@@ -740,6 +744,13 @@ const Courses = () => {
                         )}
                         
                         <button
+                          onClick={() => setOrderCourse(course)}
+                          className="w-full bg-green-600 hover:bg-green-700 text-white text-xs py-2 px-3 rounded font-medium"
+                        >
+                          Add to Custom Order
+                        </button>
+
+                        {HistoryAssignmentComponent && <button
                           onClick={() => handleOpenVideoLinking(course)}
                           disabled={linkingLoading}
                           className="w-full bg-purple-600 hover:bg-purple-700 text-white text-xs py-2 px-3 rounded font-medium disabled:bg-gray-400"
@@ -751,12 +762,12 @@ const Courses = () => {
                             </>
                           ) : (
                             <>
-                              🔗 Link Videos
+                              🔗 Link History Plus Videos
                             </>
                           )}
-                        </button>
+                        </button>}
                         
-                        {isAdded && videoCount > 0 && (
+                        {HistoryAssignmentComponent && isAdded && videoCount > 0 && (
                           <button
                             onClick={() => handleOpenAiAssignment(course)}
                             className="w-full bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700 text-white text-xs py-2 px-3 rounded font-medium"
@@ -766,7 +777,7 @@ const Courses = () => {
                         )}
                         
                         <p className="text-xs text-gray-500 text-center px-2">
-                          {isAdded 
+                          {HistoryAssignmentComponent && isAdded
                             ? "Link course lectures to existing great-courses-plus videos or create new ones"
                             : "Scrape all lectures from this course and add them to your video library"
                           }
@@ -930,7 +941,7 @@ const Courses = () => {
       )}
 
       {/* Course AI Assignment Modal */}
-      {showAiAssignment && selectedAiCourse && (
+      {HistoryAssignmentComponent && showAiAssignment && selectedAiCourse && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-lg max-w-5xl w-full max-h-[95vh] overflow-hidden">
             <div className="p-4 border-b bg-gradient-to-r from-indigo-600 to-purple-600 text-white">
@@ -948,7 +959,7 @@ const Courses = () => {
             </div>
             
             <div className="p-6 overflow-y-auto max-h-[calc(95vh-120px)]">
-              <CourseAIAssignment
+              <HistoryAssignmentComponent
                 course={selectedAiCourse}
                 onAssignToEvent={handleAiAssignmentComplete}
                 onCreateNewEvent={handleAiAssignmentComplete}
@@ -1031,6 +1042,9 @@ const Courses = () => {
             </div>
           </div>
         </div>
+      )}
+      {orderCourse && (
+        <AddCourseVideosToOrderModal course={orderCourse} onClose={() => setOrderCourse(null)} />
       )}
     </div>
   );

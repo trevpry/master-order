@@ -52,7 +52,9 @@ import Timeline from './modules/history-plus/pages/Timeline';
 import Videos from './modules/history-plus/pages/Videos';
 import Channels from './modules/history-plus/pages/Channels';
 import Categories from './modules/history-plus/pages/Categories';
-import Courses from './modules/history-plus/pages/Courses';
+import Courses from './modules/courses/pages/Courses';
+import CourseDetails from './modules/courses/pages/CourseDetails';
+import CourseAIAssignment from './modules/history-plus/components/CourseAIAssignment';
 import PromptTemplates from './modules/history-plus/pages/PromptTemplates';
 
 function App() {
@@ -71,6 +73,8 @@ function App() {
           <Route path="/media/up-next" element={<MediaHome />} />
           <Route path="/media/custom-orders" element={<CustomOrders />} />
           <Route path="/media/custom-orders/:orderId" element={<CustomOrders />} />
+          <Route path="/media/courses" element={<Courses />} />
+          <Route path="/media/courses/:id" element={<CourseDetails />} />
           <Route path="/media/watch-stats" element={<WatchStats />} />
           <Route path="/media/stash" element={<Stash />} />
           <Route path="/media/stash/tags" element={<TagsPage />} />
@@ -131,7 +135,8 @@ function App() {
           <Route path="/channels" element={<Channels />} />
           <Route path="/media/channels" element={<Channels />} />
           <Route path="/history-plus/categories" element={<Categories />} />
-          <Route path="/history-plus/courses" element={<Courses />} />
+          <Route path="/history-plus/courses" element={<Courses HistoryAssignmentComponent={CourseAIAssignment} />} />
+          <Route path="/history-plus/courses/:id" element={<CourseDetails historyIntegration />} />
           <Route path="/history-plus/prompts" element={<PromptTemplates />} />
           <Route path="/chat" element={<ChatHome />} />
           <Route path="/eddie-settings" element={<EddieSettings />} />

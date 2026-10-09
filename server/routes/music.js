@@ -1480,6 +1480,8 @@ router.get('/artists/:ratingKey', asyncHandler(async (req, res) => {
     return res.status(404).json({ error: 'Artist not found' });
   }
 
+  artist.tracksWithoutAlbum = await plexDb.getTracksWithoutAlbumByArtist(ratingKey);
+
   const linkedAlbumAssignments = await prisma.albumArtist.findMany({
     where: { artistKey: artist.ratingKey },
     include: {
@@ -2856,6 +2858,44 @@ router.get('/tracks/album/:albumRatingKey', asyncHandler(async (req, res) => {
   const { albumRatingKey } = req.params;
   const tracks = await plexDb.getTracksByAlbum(albumRatingKey);
   res.json(tracks);
+}));
+
+router.post('/tracks/:ratingKey/disconnect-album', asyncHandler(async (req, res) => {
+  const track = await plexDb.disconnectTrackFromAlbum(req.params.ratingKey);
+  if (!track) {
+    return res.status(404).json({ error: 'Track not found' });
+  }
+  res.json({ success: true, track });
+}));
+
+router.post('/tracks/:ratingKey/album', asyncHandler(async (req, res) => {
+  const { albumRatingKey } = req.body;
+  if (typeof albumRatingKey !== 'string' || !albumRatingKey.trim()) {
+    return sendBadRequest(res, 'An album rating key is required');
+  }
+
+  const track = await plexDb.getTrackByRatingKey(req.params.ratingKey);
+  if (!track || track.removed) {
+    return res.status(404).json({ error: 'Track not found' });
+  }
+  if (track.parentRatingKey !== null) {
+    return res.status(409).json({ error: 'Disconnect the track from its current album first' });
+  }
+
+  const album = await plexDb.getAlbumByRatingKey(albumRatingKey);
+  if (!album || album.removed) {
+    return res.status(404).json({ error: 'Album not found' });
+  }
+
+  try {
+    const updatedTrack = await plexDb.addTrackToAlbum(track.ratingKey, album.ratingKey);
+    res.json({ success: true, track: updatedTrack });
+  } catch (error) {
+    if (error.code === 'P2025') {
+      return res.status(409).json({ error: 'The track changed. Refresh and try again.' });
+    }
+    throw error;
+  }
 }));
 
 // Get tracks by artist

@@ -9,6 +9,8 @@ A comprehensive media management application that intelligently curates your nex
 - **Collection-Aware Ordering**: Identifies shared collections between movies and TV shows for chronological viewing
 - **Multi-Source Integration**: Combines Plex library data with TVDB and ComicVine metadata
 - **Custom Order Management**: Create and manage custom viewing orders for complex franchises
+- **Course Library**: Browse courses under **Media > Courses**, independently of History Plus. Use **Add to Custom Order** on a course or lecture to select one, several, or all lectures. Lectures are appended in course order as web videos, with duplicate URLs skipped and independent watch/progress tracking per custom order. Import course videos first if a course has no lectures yet. Existing History Plus course URLs, video linking, and AI event assignment remain available.
+- **Plex Watch Tracking**: Custom-order movies and episodes are automatically marked watched only when Plex reports a positive `viewCount` during sync or sends a `media.scrobble` webhook. Playback activity (`lastViewedAt`, play, resume, pause, or stop) alone does not mark items watched. Manual watched marking remains available.
 - **Comic Publisher Integration**: Automatically extracts and displays comic publisher information from ComicVine
 - **Advanced Statistics**: Publisher breakdowns, author statistics, and comprehensive watch analytics
 - **Real-time Artwork**: Dynamic artwork fetching and caching from TVDB
@@ -19,6 +21,10 @@ A comprehensive media management application that intelligently curates your nex
 - **Template Management**: Customizable note templates (daily, weekly, meeting, project)
 - **Quick Capture**: Fast note creation with tags and folder organization
 - **Full-Featured Editor**: Rich text editing with tag management and search
+
+### Music Library
+- **Disconnect Album**: Removes a track's local album association without deleting the track or changing its other metadata, artist credits, or work links. Disconnected tracks remain on the artist details page under **Tracks Not In Albums** (and retain any linked-artist listings). Plex music sync preserves the disconnection.
+- **Add to Album**: Use **Add to Album** under **Tracks Not In Albums** on artist details to browse or search any album in the library. Adding a disconnected track changes only its album association; its existing artist, metadata, credits, work links, and track numbering are preserved.
 
 ### Technical Stack
 - **Frontend**: React with Vite, TailwindCSS

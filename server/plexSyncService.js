@@ -102,10 +102,10 @@ class PlexSyncService {
     return Number.isFinite(parsedValue) ? parsedValue : null;
   }
 
-  isPlexWatched(viewCount, lastViewedAt) {
+  isPlexWatched(viewCount) {
     const numericViewCount = this.getNullableInt(viewCount);
-    const numericLastViewedAt = this.getNullableInt(lastViewedAt);
-    return (numericViewCount ?? 0) > 0 || (numericLastViewedAt ?? 0) > 0;
+    // lastViewedAt records playback activity, not necessarily a completed view.
+    return (numericViewCount ?? 0) > 0;
   }
 
   normalizeCollectionValue(collectionValue) {
@@ -531,7 +531,7 @@ class PlexSyncService {
           (existingEpisode?.viewCount ?? null) !== summaryViewCount ||
           (existingEpisode?.lastViewedAt ?? null) !== summaryLastViewedAt
         );
-        const shouldReconcileCustomOrderWatchState = this.isPlexWatched(detailedEpisode.viewCount ?? episode.viewCount, detailedEpisode.lastViewedAt ?? episode.lastViewedAt);
+        const shouldReconcileCustomOrderWatchState = this.isPlexWatched(detailedEpisode.viewCount ?? episode.viewCount);
 
         if (shouldRefreshEpisode) {
           await prisma.plexEpisode.upsert({
@@ -641,7 +641,7 @@ class PlexSyncService {
           (existingMovie?.viewCount ?? null) !== summaryViewCount ||
           (existingMovie?.lastViewedAt ?? null) !== summaryLastViewedAt
         );
-        const shouldReconcileCustomOrderWatchState = this.isPlexWatched(detailedMovie.viewCount ?? movie.viewCount, detailedMovie.lastViewedAt ?? movie.lastViewedAt);
+        const shouldReconcileCustomOrderWatchState = this.isPlexWatched(detailedMovie.viewCount ?? movie.viewCount);
 
         if (shouldRefreshMovie) {
           const syncedMovie = await prisma.plexMovie.upsert({
@@ -938,14 +938,14 @@ class PlexSyncService {
               index: item.episodeNumber,
               removed: false
             },
-            select: { ratingKey: true, viewCount: true, lastViewedAt: true }
+            select: { ratingKey: true, viewCount: true }
           });
           if (plexEp) {
             await prisma.customOrderItem.update({
               where: { id: item.id },
               data: {
                 plexKey: plexEp.ratingKey,
-                ...(this.isPlexWatched(plexEp.viewCount, plexEp.lastViewedAt) ? { isWatched: true } : {})
+                ...(this.isPlexWatched(plexEp.viewCount) ? { isWatched: true } : {})
               }
             });
             healed++;
@@ -953,14 +953,14 @@ class PlexSyncService {
         } else if (item.mediaType === 'movie' && item.title) {
           const plexMovie = await prisma.plexMovie.findFirst({
             where: { title: { equals: item.title, mode: 'insensitive' }, removed: false },
-            select: { ratingKey: true, viewCount: true, lastViewedAt: true }
+            select: { ratingKey: true, viewCount: true }
           });
           if (plexMovie) {
             await prisma.customOrderItem.update({
               where: { id: item.id },
               data: {
                 plexKey: plexMovie.ratingKey,
-                ...(this.isPlexWatched(plexMovie.viewCount, plexMovie.lastViewedAt) ? { isWatched: true } : {})
+                ...(this.isPlexWatched(plexMovie.viewCount) ? { isWatched: true } : {})
               }
             });
             healed++;
@@ -986,11 +986,11 @@ class PlexSyncService {
 
       const [watchedEpisodes, watchedMovies] = await Promise.all([
         episodeKeys.length ? prisma.plexEpisode.findMany({
-          where: { ratingKey: { in: episodeKeys }, OR: [{ viewCount: { gt: 0 } }, { lastViewedAt: { not: null } }] },
+          where: { ratingKey: { in: episodeKeys }, viewCount: { gt: 0 } },
           select: { ratingKey: true }
         }) : [],
         movieKeys.length ? prisma.plexMovie.findMany({
-          where: { ratingKey: { in: movieKeys }, OR: [{ viewCount: { gt: 0 } }, { lastViewedAt: { not: null } }] },
+          where: { ratingKey: { in: movieKeys }, viewCount: { gt: 0 } },
           select: { ratingKey: true }
         }) : []
       ]);

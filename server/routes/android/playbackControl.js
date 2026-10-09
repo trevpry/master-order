@@ -227,9 +227,10 @@ function createPlaybackControlRoutes() {
         }),
       });
       
-      const playData = await playResponse.json();
+      const playBody = await playResponse.json();
+      const playData = playBody.data || playBody;
       
-      if (playResponse.ok) {
+      if (playResponse.ok && playData.success === true) {
         // Success response in Android format
         const androidResponse = {
           type: 'PLAY_SUCCESS',
@@ -269,7 +270,7 @@ function createPlaybackControlRoutes() {
         };
         
         console.log('❌ Playback failed:', JSON.stringify(androidErrorResponse, null, 2));
-        res.status(playResponse.status).json(androidErrorResponse);
+        res.status(playResponse.ok ? 502 : playResponse.status).json(androidErrorResponse);
       }
       
     } catch (error) {
@@ -564,9 +565,10 @@ function createPlaybackControlRoutes() {
         }),
       });
       
-      const playData = await playResponse.json();
+      const playBody = await playResponse.json();
+      const playData = playBody.data || playBody;
       
-      if (playResponse.ok) {
+      if (playResponse.ok && playData.success === true) {
         // Helper function to get proper artwork URL
         const getAndroidArtworkUrl = (metadata) => {
           if (!metadata) return null;
@@ -672,7 +674,7 @@ function createPlaybackControlRoutes() {
         };
         
         console.log('❌ Media playback failed:', JSON.stringify(androidErrorResponse, null, 2));
-        res.status(playResponse.status).json(androidErrorResponse);
+        res.status(playResponse.ok ? 502 : playResponse.status).json(androidErrorResponse);
       }
       
     } catch (error) {
