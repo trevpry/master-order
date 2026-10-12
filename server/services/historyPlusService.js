@@ -1,5 +1,6 @@
 const { PrismaClient } = require('@prisma/client');
 const BookCompletionService = require('./BookCompletionService');
+const { normalizeGreatCoursesUrl, withNormalizedGreatCoursesUrl } = require('../utils/courseUrlValidation');
 
 /**
  * History Plus Service - Business logic for historical content management
@@ -96,7 +97,7 @@ class HistoryPlusService {
         ...event,
         reviewed: event.user_event_reviews?.reviewed || false,
         videos: event.videos?.map(video => ({
-          ...video,
+          ...withNormalizedGreatCoursesUrl(video),
           watched: video.user_video_watches?.watched || false
         })) || [],
         books: unifiedBooks,
@@ -186,7 +187,7 @@ class HistoryPlusService {
       ...event,
       reviewed: event.user_event_reviews?.reviewed || false,
       videos: event.videos?.map(video => ({
-        ...video,
+        ...withNormalizedGreatCoursesUrl(video),
         watched: video.user_video_watches?.watched || false
       })) || [],
       books: unifiedBooks,
@@ -594,7 +595,7 @@ class HistoryPlusService {
   // ==========================================
 
   async getVideosByEvent(eventId) {
-    return await this.prisma.historyVideo.findMany({
+    const videos = await this.prisma.historyVideo.findMany({
       where: { 
         eventId: parseInt(eventId),
         deleted: false
@@ -604,10 +605,12 @@ class HistoryPlusService {
         user_video_watches: true
       }
     });
+
+    return videos.map(withNormalizedGreatCoursesUrl);
   }
 
   async getVideoById(id) {
-    return await this.prisma.historyVideo.findUnique({
+    const video = await this.prisma.historyVideo.findUnique({
       where: { 
         id: parseInt(id),
         deleted: false
@@ -618,10 +621,12 @@ class HistoryPlusService {
         event: true
       }
     });
+
+    return withNormalizedGreatCoursesUrl(video);
   }
 
   async getAllVideos() {
-    return await this.prisma.historyVideo.findMany({
+    const videos = await this.prisma.historyVideo.findMany({
       where: {
         deleted: false
       },
@@ -634,11 +639,17 @@ class HistoryPlusService {
         createdAt: 'desc'
       }
     });
+
+    return videos.map(withNormalizedGreatCoursesUrl);
   }
 
   async createVideo(videoData) {
     // Clean up the create data - handle relationships properly
     const cleanVideoData = { ...videoData };
+    
+    if (typeof cleanVideoData.url === 'string') {
+      cleanVideoData.url = normalizeGreatCoursesUrl(cleanVideoData.url);
+    }
     
     // Handle publishedAt date conversion
     if (cleanVideoData.publishedAt !== undefined) {
@@ -671,19 +682,23 @@ class HistoryPlusService {
       }
     }
     
-    return await this.prisma.historyVideo.create({
+    return withNormalizedGreatCoursesUrl(await this.prisma.historyVideo.create({
       data: cleanVideoData,
       include: {
         channel: true,
         user_video_watches: true,
         event: true
       }
-    });
+    }));
   }
 
   async updateVideo(id, updateData) {
     // Clean up the update data - handle relationships properly
     const cleanUpdateData = { ...updateData };
+    
+    if (typeof cleanUpdateData.url === 'string') {
+      cleanUpdateData.url = normalizeGreatCoursesUrl(cleanUpdateData.url);
+    }
     
     // Handle publishedAt date conversion
     if (cleanUpdateData.publishedAt !== undefined) {
@@ -741,7 +756,7 @@ class HistoryPlusService {
       }
     }
     
-    return await this.prisma.historyVideo.update({
+    return withNormalizedGreatCoursesUrl(await this.prisma.historyVideo.update({
       where: { id: parseInt(id) },
       data: cleanUpdateData,
       include: {
@@ -749,7 +764,7 @@ class HistoryPlusService {
         user_video_watches: true,
         event: true
       }
-    });
+    }));
   }
 
   async deleteVideo(id) {
@@ -1453,7 +1468,7 @@ class HistoryPlusService {
     return {
       events,
       books,
-      videos
+      videos: videos.map(withNormalizedGreatCoursesUrl)
     };
   }
 

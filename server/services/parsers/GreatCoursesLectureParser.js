@@ -1,4 +1,5 @@
 const cheerio = require('cheerio');
+const { normalizeGreatCoursesUrl } = require('../../utils/courseUrlValidation');
 
 function parseGreatCoursesLectures(html, course) {
   const $ = cheerio.load(html);
@@ -11,7 +12,7 @@ function parseGreatCoursesLectures(html, course) {
     const order = explicitOrder === undefined ? Number(match[1]) : Number(explicitOrder);
     if (!Number.isSafeInteger(order) || order <= 0 || lectures.has(order)) return;
 
-    const url = new URL(course.url);
+    const url = new URL(normalizeGreatCoursesUrl(course.url));
     url.hash = '';
     url.searchParams.set('lecplay', String(order));
     const description = container.find('.media-body p').first().text().trim() ||

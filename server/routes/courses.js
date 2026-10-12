@@ -7,7 +7,7 @@ const CourseScrapingService = require('../services/CourseScrapingService');
 const GeminiService = require('../services/GeminiService');
 const { asyncHandler, sendSuccess, sendBadRequest, sendServerError } = require('../utils/responses');
 const { validateRequiredFieldsDirect } = require('../middleware/validation');
-const { isSupportedGreatCoursesUrl } = require('../utils/courseUrlValidation');
+const { isSupportedGreatCoursesUrl, normalizeGreatCoursesUrl, withNormalizedGreatCoursesUrl } = require('../utils/courseUrlValidation');
 const createCourseCustomOrdersRouter = require('./courseCustomOrders');
 
 const prisma = new PrismaClient();
@@ -77,7 +77,7 @@ router.get('/', asyncHandler(async (req, res) => {
   ]);
   
   sendSuccess(res, {
-    courses,
+    courses: courses.map(withNormalizedGreatCoursesUrl),
     pagination: {
       page: parseInt(page),
       limit: parseInt(limit),
@@ -155,7 +155,7 @@ router.get('/:id/details', asyncHandler(async (req, res) => {
     const linkedWatched = linkedVideo?.user_video_watches?.watched || false;
 
     return {
-      ...lecture,
+      ...withNormalizedGreatCoursesUrl(lecture),
       watchStatus: {
         courseVideoWatched: !!lecture.watched,
         linkedHistoryVideoWatched: linkedWatched,
@@ -164,7 +164,7 @@ router.get('/:id/details', asyncHandler(async (req, res) => {
       linkedHistoryVideo: linkedVideo ? {
         id: linkedVideo.id,
         title: linkedVideo.title,
-        url: linkedVideo.url,
+        url: normalizeGreatCoursesUrl(linkedVideo.url),
         lectureNumber: linkedVideo.lectureNumber,
         watched: linkedWatched,
         event: linkedVideo.event ? {
@@ -179,7 +179,7 @@ router.get('/:id/details', asyncHandler(async (req, res) => {
 
   sendSuccess(res, {
     course: {
-      ...course,
+      ...withNormalizedGreatCoursesUrl(course),
       videos: undefined
     },
     lectures,
@@ -259,14 +259,18 @@ router.get('/:id', asyncHandler(async (req, res) => {
     return sendBadRequest(res, 'Course not found');
   }
   
-  sendSuccess(res, course);
+  sendSuccess(res, {
+    ...withNormalizedGreatCoursesUrl(course),
+    videos: (course.videos || []).map(withNormalizedGreatCoursesUrl)
+  });
 }));
 
 // POST /api/courses - Create a new course
 router.post('/', asyncHandler(async (req, res) => {
   validateRequiredFieldsDirect(req.body, ['title', 'category', 'url']);
   
-  const { title, category, url, instructor, thumbnail, description } = req.body;
+  const { title, category, instructor, thumbnail, description } = req.body;
+  const url = normalizeGreatCoursesUrl(req.body.url);
   
   // Check if course already exists
   const existingCourse = await prisma.historyCourse.findUnique({
@@ -305,6 +309,10 @@ router.put('/:id', asyncHandler(async (req, res) => {
   delete updateData.createdAt;
   delete updateData.updatedAt;
   delete updateData.videos;
+  
+  if (typeof updateData.url === 'string') {
+    updateData.url = normalizeGreatCoursesUrl(updateData.url);
+  }
   
   const course = await prisma.historyCourse.update({
     where: { id: parseInt(id) },
@@ -375,7 +383,7 @@ router.get('/:id/videos', asyncHandler(async (req, res) => {
     ]
   });
   
-  sendSuccess(res, videos);
+  sendSuccess(res, videos.map(withNormalizedGreatCoursesUrl));
 }));
 
 // POST /api/courses/:id/videos - Add a video to a course
@@ -383,7 +391,8 @@ router.post('/:id/videos', asyncHandler(async (req, res) => {
   const { id } = req.params;
   validateRequiredFieldsDirect(req.body, ['title', 'url']);
   
-  const { title, url, description, order } = req.body;
+  const { title, description, order } = req.body;
+  const url = normalizeGreatCoursesUrl(req.body.url);
   
   // Check if video already exists
   const existingVideo = await prisma.historyCourseVideo.findUnique({
@@ -418,6 +427,10 @@ router.put('/videos/:videoId', asyncHandler(async (req, res) => {
   delete updateData.createdAt;
   delete updateData.updatedAt;
   delete updateData.courseId;
+  
+  if (typeof updateData.url === 'string') {
+    updateData.url = normalizeGreatCoursesUrl(updateData.url);
+  }
   
   const video = await prisma.historyCourseVideo.update({
     where: { id: parseInt(videoId) },
@@ -549,10 +562,11 @@ router.get('/:id/history-linking', asyncHandler(async (req, res) => {
   
   sendSuccess(res, {
     course: {
-      ...course,
-      historyVideos: linkedHistoryVideos
+      ...withNormalizedGreatCoursesUrl(course),
+      videos: (course.videos || []).map(withNormalizedGreatCoursesUrl),
+      historyVideos: linkedHistoryVideos.map(withNormalizedGreatCoursesUrl)
     },
-    availableHistoryVideos
+    availableHistoryVideos: availableHistoryVideos.map(withNormalizedGreatCoursesUrl)
   });
 }));
 
@@ -626,7 +640,7 @@ router.post('/:courseId/videos/:videoId/create', asyncHandler(async (req, res) =
   const historyVideo = await prisma.historyVideo.create({
     data: {
       title: title || courseVideo.title,
-      url,
+      url: normalizeGreatCoursesUrl(url),
       type: 'great-courses-plus',
       description: description || courseVideo.description,
       courseTitle: course.title,

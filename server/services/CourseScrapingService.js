@@ -2,7 +2,7 @@ const cheerio = require('cheerio');
 const { PrismaClient } = require('@prisma/client');
 const fs = require('fs');
 const path = require('path');
-const { getGreatCoursesAnchorSelectors, isSupportedGreatCoursesUrl } = require('../utils/courseUrlValidation');
+const { getGreatCoursesAnchorSelectors, isSupportedGreatCoursesUrl, normalizeGreatCoursesUrl } = require('../utils/courseUrlValidation');
 const { parseGreatCoursesLectures } = require('./parsers/GreatCoursesLectureParser');
 
 const prisma = new PrismaClient();
@@ -141,7 +141,7 @@ class CourseScrapingService {
 
           // Check if course already exists in database
           const existingCourse = await prisma.historyCourse.findUnique({
-            where: { url: courseUrl }
+            where: { url: normalizeGreatCoursesUrl(courseUrl) }
           });
 
           if (existingCourse) {
@@ -173,7 +173,7 @@ class CourseScrapingService {
             data: {
               title: courseInfo.title,
               category: courseInfo.category,
-              url: courseUrl,
+              url: normalizeGreatCoursesUrl(courseUrl),
               instructor: courseInfo.instructor,
               thumbnail: courseInfo.thumbnail || 'https://img.youtube.com/vi/dQw4w9WgXcQ/mqdefault.jpg',
               description: courseInfo.description ? courseInfo.description.substring(0, 500) : null,
@@ -274,7 +274,7 @@ class CourseScrapingService {
       
       // Check if course already exists
       const existingCourse = await prisma.historyCourse.findUnique({
-        where: { url }
+        where: { url: normalizeGreatCoursesUrl(url) }
       });
 
       if (existingCourse) {
@@ -302,7 +302,7 @@ class CourseScrapingService {
         data: {
           title: courseInfo.title,
           category: courseInfo.category,
-          url: url,
+          url: normalizeGreatCoursesUrl(url),
           instructor: courseInfo.instructor,
           thumbnail: courseInfo.thumbnail || 'https://img.youtube.com/vi/dQw4w9WgXcQ/mqdefault.jpg',
           description: courseInfo.description ? courseInfo.description.substring(0, 500) : null,
