@@ -90,6 +90,7 @@ async function resolveUpNextContent(req) {
   const data = await getNextEpisode(); // Handles order type selection internally
 
   if (data.orderType === 'MOVIES_GENERAL') {
+    if (data.type === 'movie' && data.ratingKey) return data;
     console.log('Movie order type selected, using getNextMovie function');
     const movieData = await getNextMovie();
     return movieData;

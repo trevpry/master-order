@@ -7,6 +7,7 @@ const tvdbService = require('./tvdbCachedService');
 const PlexDatabaseService = require('./plexDatabaseService');
 const HistoryPlusService = require('./services/historyPlusService');
 const { getNextEpisodeFromLibrary } = require('./services/libraryUpNextService');
+const { selectCollectionUpNext } = require('./services/collectionUpNextService');
 
 // Initialize Database Service
 const plexDb = new PlexDatabaseService(prisma);
@@ -184,8 +185,8 @@ function selectWeightedTvOrMovie(tvWeight, movieWeight) {
     return null;
   }
 
-  const random = Math.floor(Math.random() * total) + 1;
-  return random <= tvWeight ? 'episode' : 'movie';
+  const random = Math.random() * total;
+  return random < tvWeight ? 'episode' : 'movie';
 }
 
 async function selectOrderType() {
@@ -213,17 +214,17 @@ async function selectOrderType() {
     return { orderType: 'TV_GENERAL', mediaTypeLimiters: limiters };
   }
 
-  const randomPercent = Math.floor(Math.random() * totalWeight) + 1;
+  const randomPercent = Math.random() * totalWeight;
   console.log(`Random selection: ${randomPercent}/${totalWeight}`);
   
   // Determine order type based on cumulative weights
-  if (randomPercent <= tvPercent) {
+  if (randomPercent < tvPercent) {
     console.log('Selected order type: TV General');
     return { orderType: 'TV_GENERAL', mediaTypeLimiters: limiters };
-  } else if (randomPercent <= tvPercent + moviesPercent) {
+  } else if (randomPercent < tvPercent + moviesPercent) {
     console.log('Selected order type: Movies General');
     return { orderType: 'MOVIES_GENERAL', mediaTypeLimiters: limiters };
-  } else if (randomPercent <= tvPercent + moviesPercent + customPercent) {
+  } else if (randomPercent < tvPercent + moviesPercent + customPercent) {
     console.log('Selected order type: Custom Order');
     return { orderType: 'CUSTOM_ORDER', mediaTypeLimiters: limiters };
   } else {
@@ -1107,7 +1108,7 @@ async function getNextEpisode() {
         console.log(`🆕 New Release roll: ${roll}% <= ${preferNewRelease}% — searching for new TV releases`);
         const newRelease = await findNewRelease(settings);
         if (newRelease) {
-          return newRelease;
+          return await selectCollectionUpNext(newRelease);
         }
         console.log('🆕 No new TV releases found, falling through to normal TV selection');
       }
@@ -1119,7 +1120,7 @@ async function getNextEpisode() {
         console.log(`⏳ Long Unwatched roll: ${roll}% <= ${preferLongUnwatched}% — searching for long-unwatched TV shows`);
         const longUnwatched = await findLongUnwatched(settings);
         if (longUnwatched) {
-          return longUnwatched;
+          return await selectCollectionUpNext(longUnwatched);
         }
         console.log('⏳ No long-unwatched TV shows found, falling through to normal TV selection');
       }
@@ -1140,30 +1141,20 @@ async function getNextEpisode() {
     }
     
     console.log('Initially selected series for collection check:', selectedSeries?.title || 'Unknown');
+    if (!/^[0-9a-f]{32}$/i.test(selectedSeries.ratingKey)) {
       selectedSeries = await checkCollections(selectedSeries);
+    }
     console.log('Found collections for:', selectedSeries?.title || 'Unknown');
       // Now select the earliest unplayed item from all collections
-    const finalSelection = await selectEarliestUnplayedFromCollections(selectedSeries);
+    const finalSelection = /^[0-9a-f]{32}$/i.test(selectedSeries.ratingKey)
+      ? await selectCollectionUpNext(selectedSeries)
+      : await selectEarliestUnplayedFromCollections(selectedSeries);
     console.log('Final selection (earliest unplayed):', finalSelection?.title || 'Unknown');
 
-    // If the collection-ordering logic returned a movie instead of a TV episode,
-    // respect the configured TV/Movie percentages rather than blindly returning a movie.
-    // The collection logic is designed for franchise chronological ordering, but it should
-    // not override the user's configured order-type weights.
-    let selectionToEnhance = finalSelection;
-    if (finalSelection.libraryType === 'movie') {
-      const effective = getEffectiveOrderTypePercentages(settings);
-      const typeRoll = selectWeightedTvOrMovie(effective.tvPercent, effective.moviesPercent);
-      if (typeRoll === 'episode') {
-        console.log(`🎯 Collection returned movie "${finalSelection.title}" but TV was selected — reverting to TV episode per configured percentages (TV: ${effective.tvPercent}%, Movies: ${effective.moviesPercent}%)`);
-        selectionToEnhance = selectedSeries;
-      } else {
-        console.log(`🎯 Collection returned movie "${finalSelection.title}" and movie roll succeeded — proceeding with movie`);
-      }
-    }
+    if (finalSelection.message || finalSelection.type === 'movie') return finalSelection;
 
     // Enhance with TVDB artwork
-    const enhancedSelection = await enhanceWithTVDBArtwork(selectionToEnhance);
+    const enhancedSelection = await enhanceWithTVDBArtwork(finalSelection);
     
     // Add order type to the response
     enhancedSelection.orderType = 'TV_GENERAL';

@@ -68,3 +68,35 @@ test('an item is ignored when any (including ancestor) collection is ignored', (
   assert.equal(isInIgnoredCollection(null, ignored), false);
   assert.equal(isInIgnoredCollection(JSON.stringify(['Marvel']), []), false);
 });
+
+test('movie sync imports every movie library, including when the first library is empty', async () => {
+  const jellyfin = require('../services/jellyfinService');
+  const queries = [];
+  const imported = [];
+  const originalGetAllItems = jellyfin.getAllItems;
+  jellyfin.getAllItems = async query => {
+    queries.push(query);
+    return query.ParentId === 'first' ? [] : [{ Id: 'b'.repeat(32), Name: 'Second Library Movie' }];
+  };
+  const sync = new JellyfinSyncService();
+  sync.loadExisting = async () => new Map();
+  sync.upsertRows = async (_model, rows) => imported.push(...rows);
+  sync.syncChildRows = async () => {};
+  const stats = { movies: { total: 0 } };
+  try {
+    await sync.syncMovies([
+      { ItemId: 'first', Name: 'Movies One', CollectionType: 'movies' },
+      { ItemId: 'tv', Name: 'TV', CollectionType: 'tvshows' },
+      { ItemId: 'second', Name: 'Movies Two', CollectionType: 'movies' }
+    ], new Map(), stats, { movies: new Set() });
+    assert.deepEqual(queries.map(query => query.ParentId), ['first', 'second']);
+    assert.ok(queries.every(query => query.IncludeItemTypes === 'Movie' && query.Recursive === true));
+    assert.equal(imported.length, 1);
+    assert.equal(imported[0].sectionKey, 'second');
+    assert.equal(imported[0].librarySectionTitle, 'Movies Two');
+    assert.equal(stats.movies.total, 1);
+  } finally {
+    if (originalGetAllItems === undefined) delete jellyfin.getAllItems;
+    else jellyfin.getAllItems = originalGetAllItems;
+  }
+});

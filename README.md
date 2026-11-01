@@ -215,13 +215,34 @@ npm start
 ## Configuration
 
 ### Collection Settings
-Configure which Jellyfin collection to use for episode/movie selection, and which collections to ignore, in the Settings page.
+Configure which Jellyfin collection to use for initial TV series selection (for example, Now Watching), and which collections to ignore, in the Settings page. This collection does not restrict initial movie selection.
 Jellyfin collections can mix movies and shows and can contain other collections: an item belongs to a collection if it is in it directly or in any collection nested inside it, and ignoring a collection ignores everything nested within it.
+
+For general Up Next picks, TV/movie weights and release/long-unwatched preferences
+choose the initial candidate only. Its collections and their nested collections
+are then checked for the earliest unplayed movie or next unplayed episode, ordered
+by movie release date or episode air date (not the series premiere). This final
+chronological choice can cross from TV to movies or vice versa and is shared by
+the Android and web endpoints. The configured selection collection is excluded
+from franchise expansion, ignored collections and removed items are skipped,
+and explicit custom orders retain their authored ordering.
+
+Movie candidates are queried across every synced Jellyfin movie library, not
+just the first library, regardless of membership in Now Watching or the configured
+TV selection collection. Movies in mixed movie/TV collections remain eligible;
+Jellyfin chooses uniformly from all eligible unwatched movies, including movies
+without collections. The partially watched collection priority setting applies
+only to legacy Plex selection, not Jellyfin: it cannot restrict the Jellyfin seed
+pool or select a watched movie as a seed. Existing ignored-collection,
+Christmas and custom-order filters still apply. If no unwatched movies remain,
+Up Next returns no content rather than replaying a watched movie.
+Collection chronology is applied only after choosing the candidate. Positive
+fractional TV/movie weights are supported as well as whole-number percentages.
 
 ### Order Type Percentages
 Set the probability distribution for different content types:
 - TV General: Random episodes from your collection
-- Movies General: Random movies from your collection  
+- Movies General: Random movies across all synced movie libraries
 - Custom Order: Episodes from user-defined custom orders
 
 ## Development

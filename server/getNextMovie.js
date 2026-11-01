@@ -5,6 +5,7 @@ if (process.env.NODE_ENV !== 'production') {
 const prisma = require('./prismaClient'); // Use the shared Prisma client
 const PlexDatabaseService = require('./plexDatabaseService');
 const { getNextMovieFromLibrary } = require('./services/libraryUpNextService');
+const { selectCollectionUpNext } = require('./services/collectionUpNextService');
 
 // Initialize Database Service
 const plexDb = new PlexDatabaseService(); // prisma is now handled within PlexDatabaseService constructor
@@ -26,25 +27,6 @@ function getCollectionName() {
   });
 }
 
-async function getMoviesFromCollection(collection) {
-  try {
-    // Get movies by collection from database
-    const movies = await plexDb.getMoviesByCollection(collection);
-    
-    if (movies.length > 0) {
-      console.log(`Total movies found in collection "${collection}": ${movies.length}`);
-      return movies;
-    } else {
-      console.log(`No movies found in collection "${collection}", falling back to all movies`);
-      return await getAllMovies();
-    }
-  } catch (error) {
-    console.error('Error getting movies from collection:', error.message);
-    console.log('Falling back to all movies due to error');
-    return await getAllMovies();
-  }
-}
-
 async function getAllMovies() {
   try {
     console.log('Getting all movies from all movie libraries...');
@@ -62,13 +44,13 @@ async function selectInitialMovie(movies) {
   if (!Array.isArray(movies) || movies.length === 0) {
     // If movies is not an array or is empty, return error message
     if (typeof movies === 'object' && movies.message) {
-      return movies; // Return the error object from getMoviesFromCollection
+      return movies;
     } else {
       return { message: "No movies found" };
     }
   }
 
-  // Get settings for partially watched collection prioritization and ignored collections
+  // Legacy Plex collection priority does not restrict Jellyfin movie seeds.
   let settings = await prisma.settings.findUnique({
     where: { id: 1 }
   });
@@ -88,7 +70,6 @@ async function selectInitialMovie(movies) {
   const ignoredMovieCollections = require('./utils/collectionSettings').getIgnoredCollections(settings);
   const ignoredLower = new Set(ignoredMovieCollections.map(c => c.toLowerCase()));
   
-  console.log(`🎯 Using ${partiallyWatchedPercent}% priority for partially watched collections`);
   if (ignoredMovieCollections.length > 0) {
     console.log(`🚫 Ignoring movie collections: ${ignoredMovieCollections.join(', ')}`);
   }
@@ -162,39 +143,22 @@ async function selectInitialMovie(movies) {
     console.log('⚠️  All movies were in custom orders, proceeding with original list');
   }
   
-  // Analyze collection watch status
-  const watchAnalysis = await analyzeCollectionWatchStatus(finalMoviesToProcess);    // Filter out watched movies first
   const unwatchedMovies = finalMoviesToProcess.filter(movie => !movie.viewCount || movie.viewCount === 0);
-    if (unwatchedMovies.length === 0) {
-    console.log('⚠️  All movies are watched, returning random selection from all movies');
-    return finalMoviesToProcess[Math.floor(Math.random() * finalMoviesToProcess.length)];
+  if (unwatchedMovies.length === 0) {
+    console.log('No unwatched movies available for selection');
+    return { error: 'No unwatched movies available', message: 'No unwatched movies available' };
   }
   
   console.log(`📋 Found ${unwatchedMovies.length} unwatched movies for selection`);
-  
-  // Filter out movies that have TV series in their collections
-  const moviesWithoutTVCollections = [];
-  const moviesWithTVCollections = [];
-  
-  for (const movie of unwatchedMovies) {
-    const hasTVSeries = await movieHasTVSeriesInCollections(movie);
-    if (hasTVSeries) {
-      moviesWithTVCollections.push(movie);
-    } else {
-      moviesWithoutTVCollections.push(movie);
-    }
+
+  if (unwatchedMovies.every(movie => /^[0-9a-f]{32}$/i.test(movie.ratingKey))) {
+    return unwatchedMovies[Math.floor(Math.random() * unwatchedMovies.length)];
   }
+
+  console.log(`🎯 Using ${partiallyWatchedPercent}% priority for legacy Plex collections`);
+  const watchAnalysis = await analyzeCollectionWatchStatus(finalMoviesToProcess);
   
-  console.log(`🔍 Collection filtering results:`);
-  console.log(`   - Movies without TV series in collections: ${moviesWithoutTVCollections.length}`);
-  console.log(`   - Movies with TV series in collections (excluded): ${moviesWithTVCollections.length}`);
-  
-  // Prefer movies that don't have TV series in their collections
-  const moviesToConsider = moviesWithoutTVCollections.length > 0 ? moviesWithoutTVCollections : unwatchedMovies;
-  
-  if (moviesWithoutTVCollections.length === 0) {
-    console.log('⚠️  All unwatched movies have TV series in their collections, proceeding with all unwatched movies');
-  }
+  const moviesToConsider = unwatchedMovies;
     // Categorize unwatched movies by collection watch status
     const partiallyWatchedCollectionMovies = [];
     const partiallyWatchedCollectionMap = new Map();
@@ -381,41 +345,6 @@ async function selectInitialMovie(movies) {
 async function determineIfWatched(movie) {
   // For movies, check if it's watched (viewCount > 0)
   return movie.viewCount && movie.viewCount > 0;
-}
-
-async function movieHasTVSeriesInCollections(movie) {
-  // Check if the movie's collections contain any TV series
-  try {
-    const movieCollections = plexDb.parseCollections(movie.collections || '');
-    
-    if (movieCollections.length === 0) {
-      return false; // No collections, so no TV series
-    }
-    
-    // Check each collection for TV series
-    for (const collectionName of movieCollections) {      const searchVariants = [
-        collectionName,
-        collectionName.replace(/ Collection$/, '')
-      ].filter((v, i, arr) => arr.indexOf(v) === i); // Remove duplicates
-      
-      for (const searchTerm of searchVariants) {
-        try {
-          const tvSeries = await plexDb.getTVShowsByCollection(searchTerm);
-          if (tvSeries.length > 0) {
-            console.log(`⚠️  Movie "${movie.title}" has TV series in collection "${collectionName}": ${tvSeries.length} series found`);
-            return true; // Found TV series in this collection
-          }
-        } catch (error) {
-          // Continue checking other variants/collections
-        }
-      }
-    }
-    
-    return false; // No TV series found in any collection
-  } catch (error) {
-    console.warn(`Error checking TV series in collections for movie "${movie.title}":`, error.message);
-    return false; // Assume no TV series if error
-  }
 }
 
 async function analyzeCollectionWatchStatus(movies) {
@@ -884,18 +813,14 @@ async function getNextMovie() {
 
     console.log('Starting movie selection process...');
     
-    // Get collection name from settings (same as TV show logic)
-    const collection = await getCollectionName();
-    console.log('Collection:', collection);
-
-    // Get movies from the specified collection
-    const movies = await getMoviesFromCollection(collection);
+    const movies = await getAllMovies();
 
     let selectedMovie = await selectInitialMovie(movies);
     
     // Check if selectInitialMovie returned an error
     if (selectedMovie.message) {
       return {
+        ...(selectedMovie.error && { error: selectedMovie.error }),
         message: selectedMovie.message,
         orderType: 'MOVIES_GENERAL'
       };
@@ -905,18 +830,25 @@ async function getNextMovie() {
 
     let finalSelection;
     if (selectedMovie?.skipCollectionExpansion) {
-      finalSelection = selectedMovie;
+      finalSelection = /^[0-9a-f]{32}$/i.test(selectedMovie.ratingKey)
+        ? await selectCollectionUpNext(selectedMovie)
+        : selectedMovie;
       console.log(`Using locked collection selection from partially watched branch: "${finalSelection.selectedCollectionName || 'unknown'}"`);
       console.log(`[PWCP] Locked selection details: title="${finalSelection.title}" ratingKey=${finalSelection.ratingKey} viaPartiallyWatched=${Boolean(finalSelection.selectedViaPartiallyWatchedPriority)}`);
     } else {
       // Check for other collections this movie belongs to
-      selectedMovie = await checkCollections(selectedMovie);
+      if (!/^[0-9a-f]{32}$/i.test(selectedMovie.ratingKey)) {
+        selectedMovie = await checkCollections(selectedMovie);
+      }
       console.log('Found collections for:', selectedMovie?.title || 'Unknown');
 
       // Now select the earliest unplayed item from all collections
-      finalSelection = await selectEarliestUnplayedFromCollections(selectedMovie);
+      finalSelection = /^[0-9a-f]{32}$/i.test(selectedMovie.ratingKey)
+        ? await selectCollectionUpNext(selectedMovie)
+        : await selectEarliestUnplayedFromCollections(selectedMovie);
     }
     console.log('Final selection (earliest unplayed):', finalSelection?.title || 'Unknown');
+    if (finalSelection.message) return finalSelection;
     
     if (finalSelection && finalSelection.ratingKey) {
       console.log(`Selected movie: "${finalSelection.title}" (${finalSelection.ratingKey})`);

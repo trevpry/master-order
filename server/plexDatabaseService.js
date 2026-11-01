@@ -1,8 +1,8 @@
 const prisma = require('./prismaClient'); // Use the shared Prisma client
 
 class PlexDatabaseService {
-  constructor() {
-    this.prisma = prisma; // Assign the shared instance
+  constructor(database = prisma) {
+    this.prisma = database;
     
     // Detect database provider to handle table name casing differences
     this.isPostgreSQL = this.detectPostgreSQL();
