@@ -1,10 +1,44 @@
 // Implementation based on the comprehensive Plex remote control documentation
 // Following the server-brokered model for AndroidTV control
 
-const PlexAPI = require('plex-api');
+const axios = require('axios');
 const { PrismaClient } = require('@prisma/client');
 const crypto = require('crypto');
-const { v4: uuidv4 } = require('uuid');
+const uuidv4 = () => crypto.randomUUID();
+
+/**
+ * Minimal Plex Media Server client exposing the subset of the former `plex-api`
+ * interface used here: query(uri | { uri, extraHeaders }) resolves to parsed JSON.
+ * Errors carry `statusCode` like plex-api did.
+ */
+class PlexClient {
+  constructor({ hostname, port, token, https, timeout, options = {} }) {
+    this.baseURL = `${https ? 'https' : 'http'}://${hostname}:${port}`;
+    this.timeout = timeout;
+    this.headers = {
+      Accept: 'application/json',
+      'X-Plex-Token': token,
+      'X-Plex-Client-Identifier': options.identifier,
+      'X-Plex-Product': options.product,
+      'X-Plex-Device-Name': options.deviceName,
+      'X-Plex-Platform': options.platform
+    };
+  }
+
+  async query(request) {
+    const { uri, extraHeaders = {} } = typeof request === 'string' ? { uri: request } : request;
+    try {
+      const response = await axios.get(`${this.baseURL}${uri}`, {
+        headers: { ...this.headers, ...extraHeaders },
+        timeout: this.timeout
+      });
+      return response.data === '' ? null : response.data;
+    } catch (error) {
+      if (error.response) error.statusCode = error.response.status;
+      throw error;
+    }
+  }
+}
 
 const prisma = new PrismaClient();
 
@@ -36,7 +70,7 @@ class PlexPlayerService {
       const url = new URL(settings.plexUrl);
       
       // Initialize with proper headers as per documentation
-      this.client = new PlexAPI({
+      this.client = new PlexClient({
         hostname: url.hostname,
         port: parseInt(url.port) || 32400,
         token: settings.plexToken,

@@ -1,5 +1,8 @@
 # Multi-stage build for Master Order application
 FROM node:20-alpine AS build
+# Never let npm download Puppeteer's bundled Chrome (~600MB per install, fills the
+# Docker/Unraid disk); the production stage uses Alpine's system Chromium instead.
+ENV PUPPETEER_SKIP_DOWNLOAD=true
 
 # Install dependencies needed for sqlite3 and other native modules
 RUN apk add --no-cache python3 make g++
@@ -13,11 +16,11 @@ COPY server/package*.json ./server/
 COPY client/package*.json ./client/
 
 # Install dependencies (install all deps, not just production)
-RUN npm ci
+RUN npm ci && npm cache clean --force
 WORKDIR /app/server
-RUN npm ci
+RUN npm ci && npm cache clean --force
 WORKDIR /app/client
-RUN npm ci
+RUN npm ci && npm cache clean --force
 
 # Copy source code
 WORKDIR /app
@@ -38,6 +41,9 @@ RUN npm run build
 
 # Production stage
 FROM node:20-alpine AS production
+# Never let npm download Puppeteer's bundled Chrome (~600MB per install, fills the
+# Docker/Unraid disk); the production stage uses Alpine's system Chromium instead.
+ENV PUPPETEER_SKIP_DOWNLOAD=true
 
 # Install runtime dependencies including Chrome for Puppeteer
 RUN apk add --no-cache \
@@ -66,9 +72,9 @@ COPY --from=build /app/package*.json ./
 COPY --from=build /app/server/package*.json ./server/
 
 # Install production dependencies
-RUN npm ci --omit=dev
+RUN npm ci --omit=dev && npm cache clean --force
 WORKDIR /app/server
-RUN npm ci --omit=dev
+RUN npm ci --omit=dev && npm cache clean --force
 
 # Create non-root user
 WORKDIR /app
@@ -100,7 +106,6 @@ RUN mkdir -p /app/data /app/server/artwork-cache /app/server/temp-uploads /app/s
 ENV NODE_ENV=production
 ENV PORT=3001
 # Set Puppeteer to use system-installed Chromium
-ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
 ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium-browser
 
 # Expose port

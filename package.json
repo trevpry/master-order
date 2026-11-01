@@ -31,12 +31,9 @@
     "express": "^5.1.0",
     "js-yaml": "^4.1.0",
     "node-fetch": "^2.7.0",
-    "plex-api": "^5.3.2",
-    "plex-control": "^3.0.1",
     "puppeteer": "^24.22.3",
     "react-hot-toast": "^2.6.0",
-    "react-router-dom": "^7.6.0",
-    "sqlite3": "^5.1.7"
+    "react-router-dom": "^7.6.0"
   },
   "devDependencies": {
     "concurrently": "^8.2.2"

@@ -6,6 +6,9 @@
 # 4. Using BuildKit cache mounts for npm cache
 
 FROM node:20-alpine AS build
+# Never let npm download Puppeteer's bundled Chrome (~600MB per install, fills the
+# Docker/Unraid disk); the production stage uses Alpine's system Chromium instead.
+ENV PUPPETEER_SKIP_DOWNLOAD=true
 
 # Install dependencies needed for sqlite3 and other native modules
 RUN apk add --no-cache python3 make g++
@@ -95,6 +98,9 @@ RUN find . -name ".env*" -type f -delete || true
 # Production stage
 # ==========================================
 FROM node:20-alpine AS production
+# Never let npm download Puppeteer's bundled Chrome (~600MB per install, fills the
+# Docker/Unraid disk); the production stage uses Alpine's system Chromium instead.
+ENV PUPPETEER_SKIP_DOWNLOAD=true
 
 # Install runtime dependencies including Chrome for Puppeteer
 RUN apk add --no-cache \
@@ -158,7 +164,6 @@ RUN mkdir -p /app/data /app/server/artwork-cache /app/server/temp-uploads /app/s
 ENV NODE_ENV=production
 ENV PORT=3001
 # Set Puppeteer to use system-installed Chromium
-ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
 ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium-browser
 
 # Expose port

@@ -71,7 +71,7 @@ class StashTagService {
     }
 
     // Create the tag (UUID string id expected by schema)
-    const { v4: uuid } = require('uuid');
+    const { randomUUID: uuid } = require('crypto');
     const tagId = uuid();
 
     const tag = await prisma.stashTag.create({

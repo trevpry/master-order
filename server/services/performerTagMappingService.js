@@ -10,7 +10,7 @@
  */
 
 const prisma = require('../prismaClient');
-const { v4: uuid } = require('uuid');
+const { randomUUID: uuid } = require('crypto');
 
 class PerformerTagMappingService {
   constructor(stashApiClient = null) {
